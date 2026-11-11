@@ -12,7 +12,6 @@ import {
   weixinKeys,
   isWeixinLoginPending,
 } from "@multica/core/weixin";
-import { useActorName } from "@multica/core/workspace/hooks";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
@@ -26,62 +25,15 @@ import {
 } from "@multica/ui/components/ui/dialog";
 import { WeChat } from "@multica/ui/icons";
 import { useT } from "../../i18n";
-import { ActorAvatar } from "../../common/actor-avatar";
-
-export function WeixinTab() {
-  const { t } = useT("settings");
-  const wsId = useWorkspaceId();
-  const query = useQuery(weixinInstallationsOptions(wsId));
-  const { getAgentName } = useActorName();
-  if (query.isPending) return <p role="status">{t(($) => $.weixin.loading)}</p>;
-  if (query.isError)
-    return <p role="alert">{t(($) => $.weixin.load_failed)}</p>;
-  if (!query.data.configured)
-    return (
-      <p className="text-body text-muted-foreground">
-        {t(($) => $.weixin.not_enabled)}
-      </p>
-    );
-  if (!query.data.installations.length)
-    return (
-      <p className="text-body text-muted-foreground">
-        {t(($) => $.weixin.empty)}
-      </p>
-    );
-  return (
-    <div className="space-y-4">
-      {query.data.installations.map((installation) => (
-        <div
-          key={installation.id}
-          className="flex flex-wrap items-center justify-between gap-4 rounded-lg border p-4"
-        >
-          <div className="flex min-w-0 items-center gap-3">
-            <ActorAvatar
-              actorType="agent"
-              actorId={installation.agent_id}
-              size="lg"
-              profileLink
-            />
-            <span className="truncate text-body font-medium">
-              {getAgentName(installation.agent_id)}
-            </span>
-          </div>
-          <WeixinAgentBindButton
-            agentId={installation.agent_id}
-            agentName={getAgentName(installation.agent_id)}
-          />
-        </div>
-      ))}
-    </div>
-  );
-}
 
 export function WeixinAgentBindButton({
   agentId,
   agentName,
+  onBusyChange,
 }: {
   agentId: string;
   agentName: string;
+  onBusyChange?: (busy: boolean) => void;
 }) {
   const wsId = useWorkspaceId();
   const { t } = useT("settings");
@@ -119,7 +71,7 @@ export function WeixinAgentBindButton({
     );
   if (listing.data.install_supported !== true)
     return <p className="text-caption">{t(($) => $.weixin.not_enabled)}</p>;
-  return <WeixinConnect agentId={agentId} agentName={agentName} />;
+  return <WeixinConnect agentId={agentId} agentName={agentName} onBusyChange={onBusyChange} />;
 }
 
 function WeixinDisconnect({
@@ -193,9 +145,11 @@ function WeixinDisconnect({
 function WeixinConnect({
   agentId,
   agentName,
+  onBusyChange,
 }: {
   agentId: string;
   agentName: string;
+  onBusyChange?: (busy: boolean) => void;
 }) {
   const { t } = useT("settings");
   const wsId = useWorkspaceId();
@@ -205,6 +159,7 @@ function WeixinConnect({
   const [code, setCode] = useState("");
   const [closing, setClosing] = useState(false);
   const [closeError, setCloseError] = useState(false);
+  useEffect(() => () => onBusyChange?.(false), [onBusyChange]);
   const key = weixinKeys.login(wsId, loginId);
   const begin = useMutation({
     mutationFn: async () => {
@@ -279,6 +234,7 @@ function WeixinConnect({
       await qc.invalidateQueries({ queryKey: weixinKeys.installations(wsId) });
       qc.removeQueries({ queryKey: key });
       setOpen(false);
+      onBusyChange?.(false);
       setLoginId("");
       setCode("");
     } catch {
@@ -289,6 +245,7 @@ function WeixinConnect({
   }
 
   function start() {
+    onBusyChange?.(true);
     setOpen(true);
     setLoginId("");
     begin.mutate();

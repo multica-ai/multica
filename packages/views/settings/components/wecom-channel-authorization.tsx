@@ -20,14 +20,7 @@ import { toast } from "sonner";
 // throws "Element type is invalid" the moment the QR mounts.
 import { QRCode } from "react-qr-code";
 import { Button } from "@multica/ui/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@multica/ui/components/ui/dialog";
+import { DialogFooter } from "@multica/ui/components/ui/dialog";
 import { api, ApiError, errorCode } from "@multica/core/api";
 import { createSafeId } from "@multica/core/utils";
 import { wecomKeys } from "@multica/core/wecom";
@@ -63,18 +56,18 @@ const BEGIN_ERROR_REASONS: Record<string, ScanErrorReason> = {
 };
 
 function isKnownScanError(reason: string | null): reason is ScanErrorReason {
-  return reason !== null && (SCAN_ERROR_KEYS as readonly string[]).includes(reason);
+  return (
+    reason !== null && (SCAN_ERROR_KEYS as readonly string[]).includes(reason)
+  );
 }
 
-export function WecomScanInstallDialog({
+export function WecomChannelAuthorization({
   wsId,
   agentId,
-  agentName,
   onClose,
 }: {
   wsId: string;
   agentId: string;
-  agentName?: string;
   onClose: () => void;
 }) {
   const { t } = useT("settings");
@@ -124,7 +117,9 @@ export function WecomScanInstallDialog({
       const code = errorCode(e);
       setErrorReason(
         (code && BEGIN_ERROR_REASONS[code]) ??
-          (e instanceof ApiError && e.status === 503 ? "integration_unconfigured" : "internal_error"),
+          (e instanceof ApiError && e.status === 503
+            ? "integration_unconfigured"
+            : "internal_error"),
       );
     } finally {
       if (!closedRef.current) setBeginning(false);
@@ -168,8 +163,10 @@ export function WecomScanInstallDialog({
           setExpiresInSeconds(res.expires_in_seconds);
         }
         if (res.status === "success") {
-          await qc.invalidateQueries({ queryKey: wecomKeys.installations(wsId) });
-          toast.success(t(($) => $.wecom.scan_success_toast));
+          await qc.invalidateQueries({
+            queryKey: wecomKeys.installations(wsId),
+          });
+          toast.success(t(($) => $.channels.connect_success));
           // The close itself is deliberately NOT scheduled here: `status` is a
           // dependency of this effect, so setting it to "success" re-runs the
           // effect and the cleanup would cancel the very timer meant to close
@@ -219,8 +216,12 @@ export function WecomScanInstallDialog({
     ? {
         expired: t(($) => $.wecom.scan_error_expired),
         generate_failed: t(($) => $.wecom.scan_error_generate_failed),
-        integration_unconfigured: t(($) => $.wecom.scan_error_integration_unconfigured),
-        installation_conflict: t(($) => $.wecom.scan_error_installation_conflict),
+        integration_unconfigured: t(
+          ($) => $.wecom.scan_error_integration_unconfigured,
+        ),
+        installation_conflict: t(
+          ($) => $.wecom.scan_error_installation_conflict,
+        ),
         bind_failed: t(($) => $.wecom.scan_error_bind_failed),
         wecom_protocol_error: t(($) => $.wecom.scan_error_wecom_protocol_error),
         internal_error: t(($) => $.wecom.scan_error_internal_error),
@@ -231,70 +232,64 @@ export function WecomScanInstallDialog({
     : t(($) => $.wecom.scan_error_internal_error);
 
   return (
-    <Dialog
-      open
-      onOpenChange={(o) => {
-        if (!o) onClose();
-      }}
-    >
-      <DialogContent className="max-w-sm" data-testid="wecom-scan-dialog">
-        <DialogHeader>
-          <DialogTitle>{t(($) => $.wecom.scan_dialog_title)}</DialogTitle>
-          <DialogDescription>
-            {agentName
-              ? t(($) => $.wecom.bind_button_title, { agent: agentName })
-              : t(($) => $.wecom.scan_hint)}
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="flex flex-col items-center gap-4 py-2">
-          {(beginning || status === "creating") && !qrCodeURL && status !== "error" && (
-            <p className="text-body text-muted-foreground" data-testid="wecom-scan-starting">
+    <>
+      <div className="flex flex-col items-center gap-4 py-2">
+        {(beginning || status === "creating") &&
+          !qrCodeURL &&
+          status !== "error" && (
+            <p
+              className="text-body text-muted-foreground"
+              data-testid="wecom-scan-starting"
+            >
               {t(($) => $.wecom.scan_starting)}
             </p>
           )}
 
-          {status === "pending" && qrCodeURL && (
-            <>
-              {/* White plate regardless of theme: a QR needs light quiet zones
+        {status === "pending" && qrCodeURL && (
+          <>
+            {/* White plate regardless of theme: a QR needs light quiet zones
                   to scan, and the dark-mode surface token would invert it. */}
-              <div className="rounded-md border bg-white p-3">
-                <QRCode value={qrCodeURL} size={192} />
-              </div>
-              <p className="text-caption text-muted-foreground text-center">
-                {t(($) => $.wecom.scan_hint)}
-              </p>
-              {expiresInSeconds !== null && expiresInSeconds > 0 && (
-                <p className="text-caption text-muted-foreground" data-testid="wecom-scan-expiry">
-                  {t(($) => $.wecom.scan_expires_in, { seconds: expiresInSeconds })}
-                </p>
-              )}
-            </>
-          )}
-
-          {status === "error" && (
-            <div className="text-center" data-testid="wecom-scan-error">
-              <p className="text-body">{scanErrorText}</p>
+            <div className="rounded-md border bg-white p-3">
+              <QRCode value={qrCodeURL} size={192} />
             </div>
-          )}
-        </div>
+            <p className="text-caption text-muted-foreground text-center">
+              {t(($) => $.wecom.scan_hint)}
+            </p>
+            {expiresInSeconds !== null && expiresInSeconds > 0 && (
+              <p
+                className="text-caption text-muted-foreground"
+                data-testid="wecom-scan-expiry"
+              >
+                {t(($) => $.wecom.scan_expires_in, {
+                  seconds: expiresInSeconds,
+                })}
+              </p>
+            )}
+          </>
+        )}
 
-        <DialogFooter>
-          <Button variant="outline" size="sm" onClick={onClose}>
-            {t(($) => $.wecom.scan_close)}
+        {status === "error" && (
+          <div className="text-center" data-testid="wecom-scan-error">
+            <p className="text-body">{scanErrorText}</p>
+          </div>
+        )}
+      </div>
+
+      <DialogFooter>
+        <Button variant="outline" size="sm" onClick={onClose}>
+          {t(($) => $.wecom.scan_close)}
+        </Button>
+        {status === "error" && (
+          <Button
+            size="sm"
+            onClick={() => void beginSession()}
+            disabled={beginning}
+            data-testid="wecom-scan-retry"
+          >
+            {t(($) => $.wecom.scan_again)}
           </Button>
-          {status === "error" && (
-            <Button
-              size="sm"
-              onClick={() => void beginSession()}
-              disabled={beginning}
-              data-testid="wecom-scan-retry"
-            >
-              {t(($) => $.wecom.scan_again)}
-            </Button>
-          )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        )}
+      </DialogFooter>
+    </>
   );
 }

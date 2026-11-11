@@ -99,9 +99,7 @@ function overlayPath(overlay: WindowOverlay): string {
       return "/workspaces/new";
     case "onboarding":
       return "/onboarding";
-    case "invite":
-      return `/invite/${overlay.invitationId}`;
     case "invitations":
-      return "/invitations";
+      return overlay.invitationId ? `/invite/${overlay.invitationId}` : "/invitations";
   }
 }

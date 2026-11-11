@@ -200,6 +200,8 @@ interface TabStore {
   closeTab: (tabId: string) => void;
   /** Close every other unpinned tab in the target tab's workspace. */
   closeOtherTabs: (tabId: string) => void;
+  /** Close the unpinned tabs after the target tab in its workspace. */
+  closeTabsToRight: (tabId: string) => void;
   /**
    * Activate a tab. Finds it across all workspaces. Sets both the owning
    * workspace as active and that group's activeTabId; needed for any code
@@ -682,12 +684,13 @@ function findTabLocation(
 function buildCloseOtherTabsResult(
   byWorkspace: Record<string, WorkspaceTabGroup>,
   tabId: string,
+  scope: "others" | "right" = "others",
 ): Record<string, WorkspaceTabGroup> | null {
   const hit = findTabLocation(byWorkspace, tabId);
   if (!hit) return null;
-  const { slug, group } = hit;
+  const { slug, group, index } = hit;
   const closingTabs = group.tabs.filter(
-    (tab) => !tab.pinned && tab.id !== tabId,
+    (tab, i) => !tab.pinned && tab.id !== tabId && (scope === "others" || i > index),
   );
   if (closingTabs.length === 0) return null;
 
@@ -957,6 +960,13 @@ export const useTabStore = create<TabStore>()(
       closeOtherTabs(tabId) {
         const { byWorkspace } = get();
         const next = buildCloseOtherTabsResult(byWorkspace, tabId);
+        if (!next) return;
+        set({ byWorkspace: next });
+      },
+
+      closeTabsToRight(tabId) {
+        const { byWorkspace } = get();
+        const next = buildCloseOtherTabsResult(byWorkspace, tabId, "right");
         if (!next) return;
         set({ byWorkspace: next });
       },

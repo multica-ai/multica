@@ -109,12 +109,12 @@ test("WeChat QR verification, connection listing, and disconnect", async ({
     await page.goto(`/${workspace.slug}/agents/${agentID}`, {
       waitUntil: "domcontentloaded",
     });
-    await page.getByRole("button", { name: "Settings", exact: true }).click();
-    await page.getByRole("tab", { name: "Integrations", exact: true }).click();
-    await expect(
-      page.getByRole("button", { name: "Connect WeChat", exact: true }),
-    ).toBeVisible();
-    await page.getByRole("button", { name: "Connect WeChat", exact: true }).scrollIntoViewIfNeeded();
+    const channels = page.locator("#messaging-channels");
+    await channels.getByRole("button", { name: "Add messaging channel" }).first().click();
+    const connectDialog = page.getByRole("dialog", { name: "Connect messaging channel" });
+    await connectDialog.getByRole("button", { name: "WeChat" }).click();
+    await connectDialog.getByRole("button", { name: "Continue" }).click();
+    await expect(connectDialog.getByRole("button", { name: "Connect WeChat" })).toBeVisible();
     await page.screenshot({
       path: testInfo.outputPath("weixin-agent.png"),
       fullPage: true,
@@ -132,26 +132,23 @@ test("WeChat QR verification, connection listing, and disconnect", async ({
     });
     await dialog.getByLabel("Verification code").fill("001234");
     await dialog.getByRole("button", { name: "Verify", exact: true }).click();
-    await expect(
-      page.getByRole("button", { name: "Disconnect", exact: true }),
-    ).toBeVisible();
+    await expect(connectDialog.getByText("Connected", { exact: true })).toBeVisible();
+    await connectDialog.getByRole("button", { name: "Close" }).click();
+    await expect(page.getByRole("button", { name: "Manage WeChat" })).toBeVisible();
     await page.goto(
       `/${workspace.slug}/settings?tab=channels&integration=weixin`,
       { waitUntil: "domcontentloaded" },
     );
-    await expect(page.getByText("Connected", { exact: true })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("link", { name: "WeChat Assistant" })).toBeVisible({ timeout: 30_000 });
     await page.screenshot({
       path: testInfo.outputPath("weixin-connected.png"),
       fullPage: true,
     });
-    await page.getByRole("button", { name: "Disconnect", exact: true }).click();
-    await page
-      .getByRole("dialog")
-      .getByRole("button", { name: "Disconnect", exact: true })
-      .click();
-    await expect(
-      page.getByText("Connect WeChat from an agent’s Integrations tab."),
-    ).toBeVisible();
+    await page.getByRole("link", { name: "WeChat Assistant" }).click();
+    await page.getByRole("button", { name: "Manage WeChat" }).click();
+    await page.getByRole("menuitem", { name: "Disconnect" }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Disconnect", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Manage WeChat" })).toHaveCount(0);
   } finally {
     await api.cleanup();
   }

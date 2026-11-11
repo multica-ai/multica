@@ -634,6 +634,10 @@ type AgentTaskResponse struct {
 	// owning user; the daemon must not fall back to its own credential. See
 	// MUL-3292.
 	AuthToken string `json:"auth_token,omitempty"`
+
+	// ChatFeishuSource is the Feishu ids of the message this task answers,
+	// from its frozen delivery. Absent for other surfaces.
+	ChatFeishuSource *protocol.FeishuSource `json:"chat_feishu_source,omitempty"`
 }
 
 // TaskAttribution is the wire shape of a run's accountable-human provenance

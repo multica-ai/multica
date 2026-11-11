@@ -419,6 +419,10 @@
         "label": "Mostrar u ocultar la ventana de chat",
         "description": "Abre o cierra la ventana de chat flotante. Al abrirla, el foco va al campo de mensaje."
       },
+      "newChat": {
+        "label": "Pregunta a Multica",
+        "description": "Inicia un chat nuevo en la ventana de chat flotante."
+      },
       "findInIssue": {
         "label": "Buscar en la tarea",
         "description": "Busca dentro del detalle de la tarea abierta."
@@ -1370,7 +1374,9 @@
     "github_load_more": "Cargar más",
     "github_selected_count": "{{count}} seleccionados",
     "github_cancel": "Cancelar",
-    "github_import": "Añadir repositorios",
+    "github_import": "Añadir {{count}} repositorios",
+    "github_import_one": "Añadir {{count}} repositorio",
+    "github_import_other": "Añadir {{count}} repositorios",
     "save": "Guardar",
     "saving": "Guardando...",
     "saved_hint": "Todos los cambios guardados",
@@ -1403,7 +1409,10 @@
       "close_others": "Cerrar las demás pestañas",
       "open_window": "Abrir en ventana nueva",
       "new": "Pestaña nueva",
-      "pinned_name": "{{title}} (fijada)"
+      "pinned_name": "{{title}} (fijada)",
+      "copy_link": "Copiar enlace",
+      "link_copied": "Enlace copiado",
+      "close_right": "Cerrar las pestañas a la derecha"
     },
     "updates": {
       "title": "Actualizaciones",
@@ -1584,7 +1593,42 @@
     "status_unknown": "Estado no disponible"
   },
   "channels": {
-    "breadcrumb": "Migas de pan"
+    "breadcrumb": "Migas de pan",
+    "add": "Añadir canal de mensajería",
+    "connect": "Conectar",
+    "disconnect": "Desconectar",
+    "open": "Abrir",
+    "normal": "Conectado",
+    "waiting_message": "Esperando el primer mensaje",
+    "disconnected": "Desconectado",
+    "find_me": "Encuéntrame en {{platform}}",
+    "manage": "Gestionar {{platform}}",
+    "last_message": "Último mensaje: {{time}}",
+    "ask_admin": "Pide ayuda a un administrador",
+    "unavailable": "Conexión no disponible",
+    "server_unavailable": "No habilitado en este servidor: {{platforms}}",
+    "permissions_title": "Quién puede conectar",
+    "owner_or_admin": "Propietario del agente o administrador del espacio",
+    "admin_only": "Solo administradores del espacio",
+    "connect_title": "Conectar canal de mensajería",
+    "choose_description": "Elige un agente y una plataforma.",
+    "authorize_description": "Conectar {{agent}} a {{platform}}.",
+    "agent_label": "Agente",
+    "choose_agent": "Elegir agente",
+    "platform_label": "Plataforma",
+    "region_label": "Región",
+    "method_label": "Método de conexión",
+    "continue": "Continuar",
+    "feishu": "Feishu (China)",
+    "lark": "Lark (internacional)",
+    "setup_guide": "Guía de configuración",
+    "connection_changed": "Esta conexión ya no está disponible. Cierra esta ventana y vuelve a intentarlo.",
+    "connect_failed": "No se pudo conectar el bot.",
+    "connect_success": "Canal de mensajería conectado.",
+    "disconnect_failed": "No se pudo desconectar el bot.",
+    "disconnect_title": "¿Desconectar el canal de mensajería?",
+    "disconnect_description": "Este agente dejará de recibir mensajes de {{platform}}.",
+    "agent_unavailable": "Agente no disponible"
   },
   "code": {
     "github_actions": "Acciones de GitHub",

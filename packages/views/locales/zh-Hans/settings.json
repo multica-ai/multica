@@ -413,6 +413,10 @@
         "label": "显示或隐藏聊天窗",
         "description": "打开或关闭悬浮聊天窗，打开时自动聚焦输入框。"
       },
+      "newChat": {
+        "label": "问 Multica",
+        "description": "在悬浮聊天窗里开始新对话。"
+      },
       "findInIssue": {
         "label": "在任务中查找",
         "description": "搜索当前打开的任务详情。"
@@ -1360,7 +1364,8 @@
     "github_load_more": "加载更多",
     "github_selected_count": "已选择 {{count}} 个",
     "github_cancel": "取消",
-    "github_import": "添加仓库",
+    "github_import": "添加 {{count}} 个仓库",
+    "github_import_other": "添加 {{count}} 个仓库",
     "save": "保存",
     "saving": "保存中...",
     "saved_hint": "所有改动已保存",
@@ -1393,7 +1398,10 @@
       "close_others": "关闭其他标签页",
       "open_window": "在新窗口打开",
       "new": "新建标签页",
-      "pinned_name": "{{title}}（已固定）"
+      "pinned_name": "{{title}}（已固定）",
+      "copy_link": "复制链接",
+      "link_copied": "已复制链接",
+      "close_right": "关闭右侧标签页"
     },
     "updates": {
       "title": "更新",
@@ -1595,7 +1603,42 @@
     "github_actions": "GitHub 操作"
   },
   "channels": {
-    "breadcrumb": "路径"
+    "breadcrumb": "路径",
+    "add": "添加消息渠道",
+    "connect": "连接",
+    "disconnect": "断开连接",
+    "open": "打开",
+    "normal": "正常",
+    "waiting_message": "等待第一条消息",
+    "disconnected": "已断开",
+    "find_me": "在 {{platform}} 中找我",
+    "manage": "管理 {{platform}}",
+    "last_message": "最近消息：{{time}}",
+    "ask_admin": "找管理员",
+    "unavailable": "暂不可连接",
+    "server_unavailable": "服务器尚未启用：{{platforms}}",
+    "permissions_title": "谁可以连接",
+    "owner_or_admin": "智能体所有者或工作区管理员",
+    "admin_only": "仅工作区管理员",
+    "connect_title": "连接消息渠道",
+    "choose_description": "选择智能体和平台。",
+    "authorize_description": "将 {{agent}} 连接到 {{platform}}。",
+    "agent_label": "智能体",
+    "choose_agent": "选择智能体",
+    "platform_label": "平台",
+    "region_label": "区域",
+    "method_label": "连接方式",
+    "continue": "继续",
+    "feishu": "飞书（中国）",
+    "lark": "Lark（国际）",
+    "setup_guide": "配置指南",
+    "connection_changed": "此连接已不可用。关闭后重试。",
+    "connect_failed": "无法连接机器人。",
+    "connect_success": "消息渠道已连接。",
+    "disconnect_failed": "无法断开机器人连接。",
+    "disconnect_title": "断开消息渠道？",
+    "disconnect_description": "此智能体将不再接收来自 {{platform}} 的消息。",
+    "agent_unavailable": "智能体已不可用"
   },
   "mcp_usage": {
     "agent_count_other": "已分配给 {{count}} 个智能体",

@@ -64,6 +64,50 @@ func TestSendChatMessage_ReportsPositionInsteadOfQueuedStatus(t *testing.T) {
 	}
 }
 
+func TestSendChatMessage_FirstMessageTitlesUntitledSession(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	agentID := createHandlerTestAgent(t, "ChatSendFirstTitleAgent", []byte("[]"))
+	createReq := newRequest("POST", "/api/chat-sessions", map[string]any{"agent_id": agentID})
+	createReq = withChatTestWorkspaceCtx(t, createReq)
+	createW := httptest.NewRecorder()
+	testHandler.CreateChatSession(createW, createReq)
+	if createW.Code != http.StatusCreated {
+		t.Fatalf("CreateChatSession: expected 201, got %d: %s", createW.Code, createW.Body.String())
+	}
+	var created ChatSessionResponse
+	if err := json.Unmarshal(createW.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM chat_session WHERE id = $1`, created.ID)
+	})
+	if created.Title != "" {
+		t.Fatalf("session created without a title got %q", created.Title)
+	}
+
+	req := newRequest("POST", "/api/chat-sessions/"+created.ID+"/messages", map[string]any{
+		"content": "\n# Release **checklist** for [MUL-1](mention://issue/abc)\nsecond line",
+	})
+	req = withURLParam(req, "sessionId", created.ID)
+	req = withChatTestWorkspaceCtx(t, req)
+	w := httptest.NewRecorder()
+	testHandler.SendChatMessage(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("SendChatMessage: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	session, err := testHandler.Queries.GetChatSession(context.Background(), parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	if session.Title != "Release checklist for MUL-1" {
+		t.Fatalf("title = %q, want the server-derived first-message title", session.Title)
+	}
+}
+
 func TestSendChatMessage_DeferredPredecessorStaysHeadAcrossPromotion(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")

@@ -430,6 +430,10 @@
         "label": "Переключить окно чата",
         "description": "Открыть или закрыть плавающее окно чата. При открытии фокус переходит в поле ввода сообщения."
       },
+      "newChat": {
+        "label": "Спросить Multica",
+        "description": "Начать новый чат в плавающем окне чата."
+      },
       "findInIssue": {
         "label": "Найти в задаче",
         "description": "Поиск внутри открытой карточки задачи."
@@ -1389,7 +1393,11 @@
     "github_load_more": "Загрузить ещё",
     "github_selected_count": "Выбрано: {{count}}",
     "github_cancel": "Отмена",
-    "github_import": "Добавить репозитории",
+    "github_import": "Добавить {{count}} репозиториев",
+    "github_import_one": "Добавить {{count}} репозиторий",
+    "github_import_other": "Добавить {{count}} репозиториев",
+    "github_import_few": "Добавить {{count}} репозитория",
+    "github_import_many": "Добавить {{count}} репозиториев",
     "save": "Сохранить",
     "saving": "Сохранение...",
     "saved_hint": "Все изменения сохранены",
@@ -1422,7 +1430,10 @@
       "close_others": "Закрыть другие вкладки",
       "open_window": "Открыть в новом окне",
       "new": "Новая вкладка",
-      "pinned_name": "{{title}} (закреплено)"
+      "pinned_name": "{{title}} (закреплено)",
+      "copy_link": "Копировать ссылку",
+      "link_copied": "Ссылка скопирована",
+      "close_right": "Закрыть вкладки справа"
     },
     "updates": {
       "title": "Обновления",
@@ -1636,7 +1647,42 @@
     "github_actions": "GitHub Actions"
   },
   "channels": {
-    "breadcrumb": "Хлебные крошки"
+    "breadcrumb": "Хлебные крошки",
+    "add": "Добавить канал сообщений",
+    "connect": "Подключить",
+    "disconnect": "Отключить",
+    "open": "Открыть",
+    "normal": "Подключено",
+    "waiting_message": "Ожидание первого сообщения",
+    "disconnected": "Отключено",
+    "find_me": "Найти меня в {{platform}}",
+    "manage": "Управление {{platform}}",
+    "last_message": "Последнее сообщение: {{time}}",
+    "ask_admin": "Обратитесь к администратору",
+    "unavailable": "Подключение недоступно",
+    "server_unavailable": "Не включено на сервере: {{platforms}}",
+    "permissions_title": "Кто может подключать",
+    "owner_or_admin": "Владелец агента или администратор пространства",
+    "admin_only": "Только администраторы пространства",
+    "connect_title": "Подключить канал сообщений",
+    "choose_description": "Выберите агента и платформу.",
+    "authorize_description": "Подключить {{agent}} к {{platform}}.",
+    "agent_label": "Агент",
+    "choose_agent": "Выберите агента",
+    "platform_label": "Платформа",
+    "region_label": "Регион",
+    "method_label": "Способ подключения",
+    "continue": "Продолжить",
+    "feishu": "Feishu (Китай)",
+    "lark": "Lark (международный)",
+    "setup_guide": "Руководство по настройке",
+    "connection_changed": "Это подключение больше недоступно. Закройте окно и повторите попытку.",
+    "connect_failed": "Не удалось подключить бота.",
+    "connect_success": "Канал сообщений подключён.",
+    "disconnect_failed": "Не удалось отключить бота.",
+    "disconnect_title": "Отключить канал сообщений?",
+    "disconnect_description": "Этот агент перестанет получать сообщения из {{platform}}.",
+    "agent_unavailable": "Агент недоступен"
   },
   "mcp_usage": {
     "agent_count_one": "Используется {{count}} агентом",
