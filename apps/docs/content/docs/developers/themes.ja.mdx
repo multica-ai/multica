@@ -219,7 +219,7 @@ pnpm theme:preview path/to/paper --out preview   # preview/light.png と preview
 
 ### レジストリに追加する
 
-レジストリの `themes.json` にテーマを追加する pull request を作ります。pull request はリリースに対して `theme:check` と `theme:preview` を実行して結果をコメントし、通過したらメンテナーがマージします。
+レジストリに `themes/<id>.json` というファイルを追加する pull request を作ります。ファイル名は manifest の `id` です。テーマごとにファイルが分かれているので、別々のテーマの pull request は競合しません。pull request はリリースに対して `theme:check` と `theme:preview` を実行して結果をコメントし、通過したらメンテナーがマージします。
 
 </Step>
 </Steps>

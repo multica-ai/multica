@@ -219,7 +219,7 @@ pnpm theme:preview path/to/paper --out preview   # preview/light.png 和 preview
 
 ### 加入仓库
 
-提一个 pull request，把主题加到仓库的 `themes.json` 里。pull request 会对这个 release 运行 `theme:check` 和 `theme:preview`，并在评论里贴出结果；通过后由维护者合并。
+提一个 pull request，在仓库里新增文件 `themes/<id>.json`，文件名就是 manifest 的 `id`。每个主题一个文件，不同主题的 pull request 不会冲突。pull request 会对这个 release 运行 `theme:check` 和 `theme:preview`，并在评论里贴出结果；通过后由维护者合并。
 
 </Step>
 </Steps>
