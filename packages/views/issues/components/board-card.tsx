@@ -24,6 +24,7 @@ import { PriorityPicker, AssigneePicker, StartDatePicker, DueDatePicker } from "
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { propertyIdFromViewKey } from "@multica/core/issues/stores/view-store";
 import { ProgressRing } from "./progress-ring";
+import { OpenSubIssuesIndicator } from "./open-sub-issues-indicator";
 import type { ChildProgress } from "./list-row";
 import { IssueActionsContextMenu } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
@@ -218,6 +219,7 @@ export const BoardCardContent = memo(function BoardCardContent({
       <p className="mt-1 text-body font-medium leading-snug cjk:leading-normal line-clamp-2">
         {issue.title}
       </p>
+      <OpenSubIssuesIndicator issue={issue} childProgress={childProgress} className="mt-1.5" />
 
       {showDescription && (() => {
         const preview = descriptionPreview(issue.description!);

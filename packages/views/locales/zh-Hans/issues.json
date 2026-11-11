@@ -958,6 +958,7 @@
     "delete_count_other": "删除 {{count}} 个任务"
   },
   "card": {
+    "open_sub_issues_other": "{{count}} 个子任务未关闭",
     "update_failed": "更新任务失败",
     "updated_ago": "更新于 {{time}}"
   },

@@ -958,6 +958,7 @@
     "delete_count_other": "태스크 {{count}}개 삭제"
   },
   "card": {
+    "open_sub_issues_other": "열린 하위 작업 {{count}}개",
     "update_failed": "태스크를 업데이트하지 못했습니다",
     "updated_ago": "{{time}} 수정됨"
   },

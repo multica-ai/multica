@@ -1007,6 +1007,8 @@
     "delete_count_other": "Supprimer {{count}} tâches"
   },
   "card": {
+    "open_sub_issues_one": "{{count}} sous-tâche ouverte",
+    "open_sub_issues_other": "{{count}} sous-tâches ouvertes",
     "update_failed": "Échec de la mise à jour de la tâche",
     "updated_ago": "Mis à jour {{time}}"
   },

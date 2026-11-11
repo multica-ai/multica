@@ -958,6 +958,7 @@
     "delete_count_other": "タスク {{count}} 件を削除"
   },
   "card": {
+    "open_sub_issues_other": "未クローズのサブタスク {{count}} 件",
     "update_failed": "タスクを更新できませんでした",
     "updated_ago": "{{time}} に更新"
   },

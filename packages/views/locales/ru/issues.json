@@ -1104,6 +1104,10 @@
     "delete_count_other": "Удалить {{count}} задачи"
   },
   "card": {
+    "open_sub_issues_one": "{{count}} открытая подзадача",
+    "open_sub_issues_few": "{{count}} открытые подзадачи",
+    "open_sub_issues_many": "{{count}} открытых подзадач",
+    "open_sub_issues_other": "{{count}} открытой подзадачи",
     "update_failed": "Не удалось обновить задачу",
     "updated_ago": "Обновлено {{time}}"
   },

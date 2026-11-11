@@ -921,6 +921,8 @@
     "delete_count_other": "Eliminar {{count}} tareas"
   },
   "card": {
+    "open_sub_issues_one": "{{count}} subtarea abierta",
+    "open_sub_issues_other": "{{count}} subtareas abiertas",
     "update_failed": "No se ha podido actualizar la tarea",
     "updated_ago": "Actualizada {{time}}"
   },
