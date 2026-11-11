@@ -1141,7 +1141,10 @@
       "close_others": "다른 탭 닫기",
       "open_window": "새 창에서 열기",
       "new": "새 탭",
-      "pinned_name": "{{title}} (고정됨)"
+      "pinned_name": "{{title}} (고정됨)",
+      "copy_link": "링크 복사",
+      "link_copied": "링크를 복사했습니다",
+      "close_right": "오른쪽 탭 닫기"
     },
     "updates": {
       "title": "업데이트",

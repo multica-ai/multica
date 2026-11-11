@@ -182,6 +182,10 @@ interface PanelLinkProps {
   trailing?: React.ReactNode;
   /** Runs before navigation, e.g. to select a list scope the page reads. */
   onNavigate?: () => void;
+  onContextMenu?: React.MouseEventHandler<HTMLAnchorElement>;
+  /** Rendered beside the link, inside the row's list item: a right-click menu,
+   *  which must not nest inside the anchor. */
+  menu?: React.ReactNode;
   className?: string;
 }
 
@@ -193,6 +197,8 @@ export function PanelLink({
   description,
   trailing,
   onNavigate,
+  onContextMenu,
+  menu,
   className,
 }: PanelLinkProps) {
   return (
@@ -202,6 +208,7 @@ export function PanelLink({
         newTabTitle={label}
         aria-current={active ? "page" : undefined}
         onClick={onNavigate}
+        onContextMenu={onContextMenu}
         {...panelRowAnchor(active)}
         className={cn(
           PANEL_ROW_CLASS,
@@ -223,6 +230,7 @@ export function PanelLink({
         )}
         {trailing}
       </AppLink>
+      {menu}
     </li>
   );
 }
