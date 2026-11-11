@@ -89,7 +89,6 @@ function ChannelConnectSteps({
     initialChannel,
   );
   const [authorizing, setAuthorizing] = useState(false);
-  const [region, setRegion] = useState<"feishu" | "lark">("feishu");
   const [wecomMethod, setWecomMethod] = useState<"scan" | "credentials">(
     "scan",
   );
@@ -118,7 +117,10 @@ function ChannelConnectSteps({
         {authorizing && agent && channel
           ? t(($) => $.channels.authorize_description, {
               agent: agent.name,
-              platform: t(($) => $[channel].section_title),
+              platform:
+                channel === "lark"
+                  ? t(($) => $.lark.region_feishu)
+                  : t(($) => $[channel].section_title),
             })
           : t(($) => $.channels.choose_description)}
       </DialogDescription>
@@ -178,7 +180,11 @@ function ChannelConnectSteps({
                       onClick={() => setChannel(id)}
                     >
                       <IntegrationChannelIcon channel={id} />
-                      <span>{t(($) => $[id].section_title)}</span>{" "}
+                      <span>
+                        {id === "lark"
+                          ? t(($) => $.lark.region_feishu)
+                          : t(($) => $[id].section_title)}
+                      </span>{" "}
                       <span className="ml-auto text-caption text-muted-foreground">
                         {queries[id].isError
                           ? t(($) => $.integrations.status_unknown)
@@ -192,24 +198,6 @@ function ChannelConnectSteps({
                   );
                 })}
             </div>
-            {channel === "lark" ? (
-              <div className="space-y-1.5">
-                <Label htmlFor="channel-region">
-                  {t(($) => $.channels.region_label)}
-                </Label>
-                <select
-                  id="channel-region"
-                  value={region}
-                  onChange={(event) =>
-                    setRegion(event.target.value === "lark" ? "lark" : "feishu")
-                  }
-                  className="h-9 w-full rounded-md border bg-background px-3 text-body"
-                >
-                  <option value="feishu">{t(($) => $.channels.feishu)}</option>
-                  <option value="lark">{t(($) => $.channels.lark)}</option>
-                </select>
-              </div>
-            ) : null}
             {channel === "wecom" &&
             queries.wecom.data?.scan_install_supported ? (
               <div className="space-y-1.5">
@@ -276,7 +264,9 @@ function ChannelConnectSteps({
             <LarkChannelAuthorization
               wsId={wsId}
               agentId={agent.id}
-              region={region}
+              // International installs remain disabled until the persistence
+              // issue is fixed; existing Lark bots stay manageable.
+              region="feishu"
               onClose={onClose}
             />
           ) : scanWecom ? (

@@ -139,6 +139,83 @@ beforeEach(() => {
 });
 
 describe("agent messaging channels", () => {
+  it.each([
+    ["feishu", "open.feishu.cn", "Manage in Feishu"],
+    ["lark", "open.larksuite.com", "Manage in Lark"],
+    [undefined, "open.feishu.cn", "Manage in Feishu"],
+  ])(
+    "keeps management and troubleshooting available for an existing %s bot",
+    async (region, host, label) => {
+      vi.mocked(api.listLarkInstallations).mockResolvedValue({
+        ...listing([{ ...active, app_id: "cli_a&b", region }]),
+        install_supported: false,
+      } as never);
+      show(<AgentChannelsSection agent={agent} />);
+      fireEvent.click(
+        await screen.findByRole("button", { name: "Manage Lark" }),
+      );
+      fireEvent.click(await screen.findByRole("menuitem", { name: label }));
+      expect(state.open).toHaveBeenCalledWith(`https://${host}/app/cli_a%26b`);
+      fireEvent.click(screen.getByRole("button", { name: "Manage Lark" }));
+      fireEvent.click(
+        await screen.findByRole("menuitem", { name: "Troubleshooting" }),
+      );
+      expect(state.open).toHaveBeenCalledWith(
+        "https://multica.ai/docs/lark-bot-integration",
+      );
+    },
+  );
+
+  it("shows actionable DingTalk permission help instead of a healthy status", async () => {
+    vi.mocked(api.listDingTalkInstallations).mockResolvedValue(
+      listing([active]) as never,
+    );
+    vi.mocked(api.listAgentDingTalkGroups).mockResolvedValue({
+      groups: [],
+      group_discovery_supported: true,
+      bot_identities: {
+        i1: {
+          installation_id: "i1",
+          agent_id: agent.id,
+          bot_name: "",
+          bot_identity_issue: "missing_qyapi_chat_manage",
+        },
+      },
+    });
+    show(<AgentChannelsSection agent={agent} />);
+    expect(await screen.findByText("qyapi_chat_manage")).toBeInTheDocument();
+    expect(screen.getByText("Identity unavailable")).toBeInTheDocument();
+    expect(screen.getByText(/then @mention the bot again/)).toBeInTheDocument();
+    expect(screen.queryByText("Connected", { exact: true })).toBeNull();
+  });
+
+  it("keeps recovery controls hidden for members who cannot manage the bot", async () => {
+    state.role = "member";
+    vi.mocked(api.listLarkInstallations).mockResolvedValue(
+      listing([
+        { ...active, agent_id: otherAgent.id, app_id: "cli_readonly" },
+      ]) as never,
+    );
+    vi.mocked(api.listDingTalkInstallations).mockResolvedValue(
+      listing([{ ...active, id: "d1", agent_id: otherAgent.id }]) as never,
+    );
+    vi.mocked(api.listAgentDingTalkGroups).mockResolvedValue({
+      groups: [],
+      group_discovery_supported: true,
+      bot_identities: {
+        d1: {
+          installation_id: "d1",
+          agent_id: otherAgent.id,
+          bot_name: "",
+          bot_identity_issue: "missing_qyapi_chat_manage",
+        },
+      },
+    });
+    show(<AgentChannelsSection agent={otherAgent} />);
+    expect(await screen.findByText("Identity unavailable")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Manage Lark" })).toBeNull();
+    expect(screen.queryByText("qyapi_chat_manage")).toBeNull();
+  });
   it("does not offer management to someone without workspace membership", async () => {
     state.member = false;
     const { container } = show(<AgentChannelsSection agent={agent} />);
@@ -170,7 +247,7 @@ describe("agent messaging channels", () => {
     );
     const dialog = await screen.findByRole("dialog");
     expect(
-      within(dialog).getByRole("button", { name: /^Lark$/ }),
+      within(dialog).getByRole("button", { name: /^Feishu$/ }),
     ).toBeEnabled();
     expect(
       within(dialog).getByRole("button", { name: /^DingTalk$/ }),
@@ -305,7 +382,7 @@ describe("agent messaging channels", () => {
 });
 
 describe("shared connection dialog", () => {
-  it("starts the Lark QR flow for the selected agent and region", async () => {
+  it("offers only Feishu for new connections while international Lark is disabled", async () => {
     show(
       <ChannelConnectDialog
         agents={[agent]}
@@ -318,15 +395,17 @@ describe("shared connection dialog", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled(),
     );
-    fireEvent.change(screen.getByLabelText("Region"), {
-      target: { value: "lark" },
-    });
+    expect(screen.getByRole("button", { name: "Feishu" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Lark" })).toBeNull();
+    expect(
+      screen.queryByRole("option", { name: "Lark (International)" }),
+    ).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     await waitFor(() =>
       expect(api.beginLarkInstall).toHaveBeenCalledWith(
         "ws-1",
         "agent-1",
-        "lark",
+        "feishu",
       ),
     );
   });

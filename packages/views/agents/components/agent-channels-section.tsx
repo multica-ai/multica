@@ -11,9 +11,11 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 
+import { docsLocalePrefix } from "../../common/docs-locale";
 import { ObjectSection, ObjectSectionAction } from "../../layout/object-page";
 import { useT, useTimeAgo } from "../../i18n";
 import { openExternal } from "../../platform";
@@ -31,6 +33,8 @@ import {
   useMessagingChannels,
   type ChannelConnection,
 } from "../../settings/components/use-messaging-channels";
+
+const DINGTALK_CHAT_MANAGE_PERMISSION = "qyapi_chat_manage";
 
 export function AgentChannelLinks({ agent }: { agent: Agent }) {
   const { connections } = useMessagingChannels();
@@ -200,7 +204,7 @@ function AgentChannelRow({
   canManage: boolean;
   canForget: boolean;
 }) {
-  const { t } = useT("settings");
+  const { t, i18n } = useT("settings");
   const timeAgo = useTimeAgo();
   const { channel, installation } = connection;
   const [confirm, setConfirm] = useState(false);
@@ -214,6 +218,9 @@ function AgentChannelRow({
   const identity =
     groups.data?.bot_identities?.[installation.id] ??
     getDingTalkBotIdentity(groups.data?.groups ?? [], installation.id);
+  const identityIssue =
+    channel === "dingtalk" ? identity?.bot_identity_issue : undefined;
+  const missingChatPermission = identityIssue === "missing_qyapi_chat_manage";
   const name =
     channel === "dingtalk"
       ? identity?.bot_name
@@ -227,6 +234,10 @@ function AgentChannelRow({
     connection.channel === "lark" &&
     !connection.installation.first_message_received_at;
   const href = channelChatLink(connection);
+  const larkManageHref =
+    connection.channel === "lark" && connection.installation.app_id
+      ? `https://${connection.installation.region === "lark" ? "open.larksuite.com" : "open.feishu.cn"}/app/${encodeURIComponent(connection.installation.app_id)}`
+      : undefined;
   const lastMessage = (groups.data?.groups ?? [])
     .flatMap((group) => group.bots)
     .filter(
@@ -255,14 +266,18 @@ function AgentChannelRow({
           </div>
           <span
             className={
-              pending
-                ? "text-caption text-muted-foreground"
-                : "text-caption text-success"
+              identityIssue
+                ? "text-caption text-warning"
+                : pending
+                  ? "text-caption text-muted-foreground"
+                  : "text-caption text-success"
             }
           >
-            {pending
-              ? t(($) => $.channels.waiting_message)
-              : t(($) => $.channels.normal)}
+            {identityIssue
+              ? t(($) => $.dingtalk.bot_identity_unavailable)
+              : pending
+                ? t(($) => $.channels.waiting_message)
+                : t(($) => $.channels.normal)}
             {lastMessage ? (
               <span className="ml-2 text-muted-foreground">
                 {t(($) => $.channels.last_message, {
@@ -293,6 +308,31 @@ function AgentChannelRow({
               }
             />
             <DropdownMenuContent align="end">
+              {connection.channel === "lark" ? (
+                <>
+                  {larkManageHref ? (
+                    <DropdownMenuItem
+                      onClick={() => openExternal(larkManageHref)}
+                    >
+                      <ExternalLink />
+                      {connection.installation.region === "lark"
+                        ? t(($) => $.lark.agent_bot_manage_link_lark)
+                        : t(($) => $.lark.agent_bot_manage_link_feishu)}
+                    </DropdownMenuItem>
+                  ) : null}
+                  <DropdownMenuItem
+                    onClick={() =>
+                      openExternal(
+                        `https://multica.ai/docs${docsLocalePrefix(i18n.language)}/lark-bot-integration`,
+                      )
+                    }
+                  >
+                    <ExternalLink />
+                    {t(($) => $.lark.agent_bot_silent_hint_link)}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                </>
+              ) : null}
               <DropdownMenuItem
                 variant="destructive"
                 onClick={() => setConfirm(true)}
@@ -303,6 +343,18 @@ function AgentChannelRow({
           </DropdownMenu>
         ) : null}
       </div>
+      {missingChatPermission && canManage ? (
+        <p role="status" className="mt-2 text-caption text-muted-foreground">
+          {t(($) => $.dingtalk.bot_permission_tooltip_prefix)}{" "}
+          <code
+            className="rounded-xs bg-muted px-1 py-0.5 font-mono text-micro"
+            translate="no"
+          >
+            {DINGTALK_CHAT_MANAGE_PERMISSION}
+          </code>{" "}
+          {t(($) => $.dingtalk.bot_permission_tooltip_suffix)}
+        </p>
+      ) : null}
       {channel === "dingtalk" &&
       (groups.isPending ||
         groups.isError ||
