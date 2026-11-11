@@ -93,11 +93,12 @@ export function ChatWindow() {
   // Toast when an accepted refresh later fails in the daemon (async half).
   useQuickActionsFailureToast(activeSessionId ?? null);
 
-  // The window adds its own focus moment — opening it — on top of the
-  // controller's new-chat nonce. Both counters only grow, so their sum changes
-  // whenever either one does.
+  // The window adds its own focus moments — opening it, and Ask Multica starting
+  // a new chat — on top of the controller's new-chat nonce. Both counters only
+  // grow, so their sum changes whenever either one does.
   const windowRef = useRef<HTMLDivElement>(null);
-  const { focusRequest: openFocusRequest } = useChatInputFocus(isOpen, windowRef);
+  const newChatRequest = useChatStore((s) => s.newChatRequest);
+  const { focusRequest: openFocusRequest } = useChatInputFocus(isOpen, windowRef, newChatRequest);
   const focusRequest = c.focusInputRequest + openFocusRequest;
 
   const annotations = useChatAnnotations({

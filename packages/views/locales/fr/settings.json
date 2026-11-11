@@ -419,6 +419,10 @@
         "label": "Afficher ou masquer la fenêtre de discussion",
         "description": "Ouvrir ou fermer la fenêtre de discussion flottante. À l'ouverture, le champ de message reçoit le focus."
       },
+      "newChat": {
+        "label": "Demander à Multica",
+        "description": "Démarrer une nouvelle discussion dans la fenêtre de discussion flottante."
+      },
       "findInIssue": {
         "label": "Rechercher dans la tâche",
         "description": "Rechercher dans la tâche ouverte."
