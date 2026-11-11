@@ -343,6 +343,14 @@ type ChatReplyNotification struct {
 	Title       string `json:"title"`
 }
 
+type ChatReplyNotificationPayload struct {
+	WorkspaceID   string `json:"workspace_id"`
+	ChatSessionID string `json:"chat_session_id"`
+	MessageID     string `json:"message_id"`
+	Title         string `json:"title"`
+	Body          string `json:"body"`
+}
+
 // Outcome values carried by ChatCancelFinalizedPayload.
 const (
 	// ChatCancelOutcomeStopped: the transcript turned out non-empty, so a

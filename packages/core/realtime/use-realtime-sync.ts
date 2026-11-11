@@ -120,6 +120,7 @@ import type {
   TaskFailedPayload,
   TaskCancelledPayload,
   ChatDonePayload,
+  ChatReplyNotificationPayload,
   ChatQuickActionsPayload,
   ChatQuickActionsPendingState,
   ChatQuickActionsFailureState,
@@ -635,33 +636,31 @@ export async function handleInboxNew(
 export function createChatReplyNotifier(
   qc: QueryClient,
   getUserId: () => string | undefined,
-): (payload: ChatDonePayload) => Promise<void> {
+): (payload: ChatReplyNotificationPayload) => Promise<void> {
   const seen = new Set<string>();
   return async (payload) => {
-    const context = payload.notification;
     const messageId = payload.message_id;
     const userId = getUserId();
-    if (!context?.workspace_id || !messageId || !payload.chat_session_id || !userId || seen.has(messageId)) return;
+    if (!payload.workspace_id || !messageId || !payload.chat_session_id || !userId || seen.has(messageId)) return;
     seen.add(messageId);
     if (seen.size > 1_000) seen.delete(seen.values().next().value!);
     if (typeof document !== "undefined" && document.hasFocus()) return;
 
-    const slug = await resolveInboxSourceSlug(qc, context.workspace_id);
+    const slug = await resolveInboxSourceSlug(qc, payload.workspace_id);
     if (!slug) return;
     try {
-      const { preferences } = await qc.ensureQueryData(notificationPreferenceOptions(context.workspace_id, slug));
+      const { preferences } = await qc.ensureQueryData(notificationPreferenceOptions(payload.workspace_id, slug));
       if (preferences.system_notifications === "muted" || preferences.chat_replies === "muted") return;
     } catch {
       // Match the existing default-on system-notification behavior.
     }
     if (getUserId() !== userId || (typeof document !== "undefined" && document.hasFocus())) return;
-    const preview = [...(payload.content ?? "").replace(/\s+/g, " ").trim()];
     showSystemNotification({
       slug,
       itemId: `chat:${messageId}`,
       chatSessionId: payload.chat_session_id,
-      title: context.title,
-      body: preview.slice(0, 200).join("") + (preview.length > 200 ? "…" : ""),
+      title: payload.title,
+      body: payload.body,
     });
   };
 }
@@ -1123,7 +1122,7 @@ export function useRealtimeSync(
       "subscriber:added", "subscriber:removed",
       "daemon:heartbeat",
       // Chat events are handled explicitly below; do not double-invalidate.
-      "chat:message", "chat:done", "chat:quick_actions", "chat:cancel_finalized", "chat:session_read",
+      "chat:message", "chat:done", "chat:reply_notification", "chat:quick_actions", "chat:cancel_finalized", "chat:session_read",
       "chat:session_created", "chat:session_deleted", "chat:session_updated",
       // task:message stays out of the prefix path because it fires per
       // streamed message during a long run — invalidating the snapshot on
@@ -1700,6 +1699,9 @@ export function useRealtimeSync(
     });
 
     const notifyChatReply = createChatReplyNotifier(qc, () => authStore.getState().user?.id);
+    const unsubChatReplyNotification = ws.on("chat:reply_notification", (p) => {
+      void notifyChatReply(p as ChatReplyNotificationPayload);
+    });
     const unsubChatDone = ws.on("chat:done", (p) => {
       const payload = p as ChatDonePayload;
       chatWsLogger.info("chat:done (global)", {
@@ -1720,7 +1722,6 @@ export function useRealtimeSync(
       // work: they ignore the extra fields and rely on the invalidate
       // below, which keeps the old behavior alive.
       applyChatDoneToCache(qc, payload);
-      void notifyChatReply(payload);
       // NOTE: the pending aggregate is left to the task:completed / task:failed
       // handlers (which carry the task_id needed to remove the right entry).
       // chat:done no longer invalidates it, so a chatty session doesn't refetch
@@ -1984,6 +1985,7 @@ export function useRealtimeSync(
       unsubTaskMessage();
       unsubChatMessage();
       unsubChatDone();
+      unsubChatReplyNotification();
       unsubChatQuickActions();
       unsubChatCancelFinalized();
       unsubTaskQueued();

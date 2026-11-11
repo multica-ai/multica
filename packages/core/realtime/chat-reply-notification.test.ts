@@ -3,14 +3,14 @@ import { QueryClient } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { notificationPreferenceKeys } from "../notification-preferences/queries";
 import type { NotificationPreferences } from "../types/notification-preference";
-import type { ChatDonePayload } from "../types/events";
+import type { ChatReplyNotificationPayload } from "../types/events";
 import { workspaceKeys } from "../workspace/queries";
 import { createChatReplyNotifier } from "./use-realtime-sync";
 
-function reply(overrides: Partial<ChatDonePayload> = {}): ChatDonePayload {
+function reply(overrides: Partial<ChatReplyNotificationPayload> = {}): ChatReplyNotificationPayload {
   return {
-    chat_session_id: "session-1", task_id: "task-1", message_id: "message-1", content: "Review is complete",
-    notification: { workspace_id: "ws-a", title: "Review changes" }, ...overrides,
+    chat_session_id: "session-1", message_id: "message-1", body: "Review is complete",
+    workspace_id: "ws-a", title: "Review changes", ...overrides,
   };
 }
 
@@ -82,13 +82,13 @@ describe("chat reply OS notifications", () => {
   });
 
   it("supports attachment-only replies", async () => {
-    await notify(reply({ content: "" }));
+    await notify(reply({ body: "" }));
     expect(showNotification).toHaveBeenCalledWith(expect.objectContaining({ body: "", chatSessionId: "session-1" }));
   });
 
-  it("ignores older-server and lifecycle events without notification context", async () => {
-    await notify(reply({ notification: undefined }));
-    await notify(reply({ message_id: undefined }));
+  it("ignores alerts without a source workspace or message", async () => {
+    await notify(reply({ workspace_id: "" }));
+    await notify(reply({ message_id: "" }));
     expect(showNotification).not.toHaveBeenCalled();
   });
 
