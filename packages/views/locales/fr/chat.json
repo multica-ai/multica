@@ -13,7 +13,21 @@
     "unread_other": "{{count}} discussions non lues",
     "default": "Demander à Multica"
   },
+  "bar": {
+    "history": "Historique des discussions",
+    "history_group": {
+      "today": "Aujourd'hui",
+      "week": "7 derniers jours",
+      "older": "Plus anciennes"
+    },
+    "close_chip": "Fermer {{title}}",
+    "all_chats": "Toutes les discussions",
+    "more_one": "{{count}} autre discussion",
+    "more_other": "{{count}} autres discussions"
+  },
   "input": {
+    "page_context_add": "Ajouter cette page comme contexte",
+    "page_context_remove": "Retirer le contexte de la page",
     "placeholder_no_agent": "Créez un agent pour commencer à discuter",
     "placeholder_archived": "Cette session est archivée",
     "placeholder_archived_agent": "Cet agent a été archivé",

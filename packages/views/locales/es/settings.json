@@ -453,7 +453,10 @@
   },
   "chat": {
     "floating_label": "Ventana de chat flotante",
-    "floating_hint": "Muestra el botón de chat flotante en todas las páginas."
+    "floating_hint": "Muestra el botón de chat flotante en todas las páginas.",
+    "ask_agent_label": "Agente de Preguntar a Multica",
+    "ask_agent_hint": "El agente con el que empieza un chat nuevo desde la barra inferior, en este espacio de trabajo.",
+    "ask_agent_last_used": "El último usado"
   },
   "issue": {
     "description": "Elige qué campos mantiene cada diálogo de creación en su barra de herramientas. Los campos ocultos siguen disponibles en el menú ⋯ y reaparecen mientras tengan un valor.",

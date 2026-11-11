@@ -467,7 +467,10 @@
   },
   "chat": {
     "floating_label": "フローティングチャット",
-    "floating_hint": "すべてのページにフローティングチャットボタンを表示します。"
+    "floating_hint": "すべてのページにフローティングチャットボタンを表示します。",
+    "ask_agent_label": "「Multica に聞く」のエージェント",
+    "ask_agent_hint": "このワークスペースで、下部バーから始める新しいチャットの相手になるエージェント。",
+    "ask_agent_last_used": "最後に使用したエージェント"
   },
   "issue": {
     "opening": {

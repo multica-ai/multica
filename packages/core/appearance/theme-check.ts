@@ -78,7 +78,7 @@ const FRAME_BACKGROUNDS = [
 const GENERIC_FAMILY =
   /^(?:serif|sans-serif|monospace|cursive|fantasy|system-ui|math|emoji|fangsong|ui-[a-z-]+)$/i;
 const LATIN_STACKS = new Set(["font-ui", "font-content-latin"]);
-const FRAME_ANCHOR = /data-mc="(?:app-rail|window-toolbar|tab-bar)"/;
+const FRAME_ANCHOR = /data-mc="(?:app-rail|window-toolbar|tab-bar|bottom-bar)"/;
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);

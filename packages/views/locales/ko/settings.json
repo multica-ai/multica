@@ -467,7 +467,10 @@
   },
   "chat": {
     "floating_label": "플로팅 채팅 창",
-    "floating_hint": "모든 페이지에 플로팅 채팅 버튼을 표시합니다."
+    "floating_hint": "모든 페이지에 플로팅 채팅 버튼을 표시합니다.",
+    "ask_agent_label": "Multica에게 묻기 에이전트",
+    "ask_agent_hint": "이 워크스페이스에서 하단 바로 시작하는 새 채팅의 에이전트입니다.",
+    "ask_agent_last_used": "마지막으로 사용한 에이전트"
   },
   "issue": {
     "opening": {

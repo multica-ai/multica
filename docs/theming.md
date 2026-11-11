@@ -171,6 +171,7 @@ those change without notice. Anchors, slots and hooks stay until the next
 | `[data-mc="page"]` | The rounded canvas that holds the current page. |
 | `[data-mc="window-toolbar"]` | Desktop only: the toolbar above the rail. |
 | `[data-mc="tab-bar"]` | Desktop only: the tab strip above the page. |
+| `[data-mc="bottom-bar"]` | The status bar under the page, on windows wide enough to show it. |
 | `[data-mc="issue-group-header"]` | A status group header in issue lists; `data-status` is the status key (`backlog`, `todo`, `in_progress`, `in_review`, `done`, `blocked`, `cancelled`, or a custom key). |
 | `[data-mc="issue-row"]` | One issue in a list; `data-status`, `data-priority` (`urgent`, `high`, `medium`, `low`, `none`) and `data-assignee-type` (`member`, `agent`, `squad` or `none`). |
 | `[data-mc="board-column"]` | One column on a board. |
@@ -246,8 +247,8 @@ that breaks them:
 - Keep text readable in both modes (WCAG AA): `--foreground` and
   `--muted-foreground` need 4.5:1 on every surface, `--brand` 4.5:1 on the
   reading surfaces, the primary button label 4.5:1 on the button, and
-  `--faint-foreground` 3:1. A frame (rules on the rail, window toolbar or
-  tab bar) is checked against its own colours. The check follows `:root`,
+  `--faint-foreground` 3:1. A frame (rules on the rail, window toolbar,
+  tab bar or bottom bar) is checked against its own colours. The check follows `:root`,
   `html`, the mode classes and option attributes the way the browser does,
   with every option at its default; when a colour it measures is also set
   somewhere else, such as inside `@media` or on `body`, it says so instead
@@ -316,7 +317,7 @@ and dark differ, both defaults are given.
 
 | Variable | Default (light / dark) | Use |
 | --- | --- | --- |
-| `--app-shell` | `oklch(0.964435 0.001327 286.375)` / `oklch(0.155 0.005 285.823)` | The frame around the page: rail, desktop toolbar and tab bar. |
+| `--app-shell` | `oklch(0.964435 0.001327 286.375)` / `oklch(0.155 0.005 285.823)` | The frame around the page: rail, bottom bar, desktop toolbar and tab bar. |
 | `--page-canvas` | `oklch(0.988087 0 0)` / `oklch(0.18 0.005 285.823)` | The page that lists, boards and conversations sit on. |
 | `--surface` | `oklch(1 0 0)` / `oklch(0.21 0.006 285.885)` | Bounded content groups: cards, board cards, panels. |
 | `--surface-foreground` | `oklch(0.141 0.005 285.823)` / `oklch(0.985 0 0)` | Text on a surface. |
