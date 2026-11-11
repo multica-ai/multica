@@ -1,12 +1,14 @@
 import { beforeEach, expect, it, vi } from "vitest";
+import type { ReactNode } from "react";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
+import { useUpdateIssueSystemWakeup } from "@multica/core/issues";
 import { renderWithI18n } from "../../test/i18n";
 import { SystemWakeupDefaults } from "./system-wakeup-defaults";
 
 vi.mock("@multica/core/api", () => ({
-  api: { listWorkspaceSystemWakeups: vi.fn(), updateWorkspaceSystemWakeup: vi.fn() },
+  api: { listWorkspaceSystemWakeups: vi.fn(), updateWorkspaceSystemWakeup: vi.fn(), updateIssueSystemWakeup: vi.fn() },
 }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws" }));
 let role = "admin";
@@ -16,12 +18,22 @@ vi.mock("@multica/core/permissions", () => ({
 
 const list = vi.mocked(api.listWorkspaceSystemWakeups);
 const update = vi.mocked(api.updateWorkspaceSystemWakeup);
+const updateIssue = vi.mocked(api.updateIssueSystemWakeup);
 
-function mount(onShowCustomized = vi.fn()) {
+/** The list row's per-issue switch, which shares the page with the card. */
+function IssueRuleSwitch() {
+  const turnOff = useUpdateIssueSystemWakeup("ws", "parent");
+  return (
+    <button onClick={() => turnOff.mutate({ rule: "child_done", enabled: false })}>Turn off on this issue</button>
+  );
+}
+
+function mount(onShowCustomized = vi.fn(), extra?: ReactNode) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   renderWithI18n(
     <QueryClientProvider client={client}>
       <SystemWakeupDefaults onShowCustomized={onShowCustomized} />
+      {extra}
     </QueryClientProvider>,
   );
   return onShowCustomized;
@@ -68,6 +80,21 @@ it("lists the issues that use their own setting", async () => {
     await screen.findByRole("button", { name: /2 open issues have their own setting/ }),
   );
   expect(onShowCustomized).toHaveBeenCalledOnce();
+});
+
+it("counts an issue that sets its own rule without leaving the page", async () => {
+  let customized = 0;
+  list.mockImplementation(async () => [
+    { rule: "child_done", enabled: true, instruction: "", builtin_instruction: "Advance the next stage.", customized },
+  ]);
+  updateIssue.mockReset().mockImplementation(async () => {
+    customized = 1;
+  });
+  mount(vi.fn(), <IssueRuleSwitch />);
+  await screen.findByRole("switch", { name: "On by default" });
+  expect(screen.queryByRole("button", { name: /own setting/ })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Turn off on this issue" }));
+  expect(await screen.findByRole("button", { name: /1 open issue has its own setting/ })).toBeVisible();
 });
 
 it("shows the default read-only to members who cannot change it", async () => {
