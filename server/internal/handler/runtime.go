@@ -235,9 +235,10 @@ func (h *Handler) GetRuntimeUsageByAgent(w http.ResponseWriter, r *http.Request)
 	}
 
 	// No date bucketing — tz only sets the cutoff boundary so "last 30
-	// days" means 30 of the viewer's days.
+	// days" means 30 of the viewer's days. Without a date column the client
+	// cannot trim the extra day, so the window closes here.
 	viewTZ := h.resolveViewingTZ(r)
-	since := parseSinceParamInTZ(r, 30, viewTZ)
+	since := parseExactSinceParamInTZ(r, 30, viewTZ)
 
 	rows, err := h.Queries.ListRuntimeUsageByAgent(r.Context(), db.ListRuntimeUsageByAgentParams{
 		RuntimeID: rt.ID,

@@ -1390,9 +1390,11 @@ export function sliceWindow(
   days: number,
   tz: string,
 ): { filtered: RuntimeUsage[]; prevFiltered: RuntimeUsage[] } {
+  // `days` calendar days including today. The backend's `days=N` series
+  // starts one day earlier on purpose, so the cutoff must not be today - N.
   const today = todayIso(tz);
-  const isoCurrent = addDaysIso(today, -days);
-  const isoPrev = addDaysIso(today, -days * 2);
+  const isoCurrent = addDaysIso(today, -(days - 1));
+  const isoPrev = addDaysIso(today, -(days * 2 - 1));
   return {
     filtered: usage.filter((u) => u.date >= isoCurrent),
     prevFiltered: usage.filter(

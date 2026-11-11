@@ -290,6 +290,90 @@ func TestListRuntimeUsageByAgent_MergesMixedCaseProvider(t *testing.T) {
 	}
 }
 
+// TestGetRuntimeUsageByAgentUsesExactWindow pins the runtime detail page's
+// "Cost by agent" to the same N calendar days as the KPIs above it. The
+// by-agent rows carry no date, so the client cannot trim the extra day
+// parseSinceParamInTZ hands date-bucketed series; the handler has to close
+// the window itself, as the dashboard's per-agent rollups do (MUL-5551).
+func TestGetRuntimeUsageByAgentUsesExactWindow(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var runtimeID, agentID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id FROM agent_runtime WHERE workspace_id = $1 LIMIT 1
+	`, testWorkspaceID).Scan(&runtimeID); err != nil {
+		t.Fatalf("fetch runtime: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1
+	`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("fetch agent: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, creator_id, creator_type)
+		VALUES ($1, 'runtime by-agent window test', $2, 'member')
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	// Usage at noon yesterday (UTC), under a model no other fixture uses.
+	// Noon keeps it clear of the midnight edge in either direction.
+	const windowModel = "runtime-exact-window-model"
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, created_at)
+		VALUES ($1, $2, $3, 'completed', now())
+		RETURNING id
+	`, agentID, issueID, runtimeID).Scan(&taskID); err != nil {
+		t.Fatalf("insert task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, created_at)
+		VALUES ($1, 'anthropic', $2, 7777, 0,
+		        (((now() AT TIME ZONE 'UTC')::date - 1)::timestamp + interval '12 hours') AT TIME ZONE 'UTC')
+	`, taskID, windowModel); err != nil {
+		t.Fatalf("insert task_usage: %v", err)
+	}
+
+	seededTokens := func(days string) int64 {
+		w := httptest.NewRecorder()
+		req := newRequest("GET", "/api/runtimes/"+runtimeID+"/usage/by-agent?days="+days+"&tz=UTC", nil)
+		req = withURLParam(req, "runtimeId", runtimeID)
+		testHandler.GetRuntimeUsageByAgent(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("days=%s: expected 200, got %d: %s", days, w.Code, w.Body.String())
+		}
+		var rows []RuntimeUsageByAgentResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &rows); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		var n int64
+		for _, r := range rows {
+			if r.Model == windowModel {
+				n += r.InputTokens
+			}
+		}
+		return n
+	}
+
+	if got := seededTokens("1"); got != 0 {
+		t.Errorf("days=1 must not reach yesterday's tokens, but by-agent counted %d", got)
+	}
+	// days=2 covers today and yesterday, so the row must appear: the window
+	// closed, the fixture is reachable.
+	if got := seededTokens("2"); got != 7777 {
+		t.Errorf("days=2 must include yesterday's 7777 tokens, got %d", got)
+	}
+}
+
 // TestListRuntimeUsageBucketsByViewerTimezone proves the runtime trend reads
 // bucket the day boundary in the VIEWER's tz (the argument passed to
 // listRuntimeUsage). The viewer tz is Asia/Shanghai; assertions only pass if
