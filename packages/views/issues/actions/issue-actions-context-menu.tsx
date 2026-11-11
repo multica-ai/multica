@@ -191,6 +191,19 @@ function StopRunConfirmDialog({
   );
 }
 
+/** Opens the surrounding provider's issue menu at the event's cursor, for an
+ *  item that must stay selectable text (IssueActionsContextMenu makes its child
+ *  `select-none`). */
+export function useOpenIssueContextMenu(): OpenIssueContextMenu {
+  const openMenu = useContext(IssueContextMenuContext);
+  if (!openMenu) {
+    throw new Error(
+      "useOpenIssueContextMenu requires an IssueContextMenuProvider ancestor",
+    );
+  }
+  return openMenu;
+}
+
 interface IssueActionsContextMenuProps {
   issue: Issue;
   /** A single React element the menu trigger behavior is grafted onto. */
