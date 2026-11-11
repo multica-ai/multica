@@ -2,13 +2,16 @@
 
 import { useId, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { BarChart3, BookOpenText, Bot, Monitor, Plus, User, UserPlus, Users } from "@multica/ui/icons";
+import { ArrowUpRight, BarChart3, BookOpenText, Bot, MessageSquare, Monitor, Plus, User, UserPlus, Users } from "@multica/ui/icons";
+import { DropdownMenuItem } from "@multica/ui/components/ui/dropdown-menu";
 import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { agentTaskSnapshotOptions, type AgentPresenceDetail } from "@multica/core/agents";
 import { useAgentsViewStore } from "@multica/core/agents/stores";
 import { useAuthStore } from "@multica/core/auth";
+import { useChatStore } from "@multica/core/chat";
+import { canAssignAgentToIssue } from "@multica/core/permissions";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
@@ -17,6 +20,7 @@ import { memberListOptions, skillListOptions, squadListOptions } from "@multica/
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import type { Agent, AgentTask } from "@multica/core/types";
 import { useNavigation } from "../../navigation";
+import { isFloatingChatRouteSuppressed } from "../../chat/floating-chat-visibility";
 import { AgentRowActions } from "../../agents/components/agent-row-actions";
 import { shouldOpenRowMenu, useRowMenu } from "../../common/point-menu";
 import { CollectionRowContext } from "../collection-list/row-context";
@@ -108,10 +112,10 @@ function AgentAvatar({ agent, detail }: { agent: Agent; detail: AgentPresenceDet
 }
 
 /** "MUL-8317 Redesign the sidebar" for the issue the agent is running, if any. */
-function useRunningIssueLabel(wsId: string, task: AgentTask | undefined) {
+function useRunningIssue(wsId: string, task: AgentTask | undefined) {
   const issueId = task?.issue_id ?? "";
   const { data: issue } = useQuery({ ...issueDetailOptions(wsId, issueId), enabled: !!issueId });
-  return issue ? `${issue.identifier} ${issue.title}` : null;
+  return issue ?? null;
 }
 
 /**
@@ -125,15 +129,51 @@ function AgentPanelLink({
   active,
   description,
   canManage,
+  canChat,
+  currentIssue,
 }: {
   agent: Agent;
   detail: AgentPresenceDetail | undefined;
   active: boolean;
   description: ReactNode;
   canManage: boolean;
+  canChat: boolean;
+  /** The issue the agent is working on, when it works on exactly one. */
+  currentIssue?: { id: string; identifier: string } | null;
 }) {
+  const { t } = useT("layout");
+  const { t: tChat } = useT("chat");
   const p = useWorkspacePaths();
+  const { pathname, push } = useNavigation();
   const rowMenu = useRowMenu();
+  const startChat = () => {
+    const chat = useChatStore.getState();
+    chat.setSelectedAgentId(agent.id);
+    chat.setSelectedProjectId(null);
+    chat.setActiveSession(null);
+    if (chat.floatingChatEnabled && !isFloatingChatRouteSuppressed(pathname, p.chat())) {
+      chat.setOpen(true);
+    } else {
+      push(p.chat());
+    }
+  };
+  const leading =
+    canChat || currentIssue ? (
+      <>
+        {canChat && (
+          <DropdownMenuItem onClick={startChat}>
+            <MessageSquare className="h-3.5 w-3.5" />
+            {tChat(($) => $.empty_state.chat_with_named, { name: agent.name })}
+          </DropdownMenuItem>
+        )}
+        {currentIssue && (
+          <DropdownMenuItem onClick={() => push(p.issueDetail(currentIssue.id))}>
+            <ArrowUpRight className="h-3.5 w-3.5" />
+            {t(($) => $.panels.team.open_issue, { identifier: currentIssue.identifier })}
+          </DropdownMenuItem>
+        )}
+      </>
+    ) : undefined;
   const rowMenuContext = useMemo(
     () => ({ menu: rowMenu.menu, setMenu: rowMenu.setMenu }),
     [rowMenu.menu, rowMenu.setMenu],
@@ -156,6 +196,7 @@ function AgentPanelLink({
               presence={detail}
               canManage={canManage}
               duplicateHref={`${p.newAgentManual()}?duplicate=${encodeURIComponent(agent.id)}`}
+              leading={leading}
               triggerHidden
             />
           </CollectionRowContext.Provider>
@@ -172,6 +213,7 @@ function WorkingAgentRow({
   wsId,
   active,
   canManage,
+  canChat,
 }: {
   agent: Agent;
   detail: AgentPresenceDetail | undefined;
@@ -179,9 +221,11 @@ function WorkingAgentRow({
   wsId: string;
   active: boolean;
   canManage: boolean;
+  canChat: boolean;
 }) {
   const { t } = useT("layout");
-  const issueLabel = useRunningIssueLabel(wsId, task);
+  const issue = useRunningIssue(wsId, task);
+  const issueLabel = issue ? `${issue.identifier} ${issue.title}` : null;
   const running = detail?.runningCount ?? 0;
   return (
     <AgentPanelLink
@@ -189,6 +233,8 @@ function WorkingAgentRow({
       detail={detail}
       active={active}
       canManage={canManage}
+      canChat={canChat}
+      currentIssue={running === 1 ? issue : null}
       description={
         running > 1 || !issueLabel ? t(($) => $.panels.team.running_tasks, { count: running }) : issueLabel
       }
@@ -239,6 +285,8 @@ export function TeamPanel() {
   const isAdmin = myRole === "owner" || myRole === "admin";
   const canInvite = isAdmin;
   const canManageAgent = (agent: Agent) => isAdmin || (!!userId && agent.owner_id === userId);
+  const canChatWith = (agent: Agent) =>
+    !agent.archived_at && canAssignAgentToIssue(agent, { userId: userId ?? null, role: myRole ?? null }).allowed;
   const onAgents = pathname === p.agents();
   // Member pages live under /members/:id; the list itself is a Settings tab.
   const membersRoot = p.memberDetail("").replace(/\/$/, "");
@@ -283,6 +331,7 @@ export function TeamPanel() {
                   detail={byAgent.get(agent.id)}
                   active={isPathWithin(pathname, href)}
                   canManage={canManageAgent(agent)}
+                  canChat={canChatWith(agent)}
                   description={
                     <span className="text-warning">
                       {t(($) => $.panels.team.stuck, { count: byAgent.get(agent.id)?.queuedCount ?? 0 })}
@@ -310,6 +359,7 @@ export function TeamPanel() {
                 wsId={wsId}
                 active={isPathWithin(pathname, p.agentDetail(agent.id))}
                 canManage={canManageAgent(agent)}
+                canChat={canChatWith(agent)}
               />
             )}
           />

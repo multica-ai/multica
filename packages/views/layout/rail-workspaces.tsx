@@ -2,7 +2,9 @@
 
 import { useMemo, useState, type MouseEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AppWindow, ArrowBigUp, Check, Mail, Pin, PinOff, Plus, Settings, UserPlus } from "@multica/ui/icons";
+import { AppWindow, ArrowBigUp, Check, Link2, Mail, Pin, PinOff, Plus, Settings, UserPlus } from "@multica/ui/icons";
+import { toast } from "sonner";
+import { copyText } from "@multica/ui/lib/clipboard";
 import type { api } from "@multica/core/api";
 import { useConfigStore } from "@multica/core/config";
 import {
@@ -272,7 +274,7 @@ function WorkspaceTileMenu({
   state: ReturnType<typeof useRowMenu>;
 }) {
   const { t } = useT("layout");
-  const { push } = useNavigation();
+  const { push, getShareableUrl } = useNavigation();
   const userId = useAuthStore((s) => s.user?.id);
   const { data: members = [] } = useQuery(memberListOptions(workspace.id));
   const role = members.find((member) => member.user_id === userId)?.role;
@@ -280,10 +282,36 @@ function WorkspaceTileMenu({
   const setPinned = useSetWorkspacePinned();
   const settings = paths.workspace(workspace.slug).settings();
   const pinned = !!workspace.pinned_at;
+  const copyLink = async () => {
+    if (await copyText(getShareableUrl(paths.workspace(workspace.slug).issues()))) {
+      toast.success(t(($) => $.rail.link_copied));
+    }
+  };
 
   return (
     <DropdownMenu open={state.menu.open} onOpenChange={state.onOpenChange}>
       <DropdownMenuContent align="start" anchor={state.anchor} className="w-auto min-w-48">
+        <div className="flex items-center gap-2 px-2 pt-1 pb-1.5">
+          <WorkspaceAvatar name={workspace.name} avatarUrl={workspace.avatar_url} size="sm" />
+          <div className="min-w-0">
+            <div className="truncate text-body font-medium">{workspace.name}</div>
+            <div className="truncate text-caption text-muted-foreground">
+              {members.length > 0
+                ? t(($) => $.rail.workspace_meta, { slug: workspace.slug, count: members.length })
+                : workspace.slug}
+            </div>
+          </div>
+        </div>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => setPinned.mutate({ workspaceId: workspace.id, pinned: !pinned })}>
+          {pinned ? <PinOff /> : <Pin />}
+          {pinned ? t(($) => $.rail.unpin_workspace) : t(($) => $.rail.pin_workspace)}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => void copyLink()}>
+          <Link2 />
+          {t(($) => $.rail.copy_workspace_link)}
+        </DropdownMenuItem>
         <DropdownMenuItem onClick={() => push(settings)}>
           <Settings />
           {t(($) => $.rail.workspace_settings)}
@@ -294,11 +322,6 @@ function WorkspaceTileMenu({
             {t(($) => $.panels.team.invite_member)}
           </DropdownMenuItem>
         )}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => setPinned.mutate({ workspaceId: workspace.id, pinned: !pinned })}>
-          {pinned ? <PinOff /> : <Pin />}
-          {pinned ? t(($) => $.rail.unpin_workspace) : t(($) => $.rail.pin_workspace)}
-        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );

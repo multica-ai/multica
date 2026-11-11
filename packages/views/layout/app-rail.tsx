@@ -13,14 +13,16 @@ import {
 import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ExternalLink, Link2, Settings, Users, type IconComponent } from "@multica/ui/icons";
+import { CheckCheck, ExternalLink, Link2, RotateCcw, Settings, Users, type IconComponent } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { useChatStore } from "@multica/core/chat";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
 import { countUnreadChatMessages } from "@multica/core/chat/unread";
 import { useInboxUnreadCount } from "@multica/core/inbox/queries";
+import { useMarkAllInboxRead } from "@multica/core/inbox/mutations";
 import { resolveRailOrder, useRailOrderStore } from "@multica/core/navigation";
 import {
+  RAIL_SPACES,
   useCurrentWorkspace,
   useWorkspacePaths,
   type AppSpaceId,
@@ -35,6 +37,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useAppForeground } from "../common/use-app-foreground";
 import { useRowMenu } from "../common/point-menu";
@@ -180,7 +183,7 @@ function RailSpaceLink({
   // bubble through it; a press inside the menu must not start a drag.
   const menu = rowMenu.menu.point && (
     <span className="contents" onPointerDown={(event) => event.stopPropagation()}>
-      <RailSpaceMenu href={href} title={fullLabel} state={rowMenu} />
+      <RailSpaceMenu space={space} href={href} title={fullLabel} unread={badge?.kind === "count" ? badge.value : 0} state={rowMenu} />
     </span>
   );
   // A label the same as the full name still needs the tooltip whenever a
@@ -207,12 +210,16 @@ function RailSpaceLink({
 
 /** A rail space's right-click menu. */
 function RailSpaceMenu({
+  space,
   href,
   title,
+  unread,
   state,
 }: {
+  space: RailSpaceId;
   href: string;
   title: string;
+  unread: number;
   state: ReturnType<typeof useRowMenu>;
 }) {
   const { t } = useT("layout");
@@ -222,6 +229,9 @@ function RailSpaceMenu({
   const copyLink = async () => {
     if (await copyText(getShareableUrl(href))) toast.success(t(($) => $.rail.link_copied));
   };
+  const markAllRead = useMarkAllInboxRead();
+  const customOrder = useRailOrderStore((s) => s.order !== null);
+  const setOrder = useRailOrderStore((s) => s.setOrder);
   return (
     <DropdownMenu open={state.menu.open} onOpenChange={state.onOpenChange}>
       <DropdownMenuContent align="start" anchor={state.anchor} className="w-auto min-w-44">
@@ -232,6 +242,26 @@ function RailSpaceMenu({
         <DropdownMenuItem onClick={() => void copyLink()}>
           <Link2 />
           {t(($) => $.rail.copy_link)}
+        </DropdownMenuItem>
+        {space === "inbox" && unread > 0 && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onClick={() =>
+                markAllRead.mutate(undefined, {
+                  onError: () => toast.error(t(($) => $.rail.mark_all_read_failed)),
+                })
+              }
+            >
+              <CheckCheck />
+              {t(($) => $.rail.mark_all_read)}
+            </DropdownMenuItem>
+          </>
+        )}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem disabled={!customOrder} onClick={() => setOrder(RAIL_SPACES)}>
+          <RotateCcw />
+          {t(($) => $.rail.reset_order)}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

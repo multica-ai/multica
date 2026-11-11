@@ -46,6 +46,7 @@ vi.mock("@multica/core/chat/mutations", () => ({
   useDeleteChatSession: () => ({ mutate: vi.fn(), isPending: false }),
   useSetChatSessionPinned: () => ({ mutate: vi.fn(), isPending: false }),
   useSetChatSessionArchived: () => ({ mutate: archiveMutate, isPending: false }),
+  useUpdateChatSession: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 vi.mock("@tanstack/react-query", async (importOriginal) => {
@@ -331,7 +332,7 @@ describe("ChatThreadList right-click menu", () => {
     const menu = await screen.findByRole("menu");
     expect(
       Array.from(menu.querySelectorAll('[role="menuitem"]'), (el) => el.textContent?.trim()),
-    ).toEqual([enChat.list.pin, ARCHIVE_LABEL]);
+    ).toEqual([enChat.list.pin, ARCHIVE_LABEL, enChat.header.rename]);
 
     fireEvent.click(screen.getByRole("menuitem", { name: ARCHIVE_LABEL }));
     expect(onArchive).toHaveBeenCalledTimes(1);
