@@ -419,6 +419,10 @@
         "label": "Afficher ou masquer la fenêtre de discussion",
         "description": "Ouvrir ou fermer la fenêtre de discussion flottante. À l'ouverture, le champ de message reçoit le focus."
       },
+      "newChat": {
+        "label": "Demander à Multica",
+        "description": "Démarrer une nouvelle discussion dans la fenêtre de discussion flottante."
+      },
       "findInIssue": {
         "label": "Rechercher dans la tâche",
         "description": "Rechercher dans la tâche ouverte."
@@ -844,6 +848,10 @@
       "updates": {
         "label": "Priorité et date d'échéance",
         "description": "Quand la priorité ou la date d'échéance change sur les tâches que vous suivez"
+      },
+      "new_issues": {
+        "label": "Nouvelles tâches",
+        "description": "Quand une tâche est créée dans un projet auquel vous êtes abonné"
       },
       "agent_activity": {
         "label": "Activité des agents",

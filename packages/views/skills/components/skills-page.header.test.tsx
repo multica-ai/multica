@@ -69,7 +69,6 @@ vi.mock("@multica/core/workspace/avatar-url", () => ({
 vi.mock("@multica/ui/components/common/actor-avatar", () => ({
   ActorAvatar: () => null,
 }));
-vi.mock("../../labels/label-manager", () => ({ LabelManager: () => null }));
 vi.mock("./create-skill-dialog", () => ({
   CreateSkillDialog: ({ method }: { method: string }) => (
     <div data-testid="create-dialog">{method}</div>

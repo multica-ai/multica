@@ -289,13 +289,8 @@
     "duplicate_title": "複製 {{name}}",
     "step_ai": "透過對話建立",
     "modes": {
-      "template": {
-        "title": "使用模板",
-        "description": "從整理好的指令和 skill 開始，再根據工作區需要修改每個細節。"
-      },
       "ai": {
-        "title": "透過 AI 建立",
-        "description": "透過對話生成可編輯的配置草稿。"
+        "title": "透過 AI 建立"
       }
     },
     "sections": {
@@ -323,10 +318,6 @@
       }
     },
     "builder": {
-      "setup_title": "為 AI 代理構建器選擇執行時",
-      "setup_description": "該執行時用於建立對話，並預設用於新 AI 代理。",
-      "start": "開始對話",
-      "connect_runtime": "連線執行時",
       "draft_parse_failed": "本次回覆未能填入表單。請讓 AI 代理重新生成草稿，或手動填寫。",
       "start_failed": "無法啟動 AI 代理構建器。",
       "send_failed": "無法傳送訊息。",

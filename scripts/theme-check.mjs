@@ -70,4 +70,6 @@ if (json) {
   console.log(`\n${errors === 0 ? "Passed" : "Failed"}: ${errors} error${errors === 1 ? "" : "s"}, ${warnings} warning${warnings === 1 ? "" : "s"}.`);
 }
 
-process.exit(reports.every((report) => report.ok) ? 0 : 1);
+// Not process.exit(): it drops stdout still queued for a pipe, which cuts a
+// --json report off at 64 KB.
+process.exitCode = reports.every((report) => report.ok) ? 0 : 1;

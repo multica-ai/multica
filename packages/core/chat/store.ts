@@ -363,6 +363,8 @@ export interface ChatState {
   quickChatAgentId: string | null;
   /** Transient new-chat intent, cleared on manual selection or workspace change. */
   newChatSource: "ask" | null;
+  /** Bumped by `startNewChat`; the window focuses its composer on each bump. */
+  newChatRequest: number;
   /** Chats kept as chips in the bottom bar, newest first. */
   chatBarKept: string[];
   /** Chips closed from the bar: sessionId → the chat's activity at that moment. */
@@ -383,11 +385,12 @@ export interface ChatState {
   setOpen: (open: boolean) => void;
   toggle: () => void;
   setFloatingChatEnabled: (enabled: boolean) => void;
-  startAskChat: () => void;
   setActiveSession: (id: string | null) => void;
   setSelectedAgentId: (id: string) => void;
   setSelectedProjectId: (id: string | null) => void;
   setQuickChatAgentId: (id: string | null) => void;
+  /** Ask Multica: open the window on a new chat with the quick-chat agent and no project. */
+  startNewChat: () => void;
   /** Give a chat a chip in the bottom bar. No-op when it already has one. */
   keepChatInBar: (sessionId: string) => void;
   /** Close a chat's chip until the chat moves past `activity`. */
@@ -462,6 +465,7 @@ export function createChatStore(options: ChatStoreOptions) {
     selectedProjectId: storage.getItem(wsKey(PROJECT_STORAGE_KEY)),
     quickChatAgentId: storage.getItem(wsKey(QUICK_CHAT_AGENT_KEY)),
     newChatSource: null,
+    newChatRequest: 0,
     chatBarKept: initialChatBar.kept,
     chatBarDismissed: initialChatBar.dismissed,
     inputDrafts: initialDraftSlots.inputDrafts,
@@ -490,12 +494,6 @@ export function createChatStore(options: ChatStoreOptions) {
       set(enabled ? { floatingChatEnabled: true } : { floatingChatEnabled: false, isOpen: false });
       if (!enabled) storage.setItem(OPEN_KEY, "false");
     },
-    startAskChat: () => {
-      storage.removeItem(wsKey(SESSION_STORAGE_KEY));
-      storage.removeItem(wsKey(PROJECT_STORAGE_KEY));
-      storage.setItem(OPEN_KEY, "true");
-      set({ activeSessionId: null, selectedProjectId: null, isOpen: true, newChatSource: "ask" });
-    },
     setActiveSession: (id) => {
       logger.info("setActiveSession", { from: get().activeSessionId, to: id });
       if (id) {
@@ -521,6 +519,18 @@ export function createChatStore(options: ChatStoreOptions) {
       if (id) storage.setItem(wsKey(QUICK_CHAT_AGENT_KEY), id);
       else storage.removeItem(wsKey(QUICK_CHAT_AGENT_KEY));
       set({ quickChatAgentId: id });
+    },
+    startNewChat: () => {
+      storage.removeItem(wsKey(SESSION_STORAGE_KEY));
+      storage.removeItem(wsKey(PROJECT_STORAGE_KEY));
+      storage.setItem(OPEN_KEY, "true");
+      set((state) => ({
+        activeSessionId: null,
+        selectedProjectId: null,
+        isOpen: true,
+        newChatSource: "ask",
+        newChatRequest: state.newChatRequest + 1,
+      }));
     },
     keepChatInBar: (sessionId) => {
       const { chatBarKept, chatBarDismissed } = get();

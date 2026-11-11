@@ -149,6 +149,7 @@
     "restore_tooltip": "Restaurer",
     "expand_tooltip": "Développer",
     "minimize_tooltip": "Réduire",
+    "close_tooltip": "Fermer",
     "another_running": "Une autre discussion est en cours",
     "another_unread": "Une autre discussion a des réponses non lues",
     "running": "En cours",

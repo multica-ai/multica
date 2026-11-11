@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
-import type { Agent, ChatPendingTask, ChatSession, Project } from "@multica/core/types";
+import type { Agent, ChatPendingTask, ChatSession, Project, Workspace } from "@multica/core/types";
 
 interface QueuedRestore {
   id: string;
@@ -14,6 +14,8 @@ const h = vi.hoisted(() => {
   const store = {
     activeSessionId: null as string | null,
     selectedAgentId: null as string | null,
+    quickChatAgentId: null as string | null,
+    newChatSource: null as "ask" | null,
     selectedProjectId: null as string | null,
     setActiveSession: vi.fn((id: string | null) => {
       store.activeSessionId = id;
@@ -73,10 +75,12 @@ const h = vi.hoisted(() => {
     setProjectMutate: vi.fn(),
     removeFromCaches: vi.fn(),
     // useQuery reads these so each test can vary the loaded data.
+    workspaceQuery: { data: [] as Workspace[], isSuccess: true, isError: false },
     sessions: [] as ChatSession[],
     agents: [] as Agent[],
     projects: [] as Project[],
     pendingTask: null as ChatPendingTask | null,
+    messagesQueryEnabled: undefined as boolean | undefined,
     draftRestores: null as
       | { restores: { id: string; chat_session_id: string; content: string }[] }
       | null,
@@ -172,7 +176,7 @@ vi.mock("@tanstack/react-query", async (importOriginal) => {
     ...actual,
     useQuery: (options: { queryKey?: unknown[] }) => {
       const key = options.queryKey ?? [];
-      if (key.includes("workspaces")) return { data: [], isSuccess: true };
+      if (key.includes("workspaces")) return h.workspaceQuery;
       if (key.includes("agents")) return { data: h.agents, isSuccess: true };
       if (key.includes("members")) {
         return { data: [{ user_id: "user-1", role: "admin" }], isSuccess: true };
@@ -184,19 +188,23 @@ vi.mock("@tanstack/react-query", async (importOriginal) => {
       if (key.includes("draft-restores")) return { data: h.draftRestores };
       return { data: null };
     },
-    useInfiniteQuery: () => ({
-      data: undefined,
-      isLoading: false,
-      fetchNextPage: vi.fn(),
-      hasNextPage: false,
-      isFetchingNextPage: false,
-    }),
+    useInfiniteQuery: (options: { enabled?: boolean }) => {
+      h.messagesQueryEnabled = options.enabled;
+      return {
+        data: undefined,
+        isLoading: false,
+        fetchNextPage: vi.fn(),
+        hasNextPage: false,
+        isFetchingNextPage: false,
+      };
+    },
     useQueryClient: () => h.queryClient,
   };
 });
 
 import { useChatController } from "./use-chat-controller";
 import { api, ApiError } from "@multica/core/api";
+import { chatKeys } from "@multica/core/chat/queries";
 
 // --- Fixtures ---------------------------------------------------------------
 function makeSession(
@@ -403,6 +411,39 @@ describe("useChatController project context", () => {
     );
   });
 
+  it("creates the session untitled and refetches the list once the first send lands", async () => {
+    h.store.activeSessionId = null;
+    h.store.selectedAgentId = agentA.id;
+    h.sessions = [];
+    h.agents = [agentA];
+    h.queryClient.invalidateQueries.mockClear();
+    h.queryClient.cancelQueries.mockClear();
+    vi.mocked(api.sendChatMessage).mockResolvedValue({
+      message_id: "message-1",
+      task_id: "task-1",
+      created_at: new Date(0).toISOString(),
+    } as Awaited<ReturnType<typeof api.sendChatMessage>>);
+
+    const { result } = renderHook(() => useChatController());
+    await act(async () => {
+      await result.current.handleSend("# Release checklist\nmore", undefined, vi.fn());
+    });
+
+    expect(h.createSessionMutate).toHaveBeenCalledWith(
+      expect.not.objectContaining({ title: expect.anything() }),
+    );
+    const sessionsKey = { queryKey: chatKeys.sessions("ws-1") };
+    expect(h.queryClient.cancelQueries).toHaveBeenCalledWith(sessionsKey);
+    expect(h.queryClient.invalidateQueries).toHaveBeenCalledWith(sessionsKey);
+    const cancelOrder = h.queryClient.cancelQueries.mock.invocationCallOrder[0]!;
+    const refetchOrder = h.queryClient.invalidateQueries.mock.calls.findIndex(
+      ([arg]) => JSON.stringify(arg) === JSON.stringify(sessionsKey),
+    );
+    expect(cancelOrder).toBeLessThan(
+      h.queryClient.invalidateQueries.mock.invocationCallOrder[refetchOrder]!,
+    );
+  });
+
   it("does not inherit the current session project when starting a new chat", () => {
     const projectSession = makeSession({
       id: "project-session",
@@ -467,6 +508,77 @@ describe("useChatController project context", () => {
 
     expect(h.store.setSelectedProjectId).not.toHaveBeenCalled();
     expect(h.store.setActiveSession).toHaveBeenCalledWith(projectSession.id);
+  });
+
+  it("ignores picking the agent that is already active", () => {
+    h.store.activeSessionId = null;
+    h.store.selectedAgentId = agentA.id;
+    h.sessions = [];
+    h.agents = [agentA, agentB];
+
+    const { result } = renderHook(() => useChatController());
+    h.store.setActiveSession.mockClear();
+    h.store.setSelectedAgentId.mockClear();
+
+    act(() => result.current.handleSelectAgent(agentA));
+
+    expect(h.store.setSelectedAgentId).not.toHaveBeenCalled();
+    expect(h.store.setActiveSession).not.toHaveBeenCalled();
+  });
+
+  it("keeps the draft project when switching agent before the first send", () => {
+    h.store.activeSessionId = null;
+    h.store.selectedAgentId = agentA.id;
+    h.store.selectedProjectId = project.id;
+    h.sessions = [];
+    h.agents = [agentA, agentB];
+    h.projects = [project];
+
+    const { result } = renderHook(() => useChatController());
+    h.store.setSelectedProjectId.mockClear();
+
+    act(() => result.current.handleSelectAgent(agentB));
+
+    expect(h.store.setSelectedAgentId).toHaveBeenCalledWith(agentB.id);
+    expect(h.store.setSelectedProjectId).toHaveBeenCalledWith(project.id);
+    expect(h.store.setActiveSession).toHaveBeenCalledWith(null);
+  });
+
+  it("drops the open session's project when switching agent away from it", () => {
+    const projectSession = makeSession({
+      id: "project-session",
+      agent_id: "agent-a",
+      project_id: project.id,
+    });
+    h.store.activeSessionId = projectSession.id;
+    h.sessions = [projectSession];
+    h.agents = [agentA, agentB];
+    h.projects = [project];
+
+    const { result } = renderHook(() => useChatController());
+    h.store.setSelectedProjectId.mockClear();
+
+    act(() => result.current.handleSelectAgent(agentB));
+
+    expect(h.store.setSelectedAgentId).toHaveBeenCalledWith(agentB.id);
+    expect(h.store.setSelectedProjectId).toHaveBeenCalledWith(null);
+    expect(h.store.setActiveSession).toHaveBeenCalledWith(null);
+  });
+});
+
+describe("useChatController message loading", () => {
+  it("does not load the open session's messages while its surface is hidden", () => {
+    h.store.activeSessionId = "session-1";
+    h.sessions = [makeSession({ id: "session-1", agent_id: "agent-a" })];
+
+    const { rerender } = renderHook(
+      ({ isActive }) => useChatController({ isActive }),
+      { initialProps: { isActive: false } },
+    );
+    expect(h.messagesQueryEnabled).toBe(false);
+
+    rerender({ isActive: true });
+    expect(h.messagesQueryEnabled).toBe(true);
   });
 });
 
@@ -1254,5 +1366,71 @@ describe("useChatController revoked invoke permission", () => {
     expect(sent).toBe(false);
     expect(vi.mocked(api.sendChatMessage)).not.toHaveBeenCalled();
     expect(h.createSessionMutate).not.toHaveBeenCalled();
+  });
+});
+
+describe("useChatController workspace fallback query state", () => {
+  beforeEach(() => {
+    h.store.activeSessionId = null;
+    h.store.selectedAgentId = null;
+    h.store.quickChatAgentId = null;
+    h.store.newChatSource = "ask";
+    h.store.selectedProjectId = null;
+    h.sessions = [];
+    h.projects = [];
+    h.agents = [agentA, agentB];
+    h.pendingTask = null;
+    h.workspaceQuery = {
+      data: [{ id: "ws-1", settings: { default_chat_agent_id: agentB.id } }] as Workspace[],
+      isSuccess: true,
+      isError: false,
+    };
+    h.createSessionMutate.mockClear();
+    invokableAgentIds.current = null;
+  });
+
+  afterEach(() => {
+    h.workspaceQuery = { data: [], isSuccess: true, isError: false };
+    h.store.quickChatAgentId = null;
+    h.store.newChatSource = null;
+  });
+
+  it.each(["pending", "uncached error", "cached refetch error"])("holds automatic sends during %s and recovers from authoritative results", async (state) => {
+    h.workspaceQuery.isSuccess = false;
+    h.workspaceQuery.isError = state !== "pending";
+    if (state !== "cached refetch error") h.workspaceQuery.data = [];
+    const { result, rerender } = renderHook(() => useChatController());
+    expect(result.current.activeAgent).toBeNull();
+    await act(async () => {
+      expect(await result.current.handleSend("keep my draft")).toBe(false);
+    });
+    expect(h.createSessionMutate).not.toHaveBeenCalled();
+
+    h.workspaceQuery = {
+      data: [{ id: "ws-1", settings: { default_chat_agent_id: agentB.id } }] as Workspace[],
+      isSuccess: true,
+      isError: false,
+    };
+    rerender();
+    expect(result.current.activeAgent).toBe(agentB);
+    h.workspaceQuery.data = [{ id: "ws-1", settings: {} }] as Workspace[];
+    rerender();
+    expect(result.current.activeAgent).toBe(agentA);
+  });
+
+  it.each(["personal", "selected", "session"])("retains a valid %s target during workspace failure", (choice) => {
+    h.workspaceQuery.isSuccess = false;
+    h.workspaceQuery.isError = true;
+    if (choice === "personal") h.store.quickChatAgentId = agentB.id;
+    if (choice === "selected") {
+      h.store.newChatSource = null;
+      h.store.selectedAgentId = agentB.id;
+    }
+    if (choice === "session") {
+      h.store.activeSessionId = sB.id;
+      h.sessions = [sB];
+    }
+    const { result } = renderHook(() => useChatController());
+    expect(result.current.activeAgent).toBe(agentB);
   });
 });

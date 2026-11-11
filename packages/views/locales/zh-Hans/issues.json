@@ -547,6 +547,8 @@
     "unsubscribe": "取消订阅",
     "delegated_subscription_badge": "由智能体代你关注",
     "delegated_subscription_hint": "你的智能体代你创建了这个任务，因此你在关注它。待评审、完成或受阻时会通知你。",
+    "project_subscription_badge": "通过项目订阅",
+    "project_subscription_hint": "你订阅了这个项目的全部任务。在这里取消订阅只会停止这个任务的通知。",
     "unsubscribe_this": "取消订阅此任务",
     "unsubscribe_subtree": "取消订阅此任务及其子任务",
     "unsubscribe_subtree_failed": "取消订阅子任务失败，请重试。",

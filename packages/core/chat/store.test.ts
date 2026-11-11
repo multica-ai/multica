@@ -49,7 +49,7 @@ describe("Ask chat intent", () => {
     state.addInputDraftAttachment(DRAFT_NEW_SESSION, makeAttachment("upload"));
     const updates: unknown[] = [];
     const unsubscribe = store.subscribe((next) => updates.push(next));
-    state.startAskChat();
+    state.startNewChat();
     unsubscribe();
     expect(updates).toHaveLength(1);
     expect(store.getState()).toMatchObject({
@@ -63,7 +63,7 @@ describe("Ask chat intent", () => {
     expect(store.getState().newChatSource).toBe("ask");
     state.setSelectedAgentId("manual");
     expect(store.getState().newChatSource).toBeNull();
-    state.startAskChat();
+    state.startNewChat();
     state.setActiveSession("session");
     expect(store.getState().newChatSource).toBeNull();
     expect(createChatStore({ storage }).getState().newChatSource).toBeNull();
@@ -357,6 +357,36 @@ describe("chat store — Ask Multica agent", () => {
 
     store.getState().setQuickChatAgentId(null);
     expect(createChatStore({ storage }).getState().quickChatAgentId).toBeNull();
+  });
+
+  it("starts an Ask draft atomically and requests focus without replacing the stored agent", () => {
+    const store = createChatStore({ storage: memStorage() });
+    const s = () => store.getState();
+    s().setSelectedAgentId("agent-1");
+    s().setSelectedProjectId("project-1");
+    s().setActiveSession("session-1");
+    s().setQuickChatAgentId("agent-9");
+
+    s().startNewChat();
+
+    expect(s().isOpen).toBe(true);
+    expect(s().activeSessionId).toBeNull();
+    expect(s().selectedProjectId).toBeNull();
+    expect(s().selectedAgentId).toBe("agent-1");
+    expect(s().newChatSource).toBe("ask");
+    expect(s().newChatRequest).toBe(1);
+
+    s().startNewChat();
+    expect(s().newChatRequest).toBe(2);
+  });
+
+  it("retains the current selection when starting an automatic Ask draft", () => {
+    const store = createChatStore({ storage: memStorage() });
+    store.getState().setSelectedAgentId("agent-1");
+
+    store.getState().startNewChat();
+
+    expect(store.getState().selectedAgentId).toBe("agent-1");
   });
 });
 

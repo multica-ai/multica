@@ -182,3 +182,50 @@ test("scrolling up a virtualized long thread keeps the reading position steady",
     await api.cleanup();
   }
 });
+
+test("Inbox landing survives a comment that arrives while it is still aligning", async ({ page }) => {
+  test.setTimeout(180_000);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const api = await createTestApi();
+  try {
+    const slug = await loginAsDefault(page);
+    const title = "Inbox landing during realtime updates";
+    const body = (lines: number) => Array.from({ length: lines }, (_, j) => `Line ${j}. ${"Agent reply text that wraps. ".repeat(4)}`).join("\n\n");
+    const issue = await api.createIssue(title, { description: body(8) });
+    // The shape of a busy agent issue: two threads of nested member/agent
+    // exchanges, the notification on the newest agent reply.
+    const first = await api.createComment(issue.id, "First thread root");
+    let parent = first;
+    for (let i = 0; i < 4; i++) parent = await api.createComment(issue.id, i % 2 ? "Follow-up" : body(20), parent.id);
+    const second = await api.createComment(issue.id, "Second thread root");
+    let targetId = "";
+    for (let i = 0; i < 7; i++) {
+      const ask = await api.createComment(issue.id, `Member ask ${i}`, second.id);
+      targetId = (await api.createComment(issue.id, body(5 + (i % 4) * 5), ask.id)).id;
+    }
+    const other = await api.createIssue("Another notification", { description: "Short." });
+    await api.seedCommentNotification(other.id, (await api.createComment(other.id, "Other comment")).id, "Another notification");
+    await api.seedCommentNotification(issue.id, targetId, title);
+
+    await page.goto(`/${slug}/inbox`);
+    // A realtime comment re-renders the timeline mid-landing. Before MUL-9068
+    // that cancelled the alignment for good, or aligned a replaced row that
+    // measured as zero and scrolled the detail back to the top.
+    for (const delay of [0, 120, 240, 360]) {
+      await page.getByText(title, { exact: true }).first().click();
+      await page.locator(`[data-tab-scroll-root="main:${issue.id}"]`).waitFor();
+      await page.waitForTimeout(delay);
+      await api.createComment(issue.id, `Arrived after ${delay}ms`, first.id);
+      let stable = 0;
+      await expect.poll(async () => {
+        const p = await readingPosition(page, targetId);
+        stable = p?.mounted && p.visible ? stable + 1 : 0;
+        return stable;
+      }, { message: `landing after a ${delay}ms update`, timeout: 10_000, intervals: [200] }).toBeGreaterThanOrEqual(5);
+      await page.getByText("Another notification", { exact: true }).first().click();
+      await expect(page.getByText("Other comment")).toBeVisible();
+    }
+  } finally {
+    await api.cleanup();
+  }
+});

@@ -517,6 +517,34 @@ function measureContrast(
         });
       }
     };
+    // Rail items read their own variables, with the fallbacks in theme-variables.css:
+    // the label on the shell at rest, and the active colour on the active and hover fills.
+    const measureRail = (area: ContrastCheck["area"], p: Map<string, string>) => {
+      if (p.has("--rail-item-color")) measure(area, p, "--rail-item-color", ["--app-shell"], TEXT);
+      const railText = p.has("--rail-item-active-color") ? "--rail-item-active-color" : "--sidebar-accent-foreground";
+      const railSurfaces = [p.has("--rail-item-active-background") ? "--rail-item-active-background" : "--sidebar-accent"];
+      if (p.has("--rail-item-hover-background")) railSurfaces.push("--rail-item-hover-background");
+      else {
+        // The default hover is --sidebar-accent at 60% over the shell.
+        const accent = resolveColor(p, "--sidebar-accent");
+        const shell = resolveColor(p, "--app-shell");
+        if ("color" in accent && "color" in shell && shell.color.a === 1) {
+          const { r, g, b } = paintOver({ ...accent.color, a: accent.color.a * 0.6 }, shell.color);
+          p.set("--rail-item-hover-background", `rgb(${r} ${g} ${b})`);
+          railSurfaces.push("--rail-item-hover-background");
+        }
+      }
+      // The frame measures --sidebar-accent-foreground on --sidebar-accent for its other controls.
+      measure(
+        area,
+        p,
+        railText,
+        railSurfaces.filter(
+          (surface) => area !== "frame" || railText !== "--sidebar-accent-foreground" || surface !== "--sidebar-accent",
+        ),
+        TEXT,
+      );
+    };
     const hasFrame = frame[m].length > 0;
     const backgrounds = hasFrame ? BACKGROUNDS.filter((b) => b !== "--app-shell") : BACKGROUNDS;
     measure("page", palette, "--foreground", backgrounds, TEXT);
@@ -535,31 +563,10 @@ function measureContrast(
       measure("frame", framePalette, "--faint-foreground", FRAME_BACKGROUNDS, NON_TEXT);
       // Toolbar and layout buttons paint --sidebar-accent-foreground on --sidebar-accent on hover.
       measure("frame", framePalette, "--sidebar-accent-foreground", ["--sidebar-accent"], TEXT);
-      // Rail items read their own variables, with the fallbacks in theme-variables.css:
-      // the label on the shell at rest, and the active colour on the active and hover fills.
-      if (framePalette.has("--rail-item-color")) measure("frame", framePalette, "--rail-item-color", ["--app-shell"], TEXT);
-      const railText = framePalette.has("--rail-item-active-color") ? "--rail-item-active-color" : "--sidebar-accent-foreground";
-      const railSurfaces = [
-        framePalette.has("--rail-item-active-background") ? "--rail-item-active-background" : "--sidebar-accent",
-      ];
-      if (framePalette.has("--rail-item-hover-background")) railSurfaces.push("--rail-item-hover-background");
-      else {
-        // The default hover is --sidebar-accent at 60% over the shell.
-        const accent = resolveColor(framePalette, "--sidebar-accent");
-        const shell = resolveColor(framePalette, "--app-shell");
-        if ("color" in accent && "color" in shell && shell.color.a === 1) {
-          const { r, g, b } = paintOver({ ...accent.color, a: accent.color.a * 0.6 }, shell.color);
-          framePalette.set("--rail-item-hover-background", `rgb(${r} ${g} ${b})`);
-          railSurfaces.push("--rail-item-hover-background");
-        }
-      }
-      measure(
-        "frame",
-        framePalette,
-        railText,
-        railSurfaces.filter((surface) => railText !== "--sidebar-accent-foreground" || surface !== "--sidebar-accent"),
-        TEXT,
-      );
+      measureRail("frame", framePalette);
+    } else {
+      // Without frame rules the rail sits on the page's own colours.
+      measureRail("page", new ReadTracker(read, palette));
     }
 
     // The tooltip is a `.dark` scope in both modes: its text takes the app's

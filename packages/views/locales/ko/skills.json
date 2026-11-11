@@ -90,9 +90,7 @@
     "section_labels": "라벨",
     "filter_search_placeholder": "필터...",
     "no_labels": "아직 라벨이 없습니다",
-    "no_results": "결과 없음",
-    "manage_labels": "라벨 관리...",
-    "manage_labels_title": "스킬 라벨"
+    "no_results": "결과 없음"
   },
   "detail": {
     "read_only": "읽기 전용",

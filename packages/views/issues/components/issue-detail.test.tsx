@@ -2791,6 +2791,42 @@ describe("IssueDetail (shared)", () => {
       expect(landedBeforeGrouping).toBe(false);
     });
 
+    it("restarts a comment landing that a timeline update cancels while it is still aligning", async () => {
+      mockApiObj.listTasksByIssue.mockResolvedValue([]);
+      // The anchor keeps moving for 300ms, like reply heights settling, so the
+      // alignment loop is still running when the update arrives.
+      let driftStart = 0;
+      const drift = () => {
+        driftStart ||= performance.now();
+        return Math.min(performance.now() - driftStart, 300);
+      };
+      const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+        const container = this.closest<HTMLElement>("[data-tab-scroll-root]");
+        if (this === container) return new DOMRect(0, 0, 400, 200);
+        if (this.id === "comment-comment-2" && container) {
+          return new DOMRect(0, 250 + drift() - container.scrollTop, 400, 100);
+        }
+        return new DOMRect(0, 0, 0, 0);
+      });
+      try {
+        const { queryClient } = renderIssueDetailWithHighlight("comment-2");
+        await waitFor(() => expect(hasHighlightedCommentBackground(document.getElementById("comment-comment-2"))).toBe(true));
+        const container = document.querySelector<HTMLElement>("[data-tab-scroll-root]")!;
+        act(() => {
+          queryClient.setQueryData<TimelineEntry[]>(["issues", "timeline", "issue-1"], (old) => [
+            ...(old ?? []),
+            { ...mockTimeline[0]!, id: "comment-late", content: "Arrived mid-landing", created_at: "2026-01-18T00:00:00Z" },
+          ]);
+        });
+        expect(driftStart).toBeGreaterThan(0);
+        expect(performance.now() - driftStart).toBeLessThan(300);
+        // 250 + 300 drift - 16 top gap: where the comment sits once settled.
+        await waitFor(() => expect(container.scrollTop).toBe(534), { timeout: 2000 });
+      } finally {
+        rect.mockRestore();
+      }
+    });
+
     it("folds an assignment reply with its resolved parent and unfolds that thread for a notification", async () => {
       const run: AgentTask = { id: "ba2e8d1c-7f9b-4e2a-9c1d-123456789abc", agent_id: "agent-1", runtime_id: "runtime-1", issue_id: "issue-1",
         kind: "direct", status: "completed", priority: 0, created_at: "2026-01-16T00:00:00Z", started_at: null, dispatched_at: null,
@@ -3935,6 +3971,46 @@ describe("IssueDetail (shared)", () => {
   // showed a Subscribe button to people who were already subscribed, and a
   // click landing in that window sent a subscribe instead of the unsubscribe
   // they meant (MUL-5714).
+  describe("subscription inherited from the project", () => {
+    beforeEach(() => {
+      mockApiObj.listIssueSubscribers.mockResolvedValue([
+        {
+          issue_id: "issue-1",
+          user_type: "member" as const,
+          user_id: "user-1",
+          reason: "project" as const,
+          created_at: "2026-01-01T00:00:00Z",
+        },
+      ]);
+      mockApiObj.listChildIssues.mockResolvedValue({ issues: [] });
+    });
+
+    afterEach(() => {
+      document.body.innerHTML = "";
+    });
+
+    it("labels the project source and leaves only this issue", async () => {
+      renderIssueDetail();
+
+      expect(await screen.findByText("Via project")).toBeInTheDocument();
+      const button = await waitFor(() => {
+        const el = screen.getByText("Unsubscribe");
+        expect(el.getAttribute("aria-haspopup")).toBeNull();
+        return el;
+      });
+      fireEvent.click(button);
+
+      await waitFor(() =>
+        expect(mockApiObj.unsubscribeFromIssue).toHaveBeenCalledWith(
+          "issue-1",
+          "user-1",
+          "member",
+        ),
+      );
+      expect(mockApiObj.unsubscribeFromIssueSubtree).not.toHaveBeenCalled();
+    });
+  });
+
   describe("subscription state before the query resolves", () => {
     afterEach(() => {
       document.body.innerHTML = "";

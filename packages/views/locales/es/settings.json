@@ -419,6 +419,10 @@
         "label": "Mostrar u ocultar la ventana de chat",
         "description": "Abre o cierra la ventana de chat flotante. Al abrirla, el foco va al campo de mensaje."
       },
+      "newChat": {
+        "label": "Pregunta a Multica",
+        "description": "Inicia un chat nuevo en la ventana de chat flotante."
+      },
       "findInIssue": {
         "label": "Buscar en la tarea",
         "description": "Busca dentro del detalle de la tarea abierta."
@@ -844,6 +848,10 @@
       "updates": {
         "label": "Prioridad y fecha de entrega",
         "description": "Cuando cambian la prioridad o la fecha de entrega de tareas que sigues"
+      },
+      "new_issues": {
+        "label": "Tareas nuevas",
+        "description": "Cuando se crea una tarea en un proyecto al que estás suscrito"
       },
       "agent_activity": {
         "label": "Actividad de agentes",

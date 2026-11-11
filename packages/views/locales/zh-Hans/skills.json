@@ -90,9 +90,7 @@
     "section_labels": "标签",
     "filter_search_placeholder": "筛选...",
     "no_labels": "还没有标签",
-    "no_results": "无结果",
-    "manage_labels": "管理标签...",
-    "manage_labels_title": "Skill 标签"
+    "no_results": "无结果"
   },
   "detail": {
     "read_only": "只读",

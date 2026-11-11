@@ -1814,6 +1814,12 @@ export const ListProjectMembersResponseSchema = z.object({
   total: z.number(),
 }).loose();
 
+// The viewer's own project subscription (`/api/projects/:id/subscription`).
+// Anything but an explicit `true` reads as not subscribed.
+export const ProjectSubscriptionSchema = z.object({
+  subscribed: z.boolean().catch(false),
+}).loose();
+
 const SearchProjectResultSchema = ProjectSchema.extend({
   match_source: z.string(),
   matched_snippet: z.string().optional(),

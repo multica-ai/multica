@@ -524,6 +524,8 @@
     "unsubscribe": "Darse de baja",
     "delegated_subscription_badge": "Observando a través de un agente",
     "delegated_subscription_hint": "Tu agente creó esta tarea en tu nombre, así que estás suscrito. Recibirás una notificación cuando necesite revisión, termine o se quede atascada.",
+    "project_subscription_badge": "Suscrito a través del proyecto",
+    "project_subscription_hint": "Estás suscrito a todas las tareas de este proyecto. Darte de baja aquí solo detiene las notificaciones de esta tarea.",
     "unsubscribe_this": "Darse de baja de esta tarea",
     "unsubscribe_subtree": "Darse de baja de esta tarea y sus subtareas",
     "unsubscribe_subtree_failed": "No se ha podido dar de baja de las subtareas. Inténtalo de nuevo.",
