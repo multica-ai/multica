@@ -1797,7 +1797,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 		r.Route("/api/workspaces", func(r chi.Router) {
 			r.Get("/", h.ListWorkspaces)
-			r.Post("/", h.CreateWorkspace)
+			// A service account must not bootstrap new workspaces; its
+			// identity is minted inside an existing workspace and its
+			// membership is fixed there. RequireUserAccount lets every other
+			// authenticated actor through unchanged.
+			r.With(handler.RequireUserAccount).Post("/", h.CreateWorkspace)
 			r.Route("/{id}", func(r chi.Router) {
 				// Member-level access
 				r.Group(func(r chi.Router) {
@@ -1857,6 +1861,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/share-links", h.CreateShareLink)
 					r.Delete("/share-links/{linkId}", h.RevokeShareLink)
 					r.Get("/share-links", h.ListShareLinks)
+					// Service accounts (MUL-9163): workspace-scoped machine
+					// identities. Minting and revoking their credentials is
+					// an owner/admin action; the identity itself acts as a
+					// regular member of this one workspace.
+					r.Route("/service-accounts", func(r chi.Router) {
+						r.Post("/", h.CreateServiceAccount)
+						r.Get("/", h.ListServiceAccounts)
+						r.Post("/{accountId}/tokens", h.CreateServiceAccountToken)
+						r.Delete("/tokens/{tokenId}", h.RevokeServiceAccountToken)
+					})
 					// Custom runtime profile mutations (admin-only).
 					r.Post("/runtime-profiles", h.CreateRuntimeProfile)
 					r.Patch("/runtime-profiles/{profileId}", h.UpdateRuntimeProfile)
@@ -2027,9 +2041,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// User-scoped invitation routes (no workspace context required)
 		r.Get("/api/invitations", h.ListMyInvitations)
 		r.Get("/api/invitations/{id}", h.GetMyInvitation)
-		r.Post("/api/invitations/{id}/accept", h.AcceptInvitation)
-		r.Post("/api/invitations/{id}/decline", h.DeclineInvitation)
-		r.Post("/api/share-links/join", h.JoinByShareLink)
+		// Join/accept routes are account-level: a service account's one
+		// membership is minted with it, never added later — blocking these
+		// here is what keeps a service account scoped to exactly one
+		// workspace even if it holds a share link or invitation.
+		r.With(handler.RequireUserAccount).Post("/api/invitations/{id}/accept", h.AcceptInvitation)
+		r.With(handler.RequireUserAccount).Post("/api/invitations/{id}/decline", h.DeclineInvitation)
+		r.With(handler.RequireUserAccount).Post("/api/share-links/join", h.JoinByShareLink)
 
 		// PAT management is human-only (MUL-8154): a machine credential must
 		// not mint a non-expiring PAT, enumerate the owner's PATs, or revoke
@@ -2808,22 +2826,26 @@ type patResolver struct {
 func (pr *patResolver) ResolveToken(ctx context.Context, token string) (string, bool) {
 	hash := auth.HashToken(token)
 
-	if userID, ok := pr.cache.Get(ctx, hash); ok {
-		return userID, true
+	if patAuth, ok := pr.cache.Get(ctx, hash); ok {
+		return patAuth.UserID, true
 	}
 
-	pat, err := pr.queries.GetPersonalAccessTokenByHash(ctx, hash)
+	pat, err := pr.queries.GetPersonalAccessTokenByHashWithKind(ctx, hash)
 	if err != nil {
 		return "", false
 	}
 
 	userID := util.UUIDToString(pat.UserID)
+	patAuth := auth.PATAuth{
+		UserID:    userID,
+		IsService: pat.UserKind == auth.ServiceUserKind,
+	}
 
 	var expiresAt time.Time
 	if pat.ExpiresAt.Valid {
 		expiresAt = pat.ExpiresAt.Time
 	}
-	pr.cache.Set(ctx, hash, userID, auth.TTLForExpiry(time.Now(), expiresAt))
+	pr.cache.Set(ctx, hash, patAuth, auth.TTLForExpiry(time.Now(), expiresAt))
 
 	// Cache miss = first WS auth in this TTL window. Refresh last_used_at;
 	// subsequent connects within the window skip the write.
