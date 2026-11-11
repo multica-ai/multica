@@ -4,7 +4,7 @@ Protocol evidence for the Droid adapter
 - `droid exec --help` verified stdin prompt input, stream-json output, model selection, session continuation, and autonomy flags.
 - An unauthenticated read-only invocation emitted `system/init`, then `error` with `source: "cli"` and `message: "Error: Authentication failed. Please log in using /login or set a valid FACTORY_API_KEY environment variable."`, and exited 1.
 - `droid-1.8.0-protocol-example.jsonl` is a **synthetic example**, not a successful account-backed capture. Its field names were checked against the stream-json serializer in the official executable and the [official headless documentation](https://docs.factory.com/droid-exec/overview). In particular, tool events use `id`, `toolName`, `parameters`, `value`, `isError`; completion uses `finalText` and does not carry an error flag. Earlier `error` events must remain failures.
-- Successful account-backed execution, resume, and real tool execution remain unverified without a Factory credential. The opt-in `TestDroidRealTaskSmoke` covers a real response through the adapter; it deliberately fails if authentication is missing. `TestDroidRealInvalidAuthentication` checks an invalid credential through the same path.
+- Successful account-backed execution, resume, and real tool execution remain unverified without a Factory credential. The opt-in `TestDroidRealTaskSmoke` reads a file using a tool, checks the response, then resumes the same session to verify memory. Its local attempt failed at authentication before tool execution. `TestDroidRealInvalidAuthentication` passed through the adapter with the official binary, verifying the failed status and an empty final output.
 
 Run only with an explicitly authorized test account:
 

@@ -87,7 +87,7 @@ A few tools need extra setup beyond signing in:
 <Accordions type="multiple">
 <Accordion title="Factory Droid" id="droid">
 
-Install the native Droid CLI using the [official instructions](https://docs.factory.com/droid-exec/overview). Multica supports Droid 1.8.0 or later on macOS, Windows, and glibc-based Linux; Alpine is unsupported. Sign in with `droid`, or set `FACTORY_API_KEY` in the daemon environment or the agent's custom environment. Credentials remain on the execution machine; do not put them in prompts or custom arguments.
+Install the native Droid CLI using the [official instructions](https://docs.factory.com/droid-exec/overview). Multica supports Droid 1.8.0 or later on macOS, Windows, and glibc-based Linux; Alpine is unsupported. Sign in with `droid`, or set `FACTORY_API_KEY` in the daemon environment or the agent's custom environment. Keep credentials out of prompts and custom arguments.
 
 After the daemon discovers `droid`, select the Droid runtime when creating an agent and assign it an issue. The run streams assistant and tool messages, then publishes the final response. Models use Droid's default unless you enter a model ID in Multica. Optional daemon overrides are `MULTICA_DROID_PATH`, `MULTICA_DROID_MODEL`, and `MULTICA_DROID_ARGS`. Reasoning effort can be set through custom arguments, such as `--reasoning-effort high`.
 
