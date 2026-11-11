@@ -3,7 +3,7 @@ import { act, cleanup, renderHook } from "@testing-library/react";
 import { QueryClientProvider, useQuery } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setApiInstance } from "../api";
 import type { ApiClient } from "../api/client";
 import { createQueryClient } from "../query-client";
@@ -37,7 +37,11 @@ import {
  */
 
 vi.mock("../hooks", () => ({ useWorkspaceId: () => "ws-1" }));
-afterEach(cleanup);
+beforeEach(() => vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] }));
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 const WS = "ws-1";
 // Deterministic, so the range is a fixed set of interleavings. Seeds 4, 16 and
@@ -119,7 +123,8 @@ class FakeServer {
 
 async function tick() {
   await act(async () => {
-    await new Promise((r) => setTimeout(r, 0));
+    // Advance Query notifications without tying the interleaving to runner load.
+    await vi.advanceTimersByTimeAsync(1);
   });
 }
 
