@@ -68,6 +68,8 @@ func (r *Renderer) issueURL(slug, issueID string) string {
 
 func actionVerb(notifType string) string {
 	switch notifType {
+	case "issue_created":
+		return "New issue"
 	case "issue_assigned":
 		return "You were assigned"
 	case "unassigned":
