@@ -45,6 +45,7 @@ Multica 当前会检测以下命令：
 | Qoder CN CLI | `qoderclicn` | [Qoder CN CLI 快速开始](https://help.aliyun.com/zh/lingma/qodercli-cn/user-guide/qoder-cli-cn-get-started-quickly) |
 | Qwen Code | `qwen` | [Qwen Code](https://github.com/QwenLM/qwen-code) |
 | QwenPaw | `qwenpaw` | [QwenPaw](https://github.com/agentscope-ai/QwenPaw) |
+| Factory Droid | `droid` | [Factory Droid](https://docs.factory.com/droid-exec/overview) |
 | Reasonix | `reasonix` | [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) |
 | TRAE CLI | `traecli` | [TRAE 官方站](https://www.trae.cn/) |
 | Dim | `dim` | [DimCode](https://dimagent.cn/docs/cli) |
@@ -72,6 +73,7 @@ Multica 当前会检测以下命令：
 | Copilot | 1.0.0 |
 | Grok | 0.2.89 |
 | Qwen Code | 0.20.0 |
+| Factory Droid | 1.8.0 |
 | MiniMax Code | 0.1.2 |
 | Muse Code | 1.4.10 |
 | OpenCode | 1.1.54 |
@@ -83,6 +85,17 @@ Multica 当前会检测以下命令：
 以下工具除了登录，还要额外配置：
 
 <Accordions type="multiple">
+<Accordion title="Factory Droid" id="droid">
+
+按[官方说明](https://docs.factory.com/droid-exec/overview)安装原生 Droid CLI，版本需为 1.8.0 或更新。支持 macOS、Windows 和使用 glibc 的 Linux，不支持 Alpine。运行 `droid` 登录，或在守护进程环境、智能体的自定义环境中设置 `FACTORY_API_KEY`，不要把凭据写进提示词或自定义参数。
+
+守护进程发现 `droid` 后，创建智能体时选择 Droid 运行时，再指派一个任务。执行过程显示文本和工具输出，完成后回传最终结果。模型默认沿用 Droid 配置，也可在 Multica 手动填写模型 ID。守护进程支持 `MULTICA_DROID_PATH`、`MULTICA_DROID_MODEL`、`MULTICA_DROID_ARGS`；推理强度可通过自定义参数 `--reasoning-effort high` 设置。
+
+任务使用 `droid exec --output-format stream-json --auto high`，读取 `AGENTS.md`，从 `.factory/skills/` 发现 skill。后续执行会在同一工作目录传入会话 ID。暂不支持恢复被拒绝后的自动重建会话、由 Multica 管理 MCP、执行中追加消息或 `max_turns`；MCP 需在 Droid 中配置，执行时长使用任务超时限制。Droid 的命令策略仍可能拒绝执行；失败前已完成的文件修改会保留。
+
+未发现运行时时，在守护进程所在机器安装 Droid，或用 `MULTICA_DROID_PATH` 指向原生可执行文件。认证失败时重新登录或更新执行环境中的 API key。权限、服务和协议错误会显示为失败；取消和超时会终止所属进程树并回传对应状态。没有完成事件的正常退出也会判为失败，中间说明文字不会作为最终结果发布。
+
+</Accordion>
 <Accordion title="CodeArts" id="codearts">
 
 用 `codearts run --model provider/model "只回复 OK"` 验证非交互模式，只验证 TUI 不够。当前 CodeArts CLI 可能允许自定义 provider 在 TUI 中工作，但 `run`、`models` 和 `serve` 仍要求配置 [`CODEARTS_CLI_AK` / `CODEARTS_CLI_SK`](https://support.huaweicloud.com/usermanual-cli/codeartsagent_cli_0026.html)。Multica 可以从 `~/.codeartsdoer/codearts_cli.json` 或 `.jsonc` 发现自定义模型，但每次运行都使用 `codearts run`，因此仍遵循该命令的授权要求。
