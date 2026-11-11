@@ -28,23 +28,15 @@ export function scoreText(text: string, query: string): number {
   if (t === query) return 100;
   if (t.startsWith(query)) return 80;
   if (t.split(WORD_SPLIT).some((word) => word.startsWith(query))) return 60;
-  if (query.length > 1 && t.includes(query)) return 40;
-  if (query.length > 1 && matchesPinyin(text, query)) return 30;
+  if (t.includes(query)) return 40;
+  if (matchesPinyin(text, query)) return 30;
   return 0;
 }
 
 export function scoreRow(label: string, keywords: readonly string[], query: string): number {
   const labelScore = scoreText(label, query);
   if (labelScore > 0) return labelScore;
-  const normalizedQuery = query.trim().toLowerCase();
-  if (!normalizedQuery) return 0;
-  return keywords.some((kw) => {
-    const inner = kw.toLowerCase();
-    return inner.startsWith(normalizedQuery)
-      || inner.split(WORD_SPLIT).some((word) => word.startsWith(normalizedQuery));
-  })
-    ? 25
-    : 0;
+  return keywords.some((kw) => kw.startsWith(query)) ? 25 : 0;
 }
 
 /** "Assign to..." → "Assign to", for breadcrumbs. */
