@@ -9109,6 +9109,23 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"idle_watchdog", execOpts.IdleWatchdogTimeout,
 	)
 
+	// MUL-9013: record what this run is being handed, before it starts, so a
+	// run that dies early still has a receipt. Rebuilt for the cold retry.
+	receiptInput := contextReceiptInput{
+		Provider:             provider,
+		RuntimeVersion:       d.agentVersion(provider),
+		Model:                model,
+		WorkDir:              env.WorkDir,
+		Prompt:               prompt,
+		RuntimeBrief:         runtimeBrief,
+		InlineBrief:          execOpts.SystemPrompt != "",
+		ResumedSession:       execOpts.ResumeSessionID != "",
+		MCPConfig:            mcpConfig,
+		TaskCtx:              taskCtx,
+		ExistingInstructions: execenv.ExistingRuntimeConfigContent(env.WorkDir, provider),
+	}
+	d.reportContextReceipt(ctx, task.ID, buildContextReceipt(receiptInput), taskLog)
+
 	// Shared across the resume-retry below so the retry's transcript rows
 	// keep ascending seq values for the same task.
 	var msgSeq atomic.Int32
@@ -9179,6 +9196,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			}
 		}
 		freshPrompt := BuildPrompt(task, provider, promptOptions...)
+
+		receiptInput.Prompt = freshPrompt
+		receiptInput.RuntimeBrief = runtimeBrief
+		receiptInput.InlineBrief = execOpts.SystemPrompt != ""
+		receiptInput.ResumedSession = false
+		receiptInput.FreshRetry = true
+		receiptInput.TaskCtx = taskCtx
+		d.reportContextReceipt(ctx, task.ID, buildContextReceipt(receiptInput), taskLog)
 
 		retryResult, retryTools, retryErr := d.executeAndDrain(ctx, backend, freshPrompt, withPriorTaskUsage(execOpts, firstUsage), taskLog, task.ID, env.CodexHome, &msgSeq)
 		if retryErr != nil {
