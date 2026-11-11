@@ -15,7 +15,7 @@ import {
   Sun,
   User,
 } from "@multica/ui/icons";
-import { BUILT_IN_THEMES, useAppearanceStore, useInstalledThemesStore } from "@multica/core/appearance";
+import { useAppearanceStore } from "@multica/core/appearance";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspacePaths } from "@multica/core/paths";
 import type { SupportedLocale } from "@multica/core/i18n";
@@ -44,7 +44,7 @@ import { useLanguageSwitch } from "../common/use-language-switch";
 import { useT } from "../i18n";
 import { AppLink } from "../navigation";
 import { isDesktopShell } from "../platform/local-directory";
-import { ThemeSwatch, useAppliedMode, useThemeLabel } from "../settings/components/theme-swatch";
+import { ThemeSwatch, useAppliedMode, useColorThemes, useThemeLabel } from "../settings/components/theme-swatch";
 import { DISCORD_URL, DiscordIcon } from "./discord";
 import { CHANGELOG_URL, DOCS_URL, DOWNLOAD_URL } from "./help-links";
 import { RAIL_ICON_BUTTON_CLASS } from "./rail-styles";
@@ -86,15 +86,11 @@ export function AccountMenu() {
   const logout = useLogout();
   const { theme: mode, setTheme: setMode } = useTheme();
   const appliedMode = useAppliedMode();
-  const colorTheme = useAppearanceStore((s) => s.theme);
   const setAppearance = useAppearanceStore((s) => s.set);
-  const installedThemes = useInstalledThemesStore((s) => s.themes);
+  const { themes: colorThemes, selected: selectedTheme } = useColorThemes();
   const themeLabel = useThemeLabel();
   const language = useLanguageSwitch();
   const modeValue = (mode ?? "system") as (typeof THEMES)[number]["value"];
-  const colorThemes = [...BUILT_IN_THEMES, ...installedThemes];
-  const selectedTheme =
-    colorThemes.find((manifest) => manifest.id === colorTheme) ?? BUILT_IN_THEMES[0]!;
   const name = user?.name ?? "";
   const avatar = (size: "md" | "lg") => (
     <ActorAvatar
