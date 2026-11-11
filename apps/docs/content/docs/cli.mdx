@@ -286,6 +286,17 @@ Deleting a runtime that still has active agents bound to it is refused by defaul
 
 See [Daemon and runtimes](/daemon-runtimes) for how it works and for custom profiles.
 
+## Environments [#environments]
+
+```bash
+multica env start web
+multica env start web --wait=false
+multica env list
+multica env stop web
+```
+
+`multica env` (long form `multica environment`) starts the environments a repository declares in `.multica/environments.toml`. The daemon supervises them, so they keep running after the run ends, show in the issue sidebar, and stop at their TTL. `start` waits until the environment answers and prints its URL. These commands use the running task's credential, so they only work inside an agent run; from your own computer, use the issue sidebar. See [Environments](/environments) for the file format and examples.
+
 ## Projects, workspaces, and autopilots
 
 ```bash
@@ -321,6 +332,7 @@ multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1" --timezone Europ
 | `workspace` | Create, view, and switch workspaces, and invite members |
 | `repo` | Manage workspace repositories and check them out locally |
 | `daemon`, `runtime` | Start and stop the local daemon; view and manage runtimes |
+| `env` | Start, stop, and list the environments a repository declares (inside agent runs only) |
 | `attachment` | Upload or download attachments |
 | `user profile` | View or update the current user's profile |
 | `auth`, `login`, `setup` | Log in, check auth status, and initialize a connection |
@@ -458,6 +470,7 @@ Migration from CSV parsing: replace `--attachment a,b` with `--attachment a --at
 | `runtime` | `list/usage/activity/update/rename/delete` | View and manage runtimes | `usage`: `--days` (default 90, max 365); `update`: `--target-version` (required), `--wait`; `delete`: `--cascade` (unbinds bound agents, preserves their data, and cancels their runs) |
 | | `profile list/create/update/delete` | Manage custom runtime profiles | `create`: `--display-name`, `--command-name` (both required), `--runtime-type` (or the older `--protocol-family`), `--description`; `update`: `--enabled` |
 | | `profile set-path/unset-path <profile-id>` | Pin a local executable path (local only, never uploaded to the server) | |
+| `env` | `start <name>` / `stop <name>` / `list` | Start, stop, or list this issue's declared environments; only inside an agent run. See [Environments](/environments) | `start`: `--wait` (default `true`); all: `--output` (`table` or `json`) |
 
 ### Additional
 

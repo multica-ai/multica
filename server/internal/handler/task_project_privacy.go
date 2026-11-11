@@ -5,11 +5,13 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/projectaccess"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// redactHiddenProjectTasks replaces every run on an issue in a private project
-// the caller cannot see (MUL-8472) with restrictedTaskResponse. The runs stay
+// redactHiddenProjectTasks replaces every run about a private project the
+// caller cannot see (MUL-8472) with restrictedTaskResponse: a run on an issue
+// there, and an issue-less run (autopilot, quick-create) that reads it. The runs stay
 // in the list so an agent's working state and workload counts read the same
 // for everyone; only what they were about is removed. tasks and resp are
 // parallel slices.
@@ -21,37 +23,14 @@ func (h *Handler) redactHiddenProjectTasks(r *http.Request, workspaceID string, 
 	if hidden.Empty() {
 		return nil
 	}
-	seen := map[pgtype.UUID]struct{}{}
-	var issueIDs []pgtype.UUID
-	for _, t := range tasks {
-		if !t.IssueID.Valid {
-			continue
-		}
-		if _, ok := seen[t.IssueID]; ok {
-			continue
-		}
-		seen[t.IssueID] = struct{}{}
-		issueIDs = append(issueIDs, t.IssueID)
-	}
-	if len(issueIDs) == 0 {
-		return nil
-	}
-	rows, err := h.Queries.ListIssueProjectIDs(r.Context(), issueIDs)
+	projects, err := projectaccess.TasksProjects(r.Context(), h.Queries, tasks)
 	if err != nil {
 		return err
 	}
-	projectOf := make(map[pgtype.UUID]pgtype.UUID, len(rows))
-	for _, row := range rows {
-		projectOf[row.ID] = row.ProjectID
-	}
-	for i, t := range tasks {
-		if !t.IssueID.Valid {
-			continue
+	for i := range tasks {
+		if !hidden.CanSeeProjects(projects[i]) {
+			resp[i] = restrictedTaskResponse(resp[i])
 		}
-		if hidden.CanSeeProject(projectOf[t.IssueID]) {
-			continue
-		}
-		resp[i] = restrictedTaskResponse(resp[i])
 	}
 	return nil
 }
@@ -84,4 +63,24 @@ func restrictedTaskResponse(full AgentTaskResponse) AgentTaskResponse {
 		// Always present on the wire (see the field's comment); empty here.
 		DeliveredCommentIDs: []string{},
 	}
+}
+
+// hiddenIssueIDs returns which of issueIDs sit in a project hidden says the
+// caller cannot see. Aggregates that name the issues a run is working on use
+// it to drop those references while keeping the run itself counted.
+func (h *Handler) hiddenIssueIDs(r *http.Request, hidden projectaccess.Hidden, issueIDs []pgtype.UUID) (map[pgtype.UUID]struct{}, error) {
+	if hidden.Empty() || len(issueIDs) == 0 {
+		return nil, nil
+	}
+	rows, err := h.Queries.ListIssueProjectIDs(r.Context(), issueIDs)
+	if err != nil {
+		return nil, err
+	}
+	out := map[pgtype.UUID]struct{}{}
+	for _, row := range rows {
+		if !hidden.CanSeeProject(row.ProjectID) {
+			out[row.ID] = struct{}{}
+		}
+	}
+	return out, nil
 }

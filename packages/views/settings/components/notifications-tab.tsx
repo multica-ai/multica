@@ -24,6 +24,7 @@ const INBOX_GROUP_KEYS = [
   "comments",
   "mentions",
   "updates",
+  "new_issues",
   "agent_activity",
 ] as const;
 type InboxGroupKey = (typeof INBOX_GROUP_KEYS)[number];

@@ -345,6 +345,10 @@ import {
   EMPTY_WEBHOOK_DELIVERY,
   AppConfigSchema,
   type AppConfigResponse,
+  StoreThemeListSchema,
+  EMPTY_STORE_THEME_LIST,
+  type StoreTheme,
+  type StoreThemeMode,
   type RefreshSessionResponse,
   RefreshSessionResponseSchema,
   EMPTY_REFRESH_SESSION_RESPONSE,
@@ -373,6 +377,7 @@ import {
   SearchIssuesResponseSchema,
   ProjectSchema,
   ListProjectMembersResponseSchema,
+  ProjectSubscriptionSchema,
   ListProjectsResponseSchema,
   EMPTY_PROJECT,
   EMPTY_LIST_PROJECTS_RESPONSE,
@@ -3260,6 +3265,38 @@ export class ApiClient {
     });
   }
 
+  // Theme store
+  async listStoreThemes(): Promise<StoreTheme[]> {
+    const raw = await this.fetch<unknown>("/api/theme-store/themes");
+    return parseWithFallback(raw, StoreThemeListSchema, EMPTY_STORE_THEME_LIST, {
+      endpoint: "GET /api/theme-store/themes",
+    }).themes as StoreTheme[];
+  }
+
+  /** The theme's checked theme.zip, for the same reader as an imported theme. */
+  async getStoreThemePackage(id: string): Promise<Uint8Array> {
+    const res = await this.fetchRaw(`/api/theme-store/themes/${encodeURIComponent(id)}/package`);
+    return new Uint8Array(await res.arrayBuffer());
+  }
+
+  // Fetched as bytes rather than linked: Desktop authenticates with a bearer
+  // token that an <img> request would not carry.
+  // The revision only keeps the browser's HTTP cache from answering for an
+  // older screenshot; the server ignores it.
+  async getStoreThemeScreenshot(
+    id: string,
+    mode: StoreThemeMode,
+    revision?: string,
+    signal?: AbortSignal,
+  ): Promise<Blob> {
+    const query = revision ? `?revision=${encodeURIComponent(revision)}` : "";
+    const res = await this.fetchRaw(
+      `/api/theme-store/themes/${encodeURIComponent(id)}/screenshots/${mode}${query}`,
+      { signal },
+    );
+    return res.blob();
+  }
+
   // Workspaces
   async listWorkspaces(): Promise<Workspace[]> {
     const raw = await this.fetch<unknown>("/api/workspaces");
@@ -4383,6 +4420,25 @@ export class ApiClient {
     });
   }
 
+  async getProjectSubscription(id: string): Promise<boolean> {
+    return this.parseProjectSubscription(
+      await this.fetch<unknown>(`/api/projects/${id}/subscription`),
+      "GET /api/projects/:id/subscription",
+    );
+  }
+
+  async setProjectSubscription(id: string, subscribed: boolean): Promise<boolean> {
+    const method = subscribed ? "PUT" : "DELETE";
+    return this.parseProjectSubscription(
+      await this.fetch<unknown>(`/api/projects/${id}/subscription`, { method }),
+      `${method} /api/projects/:id/subscription`,
+    );
+  }
+
+  private parseProjectSubscription(raw: unknown, endpoint: string): boolean {
+    return parseWithFallback(raw, ProjectSubscriptionSchema, { subscribed: false }, { endpoint }).subscribed;
+  }
+
   async addProjectMembers(id: string, userIds: string[]): Promise<ListProjectMembersResponse> {
     const raw = await this.fetch<unknown>(`/api/projects/${id}/members`, {
       method: "POST", body: JSON.stringify({ user_ids: userIds }),
@@ -5253,13 +5309,10 @@ export class ApiClient {
   // GitHub integration
   async getGitHubConnectURL(
     workspaceId: string,
-    returnTo?: "github" | "repositories",
+    options?: { desktop?: boolean },
   ): Promise<GitHubConnectResponse> {
-    const search = new URLSearchParams();
-    if (returnTo) search.set("return_to", returnTo);
-    const suffix = search.size > 0 ? `?${search.toString()}` : "";
     const raw = await this.fetch<unknown>(
-      `/api/workspaces/${workspaceId}/github/connect${suffix}`,
+      `/api/workspaces/${workspaceId}/github/connect${options?.desktop ? "?desktop=1" : ""}`,
     );
     return parseWithFallback(
       raw,

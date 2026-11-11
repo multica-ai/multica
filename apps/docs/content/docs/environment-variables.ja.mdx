@@ -190,6 +190,7 @@ allowlist の正確な判定順序は[ログインとサインアップ](/auth-s
 | Lark | `MULTICA_LARK_SECRET_KEY` | base64 エンコードされた 32 バイトの資格情報暗号化キー |
 | Slack | `MULTICA_SLACK_SECRET_KEY` | base64 エンコードされた 32 バイトの token 暗号化キー |
 | Telegram | `MULTICA_TELEGRAM_SECRET_KEY` | base64 エンコードされた 32 バイトの Bot token 暗号化キー |
+| Telegram | `MULTICA_TELEGRAM_TOOL_PROGRESS` | ストリーミング返信に表示するツールのステップ。`auto`（既定。DM では詳細、グループでは作業の種類のみ）、`off`、`summary`、`detail` |
 | Composio | `COMPOSIO_API_KEY` | Composio ツール接続を有効化 |
 | Composio | `COMPOSIO_CALLBACK_BASE_URL` | コールバック API アドレス。`MULTICA_PUBLIC_URL` にフォールバック可能 |
 | Composio | `COMPOSIO_STATE_SECRET` | OAuth state の署名シークレット。`JWT_SECRET` から派生可能 |
@@ -199,6 +200,8 @@ allowlist の正確な判定順序は[ログインとサインアップ](/auth-s
 | Plugins | `MULTICA_PLUGIN_SURFACE_ORIGIN` | バックエンドへルーティングする Cookie なしの専用 origin。app/API origin と分離し、`Host` を保持すること |
 | Plugins | `MULTICA_PLUGIN_API_URL` | バージョンを含む Plugin Public API の完全な Base URL（例: `https://plugin-api.example.com/v1`）。未設定時は `MULTICA_PUBLIC_URL` + `/v1` |
 | Plugins | `MULTICA_PLUGIN_DIR` | 開発時にローカル plugin bundle を公開するための任意の絶対ディレクトリ |
+| テーマストア | `MULTICA_THEME_STORE` | 既定で有効。公式の [multica-themes](https://github.com/multica-ai/multica-themes) レジストリを読みます。`off` でコミュニティのテーマストアを無効にし、レジストリへのリクエストを止めます |
+| テーマストア | `MULTICA_THEME_REGISTRY_URL` | 公式レジストリの fork など、別のレジストリの `index.json`。[テーマと外観](/themes#セルフホスト)を参照 |
 
 `GITHUB_APP_ID` と秘密鍵を設定しなくても、PR の関連付け・ミラー・マージ時のステータス変更は通常どおり動きますが、カードに CI とマージ可否のステータスが表示されず、「GitHub から選択」のリポジトリ入口も無効になります。
 

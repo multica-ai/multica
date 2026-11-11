@@ -63,6 +63,8 @@ Message the Bot directly. Consecutive messages stay in the same Multica conversa
 
 Add the Bot to the group first, then `@Bot` and describe what you need. The Bot only responds to messages that explicitly @-mention it, and each run includes the group's most recent messages as context.
 
+In both direct messages and group chats, each run's prompt also lists the Feishu ids of the message it answers: `chat_id`, `chat_type`, `message_id`, the topic's `thread_id` when the message is in a topic, and the sender's `open_id`. These are Feishu ids, not Multica ids, so an agent with its own Feishu access can look up the original message or conversation. The `open_id` is specific to the connected Bot's app. Ids Multica did not record are left out.
+
 ### Create an issue
 
 Send:

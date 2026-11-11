@@ -1,17 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
 import type { Agent, AgentRuntime, MemberWithUser } from "@multica/core/types";
 import { providerSupportsMcpConfig } from "@multica/core/agents";
 import { useFeatureEnabled } from "@multica/core/config";
 import { COMPOSIO_MCP_APPS_FLAG } from "@multica/core/feature-flags";
-import { useWorkspaceId } from "@multica/core/hooks";
-import { larkInstallationsOptions } from "@multica/core/lark";
-import { slackInstallationsOptions } from "@multica/core/slack";
-import { dingtalkInstallationsOptions } from "@multica/core/dingtalk";
-import { wecomInstallationsOptions } from "@multica/core/wecom";
-import { telegramInstallationsOptions } from "@multica/core/telegram";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -35,7 +28,6 @@ import { EnvTab } from "./tabs/env-tab";
 import { CustomArgsTab } from "./tabs/custom-args-tab";
 import { McpConfigTab } from "./tabs/mcp-config-tab";
 import { AgentAppsTab } from "./tabs/agent-apps-tab";
-import { IntegrationsTab } from "./tabs/integrations-tab";
 import { QoderAgentTab } from "./tabs/qoder-agent-tab";
 import { ClaudeAgentTab } from "./tabs/claude-agent-tab";
 import { RuntimeConfigTab } from "./tabs/runtime-config-tab";
@@ -51,8 +43,7 @@ export type AdvancedSection =
   | "runtime_config"
   | "skills"
   | "mcp_config"
-  | "composio_mcp"
-  | "integrations";
+  | "composio_mcp";
 
 type SectionLabelKey =
   | "general"
@@ -64,8 +55,7 @@ type SectionLabelKey =
   | "claude_agent"
   | "skills"
   | "mcp_config"
-  | "composio_mcp"
-  | "integrations";
+  | "composio_mcp";
 
 type SectionDef = { id: AdvancedSection; labelKey: SectionLabelKey };
 
@@ -81,7 +71,6 @@ const CAPABILITY_SECTIONS: SectionDef[] = [
   { id: "skills", labelKey: "skills" },
   { id: "mcp_config", labelKey: "mcp_config" },
   { id: "composio_mcp", labelKey: "composio_mcp" },
-  { id: "integrations", labelKey: "integrations" },
 ];
 
 const ADVANCED_SECTIONS = new Set<string>(
@@ -122,7 +111,6 @@ export function AgentAdvancedSettings({
   onSectionChange,
 }: AgentAdvancedSettingsProps) {
   const { t } = useT("agents");
-  const wsId = useWorkspaceId();
   const composioMCPAppsEnabled = useFeatureEnabled(
     COMPOSIO_MCP_APPS_FLAG,
     false,
@@ -133,37 +121,6 @@ export function AgentAdvancedSettings({
     undefined,
   );
 
-  const { data: larkListing } = useQuery({
-    ...larkInstallationsOptions(wsId),
-    enabled: !!wsId,
-  });
-  const { data: slackListing } = useQuery({
-    ...slackInstallationsOptions(wsId),
-    enabled: !!wsId,
-  });
-  const { data: dingtalkListing } = useQuery({
-    ...dingtalkInstallationsOptions(wsId),
-  });
-  const { data: wecomListing } = useQuery({
-    ...wecomInstallationsOptions(wsId),
-    enabled: !!wsId,
-  });
-  const { data: telegramListing } = useQuery({
-    ...telegramInstallationsOptions(wsId),
-    enabled: !!wsId,
-  });
-
-  const integrationsConfigured =
-    larkListing?.configured === true ||
-    slackListing?.configured === true ||
-    dingtalkListing?.configured === true ||
-    wecomListing?.configured === true ||
-    telegramListing?.configured === true;
-
-  // The Qoder bridge fails every task carrying skills, MCP, connected apps,
-  // env, args or a model override. Those editors are not offered; the agent
-  // in Qoder Cloud Agents owns that configuration. It does run chat, so IM
-  // channels (Integrations) stay available.
   const qoderRuntime = runtime?.provider === "qoder_cloud";
   // Claude Managed Agents refuses the same overrides; the Claude agent owns them.
   const claudeRuntime = runtime?.provider === "claude_managed";
@@ -195,23 +152,17 @@ export function AgentAdvancedSettings({
   );
 
   const capabilitySections = useMemo(() => {
-    if (cloudRuntime) {
-      return CAPABILITY_SECTIONS.filter(
-        (item) => item.id === "integrations" && integrationsConfigured,
-      );
-    }
+    if (cloudRuntime) return [];
     const showMcp = runtime ? providerSupportsMcpConfig(runtime.provider) : true;
     const showComposioMcp = composioMCPAppsEnabled && canEdit;
     return CAPABILITY_SECTIONS.filter((item) => {
       if (item.id === "mcp_config") return showMcp;
       if (item.id === "composio_mcp") return showComposioMcp;
-      if (item.id === "integrations") return integrationsConfigured;
       return true;
     });
   }, [
     canEdit,
     composioMCPAppsEnabled,
-    integrationsConfigured,
     cloudRuntime,
     runtime,
   ]);
@@ -389,9 +340,6 @@ export function AgentAdvancedSettings({
                     />
                   )}
                   {active.id === "composio_mcp" && <AgentAppsTab agent={agent} />}
-                  {active.id === "integrations" && (
-                    <IntegrationsTab agent={agent} />
-                  )}
                 </div>
               </div>
             </section>

@@ -90,9 +90,7 @@
     "section_labels": "ラベル",
     "filter_search_placeholder": "フィルター...",
     "no_labels": "まだラベルがありません",
-    "no_results": "結果なし",
-    "manage_labels": "ラベルを管理...",
-    "manage_labels_title": "スキルのラベル"
+    "no_results": "結果なし"
   },
   "detail": {
     "read_only": "読み取り専用",

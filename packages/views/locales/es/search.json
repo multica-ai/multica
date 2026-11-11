@@ -22,6 +22,7 @@
   },
   "commands": {
     "current_theme_aria": "Tema actual",
+    "current_mode_aria": "Modo actual",
     "new_issue": "Nueva tarea",
     "new_project": "Nuevo proyecto",
     "copy_issue_link": "Copiar enlace de la tarea",
@@ -128,7 +129,6 @@
     "project": "Proyecto",
     "parent": "Tarea principal",
     "quick_actions": "Acciones rápidas",
-    "theme": "Tema",
     "project_status": "Estado del proyecto",
     "no_project": "Sin proyecto",
     "current": "Actual"

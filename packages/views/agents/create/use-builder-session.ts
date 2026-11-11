@@ -26,8 +26,8 @@ import { useT } from "../../i18n";
 const EMPTY_CHAT_MESSAGES: ChatMessage[] = [];
 
 /**
- * Lifecycle of one AI-builder conversation: create the hidden carrier session,
- * exchange messages on it, rebind its runtime, and destroy it on request.
+ * Lifecycle of one AI-builder conversation: exchange messages on the hidden
+ * carrier session, rebind its runtime, and destroy it on request.
  *
  * The conversation is identified by `sessionId`, which the page reads off its
  * own URL. That is what makes it survive a refresh, a back/forward, and a
@@ -42,7 +42,7 @@ const EMPTY_CHAT_MESSAGES: ChatMessage[] = [];
  * for the main chat window — which has never polled.
  */
 export function useBuilderSession(options: {
-  /** The conversation to operate on; empty string before one is started. */
+  /** The conversation to operate on. */
   sessionId: string;
   /** Encodes composer text into the builder wire format for the current draft. */
   encodeInput: (text: string) => string;
@@ -58,7 +58,6 @@ export function useBuilderSession(options: {
   const invalidateDraftList = () =>
     qc.invalidateQueries({ queryKey: agentBuilderSessionKeys.list(wsId) });
 
-  const [starting, setStarting] = useState(false);
   const [closing, setClosing] = useState(false);
   const [switchingRuntime, setSwitchingRuntime] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -98,34 +97,6 @@ export function useBuilderSession(options: {
   const missing =
     messagesQuery.error instanceof ApiError &&
     messagesQuery.error.status === 404;
-
-  /** Creates the conversation. Returns its id so the caller can address it. */
-  const start = async (
-    runtimeId: string,
-    model: string,
-  ): Promise<string | null> => {
-    setStarting(true);
-    setError(null);
-    try {
-      const session = await api.createAgentBuilderSession({
-        runtime_id: runtimeId,
-        model: model.trim() || undefined,
-      });
-      if (!session.session_id) {
-        throw new Error(t(($) => $.creation_studio.builder.start_failed));
-      }
-      return session.session_id;
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : t(($) => $.creation_studio.builder.start_failed),
-      );
-      return null;
-    } finally {
-      setStarting(false);
-    }
-  };
 
   /**
    * Destroys the conversation. Returns false when the server refused, so the
@@ -327,7 +298,6 @@ export function useBuilderSession(options: {
     messagesLoading: messagesQuery.isLoading,
     pendingTask: pendingQuery.data,
     pending,
-    starting,
     closing,
     switchingRuntime,
     error,
@@ -339,7 +309,6 @@ export function useBuilderSession(options: {
       }
       handleDurableRestoreApplied();
     },
-    start,
     destroy,
     archiveAfterCreate,
     switchRuntime,

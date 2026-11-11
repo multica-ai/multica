@@ -271,6 +271,17 @@ multica runtime profile create --display-name "社内 Claude ラッパー" \
 
 仕組みとカスタムプロファイルについては[デーモンとランタイム](/daemon-runtimes)を参照してください。
 
+## 環境 [#environments]
+
+```bash
+multica env start web
+multica env start web --wait=false
+multica env list
+multica env stop web
+```
+
+`multica env`（長い形式は `multica environment`）は、リポジトリが `.multica/environments.toml` に宣言した環境を起動します。環境はデーモンが管理するため、実行が終わっても動き続け、タスクのサイドバーに表示され、TTL が切れると停止します。`start` は環境が応答するまで待ってから URL を表示します。これらのコマンドは実行中のタスクの認証情報を使うので、エージェントの実行の中でしか使えません。自分のコンピューターからはタスクのサイドバーを使ってください。ファイルの形式と例は[環境](/environments)を参照してください。
+
 ## プロジェクト、ワークスペース、オートパイロット
 
 ```bash
@@ -304,6 +315,7 @@ multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1" --timezone Asia/
 | `workspace` | ワークスペースの作成、表示、切り替えとメンバーの招待 |
 | `repo` | ワークスペースのリポジトリを管理し、ローカルにチェックアウト |
 | `daemon`、`runtime` | ローカルデーモンの起動と停止。ランタイムの表示と管理 |
+| `env` | リポジトリが宣言した環境の起動・停止・一覧（エージェントの実行の中でのみ） |
 | `attachment` | 添付ファイルのアップロードとダウンロード |
 | `user profile` | 現在のユーザーのプロフィールを表示・更新 |
 | `auth`、`login`、`setup` | サインイン、認証状態の確認、接続の初期化 |
@@ -423,6 +435,7 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 | `runtime` | `list/usage/activity/update/rename/delete` | ランタイムを表示・管理 | `usage`: `--days`（既定 90、最大 365）；`update`: `--target-version`（必須）、`--wait`；`delete`: `--cascade`（紐付くエージェントを解除してデータを保持し、その実行をキャンセル） |
 | | `profile list/create/update/delete` | カスタムランタイムプロファイルを管理 | `create`: `--display-name`、`--command-name`（いずれも必須）、`--runtime-type`（または古い `--protocol-family`）、`--description`；`update`: `--enabled` |
 | | `profile set-path/unset-path <profile-id>` | ローカルの実行ファイルパスを固定（ローカルのみ有効。サーバーには送信されません） | |
+| `env` | `start <name>` / `stop <name>` / `list` | このタスクの宣言された環境を起動・停止・一覧表示。エージェントの実行の中でのみ使えます。[環境](/environments)を参照 | `start`: `--wait`（既定 `true`）；すべて: `--output`（`table` または `json`） |
 
 ### Additional
 
