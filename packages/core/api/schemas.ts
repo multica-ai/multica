@@ -105,7 +105,6 @@ import type {
   User,
   WebhookDelivery,
   WorkspaceMcpServer,
-  VCSConnection,
 } from "../types";
 import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
 import type { CreateFeedbackResponse } from "../feedback/types";
@@ -4274,28 +4273,6 @@ export const RuntimeProfileSchema = z
     runtime_type: profile.runtime_type || profile.protocol_family,
   }));
 export const RuntimeProfileListSchema = z.array(RuntimeProfileSchema);
-
-export const VCSConnectionSchema = z.object({
-  id: z.string(),
-  workspace_id: z.string(),
-  provider: z.string(),
-  instance_url: z.string(),
-  account_login: z.string().catch(""),
-  webhook_url: z.string().catch(""),
-  webhook_path: z.string().catch(""),
-  created_at: z.string().catch(""),
-});
-
-export const EMPTY_VCS_CONNECTION: VCSConnection = {
-  id: "",
-  workspace_id: "",
-  provider: "forgejo",
-  instance_url: "",
-  account_login: "",
-  webhook_url: "",
-  webhook_path: "",
-  created_at: "",
-};
 
 // Receipt evidence is optional across mixed server/desktop versions. A malformed
 // timestamp must never render the binding as verified.
