@@ -143,7 +143,7 @@ export function ProjectRowActions({
     <>
       <CollectionRowMenu
         label={t(($) => $.page.row_menu)}
-        contentClassName="w-52"
+        contentClassName="w-auto min-w-52"
         triggerHidden={triggerHidden}
       >
         {leading && (
