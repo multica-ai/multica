@@ -89,9 +89,10 @@ describe("issue pull request chips", () => {
 
     const chips = await screen.findAllByTestId("issue-pull-request-chip");
     expect(chips.map((chip) => chip.textContent)).toEqual(["Mergedwidget#3", "Draftapi#2"]);
-    expect(chips[0]).toHaveAttribute("href", "https://github.com/acme/widget/pull/3");
-    expect(chips[0]).toHaveAttribute("target", "_blank");
-    fireEvent.click(chips[0]);
+    const mergedLink = screen.getByRole("link", { name: /Merged/ });
+    expect(mergedLink).toHaveAttribute("href", "https://github.com/acme/widget/pull/3");
+    expect(mergedLink).toHaveAttribute("target", "_blank");
+    fireEvent.click(mergedLink);
     expect(onRowClick).not.toHaveBeenCalled();
     expect(screen.getByText("+1")).toBeInTheDocument();
     expect(screen.queryByText(/#9/)).not.toBeInTheDocument();
