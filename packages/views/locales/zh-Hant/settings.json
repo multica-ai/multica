@@ -721,7 +721,6 @@
     },
     "delete_dialog": {
       "title": "刪除屬性？",
-      "description_one": "永久刪除「{{name}}」？{{count}} 個任務上的值也會被移除。此操作無法復原。",
       "description_other": "永久刪除「{{name}}」？{{count}} 個任務上的值也會被移除。此操作無法復原。",
       "cancel": "取消",
       "confirm": "刪除屬性",

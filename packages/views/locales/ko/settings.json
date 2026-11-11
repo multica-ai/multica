@@ -693,7 +693,6 @@
     },
     "delete_dialog": {
       "title": "속성을 삭제할까요?",
-      "description_one": "“{{name}}” 속성을 영구 삭제할까요? {{count}}개 이슈의 값도 삭제됩니다. 이 작업은 되돌릴 수 없습니다.",
       "description_other": "“{{name}}” 속성을 영구 삭제할까요? {{count}}개 이슈의 값도 삭제됩니다. 이 작업은 되돌릴 수 없습니다.",
       "cancel": "취소",
       "confirm": "속성 삭제",

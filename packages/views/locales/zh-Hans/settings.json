@@ -721,7 +721,6 @@
     },
     "delete_dialog": {
       "title": "删除属性？",
-      "description_one": "永久删除“{{name}}”？{{count}} 个任务上的值也会被移除。此操作无法撤销。",
       "description_other": "永久删除“{{name}}”？{{count}} 个任务上的值也会被移除。此操作无法撤销。",
       "cancel": "取消",
       "confirm": "删除属性",

@@ -693,7 +693,6 @@
     },
     "delete_dialog": {
       "title": "プロパティを削除しますか？",
-      "description_one": "「{{name}}」を完全に削除しますか？{{count}} 件のタスクの値も削除されます。この操作は元に戻せません。",
       "description_other": "「{{name}}」を完全に削除しますか？{{count}} 件のタスクの値も削除されます。この操作は元に戻せません。",
       "cancel": "キャンセル",
       "confirm": "プロパティを削除",
