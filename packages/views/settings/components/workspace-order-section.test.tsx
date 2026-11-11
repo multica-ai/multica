@@ -8,6 +8,10 @@ import { workspaceKeys } from "@multica/core/workspace/queries";
 import { renderWithI18n } from "../../test/i18n";
 import { WorkspaceOrderSection } from "./workspace-order-section";
 
+vi.mock("@multica/core/api", () => ({
+  api: { listWorkspaces: vi.fn(), setWorkspacePinned: vi.fn(), getBaseUrl: () => "http://localhost" },
+}));
+
 vi.mock("../../navigation", () => ({
   useNavigation: () => ({ searchParams: new URLSearchParams(), pathname: "/acme/settings", replace: vi.fn() }),
 }));
@@ -26,7 +30,9 @@ it("renders the shared order, labels drag handles, and pins a workspace", async 
   const pin = vi.spyOn(api, "setWorkspacePinned").mockResolvedValue({ pinned_at: "2026-04-01T00:00:00Z" });
   renderWithI18n(<QueryClientProvider client={qc}><WorkspaceOrderSection /></QueryClientProvider>);
   const list = screen.getByRole("list", { name: "Other workspaces" });
-  expect(within(list).getAllByRole("listitem").map((row) => row.textContent)).toEqual(["Beta", "Alpha"]);
+  const items = within(list).getAllByRole("listitem");
+  expect(items[0]).toHaveTextContent("Beta");
+  expect(items[1]).toHaveTextContent("Alpha");
   expect(screen.getByRole("button", { name: "Reorder Beta" })).toBeVisible();
   await userEvent.click(within(list).getAllByRole("button", { name: "Pin workspace" })[0]!);
   expect(pin).toHaveBeenCalledWith("Beta", true);
