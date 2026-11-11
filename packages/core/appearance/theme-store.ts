@@ -18,8 +18,8 @@ export type { StoreTheme, StoreThemeMode };
 export const themeStoreKeys = {
   all: ["theme-store"] as const,
   themes: () => [...themeStoreKeys.all, "themes"] as const,
-  screenshot: (id: string, version: string, mode: StoreThemeMode) =>
-    [...themeStoreKeys.all, "screenshot", id, version, mode] as const,
+  screenshot: (id: string, version: string, mode: StoreThemeMode, revision: string | null) =>
+    [...themeStoreKeys.all, "screenshot", id, version, mode, revision] as const,
 };
 
 export const storeThemesOptions = (enabled: boolean) =>
@@ -30,15 +30,21 @@ export const storeThemesOptions = (enabled: boolean) =>
     staleTime: 5 * 60 * 1000,
   });
 
-/** A version's screenshot never changes, so it is fetched once. */
-export const storeThemeScreenshotOptions = (theme: StoreTheme, mode: StoreThemeMode) =>
-  queryOptions({
-    queryKey: themeStoreKeys.screenshot(theme.id, theme.version, mode),
-    queryFn: ({ signal }) => api.getStoreThemeScreenshot(theme.id, mode, signal),
+/**
+ * A screenshot revision never changes, so it is fetched once. The registry
+ * re-renders screenshots without a new release, which the list reports as a
+ * new revision.
+ */
+export const storeThemeScreenshotOptions = (theme: StoreTheme, mode: StoreThemeMode) => {
+  const revision = theme.screenshot_revisions?.[mode] ?? null;
+  return queryOptions({
+    queryKey: themeStoreKeys.screenshot(theme.id, theme.version, mode, revision),
+    queryFn: ({ signal }) => api.getStoreThemeScreenshot(theme.id, mode, revision ?? undefined, signal),
     enabled: theme.screenshots.includes(mode),
     staleTime: Infinity,
     gcTime: 30 * 60 * 1000,
   });
+};
 
 /**
  * Where a store theme stands on this device:
