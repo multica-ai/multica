@@ -224,6 +224,33 @@ func (h *Handler) ListSquads(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// ListInvolvedSquadIDs returns the ids of the squads whose issues count as the
+// caller's agents' work, so clients can evaluate the "my agents" relation on
+// rows they filter themselves.
+func (h *Handler) ListInvolvedSquadIDs(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceIDFromURL(r, "workspaceId"), "workspace_id")
+	if !ok {
+		return
+	}
+	ids, err := h.Queries.ListInvolvedSquadIDs(r.Context(), db.ListInvolvedSquadIDsParams{
+		WorkspaceID: wsUUID,
+		UserID:      parseUUID(userID),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list involved squads")
+		return
+	}
+	squadIDs := make([]string, len(ids))
+	for i, id := range ids {
+		squadIDs[i] = uuidToString(id)
+	}
+	writeJSON(w, http.StatusOK, map[string][]string{"squad_ids": squadIDs})
+}
+
 func (h *Handler) CreateSquad(w http.ResponseWriter, r *http.Request) {
 	workspaceID := workspaceIDFromURL(r, "workspaceId")
 	// Any workspace member can create a squad and becomes its creator

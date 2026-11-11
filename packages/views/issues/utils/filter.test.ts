@@ -829,15 +829,45 @@ describe("relation filters", () => {
     ).toEqual(["2", "3", "4"]);
   });
 
-  it("answers subscribed without the viewer's agents, leaving only my_agents open", () => {
+  describe("my_agents with squads", () => {
+    const mine = makeIssue({ id: "mine", assignee_type: "squad", assignee_id: "my-squad", priority: "medium" });
+    const theirs = makeIssue({ id: "theirs", assignee_type: "squad", assignee_id: "their-squad", priority: "medium" });
+    const agent = makeIssue({ id: "agent", assignee_type: "agent", assignee_id: "a-1", priority: "medium" });
+    const viewer = { userId: "u-1", myAgentIds: new Set(["a-1"]), mySquadIds: new Set(["my-squad"]) };
+    const squadIds = (filters: Partial<IssueFilters>) =>
+      filterIssues([mine, theirs, agent], { ...NO_FILTER, relationContext: viewer, ...filters }).map((i) => i.id);
+
+    it("keeps the viewer's squads and drops the others", () => {
+      expect(squadIds({ relationFilters: ["my_agents"] })).toEqual(["mine", "agent"]);
+    });
+
+    it("negated, keeps only the other squads", () => {
+      expect(squadIds({ relationFilters: ["my_agents"], negatedFilters: ["relation"] })).toEqual(["theirs"]);
+    });
+
+    it("keeps a squad row an OR sibling does not match", () => {
+      const advancedFilter = createFilterGroup("any", [
+        createFilterCondition("relation", ["my_agents"]),
+        createFilterCondition("priority", ["urgent"]),
+      ]);
+      expect(squadIds({ advancedFilter })).toEqual(["mine", "agent"]);
+    });
+
+    it("leaves squad rows to the server until the viewer's squads load", () => {
+      const agentsOnly = { userId: "u-1", myAgentIds: new Set(["a-1"]) };
+      expect(squadIds({ relationContext: agentsOnly, relationFilters: ["my_agents"] })).toEqual([
+        "mine",
+        "theirs",
+        "agent",
+      ]);
+    });
+  });
+
+  it("answers subscribed without the viewer's agents, leaving only agent rows of my_agents open", () => {
     const subscriptionsOnly = { userId: "u-1", subscribedIssueIds: new Set(["3"]) };
     expect(ids({ relationContext: subscriptionsOnly, relationFilters: ["subscribed"] })).toEqual(["3"]);
-    expect(ids({ relationContext: subscriptionsOnly, relationFilters: ["my_agents"] })).toEqual([
-      "1",
-      "2",
-      "3",
-      "4",
-    ]);
+    // Member and unassigned rows are never an agent's work.
+    expect(ids({ relationContext: subscriptionsOnly, relationFilters: ["my_agents"] })).toEqual(["2"]);
   });
 });
 

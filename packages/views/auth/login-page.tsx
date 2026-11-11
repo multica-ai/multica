@@ -66,6 +66,7 @@ interface LoginPageProps {
 
 export function redirectToCliCallback(url: string, token: string, state: string) {
   const separator = url.includes("?") ? "&" : "?";
+  // eslint-disable-next-line no-restricted-syntax -- CLI login runs in the web app only; the token must reach the CLI's local listener in this tab
   window.location.href = `${url}${separator}token=${encodeURIComponent(token)}&state=${encodeURIComponent(state)}`;
 }
 
@@ -288,6 +289,7 @@ export function LoginPage({
       prompt: "select_account",
     });
     if (google.state) params.set("state", google.state);
+    // eslint-disable-next-line no-restricted-syntax -- web OAuth redirect; Desktop passes onGoogleLogin and returns above
     window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
   };
 

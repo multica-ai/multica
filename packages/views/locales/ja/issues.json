@@ -55,7 +55,7 @@
   },
   "relation_filter_error": {
     "title": "「自分との関係」フィルターを読み込めませんでした",
-    "hint": "「自分が購読中」または「自分のエージェントが担当」で絞り込んだタスクは、購読とエージェントを読み込むまで表示できません。"
+    "hint": "「自分が購読中」または「マイエージェントの作業」で絞り込んだタスクは、購読とエージェントを読み込むまで表示できません。"
   },
   "source_context": {
     "create_action": "このコメントからサブタスクを作成",
@@ -192,7 +192,7 @@
     "section_relation": "自分との関係",
     "relation_assigned": "自分が担当",
     "relation_created": "自分が作成",
-    "relation_my_agents": "自分のエージェントが担当",
+    "relation_my_agents": "マイエージェントの作業",
     "relation_subscribed": "自分が購読中",
     "section_agent_status": "エージェントの状態",
     "agent_status_running": "実行中",
@@ -635,7 +635,10 @@
     "wakeup_checkin": "サイレントチェック：{{note}}",
     "wakeup_checkin_coalesced_other": "サイレントチェック {{count}} 回 · 最新：{{note}}",
     "wakeup_chip_created_by": "{{name}} が作成",
-    "wakeup_chip_system": "システムルール"
+    "wakeup_chip_system": "システムルール",
+    "environment_stopped": "環境 {{name}} を停止しました",
+    "environment_restarted": "環境 {{name}} を再起動しました",
+    "environment_started": "環境 {{name}} を起動しました"
   },
   "comment": {
     "add_reaction": "リアクションを追加",
@@ -1071,7 +1074,7 @@
     "variant_my_any": "何らかの関わり",
     "variant_my_assigned": "自分に割り当て",
     "variant_my_created": "自分が作成",
-    "variant_my_involved": "関与中"
+    "variant_my_involved": "マイエージェントの作業"
   },
   "plugins": {
     "panels": "Plugins",
@@ -1847,7 +1850,9 @@
       "running": "実行中",
       "exited": "終了",
       "stopped": "停止",
-      "unreachable": "応答なし"
+      "unreachable": "応答なし",
+      "stopping": "停止中",
+      "preparing": "準備中"
     },
     "expires_in_minutes_other": "{{count}}分後に期限切れ",
     "expires_in_hours_other": "{{count}}時間後に期限切れ",
@@ -1862,6 +1867,85 @@
     "open": "開く",
     "copy_url": "URL をコピー",
     "copied": "URL をコピーしました",
-    "copy_failed": "URL をコピーできませんでした"
+    "copy_failed": "URL をコピーできませんでした",
+    "offline": "オフライン",
+    "machine_offline": "{{machine}} はオフラインです",
+    "more_actions": "その他の操作",
+    "view_logs": "ログを表示",
+    "restart": "再起動",
+    "stop": "停止",
+    "stop_confirm_item": "停止…",
+    "run_first": "初回の実行",
+    "run_nth_other": "{{count}} 回目の実行",
+    "someone": "誰か",
+    "started_by": "{{name}} が起動",
+    "restarted_by": "{{name}} が再起動",
+    "started_by_agent_in_run": "{{name}} が「{{run}}」で起動",
+    "stopped_by": "{{name}} が停止",
+    "stopped_on_expiry": "期限切れで自動停止",
+    "exited_ago": "{{time}}に終了",
+    "exit_code": "終了コード {{code}}",
+    "detected_label": "自動検出したサービス · {{name}}",
+    "detected_no_logs": "このサービスは環境設定から起動されていないため、ログを見ることも再起動することもできません。",
+    "offline_hint": "このマシンがオンラインに戻ると操作できます。",
+    "outdated_hint": "このマシンの Multica を更新すると、ここから操作できます。",
+    "no_permission_hint": "このマシンを使えるメンバーだけが停止・再起動できます。",
+    "waiting_machine": "マシンの応答を待っています",
+    "waiting_ready": "サービスの準備を待っています",
+    "no_response": "応答なし",
+    "action_failed": {
+      "stop": "停止できませんでした",
+      "restart": "再起動できませんでした",
+      "start": "起動できませんでした"
+    },
+    "stop_confirm_title": "{{name}} を停止しますか？",
+    "stop_confirm_body": "このサービス（{{process}}）は自動検出されたもので、環境設定から起動されたものではありません。停止するとここからは再起動できず、エージェントに起動し直してもらう必要があります。",
+    "cancel": "キャンセル",
+    "preparing_title": "{{name}} が環境を準備しています",
+    "preparing_hint": "起動するとここに表示されます",
+    "start_menu": {
+      "trigger": "環境を起動",
+      "note": "プロジェクトの環境設定に従い、このマシンでの最新の実行のコードで起動します。",
+      "no_permission": "マシンを使えるメンバーだけが、そのマシンで環境を起動できます。",
+      "nothing_to_start": "このタスクはまだ実行されていないか、以前の実行のコードが削除されているため、直接起動できる環境はありません。",
+      "ask_agent": "{{name}} に起動を依頼",
+      "ask_any_agent": "エージェントに起動を依頼",
+      "new_run": "新しい実行",
+      "preparing": "準備中",
+      "ask_agent_hint": "{{name}} がこのタスクのコードを用意してから環境を起動します。プロジェクトに環境設定がない場合は、起動方法を自分で判断します。",
+      "ask_any_agent_hint": "エージェントがこのタスクのコードを用意してから環境を起動します。プロジェクトに環境設定がない場合は、起動方法を自分で判断します。",
+      "ask_failed": "エージェントに依頼できませんでした",
+      "agent_instruction": "環境を起動してください：このタスクのコードを用意し、`multica env start` でプロジェクトに設定された環境を起動します。環境設定がない場合は、起動方法を自分で判断してください。サービスは動かしたままにして、アクセス先の URL を返信してください。"
+    },
+    "log": {
+      "title": "{{name}} · ログ",
+      "filter": "ログを絞り込む",
+      "wrap": "折り返し",
+      "follow": "最新を追う",
+      "copy": "コピー",
+      "copied": "ログをコピーしました",
+      "copy_failed": "ログをコピーできませんでした",
+      "refresh": "更新",
+      "footer_other": "直近 {{count}} 行を表示 · {{time}} に更新",
+      "loading": "ログを読み込んでいます…",
+      "empty": "まだ出力がありません",
+      "no_match": "一致する行はありません",
+      "no_response": "マシンが応答しませんでした",
+      "failed": "ログを読み込めませんでした：{{error}}",
+      "offline_excerpt": "このマシンはオフラインです。終了前に最後に出力された内容を表示しています。",
+      "offline_empty": "このマシンがオンラインに戻るとログを表示できます。",
+      "exit_divider": "{{time}} に終了",
+      "exit_divider_code": "{{time}} に終了 · 終了コード {{code}}",
+      "stopped_divider": "{{time}} に停止"
+    },
+    "app_desktop_hint": "デスクトップアプリです。実行中のマシンの Multica Desktop からウィンドウに切り替えられます。",
+    "app_remote_hint": "{{machine}} で実行中です。そのマシンの Multica Desktop からウィンドウに切り替えられます。",
+    "focus": "ウィンドウに切り替え",
+    "focus_gone": "{{name}} はもう実行されていません",
+    "focus_unsupported": "このマシンのデーモンはまだアプリのウィンドウに切り替えられません。Multica を更新してもう一度お試しください。",
+    "focus_unavailable": "ローカルのデーモンが実行されていません",
+    "focus_failed": "{{name}} に切り替えられませんでした",
+    "retry": "再試行",
+    "dismiss": "閉じる"
   }
 }

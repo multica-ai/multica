@@ -469,7 +469,7 @@ export function projectGanttIssuesOptions(
   });
 }
 
-/** Both list endpoints cap a page here, so a longer sidebar list is fetched in pages. */
+/** The table endpoint caps a page here, so a longer sidebar list is fetched in pages. */
 const SIDEBAR_MAX_PAGE = 100;
 
 async function listSidebarTableIssues(query: IssueTableQuerySpec, limit: number): Promise<ListIssuesResponse> {
@@ -492,22 +492,6 @@ async function listSidebarTableIssues(query: IssueTableQuerySpec, limit: number)
   return { issues, total };
 }
 
-async function listSidebarIssues(params: ListIssuesParams, limit: number): Promise<ListIssuesResponse> {
-  const issues: Issue[] = [];
-  let total = 0;
-  do {
-    const page = await api.listIssues({
-      ...params,
-      limit: Math.min(limit - issues.length, SIDEBAR_MAX_PAGE),
-      offset: issues.length,
-    });
-    issues.push(...page.issues);
-    total = page.total;
-    if (page.issues.length === 0) break;
-  } while (issues.length < limit && issues.length < total);
-  return { issues, total };
-}
-
 /** The first `limit` issues of a sidebar list, with the filtered total. */
 export function sidebarIssuesOptions(
   wsId: string,
@@ -517,10 +501,7 @@ export function sidebarIssuesOptions(
 ) {
   return queryOptions({
     queryKey: issueKeys.sidebar(wsId, source, request, limit),
-    queryFn: () =>
-      "table" in request
-        ? listSidebarTableIssues(request.table, limit)
-        : listSidebarIssues(request, limit),
+    queryFn: () => listSidebarTableIssues(request.table, limit),
   });
 }
 
@@ -725,13 +706,21 @@ export function issueSubscribersOptions(issueId: string) {
 }
 
 // Reports arrive over realtime; the interval only re-derives "unreachable"
-// once a daemon goes quiet, which no event announces.
+// once a daemon goes quiet, and a command expiring when its machine never
+// answers, which no event announces.
 export function issueEnvironmentsOptions(wsId: string, issueId: string) {
   return queryOptions({
     queryKey: issueKeys.environments(wsId, issueId),
     queryFn: () => api.listIssueEnvironments(issueId),
     enabled: !!wsId && !!issueId,
-    refetchInterval: 60_000,
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      const pending = !!data && (
+        data.pending_starts.length > 0 ||
+        data.environments.some((env) => env.pending_action?.status === "pending")
+      );
+      return pending ? 5_000 : 60_000;
+    },
   });
 }
 

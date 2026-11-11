@@ -15,12 +15,12 @@ import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-st
 import { spaceForPath } from "@multica/core/paths";
 import { pinListOptions } from "@multica/core/pins/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
-import type { Issue, IssueTableRowsResponse, PinnedItem, Project } from "@multica/core/types";
+import type { Issue, IssueTableRowsRequest, IssueTableRowsResponse, PinnedItem, Project } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 import { KeptRowsRelease, WorkPanel } from "./work-panel";
 
-const apiMock = vi.hoisted(() => ({ listIssueTableRows: vi.fn(), listIssues: vi.fn(), getIssue: vi.fn() }));
+const apiMock = vi.hoisted(() => ({ listIssueTableRows: vi.fn(), getIssue: vi.fn() }));
 const actions = vi.hoisted(() => ({
   sidebar: {
     items: [
@@ -221,7 +221,6 @@ beforeEach(() => {
     total: 2,
     next_cursor: null,
   } as unknown as IssueTableRowsResponse);
-  apiMock.listIssues.mockResolvedValue({ issues: [ISSUE, OTHER], total: 2 });
   // The issue page never finishes loading, so the panel cannot lean on it.
   apiMock.getIssue.mockReturnValue(new Promise<Issue>(() => {}));
 });
@@ -431,10 +430,10 @@ describe("WorkPanel and the open issue's project", () => {
 
   it("lists an issue lit in a view under its project once the project is expanded", async () => {
     // The open issue is on the project's second page.
-    apiMock.listIssues.mockImplementation(async ({ offset }: { offset: number }) => ({
-      issues: offset ? [] : [OTHER],
-      total: 2,
-    }));
+    const builtinRows = await apiMock.listIssueTableRows();
+    apiMock.listIssueTableRows.mockImplementation(async ({ query }: IssueTableRowsRequest) =>
+      query.scope.kind === "project" ? { rows: [{ issue: OTHER }], total: 2, next_cursor: null } : builtinRows,
+    );
     const qc = renderPanel("/acme/my-issues", [], [PROJECT]);
     await openInProject(qc);
     const inMyIssues = await waitFor(() => {
@@ -458,7 +457,7 @@ describe("WorkPanel and the open issue's project", () => {
 
   it("lists the open issue last under its expanded project when no page has it", async () => {
     useSidebarTreeStore.setState({ expanded: [PROJECT_SOURCE] });
-    apiMock.listIssues.mockResolvedValue({ issues: [OTHER], total: 1 });
+    apiMock.listIssueTableRows.mockResolvedValue({ rows: [{ issue: OTHER }], total: 1, next_cursor: null });
     const qc = renderPanel(`/acme/issues/${ISSUE.id}`, [], [PROJECT]);
     await openInProject(qc);
 

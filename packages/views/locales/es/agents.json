@@ -65,15 +65,6 @@
     "search_runtime_filtered": "Ningún agente en \"{{machine}}\" coincide con \"{{query}}\".",
     "runtime_filtered": "No hay agentes en \"{{machine}}\"."
   },
-  "runtime_filter": {
-    "all": "Todos los runtimes",
-    "section_local": "Local",
-    "section_remote": "Remoto",
-    "section_cloud": "Nube",
-    "agent_count_one": "{{count}} agente",
-    "agent_count_other": "{{count}} agentes",
-    "empty": "Todavía no hay máquinas"
-  },
   "columns": {
     "agent": "Agente",
     "status": "Estado",
@@ -207,7 +198,6 @@
     "rename_required": "El nombre es obligatorio",
     "edit_description_title": "Editar descripción",
     "description_placeholder": "¿Qué hace este agente?",
-    "save": "Guardar",
     "cancel": "Cancelar",
     "qoder_execution_note": "El modelo, las herramientas y las skills se configuran en el agente desde Qoder Cloud Agents."
   },
@@ -216,12 +206,7 @@
     "attention_queued_one": "{{count}} ejecución está en cola mientras el runtime no está disponible.",
     "attention_queued_other": "{{count}} ejecuciones están en cola mientras el runtime no está disponible."
   },
-  "skill_attach": {
-    "trigger_aria": "Adjuntar una skill del espacio de trabajo",
-    "trigger_label": "Adjuntar"
-  },
   "pickers": {
-    "concurrency_tooltip": "Concurrencia · {{value}} ejecuciones simultáneas máx.",
     "concurrency_range": "Ejecuciones simultáneas máx. ({{min}}-{{max}})",
     "runtime_none": "Sin runtime",
     "runtime_tooltip": "Runtime · {{name}} · {{status}}",
@@ -445,23 +430,17 @@
     }
   },
   "create_dialog": {
-    "title_create": "Crear agente",
-    "title_duplicate": "Duplicar agente",
-    "description_duplicate": "Crea un agente nuevo basado en \"{{name}}\". Se copian las instrucciones, el entorno y las skills.",
     "name_label": "Nombre",
     "name_placeholder": "p. ej., Agente de investigación profunda",
     "description_label": "Descripción",
     "description_placeholder": "¿Qué hace este agente?",
-    "visibility_label": "Visibilidad",
     "access": {
-      "label": "Acceso",
       "private_title": "Privado",
       "private_desc": "Solo tú puedes ejecutar este agente",
       "public_title": "Público",
       "public_desc": "Elige quién puede ejecutar este agente",
       "public_workspace_option": "Todos en este espacio de trabajo",
       "public_members_group": "Personas concretas",
-      "public_members_empty": "No hay miembros del espacio de trabajo para elegir",
       "public_targets_empty_hint": "Elige al menos una opción abajo; si no, el agente seguirá siendo privado."
     },
     "runtime_label": "Runtime",
@@ -476,17 +455,10 @@
     "runtime_no_results": "No hay máquinas coincidentes",
     "runtime_group_online": "{{online}}/{{total}} en línea",
     "duplicate_copy_suffix": " (Copia)",
-    "create": "Crear",
-    "creating": "Creando...",
-    "cancel": "Cancelar",
-    "create_failed_toast": "No se ha podido crear el agente",
     "skill_attach_failed_toast": "Agente creado, pero falló al adjuntar las skills: {{error}}",
     "squad_join_failed_toast": "El agente \"{{name}}\" se creó pero no pudo unirse al squad: {{error}}. Puedes añadirlo manualmente desde Miembros.",
     "instructions": {
       "label": "Instrucciones",
-      "placeholder_blank": "Haz clic para escribir las instrucciones…",
-      "placeholder_duplicate": "Haz clic para ver o editar las instrucciones duplicadas",
-      "collapse": "Contraer",
       "editor_placeholder": "Escribe qué debe hacer este agente, en qué centrarse, qué evitar…"
     },
     "skills_section": {

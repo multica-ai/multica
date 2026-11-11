@@ -28,7 +28,7 @@ vi.mock("@tanstack/react-query", () => ({
     refetch: vi.fn(),
     ...mocks.queries[(options.queryKey ?? []).join("/")],
   }),
-  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+  useQueryClient: () => ({ invalidateQueries: vi.fn(), setQueryData: vi.fn() }),
   useMutation: ({ mutationFn }: { mutationFn: (input?: unknown) => Promise<unknown> }) => ({
     mutate: (input?: unknown) => void mutationFn(input),
     mutateAsync: (input?: unknown) => mutationFn(input),
@@ -78,6 +78,23 @@ vi.mock("../../editor/content-editor", () => ({
       aria-label="Instructions editor"
       value={value}
       onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => onUpdate(event.target.value)}
+    />
+  ),
+}));
+vi.mock("../../editor/title-editor", () => ({
+  TitleEditor: ({
+    defaultValue,
+    placeholder,
+    onBlur,
+  }: {
+    defaultValue?: string;
+    placeholder?: string;
+    onBlur?: (value: string) => void;
+  }) => (
+    <input
+      aria-label={placeholder}
+      defaultValue={defaultValue}
+      onBlur={(event) => onBlur?.(event.target.value)}
     />
   ),
 }));
@@ -284,6 +301,78 @@ describe("SquadDetailPage", () => {
     expect(mocks.api.updateSquad).toHaveBeenCalledWith("sq-1", { instructions: "Ship small." });
   });
 
+  it("renames the squad in place and keeps the name when it is cleared", async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    const name = screen.getByRole("textbox", { name: "Squad name" });
+    await user.clear(name);
+    await user.type(name, "  Night Shift ");
+    await user.tab();
+    expect(mocks.api.updateSquad).toHaveBeenCalledWith("sq-1", { name: "Night Shift" });
+
+    mocks.api.updateSquad.mockClear();
+    await user.clear(screen.getByRole("textbox", { name: "Squad name" }));
+    await user.tab();
+    expect(mocks.api.updateSquad).not.toHaveBeenCalled();
+    expect(screen.getByRole("textbox", { name: "Squad name" })).toHaveValue("Strike Team");
+  });
+
+  it("discards a name edit on Escape", async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    const name = screen.getByRole("textbox", { name: "Squad name" });
+    await user.type(name, " typo");
+    await user.keyboard("{Escape}");
+    await user.tab();
+    expect(mocks.api.updateSquad).not.toHaveBeenCalled();
+    expect(screen.getByRole("textbox", { name: "Squad name" })).toHaveValue("Strike Team");
+  });
+
+  it("edits the description in place: blur saves, Escape discards", async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByRole("button", { name: "Ships the risky stuff" }));
+    const field = screen.getByRole("textbox", { name: "What is this squad responsible for?" });
+    expect(field).toHaveFocus();
+    await user.type(field, " carefully");
+    await user.tab();
+    expect(mocks.api.updateSquad).toHaveBeenCalledWith("sq-1", {
+      description: "Ships the risky stuff carefully",
+    });
+
+    mocks.api.updateSquad.mockClear();
+    await user.click(screen.getByRole("button", { name: /Ships the risky stuff/ }));
+    await user.type(screen.getByRole("textbox", { name: "What is this squad responsible for?" }), " never");
+    await user.keyboard("{Escape}");
+    expect(mocks.api.updateSquad).not.toHaveBeenCalled();
+    expect(screen.queryByRole("textbox", { name: "What is this squad responsible for?" })).toBeNull();
+  });
+
+  it("keeps a description draft whose save failed so it can be retried", async () => {
+    const user = userEvent.setup();
+    mocks.api.updateSquad.mockRejectedValueOnce(new Error("offline"));
+    renderPage();
+
+    await user.click(screen.getByRole("button", { name: "Ships the risky stuff" }));
+    await user.type(screen.getByRole("textbox", { name: "What is this squad responsible for?" }), " carefully");
+    await user.tab();
+    expect(mocks.api.updateSquad).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole("button", { name: "Ships the risky stuff" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Ships the risky stuff" }));
+    expect(screen.getByRole("textbox", { name: "What is this squad responsible for?" })).toHaveValue(
+      "Ships the risky stuff carefully",
+    );
+    await user.tab();
+    expect(mocks.api.updateSquad).toHaveBeenCalledTimes(2);
+    expect(mocks.api.updateSquad).toHaveBeenLastCalledWith("sq-1", {
+      description: "Ships the risky stuff carefully",
+    });
+  });
+
   it("lists the squad's properties in the panel", () => {
     renderPage();
 
@@ -301,6 +390,9 @@ describe("SquadDetailPage", () => {
     renderPage();
 
     expect(screen.getByRole("button", { name: "Assign work" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Strike Team" })).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Squad name" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Ships the risky stuff" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Add member" })).toBeNull();
     expect(within(section("Instructions")).queryByRole("button", { name: "Edit" })).toBeNull();
     expect(screen.queryByTestId("avatar-upload")).toBeNull();

@@ -4652,6 +4652,14 @@ func (d *Daemon) handlePendingWorkHint(runtimeID, kind string) {
 		// Not one of ours (stale relay fanout, or the runtime was just pruned).
 		return
 	}
+	// Environment commands have their own claim, and are answered by a member
+	// waiting in the sidebar, so they skip the heartbeat and its rate limit.
+	if kind == protocol.PendingWorkKindEnvironmentCommand {
+		if ctx := d.recoveryContext(); ctx.Err() == nil {
+			d.environments.claimCommands(ctx, runtimeID)
+		}
+		return
+	}
 
 	d.pendingWorkMu.Lock()
 	if d.pendingWorkInflight == nil {
@@ -5997,6 +6005,9 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 			}
 			if err := execenv.WriteGCMeta(result.EnvRoot, meta, taskLog); err != nil {
 				taskLog.Warn("write gc meta failed (non-fatal)", "error", err)
+			}
+			if meta.Kind == execenv.GCKindIssue && !meta.LocalDirectory {
+				d.environments.reportDeclared(ctx, task.ID, result.EnvRoot)
 			}
 		}
 	}
