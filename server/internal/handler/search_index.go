@@ -397,7 +397,7 @@ func (h *Handler) GetSearchIndexSnapshot(w http.ResponseWriter, r *http.Request)
 	}
 
 	resp := SearchIndexSnapshotResponse{
-		Issues:          h.searchIndexIssues(ctx, wsUUID, visibleIssues),
+		Issues:          h.searchIndexIssues(ctx, wsUUID, hidden, visibleIssues),
 		Comments:        make([]SearchIndexComment, 0, len(comments)),
 		Projects:        searchIndexProjects(visibleProjects(hidden, projects)),
 		NextAfterNumber: nextAfterNumber,
@@ -550,7 +550,7 @@ func (h *Handler) ListSearchIndexChanges(w http.ResponseWriter, r *http.Request)
 	}
 
 	resp := SearchIndexChangesResponse{
-		Issues:   h.searchIndexIssues(ctx, wsUUID, issues),
+		Issues:   h.searchIndexIssues(ctx, wsUUID, hidden, issues),
 		Comments: []SearchIndexComment{},
 		Projects: searchIndexProjects(projects),
 		Deleted: SearchIndexDeleted{
@@ -610,7 +610,7 @@ func (h *Handler) ListSearchIndexChanges(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, resp)
 }
 
-func (h *Handler) searchIndexIssues(ctx context.Context, wsUUID pgtype.UUID, issues []db.Issue) []SearchIndexIssue {
+func (h *Handler) searchIndexIssues(ctx context.Context, wsUUID pgtype.UUID, hidden projectaccess.Hidden, issues []db.Issue) []SearchIndexIssue {
 	out := make([]SearchIndexIssue, 0, len(issues))
 	if len(issues) == 0 {
 		return out
@@ -620,7 +620,7 @@ func (h *Handler) searchIndexIssues(ctx context.Context, wsUUID pgtype.UUID, iss
 	for _, is := range issues {
 		originals = appendDuplicateOriginal(originals, is.Status, is.DuplicateOfIssueID)
 	}
-	fill := h.newStatusCategoryFiller(ctx, wsUUID, originals...)
+	fill := h.newStatusCategoryFiller(ctx, wsUUID, hidden, originals...)
 	for _, is := range issues {
 		resp := issueToResponse(is, prefix)
 		fill(&resp)

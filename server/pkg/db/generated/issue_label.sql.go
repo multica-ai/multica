@@ -392,20 +392,27 @@ func (q *Queries) GetLabel(ctx context.Context, arg GetLabelParams) (IssueLabel,
 const listLabels = `-- name: ListLabels :many
 SELECT l.id, l.workspace_id, l.name, l.color, l.created_at, l.updated_at, l.resource_type, l.description,
     CASE l.resource_type
-        WHEN 'issue' THEN (SELECT COUNT(*) FROM issue_to_label x WHERE x.label_id = l.id)
+        -- MUL-8472: issues in private projects the caller cannot see are not counted.
+        WHEN 'issue' THEN (SELECT COUNT(*) FROM issue_to_label x WHERE x.label_id = l.id
+            AND ($1::uuid[] IS NULL OR NOT EXISTS (
+                SELECT 1 FROM issue hidden_issue
+                WHERE hidden_issue.id = x.issue_id
+                  AND hidden_issue.project_id = ANY($1::uuid[])
+            )))
         WHEN 'agent' THEN (SELECT COUNT(*) FROM agent_to_label x WHERE x.label_id = l.id)
         WHEN 'skill' THEN (SELECT COUNT(*) FROM skill_to_label x WHERE x.label_id = l.id)
         ELSE 0
     END::bigint AS usage_count
 FROM issue_label l
-WHERE l.workspace_id = $1::uuid
-  AND l.resource_type = $2::text
+WHERE l.workspace_id = $2::uuid
+  AND l.resource_type = $3::text
 ORDER BY LOWER(name) ASC
 `
 
 type ListLabelsParams struct {
-	WorkspaceID  pgtype.UUID `json:"workspace_id"`
-	ResourceType string      `json:"resource_type"`
+	HiddenProjectIds []pgtype.UUID `json:"hidden_project_ids"`
+	WorkspaceID      pgtype.UUID   `json:"workspace_id"`
+	ResourceType     string        `json:"resource_type"`
 }
 
 type ListLabelsRow struct {
@@ -421,7 +428,7 @@ type ListLabelsRow struct {
 }
 
 func (q *Queries) ListLabels(ctx context.Context, arg ListLabelsParams) ([]ListLabelsRow, error) {
-	rows, err := q.db.Query(ctx, listLabels, arg.WorkspaceID, arg.ResourceType)
+	rows, err := q.db.Query(ctx, listLabels, arg.HiddenProjectIds, arg.WorkspaceID, arg.ResourceType)
 	if err != nil {
 		return nil, err
 	}
