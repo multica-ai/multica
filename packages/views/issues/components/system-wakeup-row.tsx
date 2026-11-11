@@ -4,6 +4,7 @@ import { useId, useState } from "react";
 import { ListChecks, Pencil } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { useUpdateIssueSystemWakeup } from "@multica/core/issues";
+import { useWorkspacePaths } from "@multica/core/paths";
 import type { SystemWakeup } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
@@ -17,6 +18,8 @@ import {
 } from "@multica/ui/components/ui/popover";
 import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { useT } from "../../i18n";
+import { AppLink } from "../../navigation";
+import { wakeupsHref } from "../../autopilots/components/wakeups-tab";
 import { useWakeupText } from "./wakeup-presentation";
 
 const MAX_INSTRUCTION_BYTES = 4000;
@@ -26,13 +29,16 @@ export function SystemWakeupRow({
   rule,
   workspaceId,
   issueId,
+  onTurnedOff,
 }: {
   rule: SystemWakeup;
   workspaceId: string;
   issueId: string;
+  onTurnedOff?: () => void;
 }) {
   const { t } = useT("issues");
   const text = useWakeupText();
+  const paths = useWorkspacePaths();
   const update = useUpdateIssueSystemWakeup(workspaceId, issueId);
   const title =
     rule.staged && rule.stage !== null
@@ -62,10 +68,12 @@ export function SystemWakeupRow({
         : [target, t(($) => $.wakeups.system.remaining, { count: rule.remaining })].join(" · "));
   const save = (input: { enabled: boolean; instruction: string }) =>
     update.mutateAsync({ rule: rule.rule, ...input });
-  const toggle = (enabled: boolean) =>
+  const toggle = (enabled: boolean) => {
+    if (!enabled) onTurnedOff?.();
     void save({ enabled, instruction: rule.instruction }).catch(() =>
       toast.error(t(($) => $.wakeups.system.save_error)),
     );
+  };
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_auto]" aria-busy={update.isPending}>
       <Popover>
@@ -120,7 +128,13 @@ export function SystemWakeupRow({
             />
           </div>
           <p className="text-caption text-muted-foreground">
-            {rule.workspace_default ? t(($) => $.wakeups.system.default_on) : t(($) => $.wakeups.system.default_off)}
+            {rule.workspace_default ? t(($) => $.wakeups.system.default_on) : t(($) => $.wakeups.system.default_off)}{" "}
+            <AppLink
+              href={wakeupsHref(paths.autopilots())}
+              className="rounded-xs font-medium text-brand hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+            >
+              {t(($) => $.wakeups.system.default_change)}
+            </AppLink>
           </p>
         </PopoverContent>
       </Popover>
@@ -185,7 +199,7 @@ function InstructionEditor({
         ) : (
           <div className="text-caption text-muted-foreground">
             <p>{t(($) => $.wakeups.system.instruction_default)}</p>
-            <TruncatedTooltip content={rule.default_instruction}>
+            <TruncatedTooltip content={rule.default_instruction} focusable>
               <p className="mt-1 line-clamp-4 whitespace-pre-wrap break-words">
                 {rule.default_instruction}
               </p>

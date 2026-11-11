@@ -452,6 +452,21 @@ func (h *Handler) ListAutopilots(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list autopilots")
 		return
 	}
+	// Autopilots on private projects the caller cannot see are left out
+	// (MUL-8472), as loadAutopilotInWorkspace answers them like missing ones.
+	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+	if !ok {
+		return
+	}
+	if !hidden.Empty() {
+		visible := autopilots[:0:0]
+		for _, row := range autopilots {
+			if hidden.CanSeeProject(row.Autopilot.ProjectID) {
+				visible = append(visible, row)
+			}
+		}
+		autopilots = visible
+	}
 
 	// Resolve the acting caller's write access for per-row can_write. The
 	// collaborator grants are fetched once as a set (keyed by autopilot id) so the
@@ -609,6 +624,12 @@ func (h *Handler) loadAutopilotInWorkspace(w http.ResponseWriter, r *http.Reques
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "autopilot not found")
+		return db.Autopilot{}, false
+	}
+	// An autopilot on a private project (MUL-8472) is part of that project:
+	// its prompt, runs and triggers answer like a missing autopilot to anyone
+	// who cannot see the project.
+	if !h.requireProjectVisible(w, r, workspaceID, autopilot.ProjectID, http.StatusNotFound, "autopilot not found") {
 		return db.Autopilot{}, false
 	}
 	return autopilot, true
@@ -1333,6 +1354,11 @@ func (h *Handler) parseAutopilotProjectID(
 		writeError(w, http.StatusBadRequest, "project_id must reference a project in this workspace")
 		return pgtype.UUID{}, false
 	}
+	// MUL-8472: an autopilot can only file into a private project its author
+	// can see; its runs are then bounded by the rule owner's access.
+	if !h.requireProjectVisible(w, r, uuidToString(workspaceID), projectID, http.StatusBadRequest, "project_id must reference a project in this workspace") {
+		return pgtype.UUID{}, false
+	}
 	return projectID, true
 }
 
@@ -1355,6 +1381,9 @@ func (h *Handler) DeleteAutopilot(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "autopilot not found")
+		return
+	}
+	if !h.requireProjectVisible(w, r, workspaceID, ap.ProjectID, http.StatusNotFound, "autopilot not found") {
 		return
 	}
 	actor, ok := h.requireAutopilotWrite(w, r, ap, workspaceID)
@@ -2069,6 +2098,9 @@ func (h *Handler) DeleteAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "autopilot not found")
+		return
+	}
+	if !h.requireProjectVisible(w, r, workspaceID, ap.ProjectID, http.StatusNotFound, "autopilot not found") {
 		return
 	}
 	actor, ok := h.requireAutopilotWrite(w, r, ap, workspaceID)

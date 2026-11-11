@@ -52,7 +52,7 @@ import {
   PopoverTrigger,
   PopoverContent,
 } from "@multica/ui/components/ui/popover";
-import { Calendar } from "@multica/ui/components/ui/calendar";
+import { LazyCalendar } from "@multica/ui/components/ui/lazy-calendar";
 import { Switch } from "@multica/ui/components/ui/switch";
 import {
   Select,
@@ -343,7 +343,7 @@ function useIssueCounts(
 
 // Actor sub-menu content (shared between Assignee and Creator)
 
-function ActorSubContent({
+export function ActorSubContent({
   counts,
   selected,
   onToggle,
@@ -396,6 +396,7 @@ function ActorSubContent({
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
+          onKeyDown={stopMenuSearchKeys}
           placeholder={t(($) => $.filters.placeholder)}
           className="w-full bg-transparent text-body placeholder:text-muted-foreground outline-none"
           autoFocus
@@ -528,7 +529,7 @@ function ActorSubContent({
 
 // Project sub-menu content
 
-function ProjectSubContent({
+export function ProjectSubContent({
   counts,
   selected,
   onToggle,
@@ -565,6 +566,7 @@ function ProjectSubContent({
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
+          onKeyDown={stopMenuSearchKeys}
           placeholder={t(($) => $.filters.placeholder)}
           className="w-full bg-transparent text-body placeholder:text-muted-foreground outline-none"
           autoFocus
@@ -667,7 +669,7 @@ function ProjectStatusSubContent({
 
 // Label sub-menu content
 
-function LabelSubContent({
+export function LabelSubContent({
   counts,
   selected,
   onToggle,
@@ -694,6 +696,7 @@ function LabelSubContent({
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
+          onKeyDown={stopMenuSearchKeys}
           placeholder={t(($) => $.filters.placeholder)}
           className="w-full bg-transparent text-body placeholder:text-muted-foreground outline-none"
           autoFocus
@@ -823,7 +826,8 @@ function DateSubContent({
             }
           />
           <PopoverContent align="start" side="right" className="w-auto gap-0 p-0">
-            <Calendar
+            <LazyCalendar
+              autoFocus
               mode="range"
               selected={range}
               onSelect={(next) => setRange(next)}
@@ -911,16 +915,20 @@ const OPERATOR_SEGMENT_CLASS =
 
 /** "Is" / "is not" for one dimension, heading its submenu. Radio items keep
  *  it in the menu's keyboard order; the selection below is left as it is. */
-function FilterOperatorSwitch({ dimension }: { dimension: NegatableFilterDimension }) {
+export function FilterOperatorToggle({
+  negated,
+  onNegatedChange,
+}: {
+  negated: boolean;
+  onNegatedChange: (negated: boolean) => void;
+}) {
   const { t } = useT("issues");
-  const negated = useViewStore((s) => s.negatedFilters.includes(dimension));
-  const setFilterNegated = useViewStore((s) => s.setFilterNegated);
   return (
     <>
       <DropdownMenuRadioGroup
         aria-label={t(($) => $.filters.operator_label)}
         value={negated ? "is_not" : "is"}
-        onValueChange={(value) => setFilterNegated(dimension, value === "is_not")}
+        onValueChange={(value) => onNegatedChange(value === "is_not")}
         className="m-1 flex gap-0.5 rounded-lg bg-muted p-0.5"
       >
         <DropdownMenuRadioItem value="is" closeOnClick={false} className={OPERATOR_SEGMENT_CLASS}>
@@ -932,6 +940,17 @@ function FilterOperatorSwitch({ dimension }: { dimension: NegatableFilterDimensi
       </DropdownMenuRadioGroup>
       <DropdownMenuSeparator />
     </>
+  );
+}
+
+function FilterOperatorSwitch({ dimension }: { dimension: NegatableFilterDimension }) {
+  const negated = useViewStore((s) => s.negatedFilters.includes(dimension));
+  const setFilterNegated = useViewStore((s) => s.setFilterNegated);
+  return (
+    <FilterOperatorToggle
+      negated={negated}
+      onNegatedChange={(next) => setFilterNegated(dimension, next)}
+    />
   );
 }
 
@@ -1025,8 +1044,8 @@ export function IssueFilterMenu({
   onTableFacetChange?: (facet: IssueTableFacetSpec | null) => void;
   dateFilter?: IssueDateFilter | null;
   onDateFilterChange?: (filter: IssueDateFilter | null) => void;
-  /** Opens the simple menu from the host, e.g. right after a view is named.
-   *  Pair it with `onOpenChange`. */
+  /** Opens the menu, or the advanced panel in advanced mode, from the host,
+   *  e.g. right after a view is named. Pair it with `onOpenChange`. */
   open?: boolean;
   /** Mirrors the menu's open state. */
   onOpenChange?: (open: boolean) => void;
@@ -1062,9 +1081,18 @@ export function IssueFilterMenu({
   const advancedMode = advancedFilter !== null;
   const [panelOpen, setPanelOpen] = useState(false);
   // Leaving advanced mode from inside the panel unmounts it with no close
-  // event; the next entry must start closed until asked.
+  // event; the next entry must start closed until asked, and a host that
+  // holds `open` must hear it closed or the simple menu pops open instead.
+  const onOpenChangeRef = useRef(onOpenChange);
+  onOpenChangeRef.current = onOpenChange;
+  const wasAdvancedRef = useRef(advancedMode);
+  const menuOpen = open !== undefined && wasAdvancedRef.current && !advancedMode ? false : open;
   useEffect(() => {
-    if (!advancedMode) setPanelOpen(false);
+    if (!advancedMode) {
+      setPanelOpen(false);
+      if (wasAdvancedRef.current) onOpenChangeRef.current?.(false);
+    }
+    wasAdvancedRef.current = advancedMode;
   }, [advancedMode]);
   const [search, setSearch] = useState("");
   const query = search.trim().toLowerCase();
@@ -1128,7 +1156,7 @@ export function IssueFilterMenu({
   const [openProp, setOpenProp] = useState(open);
   if (open !== openProp) {
     setOpenProp(open);
-    if (open && activeAtOpen === null) setActiveAtOpen(new Set(chipByKey.keys()));
+    if (open && !advancedMode && activeAtOpen === null) setActiveAtOpen(new Set(chipByKey.keys()));
   }
   const activeKeys = activeAtOpen ?? new Set(chipByKey.keys());
   const dateFilterLabel = showDateFilter && dateFilter
@@ -1711,10 +1739,10 @@ export function IssueFilterMenu({
   if (advancedMode) {
     return (
       <Popover
-        open={panelOpen}
-        onOpenChange={(open) => {
-          setPanelOpen(open);
-          onOpenChange?.(open);
+        open={panelOpen || open === true}
+        onOpenChange={(next) => {
+          setPanelOpen(next);
+          onOpenChange?.(next);
         }}
       >
         {withTooltip ? (
@@ -1738,7 +1766,7 @@ export function IssueFilterMenu({
 
   return (
     <DropdownMenu
-      open={open}
+      open={menuOpen}
       onOpenChange={(next) => {
         if (freezeAnchor) {
           if (next && triggerRef.current) {

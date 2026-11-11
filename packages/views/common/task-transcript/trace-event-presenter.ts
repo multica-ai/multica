@@ -237,6 +237,11 @@ export type TraceEventDetail =
   | { kind: "diff"; path: string; lines: TraceDiffLine[] }
   | { kind: "file"; path: string; text: string; lineCount: number }
   | { kind: "patch"; files: TracePatchFile[]; truncated: boolean }
+  /**
+   * A shell command, verbatim. Any other arguments (description, timeout…)
+   * stay as JSON under it, so nothing the input carried is hidden.
+   */
+  | { kind: "command"; command: string; params: string | null }
   | { kind: "text"; text: string };
 
 /** Body of one file inside a multi-file patch. */
@@ -513,6 +518,31 @@ function readFileMutation(input: Record<string, unknown>): FileMutation | null {
 }
 
 /**
+ * A shell command and the call's other arguments, or null when the input is
+ * not a shell command. Keyed on shape like the summary, not on tool name:
+ * every backend names its shell differently, but they all pass a non-empty
+ * `command` (or `cmd`) string.
+ *
+ * A file editor such as `str_replace_editor` uses the same key for an
+ * operation (`view`, `create`) on a `path`, so a call that targets a file
+ * is not a command — the precedence the summary gives `path` over `command`.
+ */
+export function readCommandInput(
+  input: Record<string, unknown> | undefined,
+): { command: string; params: string | null } | null {
+  if (!input) return null;
+  if (typeof input.path === "string" || typeof input.file_path === "string") return null;
+  for (const key of ["command", "cmd"]) {
+    const command = input[key];
+    if (typeof command !== "string" || command.trim().length === 0) continue;
+    const { [key]: _, ...rest } = input;
+    const params = Object.keys(rest).length > 0 ? JSON.stringify(rest, null, 2) : null;
+    return { command, params };
+  }
+  return null;
+}
+
+/**
  * Structured body for the expanded row. Edits become a diff so a reviewer sees
  * what changed rather than two escaped string literals; results are unwrapped;
  * every other tool call falls back to pretty JSON.
@@ -541,6 +571,8 @@ export function traceEventDetail(event: TraceEvent): TraceEventDetail {
           lineCount: toLines(mutation.content).length,
         };
       }
+      const command = readCommandInput(event.input);
+      if (command !== null) return { kind: "command", ...command };
       return { kind: "text", text: JSON.stringify(event.input, null, 2) };
     }
     case "tool_result":

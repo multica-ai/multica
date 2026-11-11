@@ -30,6 +30,7 @@ export const NEW_WINDOW_SHORTCUT_CHANNEL = "window:new-by-shortcut";
 export const MAIN_RENDERER_MESSAGE_CHANNELS = [
   "auth:token",
   "invite:open",
+  "issue:open",
   "inbox:open",
   "settings:open",
   TAB_SELECTION_SHORTCUT_CHANNEL,

@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 /**
- * Drives the issue timeline's "Jump to latest" affordance (MUL-8324).
+ * Drives the issue timeline's "Jump to latest" affordance (MUL-8324, MUL-8951).
  *
- * `visible` is on while the reader is still near the top of the page and the
- * newest entry is more than one screen away; see `shouldShow`.
+ * `visible` is on while the newest entry is more than one screen away. With
+ * `nearTopOnly` (mobile) the reader must also still be near the top of the
+ * page; see `shouldShow`.
  *
  * `jump` drives scrollTop to the bottom directly instead of asking Virtuoso
  * for the last index: with `customScrollParent`, writing scrollTop is what
@@ -15,7 +16,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 /** How long a jump keeps re-pinning the bottom while late content lands. */
 export const JUMP_FOLLOW_MS = 2000;
 
-export function useJumpToLatest(scrollContainerEl: HTMLElement | null) {
+export function useJumpToLatest(
+  scrollContainerEl: HTMLElement | null,
+  { nearTopOnly = false }: { nearTopOnly?: boolean } = {},
+) {
   const [visible, setVisible] = useState(false);
   const cancelJumpRef = useRef<(() => void) | null>(null);
 
@@ -27,7 +31,7 @@ export function useJumpToLatest(scrollContainerEl: HTMLElement | null) {
     let frame = 0;
     const measure = () => {
       frame = 0;
-      setVisible(shouldShow(scrollContainerEl));
+      setVisible(shouldShow(scrollContainerEl, nearTopOnly));
     };
     const schedule = () => {
       if (frame === 0) frame = requestAnimationFrame(measure);
@@ -44,7 +48,7 @@ export function useJumpToLatest(scrollContainerEl: HTMLElement | null) {
       observer?.disconnect();
       if (frame !== 0) cancelAnimationFrame(frame);
     };
-  }, [scrollContainerEl]);
+  }, [scrollContainerEl, nearTopOnly]);
 
   useEffect(() => () => cancelJumpRef.current?.(), []);
 
@@ -98,17 +102,16 @@ export function useJumpToLatest(scrollContainerEl: HTMLElement | null) {
 }
 
 /**
- * Show only near the top of the page: the viewport's top edge must still be
- * within the first `SHOW_WITHIN_TOP_RATIO` of the page, and more than one
- * screen must be left below. Once the reader has scrolled further on their
- * own they are reading, not hunting for the latest entry, so the button gets
- * out of the way; short pages never show it at all.
+ * Show while more than one screen is left below; short pages never show it.
+ *
+ * `nearTopOnly` also requires the viewport's top edge to be within the first
+ * `SHOW_WITHIN_TOP_RATIO` of the page: on mobile the button covers the text
+ * column, so once the reader has scrolled further on their own they are
+ * reading, not hunting for the latest entry, and it gets out of the way.
  */
-function shouldShow(el: HTMLElement) {
-  return (
-    el.scrollTop <= el.scrollHeight * SHOW_WITHIN_TOP_RATIO &&
-    distanceFromBottom(el) > el.clientHeight
-  );
+function shouldShow(el: HTMLElement, nearTopOnly: boolean) {
+  if (distanceFromBottom(el) <= el.clientHeight) return false;
+  return !nearTopOnly || el.scrollTop <= el.scrollHeight * SHOW_WITHIN_TOP_RATIO;
 }
 
 /** Share of the page the reader can scroll through before the button hides. */

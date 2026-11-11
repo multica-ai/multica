@@ -86,6 +86,12 @@ func TestAvailableCommandsKeepsCompressedContracts(t *testing.T) {
 					"`git config --worktree user.name` / `user.email`",
 					"plain or `--local` config can leak into a shared cache",
 					"never change the global identity",
+					// Stash: the list is shared across checkouts (MUL-8989), so
+					// the prohibition and both safe alternatives stay here.
+					"share a single `git stash` list",
+					"never use `git stash` / `git stash pop` there",
+					"make a temporary commit",
+					"keep the SHA from `git stash create` and restore it with `git stash apply <sha>`",
 				} {
 					if !strings.Contains(ac, want) {
 						t.Errorf("Available Commands lost %q\n---\n%s", want, ac)

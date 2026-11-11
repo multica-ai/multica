@@ -166,6 +166,7 @@ describe("useIssueSurfaceController", () => {
   let listIssueTableFacets: ReturnType<typeof vi.fn>;
   let listSubscribedIssueIds: ReturnType<typeof vi.fn<() => Promise<string[]>>>;
   let listAgents: ReturnType<typeof vi.fn<() => Promise<Agent[]>>>;
+  let listInvolvedSquadIds: ReturnType<typeof vi.fn<() => Promise<string[]>>>;
   // Every row the current fixture holds, kept outside the mocked list endpoint
   // so the working-agents facet stand-in can read it without registering a
   // call that Table-isolation tests assert never happens.
@@ -193,6 +194,7 @@ describe("useIssueSurfaceController", () => {
     listIssueUnread = vi.fn(() => Promise.resolve([]));
     listSubscribedIssueIds = vi.fn(() => never<string[]>());
     listAgents = vi.fn(() => Promise.resolve([] satisfies Agent[]));
+    listInvolvedSquadIds = vi.fn(() => Promise.resolve([]));
     setApiInstance({
       // The board pages by category, so every surface stub answers the catalog
       // read. Empty is the real shape for a workspace with no custom statuses:
@@ -209,6 +211,7 @@ describe("useIssueSurfaceController", () => {
       listIssueUnread,
       getChildIssueProgress: vi.fn(() => never()),
       listAgents,
+      listInvolvedSquadIds,
       listSubscribedIssueIds,
     } as unknown as ApiClient);
     pruneIssueSurfaceViewStates([]);
@@ -2024,6 +2027,43 @@ describe("useIssueSurfaceController", () => {
       await act(async () => finish([{ id: "agent-1", owner_id: "user-1" } as Agent]));
       await waitFor(() => expect(result.current.isLoading).toBe(false));
       expect(result.current.filteredGanttIssues.map((issue) => issue.id)).toEqual(["gantt-open"]);
+    });
+
+    it("holds loading while the squads behind \"my agents\" load, then keeps only the viewer's", async () => {
+      const squadRow = (id: string, squad: string) =>
+        makeIssue({
+          id,
+          status: "in_progress",
+          assignee_type: "squad",
+          assignee_id: squad,
+          start_date: "2026-01-01",
+          due_date: "2026-01-05",
+        });
+      let finish!: (ids: string[]) => void;
+      listInvolvedSquadIds.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+      mockGanttIssues([squadRow("my-squad-row", "squad-1"), squadRow("their-squad-row", "squad-2")]);
+      const store = getIssueSurfaceViewStore("project:p1");
+      act(() => {
+        store.getState().setViewMode("gantt");
+        store.getState().toggleRelationFilter("my_agents");
+      });
+      const { result } = renderHook(
+        () => useIssueSurfaceController({ scope: { type: "project", projectId: "p1" }, modes: ["gantt"] }),
+        { wrapper: makeWrapper(qc, "project:p1") },
+      );
+
+      await waitFor(() => expect(result.current.ganttIssues).toHaveLength(2));
+      await waitFor(() => expect(listInvolvedSquadIds).toHaveBeenCalled());
+      expect(result.current.isLoading).toBe(true);
+
+      await act(async () => finish(["squad-1"]));
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      expect(result.current.filteredGanttIssues.map((issue) => issue.id)).toEqual(["my-squad-row"]);
+
+      act(() => store.getState().setFilterNegated("relation", true));
+      await waitFor(() =>
+        expect(result.current.filteredGanttIssues.map((issue) => issue.id)).toEqual(["their-squad-row"]),
+      );
     });
 
     it("offers a retry when the agents behind \"my agents\" fail", async () => {

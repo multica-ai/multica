@@ -30,12 +30,14 @@ Multica のコードを書く、翻訳を変更する、あるいは中国語の
 
 | パッケージ | 依存可能 | 依存禁止 |
 | --- | --- | --- |
-| `packages/core` | アプリ固有でないもののみ | `react-dom`, `localStorage`, `process.env`, `next/*`, UI ライブラリ |
+| `packages/core` | アプリ固有でないもののみ | `react-dom`, `next/*`, UI ライブラリ, `process.env`, `localStorage`・`sessionStorage` の直接利用（永続化は `StorageAdapter` 経由。タブ単位の `sessionStorage` を使うのは `analytics/exception-dedupe.ts` と `appearance/safe-mode.ts` のみ） |
 | `packages/ui` | なし | `@multica/core`, ビジネスロジック |
-| `packages/views` | `core/`, `ui/` | `next/*`, `react-router-dom`, stores |
+| `packages/views` | `core/`, `ui/` | `next/*`, `react-router-dom`, store の定義 |
 | `apps/web/platform/` | `next/*` | 他のアプリ |
 | `apps/desktop/.../platform/` | `react-router-dom`, electron | 他のアプリ |
-| `apps/mobile/` | `@multica/core` の型と純粋関数 | Web/Desktop の React ページ、store、プラットフォーム実装 |
+| `apps/mobile/` | `@multica/core` の型と純粋関数（各モジュール自身のサブパスから import） | Web/Desktop の React ページ、store、プラットフォーム実装、およびそれらを再エクスポートする core の barrel |
+
+パッケージ境界とその限定的な例外は、ルートの `AGENTS.md` を正とします。変更するときは両方を更新してください。`packages/core` の行は `packages/core/eslint.config.mjs`、mobile の core import は `apps/mobile/eslint.config.js` が lint で強制します。
 
 両方のアプリに同じロジックが現れる場合は、必ず共有パッケージに抽出しなければなりません。「ささいな」重複という例外はありません。Mobile は独自の UI、データ層、リリースフローを持ち、型と純粋関数だけを共有します。
 

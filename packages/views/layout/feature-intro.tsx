@@ -256,6 +256,7 @@ export function FeatureIntroCarousel({
                 aria-current={i === index ? "true" : undefined}
                 onClick={() => go(i)}
                 className={cn(
+                  // eslint-disable-next-line no-restricted-syntax -- carousel page dots
                   "h-1.5 rounded-full transition-all motion-reduce:transition-none",
                   i === index ? "w-4 bg-foreground" : "w-1.5 bg-muted-foreground/30 hover:bg-muted-foreground/60",
                 )}

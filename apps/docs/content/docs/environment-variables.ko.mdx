@@ -190,6 +190,7 @@ reverse proxy 뒤에 배포한다면 실제 proxy 네트워크를 입력해야 �
 | Feishu | `MULTICA_LARK_SECRET_KEY` | base64로 인코딩한 32바이트 자격 증명 암호화 키 |
 | Slack | `MULTICA_SLACK_SECRET_KEY` | base64로 인코딩한 32바이트 token 암호화 키 |
 | Telegram | `MULTICA_TELEGRAM_SECRET_KEY` | base64로 인코딩한 32바이트 Bot token 암호화 키 |
+| Telegram | `MULTICA_TELEGRAM_TOOL_PROGRESS` | 스트리밍 응답에 표시할 도구 단계. `auto`(기본값: 개인 채팅은 상세, 그룹은 작업 종류만), `off`, `summary`, `detail` |
 | Composio | `COMPOSIO_API_KEY` | Composio 도구 연결 활성화 |
 | Composio | `COMPOSIO_CALLBACK_BASE_URL` | callback API 주소. `MULTICA_PUBLIC_URL`로 fallback 가능 |
 | Composio | `COMPOSIO_STATE_SECRET` | OAuth state 서명 키. `JWT_SECRET`에서 파생 가능 |
@@ -199,6 +200,8 @@ reverse proxy 뒤에 배포한다면 실제 proxy 네트워크를 입력해야 �
 | Plugins | `MULTICA_PLUGIN_SURFACE_ORIGIN` | 백엔드로 라우팅되는 쿠키 없는 전용 origin. app/API origin과 달라야 하며 `Host`를 보존해야 함 |
 | Plugins | `MULTICA_PLUGIN_API_URL` | 버전을 포함한 Plugin Public API의 전체 Base URL(예: `https://plugin-api.example.com/v1`). 설정하지 않으면 `MULTICA_PUBLIC_URL` + `/v1` 사용 |
 | Plugins | `MULTICA_PLUGIN_DIR` | 개발 중 로컬 plugin bundle을 게시하는 선택적 절대 디렉터리 |
+| 테마 스토어 | `MULTICA_THEME_STORE` | 기본으로 켜져 있으며 공식 [multica-themes](https://github.com/multica-ai/multica-themes) 레지스트리를 읽습니다. `off`로 커뮤니티 테마 스토어를 끄고 레지스트리 요청을 모두 멈춥니다 |
+| 테마 스토어 | `MULTICA_THEME_REGISTRY_URL` | 공식 레지스트리의 fork 등 다른 레지스트리의 `index.json`. [테마와 모양](/themes#셀프-호스팅)을 참고하세요 |
 
 `GITHUB_APP_ID`와 private key를 설정하지 않아도 PR 연결, 미러링, merge 시 상태 변경은 정상적으로 작동합니다. 다만 카드에 CI와 merge 가능 상태가 표시되지 않고 "GitHub에서 선택" 저장소 메뉴도 비활성화됩니다.
 
@@ -385,6 +388,8 @@ multica config show
 | `ws_claim_poll_interval` | `3m` | 정상 WebSocket에서 claim 안전 polling의 상한. `poll_interval`과 독립적으로 설정되며 Daemon은 하향 jitter를 적용합니다 |
 | `heartbeat_interval` | `15s` | heartbeat 간격 |
 | `agent_timeout` | 제한 없음 | 단일 실행의 절대 시간 제한 |
+| `agent_idle_watchdog` | `2h` | 실행 중인 도구 호출이 없을 때의 무응답 상한. `0s`이면 데몬 watchdog 전체가 꺼지며 `agent_tool_watchdog`도 적용되지 않습니다 |
+| `agent_tool_watchdog` | `agent_idle_watchdog`와 동일 | 도구 호출이 실행 중일 때의 무응답 상한. `0s`이면 데몬 watchdog이 무응답 도구 호출 때문에 실행을 멈추지 않으며, 실행은 `agent_timeout`(기본값은 제한 없음)으로만 제한됩니다 |
 | `codex_semantic_inactivity_timeout` | 파생 | Codex 의미 활동 없음 기준값. 설정하지 않으면 idle과 tool watchdog 예산 중 큰 값을 따르고, tool 예산이 `0`이면 idle 예산으로 되돌아갑니다. Codex 자체의 `10m`은 watchdog 전체를 비활성화했을 때만 유지됩니다 |
 | `codex_handshake_timeout` | `30s`, `thread/start`·`thread/resume`: `60s` | Codex app-server 시작 handshake 상한. 명시적으로 설정한 값은 두 예산을 모두 일괄 재정의합니다 |
 | `disable_auto_update` | 환경을 따름 | `true`는 자동 업데이트를 끔. `false`는 로컬 덮어쓰기를 지우고 환경 변수 또는 기본값으로 복귀 |
@@ -393,7 +398,7 @@ multica config show
 
 값에는 다음 규칙이 적용됩니다.
 
-- duration key는 양의 Go duration(예: `10s`, `2h`)을 허용하며 `0s`와 음수는 거부합니다. 유일한 예외는 `agent_timeout`입니다. `0s`가 유효하며 실행 시간 제한을 명시적으로 끕니다.
+- duration key는 양의 Go duration(예: `10s`, `2h`)을 허용하며 음수는 항상 거부합니다. `0s`까지 허용하는 key는 `agent_timeout`, `agent_idle_watchdog`, `agent_tool_watchdog`뿐입니다. `agent_timeout`의 `0s`는 실행 시간 제한을 명시적으로 끄고, 두 watchdog key에서 `0s`가 무엇을 끄는지는 표를 참고하세요.
 - 빈 문자열을 전달하면 저장된 값을 지우고 환경 변수 또는 내장 기본값으로 돌아갑니다. 예: `multica config set poll_interval ""`
 - `max_concurrent_tasks`는 0 이상의 정수여야 합니다.
 - 상대 `workspaces_root` 값은 저장할 때 절대 경로로 변환됩니다.

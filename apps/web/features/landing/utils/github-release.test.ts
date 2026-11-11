@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchLatestRelease } from "./github-release";
+import { fetchLatestRelease, RELEASE_TIMEOUT_MS } from "./github-release";
 
 /** The twelve desktop artifacts a finished release carries. */
 function completeAssets(version: string) {
@@ -158,8 +158,56 @@ describe("fetchLatestRelease", () => {
       publishedAt: null,
       htmlUrl: null,
       assets: {},
+      sizes: {},
     });
     expect(warnSpy).toHaveBeenCalled();
+  });
+
+  // The homepage awaits this on a cold cache; a GitHub that accepts the
+  // connection and then stalls must not hold the page.
+  it("gives up on a stalled request and returns the empty release", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchMock = vi.fn(
+        (_url: string, init: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+          }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const pending = fetchLatestRelease();
+      await vi.advanceTimersByTimeAsync(RELEASE_TIMEOUT_MS);
+
+      await expect(pending).resolves.toMatchObject({ version: null, assets: {} });
+      expect(warnSpy).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("gives up when the response body stalls after the headers arrive", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+        const body = new ReadableStream({
+          start(controller) {
+            init.signal?.addEventListener("abort", () => controller.error(init.signal?.reason));
+          },
+        });
+        return new Response(body, { status: 200 });
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const pending = fetchLatestRelease();
+      await vi.advanceTimersByTimeAsync(RELEASE_TIMEOUT_MS);
+
+      await expect(pending).resolves.toMatchObject({ version: null, assets: {} });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("returns an empty release shape when all candidates are filtered out", async () => {

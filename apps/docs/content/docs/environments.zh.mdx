@@ -1,0 +1,248 @@
+---
+title: 环境
+description: 在任务侧栏里看到任务的运行启动了哪些开发服务和 App；在 .multica/environments.toml 里声明它们，成员就能在侧栏里启动、停止和查看日志。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
+
+智能体改 Web 应用时，成果往往是一个能打开的东西：开发服务器、预览页、桌面 App。任务侧栏的**环境**区域列出这条任务的运行启动了哪些还在运行的服务，按所在的机器分组，每个都可以直接打开。
+
+环境有两种来源：
+
+| | 自动识别 | 声明式 |
+|---|---|---|
+| 从哪里来 | 守护进程发现某次运行的目录里有服务在监听端口 | 仓库在 `.multica/environments.toml` 里描述，智能体用 `multica env start` 启动 |
+| 需要配置 | 不需要 | 在仓库里加这个文件 |
+| 运行结束后 | 进程还在就一直显示 | 由守护进程托管，直到被停止或 TTL 到期 |
+| 在侧栏里可以 | 打开、复制地址、停止 | 打开、复制地址、启动、停止、重启、查看日志 |
+
+自动识别让这个区域不用配置就能用；声明则让环境可以重复启动：每次运行都用同样的方式、在自己的端口上启动，日志也能在侧栏里看到。
+
+## 自动识别的服务 [#detected]
+
+在 macOS 和 Linux 上，守护进程大约每 30 秒检查一次哪些进程在监听 TCP 端口。一个进程满足下面两个条件时，会出现在侧栏里：
+
+- 它的工作目录在这条任务某次运行的目录里；
+- 连续两次扫描都发现了它。这样一闪而过的测试服务器不会被列进来。
+
+以下不会被列进来：
+
+- AI 编程工具本身，以及 `multica` CLI；
+- 从项目自己的[本地目录](/project-resources)运行的服务，那是你自己启动的，不属于某次运行；
+- 已经属于某个声明式环境的服务，它们只在那个环境下面列一次；
+- 不在任务上的运行（例如聊天会话）启动的服务。
+
+桌面 App（例如 Electron 应用）只作为一个 App 列出，不会按端口列成好几条。它没有 URL；在同一台机器上的 Multica Desktop 里，点**切到窗口**就能把它切到前台。它的远程调试端口不会作为链接显示。
+
+自动识别的服务在运行结束后仍会显示，直到它不再监听端口。成员可以在侧栏里停止它，但守护进程不知道它是怎么启动的，所以没有日志，也不能重启。需要这些功能，就把它声明出来。
+
+## 声明环境 [#declare]
+
+在仓库根目录添加 `.multica/environments.toml`，并提交到运行会检出的分支上。侧栏只在检出代码的根目录或下一级目录里查找这个文件，文件有错误时会跳过；`multica env start` 会报告具体哪里有问题。每个 `[environments.<name>]` 表是一个环境：
+
+```toml
+[environments.web]
+label = "Web app"
+start = "npm ci && npx vite --port $MULTICA_PORT --strictPort"
+ttl = "24h"
+```
+
+智能体在自己检出的代码目录里启动它：
+
+```bash
+multica env start web
+```
+
+命令会等环境能响应后打印它的 URL。环境出现在侧栏里，运行结束后继续运行，TTL 到期时自动停止。
+
+### 字段 [#fields]
+
+| 字段 | 必填 | 默认值 | 含义 |
+|---|---|---|---|
+| `start` | 是 | | 启动环境的 shell 命令。在 `.multica/` 所在的目录里用 `/bin/sh -c` 执行。 |
+| `label` | 否 | 环境名 | 侧栏里显示的名字。 |
+| `url` | 否 | `http://localhost:$MULTICA_PORT` | 成员打开它的地址。没有页面的环境（例如后台 worker 或桌面 App）设为 `url = ""`。 |
+| `ready` | 否 | 与 `url` 相同 | 反复检查的地址，返回任意小于 500 的状态码即视为就绪（404 也算）。既没有 `ready` 也没有 `url` 时，`start` 一启动就算运行中。 |
+| `stop` | 否 | | 守护进程向进程发信号之前先执行的命令。`start` 创建了不归它的进程所有的东西（例如容器）时需要它。 |
+| `ttl` | 否 | `24h` | 运行多久后自动停止，范围 `1m` 到 `168h`。单位用 `s`、`m` 或 `h`；不支持 `7d`。 |
+
+环境名是 `environments.` 后面的部分：只能用小写字母、数字、`-` 和 `_`，以字母或数字开头，最多 40 个字符。
+
+### 端口和变量 [#ports]
+
+每个环境分到十个自己专用的空闲端口：`MULTICA_PORT` 到 `MULTICA_PORT+9`。同一台机器上的两次运行、两条任务都不会冲突，所以不要写死端口。
+
+`start` 和 `stop` 能拿到这些变量：
+
+| 变量 | 值 |
+|---|---|
+| `MULTICA_PORT` | 端口段的第一个端口，例如 `41000` |
+| `MULTICA_ENVIRONMENT` | 环境名 |
+| `PATH` | 执行 `multica env start` 的智能体的 `PATH`，这样仓库的工具链能被找到。从侧栏启动时，沿用智能体上一次在这条任务上启动这个环境时的 `PATH`。 |
+
+它们还会继承守护进程的环境变量，但不包括 `MULTICA_*` 变量（凭据也在其中）：环境不能以这次运行的身份操作。`url` 和 `ready` 里只会替换 `$MULTICA_PORT`（或 `${MULTICA_PORT}`）。需要第二个端口时，在 shell 里计算，例如 `API_PORT=$((MULTICA_PORT + 1))`。
+
+### 让 `start` 留在前台 [#foreground]
+
+`start` 作为一个新进程组的组长运行。只要组里还有进程，环境就一直存在；停止环境时会向整个进程组发信号。所以：
+
+- 让主服务留在前台。用 `&` 放到后台的辅助进程没问题，它们仍在这个进程组里。
+- 不要把工作交给进程组以外的东西，例如 `docker compose up -d`、系统服务或 `setsid`。那样环境会立刻变成**已退出**，停止时也碰不到那些工作。这类工具要在前台运行，并配一个 `stop` 命令。
+- 运行检出的代码里还没有安装依赖。在 `start` 里安装；守护进程等待就绪的十分钟包含安装时间。
+
+## 示例 [#examples]
+
+每个示例都是一份完整的 `.multica/environments.toml`。把 `npm ci` 换成仓库所用包管理器的安装命令（`pnpm install --frozen-lockfile`、`yarn install --immutable`）。
+
+<Tabs items={["Next.js", "Vite", "Go API", "Web + API", "docker compose"]}>
+<Tab value="Next.js">
+
+```toml
+[environments.web]
+label = "Web app"
+start = "npm ci && npx next dev --port $MULTICA_PORT"
+ttl = "24h"
+```
+
+</Tab>
+<Tab value="Vite">
+
+```toml
+[environments.web]
+label = "Web app"
+start = "npm ci && npx vite --port $MULTICA_PORT --strictPort"
+ttl = "24h"
+```
+
+`--strictPort` 让 Vite 在端口被占用时直接失败，而不是悄悄换到别的端口，导致侧栏里的链接打不开。
+
+</Tab>
+<Tab value="Go API">
+
+```toml
+[environments.api]
+label = "API"
+start = "PORT=$MULTICA_PORT go run ./cmd/server"
+ready = "http://localhost:$MULTICA_PORT/healthz"
+ttl = "8h"
+```
+
+这里假设服务从 `PORT` 读取端口，并在 `/healthz` 提供健康检查；按你的代码调整这两处。
+
+</Tab>
+<Tab value="Web + API">
+
+```toml
+[environments.app]
+label = "Web + API"
+start = """
+API_PORT=$((MULTICA_PORT + 1))
+(cd api && PORT=$API_PORT go run .) &
+cd web && npm ci && VITE_API_URL=http://localhost:$API_PORT npx vite --port $MULTICA_PORT --strictPort
+"""
+ttl = "24h"
+```
+
+API 在后台运行，用端口段的第二个端口；Web 应用在前台运行，用第一个端口。停止环境时两者一起停止。
+
+</Tab>
+<Tab value="docker compose">
+
+```toml
+[environments.stack]
+label = "Full stack"
+start = "docker compose -p env-$MULTICA_PORT up --build"
+stop = "docker compose -p env-$MULTICA_PORT down"
+ttl = "8h"
+```
+
+在 `compose.yaml` 里，把 Web 服务发布到环境的端口上：
+
+```yaml
+services:
+  web:
+    build: .
+    ports:
+      - "${MULTICA_PORT:-3000}:3000"
+```
+
+不加 `-d` 时 `up` 留在前台。容器归 Docker 所有，不属于环境的进程，所以要靠 `stop` 把它们关掉。`-p env-$MULTICA_PORT` 让每个环境有自己的 Compose 项目，并行的运行不会共用容器。
+
+</Tab>
+</Tabs>
+
+要声明多个环境，在同一个文件里多写几个表即可。每个环境的进程都随它一起停止，即使同一份代码启动的另一个环境还在调用它们。需要一起保持运行的服务（例如 Web 应用和它的 API）应放在同一个环境里，参考 Web + API 示例。
+
+## 用 CLI 启动和停止 [#cli]
+
+| 命令 | 作用 |
+|---|---|
+| `multica env start <name>` | 按当前目录或上级目录里找到的 `.multica/environments.toml` 启动环境。等它就绪后打印 URL。这条任务上已有同名环境从同一份代码运行时，直接返回它。 |
+| `multica env start <name> --wait=false` | 启动后立即返回。 |
+| `multica env list` | 列出这条任务在本机上的环境，包括状态、URL 和日志路径。 |
+| `multica env stop <name>` | 停止这条任务在本机上同名的运行中环境：有 `stop` 命令就先执行它，再向剩余进程发送 `SIGTERM`，10 秒后发送 `SIGKILL`。同名的有好几个在运行时，只停止其中一个；要停止特定的那个，请用侧栏。 |
+
+三个命令都支持 `--output json`。`multica environment` 是 `multica env` 的完整写法。
+
+<Callout type="info">
+这些命令使用当前运行的凭据，所以**只能在智能体的运行中使用**。在你自己的终端里执行会报错 `MULTICA_DAEMON_PORT not set`。想自己启动或停止环境，请用侧栏。
+</Callout>
+
+启动命令在就绪前就退出时，`multica env start` 会失败，并打印日志的最后几行。10 分钟后仍未响应时，命令会返回，环境保持**启动中**，并附上原因（例如 "not answering at http://localhost:41000"）。
+
+环境属于任务，而不是某一次运行：同一条任务上后来的运行可以列出并停止之前运行启动的环境。再次启动同名环境时，只有它在本机从同一份代码运行，才会复用正在运行的那个。用另一份代码的运行会以同样的名字另起一份，使用自己的端口，所以启动前先用 `multica env list` 看一下。
+
+## 在侧栏里管理环境 [#sidebar]
+
+每个环境显示状态、启动或结束的时间、到期时间和启动者。**打开**会打开它的 URL，**复制地址**会复制 URL。已经结束的环境收在"N 个已结束"里。
+
+- **启动**：点击**环境**旁边的 **+**。菜单列出每台机器上最近一次运行声明的环境，选中后用那次运行的代码启动。这条任务还没运行过、或者那份代码已被清理时，菜单会改为让智能体来启动：智能体准备好代码后执行 `multica env start`；项目里没有声明时，它会自己判断怎么启动。
+- **停止、重启、查看日志**：打开环境的**更多操作**菜单。**重启**会重新读取代码里的声明，所以那份代码和其中的 `.multica/environments.toml` 必须还在。自动识别的服务只有**停止**，并且需要确认。
+
+启动、停止和重启需要工作区成员能访问这条任务，并且能使用那台机器的运行时（参见[守护进程与运行时](/daemon-runtimes)）。机器必须在线，且上面的 Multica 版本支持环境操作；否则按钮会说明缺了什么。查看日志只需要能访问这条任务。
+
+### 日志 [#logs]
+
+**查看日志**显示声明式环境输出的最后 500 行，最多 256 KiB。环境运行时，大约每五秒跟随一次新输出；可以暂停跟随、刷新、筛选、自动换行和复制。
+
+环境崩溃时，它最后两行输出会和环境一起保存，所以即使机器离线，侧栏也能显示它为什么退出。重新读取日志需要机器在线。
+
+完整日志留在那台机器上，位于 `<workspaces root>/.environments/v1/`，环境结束后保留七天。`multica env start` 和 `multica env list` 会打印它的路径。
+
+<Callout type="warning">
+能访问这条任务的人都能读到环境的日志。Multica 会对上传的内容做敏感信息脱敏，并在十分钟后删除读取到的日志，但不要依赖这些：别让服务把凭据打印到输出里。
+</Callout>
+
+## 状态 [#states]
+
+| 状态 | 含义 |
+|---|---|
+| 启动中 | 已启动，正在等 `ready` 地址响应。 |
+| 运行中 | 已就绪；自动识别的服务则表示正在监听。 |
+| 已退出 | 进程自己结束了，例如崩溃。会显示退出码和最后几行输出。 |
+| 已停止 | 被智能体、成员或 TTL 停止（"到期自动停止"）。 |
+| 无响应 | 运行它的机器已经三分钟没有报告它：守护进程停了，或者机器休眠、离线。守护进程重新报告后会恢复真实状态。 |
+
+守护进程停止期间不会托管任何环境；它重启后，进程仍然存活的环境会被重新接管。有环境在运行的运行目录，在环境停止前不会被守护进程的工作区清理删除。
+
+## 让智能体来写这个文件 [#agent]
+
+智能体知道这个格式：每个智能体都会收到 Multica 内置的平台技能，其中说明了 `.multica/environments.toml` 的写法和验证方法。可以直接在任务里提，例如：
+
+> 给这个仓库加一个 `.multica/environments.toml`，让 Web 应用可以用 `multica env start` 启动。先启动一次确认能用，再提 PR。
+
+智能体会先弄清项目怎么启动，用 `MULTICA_PORT` 写好端口，启动环境确认能响应，然后像其他改动一样提交。合并之后，后续每次运行都能启动这个环境，成员也能在侧栏里启动。
+
+## 已知限制 [#limitations]
+
+- **只支持 macOS 和 Linux。** 在 Windows 上不会识别服务，`multica env start` 会提示暂不支持。
+- **localhost 地址只能在运行它的机器上打开。** 环境运行在另一台机器上（例如构建机或同事的电脑）时，侧栏会注明；请在那台机器上打开，或者自己转发端口。
+- **systemd 下重启守护进程。** 在 Linux 上开启了[开机自启](/daemon-runtimes#autostart)时，重启或更新守护进程会同时停止它托管的声明式环境，之后需要重新启动。
+- **一个环境只在一台机器上。** 环境运行在启动它的那次运行所在的机器上，不会随任务迁移。
+
+## 接下来
+
+- [守护进程与运行时](/daemon-runtimes) — 识别和托管环境的守护进程。
+- [使用 CLI](/cli#environments) — `multica env` 命令和 CLI 的其他命令。
+- [运行](/tasks) — 运行的目录从哪里来。

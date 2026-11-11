@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { AgentTask, Issue } from "@multica/core/types";
+import type { AgentTask, Issue, QuickAction } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../../locales/en/common.json";
 import enIssues from "../../../locales/en/issues.json";
@@ -104,31 +104,34 @@ vi.mock("@multica/core/paths", async () => {
 
 // Module-level flag toggled per-test: desktop implements `openInNewTab`,
 // web omits it and the menu has to fall back to a real browser tab.
-const { openInNewTabMock, getShareableUrlMock, navState } = vi.hoisted(() => ({
+const { openInNewTabMock, openInDesktopMock, getShareableUrlMock, navState } = vi.hoisted(() => ({
   openInNewTabMock: vi.fn(),
+  openInDesktopMock: vi.fn(),
   getShareableUrlMock: vi.fn((p: string) => `https://app.example${p}`),
-  navState: { hasOpenInNewTab: true },
+  navState: { hasOpenInNewTab: true, hasOpenInDesktop: false, pathname: "/test/issues/issue-1", hash: "" },
 }));
 
 vi.mock("../../../navigation", () => ({
   useNavigation: () => ({
     push: vi.fn(),
-    pathname: "/test/issues/issue-1",
+    pathname: navState.pathname,
     searchParams: new URLSearchParams(),
-    hash: "",
+    hash: navState.hash,
     back: vi.fn(),
     replace: vi.fn(),
     ...(navState.hasOpenInNewTab ? { openInNewTab: openInNewTabMock } : {}),
+    ...(navState.hasOpenInDesktop ? { openInDesktop: openInDesktopMock } : {}),
     getShareableUrl: getShareableUrlMock,
   }),
 }));
 
-const { toastSuccessMock } = vi.hoisted(() => ({
+const { toastSuccessMock, toastErrorMock } = vi.hoisted(() => ({
   toastSuccessMock: vi.fn(),
+  toastErrorMock: vi.fn(),
 }));
 
 vi.mock("sonner", () => ({
-  toast: { success: toastSuccessMock, error: vi.fn() },
+  toast: { success: toastSuccessMock, error: toastErrorMock, info: vi.fn() },
 }));
 
 const { apiMocks, copyTextMock } = vi.hoisted(() => ({
@@ -140,12 +143,15 @@ const { apiMocks, copyTextMock } = vi.hoisted(() => ({
     listIssueUnread: vi.fn(),
     markIssueRead: vi.fn(),
     markIssueUnread: vi.fn(),
+    listQuickActions: vi.fn(),
+    runQuickAction: vi.fn(),
   },
   copyTextMock: vi.fn(),
 }));
 
 vi.mock("@multica/core/api", () => ({
   api: apiMocks,
+  dispatchReasonCode: (err: unknown) => (err as { reason_code?: string })?.reason_code,
 }));
 
 vi.mock("@multica/ui/lib/clipboard", () => ({
@@ -201,11 +207,19 @@ beforeEach(() => {
   deletionPolicy.allowed = true;
   mockOpenModal.mockReset();
   openInNewTabMock.mockReset();
+  openInDesktopMock.mockReset();
   getShareableUrlMock.mockClear();
   navState.hasOpenInNewTab = true;
+  navState.hasOpenInDesktop = false;
+  navState.pathname = "/test/issues/issue-1";
+  navState.hash = "";
   copyTextMock.mockReset();
   copyTextMock.mockResolvedValue(true);
   toastSuccessMock.mockReset();
+  toastErrorMock.mockReset();
+  apiMocks.listQuickActions.mockReset();
+  apiMocks.listQuickActions.mockResolvedValue({ quick_actions: [] });
+  apiMocks.runQuickAction.mockReset();
   listTasksByIssueMock.mockReset();
   listTasksByIssueMock.mockResolvedValue([]);
   apiMocks.listIssueWorkflows.mockReset();
@@ -270,7 +284,8 @@ describe("IssueActionsDropdown", () => {
     const labels = screen
       .getAllByRole("menuitem")
       .map((item) => item.textContent?.trim());
-    expect(labels.slice(0, 3)).toEqual(["Rename issue", "Create sub-issue", "Status"]);
+    // Status trails its current value.
+    expect(labels.slice(0, 3)).toEqual(["Rename issue", "Create sub-issue", "StatusTodo"]);
   });
 
   it("opens Assignee as a submenu holding the shared assignee picker", async () => {
@@ -462,7 +477,7 @@ describe("IssueActionsDropdown", () => {
 
     fireEvent.click(screen.getByTestId("trigger"));
     await waitFor(() => {
-      expect(listTasksByIssueMock).toHaveBeenCalledWith("issue-1");
+      expect(listTasksByIssueMock).toHaveBeenCalledWith("issue-1", false, { view: "timeline" });
     });
     fireEvent.click(await screen.findByText("Copy local workdir path"));
 
@@ -527,6 +542,39 @@ describe("Open in new tab", () => {
   });
 });
 
+describe("Open in Desktop", () => {
+  async function openMenu() {
+    render(wrap(<IssueActionsDropdown issue={mockIssue} trigger={<button data-testid="trigger">Menu</button>} />));
+    fireEvent.click(screen.getByTestId("trigger"));
+    await screen.findByText("Open in new tab");
+  }
+
+  it("appears directly below Open in new tab on web and hands off the current comment", async () => {
+    navState.hasOpenInDesktop = true;
+    navState.pathname = "/test/issues/TES-1";
+    navState.hash = "#comment-c1";
+    await openMenu();
+    const labels = screen.getAllByRole("menuitem").map((item) => item.textContent);
+    expect(labels[labels.indexOf("Open in new tab") + 1]).toBe("Open in Desktop");
+    fireEvent.click(screen.getByText("Open in Desktop"));
+    expect(openInDesktopMock).toHaveBeenCalledWith("/test/issues/TES-1#comment-c1");
+  });
+
+  it("opens the selected issue without copying another issue's comment anchor", async () => {
+    navState.hasOpenInDesktop = true;
+    navState.pathname = "/test/issues/TES-99";
+    navState.hash = "#comment-other";
+    await openMenu();
+    fireEvent.click(screen.getByText("Open in Desktop"));
+    expect(openInDesktopMock).toHaveBeenCalledWith("/test/issues/TES-1");
+  });
+
+  it("is hidden in the desktop app", async () => {
+    await openMenu();
+    expect(screen.queryByText("Open in Desktop")).not.toBeInTheDocument();
+  });
+});
+
 describe("IssueActionsContextMenu", () => {
   it("renders the menu when the wrapped element receives a contextmenu event", async () => {
     render(
@@ -577,6 +625,96 @@ describe("IssueActionsContextMenu", () => {
       expect.anything(),
     );
     await waitFor(() => expect(screen.queryByText("Rename issue")).not.toBeInTheDocument());
+  });
+});
+
+describe("Quick actions (MUL-9093)", () => {
+  const quickAction = (overrides: Partial<QuickAction>): QuickAction => ({
+    id: "qa-1",
+    workspace_id: "ws-1",
+    name: "Review",
+    description: "",
+    assignee_type: "agent",
+    assignee_id: "agent-1",
+    prompt: "Review this",
+    visibility: "public",
+    status: "active",
+    last_used_at: null,
+    use_count: 0,
+    created_by_id: "user-1",
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    target_name: "Lambda",
+    target_public: true,
+    target_missing: false,
+    ...overrides,
+  });
+
+  function openContextMenu() {
+    render(
+      wrap(
+        <IssueContextMenuProvider>
+          <IssueActionsContextMenu issue={mockIssue}>
+            <div data-testid="row">Row</div>
+          </IssueActionsContextMenu>
+        </IssueContextMenuProvider>,
+      ),
+    );
+    fireEvent.contextMenu(screen.getByTestId("row"));
+  }
+
+  beforeEach(() => {
+    apiMocks.listQuickActions.mockResolvedValue({
+      quick_actions: [
+        quickAction({}),
+        quickAction({ id: "qa-2", name: "Old triage", status: "archived" }),
+      ],
+    });
+  });
+
+  it("lists the workspace's active quick actions below Create sub-issue", async () => {
+    openContextMenu();
+    await screen.findByText("Quick actions");
+    const labels = screen.getAllByRole("menuitem").map((item) => item.textContent?.trim());
+    expect(labels.slice(0, 3)).toEqual(["Rename issue", "Create sub-issue", "Quick actions"]);
+
+    fireEvent.click(screen.getByText("Quick actions"));
+    expect(await screen.findByText("Review")).toBeInTheDocument();
+    expect(screen.queryByText("Old triage")).not.toBeInTheDocument();
+  });
+
+  it("runs the picked action on this issue and reports the outcome", async () => {
+    apiMocks.runQuickAction.mockResolvedValue({
+      id: "c-1",
+      trigger_outcomes: [{ status: "queued" }],
+    });
+    openContextMenu();
+    fireEvent.click(await screen.findByText("Quick actions"));
+    fireEvent.click(await screen.findByText("Review"));
+
+    await waitFor(() => expect(apiMocks.runQuickAction).toHaveBeenCalledWith("issue-1", "qa-1"));
+    await waitFor(() => expect(toastSuccessMock).toHaveBeenCalledWith("Lambda started working"));
+  });
+
+  it("explains a permission refusal", async () => {
+    apiMocks.runQuickAction.mockRejectedValue({ reason_code: "invocation_not_allowed" });
+    openContextMenu();
+    fireEvent.click(await screen.findByText("Quick actions"));
+    fireEvent.click(await screen.findByText("Review"));
+
+    await waitFor(() =>
+      expect(toastErrorMock).toHaveBeenCalledWith(expect.stringContaining("“Review” runs as an agent")),
+    );
+  });
+
+  it("is absent when the workspace has no active quick actions", async () => {
+    apiMocks.listQuickActions.mockResolvedValue({
+      quick_actions: [quickAction({ status: "archived" })],
+    });
+    openContextMenu();
+    await screen.findByText("Rename issue");
+    await waitFor(() => expect(apiMocks.listQuickActions).toHaveBeenCalled());
+    expect(screen.queryByText("Quick actions")).not.toBeInTheDocument();
   });
 });
 

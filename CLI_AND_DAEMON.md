@@ -320,6 +320,52 @@ does not clear those blocks or establish that earlier background processes exite
 4. Heartbeats are sent periodically (default: 15s) so the server knows the daemon is alive
 5. On shutdown, all runtimes are deregistered
 
+### Local Environments
+
+The issue sidebar's **Environments** section lists the servers and desktop apps associated with an issue's runs, grouped by the machine they run on. A localhost URL opens only on that machine. The daemon reports environments in two ways:
+
+- **Detected.** On macOS and Linux, any process listening on a TCP port whose working directory is inside a run's directory shows up. It has to be seen on two scans in a row, about 30 seconds apart, so short-lived test servers stay out. The agent CLIs themselves are ignored, and so are servers in a project's own local directory, which the user started.
+- **Declared.** A repository can describe its environments in `.multica/environments.toml`. An agent starts one with `multica env start <name>`. The daemon then supervises it: the environment keeps running after the run ends and stops at its TTL. If it is still running when the daemon restarts, the new daemon process picks it back up.
+
+```toml
+[environments.web]
+label = "Web app"
+start = "pnpm dev --port $MULTICA_PORT"
+# url defaults to http://localhost:$MULTICA_PORT; set url = "" when there is none
+# ready = "http://localhost:$MULTICA_PORT/health"   # defaults to url
+# stop = "docker compose down"                      # runs before the process group is signalled
+ttl = "24h"                                         # 1m to 7d, default 24h
+```
+
+Each environment gets ten ports, `MULTICA_PORT` through `MULTICA_PORT+9`. Parallel runs therefore never collide. `start` runs with `/bin/sh -c` from the directory that holds `.multica/`, with the caller's `PATH`. The daemon's `MULTICA_*` credentials are not passed to it. Output goes to a log under `<workspaces root>/.environments/v1/`, and `multica env start` prints its path. The full log file stays on the machine; the daemon can send portions of it to the server for the sidebar, as described below.
+
+```bash
+multica env start web          # waits until the ready URL answers below 500, then prints the URL
+multica env start web --wait=false
+multica env list
+multica env stop web
+```
+
+A declared environment's own servers are not listed a second time as detected ones. That includes servers its `start` command detaches into process groups of their own, as long as they stay in the session `start` runs in. When two environments from the same checkout share a server, such as one API, and the one that started it ends, the server passes to the other while it runs. When such an environment has no URL and one of its processes is a desktop app, the sidebar shows the environment as that app, and Desktop on the same machine can bring its window forward.
+
+These commands use the running task's credential, so they work only inside a run. Environments belong to the issue, which means a later run on the same issue can list and stop what an earlier one started. Neither detected nor declared environments are supported on Windows yet.
+
+#### Sidebar controls
+
+- **Declared environments:** use **+** to start an environment reported by the latest run on a machine, using that run's checkout. An environment's menu offers **Stop**, **Restart**, and **View logs**. Restart reads the repository's current declaration, so it needs the checkout and `.multica/environments.toml` to still exist.
+- **Detected servers:** the menu offers **Stop**, with confirmation. They have no captured log or restart command.
+- **Detected desktop apps:** Desktop on the same machine can bring their window forward. They cannot be stopped or restarted from the sidebar; declare the app as an environment to manage its lifecycle there.
+
+Starting, stopping, or restarting requires a human workspace member who can access the issue and use the machine. The machine must be online and its daemon must support environment controls; an older daemon requires an update. Reading logs requires access to the issue, but not permission to control the machine. Sidebar actions work without an active agent run; the CLI commands above still require a run's credential.
+
+#### Logs shared with the issue
+
+**View logs** reads the last 500 lines, capped at 256 KiB per request, from a declared environment. While the environment is live, the dialog follows its output by requesting another tail about every five seconds. You can pause following, refresh, search, wrap, or copy the displayed output. Read the local file on the machine when you need the complete log.
+
+A crashed declared environment also reports a short excerpt automatically: its last two non-empty log lines, each truncated to 240 characters. The sidebar can show that excerpt even when the machine is offline; a fresh log read needs the machine online.
+
+The server applies secret redaction to uploaded log tails and crash excerpts before storing them. Log-read records are eligible for deletion after ten minutes and are removed by a sweeper that runs every minute. Crash excerpts are stored separately with the environment record, so that ten-minute cleanup does not remove them. Anyone with access to the issue can read the shared output; do not rely on redaction to make arbitrary application logs safe to share.
+
 ### Configuration
 
 Daemon behavior is configured via flags or environment variables:
@@ -942,12 +988,13 @@ multica project delete <id>
 ### Associating Issues with Projects
 
 Use the `--project` flag on `issue create` / `issue update` to attach an issue to a
-project, or on `issue list` to filter issues by project:
+project, or on `issue list` / `issue search` to filter issues by project:
 
 ```bash
 multica issue create --title "Login bug" --project <project-id>
 multica issue update <issue-id> --project <project-id>
 multica issue list --project <project-id>
+multica issue search "Login" --project <project-id>
 ```
 
 ## Setup

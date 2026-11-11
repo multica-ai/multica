@@ -8,9 +8,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type ApiClient } from "../api/client";
 import type { StorageAdapter } from "../types/storage";
 import type { RefreshSessionResponse } from "../api/schemas";
-import { createSessionRenewal, watchSessionActivity } from "./session-renewal";
+import {
+  createSessionRenewal,
+  isRenewableSessionToken,
+  watchSessionActivity,
+} from "./session-renewal";
 
 const TOKEN_KEY = "multica_token";
+// Shaped like the server's session JWTs; renewal only runs for that shape.
+const SESSION_V1 = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ2MSJ9.c2lnLXYx";
+const SESSION_V2 = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ2MiJ9.c2lnLXYy";
 
 function makeStorage(
   initial: Record<string, string> = {},
@@ -54,7 +61,7 @@ interface Harness {
   authenticated: { value: boolean };
 }
 
-function makeHarness(initialToken: string | null = "token-v1"): Harness {
+function makeHarness(initialToken: string | null = SESSION_V1): Harness {
   return {
     api: { refreshSession: vi.fn(), setToken: vi.fn() },
     storage: makeStorage(initialToken ? { [TOKEN_KEY]: initialToken } : {}),
@@ -77,12 +84,12 @@ describe("createSessionRenewal", () => {
 
   it("persists a renewed token to storage and to the API client", async () => {
     const h = makeHarness();
-    h.api.refreshSession.mockResolvedValue(renewedResponse("token-v2"));
+    h.api.refreshSession.mockResolvedValue(renewedResponse(SESSION_V2));
 
     await renewalFor(h).renewNow();
 
-    expect(h.storage.snapshot()[TOKEN_KEY]).toBe("token-v2");
-    expect(h.api.setToken).toHaveBeenCalledWith("token-v2");
+    expect(h.storage.snapshot()[TOKEN_KEY]).toBe(SESSION_V2);
+    expect(h.api.setToken).toHaveBeenCalledWith(SESSION_V2);
   });
 
   // The common answer. Asking before the window opens must change nothing —
@@ -93,7 +100,7 @@ describe("createSessionRenewal", () => {
 
     await renewalFor(h).renewNow();
 
-    expect(h.storage.snapshot()[TOKEN_KEY]).toBe("token-v1");
+    expect(h.storage.snapshot()[TOKEN_KEY]).toBe(SESSION_V1);
     expect(h.api.setToken).not.toHaveBeenCalled();
   });
 
@@ -113,11 +120,11 @@ describe("createSessionRenewal", () => {
     const second = renewal.renewNow();
     renewal.maybeRenew();
 
-    resolve(renewedResponse("token-v2"));
+    resolve(renewedResponse(SESSION_V2));
     await Promise.all([first, second]);
 
     expect(h.api.refreshSession).toHaveBeenCalledTimes(1);
-    expect(h.storage.snapshot()[TOKEN_KEY]).toBe("token-v2");
+    expect(h.storage.snapshot()[TOKEN_KEY]).toBe(SESSION_V2);
   });
 
   // The whole point of the design: an app nobody is touching does not keep
@@ -314,7 +321,7 @@ describe("createSessionRenewal", () => {
 
     await renewalFor(h).renewNow();
 
-    expect(h.storage.snapshot()[TOKEN_KEY]).toBe("token-v1");
+    expect(h.storage.snapshot()[TOKEN_KEY]).toBe(SESSION_V1);
     expect(h.api.setToken).not.toHaveBeenCalled();
   });
 
@@ -331,7 +338,7 @@ describe("createSessionRenewal", () => {
 
     expect(h.api.setToken).not.toHaveBeenCalled();
     // Storage is the auth store's to clear, and it already did.
-    expect(h.storage.snapshot()[TOKEN_KEY]).toBe("token-v1");
+    expect(h.storage.snapshot()[TOKEN_KEY]).toBe(SESSION_V1);
   });
 
   // Log out while a renewal is in flight and the response lands afterwards.
@@ -351,7 +358,7 @@ describe("createSessionRenewal", () => {
     h.storage.removeItem(TOKEN_KEY);
     h.authenticated.value = false;
 
-    resolve(renewedResponse("token-v2"));
+    resolve(renewedResponse(SESSION_V2));
     await pending;
 
     expect(h.storage.snapshot()[TOKEN_KEY]).toBeUndefined();
@@ -372,7 +379,7 @@ describe("createSessionRenewal", () => {
     const pending = renewalFor(h).renewNow();
     h.storage.setItem(TOKEN_KEY, "someone-elses-token");
 
-    resolve(renewedResponse("token-v2"));
+    resolve(renewedResponse(SESSION_V2));
     await pending;
 
     expect(h.storage.snapshot()[TOKEN_KEY]).toBe("someone-elses-token");
@@ -396,6 +403,45 @@ describe("createSessionRenewal", () => {
     expect(h.api.refreshSession).not.toHaveBeenCalled();
   });
 
+  // The server refuses to refresh anything but a session (400). A PAT in
+  // storage — how the local dev environment signs a browser in — would
+  // otherwise fail on every launch and every backoff retry, and each failure
+  // shows up as an error in the Next.js dev overlay.
+  it.each([
+    ["personal access token", `mul_${"a".repeat(40)}`],
+    ["agent task token", `mat_${"b".repeat(40)}`],
+    ["cloud-node PAT", `mcn_${"c".repeat(40)}`],
+  ])("never asks to renew a %s", async (_name, token) => {
+    const h = makeHarness(token);
+    h.api.refreshSession.mockResolvedValue(renewedResponse(SESSION_V2));
+
+    const renewal = renewalFor(h);
+    await renewal.renewNow();
+    for (let i = 0; i < 5; i++) renewal.maybeRenew();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(h.api.refreshSession).not.toHaveBeenCalled();
+    expect(h.api.setToken).not.toHaveBeenCalled();
+    expect(h.storage.snapshot()[TOKEN_KEY]).toBe(token);
+  });
+
+  // The decision is made per attempt, not once: signing in with a real session
+  // after a PAT was in play must start renewing it.
+  it("renews once the stored credential becomes a session", async () => {
+    const h = makeHarness(`mul_${"a".repeat(40)}`);
+    h.api.refreshSession.mockResolvedValue(renewedResponse(SESSION_V2));
+    const renewal = renewalFor(h);
+
+    await renewal.renewNow();
+    expect(h.api.refreshSession).not.toHaveBeenCalled();
+
+    h.storage.setItem(TOKEN_KEY, SESSION_V1);
+    await renewal.renewNow();
+
+    expect(h.api.refreshSession).toHaveBeenCalledTimes(1);
+    expect(h.storage.snapshot()[TOKEN_KEY]).toBe(SESSION_V2);
+  });
+
   // A skipped attempt must not consume the interval, or a check that landed
   // one tick before the boot probe finished would postpone the real one.
   it("does not consume the interval when it declines to run", async () => {
@@ -412,6 +458,24 @@ describe("createSessionRenewal", () => {
     await vi.waitFor(() =>
       expect(h.api.refreshSession).toHaveBeenCalledTimes(1),
     );
+  });
+});
+
+describe("isRenewableSessionToken", () => {
+  it("accepts a three-part JWT", () => {
+    expect(isRenewableSessionToken(SESSION_V1)).toBe(true);
+  });
+
+  it.each([
+    ["a personal access token", `mul_${"a".repeat(40)}`],
+    ["an agent task token", `mat_${"b".repeat(40)}`],
+    ["a cloud-node PAT", `mcn_${"c".repeat(40)}`],
+    ["an empty string", ""],
+    ["two segments", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ2MSJ9"],
+    ["an empty segment", "eyJhbGciOiJIUzI1NiJ9..c2ln"],
+    ["a segment outside base64url", "eyJhbGciOiJIUzI1NiJ9.eyJz dWIi.c2ln"],
+  ])("rejects %s", (_name, token) => {
+    expect(isRenewableSessionToken(token)).toBe(false);
   });
 });
 

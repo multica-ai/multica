@@ -1,0 +1,26 @@
+{
+  "role": {
+    "owner": "Владелец",
+    "admin": "Администратор",
+    "member": "Участник"
+  },
+  "card": {
+    "unavailable": "Участник недоступен",
+    "agents_section": "Агенты ({{count}})",
+    "detail_link": "Подробнее →",
+    "more_agents_one": "и ещё {{count}} агент",
+    "more_agents_other": "и ещё {{count}} агента",
+    "more_agents_few": "и ещё {{count}} агента",
+    "more_agents_many": "и ещё {{count}} агентов"
+  },
+  "detail": {
+    "members_breadcrumb": "Участники",
+    "role": "Роль",
+    "email": "Эл. почта",
+    "joined": "Дата вступления",
+    "relation": "Связь",
+    "breadcrumb_fallback": "Участник",
+    "not_found_title": "Участник не найден",
+    "not_found_description": "Возможно, этот участник покинул рабочее пространство."
+  }
+}

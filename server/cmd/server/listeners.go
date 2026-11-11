@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -98,7 +99,15 @@ var memberPrivateEvents = map[string]bool{
 // for a Redis-backed relay or a feature-flagged dual-write implementation
 // without touching any of the event listeners below. This is Phase 0 of the
 // horizontal-scaling plan tracked in MUL-1138.
-func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
+//
+// audience, when given, narrows events about private projects (MUL-8472) to
+// their members and workspace owners/admins; see privateProjectAudience.
+func registerListeners(bus *events.Bus, b realtime.Broadcaster, audience ...privateProjectAudience) {
+	var projectAudience privateProjectAudience
+	if len(audience) > 0 {
+		projectAudience = audience[0]
+	}
+
 	// Personal events should NOT be broadcast to the whole workspace.
 	personalEvents := map[string]bool{
 		protocol.EventInboxNew:           true,
@@ -303,6 +312,23 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 			realtime.M.RecordEvent(e.Type)
 			b.BroadcastToScope(realtime.ScopeWorkspaceMember, realtime.WorkspaceMemberScopeID(e.WorkspaceID, e.MemberPrivateUserID), data)
 			return
+		}
+
+		if projectAudience != nil && e.WorkspaceID != "" {
+			ctx, cancel := context.WithTimeout(context.Background(), audienceResolveTimeout)
+			recipients, private, err := projectAudience.Audience(ctx, e)
+			cancel()
+			if err != nil {
+				logAudienceFailure(e, err)
+				return
+			}
+			if private {
+				realtime.M.RecordEvent(e.Type)
+				for _, userID := range recipients {
+					b.BroadcastToScope(realtime.ScopeWorkspaceMember, realtime.WorkspaceMemberScopeID(e.WorkspaceID, userID), data)
+				}
+				return
+			}
 		}
 
 		// Phase 1 (MUL-1138): the per-resource scope routing for high-frequency

@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { ApiClient, ApiError } from "./client";
@@ -60,18 +61,34 @@ describe("ApiClient schema fallback", () => {
       });
     });
 
-    it("adds the allowlisted repository return target to the connect request", async () => {
+    it.each([undefined, "all", "selected", "future-selection", 42])("handles repository selection metadata safely (%s)", async (selection) => {
+      stubFetchJson({ repositories: [], total_count: 0, next_page: null, repository_selection: selection });
+      const client = new ApiClient("https://api.example.test");
+      const response = await client.listGitHubInstallationRepositories("ws-1", "install-1");
+      expect(response.repository_selection).toBe(selection === undefined ? undefined : selection === "all" || selection === "selected" ? selection : "unknown");
+    });
+
+    it.each([undefined, "desktop-nonce", 42])("accepts missing or malformed connect correlation metadata (%s)", async (connectionID) => {
+      stubFetchJson({ configured: true, url: "https://github.com/apps/test/installations/new", connection_id: connectionID });
+      const client = new ApiClient("https://api.example.test");
+      const response = await client.getGitHubConnectURL("ws-1", { desktop: true });
+      expect(response.configured).toBe(true);
+      expect(response.connection_id).toBe(typeof connectionID === "string" ? connectionID : undefined);
+      expect(vi.mocked(fetch).mock.calls[0]?.[0]).toBe("https://api.example.test/api/workspaces/ws-1/github/connect?desktop=1");
+    });
+
+    it("uses the unified GitHub connect endpoint", async () => {
       stubFetchJson({
         configured: true,
         url: "https://github.com/apps/multica/installations/new",
       });
       const client = new ApiClient("https://api.example.test");
 
-      await client.getGitHubConnectURL("ws-1", "repositories");
+      await client.getGitHubConnectURL("ws-1");
 
       const fetchMock = vi.mocked(fetch);
       expect(fetchMock).toHaveBeenCalledWith(
-        "https://api.example.test/api/workspaces/ws-1/github/connect?return_to=repositories",
+        "https://api.example.test/api/workspaces/ws-1/github/connect",
         expect.any(Object),
       );
     });
@@ -170,6 +187,32 @@ describe("ApiClient schema fallback", () => {
       const client = new ApiClient("https://api.example.test");
       const res = await client.listSkills();
       expect(res).toEqual([]);
+    });
+
+    it.each([{ body: { skills: [] } }, { body: null }, { body: [{ id: "missing-identity" }] }])(
+      "rejects malformed skill lists for absence checks while preserving rendering fallback: %j",
+      async ({ body }) => {
+        stubFetchJson(body);
+        const client = new ApiClient("https://api.example.test");
+        await expect(client.listSkills()).resolves.toEqual([]);
+        stubFetchJson(body);
+        await expect(client.listSkills({ requireValidResponse: true })).rejects.toThrow("Invalid skill list response");
+      },
+    );
+
+    it("does not accept a defaulted 204 response as proof of absence", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => new Response(null, { status: 204 })));
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.listSkills()).resolves.toEqual([]);
+      await expect(client.listSkills({ requireValidResponse: true })).rejects.toThrow("Invalid skill list response");
+    });
+
+    it("accepts a verified empty list and older valid rows for absence checks", async () => {
+      const client = new ApiClient("https://api.example.test");
+      stubFetchJson([]);
+      await expect(client.listSkills({ requireValidResponse: true })).resolves.toEqual([]);
+      stubFetchJson([baseSkill]);
+      await expect(client.listSkills({ requireValidResponse: true })).resolves.toMatchObject([{ id: "skill-1", name: "review-helper" }]);
     });
 
     it("treats a missing labels field as an empty array (older backends)", async () => {

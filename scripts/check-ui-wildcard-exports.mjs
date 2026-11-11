@@ -39,14 +39,14 @@
  * or prose today; none currently point into packages/ui, but that is a
  * coincidence rather than a property.
  *
- * Run: node scripts/check-ui-wildcard-exports.mjs
+ * Run: node scripts/check-ui-wildcard-exports.mjs [repo-root]
  */
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import ts from "typescript";
 
-const repoRoot = resolve(import.meta.dirname, "..");
+const repoRoot = resolve(process.argv[2] ?? resolve(import.meta.dirname, ".."));
 const uiRoot = join(repoRoot, "packages", "ui");
 const pkgName = "@multica/ui";
 

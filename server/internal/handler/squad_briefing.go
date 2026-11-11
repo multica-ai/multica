@@ -160,10 +160,13 @@ const squadParentStatusStepMoved = `6. **Leave the parent issue's status unchang
 const squadParentStatusOwnedInWorkflow = `6. **Own the parent issue status — through its project workflow.** This issue
    is assigned to your squad and follows its project workflow, so its status
    is yours to move (unless Agent Identity forbids status changes), using only
-   the commands in ` + "`" + `[Project workflow]` + "`" + `. The parent stays at its
+   the commands in ` + "`" + `[Project workflow]` + "`" + `. Delegate only the current
+   step's work and pass its instructions and constraints to members in your
+   delegation comment; their observer brief does not include step instructions.
+   The parent stays at its
    current step while members work — a successful dispatch is not completion.
    On later turns, do not move it for routine progress updates. When you
-   confirm the overall goal is met, run that block's Step done command — this
+   confirm the current step's goal is met, run that block's Step done command — this
    responsibility is itself the standing instruction that authorizes that
    change, so do it even when no comment asked you to.`
 

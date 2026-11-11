@@ -9,6 +9,15 @@ export const FOCUS_WORKSPACE_WINDOW_CHANNEL = "window:focus-workspace";
 /** Renderer → main: open a workspace in its own main window. */
 export const OPEN_WORKSPACE_WINDOW_CHANNEL = "window:open-workspace";
 
+export interface WorkspacePathOptions {
+  /** Navigate a reused tab to the requested URL instead of restoring its view. */
+  navigate?: boolean;
+}
+
+export interface WorkspacePathRequest extends WorkspacePathOptions {
+  path: string;
+}
+
 const WORKSPACE_SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const MAX_WORKSPACE_PATH_LENGTH = 2_048;
 
