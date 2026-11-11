@@ -151,10 +151,11 @@ function ListRowContent({
               </span>
             )}
             {showPullRequests && (
+              // Capped so a long PR set never squeezes the title away.
               <IssuePullRequestChips
                 pullRequests={pullRequests}
                 max={2}
-                className="shrink-0"
+                className="max-w-[40%]"
               />
             )}
             {showLabels && (

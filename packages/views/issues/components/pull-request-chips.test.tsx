@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -53,6 +53,15 @@ function renderChips(props: { enabled: boolean; linked?: boolean }) {
 describe("issue pull request chips", () => {
   beforeEach(() => {
     apiMock.listIssuePullRequestSummaries.mockReset();
+    // jsdom has no layout: give the group room for every chip so these tests
+    // cover data and wiring. Fitting is covered in a real browser by
+    // e2e/issue-pull-request-chips.spec.ts.
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1000);
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(60);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it("does not request PRs while the display option is off", () => {

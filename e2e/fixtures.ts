@@ -45,6 +45,12 @@ export interface TestTableIssue {
   number: number;
 }
 
+export interface TestPullRequestSeed {
+  repoName: string;
+  number: number;
+  state: "open" | "draft" | "merged" | "closed";
+}
+
 export class TestApiClient {
   private token: string | null = null;
   private workspaceSlug: string | null = null;
@@ -54,6 +60,7 @@ export class TestApiClient {
   private createdProjectIds: string[] = [];
   private seededIssueIds: string[] = [];
   private createdPropertyIds: string[] = [];
+  private seededPullRequestIds: string[] = [];
 
   async login(email: string, name: string) {
     const client = new pg.Client(DATABASE_URL);
@@ -346,6 +353,57 @@ export class TestApiClient {
     }
   }
 
+  /**
+   * Link mirrored GitHub PRs to an issue without a GitHub App: inserts the PR
+   * rows and links directly, newest first in array order. Cleanup removes
+   * exactly these rows.
+   */
+  async linkPullRequests(issueId: string, prs: TestPullRequestSeed[]) {
+    if (!this.workspaceId) {
+      throw new Error("Cannot link pull requests before workspace setup");
+    }
+    const client = new pg.Client(DATABASE_URL);
+    await client.connect();
+    try {
+      await client.query("BEGIN");
+      const inserted = await client.query<{ id: string }>(
+        `
+          INSERT INTO github_pull_request (
+            workspace_id, installation_id, repo_owner, repo_name, pr_number,
+            title, state, html_url, pr_created_at, pr_updated_at
+          )
+          SELECT
+            $1::uuid, 0, 'e2e', fixture.repo_name, fixture.pr_number,
+            'E2E ' || fixture.repo_name, fixture.state,
+            'https://github.com/e2e/' || fixture.repo_name || '/pull/' || fixture.pr_number,
+            now() - fixture.ordinal * interval '1 minute', now()
+          FROM unnest($2::text[], $3::integer[], $4::text[])
+            WITH ORDINALITY AS fixture(repo_name, pr_number, state, ordinal)
+          RETURNING id
+        `,
+        [
+          this.workspaceId,
+          prs.map((pr) => pr.repoName),
+          prs.map((pr) => pr.number),
+          prs.map((pr) => pr.state),
+        ],
+      );
+      const ids = inserted.rows.map((row) => row.id);
+      await client.query(
+        `INSERT INTO issue_pull_request (issue_id, pull_request_id)
+         SELECT $1::uuid, unnest($2::uuid[])`,
+        [issueId, ids],
+      );
+      await client.query("COMMIT");
+      this.seededPullRequestIds.push(...ids);
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      await client.end();
+    }
+  }
+
   async deleteIssue(id: string) {
     await this.authedFetch(`/api/issues/${id}`, { method: "DELETE" });
   }
@@ -451,6 +509,23 @@ export class TestApiClient {
 
   /** Clean up all issues created during this test. */
   async cleanup() {
+    if (this.seededPullRequestIds.length > 0) {
+      const client = new pg.Client(DATABASE_URL);
+      await client.connect();
+      try {
+        await client.query(
+          `DELETE FROM issue_pull_request WHERE pull_request_id = ANY($1::uuid[])`,
+          [this.seededPullRequestIds],
+        );
+        await client.query(
+          `DELETE FROM github_pull_request WHERE id = ANY($1::uuid[])`,
+          [this.seededPullRequestIds],
+        );
+      } finally {
+        await client.end();
+      }
+      this.seededPullRequestIds = [];
+    }
     if (this.seededIssueIds.length > 0 && this.workspaceId) {
       const client = new pg.Client(DATABASE_URL);
       await client.connect();
