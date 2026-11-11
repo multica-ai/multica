@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "motion/react";
-import { Minus, Maximize2, Minimize2, ChevronDown, Plus, Check, Archive, Pencil, Loader2, Square } from "@multica/ui/icons";
+import { Minus, Maximize2, Minimize2, ChevronDown, Plus, Check, Archive, Pencil, Loader2, Square, X } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
@@ -78,6 +78,7 @@ import { ChatAppRequests } from "../../common/app-requests";
 import { EmptyState } from "./chat-empty-state";
 import { SessionRenameInput } from "./session-rename-input";
 import { SessionHistoryList } from "./session-history-list";
+import { chatActivity } from "./chat-bar-sessions";
 import { ChatResizeHandles } from "./chat-resize-handles";
 import { useChatContextItems } from "./use-chat-context-items";
 import { useChatResize } from "./use-chat-resize";
@@ -116,6 +117,7 @@ export function ChatWindow() {
   const selectedAgentId = useChatStore((s) => s.selectedAgentId);
   const selectedProjectId = useChatStore((s) => s.selectedProjectId);
   const setOpen = useChatStore((s) => s.setOpen);
+  const dismissChatFromBar = useChatStore((s) => s.dismissChatFromBar);
   const setActiveSession = useChatStore((s) => s.setActiveSession);
   const setSelectedAgentId = useChatStore((s) => s.setSelectedAgentId);
   const setSelectedProjectId = useChatStore((s) => s.setSelectedProjectId);
@@ -732,6 +734,17 @@ export function ChatWindow() {
     setOpen(false);
   }, [activeSessionId, pendingTaskId, setOpen]);
 
+  // Minimize leaves the chat's chip in the bottom bar; close also takes the
+  // chip away, the same as closing it from the bar.
+  const handleClose = useCallback(() => {
+    uiLogger.info("close", {
+      activeSessionId,
+      pendingTaskId,
+    });
+    setOpen(false);
+    if (currentSession) dismissChatFromBar(currentSession.id, chatActivity(currentSession));
+  }, [activeSessionId, pendingTaskId, currentSession, setOpen, dismissChatFromBar]);
+
   const isExpanded = useChatStore((s) => s.isExpanded);
 
   const { renderWidth, renderHeight, isAtMax, boundsReady, isDragging, toggleExpand, startDrag } = useChatResize(windowRef);
@@ -813,6 +826,7 @@ export function ChatWindow() {
     ? t(($) => $.window.restore_tooltip)
     : t(($) => $.window.expand_tooltip);
   const minimizeLabel = t(($) => $.window.minimize_tooltip);
+  const closeLabel = t(($) => $.window.close_tooltip);
   const sizeTransition =
     isDragging || reduceMotion ? { duration: 0 } : { type: "spring" as const, duration: 0.3, bounce: 0 };
 
@@ -902,6 +916,24 @@ export function ChatWindow() {
               <ActionShortcutKeycaps action="toggleChat" />
             </TooltipContent>
           </Tooltip>
+          {!isMobile && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="text-muted-foreground"
+                    aria-label={closeLabel}
+                    onClick={handleClose}
+                  />
+                }
+              >
+                <X />
+              </TooltipTrigger>
+              <TooltipContent side="top">{closeLabel}</TooltipContent>
+            </Tooltip>
+          )}
         </div>
       </div>
 

@@ -144,6 +144,7 @@
     "restore_tooltip": "還原",
     "expand_tooltip": "展開",
     "minimize_tooltip": "最小化",
+    "close_tooltip": "關閉",
     "another_running": "另一個對話正在執行",
     "another_unread": "另一個對話有未讀回覆",
     "running": "執行中",
