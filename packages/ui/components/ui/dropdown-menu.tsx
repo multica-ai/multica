@@ -5,9 +5,23 @@ import { Menu as MenuPrimitive } from "@base-ui/react/menu"
 
 import { cn } from "@multica/ui/lib/utils"
 import { ChevronRightIcon, CheckIcon } from "@multica/ui/icons"
+import {
+  ContextMenuOwnerProvider,
+  useContextMenuOwner,
+  useContextMenuOwnerRef,
+} from "@multica/ui/hooks/use-context-menu-owner"
 
-function DropdownMenu({ ...props }: MenuPrimitive.Root.Props) {
-  return <MenuPrimitive.Root data-slot="dropdown-menu" {...props} />
+function DropdownMenu({ onOpenChange, ...props }: MenuPrimitive.Root.Props) {
+  const owner = useContextMenuOwner(onOpenChange)
+  return (
+    <ContextMenuOwnerProvider value={owner.register}>
+      <MenuPrimitive.Root
+        data-slot="dropdown-menu"
+        onOpenChange={owner.onOpenChange}
+        {...props}
+      />
+    </ContextMenuOwnerProvider>
+  )
 }
 
 function DropdownMenuPortal({ ...props }: MenuPrimitive.Portal.Props) {
@@ -37,9 +51,11 @@ function DropdownMenuContent({
   // bubbles through the React component tree — without this, clicking a
   // menu item inside a row that's wrapped in <a> (agent / runtime list
   // rows) would ALSO fire the row's onClick → unintended navigation.
+  const ownerRef = useContextMenuOwnerRef()
   return (
     <MenuPrimitive.Portal>
       <MenuPrimitive.Positioner
+        ref={ownerRef}
         className="isolate z-50 outline-none"
         align={align}
         alignOffset={alignOffset}
@@ -108,8 +124,20 @@ function DropdownMenuItem({
   )
 }
 
-function DropdownMenuSub({ ...props }: MenuPrimitive.SubmenuRoot.Props) {
-  return <MenuPrimitive.SubmenuRoot data-slot="dropdown-menu-sub" {...props} />
+function DropdownMenuSub({
+  onOpenChange,
+  ...props
+}: MenuPrimitive.SubmenuRoot.Props) {
+  const owner = useContextMenuOwner(onOpenChange)
+  return (
+    <ContextMenuOwnerProvider value={owner.register}>
+      <MenuPrimitive.SubmenuRoot
+        data-slot="dropdown-menu-sub"
+        onOpenChange={owner.onOpenChange}
+        {...props}
+      />
+    </ContextMenuOwnerProvider>
+  )
 }
 
 function DropdownMenuSubTrigger({

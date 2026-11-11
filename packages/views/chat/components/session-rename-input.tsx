@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { isImeComposing } from "@multica/core/utils";
-import { contextMenuOrigin } from "../../common/context-menu-origin";
+import { contextMenuOrigin } from "@multica/ui/lib/context-menu-origin";
 import { useT } from "../../i18n";
 
 /**

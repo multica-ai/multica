@@ -4,9 +4,23 @@ import * as React from "react"
 import { Popover as PopoverPrimitive } from "@base-ui/react/popover"
 
 import { cn } from "@multica/ui/lib/utils"
+import {
+  ContextMenuOwnerProvider,
+  useContextMenuOwner,
+  useContextMenuOwnerRef,
+} from "@multica/ui/hooks/use-context-menu-owner"
 
-function Popover({ ...props }: PopoverPrimitive.Root.Props) {
-  return <PopoverPrimitive.Root data-slot="popover" {...props} />
+function Popover({ onOpenChange, ...props }: PopoverPrimitive.Root.Props) {
+  const owner = useContextMenuOwner(onOpenChange)
+  return (
+    <ContextMenuOwnerProvider value={owner.register}>
+      <PopoverPrimitive.Root
+        data-slot="popover"
+        onOpenChange={owner.onOpenChange}
+        {...props}
+      />
+    </ContextMenuOwnerProvider>
+  )
 }
 
 function PopoverTrigger({ ...props }: PopoverPrimitive.Trigger.Props) {
@@ -32,9 +46,11 @@ function PopoverContent({
   // popup unmounts the moment focus leaves for the dialog, tearing the dialog
   // down with it.
   Pick<PopoverPrimitive.Portal.Props, "keepMounted">) {
+  const ownerRef = useContextMenuOwnerRef()
   return (
     <PopoverPrimitive.Portal keepMounted={keepMounted}>
       <PopoverPrimitive.Positioner
+        ref={ownerRef}
         align={align}
         alignOffset={alignOffset}
         side={side}

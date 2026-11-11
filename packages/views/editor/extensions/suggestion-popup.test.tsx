@@ -7,7 +7,7 @@ import { forwardRef, useImperativeHandle, useState } from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { ContextMenu, ContextMenuContent, ContextMenuItem } from "@multica/ui/components/ui/context-menu";
-import { contextMenuOriginRef } from "../../common/context-menu-origin";
+import { contextMenuOriginRef } from "@multica/ui/lib/context-menu-origin";
 import { createSuggestionPopupRender } from "./suggestion-popup";
 import { isPickerAcceptKey } from "../../common/picker-keys";
 import { PatchedListItem } from "./list-item";
