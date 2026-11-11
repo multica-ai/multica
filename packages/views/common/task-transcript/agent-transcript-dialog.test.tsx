@@ -11,6 +11,7 @@ import { useTranscriptViewStore } from "@multica/core/agents/stores";
 import { renderWithI18n } from "../../test/i18n";
 import { AgentTranscriptDialog } from "./agent-transcript-dialog";
 import type { TimelineItem } from "./build-timeline";
+import type { useRunDeliverables } from "./use-run-deliverables";
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "workspace" }));
 vi.mock("./use-trace-issue-labels", () => ({
@@ -18,6 +19,19 @@ vi.mock("./use-trace-issue-labels", () => ({
 }));
 
 const copyTextMock = vi.hoisted(() => vi.fn().mockResolvedValue(true));
+const deliverables = vi.hoisted(() => ({
+  current: { comments: [], pullRequests: [] } as ReturnType<typeof useRunDeliverables>,
+}));
+vi.mock("./use-run-deliverables", () => ({ useRunDeliverables: () => deliverables.current }));
+const pushMock = vi.hoisted(() => vi.fn());
+vi.mock("../../navigation", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../navigation")>()),
+  useNavigation: () => ({ push: pushMock }),
+}));
+vi.mock("@multica/core/paths", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/paths")>()),
+  useWorkspacePaths: () => ({ issueDetail: (id: string) => `/acme/issues/${id}` }),
+}));
 
 vi.mock("@multica/core/api", () => ({
   api: {
@@ -213,15 +227,21 @@ const items: TimelineItem[] = [
   },
 ];
 
+/** The dialog opens on Overview; most of these tests are about the steps. */
+function openStepsTab() {
+  fireEvent.click(screen.getAllByRole("tab")[1]!);
+}
+
 function renderDialog(
   dialogItems: TimelineItem[] = items,
   options: {
     task?: AgentTask;
     isLive?: boolean;
     locale?: SupportedLocale;
+    view?: "overview" | "steps";
   } = {},
 ) {
-  return renderWithI18n(
+  const result = renderWithI18n(
     <AgentTranscriptDialog
       open
       onOpenChange={vi.fn()}
@@ -232,11 +252,15 @@ function renderDialog(
     />,
     { locale: options.locale },
   );
+  if ((options.view ?? "steps") === "steps") openStepsTab();
+  return result;
 }
 
 beforeEach(() => {
   cleanup();
   copyTextMock.mockClear();
+  pushMock.mockClear();
+  deliverables.current = { comments: [], pullRequests: [] };
   vi.mocked(api.listRuntimes).mockResolvedValue([]);
   useTranscriptViewStore.setState({
     sortDirection: "chronological",
@@ -444,6 +468,7 @@ describe("AgentTranscriptDialog", () => {
         agentName="【Chores|Opus5】Multica Helper"
       />,
     );
+    openStepsTab();
 
     expect(screen.getAllByTestId("rich-content")).toHaveLength(3);
     expect(screen.getAllByText("【Chores|Opus5】Multica Helper")).toHaveLength(1);
@@ -679,16 +704,18 @@ describe("AgentTranscriptDialog", () => {
     vi.useFakeTimers();
     try {
       const { unmount } = renderDialog();
+      // Base UI's tabs hold a timer of their own that outlives the dialog.
+      const baseline = vi.getTimerCount();
 
       await act(async () => {
         fireEvent.click(screen.getByRole("button", { name: "Copy all" }));
         await Promise.resolve();
       });
-      expect(vi.getTimerCount()).toBeGreaterThan(0);
+      expect(vi.getTimerCount()).toBeGreaterThan(baseline);
 
       unmount();
 
-      expect(vi.getTimerCount()).toBe(0);
+      expect(vi.getTimerCount()).toBe(baseline);
     } finally {
       vi.clearAllTimers();
       vi.useRealTimers();
@@ -792,7 +819,6 @@ describe("AgentTranscriptDialog", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Write/ }));
 
-    // The outcome row reports "+2" as well, so scope this to the inspector.
     expect(within(screen.getByRole("complementary")).getByText("+2")).toBeInTheDocument();
     // Plain content: no per-line + gutter and no diff tinting.
     const pre = container.querySelector("pre");
@@ -924,8 +950,7 @@ describe("AgentTranscriptDialog — delivered branch", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Run details" }));
 
-    // Also shown as a produced artifact in the outcome row, hence getAllByText.
-    expect(screen.getAllByText("agent/j/abc12345").length).toBeGreaterThan(0);
+    expect(screen.getByText("agent/j/abc12345")).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: /^Branch/ }));
     expect(copyTextMock).toHaveBeenCalledWith("agent/j/abc12345");
@@ -1185,5 +1210,144 @@ describe("tool output completeness", () => {
 
     expect(screen.queryByText(/only the beginning was kept/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/cannot be confirmed|completeness/i)).not.toBeInTheDocument();
+  });
+
+  describe("overview", () => {
+    const at = (seconds: number) =>
+      new Date(Date.parse("2026-06-08T08:00:00Z") + seconds * 1000).toISOString();
+    const workedRun: TimelineItem[] = [
+      { seq: 1, type: "text", content: "Looking at the parser first.", created_at: at(1) },
+      { seq: 2, type: "tool_use", tool: "Write", input: { file_path: "/repo/src/new.ts", content: "a\nb" }, created_at: at(2) },
+      { seq: 3, type: "tool_result", tool: "Write", output: "ok", created_at: at(3) },
+      { seq: 4, type: "tool_use", tool: "Edit", input: { file_path: "/repo/src/old.ts", old_string: "x", new_string: "y" }, created_at: at(4) },
+      { seq: 5, type: "tool_result", tool: "Edit", output: "ok", created_at: at(20) },
+      { seq: 6, type: "error", content: "Rate limited by provider\nretrying", created_at: at(21) },
+      { seq: 7, type: "text", content: "Fixed the parser and added a test.", created_at: at(50) },
+    ];
+    const workedTask: AgentTask = { ...baseTask, work_dir: "/repo" };
+
+    it("opens on the overview with the run's final message as its result", () => {
+      renderDialog(workedRun, { task: workedTask, view: "overview" });
+
+      expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("heading", { name: "Result" })).toBeInTheDocument();
+      expect(screen.getByTestId("rich-content")).toHaveTextContent("Fixed the parser and added a test.");
+      expect(screen.queryByText("Looking at the parser first.")).not.toBeInTheDocument();
+      // The step list and its toolbar belong to the Steps view.
+      expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
+    });
+
+    it("lists changed files relative to the workdir, marking the ones the run created", () => {
+      renderDialog(workedRun, { task: workedTask, view: "overview" });
+
+      const created = screen.getByRole("button", { name: "Open the change to src/new.ts" });
+      expect(created).toHaveTextContent("new");
+      expect(created).toHaveTextContent("+2");
+      const edited = screen.getByRole("button", { name: "Open the change to src/old.ts" });
+      expect(edited).not.toHaveTextContent("new");
+      expect(edited).toHaveTextContent("+1");
+      expect(edited).toHaveTextContent("−1");
+    });
+
+    it("opens a file's step in the Steps view with its inspector", () => {
+      renderDialog(workedRun, { task: workedTask, view: "overview" });
+
+      fireEvent.click(screen.getByRole("button", { name: "Open the change to src/old.ts" }));
+
+      expect(screen.getByRole("tab", { name: "Steps" })).toHaveAttribute("aria-selected", "true");
+      const inspector = screen.getByRole("complementary");
+      expect(within(inspector).getByText("y")).toBeInTheDocument();
+    });
+
+    it("lists errors under needs a look, each opening its step", () => {
+      renderDialog(workedRun, { task: workedTask, view: "overview" });
+
+      expect(screen.getByRole("heading", { name: "Needs a look" })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: /Rate limited by provider/ }));
+
+      expect(screen.getByRole("tab", { name: "Steps" })).toHaveAttribute("aria-selected", "true");
+      expect(within(screen.getByRole("complementary")).getByText(/retrying/)).toBeInTheDocument();
+    });
+
+    it("names the longest step and lets the mini timeline open the steps", () => {
+      renderDialog(workedRun, { task: workedTask, view: "overview" });
+
+      expect(screen.getByText("Longest step")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: /^Edit/ }));
+
+      expect(screen.getByRole("tab", { name: "Steps" })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("complementary")).toBeInTheDocument();
+    });
+
+    it("shows what a live run is doing now instead of a result", () => {
+      renderDialog(
+        [
+          { seq: 1, type: "text", content: "Running the suite next.", created_at: at(1) },
+          { seq: 2, type: "tool_use", tool: "Bash", input: { command: "pnpm test" }, created_at: at(2) },
+        ],
+        { task: liveTask, isLive: true, view: "overview" },
+      );
+
+      const now = screen.getByRole("region", { name: "Now" });
+      expect(now).toHaveTextContent("Bash");
+      expect(now).toHaveTextContent("pnpm test");
+      expect(now).toHaveTextContent("Running the suite next.");
+      expect(screen.queryByRole("heading", { name: "Result" })).not.toBeInTheDocument();
+
+      fireEvent.click(within(now).getByRole("button", { name: "Jump to step" }));
+      expect(screen.getByRole("tab", { name: "Steps" })).toHaveAttribute("aria-selected", "true");
+    });
+
+    it("lists what the run delivered and leaves the dialog for its comment", () => {
+      const onOpenChange = vi.fn();
+      deliverables.current = {
+        comments: [{ id: "comment-1", content: "Shipped the fix in the PR below.", createdAt: at(55) }],
+        pullRequests: [
+          {
+            id: "pr-1",
+            workspace_id: "workspace-1",
+            repo_owner: "acme",
+            repo_name: "app",
+            number: 42,
+            title: "Fix the parser",
+            state: "open",
+            html_url: "https://github.com/acme/app/pull/42",
+            branch: "agent/j/abc12345",
+            author_login: null,
+            author_avatar_url: null,
+            merged_at: null,
+            closed_at: null,
+            pr_created_at: at(40),
+            pr_updated_at: at(40),
+          },
+        ],
+      };
+      renderWithI18n(
+        <AgentTranscriptDialog
+          open
+          onOpenChange={onOpenChange}
+          task={{ ...workedTask, branch_name: "agent/j/abc12345" }}
+          items={workedRun}
+          agentName="Codex"
+        />,
+      );
+
+      expect(screen.getByRole("link", { name: /#42 Fix the parser/ })).toHaveAttribute(
+        "href",
+        "https://github.com/acme/app/pull/42",
+      );
+      expect(screen.getByText("agent/j/abc12345")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Open comment" }));
+      expect(pushMock).toHaveBeenCalledWith("/acme/issues/issue-1#comment-comment-1");
+      expect(onOpenChange).toHaveBeenCalledWith(false);
+    });
+
+    it("says so when the run has nothing to summarize yet", () => {
+      renderDialog([{ seq: 1, type: "thinking", content: "Hmm" }], { view: "overview" });
+
+      expect(screen.queryByRole("heading", { name: "Result" })).not.toBeInTheDocument();
+      expect(screen.getByText("This run left no message and changed no files.")).toBeInTheDocument();
+    });
   });
 });

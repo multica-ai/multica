@@ -419,6 +419,7 @@ export function toolKindTotals(steps: TraceStep[]): ToolKindTotals {
         ? "command"
         : typeof input?.old_string === "string" ||
             typeof input?.content === "string" ||
+            typeof input?.streamContent === "string" ||
             input?.changes !== undefined
           ? "write"
           : typeof input?.file_path === "string" ||

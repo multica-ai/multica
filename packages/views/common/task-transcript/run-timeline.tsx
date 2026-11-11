@@ -113,6 +113,47 @@ function LaneTrack({
   );
 }
 
+/**
+ * The same two lanes at overview size: no axis, no zoom, no labels. It answers
+ * "was it the model or the tools" at a glance; the full timeline is one tab
+ * away for anything finer.
+ */
+export function RunTimelineMini({
+  lanes,
+  onSeek,
+}: {
+  lanes: TraceLanes;
+  onSeek: (ms: number) => void;
+}) {
+  const { t } = useT("agents");
+  return (
+    <div className="space-y-1">
+      {(
+        [
+          [t(($) => $.transcript.lane_model), lanes.model],
+          [t(($) => $.transcript.lane_tool), lanes.tool],
+        ] as const
+      ).map(([label, segments]) => (
+        <div key={label} className="relative h-2.5 overflow-hidden rounded-sm bg-muted/55">
+          {segments.map((segment) => (
+            <button
+              key={`${segment.kind}:${segment.startMs}`}
+              type="button"
+              aria-label={`${label} ${formatLaneTotal(segment.durationMs)}`}
+              onClick={() => onSeek(segment.startMs)}
+              className={cn(
+                "absolute inset-y-0 rounded-[2px] transition-opacity hover:opacity-80",
+                SEGMENT_TONE[segment.kind],
+              )}
+              style={laneSegmentPosition(segment, lanes.totalMs)}
+            />
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function RunTimeline({
   lanes,
   toolKinds,

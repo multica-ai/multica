@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { buildRunOutcome } from "./run-outcome";
+import { buildRunOutcome, readReportedLineCounts } from "./run-outcome";
 import { buildSteps, groupSteps, toolKindTotals } from "./build-steps";
 import { traceEventDetail, traceToolArgSummary } from "./trace-event-presenter";
 import type { TimelineItem } from "./build-timeline";
@@ -155,6 +155,64 @@ describe("buildRunOutcome", () => {
     expect(outcome.paths).toEqual(["src/a.go", "src/new.go"]);
     expect(outcome.addedLines).toBe(4);
     expect(outcome.removedLines).toBe(1);
+  });
+
+  it("keeps per-file totals and points each file at its last change", () => {
+    const first = write("src/new.ts", "a\nb\nc");
+    const second = edit("src/old.ts", "x", "y");
+    const third = edit("src/new.ts", "a", "a2");
+
+    const outcome = buildRunOutcome(buildSteps([first, second, third]))!;
+
+    expect(outcome.files).toEqual([
+      { path: "src/new.ts", addedLines: 4, removedLines: 1, created: true, lastSeq: third.seq },
+      { path: "src/old.ts", addedLines: 1, removedLines: 1, created: false, lastSeq: second.seq },
+    ]);
+  });
+
+  it("counts a Cursor edit from the line counts its result reports", () => {
+    const at = (seconds: number) => new Date(Date.parse("2026-06-08T08:00:00Z") + seconds * 1000).toISOString();
+    const call: TimelineItem = {
+      seq: ++seq,
+      type: "tool_use",
+      tool: "edit",
+      input: { path: "/repo/src/app.ts", streamContent: "export const a = 2;" },
+      created_at: at(0),
+    };
+    const result: TimelineItem = {
+      seq: ++seq,
+      type: "tool_result",
+      tool: "edit",
+      output: `{"success":{"path":"/repo/src/app.ts","linesAdded":3,"linesRemoved":1,"diffString":"${"x".repeat(9000)}`,
+      created_at: at(2),
+    };
+    const steps = buildSteps([call, result]);
+    const outcome = buildRunOutcome(steps)!;
+
+    expect(outcome.files).toEqual([
+      { path: "/repo/src/app.ts", addedLines: 3, removedLines: 1, created: false, lastSeq: call.seq },
+    ]);
+    expect(outcome.commandCount).toBe(0);
+    expect(toolKindTotals(steps).write).toBe(2000);
+  });
+
+  it("names a Cursor edit's file even before its result arrives", () => {
+    const call: TimelineItem = {
+      seq: ++seq,
+      type: "tool_use",
+      tool: "edit",
+      input: { path: "src/app.ts", streamContent: "" },
+    };
+
+    expect(buildRunOutcome(buildSteps([call]))?.files).toEqual([
+      { path: "src/app.ts", addedLines: 0, removedLines: 0, created: false, lastSeq: call.seq },
+    ]);
+  });
+
+  it("reads reported line counts only from a result that carries them", () => {
+    expect(readReportedLineCounts('{"linesAdded": 12}')).toEqual({ added: 12, removed: 0 });
+    expect(readReportedLineCounts("ok")).toBeNull();
+    expect(readReportedLineCounts(undefined)).toBeNull();
   });
 
   it("returns null when nothing nameable was produced", () => {

@@ -26,7 +26,8 @@ import {
   ArrowUpNarrowWide,
   Info,
   Coins,
-  GitBranch,
+  LayoutGrid,
+  ListTree,
 } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
@@ -34,6 +35,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Dialog, DialogContent, DialogTitle } from "@multica/ui/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@multica/ui/components/ui/popover";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@multica/ui/components/ui/tabs";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -72,22 +74,22 @@ import {
   isGroupRow,
   rowCalls,
   toolKindTotals,
-  type TraceCallStep,
   type TraceGroupRow,
   type TraceMessageStep,
   type TraceRow,
   type TraceStep,
 } from "./build-steps";
 import { buildRunOutcome } from "./run-outcome";
+import { RunOverview } from "./run-overview";
 import { RunTimeline } from "./run-timeline";
+import { callSummary, firstLineOf, formatOffset } from "./step-summary";
+import { useRunDeliverables } from "./use-run-deliverables";
 import {
   base64ByteLength,
   readImageResult,
   traceEventCopyText,
   traceEventDetail,
   traceEventLabel,
-  traceEventSummary,
-  traceToolArgSummary,
 } from "./trace-event-presenter";
 import type { TraceSummaryLabels } from "./trace-event-presenter";
 import {
@@ -109,10 +111,11 @@ import "../../editor/styles/code.css";
 import "./task-transcript.css";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 
-// The run surface, read in four layers: what happened (header), what it
-// produced (outcome), where the time went (timeline), and the evidence (steps).
-// Only one layer is expanded at a time — the inspector opens on demand rather
-// than splitting the surface in two before the reader has asked anything.
+// The run surface, read in two views under one header. Overview answers what
+// the run delivered and whether to trust it — the agent's last word, the files
+// it changed, what it posted, what went wrong, what it cost. Steps is the
+// evidence: where the time went and every call, with the inspector opening on
+// demand rather than splitting the surface before the reader has asked.
 
 interface AgentTranscriptDialogProps {
   open: boolean;
@@ -140,6 +143,13 @@ interface AgentTranscriptDialogProps {
   headerSlot?: React.ReactNode;
 }
 
+type TranscriptView = "overview" | "steps";
+
+/** The row a step shows in: its own, or the group it is folded into. */
+function rowIndexOf(rows: readonly TraceRow[], seq: number): number {
+  return rows.findIndex((row) => row.seq === seq || rowCalls(row).some((c) => c.seq === seq));
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function formatDuration(start: string, end: string): string {
@@ -164,16 +174,6 @@ function formatStepDuration(ms: number): string {
   const minutes = Math.floor(ms / 60_000);
   const seconds = Math.round((ms % 60_000) / 1000);
   return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
-}
-
-/** Offset from the run's start, which is what a step's position means. */
-function formatOffset(ms: number): string {
-  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  if (minutes < 60) return `+${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-  const hours = Math.floor(minutes / 60);
-  return `+${hours}:${String(minutes % 60).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
 function formatRunTime(iso: string, locale: string): string {
@@ -215,7 +215,12 @@ function StepIcon({ step, className }: { step: TraceStep; className?: string }) 
   const input = step.call?.input;
   if (input) {
     if (typeof input.command === "string") return <Terminal className={className} />;
-    if (typeof input.old_string === "string" || typeof input.content === "string" || input.changes)
+    if (
+      typeof input.old_string === "string" ||
+      typeof input.content === "string" ||
+      typeof input.streamContent === "string" ||
+      input.changes
+    )
       return <FilePen className={className} />;
     if (typeof input.query === "string" || typeof input.pattern === "string")
       return <Search className={className} />;
@@ -331,6 +336,15 @@ export function AgentTranscriptDialog({
   const locale = useLocale();
   const formatText = useTraceIssueLabels(useWorkspaceId(), task.issue_id, items, open);
   const [selectedSeq, setSelectedSeq] = useState<number | null>(null);
+  // Every open starts on the overview: it is the answer, and the steps are one
+  // click away. A jump from the overview carries the step the list should open
+  // centred on, since the list mounts fresh when its tab does.
+  const [view, setView] = useState<TranscriptView>("overview");
+  const [jumpSeq, setJumpSeq] = useState<number | null>(null);
+  // A newest-first list mounts at its live end and says so, which would
+  // re-engage the follow and pin a jump from the overview back to the top.
+  // Held until the jump has carried the list away from that end.
+  const landingJumpRef = useRef(false);
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(() => new Set());
   const [query, setQuery] = useState("");
   const [elapsed, setElapsed] = useState("");
@@ -470,6 +484,9 @@ export function AgentTranscriptDialog({
   useEffect(() => {
     setSelectedSeq(null);
     setExpandedGroups(new Set());
+    setView("overview");
+    setJumpSeq(null);
+    landingJumpRef.current = false;
   }, [task.id]);
 
   // ── Derived model ────────────────────────────────────────────────────────
@@ -638,7 +655,7 @@ export function AgentTranscriptDialog({
 
   const scrollToStep = useCallback(
     (seq: number) => {
-      const index = displayRows.findIndex((row) => row.seq === seq || rowCalls(row).some((c) => c.seq === seq));
+      const index = rowIndexOf(displayRows, seq);
       if (index < 0) return;
       // Explicit navigation away from the live end unlatches the newest-first
       // follow — otherwise the scroll-event enforcement would pin the viewport
@@ -647,6 +664,25 @@ export function AgentTranscriptDialog({
       virtuosoRef.current?.scrollToIndex({ index, align: "center", behavior: "smooth" });
     },
     [displayRows, followCtl],
+  );
+
+  // Open one step's evidence from anywhere: the timeline, or an overview item.
+  // A step folded into a group opens its group, so the selection is visible.
+  const openStep = useCallback(
+    (seq: number) => {
+      const group = rows.find((row) => isGroupRow(row) && row.steps.some((step) => step.seq === seq));
+      if (group) setExpandedGroups((prev) => new Set(prev).add(group.seq));
+      setSelectedSeq(seq);
+      if (view === "steps") {
+        scrollToStep(seq);
+        return;
+      }
+      followCtl.disengage();
+      landingJumpRef.current = rowIndexOf(displayRows, seq) > 0;
+      setJumpSeq(seq);
+      setView("steps");
+    },
+    [rows, displayRows, view, scrollToStep, followCtl],
   );
 
   // Clicking the timeline lands on the first step at or after that offset.
@@ -661,10 +697,21 @@ export function AgentTranscriptDialog({
         if (!best || at < (timeMs(best.startedAt) ?? Infinity)) best = step;
       }
       if (!best) return;
-      setSelectedSeq(best.seq);
-      scrollToStep(best.seq);
+      openStep(best.seq);
     },
-    [steps, runStartMs, scrollToStep],
+    [steps, runStartMs, openStep],
+  );
+
+  const handleViewChange = useCallback((next: TranscriptView) => {
+    setJumpSeq(null);
+    landingJumpRef.current = false;
+    setView(next);
+  }, []);
+
+  const jumpIndex = jumpSeq === null ? -1 : rowIndexOf(displayRows, jumpSeq);
+  const { comments: runComments, pullRequests: runPullRequests } = useRunDeliverables(
+    task,
+    open && view === "overview",
   );
 
   const handleCopyWorkdir = useCallback(() => {
@@ -1098,19 +1145,6 @@ export function AgentTranscriptDialog({
         {/* ── What was asked ─────────────────────────────────────────── */}
         <RunTriggerRow task={task} />
 
-        {/* ── What the run produced ──────────────────────────────────── */}
-        <RunOutcomeRow outcome={outcome} branch={task.branch_name} />
-
-        {/* ── Where the time went ────────────────────────────────────── */}
-        {lanes && (
-          <RunTimeline
-            lanes={lanes}
-            toolKinds={toolKinds}
-            selectedOffsetMs={selectedOffsetMs}
-            onSeek={handleSeek}
-          />
-        )}
-
         {/* ── Optional header slot (e.g. webhook payload preview) ── */}
         {headerSlot && (
           <div className="border-b px-4 py-3 shrink-0 bg-muted/20">
@@ -1118,179 +1152,255 @@ export function AgentTranscriptDialog({
           </div>
         )}
 
-        {/* ── List toolbar: search left, the two menus right ── */}
-        <div className="flex items-center gap-2 border-b px-4 py-1.5 shrink-0">
-          <label className="flex h-7 min-w-0 max-w-xs flex-1 items-center gap-1.5 rounded-md bg-muted px-2 text-caption">
-            <Search aria-hidden className="h-3 w-3 shrink-0 text-faint-foreground" />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder={t(($) => $.transcript.search_placeholder)}
-              aria-label={t(($) => $.transcript.search_placeholder)}
-              className="min-w-0 flex-1 bg-transparent text-caption outline-none placeholder:text-faint-foreground"
-            />
-          </label>
-          <span className="ml-auto shrink-0 whitespace-nowrap text-caption text-muted-foreground">
-            {activeFilterKeys.length > 0 || trimmedQuery.length > 0
-              ? t(($) => $.transcript.steps_filtered, {
-                  shown: filteredSteps.length,
-                  total: steps.length,
-                })
-              : t(($) => $.transcript.steps_count, { count: steps.length })}
-          </span>
-          {filterOptions.length > 0 && (
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <Button
-                    variant={activeFilterKeys.length > 0 ? "brand" : "ghost"}
-                    size="sm"
-                    aria-label={t(($) => $.transcript.filter)}
-                    className={activeFilterKeys.length > 0 ? undefined : "text-muted-foreground"}
+        <Tabs
+          value={view}
+          onValueChange={(next) => handleViewChange(next as TranscriptView)}
+          className="min-h-0 flex-1 gap-0"
+        >
+          {/* ── View switch; the list's search and menus ride along on Steps ── */}
+          <div className="flex items-center gap-2 border-b px-4 py-1.5 shrink-0">
+            <TabsList className="shrink-0 group-data-horizontal/tabs:h-7">
+              <TabsTrigger value="overview" className="px-2 text-caption">
+                <LayoutGrid aria-hidden className="h-3.5 w-3.5" />
+                {t(($) => $.transcript.view_overview)}
+              </TabsTrigger>
+              <TabsTrigger value="steps" className="px-2 text-caption">
+                <ListTree aria-hidden className="h-3.5 w-3.5" />
+                {t(($) => $.transcript.view_steps)}
+              </TabsTrigger>
+            </TabsList>
+            {view === "steps" && (
+              <>
+                <label className="flex h-7 min-w-0 max-w-xs flex-1 items-center gap-1.5 rounded-md bg-muted px-2 text-caption">
+                  <Search aria-hidden className="h-3 w-3 shrink-0 text-faint-foreground" />
+                  <input
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder={t(($) => $.transcript.search_placeholder)}
+                    aria-label={t(($) => $.transcript.search_placeholder)}
+                    className="min-w-0 flex-1 bg-transparent text-caption outline-none placeholder:text-faint-foreground"
                   />
-                }
-              >
-                <Filter className="h-3 w-3" />
-                <span className="hidden sm:inline">{t(($) => $.transcript.filter)}</span>
-                {activeFilterKeys.length > 0 && (
-                  <span className="ml-0.5 rounded-full bg-brand-foreground/20 px-1.5 py-0 text-micro font-medium tabular-nums">
-                    {activeFilterKeys.length}
-                  </span>
+                </label>
+                <span className="ml-auto shrink-0 whitespace-nowrap text-caption text-muted-foreground">
+                  {activeFilterKeys.length > 0 || trimmedQuery.length > 0
+                    ? t(($) => $.transcript.steps_filtered, {
+                        shown: filteredSteps.length,
+                        total: steps.length,
+                      })
+                    : t(($) => $.transcript.steps_count, { count: steps.length })}
+                </span>
+                {filterOptions.length > 0 && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      render={
+                        <Button
+                          variant={activeFilterKeys.length > 0 ? "brand" : "ghost"}
+                          size="sm"
+                          aria-label={t(($) => $.transcript.filter)}
+                          className={activeFilterKeys.length > 0 ? undefined : "text-muted-foreground"}
+                        />
+                      }
+                    >
+                      <Filter className="h-3 w-3" />
+                      <span className="hidden sm:inline">{t(($) => $.transcript.filter)}</span>
+                      {activeFilterKeys.length > 0 && (
+                        <span className="ml-0.5 rounded-full bg-brand-foreground/20 px-1.5 py-0 text-micro font-medium tabular-nums">
+                          {activeFilterKeys.length}
+                        </span>
+                      )}
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-auto">
+                      {filterOptions.map(([value, option]) => (
+                        <DropdownMenuCheckboxItem
+                          key={value}
+                          checked={selectedFilterKeys.includes(value)}
+                          onCheckedChange={() => toggleFilterKey(value)}
+                        >
+                          <span className="flex items-center gap-1.5">
+                            <StepIcon
+                              step={option.step}
+                              className="h-3 w-3 shrink-0 text-muted-foreground"
+                            />
+                            {option.label}
+                          </span>
+                        </DropdownMenuCheckboxItem>
+                      ))}
+                      {selectedFilterKeys.length > 0 && (
+                        <>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem onClick={clearFilters} className="text-muted-foreground">
+                            {t(($) => $.transcript.clear_filters)}
+                          </DropdownMenuItem>
+                        </>
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 )}
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-auto">
-                {filterOptions.map(([value, option]) => (
-                  <DropdownMenuCheckboxItem
-                    key={value}
-                    checked={selectedFilterKeys.includes(value)}
-                    onCheckedChange={() => toggleFilterKey(value)}
-                  >
-                    <span className="flex items-center gap-1.5">
-                      <StepIcon
-                        step={option.step}
-                        className="h-3 w-3 shrink-0 text-muted-foreground"
+                {/* Sort and copy are the run-level actions nobody needs on the way
+                    in, so they live behind one overflow control instead of two
+                    permanent buttons. */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    render={
+                      <IconButton
+                        variant="ghost"
+                        size="icon-sm"
+                        label={t(($) => $.transcript.more_actions)}
+                        className="text-muted-foreground"
                       />
-                      {option.label}
-                    </span>
-                  </DropdownMenuCheckboxItem>
-                ))}
-                {selectedFilterKeys.length > 0 && (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={clearFilters} className="text-muted-foreground">
-                      {t(($) => $.transcript.clear_filters)}
+                    }
+                  >
+                    <MoreHorizontal className="h-3.5 w-3.5" />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-56">
+                    <DropdownMenuItem
+                      onClick={() =>
+                        handleSortDirectionChange(
+                          sortDirection === "chronological" ? "newest_first" : "chronological",
+                        )
+                      }
+                    >
+                      {sortDirection === "chronological" ? (
+                        <ArrowUpNarrowWide className="h-3.5 w-3.5" />
+                      ) : (
+                        <ArrowDownNarrowWide className="h-3.5 w-3.5" />
+                      )}
+                      {sortDirection === "chronological"
+                        ? t(($) => $.transcript.sort_newest_first)
+                        : t(($) => $.transcript.sort_chronological)}
                     </DropdownMenuItem>
-                  </>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-          {/* Sort and copy are the run-level actions nobody needs on the way
-              in, so they live behind one overflow control instead of two
-              permanent buttons. */}
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <IconButton
-                  variant="ghost"
-                  size="icon-sm"
-                  label={t(($) => $.transcript.more_actions)}
-                  className="text-muted-foreground"
-                />
-              }
-            >
-              <MoreHorizontal className="h-3.5 w-3.5" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuItem
-                onClick={() =>
-                  handleSortDirectionChange(
-                    sortDirection === "chronological" ? "newest_first" : "chronological",
-                  )
-                }
-              >
-                {sortDirection === "chronological" ? (
-                  <ArrowUpNarrowWide className="h-3.5 w-3.5" />
-                ) : (
-                  <ArrowDownNarrowWide className="h-3.5 w-3.5" />
-                )}
-                {sortDirection === "chronological"
-                  ? t(($) => $.transcript.sort_newest_first)
-                  : t(($) => $.transcript.sort_chronological)}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleCopyAll}>
-                {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                {copyTranscriptLabel}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
+                    <DropdownMenuItem onClick={handleCopyAll}>
+                      {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                      {copyTranscriptLabel}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </>
+            )}
+          </div>
 
-        {/* ── Steps, and the inspector when one is selected ───────────── */}
-        <div className="flex min-h-0 flex-1">
-          <div className="flex min-w-0 flex-1 flex-col">
-            {contentState ? <div className="flex h-full items-center justify-center p-4">{contentState}</div> : displayRows.length === 0 ? (
+          <TabsContent value="overview" className="flex min-h-0 flex-col">
+            {contentState ? (
+              <div className="flex h-full items-center justify-center p-4">{contentState}</div>
+            ) : steps.length === 0 ? (
               <div className="flex h-full items-center justify-center text-body text-muted-foreground">
-                {isLive && steps.length === 0 ? (
+                {isLive ? (
                   <div className="flex items-center gap-2">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     {t(($) => $.transcript.waiting_events)}
                   </div>
-                ) : steps.length === 0 ? (
-                  t(($) => $.transcript.no_data)
                 ) : (
-                  t(($) => $.transcript.no_matches)
+                  t(($) => $.transcript.no_data)
                 )}
               </div>
             ) : (
-              // Virtualized so a multi-thousand-step run mounts a bounded
-              // number of DOM rows (#5733).
-              <Virtuoso
-                key={listEpoch}
-                ref={virtuosoRef}
-                style={{ height: "100%" }}
-                data={displayRows}
-                firstItemIndex={firstItemIndex}
-                // Open a live chronological transcript pinned to the newest
-                // step (#5921); the per-listEpoch remount re-applies this after
-                // task / sort / filter changes.
-                initialTopMostItemIndex={
-                  isLive && sortDirection !== "newest_first"
-                    ? { index: "LAST", align: "end" }
-                    : 0
-                }
-                followOutput={(atBottom) =>
-                  isLive && sortDirection !== "newest_first" && atBottom ? "auto" : false
-                }
-                atBottomThreshold={FOLLOW_EDGE_THRESHOLD}
-                atTopThreshold={FOLLOW_EDGE_THRESHOLD}
-                atTopStateChange={(atTop) => followCtl.onAtEdgeChange(atTop)}
-                scrollerRef={handleScrollerRef}
-                computeItemKey={(_, row) => row.seq}
-                components={LIST_COMPONENTS}
-                itemContent={(_, row) => (
-                  <TranscriptRow
-                    row={row}
-                    formatText={formatText}
-                    runStartMs={runStartMs}
-                    isLive={isLive}
-                    selectedSeq={selectedSeq}
-                    expanded={row.kind === "group" && expandedGroups.has(row.seq)}
-                    onToggleGroup={handleToggleGroup}
-                    onSelect={setSelectedSeq}
-                  />
-                )}
+              <RunOverview
+                task={task}
+                steps={steps}
+                outcome={outcome}
+                lanes={lanes}
+                usage={usage}
+                isLive={isLive}
+                runStartMs={runStartMs}
+                reasonLabel={reasonLabel}
+                comments={runComments}
+                pullRequests={runPullRequests}
+                formatText={formatText}
+                onOpenStep={openStep}
+                onSeek={handleSeek}
+                onCopyBranch={handleCopyBranch}
+                copiedBranch={copiedBranch}
+                onClose={() => onOpenChange(false)}
               />
             )}
-          </div>
-          {selectedStep && (
-            <StepInspector
-              step={selectedStep}
-              runStartMs={runStartMs}
-              onClose={() => setSelectedSeq(null)}
-            />
-          )}
-        </div>
+          </TabsContent>
+
+          <TabsContent value="steps" className="flex min-h-0 flex-col">
+            {/* ── Where the time went ────────────────────────────────────── */}
+            {lanes && (
+              <RunTimeline
+                lanes={lanes}
+                toolKinds={toolKinds}
+                selectedOffsetMs={selectedOffsetMs}
+                onSeek={handleSeek}
+              />
+            )}
+
+            {/* ── Steps, and the inspector when one is selected ───────────── */}
+            <div className="flex min-h-0 flex-1">
+              <div className="flex min-w-0 flex-1 flex-col">
+                {contentState ? <div className="flex h-full items-center justify-center p-4">{contentState}</div> : displayRows.length === 0 ? (
+                  <div className="flex h-full items-center justify-center text-body text-muted-foreground">
+                    {isLive && steps.length === 0 ? (
+                      <div className="flex items-center gap-2">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        {t(($) => $.transcript.waiting_events)}
+                      </div>
+                    ) : steps.length === 0 ? (
+                      t(($) => $.transcript.no_data)
+                    ) : (
+                      t(($) => $.transcript.no_matches)
+                    )}
+                  </div>
+                ) : (
+                  // Virtualized so a multi-thousand-step run mounts a bounded
+                  // number of DOM rows (#5733).
+                  <Virtuoso
+                    key={listEpoch}
+                    ref={virtuosoRef}
+                    style={{ height: "100%" }}
+                    data={displayRows}
+                    firstItemIndex={firstItemIndex}
+                    // Open a live chronological transcript pinned to the newest
+                    // step (#5921); the per-listEpoch remount re-applies this after
+                    // task / sort / filter changes.
+                    initialTopMostItemIndex={
+                      jumpIndex >= 0
+                        ? { index: jumpIndex, align: "center" }
+                        : isLive && sortDirection !== "newest_first"
+                          ? { index: "LAST", align: "end" }
+                          : 0
+                    }
+                    followOutput={(atBottom) =>
+                      isLive && sortDirection !== "newest_first" && atBottom ? "auto" : false
+                    }
+                    atBottomThreshold={FOLLOW_EDGE_THRESHOLD}
+                    atTopThreshold={FOLLOW_EDGE_THRESHOLD}
+                    atTopStateChange={(atTop) => {
+                      if (landingJumpRef.current) {
+                        if (!atTop) landingJumpRef.current = false;
+                        return;
+                      }
+                      followCtl.onAtEdgeChange(atTop);
+                    }}
+                    scrollerRef={handleScrollerRef}
+                    computeItemKey={(_, row) => row.seq}
+                    components={LIST_COMPONENTS}
+                    itemContent={(_, row) => (
+                      <TranscriptRow
+                        row={row}
+                        formatText={formatText}
+                        runStartMs={runStartMs}
+                        isLive={isLive}
+                        selectedSeq={selectedSeq}
+                        expanded={row.kind === "group" && expandedGroups.has(row.seq)}
+                        onToggleGroup={handleToggleGroup}
+                        onSelect={setSelectedSeq}
+                      />
+                    )}
+                  />
+                )}
+              </div>
+              {selectedStep && (
+                <StepInspector
+                  step={selectedStep}
+                  runStartMs={runStartMs}
+                  onClose={() => setSelectedSeq(null)}
+                />
+              )}
+            </div>
+          </TabsContent>
+        </Tabs>
       </DialogContent>
     </Dialog>
   );
@@ -1322,16 +1432,6 @@ function FactDot() {
   );
 }
 
-// ─── Outcome row ────────────────────────────────────────────────────────────
-
-/**
- * What the run produced, above the evidence for it. For most readers this is
- * the whole answer — "it touched these files and ran these commands" settles
- * "can I trust this" without opening a single step.
- *
- * Renders nothing when the run produced nothing nameable; a row of zeroes
- * would read as "it did nothing" rather than "we have nothing to summarize".
- */
 /**
  * What the person asked for, in full. The header names only how the run was
  * triggered ("Comment"), and the lists that open this dialog show the ask on
@@ -1354,54 +1454,6 @@ function RunTriggerRow({ task }: { task: AgentTask }) {
         {t(($) => $.transcript.trigger_text)}
       </span>
       <p className="min-w-0 whitespace-pre-wrap break-words text-caption text-foreground">{text}</p>
-    </div>
-  );
-}
-
-function RunOutcomeRow({
-  outcome,
-  branch,
-}: {
-  outcome: ReturnType<typeof buildRunOutcome>;
-  branch?: string | null;
-}) {
-  const { t } = useT("agents");
-  if (!outcome) return null;
-
-  const chip = "inline-flex shrink-0 items-center gap-1.5 rounded-md border bg-surface px-2 py-1 text-caption";
-  return (
-    <div className="flex shrink-0 items-center gap-2 overflow-hidden border-b bg-muted/40 px-4 py-1.5">
-      <span className="shrink-0 text-micro text-faint-foreground">
-        {t(($) => $.transcript.outcome_label)}
-      </span>
-      {outcome.paths.length > 0 && (
-        <span className={chip} title={outcome.paths.join("\n")}>
-          <FilePen aria-hidden className="h-3 w-3 text-muted-foreground" />
-          <span className="font-medium">
-            {t(($) => $.transcript.outcome_files, { count: outcome.paths.length })}
-          </span>
-          {outcome.addedLines > 0 && (
-            <span className="tabular-nums text-success">+{outcome.addedLines}</span>
-          )}
-          {outcome.removedLines > 0 && (
-            <span className="tabular-nums text-destructive">−{outcome.removedLines}</span>
-          )}
-        </span>
-      )}
-      {outcome.commandCount > 0 && (
-        <span className={chip}>
-          <Terminal aria-hidden className="h-3 w-3 text-muted-foreground" />
-          <span className="font-medium">
-            {t(($) => $.transcript.outcome_commands, { count: outcome.commandCount })}
-          </span>
-        </span>
-      )}
-      {branch && (
-        <span className={cn(chip, "min-w-0")}>
-          <GitBranch aria-hidden className="h-3 w-3 shrink-0 text-muted-foreground" />
-          <span className="truncate font-mono text-micro">{branch}</span>
-        </span>
-      )}
     </div>
   );
 }
@@ -1676,27 +1728,6 @@ function GroupRow({
       )}
     </div>
   );
-}
-
-/**
- * The one line a call is worth in the list: what it was asked to do.
- *
- * Deliberately the call's argument, never the result — the result row is where
- * base64 screenshots and 8KB command dumps used to land in the middle of the
- * list. Only a call we never saw falls back to its output.
- */
-function callSummary(step: TraceCallStep, labels: TraceSummaryLabels): string {
-  if (step.call) {
-    const summary = traceToolArgSummary(step.call.input, labels);
-    if (summary) return summary;
-  }
-  if (!step.result) return "";
-  if (readImageResult(step.result.output)) return "";
-  return traceEventSummary({ type: "tool_result", output: step.result.output }, labels);
-}
-
-function firstLineOf(value: string | undefined): string {
-  return value?.split("\n").find((line) => line.trim().length > 0) ?? "";
 }
 
 // ─── Inspector ──────────────────────────────────────────────────────────────
