@@ -142,12 +142,12 @@ function AppContent() {
 
   // Listen for invite IDs delivered via deep link (multica://invite/<id>).
   // We open the overlay regardless of login state — if the user isn't logged
-  // in, InvitePage's queries will fail and render the "not found" state,
+  // in, InvitationsPage's queries will fail and render the "not found" state,
   // which is acceptable; the expected pre-flight happens in the web app
   // (login + next=/invite/... dance) before the deep link is ever dispatched.
   useEffect(() => {
     return window.desktopAPI.onInviteOpen((invitationId) => {
-      useWindowOverlayStore.getState().open({ type: "invite", invitationId });
+      useWindowOverlayStore.getState().open({ type: "invitations", invitationId });
     });
   }, []);
 
