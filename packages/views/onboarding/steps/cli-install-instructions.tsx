@@ -42,7 +42,8 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-function CommandRow({ cmd }: { cmd: string }) {
+/** A shell command with its copy button, in the onboarding token palette. */
+export function CommandRow({ cmd }: { cmd: string }) {
   return (
     <div className="flex items-start gap-2 rounded-lg bg-muted px-3 py-2.5 font-mono text-body">
       <Terminal className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />

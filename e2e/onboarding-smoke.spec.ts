@@ -2,96 +2,70 @@ import { test, expect } from "@playwright/test";
 import { TestApiClient } from "./fixtures";
 import { waitForPageText } from "./helpers";
 
-// Smoke test for the onboarding flow: welcome → About you (role +
-// use case on ONE screen) → workspace → runtime. The source question
-// is intentionally absent — it moved to the workspace source-backfill
-// prompt (MUL-5159). Captures screenshots for review. Uses a unique
-// email per run so the user is always a fresh, un-onboarded user
-// landing on /onboarding.
+// Smoke test for web onboarding: welcome → Start (the workspace is created
+// for the member, no naming step) → connect a computer → skip into the
+// workspace. Uses a unique email per run so the user is always a fresh,
+// un-onboarded user landing on /onboarding.
 
-const EMAIL = `onboarding-v3-${Date.now()}@localhost`;
-const SHOTS_DIR = "../shots-rail";
+const SHOTS_DIR = "../shots-onboarding";
 
 test.use({ viewport: { width: 1440, height: 900 } });
 
-test("onboarding — welcome → about you (answer path)", async ({ page }) => {
+async function startOnboarding(
+  page: import("@playwright/test").Page,
+  email: string,
+  name: string,
+) {
   const api = new TestApiClient();
-  await api.login(EMAIL, "OBv3 Tester");
-  const token = api.getToken();
+  await api.login(email, name);
+  await page.addInitScript(
+    (t) => localStorage.setItem("multica_token", t),
+    api.getToken(),
+  );
+  return api;
+}
 
-  await page.addInitScript((t) => {
-    localStorage.setItem("multica_token", t);
-  }, token);
+test("onboarding — Start creates the workspace and opens the connect step", async ({ page }) => {
+  const api = await startOnboarding(page, `onboarding-${Date.now()}@localhost`, "Ada Tester");
   await page.goto("/onboarding", { waitUntil: "domcontentloaded" });
-  await waitForPageText(page, "Continue on web");
+  await waitForPageText(page, "Your AI teammates, in one workspace.");
 
-  // 1. Welcome screen
-  await expect(page.getByRole("button", { name: "Continue on web" })).toBeVisible({ timeout: 15000 });
-  await page.screenshot({ path: `${SHOTS_DIR}/01-welcome.png`, fullPage: false });
+  // Web has one more step than desktop: connecting a computer.
+  await expect(page.getByText("Connect a computer")).toBeVisible();
+  await expect(page.getByText("Pick a coding tool")).toBeVisible();
+  await expect(page.getByText("Give it a first task")).toBeVisible();
+  // Nothing on web can see this computer's tools.
+  await expect(page.getByText(/on this computer/)).toHaveCount(0);
+  await page.screenshot({ path: `${SHOTS_DIR}/01-welcome.png` });
 
-  // Click Continue on web to advance to About you
-  await page.getByRole("button", { name: "Continue on web" }).click();
+  await page.getByRole("button", { name: "Start" }).click();
 
-  // 2. About you step — both questions live on this one screen and the
-  //    source question must NOT exist anywhere in the flow.
-  await expect(page.getByText("Tell us a bit about you.")).toBeVisible({ timeout: 10000 });
-  await expect(page.getByText("Which best describes you?")).toBeVisible();
-  await expect(page.getByText("What do you want to use Multica for?")).toBeVisible();
-  // The rail names every step and marks the current one; the ordinal
-  // counter it replaced is gone.
-  await expect(page.locator('[data-slot="stepper-title"]')).toHaveText([
-    "About you",
-    "Workspace",
-    "Meet Mika",
-  ]);
-  await expect(
-    page.locator('[aria-current="step"]').filter({ hasText: "About you" }),
-  ).toBeVisible();
-  await expect(page.getByText("How did you hear about Multica?")).toHaveCount(0);
-  await page.waitForTimeout(500);
-  await page.screenshot({ path: `${SHOTS_DIR}/02-about-you.png` });
+  await expect(page.getByRole("heading", { name: "Connect a computer" })).toBeVisible({
+    timeout: 20000,
+  });
+  await expect(page.getByRole("progressbar", { name: "Step 1 of 3" })).toBeVisible();
+  const workspaces = await api.getWorkspaces();
+  expect(workspaces.map((w) => w.name)).toEqual(["Ada's workspace"]);
+  await page.screenshot({ path: `${SHOTS_DIR}/02-connect.png` });
 
-  // Answer both groups, then Continue → workspace step.
-  await page.getByRole("radio", { name: /Engineer \/ developer/i }).click();
-  await page.getByRole("checkbox", { name: /Ship code with AI agents/i }).click();
-  await page.getByRole("button", { name: "Continue" }).click();
-
-  // 3. Workspace step
-  await expect(page.getByRole("heading", { name: /Name your workspace/i })).toBeVisible({ timeout: 10000 });
-  await expect(
-    page.locator('[aria-current="step"]').filter({ hasText: "Workspace" }),
-  ).toBeVisible();
-  await page.waitForTimeout(600);
-  await page.screenshot({ path: `${SHOTS_DIR}/03-workspace.png` });
-
-  // 4. Runtime step — the rail should now show two completed steps and mark
-  //    "Meet Mika" current.
-  await page.getByRole("textbox").first().fill(`Rail QA ${Date.now()}`);
-  await page.getByRole("button", { name: /^Create /i }).click();
-  await expect(
-    page.locator('[aria-current="step"]').filter({ hasText: "Meet Mika" }),
-  ).toBeVisible({ timeout: 20000 });
-  await page.waitForTimeout(800);
-  await page.screenshot({ path: `${SHOTS_DIR}/06-runtime.png` });
+  await page.getByRole("button", { name: "Skip for now" }).click();
+  await page.waitForURL(/\/issues/, { timeout: 20000 });
 });
 
-test("onboarding — one skip clears the whole questionnaire step", async ({ page }) => {
-  const api = new TestApiClient();
-  await api.login(`skip-${Date.now()}@localhost`, "Skipper");
-  const token = api.getToken();
-
-  await page.addInitScript((t) => localStorage.setItem("multica_token", t), token);
+test("onboarding — back from the first step returns to welcome without a second workspace", async ({
+  page,
+}) => {
+  const api = await startOnboarding(page, `onboarding-back-${Date.now()}@localhost`, "Back Tester");
   await page.goto("/onboarding", { waitUntil: "domcontentloaded" });
-  await waitForPageText(page, "Continue on web");
+  await waitForPageText(page, "Your AI teammates, in one workspace.");
 
-  await page.getByRole("button", { name: "Continue on web" }).click();
-  await expect(page.getByText("Tell us a bit about you.")).toBeVisible({ timeout: 10000 });
+  await page.getByRole("button", { name: "Start" }).click();
+  await page.getByRole("heading", { name: "Connect a computer" }).waitFor({ timeout: 20000 });
+  await page.getByRole("button", { name: "Back" }).click();
+  await page.getByRole("button", { name: "Start" }).click();
+  await page.getByRole("heading", { name: "Connect a computer" }).waitFor({ timeout: 20000 });
 
-  // A single Skip covers role + use case — next stop is workspace.
-  await page.getByRole("button", { name: "Skip" }).click();
-  await expect(page.getByRole("heading", { name: /Name your workspace/i })).toBeVisible({ timeout: 10000 });
-  await page.waitForTimeout(600);
-  await page.screenshot({ path: `${SHOTS_DIR}/04-after-skip.png` });
+  expect(await api.getWorkspaces()).toHaveLength(1);
 });
 
 test("onboarding — zh-Hans renders Chinese labels", async ({ page, context, baseURL }) => {
@@ -102,23 +76,16 @@ test("onboarding — zh-Hans renders Chinese labels", async ({ page, context, ba
       url: baseURL ?? "http://localhost:3000",
     },
   ]);
-  const api = new TestApiClient();
-  await api.login(`zh-${Date.now()}@localhost`, "中文用户");
-  const token = api.getToken();
-
-  await page.addInitScript((t) => localStorage.setItem("multica_token", t), token);
+  await startOnboarding(page, `zh-${Date.now()}@localhost`, "中文用户");
   await page.goto("/onboarding", { waitUntil: "domcontentloaded" });
-  await waitForPageText(page, "在 web 端继续");
+  await waitForPageText(page, "你的 AI 队友，在同一个工作区。");
 
-  // Click the CTA by name. `getByRole("button").first()` used to stand in for
-  // it, but the welcome screen renders the pinned Log out button first in DOM
-  // order — so this step was signing the user out and the assertions below
-  // were waiting on a page that had already redirected to login.
-  await page.getByRole("button", { name: "在 web 端继续" }).click();
+  // Click the CTA by name: the header's Log out button comes first in DOM
+  // order, so `getByRole("button").first()` would sign the user out.
+  await page.getByRole("button", { name: "开始" }).click();
 
-  // About-you screen — Chinese headline + both sub-questions.
-  await expect(page.getByText("简单介绍一下你自己。")).toBeVisible({ timeout: 10000 });
-  await expect(page.getByText("哪一项最符合你？")).toBeVisible();
-  await page.waitForTimeout(500);
-  await page.screenshot({ path: `${SHOTS_DIR}/05-about-you-zh.png` });
+  await expect(page.getByRole("heading", { name: "连接一台电脑" })).toBeVisible({
+    timeout: 20000,
+  });
+  await page.screenshot({ path: `${SHOTS_DIR}/03-connect-zh.png` });
 });

@@ -70,14 +70,6 @@
       "offline": "Hors ligne"
     }
   },
-  "mika_setup": {
-    "title": "Votre runtime est prêt. Commencez avec Mika.",
-    "description": "Laissez Mika organiser les tâches et coordonner les agents.",
-    "action": "Commencer avec Mika",
-    "failed": "Impossible de démarrer Mika",
-    "dialog_title": "Où Mika doit-il s'exécuter ?",
-    "cancel": "Annuler"
-  },
   "machine": {
     "search_placeholder": "Rechercher des machines…",
     "filters": {

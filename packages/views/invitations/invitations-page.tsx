@@ -10,10 +10,11 @@ import {
   workspaceListOptions,
 } from "@multica/core/workspace/queries";
 import { paths } from "@multica/core/paths";
-import type { Invitation } from "@multica/core/types";
+import type { Invitation, Workspace } from "@multica/core/types";
 import { AppLink, useNavigation } from "../navigation";
 import { useLogout } from "../auth";
-import { DragStrip } from "../platform";
+import { DragStrip, isDesktopShell } from "../platform";
+import { ConnectToolsStep } from "../onboarding/join/connect-tools-step";
 import { useT } from "../i18n";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
@@ -46,6 +47,7 @@ export function InvitationsPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [connectTools, setConnectTools] = useState<Workspace | null>(null);
 
   const {
     data: invitations,
@@ -111,6 +113,10 @@ export function InvitationsPage() {
       // refetched), fall back to the resolver. Don't blindly route to
       // wsList[0]: that could teleport the user into an unrelated old
       // workspace they happen to also belong to.
+      if (targetWs && isDesktopShell()) {
+        setConnectTools(targetWs);
+        return;
+      }
       push(
         targetWs ? paths.workspace(targetWs.slug).issues() : paths.newWorkspace(),
       );
@@ -136,6 +142,15 @@ export function InvitationsPage() {
       setSubmitting(false);
     }
   };
+
+  if (connectTools) {
+    return (
+      <ConnectToolsStep
+        workspace={connectTools}
+        onDone={() => push(paths.workspace(connectTools.slug).issues())}
+      />
+    );
+  }
 
   if (isLoading) {
     return (

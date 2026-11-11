@@ -1968,21 +1968,27 @@ export class ApiClient {
   }
 
   // Agents
-  async listAgents(params?: { workspace_id?: string; include_archived?: boolean }): Promise<Agent[]> {
+  async listAgents(
+    params?: { workspace_id?: string; include_archived?: boolean },
+    workspaceSlug?: string,
+  ): Promise<Agent[]> {
     const search = new URLSearchParams();
     if (params?.workspace_id) search.set("workspace_id", params.workspace_id);
     if (params?.include_archived) search.set("include_archived", "true");
-    return this.fetch(`/api/agents?${search}`);
+    return this.fetch(`/api/agents?${search}`, {
+      headers: workspaceHeader(workspaceSlug),
+    });
   }
 
   async getAgent(id: string): Promise<Agent> {
     return this.fetch(`/api/agents/${id}`);
   }
 
-  async createAgent(data: CreateAgentRequest): Promise<Agent> {
+  async createAgent(data: CreateAgentRequest, workspaceSlug?: string): Promise<Agent> {
     assertAgentConversationStartersWriteSupported(data);
     return this.fetch("/api/agents", {
       method: "POST",
+      headers: workspaceHeader(workspaceSlug),
       body: JSON.stringify(data),
     });
   }
@@ -4364,9 +4370,10 @@ export class ApiClient {
     return parseWithFallback(raw, ProjectSchema, EMPTY_PROJECT, { endpoint: "GET /api/projects/:id" });
   }
 
-  async createProject(data: CreateProjectRequest): Promise<Project> {
+  async createProject(data: CreateProjectRequest, workspaceSlug?: string): Promise<Project> {
     const raw = await this.fetch<unknown>("/api/projects", {
       method: "POST",
+      headers: workspaceHeader(workspaceSlug),
       body: JSON.stringify(data),
     });
     return parseWithFallback(raw, ProjectSchema, EMPTY_PROJECT, { endpoint: "POST /api/projects" });

@@ -6,7 +6,6 @@ import { useNavigation } from "@multica/views/navigation";
 import { paths } from "@multica/core/paths";
 import { workspaceListOptions } from "@multica/core/workspace/queries";
 import { useWindowOverlayStore } from "@/stores/window-overlay-store";
-import { useLocalRuntimesPending } from "../platform/use-local-runtimes-pending";
 
 /**
  * Window-level transition overlay: renders above the tab system when the
@@ -16,7 +15,7 @@ import { useLocalRuntimesPending } from "../platform/use-local-runtimes-pending"
  * This component is intentionally thin — just a fixed positioning shell
  * that covers the tab system. It does NOT hide traffic lights or provide
  * a drag strip: each contained view (OnboardingFlow, NewWorkspacePage,
- * InvitePage) renders its own `<DragStrip />` as a flex-child at top so
+ * InvitePage) renders its own drag band as a flex-child at top so
  * native macOS traffic lights stay visible and the page content can fill
  * the window edge-to-edge. This matches the Linear/Notion/Arc pattern for
  * pre-dashboard flows and keeps platform chrome consistent across every
@@ -37,10 +36,6 @@ function WindowOverlayInner() {
   const close = useWindowOverlayStore((s) => s.close);
   const { push } = useNavigation();
   const { data: wsList = [] } = useQuery(workspaceListOptions());
-  // Live local-daemon signal for the onboarding runtime step so it doesn't
-  // flash "no runtime found" while the daemon is still probing CLI versions.
-  const runtimesPending = useLocalRuntimesPending();
-
   if (!overlay) return null;
 
   // Back is only meaningful when there's somewhere to go — i.e. the user
@@ -48,30 +43,18 @@ function WindowOverlayInner() {
   // complete the flow.
   const onBack = wsList.length > 0 ? close : undefined;
 
-  // The daemon's PATH probe runs once at boot, so a newly-installed CLI
-  // (Claude / Codex / Cursor) does not show up until the daemon is bounced.
-  // Both onboarding entries need this — creating a second workspace hits the
-  // same runtime step.
-  const restartDaemon = async () => {
-    await window.daemonAPI?.restart?.();
-  };
-
   return (
     <div className="fixed inset-0 z-50 flex flex-col overflow-auto bg-background">
       {/* Creating a workspace is the onboarding flow entered at the
-          workspace step: a second workspace still needs its own runtime and
-          its own Mika, so running one flow keeps the two from drifting. */}
+          workspace step: a second workspace still needs its own agent, so
+          running one flow keeps the two from drifting. */}
       {overlay.type === "new-workspace" && (
         <OnboardingFlow
           mode="new_workspace"
           onCancel={onBack}
-          onRuntimeRefresh={restartDaemon}
-          runtimesPending={runtimesPending}
           onComplete={(ws, destination) => {
             close();
-            if (ws && destination?.kind === "chat") {
-              push(paths.workspace(ws.slug).chatSession(destination.sessionId));
-            } else if (ws && destination?.kind === "issue") {
+            if (ws && destination) {
               push(paths.workspace(ws.slug).issueDetail(destination.issueId));
             } else if (ws) {
               push(paths.workspace(ws.slug).issues());
@@ -90,11 +73,7 @@ function WindowOverlayInner() {
         <OnboardingFlow
           onComplete={(ws, destination) => {
             close();
-            if (ws && destination?.kind === "chat") {
-              push(
-                paths.workspace(ws.slug).chatSession(destination.sessionId),
-              );
-            } else if (ws && destination?.kind === "issue") {
+            if (ws && destination) {
               push(
                 paths.workspace(ws.slug).issueDetail(destination.issueId),
               );
@@ -104,9 +83,6 @@ function WindowOverlayInner() {
               push(paths.root());
             }
           }}
-          // Restart the bundled daemon when the user hits Refresh on
-          onRuntimeRefresh={restartDaemon}
-          runtimesPending={runtimesPending}
         />
       )}
     </div>

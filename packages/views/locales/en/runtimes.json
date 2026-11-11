@@ -70,14 +70,6 @@
       "offline": "Offline"
     }
   },
-  "mika_setup": {
-    "title": "Your runtime is ready. Start with Mika.",
-    "description": "Let Mika organize work and coordinate agents.",
-    "action": "Start with Mika",
-    "failed": "Couldn't start Mika",
-    "dialog_title": "Where should Mika run?",
-    "cancel": "Cancel"
-  },
   "machine": {
     "search_placeholder": "Search machines…",
     "filters": {

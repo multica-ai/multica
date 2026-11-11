@@ -13,6 +13,7 @@ const {
   markOnboardingComplete,
   listMyInvitations,
   listWorkspaces,
+  desktop,
 } = vi.hoisted(() => ({
   navigate: vi.fn(),
   logout: vi.fn(),
@@ -21,6 +22,7 @@ const {
   markOnboardingComplete: vi.fn(),
   listMyInvitations: vi.fn(),
   listWorkspaces: vi.fn(),
+  desktop: { value: false },
 }));
 
 // Mocked at the context module rather than the barrel so <AppLink> stays the
@@ -35,6 +37,13 @@ vi.mock("../auth", () => ({
 
 vi.mock("../platform", () => ({
   DragStrip: () => null,
+  isDesktopShell: () => desktop.value,
+}));
+
+vi.mock("../onboarding/join/connect-tools-step", () => ({
+  ConnectToolsStep: ({ workspace }: { workspace: { name: string } }) => (
+    <p>connect tools to {workspace.name}</p>
+  ),
 }));
 
 vi.mock("@multica/core/auth", () => ({
@@ -106,6 +115,7 @@ const mkWs = (id: string, slug: string) => ({
 
 describe("InvitationsPage", () => {
   beforeEach(() => {
+    desktop.value = false;
     navigate.mockReset();
     logout.mockReset();
     refreshMe.mockReset();
@@ -164,6 +174,20 @@ describe("InvitationsPage", () => {
       expect(refreshMe).toHaveBeenCalled();
       expect(navigate).toHaveBeenCalledWith("/acme/issues");
     });
+  });
+
+  it("on desktop, offers to connect this computer's tools before entering", async () => {
+    desktop.value = true;
+    listMyInvitations.mockResolvedValue([mkInvite("inv-1", "ws-1", "Acme")]);
+    listWorkspaces.mockResolvedValue([mkWs("ws-1", "acme")]);
+    renderWithClient();
+
+    await waitFor(() => screen.getByText("Acme"));
+    fireEvent.click(screen.getByText("Acme"));
+    fireEvent.click(screen.getByRole("button", { name: /join 1 workspace/i }));
+
+    expect(await screen.findByText("connect tools to acme")).toBeInTheDocument();
+    expect(navigate).not.toHaveBeenCalled();
   });
 
   it("empty list falls through to onboarding via Continue button", async () => {
