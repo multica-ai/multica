@@ -10,7 +10,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/logger"
-	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/projectaccess"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -72,8 +71,7 @@ func (h *Handler) hiddenProjectsForAgentRun(ctx context.Context, workspaceID pgt
 func (h *Handler) requestHiddenProjects(w http.ResponseWriter, r *http.Request, workspaceID string) (projectaccess.Hidden, bool) {
 	hidden, err := h.hiddenProjects(r, workspaceID)
 	if err != nil {
-		if errors.Is(r.Context().Err(), context.Canceled) && errors.Is(err, context.Canceled) {
-			w.WriteHeader(middleware.StatusClientClosedRequest)
+		if writeQueryCancellation(w, r, err) {
 			return projectaccess.Hidden{}, false
 		}
 		slog.Warn("resolve project access failed", append(logger.RequestAttrs(r), "workspace_id", workspaceID, "error", err)...)

@@ -1037,6 +1037,9 @@ func (h *Handler) requireWorkspaceMember(w http.ResponseWriter, r *http.Request,
 
 	member, err := h.getWorkspaceMember(r.Context(), userID, workspaceID)
 	if err != nil {
+		if writeQueryCancellation(w, r, err) {
+			return db.Member{}, false
+		}
 		writeError(w, http.StatusNotFound, notFoundMsg)
 		return db.Member{}, false
 	}
@@ -1096,7 +1099,11 @@ func (h *Handler) loadIssueForUser(w http.ResponseWriter, r *http.Request, issue
 	// Try identifier format first (e.g., "JIA-42"). resolveIssueByIdentifier
 	// silently returns false for non-identifier strings, falling through to
 	// the UUID path below.
-	if issue, ok := h.resolveIssueByIdentifier(r.Context(), issueID, workspaceID); ok {
+	issue, found, err := h.resolveIssueByIdentifier(r.Context(), issueID, workspaceID)
+	if writeQueryCancellation(w, r, err) {
+		return db.Issue{}, false
+	}
+	if found {
 		if !h.requireProjectVisible(w, r, workspaceID, issue.ProjectID, http.StatusNotFound, "issue not found") {
 			return db.Issue{}, false
 		}
@@ -1115,11 +1122,14 @@ func (h *Handler) loadIssueForUser(w http.ResponseWriter, r *http.Request, issue
 		writeError(w, http.StatusBadRequest, "invalid workspace_id")
 		return db.Issue{}, false
 	}
-	issue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+	issue, err = h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
 		ID:          issueUUID,
 		WorkspaceID: wsUUID,
 	})
 	if err != nil {
+		if writeQueryCancellation(w, r, err) {
+			return db.Issue{}, false
+		}
 		writeError(w, http.StatusNotFound, "issue not found")
 		return db.Issue{}, false
 	}
@@ -1138,31 +1148,35 @@ func (h *Handler) loadIssueForUser(w http.ResponseWriter, r *http.Request, issue
 // resolved to the same issue number, so `FOO-134` and `TRS-134` were
 // interchangeable — which makes the identifier URL `/{ws}/issues/{key}`
 // unusable as a canonical link.
-func (h *Handler) resolveIssueByIdentifier(ctx context.Context, id, workspaceID string) (db.Issue, bool) {
+func (h *Handler) resolveIssueByIdentifier(ctx context.Context, id, workspaceID string) (db.Issue, bool, error) {
 	parts := splitIdentifier(id)
 	if parts == nil {
-		return db.Issue{}, false
+		return db.Issue{}, false, nil
 	}
 	if workspaceID == "" {
-		return db.Issue{}, false
+		return db.Issue{}, false, nil
 	}
 	wsUUID, err := util.ParseUUID(workspaceID)
 	if err != nil {
-		return db.Issue{}, false
+		return db.Issue{}, false, nil
 	}
 	// Case-insensitive: a hand-typed `trs-134` should open `TRS-134`.
-	prefix := h.getIssuePrefix(ctx, wsUUID)
+	workspace, err := h.Queries.GetWorkspace(ctx, wsUUID)
+	if err != nil {
+		return db.Issue{}, false, err
+	}
+	prefix := issuePrefixForWorkspace(workspace)
 	if prefix == "" || !strings.EqualFold(parts.prefix, prefix) {
-		return db.Issue{}, false
+		return db.Issue{}, false, nil
 	}
 	issue, err := h.Queries.GetIssueByNumber(ctx, db.GetIssueByNumberParams{
 		WorkspaceID: wsUUID,
 		Number:      parts.number,
 	})
 	if err != nil {
-		return db.Issue{}, false
+		return db.Issue{}, false, err
 	}
-	return issue, true
+	return issue, true, nil
 }
 
 type identifierParts struct {
@@ -1255,6 +1269,9 @@ func (h *Handler) loadAgentForUser(w http.ResponseWriter, r *http.Request, agent
 		WorkspaceID: wsUUID,
 	})
 	if err != nil {
+		if writeQueryCancellation(w, r, err) {
+			return db.Agent{}, false
+		}
 		writeError(w, http.StatusNotFound, "agent not found")
 		return db.Agent{}, false
 	}
