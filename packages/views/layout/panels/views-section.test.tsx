@@ -6,29 +6,18 @@ import { useActiveIssueViewStore } from "@multica/core/issue-views/active-view-s
 import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 import { ViewsSection } from "./views-section";
+import type { IssueViewActions } from "../../issue-views/use-view-actions";
 
 const actions = vi.hoisted(() => ({
   sidebar: { items: [] as unknown[], reorder: vi.fn(), unstar: vi.fn() },
   create: vi.fn(),
+  edit: vi.fn(),
   remove: vi.fn(),
-  canManage: () => true,
+  canManage: vi.fn(() => true),
 }));
 
 vi.mock("../../issue-views/use-view-actions", () => ({ useIssueViewActions: () => actions }));
 vi.mock("../../issue-views/delete-view-dialog", () => ({ DeleteViewDialog: () => null }));
-vi.mock("@dnd-kit/core", () => ({
-  DndContext: ({ children }: { children: ReactNode }) => <>{children}</>,
-  PointerSensor: vi.fn(),
-  closestCenter: vi.fn(),
-  useSensor: vi.fn(),
-  useSensors: vi.fn(),
-}));
-vi.mock("@dnd-kit/sortable", () => ({
-  SortableContext: ({ children }: { children: ReactNode }) => <>{children}</>,
-  useSortable: () => ({ listeners: {}, setNodeRef: vi.fn(), setActivatorNodeRef: vi.fn() }),
-  verticalListSortingStrategy: vi.fn(),
-  arrayMove: vi.fn(),
-}));
 vi.mock("@multica/ui/components/common/tooltip-hint", () => ({
   TooltipHint: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
@@ -70,8 +59,10 @@ function renderSection(adapter = makeAdapter()) {
         wsId="ws-1"
         pathname="/acme/issues"
         plainRowsLit
-        issueLitInTree={false}
+        issueInAllIssues={false}
         activeIssueId={null}
+        litSource={null}
+        actions={actions as unknown as IssueViewActions}
       />
     </NavigationProvider>,
   );
@@ -90,6 +81,8 @@ const SAVED_VIEW = {
 
 beforeEach(() => {
   actions.create.mockReset();
+  actions.edit.mockReset();
+  actions.canManage.mockImplementation(() => true);
   actions.sidebar.items = [];
   useSidebarTreeStore.setState({ viewsCollapsed: false });
   useActiveIssueViewStore.setState({ active: {} });
@@ -123,6 +116,46 @@ describe("ViewsSection", () => {
     renderSection();
     expect(screen.getByRole("button", { name: "Issues in All issues" })).toHaveAttribute("aria-expanded", "false");
     expect(screen.getByRole("button", { name: "Issues in Not done" })).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("edits a saved view from its right-click menu", async () => {
+    actions.sidebar.items = [{ id: "view:v1", kind: "view", view: SAVED_VIEW }];
+    renderSection();
+
+    fireEvent.contextMenu(screen.getByRole("link", { name: "Not done" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Edit view" }));
+    expect(actions.edit).toHaveBeenCalledWith(SAVED_VIEW);
+  });
+
+  it("offers no Edit view on a view the user cannot manage", async () => {
+    actions.canManage.mockImplementation(() => false);
+    actions.sidebar.items = [{ id: "view:v1", kind: "view", view: SAVED_VIEW }];
+    renderSection();
+
+    fireEvent.contextMenu(screen.getByRole("link", { name: "Not done" }));
+    expect(await screen.findByRole("menuitem", { name: "Duplicate" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Edit view" })).toBeNull();
+  });
+
+  // dnd-kit stops the release's click at the document without cancelling
+  // it. Where React listens below the document (Desktop), it never sees that
+  // click, so the row must not wait for it before opening on the next one.
+  it("does not open the view released at the end of a drag, and opens it on the next click", async () => {
+    actions.sidebar.items = [{ id: "view:v1", kind: "view", view: SAVED_VIEW }];
+    const push = vi.fn();
+    renderSection(makeAdapter({ push }));
+    const row = screen.getByRole("link", { name: "Not done" });
+    const pointer = { isPrimary: true, button: 0, clientX: 30, clientY: 100 };
+    fireEvent.pointerDown(row, pointer);
+    fireEvent.pointerMove(document, { ...pointer, clientY: 110 });
+    fireEvent.pointerUp(document, { ...pointer, clientY: 110 });
+
+    expect(fireEvent.click(row)).toBe(false);
+    expect(push).not.toHaveBeenCalled();
+
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    fireEvent.click(row);
+    expect(push).toHaveBeenCalledWith("/acme/issues?view=v1");
   });
 
   describe("view state follows where the click actually navigates", () => {

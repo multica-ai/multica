@@ -8,6 +8,8 @@ import { inboxUnreadSummaryOptions, unreadWorkspaceIds } from "@multica/core/inb
 import { paths, useWorkspacePaths } from "@multica/core/paths";
 import type { InboxWorkspaceUnread } from "@multica/core/types";
 import { openCreateIssueWithPreference } from "@multica/core/issues/stores";
+import { useModalStore } from "@multica/core/modals";
+import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "../common/actor-avatar";
 import { routeIconForPath } from "../layout/route-icon-components";
 import { ProjectIcon } from "../projects/components/project-icon";
@@ -18,9 +20,8 @@ import { useIssueTargetWriter } from "./issue-target";
 import { usePalette } from "./palette-context";
 import { CommandGroupView, CommandRow, PaletteGroup, ROW_CLASS, ROW_ICON_CLASS, RowHint } from "./rows";
 import { ActorRow, AgentPresenceText, IssueResultRow, ObjectRow, ProjectResultRow } from "./result-rows";
-import { DelegateGroup } from "./delegate/delegate-group";
-import type { DelegateActor, IssueTarget } from "./types";
-import type { BestMatch, RootModel } from "./use-root-model";
+import type { IssueTarget } from "./types";
+import type { BestMatch, HandToAgentSeed, RootModel } from "./use-root-model";
 
 const EMPTY_UNREAD_SUMMARY: InboxWorkspaceUnread[] = [];
 
@@ -47,15 +48,7 @@ interface RankedGroup {
   node: ReactNode;
 }
 
-export function RootView({
-  model,
-  rawQuery,
-  onDelegate,
-}: {
-  model: RootModel;
-  rawQuery: string;
-  onDelegate: (actor: DelegateActor, prompt: string) => void;
-}) {
+export function RootView({ model, rawQuery }: { model: RootModel; rawQuery: string }) {
   const { t } = useT("search");
   const palette = usePalette();
   const p = useWorkspacePaths();
@@ -357,19 +350,10 @@ export function RootView({
     (a, b) => b.score - a.score || TYPE_ORDER.indexOf(a.type) - TYPE_ORDER.indexOf(b.type),
   );
 
-  const nothing = !model.hasResults && !model.delegate && !best;
+  const nothing = !model.hasResults && !best;
 
   return (
     <>
-      {model.delegate && (
-        <DelegateGroup
-          prompt={model.delegate.prompt}
-          actor={model.delegate.actor}
-          agentEntry={model.delegate.agentEntry}
-          attachments={model.delegate.attachments}
-          onSubmit={(actor) => onDelegate(actor, model.delegate!.prompt)}
-        />
-      )}
       {best && <BestMatchGroups best={best} query={query} target={model.primaryIssueTarget} />}
       {groups.map((group) => group.node)}
       {partitioned.hasCancelled && (
@@ -403,12 +387,44 @@ export function RootView({
         gone.
       */}
       {server.isLoading && nothing && <LoadingRow />}
+      {/* A plain div, not cmdk's Empty: the hand-to-agent row below is an
+          item, so cmdk never considers this list empty. */}
       {!server.isLoading && nothing && (
-        <CommandPrimitive.Empty className="py-10 text-center text-body text-muted-foreground">
-          {t(($) => $.empty.no_results)}
-        </CommandPrimitive.Empty>
+        <div className="py-10 text-center text-body text-muted-foreground">{t(($) => $.empty.no_results)}</div>
       )}
+      {model.handToAgent && <HandToAgentRow seed={model.handToAgent} disabled={server.stale} />}
     </>
+  );
+}
+
+/**
+ * Always the last row while there is input, so ↵ on a result never turns into
+ * a write. It only opens quick create, prefilled; the user confirms there.
+ * Disabled with the stale results so a fast ↵ does not land on it before the
+ * results for what was typed arrive.
+ */
+function HandToAgentRow({ seed, disabled }: { seed: HandToAgentSeed; disabled: boolean }) {
+  const { t } = useT("search");
+  const palette = usePalette();
+  return (
+    <div className="px-2 py-1">
+      <CommandPrimitive.Item
+        // cmdk picks a default selection only when an item mounts, so the row
+        // remounts on enable to become the selection when nothing else matched.
+        key={disabled ? "disabled" : "enabled"}
+        value="hand-to-agent"
+        disabled={disabled}
+        onSelect={() => {
+          palette.close();
+          useModalStore.getState().open("quick-create-issue", { ...seed });
+        }}
+        className={ROW_CLASS}
+      >
+        <Sparkles className={cn(ROW_ICON_CLASS, "text-brand")} />
+        <span className="min-w-0 flex-1 truncate">{t(($) => $.delegate.row, { prompt: seed.prompt })}</span>
+        <RowHint>{t(($) => $.delegate.hint)}</RowHint>
+      </CommandPrimitive.Item>
+    </div>
   );
 }
 

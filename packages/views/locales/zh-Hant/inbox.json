@@ -15,11 +15,24 @@
     "status": "狀態",
     "priority": "優先順序",
     "from": "來自",
-    "unread_only": "只看未讀",
-    "no_agents_working": "沒有 AI 代理在工作",
     "notification_count_other": "{{count}} 條通知",
     "clear": "清除篩選",
-    "empty": "沒有符合篩選條件的通知"
+    "empty": "沒有符合篩選條件的通知",
+    "section_notification": "通知",
+    "section_issue": "任務",
+    "type": "通知類型",
+    "received": "收到時間",
+    "type_mention": "提及我",
+    "type_comment": "評論與回應",
+    "type_assign": "分配與訂閱",
+    "type_review": "審查請求",
+    "type_change": "任務變更",
+    "type_run": "AI 代理執行",
+    "type_system": "系統",
+    "received_today": "今天",
+    "received_last_7_days": "最近 7 天",
+    "received_last_30_days": "最近 30 天",
+    "agent_idle": "閒置"
   },
   "context_menu": {
     "mark_read": "標為已讀",
@@ -61,6 +74,7 @@
   "types": {
     "issue_assigned": "已分配",
     "issue_subscribed": "已訂閱",
+    "issue_created": "新任務",
     "unassigned": "已取消分配",
     "assignee_changed": "分配人已更改",
     "status_changed": "狀態已更改",
@@ -80,7 +94,11 @@
     "quick_create_unconfirmed": "透過 AI 代理建立結果未確認",
     "autopilot_paused": "自動化已暫停",
     "children_done": "子任務已全部結束",
-    "autopilot_quota_exceeded": "自動化執行次數已用完"
+    "autopilot_quota_exceeded": "自動化執行次數已用完",
+    "app_action_requested": "等待你確認",
+    "app_action_reminder": "確認即將過期",
+    "app_connect_requested": "請連線應用",
+    "app_action_result": "應用操作結果"
   },
   "labels": {
     "set_status_to": "狀態設為",

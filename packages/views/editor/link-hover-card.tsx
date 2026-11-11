@@ -20,6 +20,7 @@ import { useWorkspaceSlug } from "@multica/core/paths";
 import { useAppOrigin } from "../navigation";
 import { useT } from "../i18n";
 import { openLink, isMentionHref } from "./utils/link-handler";
+import { useEditorOverlayOwner } from "./overlay-owner";
 
 function truncateUrl(url: string, max = 48): string {
   if (url.length <= max) return url;
@@ -143,6 +144,7 @@ function LinkHoverCard({
   const slug = useWorkspaceSlug();
   const appOrigin = useAppOrigin();
   const { t } = useT("editor");
+  const overlayOwner = useEditorOverlayOwner();
 
   // Position the card when the portal div is mounted (ref callback).
   // Using useEffect would race with portal rendering — the div might
@@ -193,6 +195,7 @@ function LinkHoverCard({
     <div
       ref={setCardRef}
       className="link-hover-card"
+      data-editor-overlay-owner={overlayOwner}
       style={{
         position: "fixed",
         top: pos.top,

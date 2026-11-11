@@ -109,7 +109,7 @@ describe("LabelPicker pending draft creation", () => {
     for (const name of edits) await fixture.toggle(name);
     await fixture.finish();
     await fixture.expectSelection(expected);
-    expect(fixture.writes).toHaveLength(1);
+    expect(fixture.writes).toEqual([expect.objectContaining({ name: "Gamma", resource_type: "issue" })]);
   });
 
   it("keeps intervening edits when creation fails", async () => {
@@ -121,6 +121,6 @@ describe("LabelPicker pending draft creation", () => {
     await fixture.finish(false);
     await fixture.expectSelection([beta]);
     expect(await screen.findByText("Create failed")).toBeVisible();
-    expect(fixture.writes).toHaveLength(1);
+    expect(fixture.writes).toEqual([expect.objectContaining({ name: "Gamma", resource_type: "issue" })]);
   });
 });

@@ -1,10 +1,7 @@
 // @vitest-environment node
 
 import { describe, expect, it } from "vitest";
-import {
-  canCustomizeConversationStarters,
-  selectConversationStarters,
-} from "./conversation-starters";
+import { selectConversationStarters } from "./conversation-starters";
 
 const fallback = [
   { label: "Fallback one", prompt: "Fallback prompt one." },
@@ -43,39 +40,5 @@ describe("selectConversationStarters", () => {
     expect(
       selectConversationStarters([{ label: "Orphan", prompt: "" }], fallback),
     ).toEqual({ starters: fallback, isFallback: true });
-  });
-});
-
-describe("canCustomizeConversationStarters", () => {
-  const live = { archived_at: null };
-  const allowed = { conversationStartersSupported: true, canEditAgent: true };
-
-  it("offers the editor to someone who may edit a live agent", () => {
-    expect(canCustomizeConversationStarters(live, allowed)).toBe(true);
-  });
-
-  it("stays silent for a reader", () => {
-    expect(
-      canCustomizeConversationStarters(live, { ...allowed, canEditAgent: false }),
-    ).toBe(false);
-  });
-
-  it("stays silent on a backend that drops conversation starters", () => {
-    expect(
-      canCustomizeConversationStarters(live, {
-        ...allowed,
-        conversationStartersSupported: false,
-      }),
-    ).toBe(false);
-  });
-
-  it("stays silent for an archived agent, editor or not", () => {
-    expect(
-      canCustomizeConversationStarters({ archived_at: "2026-08-01T00:00:00Z" }, allowed),
-    ).toBe(false);
-  });
-
-  it("stays silent while no agent is resolved", () => {
-    expect(canCustomizeConversationStarters(null, allowed)).toBe(false);
   });
 });

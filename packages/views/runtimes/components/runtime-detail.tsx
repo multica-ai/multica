@@ -358,8 +358,9 @@ function RuntimeProperties({
         </ObjectProperty>
         <ObjectProperty label={t(($) => $.detail.fact_device)}>
           {device?.hostname ? (
-            <TruncatedTooltip content={device.hostname}>
-              <span className="block truncate font-mono">{device.hostname}</span>
+            <TruncatedTooltip content={device.hostname} focusable>
+              {/* The value column clips, so the focus ring draws inside. */}
+              <span className="block truncate font-mono focus-visible:ring-2 focus-visible:ring-inset">{device.hostname}</span>
             </TruncatedTooltip>
           ) : (
             <span className="text-muted-foreground">—</span>

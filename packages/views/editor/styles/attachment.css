@@ -124,3 +124,79 @@
 .image-toolbar button:hover {
   background: color-mix(in srgb, white 15%, transparent);
 }
+
+/*
+ * Issue-timeline comment images. `data-comment-images` sits on the timeline
+ * and the bottom composer, carrying the personal "Images in comments"
+ * preference ("thumbnails" | "full"). "full" keeps the rules above.
+ *
+ * Thumbnails: attached images sit in a wrapping row at one height and their
+ * own aspect (never cropped); a lone one, and any image in the body, gets a
+ * larger box. Sized figures are capped by width, because capping the height
+ * of an `aspect-ratio` image would stretch it. Click opens the full size.
+ */
+[data-comment-images="thumbnails"] [data-comment-image-list] {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+
+[data-comment-images="thumbnails"] [data-comment-image-list] .image-standalone .image-content {
+  max-height: 12.5rem;
+}
+
+[data-comment-images="thumbnails"] [data-comment-image-list] .image-standalone[data-sized] {
+  width: min(var(--image-width), 100%, 12.5rem * var(--image-aspect));
+}
+
+[data-comment-images="thumbnails"] [data-comment-image-list] > .image-node:only-child .image-content {
+  max-width: min(100%, 35rem);
+  max-height: 25rem;
+}
+
+[data-comment-images="thumbnails"] [data-comment-image-list] > .image-node:only-child .image-standalone[data-sized] {
+  width: min(var(--image-width), 100%, 35rem, 25rem * var(--image-aspect));
+}
+
+[data-comment-images="thumbnails"] .image-figure[data-sized]:not(.image-standalone) {
+  width: min(var(--image-width), 100%, 35rem, 25rem * var(--image-aspect));
+}
+
+[data-comment-images="thumbnails"] .image-figure[data-pending]:not(.image-standalone) {
+  max-width: 35rem;
+}
+
+[data-comment-images="thumbnails"] .image-figure:not([data-sized], [data-pending], .image-standalone) .image-content {
+  width: auto;
+  max-width: min(100%, 35rem);
+  max-height: 25rem;
+}
+
+/* A thumbnail can be narrower than its toolbar, so the toolbar grows from
+   the left edge into the open space instead of past the column's edge. */
+[data-comment-images="thumbnails"] [data-comment-image-list] .image-toolbar,
+[data-comment-images] .ProseMirror .image-toolbar {
+  top: 0.25rem;
+  left: 0.25rem;
+  right: auto;
+}
+
+/* Comment composers, whatever the preference: an image keeps its place in
+   the text as a small thumbnail, so what is being written stays in view. */
+[data-comment-images] .ProseMirror .image-node {
+  text-align: start;
+}
+
+[data-comment-images] .ProseMirror .image-figure[data-sized] {
+  width: min(var(--image-width), 100%, 7.5rem * var(--image-aspect));
+}
+
+[data-comment-images] .ProseMirror .image-figure[data-pending] {
+  width: 12rem;
+}
+
+[data-comment-images] .ProseMirror .image-figure:not([data-sized], [data-pending]) .image-content {
+  width: auto;
+  max-width: 100%;
+  max-height: 7.5rem;
+}

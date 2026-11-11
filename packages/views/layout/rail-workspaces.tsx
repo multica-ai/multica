@@ -1,9 +1,9 @@
 "use client";
 
 import { useMemo, useState, type MouseEvent } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AppWindow, ArrowBigUp, Check, Pin, Plus } from "@multica/ui/icons";
-import { api } from "@multica/core/api";
+import { useQuery } from "@tanstack/react-query";
+import { AppWindow, ArrowBigUp, Check, Mail, Pin, Plus } from "@multica/ui/icons";
+import type { api } from "@multica/core/api";
 import { useConfigStore } from "@multica/core/config";
 import {
   inboxUnreadSummaryEnabled,
@@ -14,7 +14,6 @@ import { paths, useCurrentWorkspace } from "@multica/core/paths";
 import type { Invitation, Workspace } from "@multica/core/types";
 import {
   myInvitationListOptions,
-  workspaceKeys,
   workspaceListOptions,
 } from "@multica/core/workspace/queries";
 import { useSetWorkspacePinned } from "@multica/core/workspace/mutations";
@@ -26,9 +25,6 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { Kbd, KbdGroup } from "@multica/ui/components/ui/kbd";
@@ -123,80 +119,11 @@ function OtherWindowMarker() {
   );
 }
 
-function useInvitationActions(invitations: Invitation[]) {
-  const queryClient = useQueryClient();
-  const { push } = useNavigation();
-  const accept = useMutation({
-    mutationFn: (id: string) => api.acceptInvitation(id),
-    // Land inside the joined workspace; staying put and just adding a menu
-    // row reads as nothing happened (MUL-820).
-    onSuccess: async (_, invitationId) => {
-      const invitation = invitations.find((i) => i.id === invitationId);
-      queryClient.invalidateQueries({ queryKey: workspaceKeys.myInvitations() });
-      // staleTime: 0 forces a real fetch — the joined workspace has to be in
-      // the list before its slug can be resolved.
-      const list = await queryClient.fetchQuery({ ...workspaceListOptions(), staleTime: 0 });
-      const joined = invitation ? list.find((w) => w.id === invitation.workspace_id) : null;
-      if (joined) push(paths.workspace(joined.slug).issues());
-    },
-    // "Invitation is not pending": it was concluded on another surface while
-    // this row was on screen. Refetch so the stale row drops.
-    onError: () => {
-      queryClient.invalidateQueries({ queryKey: workspaceKeys.myInvitations() });
-    },
-  });
-  const decline = useMutation({
-    mutationFn: (id: string) => api.declineInvitation(id),
-    // Success drops the declined row; failure means it was concluded
-    // elsewhere. Either way the list is stale.
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: workspaceKeys.myInvitations() });
-    },
-  });
-  return { accept, decline };
-}
-
-function InvitationItem({
-  invitation,
-  actions,
-}: {
-  invitation: Invitation;
-  actions: ReturnType<typeof useInvitationActions>;
-}) {
-  const { t } = useT("layout");
-  const name = invitation.workspace_name ?? t(($) => $.sidebar.invitation_workspace_fallback);
-  const pending = actions.accept.isPending || actions.decline.isPending;
-  return (
-    <DropdownMenuSub>
-      <DropdownMenuSubTrigger>
-        <WorkspaceAvatar name={name} size="sm" />
-        <span className="min-w-0 flex-1 truncate">{name}</span>
-        <UnreadDot />
-      </DropdownMenuSubTrigger>
-      <DropdownMenuSubContent className="min-w-44">
-        {invitation.inviter_name && (
-          <DropdownMenuGroup>
-            <DropdownMenuLabel className="text-caption text-muted-foreground">
-              {t(($) => $.rail.invitation_from, { name: invitation.inviter_name })}
-            </DropdownMenuLabel>
-          </DropdownMenuGroup>
-        )}
-        <DropdownMenuItem disabled={pending} onClick={() => actions.accept.mutate(invitation.id)}>
-          {t(($) => $.sidebar.invitation_join)}
-        </DropdownMenuItem>
-        <DropdownMenuItem disabled={pending} onClick={() => actions.decline.mutate(invitation.id)}>
-          {t(($) => $.sidebar.invitation_decline)}
-        </DropdownMenuItem>
-      </DropdownMenuSubContent>
-    </DropdownMenuSub>
-  );
-}
-
 /**
  * The workspace switcher at the top of the rail: one tile for the current
  * workspace, whatever the workspace count, so the spaces below never move.
- * Its menu lists every workspace, pending invitations, and workspace
- * creation. The tile carries a dot while another workspace has unread inbox
+ * Its menu lists every workspace, an entry to the invitations page while
+ * any are pending, and workspace creation. The tile carries a dot while another workspace has unread inbox
  * items or an invitation waits; the current workspace's unread shows on the
  * Inbox space instead.
  */
@@ -214,7 +141,6 @@ export function RailWorkspaces() {
     enabled: inboxUnreadSummaryEnabled(wsId),
   });
   const unreadIds = useMemo(() => unreadWorkspaceIds(unreadSummary), [unreadSummary]);
-  const actions = useInvitationActions(invitations);
   const setPinned = useSetWorkspacePinned();
   const { openWorkspaceInNewWindow, workspacesInOtherWindows } = useNavigation();
   // Read when the menu opens: other windows switch workspaces independently.
@@ -299,12 +225,16 @@ export function RailWorkspaces() {
           <>
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
-              <DropdownMenuLabel className="text-caption text-muted-foreground">
-                {t(($) => $.sidebar.pending_invitations_label)}
-              </DropdownMenuLabel>
-              {invitations.map((invitation) => (
-                <InvitationItem key={invitation.id} invitation={invitation} actions={actions} />
-              ))}
+              <DropdownMenuItem render={<AppLink href={paths.invitations()} />}>
+                <Mail />
+                <span className="min-w-0 flex-1 truncate">
+                  {t(($) => $.sidebar.pending_invitations_label)}
+                </span>
+                <span className="text-caption text-muted-foreground tabular-nums">
+                  {invitations.length}
+                </span>
+                <UnreadDot />
+              </DropdownMenuItem>
             </DropdownMenuGroup>
           </>
         )}

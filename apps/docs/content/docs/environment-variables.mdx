@@ -190,6 +190,7 @@ The auth rate limits require `REDIS_URL`; without it, the startup log notes that
 | Lark | `MULTICA_LARK_SECRET_KEY` | Base64-encoded 32-byte credential encryption key |
 | Slack | `MULTICA_SLACK_SECRET_KEY` | Base64-encoded 32-byte token encryption key |
 | Telegram | `MULTICA_TELEGRAM_SECRET_KEY` | Base64-encoded 32-byte Bot token encryption key |
+| Telegram | `MULTICA_TELEGRAM_TOOL_PROGRESS` | Tool steps shown in the streamed reply: `auto` (default: details in private chats, kind of work in groups), `off`, `summary` or `detail` |
 | Composio | `COMPOSIO_API_KEY` | Enables Composio tool connections |
 | Composio | `COMPOSIO_CALLBACK_BASE_URL` | Callback API URL; can fall back to `MULTICA_PUBLIC_URL` |
 | Composio | `COMPOSIO_STATE_SECRET` | OAuth state signing secret; can be derived from `JWT_SECRET` |
@@ -199,6 +200,8 @@ The auth rate limits require `REDIS_URL`; without it, the startup log notes that
 | Plugins | `MULTICA_PLUGIN_SURFACE_ORIGIN` | Dedicated cookie-free browser origin routed to this backend; must differ from app/API origins and preserve `Host` |
 | Plugins | `MULTICA_PLUGIN_API_URL` | Complete versioned Plugin Public API base URL, such as `https://plugin-api.example.com/v1`; falls back to `MULTICA_PUBLIC_URL` + `/v1` |
 | Plugins | `MULTICA_PLUGIN_DIR` | Optional absolute directory used to publish local plugin bundles during development |
+| Theme store | `MULTICA_THEME_STORE` | On by default, reading the official [multica-themes](https://github.com/multica-ai/multica-themes) registry; `off` turns the community theme store off and stops every registry request |
+| Theme store | `MULTICA_THEME_REGISTRY_URL` | Another registry's `index.json`, such as a fork of the official one; see [Themes and appearance](/themes#self-hosting) |
 
 Without `GITHUB_APP_ID` and the private key, PRs still link, mirror, and move issues on merge normally, but cards show no CI or mergeability status, and the "pick from GitHub" repository entry is disabled.
 
@@ -391,6 +394,8 @@ Supported keys:
 | `ws_claim_poll_interval` | `3m` | Upper bound for healthy WebSocket claim safety polls, independent of `poll_interval`; the daemon applies downward-only jitter |
 | `heartbeat_interval` | `15s` | Heartbeat interval |
 | `agent_timeout` | unlimited | Absolute time limit per run |
+| `agent_idle_watchdog` | `2h` | Silence ceiling when no tool call is in flight; `0s` turns off the daemon watchdog entirely, including `agent_tool_watchdog` |
+| `agent_tool_watchdog` | same as `agent_idle_watchdog` | Silence ceiling while a tool call is in flight; `0s` means the daemon watchdog never stops a run over a silent tool call, so the run is bounded only by `agent_timeout`, which is unlimited by default |
 | `codex_semantic_inactivity_timeout` | derived | Codex semantic-silence threshold. With nothing set it takes the larger of the idle and tool watchdog budgets; a tool budget of `0` falls back to the idle budget, and only when the whole watchdog suite is disabled does Codex keep its own `10m` |
 | `codex_handshake_timeout` | `30s`; `thread/start`, `thread/resume`: `60s` | Codex app-server startup handshake ceilings. An explicit value overrides both budgets globally |
 | `disable_auto_update` | follows environment | `true` turns auto-update off; `false` clears the local override and returns to the env var or default |
@@ -399,7 +404,7 @@ Supported keys:
 
 A few value rules:
 
-- Duration keys accept positive Go durations (such as `10s`, `2h`); `0s` and negative values are rejected. The one exception is `agent_timeout`: `0s` is valid and explicitly disables the run time limit.
+- Duration keys take a positive Go duration such as `10s` or `2h`; negative values are always rejected. Only `agent_timeout`, `agent_idle_watchdog`, and `agent_tool_watchdog` also accept `0s`: for `agent_timeout` it removes the run time limit, and for the two watchdog keys the table says what it turns off.
 - Passing an empty string clears a persisted value and falls back to the env var or built-in default, for example `multica config set poll_interval ""`.
 - `max_concurrent_tasks` requires a non-negative integer.
 - Relative `workspaces_root` values are converted to absolute paths when saved.

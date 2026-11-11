@@ -130,6 +130,14 @@ async function expectPopupClosed() {
 }
 
 describe("createSuggestionPopupRender", () => {
+  it("marks its portal with the editor surface owner", async () => {
+    const ed = makeEditor("@");
+    ed.view.dom.parentElement!.setAttribute("data-editor-overlay-owner", "selection-draft");
+    await triggerSuggestion(ed, "@a");
+    expect(screen.getByTestId("suggestion-popup").closest("[data-editor-overlay-owner]"))
+      .toHaveAttribute("data-editor-overlay-owner", "selection-draft");
+  });
+
   it.each(["@", "/"] as const)(
     "closes the %s popup through a real pluginKey on outside pointerdown",
     async (char) => {

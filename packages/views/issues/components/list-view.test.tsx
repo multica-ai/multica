@@ -9,6 +9,7 @@ import { ListView } from "./list-view";
 import { IssueContextMenuProvider } from "../actions";
 import { ScrollRestorationProvider, type ScrollRestorationAdapter } from "../../platform";
 import type { IssueStatusPagination } from "../surface/use-issue-status-branches";
+import type { IssueCreateDefaults } from "../surface/types";
 import enCommon from "../../locales/en/common.json";
 import enIssues from "../../locales/en/issues.json";
 
@@ -213,6 +214,7 @@ function renderListView(
   onMoveIssue = vi.fn(),
   statuses: IssueStatusEntry[] = [],
   scrollAdapter: ScrollRestorationAdapter = { get: () => undefined },
+  onCreateIssue?: (defaults: IssueCreateDefaults) => void,
 ) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
@@ -228,6 +230,7 @@ function renderListView(
               visibleStatuses={visibleStatuses}
               statusPagination={PAGINATION}
               onMoveIssue={onMoveIssue}
+              onCreateIssue={onCreateIssue}
             />
           </ScrollRestorationProvider>
         </IssueContextMenuProvider>
@@ -332,6 +335,16 @@ describe("ListView status header collapse", () => {
     await user.click(trigger);
 
     expect(mockViewState.listCollapsedStatuses).toEqual(["todo"]);
+  });
+
+  it("names the header's add issue button after its tooltip", async () => {
+    const user = userEvent.setup();
+    const onCreateIssue = vi.fn();
+    renderListView(ISSUES, ["todo"], vi.fn(), [], { get: () => undefined }, onCreateIssue);
+
+    await user.click(screen.getByRole("button", { name: enIssues.list.add_issue_tooltip }));
+
+    expect(onCreateIssue).toHaveBeenCalledWith({ status: "todo" });
   });
 });
 

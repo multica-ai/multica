@@ -223,6 +223,15 @@ describe("installContextMenu — link items", () => {
     expect(lastMenuLabels()).toContain("复制链接地址");
   });
 
+  it("uses Russian labels when the OS preferred language is Russian", () => {
+    ctx.preferredLanguagesRef.current = ["ru-RU"];
+    const wc = makeWebContents();
+    installContextMenu(wc as never);
+    wc.fire(baseSelection({ linkURL: "https://multica.ai" }));
+    expect(lastMenuLabels()).toContain("Открыть ссылку в браузере");
+    expect(lastMenuLabels()).toContain("Копировать адрес ссылки");
+  });
+
   it("falls back to English when the OS preferred language is something we don't ship", () => {
     ctx.preferredLanguagesRef.current = ["fr-FR"];
     const wc = makeWebContents();

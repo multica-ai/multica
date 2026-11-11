@@ -40,6 +40,15 @@ WHERE id = ANY(@ids::uuid[])
   AND workspace_id = @workspace_id
 ORDER BY created_at ASC, id ASC;
 
+-- name: ListCommentOriginsForIssue :many
+-- Author and time of the live comments in @ids, without their bodies: the
+-- issue attachment list labels each file with the comment that delivered it.
+SELECT id, author_type, author_id, created_at FROM comment
+WHERE id = ANY(@ids::uuid[])
+  AND issue_id = @issue_id
+  AND workspace_id = @workspace_id
+  AND deleted_at IS NULL;
+
 -- name: ListChildCommentsForParents :many
 -- Fetch one descendant level for a bounded set of parent comments. Each parent
 -- maps back to its thread root in the Go breadth-first walk, avoiding one query

@@ -10,6 +10,10 @@ import {
   CollectionPageHeader,
 } from "./collection-page";
 import { CollapsedNavTrigger, PAGE_GUTTER, PageHeader } from "./page-header";
+import {
+  WINDOW_TITLE_BAR_CLASS,
+  WindowTitleBarProvider,
+} from "../platform/window-title-bar";
 
 const navigation = vi.hoisted(() => ({ pathname: "/acme/issues" }));
 vi.mock("../navigation", async (importOriginal) => ({
@@ -108,6 +112,35 @@ describe("PageHeader base chrome", () => {
     );
 
     expect(container.querySelector("[data-slot='sidebar-trigger']")).toBeNull();
+  });
+
+  // A frameless window (the Desktop issue window) hands its title bar to the
+  // page header, which then has to clear the native window controls and
+  // carve its controls out of the drag region.
+  it("becomes the window's title bar under a WindowTitleBarProvider", () => {
+    const header = renderHeader(
+      <WindowTitleBarProvider value={{ leadingInset: 88 }}>
+        <PageHeader>
+          <h1>MUL-1</h1>
+        </PageHeader>
+      </WindowTitleBarProvider>,
+    );
+
+    expect(header.style.paddingLeft).toBe("88px");
+    expect(header).toHaveClass(WINDOW_TITLE_BAR_CLASS);
+  });
+
+  it("stays a plain header where the window has its own title bar", () => {
+    const header = renderHeader(
+      <WindowTitleBarProvider value={null}>
+        <PageHeader>
+          <h1>MUL-1</h1>
+        </PageHeader>
+      </WindowTitleBarProvider>,
+    );
+
+    expect(header.style.paddingLeft).toBe("");
+    expect(header).not.toHaveClass(WINDOW_TITLE_BAR_CLASS);
   });
 
   // Outside a `SidebarProvider` there is no nav to reopen at all.

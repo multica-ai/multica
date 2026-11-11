@@ -24,6 +24,7 @@ import {
   type IssueSortParam,
 } from "./queries";
 import { onIssueUpdated, onIssueAuxiliaryRevision } from "./ws-updaters";
+import { useStarPromptStore } from "../star-prompt";
 import { inboxKeys, inboxListOptions } from "../inbox/queries";
 import {
   onInboxInvalidate,
@@ -1509,5 +1510,67 @@ describe("useCreateComment — sibling caches under a shared key prefix", () => 
     expect(
       qc.getQueryData<TimelineEntry[]>(issueKeys.timeline(ISSUE_ID))?.map((e) => e.id),
     ).toEqual(["comment-1"]);
+  });
+});
+
+describe("useUpdateIssue — star prompt moment", () => {
+  let qc: QueryClient;
+  let updateIssue: ReturnType<typeof vi.fn<(id: string, data: unknown) => Promise<Issue>>>;
+
+  beforeEach(() => {
+    qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    updateIssue = vi.fn();
+    setApiInstance({ updateIssue } as unknown as ApiClient);
+    useStarPromptStore.setState({ moment: null });
+  });
+
+  afterEach(() => {
+    qc.clear();
+    useStarPromptStore.setState({ moment: null });
+  });
+
+  async function update(vars: { id: string } & UpdateIssueRequest, response: Issue) {
+    updateIssue.mockResolvedValue(response);
+    const { result } = renderHook(() => useUpdateIssue(), { wrapper: createWrapper(qc) });
+    await act(async () => {
+      await result.current.mutateAsync(vars);
+    });
+  }
+
+  it("reports the moment the user moves an agent's issue to done", async () => {
+    await update(
+      { id: "issue-1", status: "done" },
+      makeIssue(1, { status: "done", assignee_type: "agent", assignee_id: "agent-1" }),
+    );
+    expect(useStarPromptStore.getState().moment).toEqual({
+      wsId: WS_ID,
+      agentId: "agent-1",
+      issueId: "issue-1",
+    });
+  });
+
+  it("reports a custom status in the done category", async () => {
+    await update(
+      { id: "issue-1", status: "shipped" },
+      makeIssue(1, {
+        status: "shipped",
+        status_category: "done",
+        assignee_type: "agent",
+        assignee_id: "agent-1",
+      }),
+    );
+    expect(useStarPromptStore.getState().moment).toMatchObject({ agentId: "agent-1" });
+  });
+
+  it("ignores done issues owned by members and edits that leave status alone", async () => {
+    await update(
+      { id: "issue-1", status: "done" },
+      makeIssue(1, { status: "done", assignee_type: "member", assignee_id: "user-1" }),
+    );
+    await update(
+      { id: "issue-2", title: "Renamed" },
+      makeIssue(2, { status: "done", assignee_type: "agent", assignee_id: "agent-1" }),
+    );
+    expect(useStarPromptStore.getState().moment).toBeNull();
   });
 });

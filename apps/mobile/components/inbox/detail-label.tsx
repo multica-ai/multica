@@ -37,6 +37,7 @@ const PRIORITY_LABEL: Record<IssuePriority, string> = {
 const TYPE_KEY: Record<InboxItemType, string> = {
   issue_assigned: "type.assigned",
   issue_subscribed: "type.subscribed",
+  issue_created: "type.issue_created",
   unassigned: "type.unassigned",
   assignee_changed: "type.reassigned",
   status_changed: "type.status_changed",
@@ -57,6 +58,10 @@ const TYPE_KEY: Record<InboxItemType, string> = {
   autopilot_paused: "type.autopilot_paused",
   autopilot_quota_exceeded: "type.autopilot_quota_exceeded",
   children_done: "type.children_done",
+  app_action_requested: "type.app_action_requested",
+  app_action_reminder: "type.app_action_reminder",
+  app_connect_requested: "type.app_connect_requested",
+  app_action_result: "type.app_action_result",
 };
 
 // due_date is a calendar day — format timezone-safely (no offset day shift).

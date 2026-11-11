@@ -231,9 +231,13 @@ export function EnvTab({
       toast.error(
         formatted.reason === "duplicate"
           ? t(($) => $.tab_body.env.duplicate_keys_toast)
-          : t(($) => $.tab_body.env.bulk_unsupported_toast, {
-              key: formatted.key,
-            }),
+          : formatted.reason === "invalid_key"
+            ? t(($) => $.tab_body.env.bulk_invalid_key_toast, {
+                key: formatted.key,
+              })
+            : t(($) => $.tab_body.env.bulk_unsupported_toast, {
+                key: formatted.key,
+              }),
       );
       return;
     }

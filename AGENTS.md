@@ -13,18 +13,19 @@ Multica is a task management platform where people and agents collaborate on iss
 | Location | Responsibility and constraints |
 | --- | --- |
 | `server/` | Go backend; Chi, sqlc, WebSocket |
-| `packages/core/` | Headless logic, API client, Query hooks, shared Zustand stores. No UI libraries, `react-dom`, `localStorage`, or `process.env`; use `StorageAdapter` for persistence. |
+| `packages/core/` | Headless logic, API client, Query hooks, shared Zustand stores. No UI libraries, `react-dom`, `next/*`, or `process.env`. Client persistence goes through `StorageAdapter`; only the default adapter (`platform/storage.ts`) and two tab-scoped `sessionStorage` uses, exception dedupe (`analytics/exception-dedupe.ts`) and theme safe mode (`appearance/safe-mode.ts`), touch Web Storage. Cookies are only for values the server or Next.js proxy reads. Lint enforces the import, `process.env`, and Web Storage rules outside tests (`packages/core/eslint.config.mjs`). |
 | `packages/ui/` | UI primitives and shared styles. No business logic or `@multica/core` imports. |
-| `packages/views/` | Shared web/desktop pages and business components. No store definitions, `next/*`, or `react-router-dom`; use `NavigationAdapter`, `useNavigation()`, and `<AppLink>`. |
+| `packages/views/` | Shared web/desktop pages and business components. No store definitions, `next/*`, or `react-router-dom`; use `NavigationAdapter`, `useNavigation()`, and `<AppLink>`. Lint enforces the store rule outside tests (`packages/views/eslint.config.mjs`). |
 | `apps/web/` | Next.js routes/layouts and web-only UI. Framework APIs stay here; shared navigation adapters live in `apps/web/platform/`. |
 | `apps/desktop/` | Electron and desktop-only UI/state. Application navigation goes through `apps/desktop/src/renderer/src/platform/`. |
-| `apps/mobile/` | Independent Expo/React Native client: owns UI, state, hooks, providers, i18n, build, and release. Shares core types and pure utilities, including platform-independent schemas. |
+| `apps/mobile/` | Independent Expo/React Native client: owns UI, state, hooks, providers, i18n, build, and release. Shares core types and pure utilities, including platform-independent schemas; runtime imports use the pure module's own subpath, not a barrel that also re-exports hooks or stores (lint-enforced). |
 | `apps/docs/` | Fumadocs documentation site |
 
 - Dependency direction is `views -> core + ui`; core and ui remain independent. Shared packages export raw TypeScript compiled by consuming apps.
 - Extract logic used by both web and desktop into the appropriate shared package. Keep framework/Electron APIs in the app layer; inject platform-specific UI through props/slots.
 - Wire shared features into both web routes and the desktop router or overlay. Reuse existing guards/providers such as `DashboardGuard` in `packages/views/layout/`.
-- Each workspace declares its directly imported external dependencies. Use `catalog:` for shared dependencies; mobile pins Expo/React Native dependencies in its own manifest.
+- Each workspace declares its directly imported external dependencies. A dependency declared by two or more workspaces, or already in the `pnpm-workspace.yaml` catalog, uses `catalog:`; CI runs `scripts/check-dependency-catalog.mjs`, whose allowlist records known drift awaiting an upgrade. Mobile is exempt and pins Expo/React Native-aligned versions in its own manifest.
+- This section is the source for the package-boundary table in `apps/docs/content/docs/developers/conventions*.mdx` (every locale); change them together.
 
 ## Development and Verification
 
@@ -40,6 +41,7 @@ Run these from the repository root:
 | Scope | Checks |
 | --- | --- |
 | Frontend excluding mobile | `pnpm typecheck`, `pnpm lint`, `pnpm test` |
+| `.github/` or `scripts/` | `pnpm test:scripts` (every `scripts/**/*.test.mjs`, including CI path selection and gates), plus `bash scripts/<name>.test.sh` for a shell script you changed |
 | Go backend | `make test` |
 | End-to-end | `pnpm exec playwright test` |
 | Combined web/backend verification | `make check` |
@@ -72,6 +74,8 @@ Installed desktop clients may talk to newer backends. Preserve response compatib
 
 - Do not add foreign keys, cascading deletes, or cascading updates. Validate relationships and clean up dependents in application code, using a transaction when the operation must be atomic.
 - Every migration-created index, including indexes on new tables, uses `CREATE [UNIQUE] INDEX CONCURRENTLY`. Each concurrent index build gets its own single-statement migration file; the runner executes files outside an explicit transaction.
+- Register every concurrent index build in `server/cmd/migrate/main.go` so an interrupted build's INVALID index is dropped before retry: up-direction builds in `concurrentIndexCleanups`, down-direction rebuilds in `concurrentDownIndexCleanups` (version → index name).
+- Before pushing a migration, rebase onto the latest `origin/main`, number it as the current highest prefix plus one, and run `go test ./cmd/migrate ./internal/migrations` from `server/`.
 - Conditionally skipped migrations are still recorded in `schema_migrations`. Later DDL touching conditional objects must be idempotent (`IF EXISTS` / `IF NOT EXISTS`); document recovery if the missing object would break runtime behavior.
 
 ## Backend UUID Rules
@@ -117,6 +121,7 @@ Workspace-scoped queries filter by `workspace_id`; membership gates access and `
 - E2E setup/teardown uses `TestApiClient`.
 - DB-backed Go tests use `server/internal/testutil` fixtures (`dbfx.Issue`, `dbfx.Task`, `dbfx.Insert`) and `testutil.Call(h, req).Want(status).JSON(&out)`. Keep product assertions and case-specific diagnostics in the test, not fixture helpers.
 - DB-backed Go tests share one database with packages running in parallel. When code under test reads across workspaces (sweeps, outbox scans, GC), assert on your fixture's rows (task state, `pending` / `settled` for your IDs), never on the call's totals or result length.
+- Tests of CI configuration assert invariants a gate cannot see on its own, such as no `continue-on-error` in gated jobs, or behavior derived from the configuration, such as path selection and gate mapping. Do not assert the current text of a step, name, or matrix.
 - Default tests must not resolve or execute user-installed agent CLIs; pass test-created fake or missing executable paths. New default agent commands go in `scripts/agent-cli-command-names.txt`.
 - Only run real-agent smoke tests when explicitly authorized. Gate them behind `agentintegration` and check `MULTICA_RUN_REAL_AGENT_SMOKE=1` before executable lookup/account access. Run the specific test: `(cd server && MULTICA_RUN_REAL_AGENT_SMOKE=1 go test -tags=agentintegration ./pkg/agent -run '<test-name>' -count=1 -v)`.
 

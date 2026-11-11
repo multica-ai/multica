@@ -397,6 +397,53 @@ describe("ChatMessageList live timeline (MUL-3960 regression)", () => {
     expect(screen.getByText("3 steps")).toBeInTheDocument();
     expect(screen.queryByText("Intermediate narration")).not.toBeInTheDocument();
   });
+
+  it("marks only the settled answer as an annotation source, without remounting it", async () => {
+    const qc = new QueryClient();
+    qc.setQueryData(chatKeys.taskMessages(TASK_ID), [
+      taskMsg(0, "tool_use", { tool: "Read", input: { path: "/tmp/x" } }),
+      taskMsg(1, "text", { content: "Stable final answer" }),
+    ]);
+    const revealSourceRef: { current: ((messageId: string) => boolean) | null } = { current: null };
+    const annotations = {
+      cardRef: () => {},
+      captureProps: {
+        "data-annotation-thread": "chat:session-1" as const,
+        onPointerUp: () => {}, onKeyUp: () => {}, onKeyDown: () => {},
+      },
+      popup: <></>,
+      revealSourceRef,
+    };
+    const view = (
+      messages: Parameters<typeof ChatMessageList>[0]["messages"],
+      pendingTask: Parameters<typeof ChatMessageList>[0]["pendingTask"],
+    ) => (
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={qc}>
+          <ChatMessageList messages={messages} pendingTask={pendingTask} availability="online" annotations={annotations} />
+        </QueryClientProvider>
+      </I18nProvider>
+    );
+
+    const { rerender, container } = render(view([], { task_id: TASK_ID, status: "running" }));
+    const answerBefore = await screen.findByText("Stable final answer");
+    expect(container.querySelector("[data-comment-content]")).toBeNull();
+    expect(revealSourceRef.current?.("persisted-answer")).toBe(false);
+
+    rerender(view([{
+      id: "persisted-answer",
+      chat_session_id: "session-1",
+      role: "assistant",
+      content: "Stable final answer",
+      task_id: TASK_ID,
+      created_at: "2026-09-17T00:00:00Z",
+    }], null));
+
+    const answer = await screen.findByText("Stable final answer");
+    expect(answer).toBe(answerBefore);
+    expect(answer.closest("[data-comment-content]")?.getAttribute("data-comment-content")).toBe("persisted-answer");
+    expect(answer.closest("[data-annotation-thread]")).not.toBeNull();
+  });
 });
 
 describe("ChatMessageList tool rows (#8835 regression)", () => {
@@ -584,7 +631,7 @@ describe("ChatMessageList quick actions skeleton", () => {
     created_at: "2026-07-22T00:00:00Z",
   };
 
-  it("renders pill skeletons for the message awaiting its supplement", () => {
+  it("renders chip skeletons for the message awaiting its supplement", () => {
     const qc = new QueryClient();
     const { container } = render(
       <I18nProvider locale="en" resources={TEST_RESOURCES}>
@@ -599,7 +646,7 @@ describe("ChatMessageList quick actions skeleton", () => {
         </QueryClientProvider>
       </I18nProvider>,
     );
-    expect(container.querySelectorAll(".rounded-full[aria-hidden] , [aria-hidden] .rounded-full").length).toBeGreaterThan(0);
+    expect(container.querySelectorAll('[aria-hidden] [data-slot="skeleton"]').length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: /suggested/i })).toBeNull();
   });
 
@@ -617,7 +664,7 @@ describe("ChatMessageList quick actions skeleton", () => {
         </QueryClientProvider>
       </I18nProvider>,
     );
-    expect(container.querySelector("[aria-hidden] .rounded-full")).toBeNull();
+    expect(container.querySelector('[aria-hidden] [data-slot="skeleton"]')).toBeNull();
   });
 });
 
