@@ -106,7 +106,12 @@
     "all_workspaces_open": "所有工作区都已在窗口中打开",
     "copy_link": "复制链接",
     "link_copied": "链接已复制",
-    "workspace_settings": "工作区设置"
+    "workspace_settings": "工作区设置",
+    "mark_all_read": "全部标为已读",
+    "mark_all_read_failed": "全部标为已读失败",
+    "reset_order": "恢复默认顺序",
+    "copy_workspace_link": "复制工作区链接",
+    "workspace_meta_other": "{{slug}} · {{count}} 位成员"
   },
   "bottom_bar": {
     "label": "状态栏",
@@ -170,7 +175,8 @@
       "members_other": "{{count}} 位成员",
       "resources": "资源",
       "runtimes_online_other": "{{count}} 台在线",
-      "invite_member": "邀请成员"
+      "invite_member": "邀请成员",
+      "open_issue": "打开 {{identifier}}"
     },
     "autopilots": {
       "all": "全部自动化",
@@ -233,6 +239,10 @@
     "add_to_dictionary": "添加到词典",
     "open_link": "在浏览器中打开链接",
     "copy_link_address": "复制链接地址",
-    "copy_image": "复制图片"
+    "copy_image": "复制图片",
+    "copy_code": "复制代码",
+    "copy_table": "复制表格",
+    "copied": "已复制",
+    "copy_failed": "复制失败"
   }
 }

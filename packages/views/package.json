@@ -13,6 +13,8 @@
     "./common/actor-avatar": "./common/actor-avatar.tsx",
     "./common/appearance-sync": "./common/appearance-sync.tsx",
     "./common/cli-install-command": "./common/cli-install-command.tsx",
+    "./common/context-menu-scope": "./common/context-menu-scope.tsx",
+    "./common/menu-primitives": "./common/menu-primitives.ts",
     "./common/shortcut-keycaps": "./common/shortcut-keycaps.tsx",
     "./editor": "./editor/index.ts",
     "./issue-views": "./issue-views/index.ts",

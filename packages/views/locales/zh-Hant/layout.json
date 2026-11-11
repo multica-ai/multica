@@ -106,7 +106,12 @@
     "all_workspaces_open": "所有工作區都已在視窗中開啟",
     "copy_link": "複製連結",
     "link_copied": "已複製連結",
-    "workspace_settings": "工作區設定"
+    "workspace_settings": "工作區設定",
+    "mark_all_read": "全部標為已讀",
+    "mark_all_read_failed": "全部標為已讀失敗",
+    "reset_order": "恢復預設順序",
+    "copy_workspace_link": "複製工作區連結",
+    "workspace_meta_other": "{{slug}} · {{count}} 位成員"
   },
   "bottom_bar": {
     "label": "狀態列",
@@ -170,7 +175,8 @@
       "members_other": "{{count}} 位成員",
       "resources": "資源",
       "runtimes_online_other": "{{count}} 台線上",
-      "invite_member": "邀請成員"
+      "invite_member": "邀請成員",
+      "open_issue": "開啟 {{identifier}}"
     },
     "autopilots": {
       "all": "全部自動化",
@@ -233,6 +239,10 @@
     "add_to_dictionary": "加入字典",
     "open_link": "在瀏覽器中開啟連結",
     "copy_link_address": "複製連結網址",
-    "copy_image": "複製圖片"
+    "copy_image": "複製圖片",
+    "copy_code": "複製程式碼",
+    "copy_table": "複製表格",
+    "copied": "已複製",
+    "copy_failed": "複製失敗"
   }
 }

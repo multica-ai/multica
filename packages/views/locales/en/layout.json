@@ -107,7 +107,13 @@
     "all_workspaces_open": "Every workspace is already open in a window",
     "copy_link": "Copy link",
     "link_copied": "Link copied",
-    "workspace_settings": "Workspace settings"
+    "workspace_settings": "Workspace settings",
+    "mark_all_read": "Mark all as read",
+    "mark_all_read_failed": "Couldn't mark all as read",
+    "reset_order": "Reset to default order",
+    "copy_workspace_link": "Copy workspace link",
+    "workspace_meta_one": "{{slug}} · {{count}} member",
+    "workspace_meta_other": "{{slug}} · {{count}} members"
   },
   "bottom_bar": {
     "label": "Status bar",
@@ -177,7 +183,8 @@
       "resources": "Resources",
       "runtimes_online_one": "{{count}} online",
       "runtimes_online_other": "{{count}} online",
-      "invite_member": "Invite member"
+      "invite_member": "Invite member",
+      "open_issue": "Open {{identifier}}"
     },
     "autopilots": {
       "all": "All autopilots",
@@ -242,6 +249,10 @@
     "add_to_dictionary": "Add to dictionary",
     "open_link": "Open link in browser",
     "copy_link_address": "Copy link address",
-    "copy_image": "Copy image"
+    "copy_image": "Copy image",
+    "copy_code": "Copy code",
+    "copy_table": "Copy table",
+    "copied": "Copied",
+    "copy_failed": "Couldn't copy"
   }
 }

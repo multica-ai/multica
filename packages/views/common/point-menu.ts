@@ -48,7 +48,11 @@ export function nextRowMenuState(
 }
 
 function isContentTarget(target: Element): boolean {
-  if (target.closest("a[href], img, video, input, textarea, [contenteditable='true']")) {
+  if (
+    target.closest(
+      "a[href], img, video, input, textarea, [contenteditable='true'], pre, table, [data-context-menu-content]",
+    )
+  ) {
     return true;
   }
   const selection = window.getSelection();
@@ -64,7 +68,8 @@ function isContentTarget(target: Element): boolean {
  * something inside the row already handled it, nor when the event bubbled up
  * the React tree from a portaled popup outside the row's DOM (the row's own
  * open menu included). With `deferToContent`, content that has a menu of its
- * own — a link, an image, a field, selected text — keeps it.
+ * own — a link, an image, a field, selected text, a code block, a table, an
+ * attachment — keeps it.
  */
 export function shouldOpenRowMenu(
   event: MouseEvent,

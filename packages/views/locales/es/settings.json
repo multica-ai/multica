@@ -1403,7 +1403,10 @@
       "close_others": "Cerrar las demás pestañas",
       "open_window": "Abrir en ventana nueva",
       "new": "Pestaña nueva",
-      "pinned_name": "{{title}} (fijada)"
+      "pinned_name": "{{title}} (fijada)",
+      "copy_link": "Copiar enlace",
+      "link_copied": "Enlace copiado",
+      "close_right": "Cerrar las pestañas a la derecha"
     },
     "updates": {
       "title": "Actualizaciones",

@@ -31,6 +31,9 @@ describe("shouldOpenRowMenu", () => {
         <span>plain text</span>
         <a href="https://multica.ai">a link</a>
         <img alt="a picture" src="data:," />
+        <pre>some code</pre>
+        <table><tbody><tr><td>a cell</td></tr></tbody></table>
+        <div data-context-menu-content="">an attachment</div>
         <span
           onContextMenu={(event) => event.preventDefault()}
         >
@@ -57,6 +60,14 @@ describe("shouldOpenRowMenu", () => {
     const onOpen = renderRow(true);
     fireEvent.contextMenu(screen.getByText("a link"));
     fireEvent.contextMenu(screen.getByAltText("a picture"));
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  it("leaves code, tables and attachments their own menu when deferring to content", () => {
+    const onOpen = renderRow(true);
+    fireEvent.contextMenu(screen.getByText("some code"));
+    fireEvent.contextMenu(screen.getByText("a cell"));
+    fireEvent.contextMenu(screen.getByText("an attachment"));
     expect(onOpen).not.toHaveBeenCalled();
   });
 

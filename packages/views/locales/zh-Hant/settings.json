@@ -1393,7 +1393,10 @@
       "close_others": "關閉其他標籤頁",
       "open_window": "在新視窗開啟",
       "new": "新建標籤頁",
-      "pinned_name": "{{title}}（已固定）"
+      "pinned_name": "{{title}}（已固定）",
+      "copy_link": "複製連結",
+      "link_copied": "已複製連結",
+      "close_right": "關閉右側標籤頁"
     },
     "updates": {
       "title": "更新",
