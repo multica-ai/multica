@@ -25,12 +25,15 @@ export function CollectionRowMenu({
   contentClassName,
   triggerClassName,
   triggerHidden = false,
+  finalFocus,
 }: {
   label?: string;
   children: ReactNode;
   contentClassName?: string;
   triggerClassName?: string;
   triggerHidden?: boolean;
+  /** Where focus goes once the menu closes; see Base UI's `finalFocus`. */
+  finalFocus?: () => boolean;
 }) {
   const { t } = useT("layout");
   const row = useCollectionRowMenuState();
@@ -79,6 +82,7 @@ export function CollectionRowMenu({
       <DropdownMenuContent
         align={point ? "start" : "end"}
         anchor={anchor}
+        finalFocus={finalFocus}
         className={cn("w-48", contentClassName)}
       >
         {children}

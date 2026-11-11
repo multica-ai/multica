@@ -1,8 +1,15 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { AppLink } from "../../navigation";
 import { useRowMenu } from "../../common/point-menu";
+import {
+  ContextMenuScopeSubmenu,
+  findContextMenuScope,
+  useScopeSubmenuFocus,
+  type ResolvedContextMenuScope,
+} from "../../common/context-menu-scope";
+import { dropdownPrimitives } from "../../common/menu-primitives";
 import { CollectionRowContext } from "../../layout/collection-list/row-context";
 import { ProjectMenu } from "./project-row-actions";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -44,6 +51,9 @@ export function ProjectMentionCard({
   // Right-click opens the projects page's row menu at the cursor; it mounts
   // on the first right-click, so a page of mentions holds no menus.
   const rowMenu = useRowMenu();
+  // The comment around the mention, read when the menu opens.
+  const [outer, setOuter] = useState<ResolvedContextMenuScope["submenu"]>(null);
+  const scope = useScopeSubmenuFocus(outer);
   const rowMenuContext = useMemo(
     () => ({ menu: rowMenu.menu, setMenu: rowMenu.setMenu }),
     [rowMenu.menu, rowMenu.setMenu],
@@ -60,6 +70,7 @@ export function ProjectMentionCard({
                 // The innermost object's menu wins; a row around the mention
                 // must not open its own as well.
                 event.stopPropagation();
+                setOuter(findContextMenuScope(event.currentTarget.parentElement).submenu);
                 rowMenu.openAtPointer(event);
               }
             : undefined
@@ -73,7 +84,12 @@ export function ProjectMentionCard({
       </AppLink>
       {project && rowMenu.menu.point && (
         <CollectionRowContext.Provider value={rowMenuContext}>
-          <ProjectMenu project={project} triggerHidden />
+          <ProjectMenu
+            project={project}
+            triggerHidden
+            trailing={<ContextMenuScopeSubmenu submenu={scope.submenu} primitives={dropdownPrimitives} />}
+            finalFocus={scope.finalFocus}
+          />
         </CollectionRowContext.Provider>
       )}
     </>

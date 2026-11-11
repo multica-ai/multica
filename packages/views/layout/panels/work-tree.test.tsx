@@ -54,6 +54,7 @@ vi.mock("@multica/core/auth", () => {
 });
 vi.mock("../../navigation", () => ({
   useIntentNavigate: () => vi.fn(),
+  useNavigation: () => ({ getShareableUrl: (path: string) => `https://app.example${path}` }),
   AppLink: ({
     children,
     href,
@@ -184,7 +185,7 @@ describe("ProjectsSection", () => {
 
     const menu = await screen.findByRole("menu");
     const items = Array.from(menu.querySelectorAll('[role="menuitem"]'), (el) => el.textContent?.trim());
-    expect(items).toEqual(["New issue in this project", "Rename", "Open in new tab", "Pin to sidebar"]);
+    expect(items).toEqual(["New issue in this project", "Rename", "Open in new tab", "Pin to sidebar", "Copy link"]);
 
     fireEvent.click(screen.getByRole("menuitem", { name: "New issue in this project" }));
     expect(openCreateIssue).toHaveBeenCalledWith({ project_id: "p2" });

@@ -3,7 +3,8 @@
 import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ExternalLink, Pencil, Pin, PinOff, Trash2 } from "@multica/ui/icons";
+import { ExternalLink, Link2, Pencil, Pin, PinOff, Trash2 } from "@multica/ui/icons";
+import { copyText } from "@multica/ui/lib/clipboard";
 import { Button } from "@multica/ui/components/ui/button";
 import { Spinner } from "@multica/ui/components/ui/spinner";
 import {
@@ -28,7 +29,7 @@ import { canDeleteProject } from "@multica/core/projects/deletion-permissions";
 import type { Project } from "@multica/core/types";
 import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
 import { useT } from "../../i18n";
-import { useIntentNavigate } from "../../navigation";
+import { useIntentNavigate, useNavigation } from "../../navigation";
 import { CollectionRowMenu } from "../../layout/collection-list";
 
 export function DeleteProjectsDialog({
@@ -118,18 +119,25 @@ export function ProjectRowActions({
   pinned,
   canDelete,
   leading,
+  trailing,
   triggerHidden,
+  finalFocus,
 }: {
   project: Project;
   pinned: boolean;
   canDelete: boolean;
   leading?: ReactNode;
+  /** After the project's own items, e.g. the surrounding comment's submenu. */
+  trailing?: ReactNode;
   triggerHidden?: boolean;
+  finalFocus?: () => boolean;
 }) {
   const { t } = useT("projects");
   const { t: tCommon } = useT("common");
+  const { t: tLayout } = useT("layout");
   const wsPaths = useWorkspacePaths();
   const intentNavigate = useIntentNavigate();
+  const { getShareableUrl } = useNavigation();
   const createPin = useCreatePin();
   const deletePin = useDeletePin();
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -138,6 +146,11 @@ export function ProjectRowActions({
     if (pinned) deletePin.mutate({ itemType: "project", itemId: project.id });
     else createPin.mutate({ item_type: "project", item_id: project.id });
   };
+  const copyLink = async () => {
+    if (await copyText(getShareableUrl(wsPaths.projectDetail(project.id)))) {
+      toast.success(tLayout(($) => $.rail.link_copied));
+    }
+  };
 
   return (
     <>
@@ -145,6 +158,7 @@ export function ProjectRowActions({
         label={t(($) => $.page.row_menu)}
         contentClassName="w-auto min-w-52"
         triggerHidden={triggerHidden}
+        finalFocus={finalFocus}
       >
         {leading && (
           <>
@@ -183,6 +197,10 @@ export function ProjectRowActions({
           )}
           {pinned ? t(($) => $.page.unpin) : t(($) => $.page.pin)}
         </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => void copyLink()}>
+          <Link2 className="size-3.5" />
+          {tLayout(($) => $.rail.copy_link)}
+        </DropdownMenuItem>
         {canDelete && (
           <>
             <DropdownMenuSeparator />
@@ -195,6 +213,7 @@ export function ProjectRowActions({
             </DropdownMenuItem>
           </>
         )}
+        {trailing}
       </CollectionRowMenu>
 
       <DeleteProjectsDialog
@@ -213,11 +232,15 @@ export function ProjectRowActions({
 export function ProjectMenu({
   project,
   leading,
+  trailing,
   triggerHidden,
+  finalFocus,
 }: {
   project: Project;
   leading?: ReactNode;
+  trailing?: ReactNode;
   triggerHidden?: boolean;
+  finalFocus?: () => boolean;
 }) {
   const wsId = useWorkspaceId();
   const userId = useAuthStore((s) => s.user?.id ?? null);
@@ -236,7 +259,9 @@ export function ProjectMenu({
       pinned={pinned}
       canDelete={canDeleteProject(project, userId, role, agents)}
       leading={leading}
+      trailing={trailing}
       triggerHidden={triggerHidden}
+      finalFocus={finalFocus}
     />
   );
 }
