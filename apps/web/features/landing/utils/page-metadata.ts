@@ -5,7 +5,7 @@ import { createLandingDict } from "../i18n/dictionary";
 import { toLandingDictionaryLocale, type LandingDictionaryLocale, type MetaPage } from "../i18n/types";
 import { SHARE_IMAGE } from "../share-image";
 
-const OG_LOCALE: Record<LandingDictionaryLocale, string> = { en: "en_US", zh: "zh_CN", ko: "ko_KR", ja: "ja_JP" };
+const OG_LOCALE: Record<LandingDictionaryLocale, string> = { en: "en_US", zh: "zh_CN", ko: "ko_KR", ja: "ja_JP", fr: "fr_FR" };
 
 /**
  * A marketing page's title, description and share card in the language its

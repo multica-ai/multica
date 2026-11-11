@@ -50,7 +50,7 @@ function nextWithLocale(req: NextRequest, locale = resolveLocale(req)): NextResp
 }
 
 // The marketing site has one URL per language: English at the root, the
-// others under /zh, /ko and /ja (lib/landing-locale-path). Returns null for
+// others under /zh, /ko, /ja and /fr (lib/landing-locale-path). Returns null for
 // paths that are not marketing pages.
 function routeLandingLocale(
   req: NextRequest,

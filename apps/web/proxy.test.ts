@@ -300,6 +300,7 @@ describe("proxy marketing-site language URLs", () => {
     ["/zh/download", "/download", "zh-Hans"],
     ["/ko/usecases/auto-data-analysis", "/usecases/auto-data-analysis", "ko"],
     ["/ja/about?ref=x", "/about?ref=x", "ja"],
+    ["/fr/pricing", "/pricing", "fr"],
   ])("serves %s as %s in its language", (path, page, locale) => {
     const res = proxy(makeRequest(path, { "multica-locale": "en" }));
 
@@ -317,16 +318,17 @@ describe("proxy marketing-site language URLs", () => {
   });
 
   it("keeps locales without a translated site on the English URL", () => {
-    const res = proxy(makeRequest("/about", { "multica-locale": "fr" }));
+    const res = proxy(makeRequest("/about", { "multica-locale": "es" }));
 
     expect(res.headers.get("location")).toBeNull();
-    expect(localeOf(res)).toBe("fr");
+    expect(localeOf(res)).toBe("es");
   });
 
   it.each([
     ["/", { "multica-locale": "zh-Hans" }, "/zh"],
     ["/download?started=mac", { "multica-locale": "ko" }, "/ko/download?started=mac"],
     ["/about", { "multica-locale": "zh-Hant" }, "/zh/about"],
+    ["/about", { "multica-locale": "fr" }, "/fr/about"],
   ])("sends %s to the language the visitor picked", (path, cookies, location) => {
     expect(redirectLocation(path, cookies, "www.multica.ai")).toBe(`https://www.multica.ai${location}`);
   });

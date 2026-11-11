@@ -69,18 +69,20 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
   "customers",
 
   // Marketing site language prefixes
-  // The marketing pages in other languages live under `/zh`, `/ko` and `/ja`
-  // (apps/web/lib/landing-locale-path.ts), matching the docs. A workspace with
-  // one of these slugs would have its root shadowed by that language's homepage.
+  // The marketing pages in other languages live under `/zh`, `/ko`, `/ja` and
+  // `/fr` (apps/web/lib/landing-locale-path.ts), matching the docs. A workspace
+  // with one of these slugs would have its root shadowed by that language's
+  // homepage.
   "zh",
   "ko",
   "ja",
+  "fr",
 
   // Future marketing site languages
   // Every ISO 639-1 language code, plus the script and region tags a language
   // URL is likely to use (`zh-hant`, `pt-br`, ...), so a new language prefix
   // like `/de` or `/zh-hant` never has to take a slug from a workspace. `zh`,
-  // `ko` and `ja` are in the group above because they are already live.
+  // `ko`, `ja` and `fr` are in the group above because they are already live.
   // Workspaces created with one of these slugs before they were reserved keep
   // them: reservation only blocks creation.
   "aa",
@@ -129,7 +131,6 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
   "fi",
   "fj",
   "fo",
-  "fr",
   "fy",
   "ga",
   "gd",

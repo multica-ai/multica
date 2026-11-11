@@ -9,7 +9,7 @@ import type { SupportedLocale } from "@multica/core/i18n";
  */
 
 /** Prefix → the locale its pages render in. */
-export const LANDING_PATH_PREFIXES = { zh: "zh-Hans", ko: "ko", ja: "ja" } as const satisfies Record<
+export const LANDING_PATH_PREFIXES = { zh: "zh-Hans", ko: "ko", ja: "ja", fr: "fr" } as const satisfies Record<
   string,
   SupportedLocale
 >;
@@ -18,10 +18,10 @@ type LandingPathPrefix = keyof typeof LANDING_PATH_PREFIXES;
 /** The languages the marketing site has a URL for. */
 export type LandingPathLocale = "en" | (typeof LANDING_PATH_PREFIXES)[LandingPathPrefix];
 
-const PREFIX_FOR: Record<LandingPathLocale, string> = { en: "", "zh-Hans": "zh", ko: "ko", ja: "ja" };
+const PREFIX_FOR: Record<LandingPathLocale, string> = { en: "", "zh-Hans": "zh", ko: "ko", ja: "ja", fr: "fr" };
 
 /** `hreflang` value (BCP 47) for each language's URL. */
-export const HREFLANG: Record<LandingPathLocale, string> = { en: "en", "zh-Hans": "zh-Hans", ko: "ko", ja: "ja" };
+export const HREFLANG: Record<LandingPathLocale, string> = { en: "en", "zh-Hans": "zh-Hans", ko: "ko", ja: "ja", fr: "fr" };
 
 /** First path segments served by `app/(landing)`, besides the root. */
 export const LANDING_ROUTES: ReadonlySet<string> = new Set([
@@ -71,7 +71,7 @@ export function splitLandingLocale(pathname: string): { locale: LandingPathLocal
 /** The marketing-site language a locale reads: Traditional Chinese reads the Chinese pages, untranslated locales English. */
 export function landingPathLocale(locale: SupportedLocale): LandingPathLocale {
   if (locale === "zh-Hans" || locale === "zh-Hant") return "zh-Hans";
-  if (locale === "ko" || locale === "ja") return locale;
+  if (locale === "ko" || locale === "ja" || locale === "fr") return locale;
   return "en";
 }
 
