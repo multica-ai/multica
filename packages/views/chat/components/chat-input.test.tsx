@@ -763,7 +763,55 @@ describe("ChatInput page context", () => {
     fireEvent.click(sendButton());
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
     expect(onSend.mock.calls[0]![0]).toBe("[MUL-1](mention://issue/issue-1)\n\nwhy is this slow?");
-    await waitFor(() => expect(pageChip()).toBeNull());
+    expect(pageChip()).toBeNull();
+  });
+
+  // The chip clears in the same commit that scrubs the editor, not once the
+  // owner's promise settles: the owner commits before its own follow-up work.
+  it("drops the page when the owner commits, while the send is still pending", async () => {
+    let finishSend!: (accepted: boolean) => void;
+    const onSend = vi.fn<ChatInputOnSend>((_content, _ids, commitInput) => {
+      commitInput();
+      return new Promise<boolean>((resolve) => { finishSend = resolve; });
+    });
+    renderInput({ onSend, pageContext: page });
+    fireEvent.keyDown(screen.getByTestId("editor"), { key: "Tab" });
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "why is this slow?" } });
+
+    fireEvent.click(sendButton());
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(pageChip()).toBeNull();
+
+    await act(async () => finishSend(true));
+    expect(pageChip()).toBeNull();
+  });
+
+  // Stop before the task starts: the owner commits, cancels, restores the sent
+  // text (mention included) and reports false. A chip left behind would put the
+  // page in front of that restored text a second time.
+  it("keeps the page off after a committed send the owner then cancels", async () => {
+    const onSend = vi.fn<ChatInputOnSend>(async (_content, _ids, commitInput) => {
+      commitInput();
+      return false;
+    });
+    renderInput({ onSend, pageContext: page });
+    fireEvent.keyDown(screen.getByTestId("editor"), { key: "Tab" });
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "why is this slow?" } });
+
+    await act(async () => fireEvent.click(sendButton()));
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(pageChip()).toBeNull();
+  });
+
+  it("keeps the page for a retry when the owner rejects without committing", async () => {
+    const onSend = vi.fn<ChatInputOnSend>(async () => false);
+    renderInput({ onSend, pageContext: page });
+    fireEvent.keyDown(screen.getByTestId("editor"), { key: "Tab" });
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "why is this slow?" } });
+
+    await act(async () => fireEvent.click(sendButton()));
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(pageChip()).toHaveTextContent("MUL-1");
   });
 
   it("leaves Tab alone when the editor already used it, or it came from outside the editor", () => {
