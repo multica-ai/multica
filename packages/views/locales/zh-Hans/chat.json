@@ -12,7 +12,20 @@
     "unread_other": "{{count}} 条未读对话",
     "default": "问 Multica"
   },
+  "bar": {
+    "history": "对话历史",
+    "history_group": {
+      "today": "今天",
+      "week": "过去 7 天",
+      "older": "更早"
+    },
+    "close_chip": "关闭 {{title}}",
+    "all_chats": "全部对话",
+    "more_other": "另外 {{count}} 个对话"
+  },
   "input": {
+    "page_context_add": "将当前页面添加为上下文",
+    "page_context_remove": "移除页面上下文",
     "placeholder_no_agent": "创建一个智能体后才能开始对话",
     "placeholder_archived": "此会话已归档",
     "placeholder_archived_agent": "该智能体已归档",
@@ -131,6 +144,7 @@
     "restore_tooltip": "还原",
     "expand_tooltip": "展开",
     "minimize_tooltip": "最小化",
+    "close_tooltip": "关闭",
     "another_running": "另一个对话正在运行",
     "another_unread": "另一个对话有未读回复",
     "running": "运行中",
@@ -170,7 +184,6 @@
       "label": "推荐一个操作",
       "prompt": "根据你对我的工作区的了解，推荐一个有用的初始操作。"
     },
-    "customize": "自定义开场建议",
     "uploading": "请等待附件上传完成后再使用开场建议。",
     "draft_in_progress": "请先发送或清空草稿，再使用开场建议。"
   },

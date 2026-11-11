@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "motion/react";
-import { Minus, Maximize2, Minimize2, ChevronDown, Plus, Check, Archive, Pencil, Loader2, Square } from "@multica/ui/icons";
+import { Minus, Maximize2, Minimize2, ChevronDown, Plus, Check, Archive, Pencil, Loader2, Square, X } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
@@ -12,24 +12,13 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@multica/ui/components/ui/popover";
-import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useAuthStore } from "@multica/core/auth";
 import { useReducedMotion } from "@multica/core/appearance";
-import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
-import { projectListOptions } from "@multica/core/projects/queries";
-import { canAssignAgent } from "../../issues/components/pickers/assignee-picker";
-import { api, dispatchReasonCode } from "@multica/core/api";
-import {
-  isAgentRuntimeBound,
-  useAgentPresenceDetail,
-  useCustomizeConversationStartersHref,
-  useWorkspaceAgentAvailability,
-} from "@multica/core/agents";
+import { api } from "@multica/core/api";
+import { isAgentRuntimeBound } from "@multica/core/agents";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { DeferredTooltip } from "../../common/deferred-tooltip";
 import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
-import { useAppForeground } from "../../common/use-app-foreground";
 import {
   RowActionsMenu,
   handleRowActivationKey,
@@ -48,27 +37,15 @@ import { ArchivedAgentBanner } from "./archived-agent-banner";
 import { AgentAccessRevokedBanner } from "./agent-access-revoked-banner";
 import { RuntimeRequiredBanner } from "./runtime-required-banner";
 import {
-  chatSessionsOptions,
-  pendingChatTaskOptions,
   pendingChatTasksOptions,
   chatKeys,
-  isTaskMessageTaskId,
 } from "@multica/core/chat/queries";
-import {
-  useCreateChatSession,
-  useMarkChatSessionRead,
-  useSetChatSessionArchived,
-  useSetChatSessionProject,
-  useUpdateChatSession,
-} from "@multica/core/chat/mutations";
+import { useUpdateChatSession } from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
-import { upsertChatMessageToCaches } from "@multica/core/chat/message-cache";
 import { chatQuickActionsPendingOptions } from "@multica/core/chat/queries";
 import { useQuickActionsPendingTimeout } from "@multica/core/chat/use-quick-actions-pending-timeout";
 import { useQuickActionsFailureToast } from "./use-quick-actions-failure-toast";
 import { removeChatMessageFromCaches } from "@multica/core/realtime";
-import { useChatDraftRestore } from "./use-chat-draft-restore";
-import { useChatTaskActions } from "./use-chat-task-actions";
 import { useChatInputFocus } from "./use-chat-input-focus";
 import { useChatOpenReveal } from "./use-chat-open-reveal";
 import { ChatWindowMessages } from "./chat-window-messages";
@@ -79,21 +56,18 @@ import { ChatAppRequests } from "../../common/app-requests";
 import { EmptyState } from "./chat-empty-state";
 import { SessionRenameInput } from "./session-rename-input";
 import { SessionHistoryList } from "./session-history-list";
+import { chatActivity } from "./chat-bar-sessions";
 import { ChatResizeHandles } from "./chat-resize-handles";
 import { useChatContextItems } from "./use-chat-context-items";
 import { useChatResize } from "./use-chat-resize";
 import { useVisualViewportKeyboard } from "./use-visual-viewport-keyboard";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
-import {
-  hasInFlightPendingTask,
-  isStillOnComposeTarget,
-  planProjectContextChange,
-  seedAcceptedPendingTask,
-} from "./use-chat-controller";
-import { useChatProjectContextSupport } from "./use-chat-project-context-support";
+import { CHAT_WINDOW_INSET, useChatWindowAnchor } from "./use-chat-window-anchor";
+import { useFormatTimeAgo } from "./use-format-time-ago";
+import { useChatController } from "./use-chat-controller";
 import { createLogger } from "@multica/core/logger";
-import type { Agent, Attachment, ChatMessage, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
-import { useLocale, useT } from "../../i18n";
+import type { Agent, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
+import { useT } from "../../i18n";
 
 const uiLogger = createLogger("chat.ui");
 const apiLogger = createLogger("chat.api");
@@ -101,9 +75,15 @@ const apiLogger = createLogger("chat.api");
 
 export function ChatWindow() {
   const { t } = useT("chat");
-  const wsId = useWorkspaceId();
   const isOpen = useChatStore((s) => s.isOpen);
-  const activeSessionId = useChatStore((s) => s.activeSessionId);
+  const isExpanded = useChatStore((s) => s.isExpanded);
+  const setOpen = useChatStore((s) => s.setOpen);
+  const dismissChatFromBar = useChatStore((s) => s.dismissChatFromBar);
+  // Conversation state and behavior are shared with the Chat tab. `isOpen`
+  // gates everything that assumes the user is looking: this window stays
+  // MOUNTED when closed (it is only hidden, see isVisible below).
+  const c = useChatController({ isActive: isOpen });
+  const { wsId, activeSessionId, currentSession, activeAgent, pendingTask, pendingTaskId } = c;
   const { data: quickActionsPending = null } = useQuery(
     chatQuickActionsPendingOptions(activeSessionId ?? ""),
   );
@@ -112,170 +92,20 @@ export function ChatWindow() {
   useQuickActionsPendingTimeout(activeSessionId ?? null, quickActionsPending);
   // Toast when an accepted refresh later fails in the daemon (async half).
   useQuickActionsFailureToast(activeSessionId ?? null);
-  const selectedAgentId = useChatStore((s) => s.selectedAgentId);
-  const selectedProjectId = useChatStore((s) => s.selectedProjectId);
-  const setOpen = useChatStore((s) => s.setOpen);
-  const setActiveSession = useChatStore((s) => s.setActiveSession);
-  const setSelectedAgentId = useChatStore((s) => s.setSelectedAgentId);
-  const setSelectedProjectId = useChatStore((s) => s.setSelectedProjectId);
-  const user = useAuthStore((s) => s.user);
-  const { data: agents = [] } = useQuery(agentListOptions(wsId));
-  const { data: members = [] } = useQuery(memberListOptions(wsId));
-  // Single sessions cache — eliminates the separate active/all queries
-  // that used to drift during the WS-invalidate window.
-  const { data: sessions = [], isSuccess: sessionsLoaded } = useQuery(
-    chatSessionsOptions(wsId),
-  );
-  const { data: projects = [], isSuccess: projectsLoaded } = useQuery(
-    projectListOptions(wsId),
-  );
-  // Server-authoritative pending task. Survives refresh / reopen / session
-  // switch because it's keyed on sessionId in the Query cache; WS events
-  // (chat:message / chat:done / task:*) keep it invalidated in real time.
-  //
-  // This is the SOLE source for pendingTaskId — no mirror in the store.
-  const { data: pendingTask, isLoading: pendingTaskLoading } = useQuery(
-    pendingChatTaskOptions(activeSessionId ?? ""),
-  );
-  const pendingTaskId = pendingTask?.task_id ?? null;
-  const stopRequestedBeforeTaskRef = useRef(false);
-  // Durable deferred-cancellation draft restores (#5219). Same hook as the chat
-  // page controller — the skip/apply/consume/reconcile state machine must not
-  // diverge between the two composers.
-  //
-  // Gated on isOpen AND app foreground: this window stays MOUNTED when closed
-  // (it is only hidden, see isVisible below), and isOpen alone is also true for a
-  // backgrounded browser tab. Its ChatInput would otherwise adopt and consume a
-  // restore with nobody looking at it — stealing the prompt from the composer the
-  // user is actually waiting on, possibly on another device. Only a composer the
-  // user can actually see claims; a re-foregrounded window recovers on its next
-  // fetch. (appForeground also gates auto mark-read below.)
-  const appForeground = useAppForeground();
-  const { restoreDraftRequest, enqueueLocalRestore, handleRestoreDraftApplied } =
-    useChatDraftRestore(activeSessionId, isOpen && appForeground);
-  const {
-    cancelChatTask,
-    handleEditQueuedTask,
-    handleRemoveQueuedTask,
-    handleClearQueuedTasks,
-    handleSendQueuedTaskNow,
-  } = useChatTaskActions(activeSessionId, enqueueLocalRestore);
-  // Nonce handed to ChatInput to pull focus into the compose box: when a new
-  // chat starts (⊕ or switching agent), and whenever the window itself opens.
+
+  // The window adds its own focus moments — opening it, and Ask Multica starting
+  // a new chat — on top of the controller's new-chat nonce. Both counters only
+  // grow, so their sum changes whenever either one does.
   const windowRef = useRef<HTMLDivElement>(null);
-  const { focusRequest, requestInputFocus } = useChatInputFocus(isOpen, windowRef);
-  const [conversationStarterRequest, setConversationStarterRequest] = useState<{
-    id: number;
-    content: string;
-  } | null>(null);
-  const nextConversationStarterRequestIdRef = useRef(0);
-  const sendConversationStarter = useCallback(
-    (prompt: string) => {
-      setConversationStarterRequest({
-        id: ++nextConversationStarterRequestIdRef.current,
-        content: prompt,
-      });
-      requestInputFocus();
-    },
-    [requestInputFocus],
-  );
-  const handleConversationStarterApplied = useCallback(
-    () => setConversationStarterRequest(null),
-    [],
-  );
+  const newChatRequest = useChatStore((s) => s.newChatRequest);
+  const { focusRequest: openFocusRequest } = useChatInputFocus(isOpen, windowRef, newChatRequest);
+  const focusRequest = c.focusInputRequest + openFocusRequest;
 
-  // Legacy archived sessions (the old soft-archive feature was removed but
-  // pre-existing rows with status='archived' may still exist) are excluded
-  // from the history dropdown. If one is still the active session, ChatInput
-  // is disabled and the server still rejects POST /messages for it.
-  const currentSession = activeSessionId
-    ? sessions.find((s) => s.id === activeSessionId)
-    : null;
-  const isSessionArchived = currentSession?.status === "archived";
-  const candidateProjectId = currentSession
-    ? currentSession.project_id ?? null
-    : selectedProjectId;
-  const activeProjectId = candidateProjectId &&
-    (!projectsLoaded || projects.some((project) => project.id === candidateProjectId))
-    ? candidateProjectId
-    : null;
-
-  useEffect(() => {
-    if (!projectsLoaded || !selectedProjectId) return;
-    if (projects.some((project) => project.id === selectedProjectId)) return;
-    setSelectedProjectId(null);
-  }, [projectsLoaded, projects, selectedProjectId, setSelectedProjectId]);
-
-  const qc = useQueryClient();
-  const createSession = useCreateChatSession();
-  const markRead = useMarkChatSessionRead();
-  const setSessionProject = useSetChatSessionProject();
-
-  const currentMember = members.find((m) => m.user_id === user?.id);
-  const memberRole = currentMember?.role;
-  const availableAgents = agents.filter(
-    (a) => !a.archived_at && canAssignAgent(a, user?.id, memberRole),
-  );
-
-  // The agent bound to the OPEN session, resolved from the full agent list
-  // (archived included). An archived agent is filtered out of availableAgents,
-  // so resolving only from that list would make an archived-agent session
-  // render some *other* available agent — wrong avatar/name and a send that
-  // targets the wrong agent. Binding to the session's real agent keeps it
-  // honest; the archived state then makes the conversation read-only.
-  const sessionAgent = currentSession
-    ? agents.find((a) => a.id === currentSession.agent_id) ?? null
-    : null;
-  const isAgentArchived = !!sessionAgent?.archived_at;
-
-  // Resolve selected agent: open session's agent → stored preference → first
-  // available. New chats have no session, so they fall through to the picker.
-  const activeAgent =
-    sessionAgent ??
-    availableAgents.find((a) => a.id === selectedAgentId) ??
-    availableAgents[0] ??
-    null;
-  const activeAgentRuntimeBound =
-    !!activeAgent && isAgentRuntimeBound(activeAgent);
-
-  // A session outlives the permission that created it: the agent can be flipped
-  // to personal, change owner, or drop this member from its allow-list, and the
-  // server then refuses every send with `invocation_not_allowed` while still
-  // serving the transcript (MUL-4525). Judge the SESSION's agent, not just the
-  // picker list, so the composer goes read-only up front rather than after the
-  // user types (MUL-6380). Mirrors use-chat-controller.ts.
-  const isAgentAccessRevoked =
-    !!activeAgent && !canAssignAgent(activeAgent, user?.id, memberRole);
-
-  // "Customize" under the starter buttons — the only place the empty state
-  // admits that those buttons are configuration at all.
-  const customizeConversationStartersHref = useCustomizeConversationStartersHref(
-    activeAgent,
-    wsId,
-  );
-
-  const projectContextSupport = useChatProjectContextSupport(wsId, activeAgent);
-
-  // Three-state availability — "loading" stays neutral (no banner, no
-  // disable) so the input doesn't flash a fake "no agent" state in the
-  // few hundred ms before the agent list query resolves. Only `"none"`
-  // (server confirmed: zero usable agents) drives the disabled UI.
-  const agentAvailability = useWorkspaceAgentAvailability();
-  const noAgent = agentAvailability === "none";
   const annotations = useChatAnnotations({
     sessionId: activeSessionId,
     agentName: activeAgent?.name,
-    enabled: !isSessionArchived && !isAgentArchived && !isAgentAccessRevoked && activeAgentRuntimeBound && !noAgent,
+    enabled: !c.isSessionArchived && !c.isAgentArchived && !c.isAgentAccessRevoked && c.isAgentRuntimeBound && !c.noAgent,
   });
-
-  // Presence drives both the avatar status dot (via ActorAvatar) and the
-  // OfflineBanner / TaskStatusPill availability copy. `useAgentPresenceDetail`
-  // returns "loading" while queries are still resolving — pass `undefined`
-  // downstream so banners and pill copy stay silent during loading rather
-  // than flash speculative offline text.
-  const presenceDetail = useAgentPresenceDetail(wsId, activeAgent?.id);
-  const availability =
-    presenceDetail === "loading" ? undefined : presenceDetail.availability;
 
   // Mount / unmount logging. ChatWindow lives in DashboardLayout, so this
   // fires on layout mount (login / workspace switch / fresh page load).
@@ -284,7 +114,7 @@ export function ChatWindow() {
       isOpen,
       activeSessionId,
       pendingTaskId,
-      selectedAgentId,
+      selectedAgentId: c.selectedAgentId,
       wsId,
     });
     return () => {
@@ -296,440 +126,6 @@ export function ChatWindow() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per mount
   }, []);
 
-  // Self-heal a dangling `activeSessionId` (persisted / restored from storage)
-  // that points at a session which was deleted or lost access: once the
-  // sessions list has loaded and doesn't contain it — with no in-flight
-  // pending task exempting a just-created session — clear it so the
-  // floating window shows the new-chat state instead of an editable empty chat
-  // whose send would POST into a nonexistent session. Same fix the shared
-  // controller applies for the tab (kept in sync via `hasInFlightPendingTask`).
-  // The earlier "no self-heal" note was about a naive version keyed on stale
-  // `allSessions`; the in-flight-pending-task signal here exempts the
-  // freshly-created session (handleSend seeds its pending task from the send
-  // response BEFORE setActiveSession), so it is never mistaken for stale.
-  useEffect(() => {
-    if (!activeSessionId || !sessionsLoaded) return;
-    if (sessions.some((s) => s.id === activeSessionId)) return;
-    if (hasInFlightPendingTask(qc, activeSessionId)) return;
-    uiLogger.info("clearing dangling activeSessionId (floating)", { sessionId: activeSessionId });
-    setActiveSession(null);
-  }, [activeSessionId, sessionsLoaded, sessions, qc, setActiveSession]);
-
-  // WS events are handled globally in useRealtimeSync — the query cache
-  // stays current even when this window is closed. See packages/core/realtime/.
-
-  // Auto mark-as-read whenever the user is looking at a session with unread
-  // state: window open + app in the foreground + a session active + has_unread
-  // → PATCH. has_unread comes from the list query; WS handlers invalidate it on
-  // chat:done so a reply arriving while the user watches triggers this effect
-  // again and is instantly cleared. `appForeground` gates the "is looking"
-  // assumption: a reply landing while the window is open but the app is
-  // backgrounded must stay unread so the sidebar badges it (MUL-4485), then
-  // clears when the user refocuses and this effect re-runs.
-  const currentHasUnread =
-    sessions.find((s) => s.id === activeSessionId)?.has_unread ?? false;
-  useEffect(() => {
-    if (!isOpen || !appForeground || !activeSessionId) return;
-    if (!currentHasUnread) return;
-    uiLogger.info("auto markRead", { sessionId: activeSessionId });
-    markRead.mutate(activeSessionId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- markRead ref stable
-  }, [isOpen, appForeground, activeSessionId, currentHasUnread]);
-
-  // Lazy-creates a chat_session the first time the user needs an id —
-  // either to send a message or to attach an uploaded file. Pulled out of
-  // handleSend so the upload path (which fires before any text exists) can
-  // get a session_id to hang the attachment on. Returns null when no agent
-  // is available; callers must early-return in that case.
-  //
-  // Concurrent callers (e.g. user drops a file → handleUploadFile, then
-  // quickly clicks send → handleSend) would each observe activeSessionId
-  // === null and fire a separate createSession.mutateAsync, creating two
-  // sessions and orphaning the attachment on the wrong one. The in-flight
-  // promise ref dedupes those races: the first caller starts the create,
-  // every subsequent caller awaits the same promise until it settles.
-  //
-  // titleSeed is the first 50 chars of the user's message when called from
-  // send; the upload path passes "" and we leave the title empty so the
-  // session-dropdown's existing localized `window.untitled` fallback kicks
-  // in. A follow-up task may back-fill the real title from the first user
-  // message — until then this keeps the session list scannable across locales.
-  //
-  // NOTE: ensureSession does NOT flip `activeSessionId` itself. Callers must
-  // seed `chatKeys.messages(sessionId)` in the Query cache BEFORE calling
-  // `setActiveSession(sessionId)`, otherwise the first useQuery subscription
-  // for the new key reports `isLoading: true` and renders ChatMessageSkeleton
-  // for one frame (the "new-chat first-message" white flash).
-  const sessionPromiseRef = useRef<Promise<string | null> | null>(null);
-  const ensureSession = useCallback(
-    async (titleSeed: string): Promise<string | null> => {
-      // Trust the current id only when it's real: in the loaded list, or a
-      // just-created one still awaiting the refetch (has an optimistic write).
-      // A dangling id (deleted / no access) must not be treated as an existing
-      // session — fall through and create a fresh one instead of POSTing 404.
-      if (
-        activeSessionId &&
-        (!sessionsLoaded ||
-          sessions.some((s) => s.id === activeSessionId) ||
-          hasInFlightPendingTask(qc, activeSessionId))
-      ) {
-        return activeSessionId;
-      }
-      if (!activeAgent) return null;
-      if (sessionPromiseRef.current) return sessionPromiseRef.current;
-
-      const promise = (async () => {
-        try {
-          const session = await createSession.mutateAsync({
-            agent_id: activeAgent.id,
-            title: titleSeed.slice(0, 50),
-            project_id: activeProjectId,
-          });
-          return session.id;
-        } finally {
-          sessionPromiseRef.current = null;
-        }
-      })();
-      sessionPromiseRef.current = promise;
-      return promise;
-    },
-    [
-      activeSessionId,
-      activeAgent,
-      activeProjectId,
-      createSession,
-      sessions,
-      sessionsLoaded,
-      qc,
-    ],
-  );
-
-  // Upload transport moved into the coordinated-upload engine inside ChatInput
-  // (MUL-5181 L2); the host only says whether the affordance exists. Uploads
-  // remain workspace-scoped drafts — sending is still the point where a
-  // session is created (if needed) and attachment_ids bind to the message.
-
-  const handleSend = useCallback(
-    async (
-      content: string,
-      attachmentIds?: string[],
-      commitInput?: (options?: { extraDraftKeys?: string[]; clearEditor?: boolean }) => void,
-      draftAttachments: Attachment[] = [],
-    ): Promise<boolean> => {
-      if (!activeAgent) {
-        apiLogger.warn("sendChatMessage skipped: no active agent");
-        return false;
-      }
-      // Read-only conversation: the agent is retired and can no longer pick up
-      // work, so refuse to enqueue a task that would sit orphaned forever. The
-      // input is disabled in this state; this is the belt-and-braces guard.
-      if (isAgentArchived) {
-        apiLogger.warn("sendChatMessage skipped: agent is archived", {
-          sessionId: activeSessionId,
-          agentId: activeAgent.id,
-        });
-        return false;
-      }
-      // Invoke permission was revoked while this session was open — the server
-      // would refuse before persisting anything. Keep the draft, skip the
-      // roundtrip. The input is disabled here; belt-and-braces guard.
-      if (isAgentAccessRevoked) {
-        apiLogger.warn("sendChatMessage skipped: invoke permission revoked", {
-          sessionId: activeSessionId,
-          agentId: activeAgent.id,
-        });
-        return false;
-      }
-      if (pendingTaskId && pendingTask?.supports_queue !== true) {
-        apiLogger.warn("sendChatMessage skipped: server does not support follow-up queues", {
-          sessionId: activeSessionId,
-        });
-        return false;
-      }
-      if (!activeAgentRuntimeBound) {
-        toast.error(t(($) => $.input.runtime_required_toast));
-        return false;
-      }
-
-      const finalContent = content;
-
-      const isNewSession = !activeSessionId;
-
-      apiLogger.info("sendChatMessage.start", {
-        sessionId: activeSessionId,
-        isNewSession,
-        agentId: activeAgent.id,
-        contentLength: finalContent.length,
-        attachmentCount: attachmentIds?.length ?? 0,
-      });
-
-      let sessionId: string | null = null;
-      try {
-        sessionId = await ensureSession(finalContent);
-      } catch (err) {
-        apiLogger.error("sendChatMessage.ensureSession.error", err);
-        const reason = dispatchReasonCode(err);
-        toast.error(
-          reason === "invocation_not_allowed"
-            ? t(($) => $.input.send_blocked_toast)
-            : reason === "agent_runtime_required"
-              ? t(($) => $.input.runtime_required_toast)
-              : reason === "runtime_access_denied"
-                ? t(($) => $.input.runtime_access_denied_toast)
-                : t(($) => $.input.send_failed_toast),
-        );
-        return false;
-      }
-      if (!sessionId) {
-        apiLogger.warn("sendChatMessage aborted: ensureSession returned null");
-        return false;
-      }
-
-      // Await-then-render: the composer keeps the user's text and attachments
-      // in place (editor locked, button spinning via `submitting`) until the
-      // server accepts the send. Nothing is written into the caches, and the
-      // draft is never cleared, before the roundtrip settles — a slow send never
-      // reads as "posted but the box is still full", and a rejected one keeps
-      // the draft for retry (ChatInput never cleared it).
-      let result;
-      try {
-        result = await api.sendChatMessage(sessionId, finalContent, attachmentIds);
-      } catch (err) {
-        apiLogger.error("sendChatMessage.error", { sessionId, err });
-        const reason = dispatchReasonCode(err);
-        toast.error(
-          reason === "invocation_not_allowed"
-            ? t(($) => $.input.send_blocked_toast)
-            : reason === "agent_runtime_required"
-              ? t(($) => $.input.runtime_required_toast)
-              : reason === "runtime_access_denied"
-                ? t(($) => $.input.runtime_access_denied_toast)
-                : t(($) => $.input.send_failed_toast),
-        );
-        return false;
-      }
-      apiLogger.info("sendChatMessage.success", {
-        sessionId,
-        messageId: result.message_id,
-        taskId: result.task_id,
-      });
-
-      // Render the accepted message from the server response. Seed the message
-      // caches BEFORE flipping activeSessionId: if we set the active session
-      // first, useQuery's first subscription to the new key sees no cached data
-      // and renders ChatMessageSkeleton for one frame — the "new-chat
-      // first-message" white flash. Priming the cache first means the very first
-      // read after activeSessionId flips hits data synchronously and
-      // ChatMessageList mounts directly. Seed the pending-task from the server's
-      // real id + created_at so the StatusPill mounts anchored to the true clock
-      // (no local-clock drift, no backwards snap) and the stale-session self-heal
-      // exempts this just-created session until the sessions-list refetch lands.
-      const sent: ChatMessage = {
-        id: result.message_id,
-        chat_session_id: sessionId,
-        role: "user",
-        content: finalContent,
-        task_id: result.task_id,
-        created_at: result.created_at,
-        attachments: draftAttachments,
-      };
-      // Single door into the message caches (MUL-5711): idempotent by id, so
-      // this row and the chat:message echo of the same send converge in either
-      // arrival order, and this richer row (it carries the draft attachments)
-      // is never downgraded by the echo, which has no attachments field.
-      upsertChatMessageToCaches(qc, sessionId, sent, { seedIfMissing: true });
-      seedAcceptedPendingTask(qc, sessionId, {
-        task_id: result.task_id,
-        created_at: result.created_at,
-        message_id: result.message_id,
-        content: finalContent,
-        supports_queue: result.supports_queue,
-        queued: result.queued,
-      });
-      // Cache primed → publish the new active session, but only if the user
-      // hasn't navigated away mid-send. Compare the live store against the
-      // closure-captured target; see isStillOnComposeTarget for the rule, which
-      // this floating window shares with the chat tab's controller. commitInput
-      // clears the sent draft, and scrubs the shared editor only when the user
-      // is still on the session they sent from.
-      const live = useChatStore.getState();
-      const stillOnSourceSession = isStillOnComposeTarget(live.activeSessionId, activeSessionId);
-      if (stillOnSourceSession) {
-        setActiveSession(sessionId);
-      }
-      commitInput?.({ extraDraftKeys: [sessionId], clearEditor: stillOnSourceSession });
-
-      if (stopRequestedBeforeTaskRef.current) {
-        stopRequestedBeforeTaskRef.current = false;
-        await cancelChatTask(result.task_id, sessionId, {
-          restoreDraftToInput: true,
-          source: "deferred-send",
-        });
-        return false;
-      }
-      // The server reports which attachment ids it actually bound. Diff
-      // against what we requested so a silent bind failure surfaces to the
-      // user — no extra fetch. Skip the check on servers that predate the
-      // field (attachment_ids undefined) rather than false-alarm.
-      if (attachmentIds && attachmentIds.length > 0 && result.attachment_ids) {
-        const boundIds = new Set(result.attachment_ids);
-        const missing = attachmentIds.filter((id) => !boundIds.has(id));
-        if (missing.length > 0) {
-          apiLogger.warn("sendChatMessage.attachments missing after send", {
-            sessionId,
-            messageId: result.message_id,
-            missing,
-          });
-          toast.error(t(($) => $.input.attachment_bind_failed_toast));
-        }
-      }
-      qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
-      qc.invalidateQueries({ queryKey: chatKeys.messagesPage(sessionId) });
-      return true;
-    },
-    [
-      activeSessionId,
-      activeAgent,
-      activeAgentRuntimeBound,
-      isAgentArchived,
-      isAgentAccessRevoked,
-      pendingTask,
-      pendingTaskId,
-      ensureSession,
-      cancelChatTask,
-      qc,
-      setActiveSession,
-      t,
-    ],
-  );
-
-  const handleStop = useCallback(() => {
-    if (!pendingTaskId || !activeSessionId) {
-      apiLogger.debug("cancelTask skipped: no pending task");
-      return;
-    }
-    if (!isTaskMessageTaskId(pendingTaskId)) {
-      stopRequestedBeforeTaskRef.current = true;
-      apiLogger.info("cancelTask.deferred until server task id", {
-        taskId: pendingTaskId,
-        sessionId: activeSessionId,
-      });
-      return;
-    }
-    void cancelChatTask(pendingTaskId, activeSessionId, {
-      restoreDraftToInput: true,
-      source: "active-input",
-    });
-  }, [pendingTaskId, activeSessionId, cancelChatTask]);
-
-  const handleSelectAgent = useCallback(
-    (agent: Agent) => {
-      // No-op when clicking the already-active agent — don't clobber the
-      // current session just because the user closed the menu this way.
-      // Compare against activeAgent (what the UI shows), not selectedAgentId
-      // (which may be null / point to an archived agent on first load).
-      if (activeAgent && agent.id === activeAgent.id) return;
-      uiLogger.info("selectAgent", {
-        from: selectedAgentId,
-        to: agent.id,
-        previousSessionId: activeSessionId,
-      });
-      setSelectedAgentId(agent.id);
-      // Preserve an explicitly chosen project while composing an unsent chat,
-      // but never inherit project context from the historical session being
-      // left behind.
-      setSelectedProjectId(currentSession ? null : activeProjectId);
-      // Reset session when switching agent
-      setActiveSession(null);
-      requestInputFocus();
-    },
-    [
-      activeAgent,
-      selectedAgentId,
-      activeSessionId,
-      activeProjectId,
-      currentSession,
-      setSelectedAgentId,
-      setSelectedProjectId,
-      setActiveSession,
-      requestInputFocus,
-    ],
-  );
-
-  const handleNewChat = useCallback(() => {
-    uiLogger.info("newChat", {
-      previousSessionId: activeSessionId,
-      previousPendingTask: pendingTaskId,
-    });
-    setSelectedProjectId(null);
-    setActiveSession(null);
-    requestInputFocus();
-  }, [
-    activeSessionId,
-    pendingTaskId,
-    setSelectedProjectId,
-    setActiveSession,
-    requestInputFocus,
-  ]);
-
-  const handleSelectSession = useCallback(
-    (session: ChatSession) => {
-      // Sessions are bound 1:1 to an agent — picking a session from a
-      // different agent implicitly switches the agent too.
-      if (activeAgent && session.agent_id !== activeAgent.id) {
-        uiLogger.info("selectSession (cross-agent)", {
-          from: activeAgent.id,
-          toAgent: session.agent_id,
-          toSession: session.id,
-        });
-        setSelectedAgentId(session.agent_id);
-      }
-      setActiveSession(session.id);
-    },
-    [activeAgent, setSelectedAgentId, setActiveSession],
-  );
-
-  const handleProjectChange = useCallback(
-    (projectId: string | null) => {
-      if (projectId === activeProjectId) return;
-      uiLogger.info("selectProjectContext", {
-        from: activeProjectId,
-        to: projectId,
-        previousSessionId: activeSessionId,
-      });
-      const plan = planProjectContextChange({
-        targetProjectId: projectId,
-        activeSessionId,
-        currentSession: currentSession ?? null,
-      });
-      switch (plan.kind) {
-        case "awaitSession":
-          return;
-        case "detachCurrent":
-          setSessionProject.mutate({ sessionId: plan.sessionId, projectId: null });
-          break;
-        case "startFreshChat":
-          setSelectedAgentId(plan.agentId);
-          setSelectedProjectId(plan.projectId);
-          setActiveSession(null);
-          break;
-        case "setDraftProject":
-          setSelectedProjectId(plan.projectId);
-          break;
-      }
-      requestInputFocus();
-    }, [
-      activeProjectId,
-      activeSessionId,
-      currentSession,
-      setSessionProject,
-      setSelectedAgentId,
-      setSelectedProjectId,
-      setActiveSession,
-      requestInputFocus,
-    ],
-  );
-
   const handleMinimize = useCallback(() => {
     uiLogger.info("minimize (close)", {
       activeSessionId,
@@ -738,7 +134,21 @@ export function ChatWindow() {
     setOpen(false);
   }, [activeSessionId, pendingTaskId, setOpen]);
 
-  const isExpanded = useChatStore((s) => s.isExpanded);
+  // Minimize leaves the chat's chip in the bottom bar; close also takes the
+  // chip away, the same as closing it from the bar.
+  const handleClose = useCallback(() => {
+    uiLogger.info("close", {
+      activeSessionId,
+      pendingTaskId,
+    });
+    setOpen(false);
+    if (currentSession) dismissChatFromBar(currentSession.id, chatActivity(currentSession));
+  }, [activeSessionId, pendingTaskId, currentSession, setOpen, dismissChatFromBar]);
+
+  const handleArchiveSession = (session: ChatSession) => {
+    c.advanceSelectionAfterArchive(session);
+    c.archiveSession(session.id);
+  };
 
   const { renderWidth, renderHeight, isAtMax, boundsReady, isDragging, toggleExpand, startDrag } = useChatResize(windowRef);
   const reduceMotion = useReducedMotion();
@@ -758,7 +168,7 @@ export function ChatWindow() {
     "absolute z-50 flex flex-col overflow-hidden bg-surface-raised @container",
     isMobile
       ? "inset-x-0"
-      : "right-2 rounded-xl shadow-[var(--floating-shadow)] ring-1 ring-surface-border",
+      : "rounded-xl shadow-[var(--floating-shadow)] ring-1 ring-floating-border",
   );
   // Soft keyboards shrink only the *visual* viewport — the layout viewport
   // (and this panel's bottom-anchored parent) keeps its full height, so
@@ -774,6 +184,7 @@ export function ChatWindow() {
   // disappears from the style prop, so a conditional spread here would
   // leave the keyboard geometry stuck on the DOM after the keyboard closes.
   const keyboard = useVisualViewportKeyboard();
+  const anchorRight = useChatWindowAnchor(windowRef, isOpen, renderWidth, isDragging);
   const containerStyle: React.CSSProperties = {
     transformOrigin: "bottom right",
     pointerEvents: isOpen ? "auto" : "none",
@@ -782,13 +193,15 @@ export function ChatWindow() {
           // Full-screen panel anchored to the visible bottom edge;
           // width/height live in the motion animate below.
           top: "auto",
+          right: 0,
           bottom: keyboard ? keyboard.occludedBottom : 0,
           maxHeight: "none",
         }
       : {
           // Floating card; only the anchor and the height cap live here.
           top: "auto",
-          bottom: keyboard ? keyboard.occludedBottom + 8 : 8,
+          right: anchorRight,
+          bottom: keyboard ? keyboard.occludedBottom + CHAT_WINDOW_INSET : CHAT_WINDOW_INSET,
           maxHeight: keyboard ? keyboard.viewportHeight - 16 : "none",
         }),
   };
@@ -807,6 +220,7 @@ export function ChatWindow() {
     : { width: renderWidth, height: renderHeight };
 
   const contextItems = useChatContextItems(wsId);
+  const pageContext = contextItems.find((item) => item.group === "current") ?? null;
   const queuedTasks = pendingTask?.queued_tasks ?? [];
 
   const showRestore = isExpanded || isAtMax;
@@ -815,6 +229,7 @@ export function ChatWindow() {
     ? t(($) => $.window.restore_tooltip)
     : t(($) => $.window.expand_tooltip);
   const minimizeLabel = t(($) => $.window.minimize_tooltip);
+  const closeLabel = t(($) => $.window.close_tooltip);
   const sizeTransition =
     isDragging || reduceMotion ? { duration: 0 } : { type: "spring" as const, duration: 0.3, bounce: 0 };
 
@@ -849,7 +264,7 @@ export function ChatWindow() {
                   size="icon-sm"
                   className="text-muted-foreground"
                   aria-label={newChatLabel}
-                  onClick={handleNewChat}
+                  onClick={c.handleNewChat}
                 />
               }
             >
@@ -858,12 +273,13 @@ export function ChatWindow() {
             <TooltipContent side="top">{newChatLabel}</TooltipContent>
           </Tooltip>
           <SessionDropdown
-            sessions={sessions}
+            sessions={c.sessions}
             // Use the full agent list (incl. archived) so historical
             // sessions can still resolve their avatar.
-            agents={agents}
+            agents={c.agents}
             activeSessionId={activeSessionId}
-            onSelectSession={handleSelectSession}
+            onSelectSession={c.handleSelectSession}
+            onArchiveSession={handleArchiveSession}
           />
         </div>
         <div className="flex items-center gap-0.5 shrink-0">
@@ -904,6 +320,24 @@ export function ChatWindow() {
               <ActionShortcutKeycaps action="toggleChat" />
             </TooltipContent>
           </Tooltip>
+          {!isMobile && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="text-muted-foreground"
+                    aria-label={closeLabel}
+                    onClick={handleClose}
+                  />
+                }
+              >
+                <X />
+              </TooltipTrigger>
+              <TooltipContent side="top">{closeLabel}</TooltipContent>
+            </Tooltip>
+          )}
         </div>
       </div>
 
@@ -913,16 +347,16 @@ export function ChatWindow() {
           <ChatWindowMessages
             sessionId={activeSessionId}
             pendingTask={pendingTask}
-            pendingTaskLoading={pendingTaskLoading}
-            availability={availability}
-            onQuickAction={(action) => handleSend(action.prompt)}
+            pendingTaskLoading={c.pendingTaskLoading}
+            availability={c.availability}
+            onQuickAction={(action) => c.handleSend(action.prompt)}
             quickActionsDisabled={
               !!pendingTaskId ||
-              isSessionArchived ||
-              isAgentArchived ||
-              isAgentAccessRevoked ||
-              !activeAgentRuntimeBound ||
-              noAgent
+              c.isSessionArchived ||
+              c.isAgentArchived ||
+              c.isAgentAccessRevoked ||
+              !c.isAgentRuntimeBound ||
+              c.noAgent
             }
             quickActionsPendingMessageId={quickActionsPending?.message_id ?? null}
             onReady={markContentReady}
@@ -930,9 +364,8 @@ export function ChatWindow() {
           >
             <EmptyState
               agent={activeAgent}
-              hasSessions={sessions.length > 0}
-              onPickPrompt={sendConversationStarter}
-              customizeHref={customizeConversationStartersHref}
+              hasSessions={c.sessions.length > 0}
+              onPickPrompt={c.sendConversationStarter}
             />
           </ChatWindowMessages>
         )}
@@ -947,19 +380,19 @@ export function ChatWindow() {
        *  We key off `noAgent` (the resolved-empty state) rather than
        *  `!activeAgent`, so the loading window between mount and the
        *  first agent-list response stays banner-free. */}
-      {noAgent ? (
+      {c.noAgent ? (
         <NoAgentBanner />
-      ) : isAgentAccessRevoked ? (
+      ) : c.isAgentAccessRevoked ? (
         <AgentAccessRevokedBanner agentName={activeAgent?.name} />
-      ) : isAgentArchived ? (
+      ) : c.isAgentArchived ? (
         <ArchivedAgentBanner agentName={activeAgent?.name} />
-      ) : !activeAgentRuntimeBound && activeAgent ? (
+      ) : !c.isAgentRuntimeBound && activeAgent ? (
         <RuntimeRequiredBanner
           agentId={activeAgent.id}
           agentName={activeAgent.name}
         />
       ) : (
-        <OfflineBanner agentName={activeAgent?.name} availability={availability} />
+        <OfflineBanner agentName={activeAgent?.name} availability={c.availability} />
       )}
 
       <div className="px-4">
@@ -969,53 +402,52 @@ export function ChatWindow() {
       <ChatQueue
         tasks={queuedTasks}
         headStatus={pendingTask?.status}
-        onSendNow={handleSendQueuedTaskNow}
-        sendNowDisabled={isAgentAccessRevoked}
-        onEdit={handleEditQueuedTask}
-        onRemove={handleRemoveQueuedTask}
-        onClear={handleClearQueuedTasks}
+        onSendNow={c.handleSendQueuedTaskNow}
+        sendNowDisabled={c.isAgentAccessRevoked}
+        onEdit={c.handleEditQueuedTask}
+        onRemove={c.handleRemoveQueuedTask}
+        onClear={c.handleClearQueuedTasks}
       />
 
       {/* Input — disabled for legacy archived sessions and for sessions whose
        *  agent has been archived (read-only); locked out entirely when there's
        *  no agent (the EmptyState above carries the CTA). */}
       <ChatInput
-        onSend={handleSend}
-        restoreDraftRequest={restoreDraftRequest}
-        conversationStarterRequest={conversationStarterRequest}
-        onConversationStarterApplied={handleConversationStarterApplied}
-        onRestoreDraftApplied={handleRestoreDraftApplied}
-        uploadEnabled={!!activeAgent && !isAgentAccessRevoked}
-        onStop={handleStop}
+        onSend={c.handleSend}
+        restoreDraftRequest={c.restoreDraftRequest}
+        conversationStarterRequest={c.conversationStarterRequest}
+        onConversationStarterApplied={c.handleConversationStarterApplied}
+        onRestoreDraftApplied={c.handleRestoreDraftApplied}
+        uploadEnabled={c.uploadEnabled && !c.isAgentAccessRevoked}
+        onStop={c.handleStop}
         isRunning={!!pendingTaskId}
         allowSubmitWhileRunning={pendingTask?.supports_queue === true}
         disabled={
-          isSessionArchived ||
-          isAgentArchived ||
-          isAgentAccessRevoked ||
-          !activeAgentRuntimeBound
+          c.isSessionArchived ||
+          c.isAgentArchived ||
+          c.isAgentAccessRevoked ||
+          !c.isAgentRuntimeBound
         }
-        noAgent={noAgent}
-        agentArchived={isAgentArchived}
-        agentAccessRevoked={isAgentAccessRevoked}
-        agentRuntimeRequired={!activeAgentRuntimeBound}
+        noAgent={c.noAgent}
+        agentArchived={c.isAgentArchived}
+        agentAccessRevoked={c.isAgentAccessRevoked}
+        agentRuntimeRequired={!c.isAgentRuntimeBound}
         agentName={activeAgent?.name}
-        projects={projects}
-        projectId={activeProjectId}
-        onProjectChange={handleProjectChange}
-        projectContextUnsupported={projectContextSupport === false}
-        isProjectUpdating={
-          setSessionProject.isPending || (!!activeSessionId && !currentSession)
-        }
+        projects={c.projects}
+        projectId={c.activeProjectId}
+        onProjectChange={c.handleProjectChange}
+        projectContextUnsupported={c.projectContextUnsupported}
+        isProjectUpdating={c.isProjectUpdating}
         leftAdornment={
           <AgentDropdown
-            agents={availableAgents}
+            agents={c.availableAgents}
             activeAgent={activeAgent}
-            userId={user?.id}
-            onSelect={handleSelectAgent}
+            userId={c.user?.id}
+            onSelect={c.handleSelectAgent}
           />
         }
         contextItems={contextItems}
+        pageContext={pageContext}
         focusRequest={focusRequest}
         annotations={annotations}
       />
@@ -1187,11 +619,13 @@ function SessionDropdown({
   agents,
   activeSessionId,
   onSelectSession,
+  onArchiveSession,
 }: {
   sessions: ChatSession[];
   agents: Agent[];
   activeSessionId: string | null;
   onSelectSession: (session: ChatSession) => void;
+  onArchiveSession: (session: ChatSession) => void;
 }) {
   const { t } = useT("chat");
   const wsId = useWorkspaceId();
@@ -1217,9 +651,7 @@ function SessionDropdown({
   // session id (not the full session) so a stale closure can't overwrite a
   // newer rename pulled in via WS.
   const [renamingId, setRenamingId] = useState<string | null>(null);
-  const setArchived = useSetChatSessionArchived();
   const updateSession = useUpdateChatSession();
-  const setActiveSession = useChatStore((s) => s.setActiveSession);
   const queryClient = useQueryClient();
   const formatTimeAgo = useFormatTimeAgo();
 
@@ -1295,21 +727,6 @@ function SessionDropdown({
   // hard-delete: unarchive / delete live only in the full Chat page's Archived
   // view (reachable via the expand button), so a stale floating dropdown can't
   // bypass the "archive first, delete only from Archived" semantics.
-  const handleArchive = (session: ChatSession) => {
-    if (activeSessionId === session.id) {
-      // Archiving the session in view: advance to the next chat (fall back to
-      // the previous, clear only when none remain) instead of stranding the
-      // composer on a now read-only session — mirrors the Chat tab and the
-      // Inbox list. Routing the non-null advance through onSelectSession keeps
-      // selectedAgentId in sync when the next chat belongs to another agent.
-      const idx = historySessions.findIndex((s) => s.id === session.id);
-      const next = historySessions[idx + 1] ?? historySessions[idx - 1] ?? null;
-      if (next) onSelectSession(next);
-      else setActiveSession(null);
-    }
-    setArchived.mutate({ sessionId: session.id, archived: true });
-  };
-
   const handleSubmitRename = (sessionId: string, raw: string) => {
     const trimmed = raw.trim();
     const current = sessions.find((s) => s.id === sessionId);
@@ -1411,7 +828,7 @@ function SessionDropdown({
             key: "archive",
             icon: <Archive className="size-3.5" />,
             label: t(($) => $.list.archive),
-            onSelect: () => handleArchive(session),
+            onSelect: () => onArchiveSession(session),
           },
         ];
 
@@ -1632,23 +1049,4 @@ function SessionDropdown({
       </Popover>
     </>
   );
-}
-
-function useFormatTimeAgo(): (dateStr: string) => string {
-  const { t } = useT("chat");
-  const locale = useLocale();
-  return (dateStr: string) => {
-    const date = new Date(dateStr);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMs / 3600000);
-    const diffDays = Math.floor(diffMs / 86400000);
-
-    if (diffMins < 1) return t(($) => $.session_history.time.just_now);
-    if (diffMins < 60) return t(($) => $.session_history.time.minutes, { count: diffMins });
-    if (diffHours < 24) return t(($) => $.session_history.time.hours, { count: diffHours });
-    if (diffDays < 7) return t(($) => $.session_history.time.days, { count: diffDays });
-    return date.toLocaleDateString(locale);
-  };
 }

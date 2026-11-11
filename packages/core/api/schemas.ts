@@ -378,6 +378,7 @@ export const EMPTY_LIST_GITHUB_INSTALLATIONS_RESPONSE: ListGitHubInstallationsRe
 };
 
 export const GitHubConnectResponseSchema = z.object({
+  connection_id: z.string().optional().catch(undefined),
   url: z.string().optional(),
   configured: z.boolean().optional().default(false),
 }).loose();
@@ -398,6 +399,7 @@ export const GitHubRepositorySchema = z.object({
 }).loose();
 
 export const ListGitHubRepositoriesResponseSchema = z.object({
+  repository_selection: z.enum(["all", "selected", "unknown"]).catch("unknown").optional(),
   repositories: z.array(GitHubRepositorySchema).default([]),
   total_count: z.number().optional().default(0),
   next_page: z.number().nullable().optional().default(null),
@@ -1043,6 +1045,10 @@ export interface AppConfigResponse {
    * DELETE /api/comments/{id}/keep-replies. Older servers deleted the replies
    * too, so absent must be treated as false (#8296). */
   comment_delete_keep_replies_supported?: boolean;
+  /** Whether this server serves the community theme store under
+   * /api/theme-store. Off when the operator turned it off, and absent on older
+   * servers, so the app shows no Browse entry and makes no store requests. */
+  theme_store_enabled?: boolean;
   server_version?: string;
 }
 
@@ -1161,6 +1167,24 @@ export const AttachmentResponseSchema = z.object({
   // means "unknown dimensions", never a lost attachment.
   ...AttachmentImageFields,
 }).loose();
+
+// The issue file inventory uses comment origins for grouping and sorting.
+// Malformed optional origins must not discard otherwise usable attachments.
+export const AttachmentListSchema = z.array(AttachmentResponseSchema.extend({
+  workspace_id: z.string(),
+  issue_id: z.string().nullable().default(null),
+  comment_id: z.string().nullable().default(null),
+  chat_session_id: z.string().nullable().default(null),
+  chat_message_id: z.string().nullable().default(null),
+  uploader_type: z.string(),
+  uploader_id: z.string(),
+  content_type: z.string(),
+  size_bytes: z.number(),
+  created_at: z.string(),
+  comment_author_type: z.string().optional().catch(undefined),
+  comment_author_id: z.string().optional().catch(undefined),
+  comment_created_at: z.iso.datetime({ offset: true }).optional().catch(undefined),
+})).default([]);
 
 export const EMPTY_ATTACHMENT: Attachment = {
   id: "",
@@ -1313,6 +1337,7 @@ export const AppConfigSchema = z.object({
   agent_conversation_starters_supported: BooleanWithDefaultSchema(false),
   issue_create_properties_supported: BooleanWithDefaultSchema(false),
   comment_delete_keep_replies_supported: BooleanWithDefaultSchema(false),
+  theme_store_enabled: BooleanWithDefaultSchema(false),
   server_version: OptionalStringSchema,
 }).loose();
 
@@ -1336,8 +1361,70 @@ export const EMPTY_APP_CONFIG: AppConfigResponse = {
   issue_create_properties_supported: false,
   // Fail closed: old servers delete a comment's replies with it.
   comment_delete_keep_replies_supported: false,
+  theme_store_enabled: false,
   feature_flags: {},
 };
+
+export type StoreThemeMode = "light" | "dark";
+
+/** A theme of the community registry, as /api/theme-store lists it. */
+export interface StoreTheme {
+  id: string;
+  name: string;
+  author: string;
+  /** The author's GitHub repository, `owner/name`. */
+  repo: string;
+  description?: string;
+  modes: StoreThemeMode[];
+  /** The release the registry checked; installs always get this one. */
+  version: string;
+  size: number;
+  /** Modes the registry rendered a screenshot for. */
+  screenshots: StoreThemeMode[];
+  /**
+   * Each mode's current screenshot. The registry re-renders screenshots
+   * without a new release; absent from servers that predate this.
+   */
+  screenshot_revisions?: Partial<Record<StoreThemeMode, string>>;
+  updated_at?: string;
+  /** Installs and updates served by this server, all users together. */
+  downloads: number;
+}
+
+const StoreThemeModesSchema = z.preprocess(
+  (value) => (Array.isArray(value) ? value.filter((m) => m === "light" || m === "dark") : []),
+  z.array(z.enum(["light", "dark"])),
+);
+
+const StoreThemeSchema = z
+  .object({
+    id: z.string(),
+    name: z.string(),
+    author: z.string(),
+    repo: z.string(),
+    description: OptionalStringSchema,
+    modes: StoreThemeModesSchema,
+    version: z.string(),
+    size: z.number(),
+    screenshots: StoreThemeModesSchema,
+    screenshot_revisions: z
+      .object({ light: z.string().optional(), dark: z.string().optional() })
+      .optional()
+      .catch(undefined),
+    updated_at: OptionalStringSchema,
+    downloads: z.number().catch(0).default(0),
+  })
+  .loose();
+
+/** One malformed entry drops that theme, not the whole list. */
+export const StoreThemeListSchema = z.object({
+  themes: z.preprocess(
+    (value) => (Array.isArray(value) ? value.filter((item) => StoreThemeSchema.safeParse(item).success) : []),
+    z.array(StoreThemeSchema),
+  ),
+});
+
+export const EMPTY_STORE_THEME_LIST: { themes: StoreTheme[] } = { themes: [] };
 
 // Preference keys may grow over time, so keep both the key and value spaces
 // forward-compatible while still rejecting non-string persisted data.
@@ -1598,6 +1685,7 @@ export const IssueSchema = z.object({
   assignee_id: z.string().nullable(),
   creator_type: z.string(),
   creator_id: z.string(),
+  requester_id: z.string().nullable().optional().catch(undefined),
   parent_issue_id: z.string().nullable(),
   // Additive pointer (MUL-7349); same disproportionate-failure reasoning as
   // status_name above, and older backends do not send it at all.
@@ -1726,6 +1814,12 @@ export const ProjectMemberSchema = z.object({
 export const ListProjectMembersResponseSchema = z.object({
   members: z.array(ProjectMemberSchema),
   total: z.number(),
+}).loose();
+
+// The viewer's own project subscription (`/api/projects/:id/subscription`).
+// Anything but an explicit `true` reads as not subscribed.
+export const ProjectSubscriptionSchema = z.object({
+  subscribed: z.boolean().catch(false),
 }).loose();
 
 const SearchProjectResultSchema = ProjectSchema.extend({
@@ -3689,6 +3783,7 @@ export const WecomInstallationSchema = z.object({
   workspace_id: z.string().default(""),
   agent_id: z.string().default(""),
   bot_id: z.string().default(""),
+  bot_name: z.string().optional(),
   installer_user_id: z.string().default(""),
   status: z.string().default("revoked"),
 }).loose();

@@ -75,6 +75,8 @@
     "mentions_description": "When someone @mentions you, including @all and @squad.",
     "updates": "Issue updates",
     "updates_description": "Edits to title, description, labels, priority, or due date.",
+    "new_issues": "New issues",
+    "new_issues_description": "When an issue is created in a project you subscribe to.",
     "agent_activity": "Agent activity",
     "agent_activity_description": "When an agent run fails.",
     "inbox_notifications": "Inbox notifications",

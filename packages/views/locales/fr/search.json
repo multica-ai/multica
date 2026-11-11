@@ -34,6 +34,7 @@
   },
   "commands": {
     "current_theme_aria": "Thème actuel",
+    "current_mode_aria": "Mode actuel",
     "new_issue": "Nouvelle tâche",
     "new_project": "Nouveau projet",
     "new_autopilot": "Nouvelle automatisation",
@@ -106,7 +107,6 @@
     "project": "Projet",
     "parent": "Tâche parente",
     "quick_actions": "Actions rapides",
-    "theme": "Thème",
     "project_status": "Statut du projet",
     "no_project": "Aucun projet",
     "current": "Actuel"

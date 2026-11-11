@@ -3,7 +3,7 @@
 import { useMemo, useState, useCallback, useRef, useEffect } from "react";
 import { useRegisterCommandBarContext } from "../../search/register-context";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
-import { Check, ChevronRight, FileQuestion, Link2, PanelRight, Pencil, Pin, PinOff, Trash2, UserMinus } from "@multica/ui/icons";
+import { BellOff, BellRing, Check, ChevronRight, FileQuestion, Link2, PanelRight, Pencil, Pin, PinOff, Trash2, UserMinus } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
@@ -12,9 +12,9 @@ import type { Project, ProjectStatus, ProjectPriority } from "@multica/core/type
 import { useAuthStore } from "@multica/core/auth";
 import { canDeleteProject } from "@multica/core/projects/deletion-permissions";
 import { canChangeProjectLead } from "@multica/core/projects/access";
-import { projectDetailOptions } from "@multica/core/projects/queries";
+import { projectDetailOptions, projectSubscriptionOptions } from "@multica/core/projects/queries";
 import { Spinner } from "@multica/ui/components/ui/spinner";
-import { useUpdateProject, useDeleteProject, ProjectDeletionOfflineError } from "@multica/core/projects/mutations";
+import { useUpdateProject, useDeleteProject, useSetProjectSubscription, ProjectDeletionOfflineError } from "@multica/core/projects/mutations";
 import { pinListOptions } from "@multica/core/pins";
 import { useCreatePin, useDeletePin } from "@multica/core/pins";
 import { useModalStore } from "@multica/core/modals";
@@ -165,6 +165,22 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const canDelete = !!project && canDeleteProject(project, userId ?? null, role, agents);
   const createPin = useCreatePin();
   const deletePinMut = useDeletePin();
+  const { data: isSubscribed = false } = useQuery({
+    ...projectSubscriptionOptions(wsId, projectId),
+    enabled: !!project,
+  });
+  const setSubscription = useSetProjectSubscription();
+  const handleToggleSubscription = () => {
+    setSubscription.mutate(
+      { id: projectId, subscribed: !isSubscribed },
+      {
+        onSuccess: (subscribed) => {
+          if (subscribed) toast.success(t(($) => $.detail.toast_subscribed));
+        },
+        onError: () => toast.error(t(($) => $.detail.toast_subscription_failed)),
+      },
+    );
+  };
   const descEditorRef = useRef<ContentEditorRef>(null);
   const isMobile = useIsMobile();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -572,6 +588,13 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                     }}>
                       {isPinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
                       {isPinned ? t(($) => $.detail.unpin_tooltip) : t(($) => $.detail.pin_tooltip)}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      disabled={setSubscription.isPending}
+                      onClick={handleToggleSubscription}
+                    >
+                      {isSubscribed ? <BellOff className="h-3.5 w-3.5" /> : <BellRing className="h-3.5 w-3.5" />}
+                      {isSubscribed ? t(($) => $.detail.unsubscribe_action) : t(($) => $.detail.subscribe_action)}
                     </DropdownMenuItem>
                     <ProjectWorkflowMenuItem project={project} onOpen={() => setWorkflowSheetOpen(true)} />
                     {canDelete && (

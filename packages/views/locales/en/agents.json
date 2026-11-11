@@ -300,13 +300,8 @@
     "duplicate_title": "Duplicate {{name}}",
     "step_ai": "Build through conversation",
     "modes": {
-      "template": {
-        "title": "Use a template",
-        "description": "Start from curated instructions and skills, then adapt every detail to your workspace."
-      },
       "ai": {
-        "title": "Build with AI",
-        "description": "Create an editable configuration through conversation."
+        "title": "Build with AI"
       }
     },
     "sections": {
@@ -334,10 +329,6 @@
       }
     },
     "builder": {
-      "setup_title": "Choose a runtime for Agent Builder",
-      "setup_description": "This runtime powers setup and is the default for the new agent.",
-      "start": "Start conversation",
-      "connect_runtime": "Connect a runtime",
       "draft_parse_failed": "This reply could not fill the form. Ask the assistant to generate the draft again, or fill it in manually.",
       "start_failed": "Could not start Agent Builder.",
       "send_failed": "Could not send your message.",
@@ -556,6 +547,7 @@
       "bulk_placeholder": "API_KEY=value\nBASE_URL=https://example.com",
       "bulk_plaintext_notice": "Values are shown in plain text while bulk editing.",
       "bulk_unsupported_toast": "\"{{key}}\" can't be shown as text — edit it as a row",
+      "bulk_invalid_key_toast": "Bulk text only supports names like API_KEY — edit \"{{key}}\" as a row",
       "parse_error_malformed": "Line {{line}} isn't a KEY=value assignment",
       "parse_error_duplicate": "Duplicate key \"{{key}}\" on line {{line}}",
       "paste_invalid_toast": "Couldn't parse pasted environment variables",
@@ -760,7 +752,7 @@
       "add_failed_toast": "Failed to add skill"
     },
     "integrations": {
-      "members_note": "Only workspace owners and admins can manage this connection. You can view connected bots in Settings → Integrations."
+      "members_note": "View and manage messaging channels on the agent page."
     },
     "activity": {
       "status": {

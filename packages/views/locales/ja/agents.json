@@ -389,6 +389,7 @@
       "bulk_placeholder": "API_KEY=値\nBASE_URL=https://example.com",
       "bulk_plaintext_notice": "一括編集中は値が平文で表示されます。",
       "bulk_unsupported_toast": "\"{{key}}\" の値はテキストで表現できません。個別編集で変更してください",
+      "bulk_invalid_key_toast": "一括編集では API_KEY のような変数名のみ使えます。\"{{key}}\" は個別編集で変更してください",
       "parse_error_malformed": "{{line}} 行目が KEY=value 形式ではありません",
       "parse_error_duplicate": "{{line}} 行目のキー \"{{key}}\" が重複しています",
       "paste_invalid_toast": "貼り付けた環境変数を解析できませんでした",
@@ -591,7 +592,7 @@
       "add_failed_toast": "スキルを追加できませんでした"
     },
     "integrations": {
-      "members_note": "この接続を管理できるのはワークスペースのオーナーと管理者のみです。接続済みの Bot は「設定 → 連携」で確認できます。"
+      "members_note": "エージェントのページでメッセージチャネルを確認・管理できます。"
     },
     "activity": {
       "status": {
@@ -873,13 +874,8 @@
     "duplicate_title": "{{name}} を複製",
     "step_ai": "会話で作成",
     "modes": {
-      "template": {
-        "title": "テンプレートを使用",
-        "description": "整理された指示とスキルを基に、ワークスペースに合わせて詳細を調整します。"
-      },
       "ai": {
-        "title": "AI で作成",
-        "description": "対話で編集可能な設定の下書きを作成します。"
+        "title": "AI で作成"
       }
     },
     "sections": {
@@ -907,10 +903,6 @@
       }
     },
     "builder": {
-      "setup_title": "Agent Builder のランタイムを選択",
-      "setup_description": "このランタイムは作成時の対話と、新しいエージェントの既定値に使われます。",
-      "start": "会話を開始",
-      "connect_runtime": "ランタイムを接続",
       "draft_parse_failed": "この返信からフォームを入力できませんでした。エージェントに下書きの再生成を依頼するか、手動で入力してください。",
       "start_failed": "Agent Builder を開始できませんでした。",
       "send_failed": "メッセージを送信できませんでした。",

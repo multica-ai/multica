@@ -300,13 +300,8 @@
     "duplicate_title": "Dupliquer {{name}}",
     "step_ai": "Construire par la conversation",
     "modes": {
-      "template": {
-        "title": "Partir d'un modèle",
-        "description": "Partez d'instructions et de skills sélectionnés, puis adaptez chaque détail à votre espace de travail."
-      },
       "ai": {
-        "title": "Construire avec l'IA",
-        "description": "Créez une configuration modifiable par la conversation."
+        "title": "Construire avec l'IA"
       }
     },
     "sections": {
@@ -334,10 +329,6 @@
       }
     },
     "builder": {
-      "setup_title": "Choisir un runtime pour l'Agent Builder",
-      "setup_description": "Ce runtime sert à la configuration et sera celui du nouvel agent par défaut.",
-      "start": "Démarrer la conversation",
-      "connect_runtime": "Connecter un runtime",
       "draft_parse_failed": "Cette réponse n’a pas permis de remplir le formulaire. Demandez à l’agent de générer à nouveau le brouillon ou remplissez le formulaire manuellement.",
       "start_failed": "Impossible de démarrer l'Agent Builder.",
       "send_failed": "Impossible d'envoyer votre message.",
@@ -556,6 +547,7 @@
       "bulk_placeholder": "API_KEY=valeur\nBASE_URL=https://exemple.com",
       "bulk_plaintext_notice": "Les valeurs sont affichées en clair pendant l'édition groupée.",
       "bulk_unsupported_toast": "« {{key}} » ne peut pas être affiché en texte — modifiez-le en ligne",
+      "bulk_invalid_key_toast": "L'édition groupée n'accepte que des noms comme API_KEY — modifiez « {{key}} » en ligne",
       "parse_error_malformed": "La ligne {{line}} n'est pas une affectation CLÉ=valeur",
       "parse_error_duplicate": "Clé « {{key}} » en double à la ligne {{line}}",
       "paste_invalid_toast": "Impossible d'analyser les variables d'environnement collées",
@@ -760,7 +752,7 @@
       "add_failed_toast": "Échec de l'ajout du skill"
     },
     "integrations": {
-      "members_note": "Seuls les propriétaires et administrateurs de l'espace de travail peuvent gérer cette connexion. Vous pouvez voir les bots connectés dans Paramètres → Intégrations."
+      "members_note": "Consultez et gérez les canaux de messagerie sur la page de l’agent."
     },
     "activity": {
       "status": {
