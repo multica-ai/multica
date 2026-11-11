@@ -194,6 +194,8 @@
       "dark": "Sombre",
       "system": "Système"
     },
+    "mode": "Mode",
+    "appearance_settings": "Paramètres d’apparence",
     "language": "Langue",
     "shortcuts": "Raccourcis clavier"
   },

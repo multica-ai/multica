@@ -11,9 +11,11 @@ import {
   Monitor,
   Moon,
   Palette,
+  Settings2,
   Sun,
   User,
 } from "@multica/ui/icons";
+import { BUILT_IN_THEMES, useAppearanceStore, useInstalledThemesStore } from "@multica/core/appearance";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspacePaths } from "@multica/core/paths";
 import type { SupportedLocale } from "@multica/core/i18n";
@@ -26,6 +28,7 @@ import {
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
@@ -41,6 +44,7 @@ import { useLanguageSwitch } from "../common/use-language-switch";
 import { useT } from "../i18n";
 import { AppLink } from "../navigation";
 import { isDesktopShell } from "../platform/local-directory";
+import { ThemeSwatch, useAppliedMode, useThemeLabel } from "../settings/components/theme-swatch";
 import { DISCORD_URL, DiscordIcon } from "./discord";
 import { CHANGELOG_URL, DOCS_URL, DOWNLOAD_URL } from "./help-links";
 import { RAIL_ICON_BUTTON_CLASS } from "./rail-styles";
@@ -76,9 +80,17 @@ export function AccountMenu() {
   const user = useAuthStore((s) => s.user);
   const p = useWorkspacePaths();
   const logout = useLogout();
-  const { theme, setTheme } = useTheme();
+  const { theme: mode, setTheme: setMode } = useTheme();
+  const appliedMode = useAppliedMode();
+  const colorTheme = useAppearanceStore((s) => s.theme);
+  const setAppearance = useAppearanceStore((s) => s.set);
+  const installedThemes = useInstalledThemesStore((s) => s.themes);
+  const themeLabel = useThemeLabel();
   const language = useLanguageSwitch();
-  const themeValue = (theme ?? "system") as (typeof THEMES)[number]["value"];
+  const modeValue = (mode ?? "system") as (typeof THEMES)[number]["value"];
+  const colorThemes = [...BUILT_IN_THEMES, ...installedThemes];
+  const selectedTheme =
+    colorThemes.find((manifest) => manifest.id === colorTheme) ?? BUILT_IN_THEMES[0]!;
   const name = user?.name ?? "";
   const avatar = (size: "md" | "lg") => (
     <ActorAvatar
@@ -118,20 +130,40 @@ export function AccountMenu() {
           <DropdownMenuSub>
             <DropdownMenuSubTrigger>
               <Palette />
-              <SubmenuLabel
-                label={t(($) => $.account.theme)}
-                value={t(($) => $.account.themes[themeValue])}
-              />
+              <SubmenuLabel label={t(($) => $.account.theme)} value={themeLabel(selectedTheme)} />
             </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent>
-              <DropdownMenuRadioGroup value={themeValue} onValueChange={setTheme}>
-                {THEMES.map(({ value, icon: Icon }) => (
-                  <DropdownMenuRadioItem key={value} value={value}>
-                    <Icon />
-                    {t(($) => $.account.themes[value])}
-                  </DropdownMenuRadioItem>
-                ))}
-              </DropdownMenuRadioGroup>
+            <DropdownMenuSubContent className="w-56">
+              <DropdownMenuGroup>
+                <DropdownMenuLabel>{t(($) => $.account.mode)}</DropdownMenuLabel>
+                <DropdownMenuRadioGroup value={modeValue} onValueChange={(next) => setMode(next as string)}>
+                  {THEMES.map(({ value, icon: Icon }) => (
+                    <DropdownMenuRadioItem key={value} value={value} closeOnClick={false}>
+                      <Icon />
+                      {t(($) => $.account.themes[value])}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuGroup>
+              <DropdownMenuSeparator />
+              <DropdownMenuGroup>
+                <DropdownMenuLabel>{t(($) => $.account.theme)}</DropdownMenuLabel>
+                <DropdownMenuRadioGroup
+                  value={selectedTheme.id}
+                  onValueChange={(next) => setAppearance({ theme: next as string })}
+                >
+                  {colorThemes.map((manifest) => (
+                    <DropdownMenuRadioItem key={manifest.id} value={manifest.id} closeOnClick={false}>
+                      <ThemeSwatch theme={manifest} mode={appliedMode} />
+                      <span className="min-w-0 flex-1 truncate">{themeLabel(manifest)}</span>
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuGroup>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem render={<AppLink href={`${p.settings()}?tab=appearance`} />}>
+                <Settings2 />
+                {t(($) => $.account.appearance_settings)}
+              </DropdownMenuItem>
             </DropdownMenuSubContent>
           </DropdownMenuSub>
           <DropdownMenuSub>
