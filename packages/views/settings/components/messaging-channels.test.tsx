@@ -69,6 +69,8 @@ vi.mock("@multica/core/api", async (original) => ({
       "listAgents",
       "beginLarkInstall",
       "getLarkInstallStatus",
+      "beginWecomInstall",
+      "getWecomInstallStatus",
     ].map((name) => [name, vi.fn()]),
   ),
 }));
@@ -140,7 +142,9 @@ describe("agent messaging channels", () => {
   it("does not offer management to someone without workspace membership", async () => {
     state.member = false;
     const { container } = show(<AgentChannelsSection agent={agent} />);
-    expect(screen.queryByRole("button", { name: "Add messaging channel" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Add messaging channel" }),
+    ).toBeNull();
     expect(container).toBeEmptyDOMElement();
     expect(api.listLarkInstallations).not.toHaveBeenCalled();
   });
@@ -301,6 +305,67 @@ describe("agent messaging channels", () => {
 });
 
 describe("shared connection dialog", () => {
+  it("starts the Lark QR flow for the selected agent and region", async () => {
+    show(
+      <ChannelConnectDialog
+        agents={[agent]}
+        initialAgent={agent}
+        initialChannel="lark"
+        open
+        onOpenChange={vi.fn()}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled(),
+    );
+    fireEvent.change(screen.getByLabelText("Region"), {
+      target: { value: "lark" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await waitFor(() =>
+      expect(api.beginLarkInstall).toHaveBeenCalledWith(
+        "ws-1",
+        "agent-1",
+        "lark",
+      ),
+    );
+  });
+
+  it("offers the WeCom QR flow only when the server supports it", async () => {
+    vi.mocked(api.listWecomInstallations).mockResolvedValue({
+      configured: true,
+      install_supported: true,
+      scan_install_supported: true,
+      installations: [],
+    });
+    vi.mocked(api.beginWecomInstall).mockResolvedValue({
+      session_id: "wecom-session",
+      status: "creating",
+      poll_interval_seconds: 1,
+    });
+    show(
+      <ChannelConnectDialog
+        agents={[agent]}
+        initialAgent={agent}
+        initialChannel="wecom"
+        open
+        onOpenChange={vi.fn()}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled(),
+    );
+    expect(screen.getByLabelText("Connection method")).toHaveValue("scan");
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await screen.findByTestId("wecom-scan-starting");
+    expect(api.beginWecomInstall).toHaveBeenCalledWith(
+      "ws-1",
+      "agent-1",
+      expect.any(String),
+    );
+    expect(api.registerWecomBYO).not.toHaveBeenCalled();
+  });
+
   it.each([
     [
       "slack",
@@ -410,7 +475,9 @@ describe("shared connection dialog", () => {
 
 describe("workspace overview", () => {
   it("lets admins disconnect an installation whose agent was deleted", async () => {
-    vi.mocked(api.listTelegramInstallations).mockResolvedValue(listing([{ ...active, agent_id: "deleted-agent" }]) as never);
+    vi.mocked(api.listTelegramInstallations).mockResolvedValue(
+      listing([{ ...active, agent_id: "deleted-agent" }]) as never,
+    );
     vi.mocked(api.deleteTelegramInstallation).mockResolvedValue(undefined);
     show(<ChannelsTab />);
     expect(await screen.findByText("Agent unavailable")).toBeInTheDocument();
@@ -418,7 +485,9 @@ describe("workspace overview", () => {
     const dialog = await screen.findByRole("alertdialog");
     expect(api.deleteTelegramInstallation).not.toHaveBeenCalled();
     fireEvent.click(within(dialog).getByRole("button", { name: "Disconnect" }));
-    await waitFor(() => expect(api.deleteTelegramInstallation).toHaveBeenCalledWith("ws-1", "i1"));
+    await waitFor(() =>
+      expect(api.deleteTelegramInstallation).toHaveBeenCalledWith("ws-1", "i1"),
+    );
   });
 
   it("links each connected agent to their channels, and redirects old detail links", async () => {
