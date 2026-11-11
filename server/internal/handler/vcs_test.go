@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -13,8 +14,178 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/multica-ai/multica/server/internal/testutil"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+func TestUpdateVCSConnectionToken(t *testing.T) {
+	for _, kind := range []string{"gitlab", "gitea", "forgejo"} {
+		t.Run(kind, func(t *testing.T) {
+			ctx := context.Background()
+			withVCSBox(t)
+			var validationCalls int
+			provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				validationCalls++
+				wantPath, header, wantToken := "/api/v1/user", "Authorization", "token replacement-token"
+				if kind == "gitlab" {
+					wantPath, header, wantToken = "/api/v4/user", "PRIVATE-TOKEN", "replacement-token"
+				}
+				if r.URL.Path != wantPath || r.Header.Get(header) != wantToken {
+					t.Errorf("unexpected validation request: %s, credential matches=%v", r.URL.Path, r.Header.Get(header) == wantToken)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"login":"service-bot","username":"service-bot"}`))
+			}))
+			defer provider.Close()
+			tokenEnc, err := testHandler.sealVCSSecret("old-token")
+			if err != nil {
+				t.Fatal(err)
+			}
+			secretEnc, err := testHandler.sealVCSSecret(vcsTestSecret)
+			if err != nil {
+				t.Fatal(err)
+			}
+			id := dbfx.Insert(t, "vcs_connection", testutil.Cols{
+				"workspace_id": testWorkspaceID, "provider": kind, "instance_url": provider.URL,
+				"account_login": "old-account", "access_token_encrypted": tokenEnc,
+				"webhook_secret_encrypted": secretEnc, "connected_by_id": testUserID,
+			})
+			before, err := testHandler.Queries.GetVCSConnectionByID(ctx, parseUUID(id))
+			if err != nil {
+				t.Fatal(err)
+			}
+			issueID := dbfx.Issue(t, "Keep linked pull request")
+			prID := dbfx.Insert(t, "vcs_pull_request", testutil.Cols{
+				"workspace_id": testWorkspaceID, "connection_id": id, "provider": kind,
+				"repo_owner": "acme", "repo_name": "app", "pr_number": 1, "title": "Keep me",
+				"state": "open", "html_url": provider.URL + "/acme/app/pulls/1",
+				"pr_created_at": time.Now(), "pr_updated_at": time.Now(),
+			})
+			dbfx.InsertNoID(t, "issue_vcs_pull_request",
+				testutil.Cols{"issue_id": issueID, "pull_request_id": prID},
+				"issue_id = $1 AND pull_request_id = $2", issueID, prID)
+
+			req := vcsHandlerRequest(http.MethodPost, "/token", map[string]any{
+				"access_token": " replacement-token ",
+				"instance_url": "https://ignored.example.test",
+				"provider":     "ignored",
+			}, id)
+			var resp map[string]any
+			testutil.Call(t, testHandler.UpdateVCSConnectionToken, req).Want(http.StatusOK).JSON(&resp)
+			if resp["id"] != id || resp["account_login"] != "service-bot" || resp["instance_url"] != provider.URL || resp["provider"] != kind {
+				t.Fatalf("unexpected connection response: %+v", resp)
+			}
+			for _, key := range []string{"access_token", "access_token_encrypted", "webhook_secret", "webhook_secret_encrypted"} {
+				if _, present := resp[key]; present {
+					t.Fatalf("response exposes %s", key)
+				}
+			}
+			after, err := testHandler.Queries.GetVCSConnectionByID(ctx, parseUUID(id))
+			if err != nil {
+				t.Fatal(err)
+			}
+			token, err := testHandler.openVCSSecret(after.AccessTokenEncrypted)
+			if err != nil || token != "replacement-token" || after.AccessTokenEncrypted == token {
+				t.Fatal("replacement token must be stored encrypted and decrypt correctly")
+			}
+			if after.WebhookSecretEncrypted != before.WebhookSecretEncrypted || after.ConnectedByID != before.ConnectedByID || after.CreatedAt != before.CreatedAt {
+				t.Fatal("token update changed webhook secret or connection identity")
+			}
+			linked, err := testHandler.Queries.ListVCSPullRequestsByIssue(ctx, parseUUID(issueID))
+			if err != nil || len(linked) != 1 || uuidToString(linked[0].ID) != prID {
+				t.Fatalf("linked pull request lost: %v, %+v", err, linked)
+			}
+			if validationCalls != 1 {
+				t.Fatalf("expected one provider validation, got %d", validationCalls)
+			}
+			_, err = testHandler.Queries.UpdateVCSConnectionToken(ctx, db.UpdateVCSConnectionTokenParams{
+				ID: parseUUID(id), WorkspaceID: parseUUID(uuid.NewString()),
+				AccessTokenEncrypted: "wrong-workspace", AccountLogin: "wrong-workspace",
+			})
+			if !errors.Is(err, pgx.ErrNoRows) {
+				t.Fatalf("cross-workspace write should return no rows, got %v", err)
+			}
+		})
+	}
+}
+
+func TestUpdateVCSConnectionTokenFailuresPreserveConnection(t *testing.T) {
+	tests := []struct {
+		name              string
+		token             string
+		providerStatus    int
+		foreignWorkspace  bool
+		missingConnection bool
+		disabled          bool
+		unconfigured      bool
+		wantStatus        int
+		wantCalls         int
+		wantError         string
+	}{
+		{name: "rejected token", token: "rejected", providerStatus: http.StatusUnauthorized, wantStatus: http.StatusBadRequest, wantCalls: 1, wantError: "rejected"},
+		{name: "insufficient permissions", token: "rejected", providerStatus: http.StatusForbidden, wantStatus: http.StatusBadRequest, wantCalls: 1, wantError: "rejected"},
+		{name: "provider failure", token: "valid", providerStatus: http.StatusInternalServerError, wantStatus: http.StatusBadGateway, wantCalls: 1, wantError: "could not reach"},
+		{name: "empty token", token: "  ", wantStatus: http.StatusBadRequest, wantError: "access_token is required"},
+		{name: "other workspace", token: "valid", foreignWorkspace: true, wantStatus: http.StatusNotFound},
+		{name: "missing connection", token: "valid", missingConnection: true, wantStatus: http.StatusNotFound},
+		{name: "disabled", token: "valid", disabled: true, wantStatus: http.StatusNotFound},
+		{name: "unconfigured", token: "valid", unconfigured: true, wantStatus: http.StatusForbidden},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			withVCSBox(t)
+			var calls int
+			provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				w.WriteHeader(tt.providerStatus)
+			}))
+			defer provider.Close()
+			tokenEnc, err := testHandler.sealVCSSecret("old-token")
+			if err != nil {
+				t.Fatal(err)
+			}
+			secretEnc, err := testHandler.sealVCSSecret(vcsTestSecret)
+			if err != nil {
+				t.Fatal(err)
+			}
+			id := dbfx.Insert(t, "vcs_connection", testutil.Cols{
+				"workspace_id": testWorkspaceID, "provider": "gitlab", "instance_url": provider.URL,
+				"account_login": "old-account", "access_token_encrypted": tokenEnc, "webhook_secret_encrypted": secretEnc,
+			})
+			reqID := id
+			if tt.missingConnection {
+				reqID = uuid.NewString()
+			}
+			req := vcsHandlerRequest(http.MethodPost, "/token", map[string]any{"access_token": tt.token}, reqID)
+			if tt.foreignWorkspace {
+				chi.RouteContext(req.Context()).URLParams.Add("id", uuid.NewString())
+			}
+			if tt.disabled {
+				testHandler.cfg.VCSIntegrationEnabled = false
+			}
+			if tt.unconfigured {
+				testHandler.VCSSecretBox = nil
+			}
+			var resp map[string]any
+			testutil.Call(t, testHandler.UpdateVCSConnectionToken, req).Want(tt.wantStatus).JSON(&resp)
+			if tt.wantError != "" && !strings.Contains(fmt.Sprint(resp["error"]), tt.wantError) {
+				t.Fatalf("unexpected error: %+v", resp)
+			}
+			if calls != tt.wantCalls {
+				t.Fatalf("provider calls = %d, want %d", calls, tt.wantCalls)
+			}
+			after, err := testHandler.Queries.GetVCSConnectionByID(context.Background(), parseUUID(id))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if after.AccessTokenEncrypted != tokenEnc || after.WebhookSecretEncrypted != secretEnc || after.AccountLogin != "old-account" {
+				t.Fatal("failed update modified the connection")
+			}
+		})
+	}
+}
 
 func vcsHandlerRequest(method, path string, body any, connectionID string) *http.Request {
 	req := newRequest(method, path, body)

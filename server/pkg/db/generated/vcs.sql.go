@@ -550,6 +550,45 @@ func (q *Queries) UnlinkIssueFromVCSPullRequest(ctx context.Context, arg UnlinkI
 	return result.RowsAffected(), nil
 }
 
+const updateVCSConnectionToken = `-- name: UpdateVCSConnectionToken :one
+UPDATE vcs_connection
+SET access_token_encrypted = $3,
+    account_login = $4,
+    updated_at = now()
+WHERE id = $1 AND workspace_id = $2
+RETURNING id, workspace_id, provider, instance_url, account_login, access_token_encrypted, webhook_secret_encrypted, connected_by_id, created_at, updated_at
+`
+
+type UpdateVCSConnectionTokenParams struct {
+	ID                   pgtype.UUID `json:"id"`
+	WorkspaceID          pgtype.UUID `json:"workspace_id"`
+	AccessTokenEncrypted string      `json:"access_token_encrypted"`
+	AccountLogin         string      `json:"account_login"`
+}
+
+func (q *Queries) UpdateVCSConnectionToken(ctx context.Context, arg UpdateVCSConnectionTokenParams) (VcsConnection, error) {
+	row := q.db.QueryRow(ctx, updateVCSConnectionToken,
+		arg.ID,
+		arg.WorkspaceID,
+		arg.AccessTokenEncrypted,
+		arg.AccountLogin,
+	)
+	var i VcsConnection
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Provider,
+		&i.InstanceUrl,
+		&i.AccountLogin,
+		&i.AccessTokenEncrypted,
+		&i.WebhookSecretEncrypted,
+		&i.ConnectedByID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const upsertVCSCommitStatus = `-- name: UpsertVCSCommitStatus :exec
 
 INSERT INTO vcs_commit_status (

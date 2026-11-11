@@ -356,6 +356,81 @@ func (h *Handler) RotateVCSConnectionWebhook(w http.ResponseWriter, r *http.Requ
 	})
 }
 
+type updateVCSConnectionTokenRequest struct {
+	AccessToken string `json:"access_token"`
+}
+
+// UpdateVCSConnectionToken validates and replaces a connection's access token
+// without changing its instance, webhook secret, or mirrored pull requests.
+func (h *Handler) UpdateVCSConnectionToken(w http.ResponseWriter, r *http.Request) {
+	workspaceID := chi.URLParam(r, "id")
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	connUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "connectionId"), "connection id")
+	if !ok {
+		return
+	}
+	if !h.isVCSAvailable() {
+		writeError(w, http.StatusNotFound, "vcs integration is not available on this deployment")
+		return
+	}
+	if !h.isVCSConfigured() {
+		writeFeatureDisabled(w, "vcs_not_configured", "vcs integration not configured (MULTICA_VCS_SECRET_KEY unset)")
+		return
+	}
+
+	conn, err := h.Queries.GetVCSConnectionByID(r.Context(), connUUID)
+	if err != nil || conn.WorkspaceID != wsUUID {
+		writeError(w, http.StatusNotFound, "vcs connection not found")
+		return
+	}
+	var req updateVCSConnectionTokenRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	token := strings.TrimSpace(req.AccessToken)
+	if token == "" {
+		writeError(w, http.StatusBadRequest, "access_token is required")
+		return
+	}
+	provider, ok := vcs.For(conn.Provider)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "unsupported provider")
+		return
+	}
+	account, err := provider.ValidateToken(r.Context(), conn.InstanceUrl, token)
+	if err != nil {
+		if errors.Is(err, vcs.ErrUnauthorized) {
+			writeError(w, http.StatusBadRequest, "the provider rejected the access token")
+			return
+		}
+		slog.Warn("vcs: token validation failed", "workspace_id", workspaceID, "provider", provider.Kind())
+		writeError(w, http.StatusBadGateway, vcsValidationFailureMessage(err))
+		return
+	}
+	tokenEnc, err := h.sealVCSSecret(token)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to encrypt token")
+		return
+	}
+	updated, err := h.Queries.UpdateVCSConnectionToken(r.Context(), db.UpdateVCSConnectionTokenParams{
+		ID:                   connUUID,
+		WorkspaceID:          wsUUID,
+		AccessTokenEncrypted: tokenEnc,
+		AccountLogin:         account.Login,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update access token")
+		return
+	}
+	resp := h.vcsConnectionToResponse(updated)
+	h.publish(protocol.EventVCSConnectionCreated, workspaceID, "system", "", map[string]any{"id": resp.ID})
+	writeJSON(w, http.StatusOK, resp)
+}
+
 // newVCSWebhookSecret returns a 32-byte random secret as hex (64 chars).
 func newVCSWebhookSecret() (string, error) {
 	b := make([]byte, 32)
