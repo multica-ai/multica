@@ -1029,7 +1029,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                                 size="sm"
                                 variant="ghost"
                                 // Sized to its (short) label so the wider
-                                // "Change directory…" beside it fits whole.
+                                // "Change folder..." beside it fits whole.
                                 className="h-6 shrink-0 text-caption"
                               >
                                 {effectiveLocalMode === "worktree" ? (

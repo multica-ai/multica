@@ -232,7 +232,7 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
 
     const save = screen.getByRole("button", { name: /^save$/i }) as HTMLButtonElement;
     expect(save.disabled).toBe(true);
-    expect(screen.getByText(/not a valid branch, tag, or commit/i)).toBeTruthy();
+    expect(screen.getByText(/not a valid branch name/i)).toBeTruthy();
     fireEvent.click(save);
     expect(updateMock).not.toHaveBeenCalled();
   });
