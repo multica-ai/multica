@@ -531,6 +531,9 @@ cleared_environment_commands AS (
 ),
 cleared_environment_configs AS (
     DELETE FROM issue_environment_config WHERE issue_id IN (SELECT target.id FROM target)
+),
+cleared_task_context_receipts AS (
+    DELETE FROM task_context_receipt WHERE issue_id IN (SELECT target.id FROM target)
 )
 DELETE FROM issue WHERE issue.id IN (SELECT target.id FROM target)
 `
@@ -556,6 +559,8 @@ type DeleteIssueParams struct {
 // when a caller passes a foreign issue_id with its own workspace_id (the issue
 // itself is correctly untouched, but the links are already gone) — the exact
 // cross-tenant leak the #1661 guard above exists to prevent.
+// task_context_receipt has no FK; the issue's tasks go by the legacy cascade,
+// so their receipts are swept here by the issue_id copied onto each row.
 func (q *Queries) DeleteIssue(ctx context.Context, arg DeleteIssueParams) error {
 	_, err := q.db.Exec(ctx, deleteIssue, arg.ID, arg.WorkspaceID)
 	return err
