@@ -55,6 +55,10 @@ func TestPrivateProjectChatClaimDropsContextAfterRemoval(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			// The shared TestMain runtime heartbeats only at suite start, and
+			// claims skip runtimes unseen for RuntimeClaimFreshnessSeconds
+			// (150s); a slow -race run reaches this test after that.
+			dbfx.Exec(t, `UPDATE agent_runtime SET status = 'online', last_seen_at = now() WHERE id = $1`, runtimeID)
 
 			w := httptest.NewRecorder()
 			req := withURLParam(newOwnerDaemonRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/claim", nil), "runtimeId", runtimeID)
