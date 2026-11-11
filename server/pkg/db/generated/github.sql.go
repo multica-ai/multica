@@ -540,7 +540,10 @@ SELECT
     pr.pr_number, pr.title, pr.state, pr.html_url, pr.pr_created_at
 FROM github_pull_request pr
 JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
+JOIN issue i ON i.id = ipr.issue_id
 WHERE pr.workspace_id = $1
+  AND i.workspace_id = $1
+  AND ($2::uuid[] IS NULL OR i.project_id IS NULL OR NOT (i.project_id = ANY($2::uuid[])))
 UNION ALL
 SELECT
     ipr.issue_id,
@@ -548,9 +551,17 @@ SELECT
     pr.pr_number, pr.title, pr.state, pr.html_url, pr.pr_created_at
 FROM vcs_pull_request pr
 JOIN issue_vcs_pull_request ipr ON ipr.pull_request_id = pr.id
+JOIN issue i ON i.id = ipr.issue_id
 WHERE pr.workspace_id = $1
+  AND i.workspace_id = $1
+  AND ($2::uuid[] IS NULL OR i.project_id IS NULL OR NOT (i.project_id = ANY($2::uuid[])))
 ORDER BY pr_created_at DESC
 `
+
+type ListIssuePullRequestSummariesParams struct {
+	WorkspaceID      pgtype.UUID   `json:"workspace_id"`
+	HiddenProjectIds []pgtype.UUID `json:"hidden_project_ids"`
+}
 
 type ListIssuePullRequestSummariesRow struct {
 	IssueID     pgtype.UUID        `json:"issue_id"`
@@ -568,9 +579,10 @@ type ListIssuePullRequestSummariesRow struct {
 // Every issue -> PR link in the workspace, GitHub and self-hosted providers
 // together, newest first. Carries only what an issue card or row needs to
 // render a PR chip (no CI/merge snapshot). Backs the workspace wide "Pull
-// requests" display option on board / list / table views.
-func (q *Queries) ListIssuePullRequestSummaries(ctx context.Context, workspaceID pgtype.UUID) ([]ListIssuePullRequestSummariesRow, error) {
-	rows, err := q.db.Query(ctx, listIssuePullRequestSummaries, workspaceID)
+// requests" display option on board / list / table views. Links on issues in
+// private projects the caller cannot see are left out, as in the issue lists.
+func (q *Queries) ListIssuePullRequestSummaries(ctx context.Context, arg ListIssuePullRequestSummariesParams) ([]ListIssuePullRequestSummariesRow, error) {
+	rows, err := q.db.Query(ctx, listIssuePullRequestSummaries, arg.WorkspaceID, arg.HiddenProjectIds)
 	if err != nil {
 		return nil, err
 	}

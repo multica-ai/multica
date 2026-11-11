@@ -1157,11 +1157,19 @@ type IssuePullRequestSummaryResponse struct {
 // it is one workspace-wide read so board / list / table views never fetch PRs
 // per issue.
 func (h *Handler) ListIssuePullRequestSummaries(w http.ResponseWriter, r *http.Request) {
-	wsUUID, ok := parseUUIDOrBadRequest(w, h.resolveWorkspaceID(r), "workspace_id")
+	wsID := h.resolveWorkspaceID(r)
+	wsUUID, ok := parseUUIDOrBadRequest(w, wsID, "workspace_id")
 	if !ok {
 		return
 	}
-	rows, err := h.Queries.ListIssuePullRequestSummaries(r.Context(), wsUUID)
+	hidden, ok := h.requestHiddenProjects(w, r, wsID)
+	if !ok {
+		return
+	}
+	rows, err := h.Queries.ListIssuePullRequestSummaries(r.Context(), db.ListIssuePullRequestSummariesParams{
+		WorkspaceID:      wsUUID,
+		HiddenProjectIds: hidden.Param(),
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list pull requests")
 		return
