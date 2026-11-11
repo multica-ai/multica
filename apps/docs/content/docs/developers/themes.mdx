@@ -219,7 +219,7 @@ Tag the release with the manifest's `version` (`1.0.0` or `v1.0.0`) and attach t
 
 ### Add it to the registry
 
-Open a pull request that adds the theme to `themes.json` in the registry. The pull request runs `theme:check` and `theme:preview` on the release and comments with the result; a maintainer merges it once it passes.
+Open a pull request that adds a file `themes/<id>.json`, named by the manifest's `id`, to the registry. Each theme has its own file, so pull requests for different themes don't conflict. The pull request runs `theme:check` and `theme:preview` on the release and comments with the result; a maintainer merges it once it passes.
 
 </Step>
 </Steps>

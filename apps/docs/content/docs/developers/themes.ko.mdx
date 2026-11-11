@@ -219,7 +219,7 @@ pnpm theme:preview path/to/paper --out preview   # preview/light.png와 preview/
 
 ### 레지스트리에 추가하기
 
-레지스트리의 `themes.json`에 테마를 추가하는 pull request를 엽니다. pull request는 릴리스에 `theme:check`와 `theme:preview`를 실행해 결과를 댓글로 남기고, 통과하면 메인테이너가 병합합니다.
+레지스트리에 `themes/<id>.json` 파일을 추가하는 pull request를 엽니다. 파일 이름은 manifest의 `id`입니다. 테마마다 파일이 따로 있어서 서로 다른 테마의 pull request는 충돌하지 않습니다. pull request는 릴리스에 `theme:check`와 `theme:preview`를 실행해 결과를 댓글로 남기고, 통과하면 메인테이너가 병합합니다.
 
 </Step>
 </Steps>

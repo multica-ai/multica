@@ -338,9 +338,11 @@ has the details; in short:
    is a starting point with a release workflow.
 2. Publish a release tagged with the manifest's `version` (`1.0.0` or
    `v1.0.0`) and attach the zipped theme as `theme.zip`.
-3. Add the theme to `themes.json` in the registry with a pull request. The
-   pull request runs `theme:check` and `theme:preview` on the release and
-   comments with the result; a maintainer merges once it passes.
+3. Add a file `themes/<id>.json`, named by the manifest's `id`, to the
+   registry with a pull request. Each theme has its own file, so pull
+   requests for different themes don't conflict. The pull request runs
+   `theme:check` and `theme:preview` on the release and comments with the
+   result; a maintainer merges once it passes.
 
 New releases reach the store within about an hour, after they pass the same
 checks; people who installed the theme then see **Update**. A release that
