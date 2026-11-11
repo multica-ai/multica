@@ -201,15 +201,16 @@ export class SearchIndexHost {
   private async search(
     entry: PortEntry,
     id: number,
-    kind: "issues" | "projects",
+    kind: "issues" | "projects" | "messages",
     params: Parameters<WorkspaceIndex["searchIssues"]>[0],
   ): Promise<void> {
     const indexEntry = entry.target ? this.indexes.get(indexTargetKey(entry.target)) : undefined;
     let result = null;
     try {
       if (indexEntry) {
-        result =
-          kind === "issues" ? await indexEntry.index.searchIssues(params) : await indexEntry.index.searchProjects(params);
+        if (kind === "issues") result = await indexEntry.index.searchIssues(params);
+        else if (kind === "projects") result = await indexEntry.index.searchProjects(params);
+        else result = await indexEntry.index.searchMessages(params);
       }
     } catch {
       // The tab falls back to server search.
@@ -267,11 +268,14 @@ export class SearchIndexHost {
   }
 
   private fetcherFor(key: string): IndexFetcher {
-    const request = async <T>(op: FetchOp, params: { afterNumber?: number; cursor?: string; limit?: number }) =>
-      (await this.requestFromTab(key, op, params)) as T;
+    const request = async <T>(
+      op: FetchOp,
+      params: { afterNumber?: number; afterMessageId?: string; cursor?: string; limit?: number },
+    ) => (await this.requestFromTab(key, op, params)) as T;
     return {
       manifest: () => request<SearchIndexManifest>("manifest", {}),
-      snapshot: (afterNumber, limit) => request<SearchIndexSnapshotPage>("snapshot", { afterNumber, limit }),
+      snapshot: (afterNumber, afterMessageId, limit) =>
+        request<SearchIndexSnapshotPage>("snapshot", { afterNumber, afterMessageId, limit }),
       changes: (cursor, limit) => request<SearchIndexChanges>("changes", { cursor, limit }),
     };
   }
@@ -280,7 +284,7 @@ export class SearchIndexHost {
   private async requestFromTab(
     key: string,
     op: FetchOp,
-    params: { afterNumber?: number; cursor?: string; limit?: number },
+    params: { afterNumber?: number; afterMessageId?: string; cursor?: string; limit?: number },
   ): Promise<unknown> {
     const indexEntry = this.indexes.get(key);
     const candidates = indexEntry ? [...indexEntry.ports].sort((a, b) => b.lastSeen - a.lastSeen) : [];
@@ -300,7 +304,7 @@ export class SearchIndexHost {
     entry: PortEntry,
     op: FetchOp,
     workspaceSlug: string,
-    params: { afterNumber?: number; cursor?: string; limit?: number },
+    params: { afterNumber?: number; afterMessageId?: string; cursor?: string; limit?: number },
   ): Promise<unknown> {
     const id = this.nextFetchId++;
     return new Promise((resolve, reject) => {
