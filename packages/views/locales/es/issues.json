@@ -948,6 +948,7 @@
     "copy_project_directory_path": "Copiar ruta del directorio del proyecto",
     "relations": "Relaciones",
     "create_sub_issue": "Crear subtarea",
+    "quick_actions": "Acciones rápidas",
     "set_parent_issue": "Establecer tarea principal...",
     "remove_parent_issue": "Quitar tarea principal",
     "remove_parent_issue_success": "Tarea principal quitada",

@@ -1136,6 +1136,7 @@
     "stop_agent_run": "Остановить запуск {{name}}",
     "relations": "Связи",
     "create_sub_issue": "Создать подзадачу",
+    "quick_actions": "Быстрые действия",
     "set_parent_issue": "Задать родительскую задачу...",
     "remove_parent_issue": "Убрать родительскую задачу",
     "remove_parent_issue_success": "Родительская задача убрана",

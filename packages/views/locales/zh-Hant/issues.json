@@ -992,6 +992,7 @@
     "stop_agent_run": "停止 {{name}} 的執行",
     "relations": "關係",
     "create_sub_issue": "建立子任務",
+    "quick_actions": "快捷操作",
     "set_parent_issue": "設定父任務...",
     "remove_parent_issue": "移除父任務",
     "remove_parent_issue_success": "已移除父任務",
