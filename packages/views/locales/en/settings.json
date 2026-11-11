@@ -1642,7 +1642,6 @@
     "platform_label": "Platform",
     "region_label": "Region",
     "method_label": "Connection method",
-    "continue": "Continue",
     "feishu": "Feishu (China)",
     "lark": "Lark (International)",
     "setup_guide": "Setup guide",
