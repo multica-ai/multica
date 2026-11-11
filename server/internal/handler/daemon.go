@@ -3009,7 +3009,17 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	// logged but never fail the claim: a broken overlay must not prevent
 	// the agent from running with its base config.
 	if composioMCPEnabled && len(task.RuntimeMcpOverlay) > 0 {
-		if merged, err := mergeMCPOverlay(mcpConfig, json.RawMessage(task.RuntimeMcpOverlay)); err != nil {
+		overlay := json.RawMessage(task.RuntimeMcpOverlay)
+		// The stored overlay names the apps gateway without a credential; the
+		// run's token is minted here, once the task id is final.
+		if h.ConnectedApps != nil {
+			if authorized, err := h.ConnectedApps.AuthorizeOverlay(overlay, task.ID); err != nil {
+				slog.Warn("daemon claim: authorize apps gateway overlay failed", "task_id", uuidToString(task.ID), "error", err)
+			} else {
+				overlay = authorized
+			}
+		}
+		if merged, err := mergeMCPOverlay(mcpConfig, overlay); err != nil {
 			slog.Warn("daemon claim: merge runtime_mcp_overlay failed; falling back to agent mcp_config", "task_id", uuidToString(task.ID), "error", err)
 		} else {
 			mcpConfig = merged
@@ -3209,7 +3219,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		leaderWorkflow := leaderNoWorkflow
 		if projectWorkflow != nil {
 			leaderWorkflow = leaderWorkflowCurrentDaemon
-			if legacyRuntimeRules {
+			if projectWorkflow.stepMoved {
+				leaderWorkflow = leaderWorkflowStepMoved
+			} else if legacyRuntimeRules {
 				leaderWorkflow = leaderWorkflowLegacyDaemon
 			}
 		}
@@ -3647,6 +3659,10 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			resp.ChatType = delivery.ChatType
 			resp.ChatChannelDeliversFiles = h.channelDeliversFiles(delivery.ChannelType)
 			if delivery.ChannelType == string(slack.TypeSlack) {
+				if reader, ok := h.SlackHistory.(slackTaskSourceReader); ok {
+					resp.ChatSource = reader.TaskSource(r.Context(), delivery, cs.WorkspaceID)
+				}
+
 				resp.ChatInThread = delivery.ChannelThreadID.Valid &&
 					delivery.ChannelThreadID.String != "" &&
 					delivery.ChannelThreadID.String != delivery.ChannelMessageID.String
@@ -3655,6 +3671,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount,
 				h.rejectClaimSourceLoad(r.Context(), task, deliveryErr, "channel task delivery", uuidToString(task.ID))
 		}
+		resp.ChatNoticeLocale = h.qoderChatNoticeLocale(r.Context(), runtime, *task, cs, resp.ChatChannelType, resp.ChatType)
 		// A web chat can opt into the same durable project context as an
 		// issue-bound task.
 		projectCtx, projectErr := h.resolveClaimProjectContext(r.Context(), cs.ProjectID, cs.WorkspaceID)
@@ -4708,7 +4725,7 @@ func (h *Handler) StartTask(w http.ResponseWriter, r *http.Request) {
 	}
 	offered := service.TaskStartCapabilities{
 		Supplement:     slices.Contains(req.Capabilities, protocol.DaemonCapabilityTaskSupplementV1),
-		ProcessCleanup: slices.Contains(req.Capabilities, protocol.DaemonCapabilityPiProcessCleanupV1),
+		ProcessCleanup: slices.Contains(req.Capabilities, protocol.DaemonCapabilityPiProcessCleanupV1) || slices.Contains(req.Capabilities, protocol.DaemonCapabilityMuseAppProcessCleanupV1),
 	}
 	var task *db.AgentTaskQueue
 	var err error
@@ -5925,7 +5942,7 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 // transcript (#5219); idempotent when nothing was deferred.
 // TaskCancelAckRequest is the body of the daemon's cancel acknowledgement.
 type TaskCancelAckRequest struct {
-	// Absent on older daemons: a pending Pi cleanup cannot be assumed clean.
+	// Absent on older daemons: negotiated cleanup cannot be assumed complete.
 	ProcessCleanupConfirmed *bool `json:"process_cleanup_confirmed,omitempty"`
 	// BranchName: a cancelled worktree task has already committed whatever the
 	// agent produced — the worktree is finalized before the daemon learns of
@@ -6294,6 +6311,8 @@ type ActiveRunSummary struct {
 //     child of that parent. Implies active=true, because a full execution
 //     history across a whole family is unbounded and answers no question anyone
 //     asked.
+//   - scope=subtree — full execution history for this issue and all descendants.
+//     Unlike family, it never includes ancestors or siblings and is not capped.
 func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 	issueID := chi.URLParam(r, "id")
 	issue, ok := h.loadIssueForUser(w, r, issueID)
@@ -6301,9 +6320,15 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	view := r.URL.Query().Get("view")
+	if view != "" && view != "timeline" {
+		writeError(w, http.StatusBadRequest, "view must be 'timeline' when specified")
+		return
+	}
+
 	scope := r.URL.Query().Get("scope")
-	if scope != "" && scope != "issue" && scope != "family" {
-		writeError(w, http.StatusBadRequest, "scope must be 'issue' or 'family'")
+	if scope != "" && scope != "issue" && scope != "family" && scope != "subtree" {
+		writeError(w, http.StatusBadRequest, "scope must be 'issue', 'family', or 'subtree'")
 		return
 	}
 	// Parse rather than compare. `active=tru` answering with the full history
@@ -6373,7 +6398,20 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 
 	var tasks []db.AgentTaskQueue
 	var err error
-	if activeOnly {
+	type issueLabel struct{ identifier, title string }
+	labels := make(map[string]issueLabel)
+	if scope == "subtree" {
+		rows, queryErr := h.Queries.ListTasksByIssueSubtree(r.Context(), db.ListTasksByIssueSubtreeParams{
+			RootIssueID: issue.ID, WorkspaceID: issue.WorkspaceID, ActiveOnly: activeOnly,
+		})
+		err = queryErr
+		for _, row := range rows {
+			tasks = append(tasks, row.AgentTaskQueue)
+			labels[uuidToString(row.AgentTaskQueue.IssueID)] = issueLabel{
+				identifier: service.IssueIdentifier(row.IssuePrefix, row.IssueNumber), title: row.IssueTitle,
+			}
+		}
+	} else if activeOnly {
 		tasks, err = h.Queries.ListActiveTasksByIssue(r.Context(), issue.ID)
 	} else {
 		tasks, err = h.Queries.ListTasksByIssue(r.Context(), issue.ID)
@@ -6387,6 +6425,10 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 	resp := make([]AgentTaskResponse, len(tasks))
 	for i, t := range tasks {
 		resp[i] = taskToResponse(t, workspaceID)
+		if label, ok := labels[resp[i].IssueID]; ok {
+			resp[i].IssueIdentifier = label.identifier
+			resp[i].IssueTitle = label.title
+		}
 	}
 	h.hydrateTaskSupplementMetadata(r.Context(), r, issue.WorkspaceID, tasks, resp)
 	// Execution-log rows render the "on behalf of <member>" badge, so this
@@ -6399,10 +6441,60 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 	// paying the full-history cost this filter exists to remove — and pay it
 	// for a column that is near-empty on runs that have not finished.
 	if !activeOnly {
-		h.hydrateTaskUsage(r.Context(), issue.ID, resp)
+		if scope == "subtree" {
+			h.hydrateSubtreeTaskUsage(r.Context(), tasks, resp)
+		} else {
+			h.hydrateTaskUsage(r.Context(), issue.ID, resp)
+		}
+	}
+
+	if scope == "subtree" {
+		if err := h.redactHiddenProjectTasks(r, workspaceID, tasks, resp); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to check project access")
+			return
+		}
+	}
+	if view == "timeline" {
+		for i := range resp {
+			resp[i] = issueTimelineTaskResponse(resp[i])
+		}
 	}
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// Usage is fetched only for the authorized, visible subtree runs in one batch.
+func (h *Handler) hydrateSubtreeTaskUsage(ctx context.Context, tasks []db.AgentTaskQueue, resp []AgentTaskResponse) {
+	if len(tasks) == 0 {
+		return
+	}
+	ids := make([]pgtype.UUID, len(tasks))
+	for i, task := range tasks {
+		ids[i] = task.ID
+	}
+	rows, err := h.Queries.ListTaskUsageByIDs(ctx, ids)
+	if err != nil {
+		return
+	}
+	byTask := make(map[string][]TaskUsageData, len(resp))
+	for _, row := range rows {
+		appendTaskUsage(byTask, row.TaskID, row.Provider, row.Model,
+			row.InputTokens, row.OutputTokens, row.CacheReadTokens,
+			row.CacheWriteTokens, row.CostUsdTicks, row.CreditsMicros)
+	}
+	attachTaskUsage(resp, byTask)
+}
+
+// issueTimelineTaskResponse keeps inline replies, lineage, controls and pricing.
+// Provider output and daemon handoff instructions belong to on-demand history.
+func issueTimelineTaskResponse(task AgentTaskResponse) AgentTaskResponse {
+	task.HandoffNote = ""
+	result, _ := task.Result.(map[string]any)
+	task.Result = nil
+	if comment, ok := result["comment"].(string); ok {
+		task.Result = map[string]any{"comment": comment}
+	}
+	return task
 }
 
 // hydrateTaskUsage attaches each run's own token usage to the execution-log
@@ -6546,6 +6638,12 @@ func (h *Handler) ListTaskMessagesByUser(w http.ResponseWriter, r *http.Request)
 	// to anyone else it does not exist either.
 	if task.ChatSessionID.Valid && (scope.ChatSessionOwnerID == "" || scope.ChatSessionOwnerID != requestUserID(r)) {
 		writeError(w, http.StatusNotFound, "task not found")
+		return
+	}
+	// An issue run's transcript is visible exactly where its issue is
+	// (MUL-8472). Task ids reach every member through task lifecycle events,
+	// so this cannot rely on the issue page being unreachable.
+	if !h.requireIssueIDVisible(w, r, wsID, task.IssueID, http.StatusNotFound, "task not found") {
 		return
 	}
 

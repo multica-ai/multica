@@ -1,5 +1,6 @@
 {
   "page": {
+    "search": "スキルを検索",
     "title": "スキル",
     "new_skill": "新規スキル",
     "scopes": {
@@ -126,6 +127,8 @@
     },
     "toast_saved": "スキルを保存しました",
     "toast_save_failed": "スキルを保存できませんでした",
+    "toast_saved_version": "v{{version}} として保存しました",
+    "toast_view_history": "履歴を表示",
     "toast_deleted": "スキルを削除しました",
     "toast_delete_failed": "スキルを削除できませんでした",
     "refresh": {
@@ -192,32 +195,57 @@
       "mode_edit": "編集",
       "mode_raw": "プレーンテキスト"
     },
+    "versions": {
+      "list_aria": "スキルのバージョン",
+      "version_label": "v{{version}}",
+      "current": "現在",
+      "unknown_author": "不明",
+      "empty": "まだバージョンはありません。次にこのスキルを変更したとき、現在の内容が最初のバージョンとして記録されます。",
+      "load_failed": "バージョンを読み込めませんでした。",
+      "restore": "復元",
+      "toast_restored": "v{{version}} を復元しました",
+      "toast_restore_failed": "バージョンを復元できませんでした",
+      "source": {
+        "baseline": "以前の内容",
+        "create": "作成",
+        "update": "編集",
+        "import": "インポート",
+        "refresh": "ソースから更新",
+        "restore": "v{{version}} から復元"
+      },
+      "dialog": {
+        "title": "v{{version}} を復元しますか？",
+        "description": "v{{version}} の内容が新しいバージョンになり、エージェントは次回の実行からそれを使います。新しいバージョンも履歴に残ります。",
+        "unsaved_warning": "保存していない変更は破棄されます。",
+        "cancel": "キャンセル",
+        "confirm": "復元",
+        "restoring": "復元中…"
+      }
+    },
     "sections": {
       "content": "内容",
       "files": "ファイル",
       "edit": "編集",
       "open": "開く",
-      "add": "追加"
+      "add": "追加",
+      "history": "履歴"
     },
     "menu": {
       "copy_link": "リンクをコピー",
       "link_copied": "リンクをコピーしました",
-      "delete": "スキルを削除"
+      "delete": "スキルを削除",
+      "version_history": "バージョン履歴"
     },
     "panel": {
-      "add_description": "説明を追加"
+      "add_description": "説明を追加",
+      "version": "バージョン",
+      "no_versions": "バージョンなし"
     }
   },
   "create": {
-    "back": "戻る",
-    "back_aria": "方式の選択に戻る",
     "close": "閉じる",
     "close_aria": "閉じる",
     "method": {
-      "chooser": {
-        "title": "新規スキル",
-        "desc": "スキルを追加する方法を選択してください。"
-      },
       "manual": {
         "title": "手動で作成",
         "desc": "空の SKILL.md から作成します。"
@@ -263,7 +291,19 @@
       "cancel": "キャンセル",
       "import": "インポート",
       "importing": "インポート中…",
-      "toast_imported": "スキルをインポートしました"
+      "toast_imported": "スキルをインポートしました",
+      "select_all": "すべて選択",
+      "import_count": "{{count}} 件をインポート",
+      "done": "完了",
+      "stop": "現在の処理後に停止",
+      "unreadable": "skill を読み取れません。フォルダーを再選択してください。",
+      "uncertain": "結果を確認できません。再試行前に一覧を更新して確認してください。同名の項目がある場合はロックされます。",
+      "check_results": "結果を確認",
+      "retry_ready": "更新した一覧に見つかりません。再試行できます。",
+      "uncertain_manual": "結果が不確実で、アーカイブ内のスキル名を確認できません。再インポート前に一覧を手動で確認してください。",
+      "check_failed": "一覧を検証できませんでした。結果が不確実な項目はロックされたままです。再確認するか、一覧を手動で確認してください。",
+      "workspace_changed": "ワークスペースが変わったため、残りのインポートを停止しました。この画面を閉じ、目的のワークスペースで開き直してください。",
+      "summary": "成功: {{success}} · 失敗または未確認: {{failed}}"
     },
     "url": {
       "url_label": "スキル URL",

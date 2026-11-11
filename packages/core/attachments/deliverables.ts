@@ -10,14 +10,13 @@
  * across runs, and the reader wants the latest one with its history behind
  * it, not five near-identical rows.
  *
- * Built from comment entries rather than the issue-wide attachment list: the
- * list is fetched before the upload is bound to its comment and is not
- * refreshed when that bind lands, while the timeline is patched live and
- * already carries each comment's attachments.
+ * The complete attachment inventory supplies older origins; loaded timeline
+ * comments overlay it so new uploads and tombstones remain current.
  *
  * Pure — no React, no DOM, no platform APIs.
  */
 
+import type { TimelineEntry } from "../types";
 import type { Attachment } from "../types/attachment";
 
 /** The part of a timeline comment this module reads. */
@@ -96,6 +95,21 @@ export function collectDeliverableFiles(
 }
 
 /**
+ * The deliverable a "latest version" link names: the file called `filename`,
+ * compared after trimming like `deliverableKey` does. A name uploaded under
+ * two content types is two deliverables; the link means whichever was
+ * uploaded most recently. `files` is newest first, so that is the first match.
+ */
+export function findDeliverableByName(
+  files: ReadonlyArray<DeliverableFile>,
+  filename: string,
+): DeliverableFile | undefined {
+  const name = (filename ?? "").trim();
+  if (!name) return undefined;
+  return files.find((file) => (file.latest.filename ?? "").trim() === name);
+}
+
+/**
  * The deliverable an attachment belongs to and its 1-based version number, or
  * undefined when the attachment is not a deliverable (a description file, a
  * file from another surface).
@@ -110,4 +124,44 @@ export function findDeliverableVersion(
     if (index >= 0) return { file, version: index + 1 };
   }
   return undefined;
+}
+
+/**
+ * The issue's complete file inventory as comment entries, built from the
+ * issue attachment list, which carries every comment file with its comment's
+ * author and time. A file without that origin (description, older server)
+ * contributes nothing; the loaded timeline still supplies its own comments.
+ */
+export function deliverableInventoryFromAttachments(
+  attachments: readonly Attachment[],
+): TimelineEntry[] {
+  const comments = new Map<string, { entry: TimelineEntry; files: Attachment[] }>();
+  for (const attachment of attachments) {
+    const { comment_id: id, comment_author_type: actorType, comment_author_id: actorId, comment_created_at: createdAt } = attachment;
+    if (!id || !actorType || !actorId || !createdAt) continue;
+    let comment = comments.get(id);
+    if (!comment) {
+      const files: Attachment[] = [];
+      comment = {
+        entry: { type: "comment", id, actor_type: actorType, actor_id: actorId, created_at: createdAt, attachments: files },
+        files,
+      };
+      comments.set(id, comment);
+    }
+    comment.files.push(attachment);
+  }
+  return [...comments.values()].map(({ entry }) => entry);
+}
+
+/** Live comments override inventory metadata, including tombstones. */
+export function mergeDeliverableSources(
+  inventory: readonly TimelineEntry[],
+  timeline: readonly TimelineEntry[],
+): TimelineEntry[] {
+  const comments = new Map(inventory.map((entry) => [entry.id, entry]));
+  for (const entry of timeline) {
+    if (entry.type === "comment") comments.set(entry.id, entry);
+  }
+  return [...comments.values()].filter((entry) => !entry.deleted_at)
+    .sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
 }

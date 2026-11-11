@@ -1,4 +1,6 @@
 import LinkifyIt from 'linkify-it'
+import { fromMarkdown } from 'mdast-util-from-markdown'
+import type { Nodes } from 'mdast'
 
 /**
  * Linkify - URL and file path detection for markdown preprocessing
@@ -74,18 +76,44 @@ export function shouldAutoLink(value: string): boolean {
 }
 
 /**
+ * Find block-code ranges using the same CommonMark parser as the read-only
+ * renderer. Container membership depends on preceding lines and tab columns,
+ * not just the prefix on a fence's opening line. Include indented code too:
+ * its literal backticks must not be mistaken for standalone fences.
+ */
+export function findBlockCodeRanges(text: string): CodeRange[] {
+  // Plain paragraphs and inline code need no block parse.
+  if (!/`{3}|~{3}| {4}|\t/.test(text)) return []
+
+  const ranges: CodeRange[] = []
+  const pending: Nodes[] = [fromMarkdown(text)]
+  while (pending.length > 0) {
+    const node = pending.pop()!
+    if (node.type === 'code') {
+      const start = node.position?.start.offset
+      const end = node.position?.end.offset
+      if (start !== undefined && end !== undefined) {
+        // Include list/quote prefixes so chunking keeps the opening line.
+        ranges.push({ start: text.lastIndexOf('\n', start - 1) + 1, end })
+      }
+    } else if ('children' in node) {
+      // Reverse push preserves source order without recursion on nested lists.
+      for (let i = node.children.length - 1; i >= 0; i--) {
+        pending.push(node.children[i]!)
+      }
+    }
+  }
+  return ranges
+}
+
+/**
  * Find all code block and inline code ranges in text
  * These ranges should be excluded from link detection
  */
 export function findCodeRanges(text: string): CodeRange[] {
-  const ranges: CodeRange[] = []
-
-  // Find fenced code blocks (```...```)
-  const fencedRegex = /```[\s\S]*?```/g
+  const blockRanges = findBlockCodeRanges(text)
+  const ranges = [...blockRanges]
   let match
-  while ((match = fencedRegex.exec(text)) !== null) {
-    ranges.push({ start: match.index, end: match.index + match[0].length })
-  }
 
   // Find display math blocks ($$...$$)
   const displayMathRegex = /\$\$[\s\S]*?\$\$/g
@@ -107,16 +135,26 @@ export function findCodeRanges(text: string): CodeRange[] {
     }
   }
 
-  // Find inline code (`...`)
-  // But skip escaped backticks and code inside fenced blocks
-  const inlineRegex = /(?<!`)`(?!`)([^`\n]+)`(?!`)/g
+  // Find inline code spans with matching backtick runs.
+  // Ignore spans inside fenced code or math blocks.
+  // Inline code can span soft line breaks, but not a blank paragraph boundary
+  // (LF or CRLF).
+  const inlineRegex = /(?<!`)(`+)(?!`)((?:[^\n]|\n(?![ \t]*\r?\n))*?)(?<!`)\1(?!`)/g
   while ((match = inlineRegex.exec(text)) !== null) {
     const pos = match.index
-    // Check if this is inside a fenced block or math block
-    const insideOther = ranges.some((r) => pos >= r.start && pos < r.end)
-    if (!insideOther) {
-      ranges.push({ start: pos, end: pos + match[0].length })
+    const end = pos + match[0].length
+    // An inline span cannot cross a block-code boundary.
+    const crossedBlock = blockRanges.find((r) => pos < r.end && end > r.start)
+    if (crossedBlock) {
+      inlineRegex.lastIndex = crossedBlock.end
+      continue
     }
+    const insideOther = ranges.find((r) => pos >= r.start && pos < r.end)
+    if (insideOther) {
+      inlineRegex.lastIndex = insideOther.end
+      continue
+    }
+    ranges.push({ start: pos, end })
   }
 
   return ranges
@@ -179,6 +217,20 @@ function findInlineLinkEnd(text: string, openParenIndex: number): number {
  */
 export function findMarkdownLinkRanges(text: string): CodeRange[] {
   const ranges: CodeRange[] = []
+  // Reference destinations are already links. Wrapping their URLs again
+  // corrupts the definition before the Markdown renderer resolves images.
+  // Even multiline labels and definitions in containers must contain `]:`.
+  const pending: Nodes[] = text.includes(']:') ? [fromMarkdown(text)] : []
+  while (pending.length > 0) {
+    const node = pending.pop()!
+    if (node.type === 'definition') {
+      const start = node.position?.start.offset
+      const end = node.position?.end.offset
+      if (start !== undefined && end !== undefined) ranges.push({ start, end })
+    } else if ('children' in node) {
+      for (let i = node.children.length - 1; i >= 0; i--) pending.push(node.children[i]!)
+    }
+  }
 
   for (let i = 0; i < text.length; i++) {
     if (text[i] !== '[' || isEscaped(text, i)) continue
@@ -208,6 +260,43 @@ export function findMarkdownLinkRanges(text: string): CodeRange[] {
     }
   }
 
+  return ranges
+}
+
+// CommonMark raw-HTML open tag (spec "Raw HTML"). Unquoted values exclude
+// whitespace, so attribute boundaries are unambiguous and matching stays linear.
+const HTML_ATTRIBUTE = String.raw`\s+[A-Za-z_:][\w.:-]*(?:\s*=\s*(?:[^\s"'=<>\x60]+|'[^']*'|"[^"]*"))?`
+const HTML_OPEN_TAG_REGEX = new RegExp(
+  String.raw`<[A-Za-z][A-Za-z0-9-]*(?:${HTML_ATTRIBUTE})*\s*\/?>`,
+  'g'
+)
+const HTML_ANCHOR_CLOSE_REGEX = /<\/a\s*>/gi
+
+/**
+ * Find raw HTML open tags so auto-linkification leaves their attribute values
+ * alone: rewriting `<img src="https://…">` produces `src="[url](url)"`, which
+ * renders blank and is saved back as a broken image. An `<a>` range runs
+ * through its `</a>`, since its text is already link text.
+ */
+export function findHtmlTagRanges(text: string, codeRanges: CodeRange[] = []): CodeRange[] {
+  if (!text.includes('<')) return []
+
+  const ranges: CodeRange[] = []
+  HTML_OPEN_TAG_REGEX.lastIndex = 0
+  let match
+  while ((match = HTML_OPEN_TAG_REGEX.exec(text)) !== null) {
+    const start = match.index
+    if (isEscaped(text, start) || isInsideCode(start, codeRanges)) continue
+
+    let end = start + match[0].length
+    if (/^<a[\s>]/i.test(match[0]) && !match[0].endsWith('/>')) {
+      HTML_ANCHOR_CLOSE_REGEX.lastIndex = end
+      const close = HTML_ANCHOR_CLOSE_REGEX.exec(text)
+      if (close) end = close.index + close[0].length
+    }
+    ranges.push({ start, end })
+    HTML_OPEN_TAG_REGEX.lastIndex = end
+  }
   return ranges
 }
 
@@ -361,6 +450,8 @@ export function preprocessLinks(text: string): string {
 
   if (links.length === 0) return text
 
+  const htmlRanges = findHtmlTagRanges(text, codeRanges)
+
   // Build result, converting raw links to markdown links
   let result = ''
   let lastIndex = 0
@@ -371,6 +462,9 @@ export function preprocessLinks(text: string): string {
 
     // Skip if this match is inside an existing markdown link or image.
     if (markdownLinkRanges.some((range) => rangesOverlap(link, range))) continue
+
+    // Skip if inside an HTML tag's attributes or an `<a>` element.
+    if (htmlRanges.some((range) => rangesOverlap(link, range))) continue
 
     // Skip if already a markdown link
     if (isAlreadyLinked(text, link.start, link.end)) continue

@@ -29,6 +29,15 @@
     "toast_renamed": "任務名稱已更新",
     "toast_failed": "重新命名任務失敗"
   },
+  "rename_project": {
+    "title": "重新命名專案",
+    "placeholder": "專案標題",
+    "submit": "儲存",
+    "title_required": "請輸入標題",
+    "offline_error": "目前處於離線狀態，請連線後重試。",
+    "toast_renamed": "專案名稱已更新",
+    "toast_failed": "重新命名專案失敗"
+  },
   "feedback": {
     "title": "反饋",
     "placeholder": "聊聊你的體驗、遇到的 bug，或想看到的功能...",
@@ -154,7 +163,8 @@
     "local_pick_failed": "無法開啟目錄選擇器。",
     "local_invalid_dir": "該目錄不可用，請重新選擇。",
     "local_hint": "其他機器上的 AI 代理看不到這個路徑，會啟動失敗。需要協作請用倉庫模式。",
-    "repos_ref_default": "預設分支"
+    "repos_ref_default": "預設分支",
+    "repos_remove_aria": "移除 {{repo}}"
   },
   "create_issue": {
     "sr_manual": "新建任務",
@@ -271,5 +281,13 @@
     "toast_failed": "無法標記為重複",
     "error_target_is_duplicate": "{{identifier}} 本身是重複任務，請選擇它的原始任務",
     "error_has_duplicates": "已有任務被標記為此任務的重複，請先解除這些標記"
+  },
+  "copy_parent_fields": {
+    "trigger": "複製父任務欄位",
+    "title": "複製父任務欄位",
+    "description": "從 {{identifier}} 複製所選欄位，覆蓋目前值；後續不連動。",
+    "apply": "複製所選 {{count}} 項",
+    "no_labels": "無標籤",
+    "manual_only": "標籤、開始日期和自訂屬性僅用於手動建立。"
   }
 }

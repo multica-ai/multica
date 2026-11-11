@@ -52,6 +52,8 @@
     "action_failed_toast": "Couldn't update the queued message"
   },
   "message_list": {
+    "jump_to_latest": "Jump to latest",
+    "new_reply": "New reply",
     "show_details": "Show details",
     "replied_in": "Replied in {{elapsed}}",
     "failed_after": "Failed after {{elapsed}}",
@@ -238,8 +240,6 @@
     "no_response_preview": "No text reply",
     "quick_agents": "Frequent agents",
     "add": "Add",
-    "add_agent": "Add a frequent agent",
-    "unpin_agent": "Remove from frequent",
     "waiting": "Waiting for reply",
     "pin": "Pin",
     "unpin": "Unpin",

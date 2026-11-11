@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enSettings from "../../locales/en/settings.json";
@@ -63,17 +62,27 @@ import { WecomScanInstallDialog } from "./wecom-scan-install-dialog";
 
 const TEST_RESOURCES = { en: { common: enCommon, settings: enSettings } };
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
-function renderDialog(onClose = vi.fn()) {
-  return render(
-    <I18nProvider locale="en" resources={TEST_RESOURCES}>
-      <WecomScanInstallDialog wsId="workspace-1" agentId="agent-1" onClose={onClose} />
-    </I18nProvider>,
-  );
+async function renderDialog(onClose = vi.fn()) {
+  await act(async () => {
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <WecomScanInstallDialog wsId="workspace-1" agentId="agent-1" onClose={onClose} />
+      </I18nProvider>,
+    );
+  });
+}
+
+async function advanceTime(milliseconds: number) {
+  await act(() => vi.advanceTimersByTimeAsync(milliseconds));
 }
 
 beforeEach(() => {
+  vi.useFakeTimers();
   vi.clearAllMocks();
   // jsdom has no crypto.randomUUID in every environment version.
   if (!globalThis.crypto?.randomUUID) {
@@ -101,10 +110,14 @@ describe("WecomScanInstallDialog", () => {
         poll_interval_seconds: 2,
       });
 
-    renderDialog();
+    await renderDialog();
 
-    expect(await screen.findByTestId("wecom-scan-starting")).toBeTruthy();
-    const qr = await screen.findByTestId("qr", {}, { timeout: 5000 });
+    expect(screen.getByTestId("wecom-scan-starting")).toBeTruthy();
+    await advanceTime(1000);
+    expect(mockStatus).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId("qr")).toBeNull();
+    await advanceTime(1000);
+    const qr = screen.getByTestId("qr");
     expect(qr.getAttribute("data-value")).toContain("scode=abc");
     expect(screen.getByTestId("wecom-scan-expiry").textContent).toContain("240");
   });
@@ -122,13 +135,17 @@ describe("WecomScanInstallDialog", () => {
       poll_interval_seconds: 2,
     });
 
-    renderDialog(onClose);
+    await renderDialog(onClose);
+    await advanceTime(1000);
 
-    await waitFor(() => expect(mockToastSuccess).toHaveBeenCalled(), { timeout: 5000 });
+    expect(mockToastSuccess).toHaveBeenCalled();
     expect(mockInvalidate).toHaveBeenCalledWith({
       queryKey: ["wecom", "installations", "workspace-1"],
     });
-    await waitFor(() => expect(onClose).toHaveBeenCalled(), { timeout: 5000 });
+    await advanceTime(799);
+    expect(onClose).not.toHaveBeenCalled();
+    await advanceTime(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it("renders the reason for a terminal error and stops polling", async () => {
@@ -143,13 +160,14 @@ describe("WecomScanInstallDialog", () => {
       poll_interval_seconds: 2,
     });
 
-    renderDialog();
+    await renderDialog();
+    await advanceTime(1000);
 
-    const err = await screen.findByTestId("wecom-scan-error", {}, { timeout: 5000 });
+    const err = screen.getByTestId("wecom-scan-error");
     expect(err.textContent).toBe(enSettings.wecom.scan_error_expired);
 
     const callsAfterError = mockStatus.mock.calls.length;
-    await new Promise((r) => setTimeout(r, 300));
+    await advanceTime(6000);
     expect(mockStatus.mock.calls.length).toBe(callsAfterError);
   });
 
@@ -166,9 +184,10 @@ describe("WecomScanInstallDialog", () => {
       poll_interval_seconds: 2,
     });
 
-    renderDialog();
+    await renderDialog();
+    await advanceTime(1000);
 
-    const err = await screen.findByTestId("wecom-scan-error", {}, { timeout: 5000 });
+    const err = screen.getByTestId("wecom-scan-error");
     expect(err.textContent).toContain(enSettings.wecom.scan_error_internal_error);
   });
 
@@ -189,9 +208,10 @@ describe("WecomScanInstallDialog", () => {
       poll_interval_seconds: 2,
     });
 
-    renderDialog();
+    await renderDialog();
+    await advanceTime(1000);
 
-    const err = await screen.findByTestId("wecom-scan-error", {}, { timeout: 5000 });
+    const err = screen.getByTestId("wecom-scan-error");
     expect(err.textContent).toBe(enSettings.wecom[key]);
   });
 
@@ -205,18 +225,19 @@ describe("WecomScanInstallDialog", () => {
     });
     mockStatus.mockRejectedValue(new FakeApiError(404, "install session not found"));
 
-    renderDialog();
+    await renderDialog();
+    await advanceTime(1000);
 
-    const err = await screen.findByTestId("wecom-scan-error", {}, { timeout: 5000 });
+    const err = screen.getByTestId("wecom-scan-error");
     expect(err.textContent).toContain(enSettings.wecom.scan_error_session_lost);
   });
 
   it("surfaces a 503 begin as the unconfigured reason", async () => {
     mockBegin.mockRejectedValue(new FakeApiError(503, "wecom scan install not enabled"));
 
-    renderDialog();
+    await renderDialog();
 
-    const err = await screen.findByTestId("wecom-scan-error", {}, { timeout: 5000 });
+    const err = screen.getByTestId("wecom-scan-error");
     expect(err.textContent).toContain(enSettings.wecom.scan_error_integration_unconfigured);
     // Nothing to poll when begin never produced a session.
     expect(mockStatus).not.toHaveBeenCalled();
@@ -234,12 +255,15 @@ describe("WecomScanInstallDialog", () => {
       poll_interval_seconds: 2,
     });
 
-    renderDialog();
-    await screen.findByTestId("wecom-scan-error", {}, { timeout: 5000 });
+    await renderDialog();
+    await advanceTime(1000);
+    expect(screen.getByTestId("wecom-scan-error")).toBeTruthy();
 
     const beginCalls = mockBegin.mock.calls.length;
-    await userEvent.click(screen.getByTestId("wecom-scan-retry"));
-    await waitFor(() => expect(mockBegin.mock.calls.length).toBe(beginCalls + 1));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("wecom-scan-retry"));
+    });
+    expect(mockBegin.mock.calls.length).toBe(beginCalls + 1);
     // A fresh idempotency key, or "get a new code" would replay the expired
     // session instead of starting over.
     const firstKey = mockBegin.mock.calls[0]?.[2];
@@ -259,9 +283,9 @@ describe("WecomScanInstallDialog", () => {
     const sentence = "the server's own English sentence";
     mockBegin.mockRejectedValue(new FakeApiError(status, sentence, { error: sentence, code }));
 
-    renderDialog();
+    await renderDialog();
 
-    const err = await screen.findByTestId("wecom-scan-error", {}, { timeout: 5000 });
+    const err = screen.getByTestId("wecom-scan-error");
     expect(err.textContent).toBe(enSettings.wecom[key]);
     expect(screen.queryByText(sentence, { exact: false })).toBeNull();
     expect(mockStatus).not.toHaveBeenCalled();
@@ -271,9 +295,9 @@ describe("WecomScanInstallDialog", () => {
     // parseWithFallback degrades an unparseable body to an empty session id.
     mockBegin.mockResolvedValue({ session_id: "", status: "error", poll_interval_seconds: 1 });
 
-    renderDialog();
+    await renderDialog();
 
-    expect(await screen.findByTestId("wecom-scan-error", {}, { timeout: 5000 })).toBeTruthy();
+    expect(screen.getByTestId("wecom-scan-error")).toBeTruthy();
     expect(mockStatus).not.toHaveBeenCalled();
   });
 
@@ -299,9 +323,9 @@ describe("WecomScanInstallDialog", () => {
         poll_interval_seconds: 1,
       });
 
-      renderDialog();
+      await renderDialog();
 
-      await waitFor(() => expect(mockBegin).toHaveBeenCalled(), { timeout: 5000 });
+      expect(mockBegin).toHaveBeenCalled();
       const key = mockBegin.mock.calls[0]?.[2];
       expect(typeof key).toBe("string");
       expect(key).toBeTruthy();

@@ -64,14 +64,6 @@
     "search_runtime_filtered": "\"{{machine}}\"上沒有匹配\"{{query}}\"的 AI 代理。",
     "runtime_filtered": "\"{{machine}}\"上還沒有 AI 代理。"
   },
-  "runtime_filter": {
-    "all": "全部執行時",
-    "section_local": "本地",
-    "section_remote": "遠端",
-    "section_cloud": "雲端",
-    "agent_count_other": "{{count}} 個 AI 代理",
-    "empty": "還沒有機器"
-  },
   "columns": {
     "agent": "AI 代理",
     "status": "狀態",
@@ -200,7 +192,6 @@
     "rename_required": "名稱必填",
     "edit_description_title": "編輯描述",
     "description_placeholder": "這個 AI 代理做什麼？",
-    "save": "儲存",
     "cancel": "取消"
   },
   "overview": {
@@ -223,12 +214,7 @@
     "edit_access_aria": "訪問權限：{{value}}。變更訪問權限",
     "all_settings": "全部設定"
   },
-  "skill_attach": {
-    "trigger_aria": "附加工作區 skill",
-    "trigger_label": "附加"
-  },
   "pickers": {
-    "concurrency_tooltip": "併發 · 最多 {{value}} 次並行執行",
     "concurrency_range": "最大並行執行數（{{min}}–{{max}}）",
     "runtime_none": "無執行時",
     "runtime_tooltip": "執行時 · {{name}} · {{status}}",
@@ -289,7 +275,7 @@
     "environment": "環境變數",
     "custom_args": "自定義引數",
     "mcp_config": "MCP",
-    "composio_mcp": "MCP 應用",
+    "composio_mcp": "應用",
     "integrations": "整合",
     "runtime_config": "路由",
     "qoder_agent": "Qoder Cloud Agents",
@@ -450,23 +436,17 @@
     }
   },
   "create_dialog": {
-    "title_create": "建立 AI 代理",
-    "title_duplicate": "複製 AI 代理",
-    "description_duplicate": "基於\"{{name}}\"建立一個新 AI 代理。指令、環境變數和 skill 會一併複製。",
     "name_label": "名稱",
     "name_placeholder": "例如：深度研究 AI 代理",
     "description_label": "描述",
     "description_placeholder": "這個 AI 代理做什麼？",
-    "visibility_label": "可見性",
     "access": {
-      "label": "訪問權限",
       "private_title": "私有",
       "private_desc": "只有你可以執行該 AI 代理",
       "public_title": "公開",
       "public_desc": "選擇誰可以執行該 AI 代理",
       "public_workspace_option": "工作區內所有人",
       "public_members_group": "指定成員",
-      "public_members_empty": "沒有可選擇的工作區成員",
       "public_targets_empty_hint": "至少勾選下方一項——否則該 AI 代理仍為私有。"
     },
     "runtime_label": "執行時",
@@ -481,17 +461,10 @@
     "runtime_no_results": "沒有匹配的機器",
     "runtime_group_online": "{{online}}/{{total}} 線上",
     "duplicate_copy_suffix": "（副本）",
-    "create": "建立",
-    "creating": "建立中...",
-    "cancel": "取消",
-    "create_failed_toast": "建立 AI 代理失敗",
     "skill_attach_failed_toast": "AI 代理已建立，但 skill 關聯失敗：{{error}}",
     "squad_join_failed_toast": "AI 代理\"{{name}}\"已建立，但加入小隊失敗：{{error}}。你可以在 Members 標籤裡手動新增。",
     "instructions": {
       "label": "指令",
-      "placeholder_blank": "點選撰寫指令…",
-      "placeholder_duplicate": "點選檢視或編輯複製的指令",
-      "collapse": "收起",
       "editor_placeholder": "寫下這個 AI 代理該做什麼、關注什麼、要避開什麼…"
     },
     "skills_section": {
@@ -705,22 +678,6 @@
       "redacted_hint": "只有 AI 代理 owner 或工作區 admin 可以檢視此配置。",
       "dialog_json_help": "以 JSON 編輯完整的伺服器配置。"
     },
-    "composio_mcp": {
-      "subtitle": "勾選 toolkit，只在你自己（這個 AI 代理的建立者）直接或透過下級 AI 代理鏈路觸發這個 AI 代理時，才把它掛載為 MCP server。",
-      "loading": "正在載入你的連線…",
-      "load_failed": "無法載入你已連線的應用，請稍後重試。",
-      "empty_title": "還沒有已連線的應用",
-      "empty_link_to_settings": "去 \"設定 → 整合\" 連一個",
-      "open_settings": "開啟設定",
-      "connected": "已連線",
-      "toggle_aria": "允許該 AI 代理使用 {{toolkit}}",
-      "saving": "正在儲存…",
-      "save_failed_toast": "儲存失敗，請重試",
-      "redacted_title": "已配置——對你隱藏",
-      "redacted_hint": "只有該 AI 代理的建立者才能檢視或修改它可使用的應用。",
-      "shared_warning": "該 AI 代理已共享。能夠執行該 AI 代理的人可以透過它使用你在此啟用的 Composio 應用。如果這些應用涉及敏感資料，請改用\"私有\"或縮小訪問範圍。",
-      "workspace_warning": "公開給工作區：工作區內任何成員都可以透過該 AI 代理使用這些 Composio 應用。"
-    },
     "runtime_config": {
       "mode_label": "路由模式",
       "mode_local": "Local",
@@ -833,6 +790,27 @@
       "started_prefix": "{{when}}啟動",
       "dispatched_prefix": "{{when}}派發",
       "queued_prefix": "{{when}}排隊"
+    },
+    "connected_apps": {
+      "loading": "正在載入應用…",
+      "load_failed": "無法載入此 AI 代理的應用。",
+      "empty": "尚無已連線的應用程式。",
+      "level": "權限",
+      "team_connected": "團隊帳號已連線",
+      "team_missing": "團隊帳號未連線",
+      "personal_connected": "你的帳號已連線",
+      "personal_missing": "你還沒有連線這個應用",
+      "team_admin_only": "只有工作區管理員可以給 AI 代理團隊帳號。",
+      "team_shared_warning": "能執行這個 AI 代理的人，都能透過它使用該團隊帳號。",
+      "manage_link": "在 設定 → 已連線應用 中管理帳號",
+      "save_failed_toast": "儲存失敗，請重試",
+      "team_help": "工作區共用的帳號，由管理員連線。",
+      "personal_help": "每次執行使用觸發者自己已連線的帳號；尚未連線時須先連線。",
+      "available_accounts": "可用：{{accounts}}",
+      "enable": "啟用 {{app}}",
+      "account_for": "{{app}} 的帳號",
+      "connect_hint": "找不到需要的應用程式？前往設定連線帳號。",
+      "available_personal": "你的帳號"
     }
   },
   "char_counter": {

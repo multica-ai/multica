@@ -11,6 +11,7 @@
     "view_table": "Table",
     "view_cards": "Cards",
     "row_menu": "Project actions",
+    "rename": "Rename",
     "pin": "Pin to sidebar",
     "unpin": "Unpin",
     "delete": "Delete",
@@ -62,6 +63,7 @@
     "pin_tooltip": "Pin to sidebar",
     "unpin_tooltip": "Unpin from sidebar",
     "sidebar_tooltip": "Toggle right sidebar",
+    "rename_action": "Rename project",
     "copy_link": "Copy link",
     "delete_action": "Delete project",
     "section_properties": "Properties",
@@ -153,6 +155,7 @@
     "ref_default_tooltip": "No branch set — tasks use whatever the repository's default branch is at the time."
   },
   "delete_dialog": {
+    "offline_error": "You're offline. Reconnect and try deleting again.",
     "title": "Delete project",
     "description": "This will delete the project. Issues will not be deleted but will be unlinked.",
     "confirm": "Delete",
@@ -203,5 +206,26 @@
       "issue_pricing": "Pricing comparison table",
       "issue_blog": "Paginate the blog list"
     }
+  },
+  "access": {
+    "label": "Access",
+    "title": "Access to {{title}}",
+    "description": "Controls who can see this project and its issues, comments, and attachments.",
+    "workspace": "Entire workspace",
+    "private": "Project members only",
+    "members_count": "Project members · {{count}}",
+    "add": "Add workspace member",
+    "search": "Search name or email...",
+    "no_members": "No matching members",
+    "no_selected": "No project members",
+    "admin_notice": "Workspace owners and admins always have access.",
+    "you": "You",
+    "remove": "Remove {{name}}",
+    "failed": "Could not save access changes.",
+    "load_failed": "Could not load project members.",
+    "publish_title": "Make this project visible to the workspace?",
+    "publish_description": "All workspace members will be able to see this project and its issues, comments, and attachments.",
+    "done": "Done",
+    "retry": "Retry"
   }
 }

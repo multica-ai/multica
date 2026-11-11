@@ -19,8 +19,8 @@
 
   "workspaces": {
     ".": {
-      "entry": ["scripts/*.mjs"],
-      "project": ["scripts/*.mjs"]
+      "entry": ["scripts/*.mjs", "scripts/brand/*.mjs"],
+      "project": ["scripts/*.mjs", "scripts/brand/*.mjs"]
     },
 
     "apps/web": {
@@ -34,7 +34,15 @@
     "apps/desktop": {
       // window-state.node-test.mjs is run by hand (`node --test`, see its
       // header) rather than by a package script, so nothing imports it.
-      "entry": ["eslint.config.mjs", "src/main/*.node-test.mjs"],
+      // bundle-cli.node-test.mjs is run the same way. test/electron-guard.ts
+      // is the `electron` alias target in vitest.config.ts, a path string
+      // knip does not follow.
+      "entry": [
+        "eslint.config.mjs",
+        "src/main/*.node-test.mjs",
+        "scripts/*.node-test.mjs",
+        "test/electron-guard.ts"
+      ],
       // Consumed by `extends` in tsconfig.node.json / tsconfig.web.json.
       // knip follows `extends` from the default tsconfig.json only.
       "ignoreDependencies": ["@multica/tsconfig"]
@@ -61,11 +69,20 @@
     // export and knip picks that directory back up; the script reads the same
     // manifest, so the two stay in step without overlapping.
     "packages/ui": {
-      "entry": ["eslint.config.mjs"],
+      // shimmer-text-bundle.mjs is imported by e2e/shimmer-text.spec.ts, which
+      // sits outside every workspace, and hands the fixture to esbuild as an
+      // entry-point path.
+      "entry": [
+        "eslint.config.mjs",
+        "test/shimmer-text-bundle.mjs",
+        "test/shimmer-text-fixture.tsx"
+      ],
       "project": ["**/*.{ts,tsx}"]
     },
     "packages/views": {
-      "entry": ["eslint.config.mjs"],
+      // Passed to vitest as `--reporter=./test/timing-reporter.ts` when
+      // refreshing shard timings (packages/views/test/README.md).
+      "entry": ["test/timing-reporter.ts"],
       "project": ["**/*.{ts,tsx}"]
     },
     "packages/core": {
@@ -73,7 +90,11 @@
       "project": ["**/*.{ts,tsx}"]
     },
 
+    "packages/plugin-sdk": {
+      "entry": ["eslint.config.mjs"]
+    },
     "packages/eslint-config": {},
-    "packages/tsconfig": {}
+    "packages/tsconfig": {},
+    "packages/vitest-setup": {}
   }
 }

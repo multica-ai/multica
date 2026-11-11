@@ -13,6 +13,11 @@ const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
 // Mocks — same pattern as the issue-detail test suite.
 // ---------------------------------------------------------------------------
 
+const deletionPolicy = vi.hoisted(() => ({ allowed: true }));
+vi.mock("@multica/core/issues/use-issue-deletion", () => ({
+  useIssueDeletion: () => ({ canDelete: () => deletionPolicy.allowed }),
+}));
+
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
@@ -99,21 +104,23 @@ vi.mock("@multica/core/paths", async () => {
 
 // Module-level flag toggled per-test: desktop implements `openInNewTab`,
 // web omits it and the menu has to fall back to a real browser tab.
-const { openInNewTabMock, getShareableUrlMock, navState } = vi.hoisted(() => ({
+const { openInNewTabMock, openInDesktopMock, getShareableUrlMock, navState } = vi.hoisted(() => ({
   openInNewTabMock: vi.fn(),
+  openInDesktopMock: vi.fn(),
   getShareableUrlMock: vi.fn((p: string) => `https://app.example${p}`),
-  navState: { hasOpenInNewTab: true },
+  navState: { hasOpenInNewTab: true, hasOpenInDesktop: false, pathname: "/test/issues/issue-1", hash: "" },
 }));
 
 vi.mock("../../../navigation", () => ({
   useNavigation: () => ({
     push: vi.fn(),
-    pathname: "/test/issues/issue-1",
+    pathname: navState.pathname,
     searchParams: new URLSearchParams(),
-    hash: "",
+    hash: navState.hash,
     back: vi.fn(),
     replace: vi.fn(),
     ...(navState.hasOpenInNewTab ? { openInNewTab: openInNewTabMock } : {}),
+    ...(navState.hasOpenInDesktop ? { openInDesktop: openInDesktopMock } : {}),
     getShareableUrl: getShareableUrlMock,
   }),
 }));
@@ -193,10 +200,15 @@ function wrap(ui: React.ReactNode) {
 }
 
 beforeEach(() => {
+  deletionPolicy.allowed = true;
   mockOpenModal.mockReset();
   openInNewTabMock.mockReset();
+  openInDesktopMock.mockReset();
   getShareableUrlMock.mockClear();
   navState.hasOpenInNewTab = true;
+  navState.hasOpenInDesktop = false;
+  navState.pathname = "/test/issues/issue-1";
+  navState.hash = "";
   copyTextMock.mockReset();
   copyTextMock.mockResolvedValue(true);
   toastSuccessMock.mockReset();
@@ -330,6 +342,16 @@ describe("IssueActionsDropdown", () => {
     expect(screen.queryByText("Remove parent issue")).not.toBeInTheDocument();
   });
 
+  it("disables Delete issue when the user cannot delete the issue", async () => {
+    deletionPolicy.allowed = false;
+    render(wrap(<IssueActionsDropdown issue={mockIssue} trigger={<button data-testid="trigger">Menu</button>} />));
+    fireEvent.click(screen.getByTestId("trigger"));
+    const item = await screen.findByText("Delete issue");
+    expect(item.closest('[role="menuitem"]')).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(item);
+    expect(mockOpenModal).not.toHaveBeenCalled();
+  });
+
   it("clicking Delete issue opens the delete-confirm modal", async () => {
     render(
       wrap(
@@ -446,7 +468,7 @@ describe("IssueActionsDropdown", () => {
 
     fireEvent.click(screen.getByTestId("trigger"));
     await waitFor(() => {
-      expect(listTasksByIssueMock).toHaveBeenCalledWith("issue-1");
+      expect(listTasksByIssueMock).toHaveBeenCalledWith("issue-1", false, { view: "timeline" });
     });
     fireEvent.click(await screen.findByText("Copy local workdir path"));
 
@@ -508,6 +530,39 @@ describe("Open in new tab", () => {
     );
 
     windowOpen.mockRestore();
+  });
+});
+
+describe("Open in Desktop", () => {
+  async function openMenu() {
+    render(wrap(<IssueActionsDropdown issue={mockIssue} trigger={<button data-testid="trigger">Menu</button>} />));
+    fireEvent.click(screen.getByTestId("trigger"));
+    await screen.findByText("Open in new tab");
+  }
+
+  it("appears directly below Open in new tab on web and hands off the current comment", async () => {
+    navState.hasOpenInDesktop = true;
+    navState.pathname = "/test/issues/TES-1";
+    navState.hash = "#comment-c1";
+    await openMenu();
+    const labels = screen.getAllByRole("menuitem").map((item) => item.textContent);
+    expect(labels[labels.indexOf("Open in new tab") + 1]).toBe("Open in Desktop");
+    fireEvent.click(screen.getByText("Open in Desktop"));
+    expect(openInDesktopMock).toHaveBeenCalledWith("/test/issues/TES-1#comment-c1");
+  });
+
+  it("opens the selected issue without copying another issue's comment anchor", async () => {
+    navState.hasOpenInDesktop = true;
+    navState.pathname = "/test/issues/TES-99";
+    navState.hash = "#comment-other";
+    await openMenu();
+    fireEvent.click(screen.getByText("Open in Desktop"));
+    expect(openInDesktopMock).toHaveBeenCalledWith("/test/issues/TES-1");
+  });
+
+  it("is hidden in the desktop app", async () => {
+    await openMenu();
+    expect(screen.queryByText("Open in Desktop")).not.toBeInTheDocument();
   });
 });
 

@@ -35,18 +35,12 @@
     "docs": "文档",
     "changelog": "更新日志",
     "discord": "Discord",
+    "star_on_github": "在 GitHub 上 Star",
     "feedback": "反馈",
     "server_version": "服务器版本 {{version}}"
   },
   "whats_new": {
     "trigger": "新功能",
-    "card": {
-      "eyebrow": "Multica 已更新 · {{range}}",
-      "title_other": "自你上次访问以来，新增了 {{count}} 项功能",
-      "dismiss": "关闭",
-      "view_details": "查看详情",
-      "got_it": "知道了"
-    },
     "panel": {
       "title": "新功能",
       "close": "关闭",
@@ -59,6 +53,14 @@
       "open": "前往",
       "learn_more": "了解更多"
     }
+  },
+  "star_prompt": {
+    "title_other": "{{agent}} 已经完成了 {{count}} 个任务",
+    "body": "如果 Multica 帮上了忙，在 GitHub 上点个 Star，能让更多团队发现它。",
+    "star": "Star",
+    "star_label": "在 GitHub 上给 Multica 点 Star",
+    "later": "以后再说",
+    "close": "关闭"
   },
   "workspace_loader": {
     "loading_workspace": "正在加载工作区...",
@@ -99,6 +101,8 @@
     "autopilots": "自动化",
     "switch_workspace": "切换工作区",
     "invitation_from": "{{name}} 邀请你加入",
+    "pin_workspace": "置顶工作区",
+    "unpin_workspace": "取消置顶",
     "open_in_new_window": "在新窗口打开",
     "open_in_new_window_click": "点击",
     "open_in_other_window": "已在其他窗口打开",
@@ -125,6 +129,7 @@
       "assignee_me": "我",
       "assignee_my_agents": "我的智能体",
       "assignee_me_and_my_agents": "我和我的智能体",
+      "assignee_projects_only": "仅作用于侧边栏“项目”下展开的任务",
       "reset": "重置",
       "load_more": "加载更多",
       "show_less": "收起",
@@ -142,6 +147,7 @@
       "view_actions": "{{name}} 的操作",
       "view_copy_link": "复制链接",
       "view_remove": "从侧栏移除",
+      "view_edit": "编辑视图",
       "view_rename": "重命名",
       "view_duplicate": "创建副本",
       "view_delete": "删除视图"
@@ -151,13 +157,15 @@
       "needs_attention": "需要处理",
       "stuck_other": "{{count}} 个任务在等待离线的运行时",
       "working_now": "正在工作",
+      "show_more_agents": "再显示 {{count}} 项...",
+      "show_fewer_agents": "收起",
       "running_tasks_other": "{{count}} 个任务运行中",
       "all_agents": "全部智能体",
       "my_agents": "我的智能体",
       "squads_and_members": "小队与成员",
       "members_other": "{{count}} 位成员",
       "resources": "资源",
-      "runtimes_offline_other": "{{count}} 个离线",
+      "runtimes_online_other": "{{count}} 台在线",
       "invite_member": "邀请成员"
     },
     "autopilots": {

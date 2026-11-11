@@ -1,0 +1,346 @@
+/* =============================================================================
+ * Marketing site design language
+ *
+ * Every landing surface draws from this file: colour roles, typefaces, the
+ * type ramp, radii, layout spacing, and the placeholder visual. Components
+ * reference the roles (`bg-site-canvas`, `text-site-heading`, `py-site-section`),
+ * never raw values, so the whole site can be re-tuned here without touching
+ * markup.
+ *
+ * Small gaps inside a component use the stock 4px spacing scale; the
+ * `site-*` spacing roles cover the structural rhythm that must match across
+ * pages (gutters, section padding, header height, heading-to-content gaps).
+ *
+ * Colour follows the brand: black and white only, with the zinc greys for
+ * interface. Ink and paper carry the page, the greys the rest. Text hierarchy
+ * is expressed by the four solid ink roles. Do not dim text with opacity —
+ * `site-muted` is the floor for readable copy on `site-canvas` and
+ * `site-surface`; `site-faint` is for decoration (dividers in text, disabled
+ * glyphs) only. Focus rings are ink. Product mockups keep the product's own
+ * colours, since they show the app as it is.
+ * ============================================================================= */
+
+@theme inline {
+    --color-site-canvas: var(--site-canvas);
+    --color-site-surface: var(--site-surface);
+    --color-site-sunken: var(--site-sunken);
+    --color-site-hover: var(--site-hover);
+    --color-site-ink: var(--site-ink);
+    --color-site-ink-secondary: var(--site-ink-secondary);
+    --color-site-muted: var(--site-muted);
+    --color-site-faint: var(--site-faint);
+    --color-site-line: var(--site-line);
+    --color-site-line-strong: var(--site-line-strong);
+    --color-site-rule: var(--site-rule);
+    --color-site-inverse: var(--site-inverse);
+    --color-site-inverse-ink: var(--site-inverse-ink);
+    --color-site-inverse-muted: var(--site-inverse-muted);
+
+    --radius-site-control: var(--site-radius-control);
+    --radius-site-inner: var(--site-radius-inner);
+    --radius-site-card: var(--site-radius-card);
+    --radius-site-panel: var(--site-radius-panel);
+
+    --container-site: var(--site-container);
+    --container-site-wide: var(--site-container-wide);
+    --spacing-site-gutter: var(--site-gutter);
+    --spacing-site-header: var(--site-header);
+    --spacing-site-hero: var(--site-hero);
+    --spacing-site-section: var(--site-section);
+    --spacing-site-block: var(--site-block);
+    --spacing-site-stack: var(--site-stack);
+    --spacing-site-grid-row: var(--site-grid-row);
+    --spacing-site-grid-col: var(--site-grid-col);
+    --spacing-site-step: var(--site-step);
+    --spacing-site-control-sm: var(--site-control-sm);
+    --spacing-site-control: var(--site-control);
+
+    --shadow-site-float: var(--site-shadow-float);
+    --shadow-site-menu: var(--site-shadow-menu);
+
+    --font-site-sans: var(--site-font-sans);
+    --font-site-display: var(--site-font-display);
+    --font-site-mono: var(--site-font-mono);
+}
+
+/* Type ramp. One regular weight carries every step; hierarchy comes from size,
+   leading, and tracking alone. Fluid steps run from a 375px phone to the
+   desktop width. */
+@theme {
+    --text-site-display: clamp(2.5rem, 1.9rem + 2.6vw, 4rem);
+    --text-site-display--line-height: 1;
+    --text-site-display--letter-spacing: -0.03em;
+
+    --text-site-heading: clamp(2rem, 1.8rem + 0.9vw, 2.5rem);
+    --text-site-heading--line-height: 1.05;
+    --text-site-heading--letter-spacing: -0.03em;
+
+    --text-site-title: clamp(1.5rem, 1.3rem + 0.9vw, 2rem);
+    --text-site-title--line-height: 1.2;
+    --text-site-title--letter-spacing: -0.02em;
+
+    --text-site-card: 1.25rem;
+    --text-site-card--line-height: 1.2;
+    --text-site-card--letter-spacing: -0.01em;
+
+    --text-site-body: 1rem;
+    --text-site-body--line-height: 1.4;
+
+    --text-site-small: 0.875rem;
+    --text-site-small--line-height: 1.4;
+
+    /* Mono label: eyebrows, numbering, tags. Set uppercase in markup. */
+    --text-site-label: 0.75rem;
+    --text-site-label--line-height: 1rem;
+    --text-site-label--letter-spacing: 0.08em;
+}
+
+/* Typefaces. One sans family carries the whole site: Inter's optical-size axis
+   switches headings to its Display cut (tighter spacing, finer joins) and keeps
+   copy on the text cut, and it is the face the product itself renders in, so
+   screenshots and page copy match. `site-display` is the single switch if the
+   headings ever get their own face. The CJK fallback chain comes with
+   `--font-sans`, per <html lang>. */
+.landing-light {
+    --site-font-sans: var(--font-sans);
+    --site-font-display: var(--font-sans);
+    --site-font-mono: var(--font-mono);
+
+    font-family: var(--site-font-sans);
+}
+
+.landing-light {
+    --site-canvas: oklch(0.988 0 0);
+    --site-surface: oklch(1 0 0);
+    --site-sunken: oklch(0.964 0.0013 286.4);
+    --site-hover: oklch(0.945 0.003 286.3);
+    --site-ink: oklch(0.141 0.005 285.823);
+    --site-ink-secondary: oklch(0.37 0.013 285.805);
+    --site-muted: oklch(0.505 0.016 285.938);
+    --site-faint: oklch(0.606 0.016 285.938);
+    --site-line: oklch(0.925 0.004 286.32);
+    --site-line-strong: oklch(0.871 0.006 286.286);
+    --site-rule: oklch(0.953 0.003 286.32);
+    --site-inverse: oklch(0.141 0.005 285.823);
+    --site-inverse-ink: oklch(0.985 0 0);
+    --site-inverse-muted: oklch(0.705 0.015 286.067);
+
+    /* Controls are pills; containers step 6 → 12 → 16 with size. */
+    --site-radius-control: 9999px;
+    --site-radius-inner: 6px;
+    --site-radius-card: 12px;
+    --site-radius-panel: 16px;
+
+    /* On desktop the page body sits in a narrower frame than the header and
+       hero, which keep the wide one. */
+    --site-container: 87.5rem;
+    --site-container-wide: 87.5rem;
+    --site-gutter: 1.25rem;
+    --site-header: 3.25rem;
+    --site-hero: 3rem;
+    --site-section: 4.5rem;
+    --site-block: 2.5rem;
+    --site-stack: 0.5rem;
+    --site-grid-row: 3rem;
+    --site-grid-col: 1.25rem;
+    --site-step: 4rem;
+    --site-control-sm: 1.75rem;
+    --site-control: 2.625rem;
+
+    --site-shadow-float: 0 1px 2px rgb(15 23 42 / 0.04), 0 6px 16px -6px rgb(15 23 42 / 0.08);
+    --site-shadow-menu: 0 2px 6px -2px rgb(15 23 42 / 0.06), 0 16px 40px -12px rgb(15 23 42 / 0.16);
+}
+
+@media (min-width: 64rem) {
+    .landing-light {
+        --site-container: min(80rem, 100% - 10vw);
+        --site-gutter: 3.75rem;
+        --site-hero: 4rem;
+        --site-section: 7rem;
+        --site-grid-row: 3.75rem;
+        --site-grid-col: 2rem;
+        --site-step: 7.5rem;
+    }
+}
+
+/* Frame for a product visual: a plain sunken grey, so the mockup inside is
+   the only thing on it. */
+.site-visual {
+    position: relative;
+    overflow: hidden;
+    background-color: var(--site-sunken);
+}
+
+/* Code blocks scroll sideways on narrow screens; keep their bar thin. */
+.site-code {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklab, var(--site-ink) 20%, transparent) transparent;
+}
+
+/* Page frame: on wide screens two hairline rails run down the page halfway
+   into the gutter, and a dot marks each place a section's top hairline
+   crosses them. `100%` resolves against each full-bleed box, so the rails
+   and dots land on the same x. The 1px border sits just above the padding
+   box the dots are placed in. */
+@media (min-width: 64rem) {
+    .site-rails {
+        --site-rail: calc((100% - min(100%, var(--site-container))) / 2 + var(--site-gutter) / 2);
+        position: relative;
+    }
+
+    .site-rails::before {
+        content: "";
+        position: absolute;
+        inset-block: 0;
+        inset-inline: var(--site-rail);
+        border-inline: 1px solid var(--site-rule);
+        pointer-events: none;
+    }
+
+    .site-rails > section {
+        position: relative;
+    }
+
+    .site-rails > section::before,
+    .site-rails > section::after {
+        content: "";
+        position: absolute;
+        top: -3px;
+        width: 5px;
+        height: 5px;
+        background-color: var(--site-line-strong);
+        pointer-events: none;
+    }
+
+    .site-rails > section::before {
+        left: calc(var(--site-rail) - 2px);
+    }
+
+    .site-rails > section::after {
+        right: calc(var(--site-rail) - 2px);
+    }
+}
+
+/* Feature and story cards: a frosted field per card — a pale grey wash, so
+   the product screen inside stays the focus — with film grain blended over it. The grain tile
+   is drawn at 1:1 device pixels and never smoothed, so it stays fine. Content
+   inside must be positioned to paint above the grain. */
+.site-frost {
+    position: relative;
+    overflow: hidden;
+    background-color: var(--site-sunken);
+    background-image: var(--frost-image);
+    background-position: center;
+    background-size: cover;
+}
+
+.site-frost::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image: url("/images/frost/noise.webp");
+    background-size: 256px 256px;
+    image-rendering: pixelated;
+    mix-blend-mode: overlay;
+    opacity: 0.35;
+    pointer-events: none;
+}
+
+@media (min-resolution: 2dppx) {
+    .site-frost::before {
+        background-size: 128px 128px;
+    }
+}
+
+.site-frost[data-frost="runtimes"] {
+    --frost-image: url("/images/frost/runtimes.webp");
+}
+
+.site-frost[data-frost="workflows"] {
+    --frost-image: url("/images/frost/workflows.webp");
+}
+
+.site-frost[data-frost="chat"] {
+    --frost-image: url("/images/frost/chat.webp");
+}
+
+.site-frost[data-frost="autopilots"] {
+    --frost-image: url("/images/frost/autopilots.webp");
+}
+
+.site-frost[data-frost="skills"] {
+    --frost-image: url("/images/frost/skills.webp");
+}
+
+.site-frost[data-frost="changelog"] {
+    --frost-image: url("/images/frost/changelog.webp");
+}
+
+.site-frost[data-frost="cloud"] {
+    --frost-image: url("/images/frost/cloud.webp");
+}
+
+.site-frost[data-frost="desktop"] {
+    --frost-image: url("/images/frost/desktop.webp");
+}
+
+.site-frost[data-frost="cli"] {
+    --frost-image: url("/images/frost/cli.webp");
+}
+
+.site-frost[data-frost="chat-page"] {
+    --frost-image: url("/images/frost/chat-page.webp");
+}
+
+.site-frost[data-frost="mobile"] {
+    --frost-image: url("/images/frost/mobile.webp");
+}
+
+/* Charts in the hero's issue peek: bars grow and lines draw in once, staggered
+   by an inline animation-delay. */
+@theme {
+    --animate-site-grow-x: site-grow-x 700ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    --animate-site-grow-y: site-grow-y 600ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    --animate-site-draw: site-draw 1200ms cubic-bezier(0.45, 0, 0.25, 1) both;
+
+    @keyframes site-grow-x {
+        from {
+            scale: 0 1;
+        }
+    }
+
+    @keyframes site-grow-y {
+        from {
+            scale: 1 0;
+        }
+    }
+
+    @keyframes site-draw {
+        from {
+            stroke-dashoffset: 1;
+        }
+    }
+}
+
+/* Auto-advancing tabs: the active tab's rule fills, and its animationend
+   brings up the next tab. Set inline with a per-section duration. */
+@keyframes site-advance {
+    from {
+        scale: 0 1;
+    }
+    to {
+        scale: 1 1;
+    }
+}
+
+/* Logo wall: the track holds the list twice, so sliding it by half loops
+   seamlessly. */
+@theme {
+    --animate-site-marquee: site-marquee 50s linear infinite;
+
+    @keyframes site-marquee {
+        to {
+            transform: translateX(-50%);
+        }
+    }
+}

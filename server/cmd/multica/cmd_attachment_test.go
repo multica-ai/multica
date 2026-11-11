@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -9,8 +11,49 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/spf13/cobra"
 )
+
+func TestRunAttachmentDownloadInterruptedBodyPreservesTarget(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/attachments/att-interrupted":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"filename": "report.txt", "download_url": "/download",
+			})
+		case "/download":
+			w.Header().Set("Content-Length", "71")
+			_, _ = io.WriteString(w, "payload")
+		default:
+			t.Errorf("unexpected request: %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+	outputDir := t.TempDir()
+	dest := filepath.Join(outputDir, "report.txt")
+	if err := os.WriteFile(dest, []byte("original"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := newAttachmentDownloadTestCmd()
+	_ = cmd.Flags().Set("output-dir", outputDir)
+	out, err := captureStdout(t, func() error {
+		return runAttachmentDownload(cmd, []string{"att-interrupted"})
+	})
+	if !errors.Is(err, io.ErrUnexpectedEOF) || cli.ExitCodeFor(err) != cli.ExitNetwork {
+		t.Fatalf("expected network error preserving unexpected EOF, got %v (exit %d)", err, cli.ExitCodeFor(err))
+	}
+	if !strings.HasPrefix(err.Error(), "download file: ") || out != "" {
+		t.Errorf("error context or failure output changed: err=%v stdout=%q", err, out)
+	}
+	data, readErr := os.ReadFile(dest)
+	if readErr != nil || string(data) != "original" {
+		t.Fatalf("target changed after interrupted download: data=%q err=%v", data, readErr)
+	}
+}
 
 func newAttachmentDownloadTestCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "download"}

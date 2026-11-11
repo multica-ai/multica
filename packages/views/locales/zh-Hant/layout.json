@@ -35,18 +35,12 @@
     "docs": "文件",
     "changelog": "更新日誌",
     "discord": "Discord",
+    "star_on_github": "在 GitHub 上 Star",
     "feedback": "反饋",
     "server_version": "伺服器版本 {{version}}"
   },
   "whats_new": {
     "trigger": "新功能",
-    "card": {
-      "eyebrow": "Multica 已更新 · {{range}}",
-      "title_other": "自你上次造訪以來，新增了 {{count}} 項功能",
-      "dismiss": "關閉",
-      "view_details": "查看詳情",
-      "got_it": "知道了"
-    },
     "panel": {
       "title": "新功能",
       "close": "關閉",
@@ -59,6 +53,14 @@
       "open": "前往",
       "learn_more": "了解更多"
     }
+  },
+  "star_prompt": {
+    "title_other": "{{agent}} 已經完成了 {{count}} 個任務",
+    "body": "如果 Multica 幫上了忙，在 GitHub 上按個 Star，能讓更多團隊發現它。",
+    "star": "Star",
+    "star_label": "在 GitHub 上給 Multica 按 Star",
+    "later": "以後再說",
+    "close": "關閉"
   },
   "workspace_loader": {
     "loading_workspace": "正在載入工作區...",
@@ -99,6 +101,8 @@
     "autopilots": "自動化",
     "switch_workspace": "切換工作區",
     "invitation_from": "{{name}} 邀請你加入",
+    "pin_workspace": "置頂工作區",
+    "unpin_workspace": "取消置頂",
     "open_in_new_window": "在新視窗開啟",
     "open_in_new_window_click": "點擊",
     "open_in_other_window": "已在其他視窗開啟",
@@ -125,6 +129,7 @@
       "assignee_me": "我",
       "assignee_my_agents": "我的 AI 代理",
       "assignee_me_and_my_agents": "我和我的 AI 代理",
+      "assignee_projects_only": "僅作用於側邊欄「專案」下展開的任務",
       "reset": "重設",
       "load_more": "載入更多",
       "show_less": "收合",
@@ -142,6 +147,7 @@
       "view_actions": "{{name}} 的操作",
       "view_copy_link": "複製連結",
       "view_remove": "從側欄移除",
+      "view_edit": "編輯檢視",
       "view_rename": "重新命名",
       "view_duplicate": "建立副本",
       "view_delete": "刪除檢視"
@@ -151,13 +157,15 @@
       "needs_attention": "需要處理",
       "stuck_other": "{{count}} 個任務在等待離線的執行時",
       "working_now": "正在工作",
+      "show_more_agents": "再顯示 {{count}} 項...",
+      "show_fewer_agents": "收起",
       "running_tasks_other": "{{count}} 個任務執行中",
       "all_agents": "全部 AI 代理",
       "my_agents": "我的 AI 代理",
       "squads_and_members": "小隊與成員",
       "members_other": "{{count}} 位成員",
       "resources": "資源",
-      "runtimes_offline_other": "{{count}} 個離線",
+      "runtimes_online_other": "{{count}} 台線上",
       "invite_member": "邀請成員"
     },
     "autopilots": {

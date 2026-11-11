@@ -24,6 +24,7 @@ import { useIssueUnreadIds } from "@multica/core/issues/unread";
 import {
   advancedFilterToTableQuery,
   advancedFilterUsesField,
+  advancedFilterUsesValue,
   FILTER_DIMENSION_TABLE_FIELD,
   statusColumnFilter,
   propertyIdOfField,
@@ -39,6 +40,12 @@ import {
   assigneeTypesForActorKind,
   type IssueScope,
 } from "@multica/core/issues/surface/scope";
+import {
+  combineFilterDependencies,
+  filterDependencyState,
+  statusCatalogSource,
+  type FilterDependencyState,
+} from "@multica/core/issues/surface/filter-dependency";
 import type {
   IssueDateFilter,
   NegatableFilterDimension,
@@ -51,7 +58,8 @@ import {
 } from "@multica/core/issues/stores/view-store";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { useAuthStore } from "@multica/core/auth";
-import { agentListOptions } from "@multica/core/workspace/queries";
+import { agentListOptions, involvedSquadIdsOptions } from "@multica/core/workspace/queries";
+import { subscribedIssueIdsOptions } from "@multica/core/issues/subscribed";
 import { useShallow } from "zustand/react/shallow";
 import type { IssueFilters, IssueRelationContext } from "../utils/filter";
 import type { ChildProgress } from "../components/list-row";
@@ -76,6 +84,14 @@ import {
   useIssueGroupBranches,
   type IssueGroupBranches,
 } from "./use-issue-group-branches";
+
+/** Which filter's data failed, for the error state's copy. */
+export type FilterDependencyKind = "status" | "working" | "unread" | "relation";
+
+export interface FilterDependencyError {
+  kind: FilterDependencyKind;
+  retry: () => void;
+}
 
 interface UseIssueSurfaceControllerInput {
   scope: IssueScope;
@@ -141,19 +157,9 @@ export interface IssueSurfaceController {
   /** See IssueSurfaceData.isRefreshing — placeholder-backed revalidation. */
   isRefreshing: boolean;
   isEmpty: boolean;
-  /**
-   * The status catalog a CUSTOM status filter depends on failed to load. The
-   * filter cannot be honoured, so the surface shows a retryable error rather
-   * than an unexplained empty board. (MUL-6243)
-   */
-  isStatusCatalogError: boolean;
-  /** Re-runs the failed catalog request behind {@link isStatusCatalogError}. */
-  retryStatusCatalog: () => void;
-  /** First-load failure while the working filter needs issue membership. */
-  isWorkingFilterError: boolean;
-  retryWorkingFilter: () => void;
-  isUnreadFilterError: boolean;
-  retryUnreadFilter: () => void;
+  /** Data an active filter needs failed to load, so the filter cannot be
+   *  honoured. The surface shows a retryable error instead of rows. */
+  filterDependencyError: FilterDependencyError | null;
   openCreateIssue: (defaults?: IssueCreateDefaults) => void;
   moveIssue: (
     issueId: string,
@@ -321,19 +327,51 @@ export function useIssueSurfaceController({
     dueDateFilters.length > 0 || advancedFilterUsesField(advancedFilter, "dueDate");
   const today = usesDueDates ? todayDateOnly() : undefined;
   const userId = useAuthStore((s) => s.user?.id);
-  const { data: agents } = useQuery({
+  // Each relation value reads only its own dependency, so a slow or failed
+  // agent list never switches off "subscribed" (and vice versa).
+  const usesMyAgents =
+    relationFilters.includes("my_agents") ||
+    advancedFilterUsesValue(advancedFilter, "relation", "my_agents");
+  const usesSubscribed =
+    relationFilters.includes("subscribed") ||
+    advancedFilterUsesValue(advancedFilter, "relation", "subscribed");
+  const agentsQuery = useQuery({
     ...agentListOptions(wsId),
-    enabled: relationFilters.length > 0 || advancedFilterUsesField(advancedFilter, "relation"),
+    enabled: usesMyAgents,
   });
+  const agents = agentsQuery.data;
+  const involvedSquadIdsQuery = useQuery({
+    ...involvedSquadIdsOptions(wsId),
+    enabled: usesMyAgents,
+  });
+  const involvedSquadIds = involvedSquadIdsQuery.data;
+  const subscribedIssueIdsQuery = useQuery({
+    ...subscribedIssueIdsOptions(wsId),
+    enabled: usesSubscribed,
+  });
+  const subscribedIssueIds = subscribedIssueIdsQuery.data;
+  const relationSources = [
+    usesMyAgents && agentsQuery,
+    usesMyAgents && involvedSquadIdsQuery,
+    usesSubscribed && subscribedIssueIdsQuery,
+  ];
   const relationContext = useMemo<IssueRelationContext | undefined>(() => {
-    if (!userId || !agents) return undefined;
+    if (!userId) return undefined;
     return {
       userId,
-      myAgentIds: new Set(
-        agents.filter((agent) => agent.owner_id === userId).map((agent) => agent.id),
-      ),
+      ...(usesMyAgents && agents
+        ? {
+            myAgentIds: new Set(
+              agents.filter((agent) => agent.owner_id === userId).map((agent) => agent.id),
+            ),
+          }
+        : {}),
+      ...(usesMyAgents && involvedSquadIds ? { mySquadIds: new Set(involvedSquadIds) } : {}),
+      ...(usesSubscribed && subscribedIssueIds
+        ? { subscribedIssueIds: new Set(subscribedIssueIds) }
+        : {}),
     };
-  }, [agents, userId]);
+  }, [agents, involvedSquadIds, subscribedIssueIds, userId, usesMyAgents, usesSubscribed]);
 
   const allowedModes = useMemo(() => new Set<IssueSurfaceMode>(modes), [modes]);
   const fallbackMode = modes[0] ?? "list";
@@ -428,23 +466,19 @@ export function useIssueSurfaceController({
     [catalog, columnStatus],
   );
   /**
-   * A custom-status filter cannot be routed until the catalog answers. While it
-   * is pending the surface must HOLD ITS LOADING STATE, and on failure it must
-   * surface a retryable error — not fetch zero branches and render an empty
-   * board, which is what "return no columns" alone produced. (MUL-6243)
+   * A custom-status filter is routed through the catalog, and status columns
+   * come from it. Until it answers, fetching is suspended: with the filter
+   * unresolved the visible column set falls back to ALL categories, so
+   * fetching anyway would briefly show the UNFILTERED board to someone who
+   * opened a saved `qa` view.
    */
-  const statusFilterPending = statusColumnsForFilters.state === "pending" ||
-    ((usesServerStatusSurface || effectiveViewMode === "swimlane") && catalog.isPending);
-  const statusFilterError = statusColumnsForFilters.state === "error" ||
-    ((usesServerStatusSurface || effectiveViewMode === "swimlane") && catalog.isError);
-  /**
-   * Fetching is suspended until the filter resolves. Not just "narrow to
-   * nothing": with the filter unresolved the visible column set falls back to
-   * ALL categories, so fetching anyway would briefly show the UNFILTERED board
-   * to someone who opened a saved `qa` view. Holding both the request and the
-   * loading state is the only honest option.
-   */
-  const statusFilterUnresolved = statusFilterPending || statusFilterError;
+  const statusDependency = filterDependencyState(
+    statusColumnsForFilters.state !== "resolved" ||
+      usesServerStatusSurface ||
+      effectiveViewMode === "swimlane",
+    [statusCatalogSource(catalog)],
+  );
+  const statusFilterUnresolved = statusDependency.unresolved;
 
   // Display preferences hide individual columns; status filters independently
   // select exact keys. Selecting a key explicitly restores its hidden column.
@@ -518,12 +552,8 @@ export function useIssueSurfaceController({
     enabled: usesGantt || agentRunningFilter,
   });
   const workspaceWorkingAgents = workingAgentsProjection.data ?? EMPTY_LIST;
-  const workingFilterUnresolved =
-    agentRunningFilter && workingAgentsProjection.data === undefined;
-  const workingFilterPending =
-    workingFilterUnresolved && workingAgentsProjection.isPending;
-  const workingFilterError =
-    workingFilterUnresolved && workingAgentsProjection.isError;
+  const workingDependency = filterDependencyState(agentRunningFilter, [workingAgentsProjection]);
+  const workingFilterUnresolved = workingDependency.unresolved;
   const workingIssueIDs = useMemo(() => {
     const issueIDs = new Set<string>();
     for (const agent of workspaceWorkingAgents) {
@@ -537,9 +567,9 @@ export function useIssueSurfaceController({
   // the query keeps its identity) until the filter turns off or the surface
   // unmounts; a newly unread issue grows the set and refetches.
   const unreadProjection = useIssueUnreadIds(wsId, unreadFilter);
-  const unreadIssueList = unreadProjection.ids;
-  const unreadFilterUnresolved = unreadFilter && unreadIssueList === undefined;
-  const unreadFilterError = unreadFilterUnresolved && unreadProjection.isError;
+  const unreadIssueList = unreadProjection.data;
+  const unreadDependency = filterDependencyState(unreadFilter, [unreadProjection]);
+  const unreadFilterUnresolved = unreadDependency.unresolved;
   const keptUnreadRef = useRef<Set<string>>(new Set());
   const unreadIssueIDs = useMemo<ReadonlySet<string>>(() => {
     if (!unreadFilter) {
@@ -904,8 +934,7 @@ export function useIssueSurfaceController({
     ganttShowCompleted,
     statusFilters,
     hiddenStatusKeys,
-    statusFilterPending,
-    statusFilterError,
+    statusDependency,
     priorityFilters,
     assigneeFilters,
     includeNoAssignee,
@@ -918,6 +947,7 @@ export function useIssueSurfaceController({
     labelFilters,
     relationFilters,
     relationContext,
+    relationSources,
     dueDateFilters,
     advancedFilter,
     today,
@@ -1018,7 +1048,20 @@ export function useIssueSurfaceController({
     createDefaults: resolvedCreateDefaults,
   });
 
-  const { ganttWorkingScopeIssues: _ganttWorkingScope, ...surfaceData } = data;
+  const {
+    ganttWorkingScopeIssues: _ganttWorkingScope,
+    projectCatalogDependency,
+    relationDependency,
+    ...surfaceData
+  } = data;
+  // In the order the surface reports them when several fail at once.
+  const dependencies: [FilterDependencyKind, FilterDependencyState][] = [
+    ["status", combineFilterDependencies(statusDependency, projectCatalogDependency)],
+    ["working", workingDependency],
+    ["unread", unreadDependency],
+    ["relation", relationDependency],
+  ];
+  const failedDependency = dependencies.find(([, state]) => state.error);
 
   return {
     scopeKey,
@@ -1027,8 +1070,7 @@ export function useIssueSurfaceController({
     viewMode: effectiveViewMode,
     allowGantt: allowedModes.has("gantt") && !!projectId,
     ...surfaceData,
-    isLoading:
-      data.isLoading || workingFilterPending || (unreadFilterUnresolved && !unreadFilterError),
+    isLoading: data.isLoading || workingDependency.pending || unreadDependency.pending,
     workingAgents,
     hasActiveFilters,
     statusPagination: usesServerStatusSurface
@@ -1046,21 +1088,9 @@ export function useIssueSurfaceController({
       data.isEmpty &&
       !data.isRefreshing &&
       !(usesTable && (tableSearch.trim() || debouncedActiveSearch)),
-    isStatusCatalogError: data.isStatusCatalogError,
-    // Either catalog can be the one that failed, and the error state offers a
-    // single retry — refresh both rather than guess which.
-    retryStatusCatalog: () => {
-      catalog.retry();
-      data.retryProjectCatalog();
-    },
-    isWorkingFilterError: workingFilterError,
-    retryWorkingFilter: () => {
-      void workingAgentsProjection.refetch();
-    },
-    isUnreadFilterError: unreadFilterError,
-    retryUnreadFilter: () => {
-      void unreadProjection.refetch();
-    },
+    filterDependencyError: failedDependency
+      ? { kind: failedDependency[0], retry: failedDependency[1].retry }
+      : null,
     sort,
     actions,
     selection,

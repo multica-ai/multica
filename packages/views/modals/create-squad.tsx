@@ -151,8 +151,7 @@ export function CreateSquadModal({ onClose }: { onClose: () => void }) {
 
         <div className="flex-1 overflow-y-auto p-5">
           <div className="space-y-4 min-w-0">
-            {/* Identity row mirrors CreateAgentDialog so the two creates read
-                as siblings — avatar (left) + name/description stack (right). */}
+            {/* Identity row: avatar (left) + name/description stack (right). */}
             <div className="flex items-start gap-4">
               <AvatarUploadControl
                 variant="squad"
@@ -221,7 +220,7 @@ export function CreateSquadModal({ onClose }: { onClose: () => void }) {
           </div>
         </div>
 
-        {/* Inline footer — see CreateAgentDialog: shadcn DialogFooter applies
+        {/* Inline footer: shadcn DialogFooter applies
             negative margins assuming a padded DialogContent. Our content is
             p-0, so a plain bordered row is the right call. */}
         <div className="flex items-center justify-end gap-2 border-t bg-background px-5 py-3">
@@ -471,6 +470,7 @@ function AdditionalMembersPicker({
             nesting interactive content. Base UI injects click/keyboard/ARIA
             wiring into the rendered element. */}
         <PopoverTrigger
+          nativeButton={false}
           render={
             <div
               role="combobox"
@@ -590,7 +590,7 @@ function MemberChip({
 }) {
   const { t } = useT("modals");
   return (
-    <span className="inline-flex items-center gap-1 rounded-full border bg-background px-1.5 py-0.5 text-caption">
+    <span className="inline-flex items-center gap-1 rounded-md border bg-background px-1.5 py-0.5 text-caption">
       <ActorAvatar actorType={m.type} actorId={m.id} size="xs" />
       <span className="max-w-[120px] truncate">{m.name}</span>
       <TooltipHint label={t(($) => $.create_squad.members_remove_aria, { name: m.name })}>
@@ -602,7 +602,7 @@ function MemberChip({
             onRemove();
           }}
           aria-label={t(($) => $.create_squad.members_remove_aria, { name: m.name })}
-          className="rounded-full text-muted-foreground hover:text-foreground"
+          className="rounded-sm text-muted-foreground hover:text-foreground"
         >
           <X className="h-3 w-3" />
         </button>

@@ -111,7 +111,7 @@ type Config struct {
 	CLICommit                      string                // full build revision embedded in the running CLI; empty/unknown if unavailable
 	LaunchedBy                     string                // "desktop" when spawned by the Electron app, empty for standalone
 	Profile                        string                // profile name (empty = default)
-	Agents                         map[string]AgentEntry // keyed by provider: claude, codebuddy, codex, copilot, opencode, codearts, deveco, openclaw, hermes, pi, cursor, kimi, reasonix, dsh, kiro, antigravity, qoder, qoderclicn, traecli, grok, qwen, qwenpaw, mcode, dim, zeroclaw (plus built-in runtime identities from agent.BuiltinRuntimes, e.g. omp)
+	Agents                         map[string]AgentEntry // keyed by provider: claude, codebuddy, codex, copilot, opencode, codearts, deveco, openclaw, hermes, pi, cursor, kimi, reasonix, dsh, kiro, antigravity, qoder, qoderclicn, traecli, grok, qwen, qwenpaw, mcode, muse, devin, dim, zeroclaw, museapp (plus built-in runtime identities from agent.BuiltinRuntimes, e.g. omp)
 	WorkspacesRoot                 string                // base path for execution envs (default: ~/multica_workspaces)
 	HealthPort                     int                   // local HTTP port for health checks (default: 19514)
 	MaxConcurrentTasks             int                   // max tasks running in parallel (default: 20)
@@ -178,6 +178,8 @@ type Overrides struct {
 	// AgentTimeout is a pointer so an explicit `--agent-timeout 0` (no cap) is
 	// distinguishable from "flag not passed". nil = use env/default.
 	AgentTimeout                   *time.Duration
+	AgentIdleWatchdog              *time.Duration
+	AgentToolWatchdog              *time.Duration
 	CodexSemanticInactivityTimeout time.Duration
 	CodexHandshakeTimeout          time.Duration
 	MaxConcurrentTasks             int
@@ -337,6 +339,9 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	if overrides.AgentIdleWatchdog != nil {
+		agentIdleWatchdog = *overrides.AgentIdleWatchdog
+	}
 	// MULTICA_OPENCODE_IDLE_WATCHDOG narrows the no-message window for
 	// OpenCode's streamed model responses. Zero removes the provider-specific
 	// override and falls back to MULTICA_AGENT_IDLE_WATCHDOG; positive values
@@ -374,6 +379,9 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	agentToolWatchdog, err := durationFromEnv("MULTICA_AGENT_TOOL_WATCHDOG", agentIdleWatchdog)
 	if err != nil {
 		return Config{}, err
+	}
+	if overrides.AgentToolWatchdog != nil {
+		agentToolWatchdog = *overrides.AgentToolWatchdog
 	}
 
 	// Codex runs a semantic-inactivity timer of its own inside the app-server

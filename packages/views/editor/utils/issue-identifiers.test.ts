@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 import {
   preprocessIssueIdentifiers,
@@ -31,6 +33,14 @@ describe("preprocessIssueIdentifiers", () => {
   it("links identifiers wrapped in prose punctuation", () => {
     expect(preprocessIssueIdentifiers("(MUL-1) and [MUL-2]")).toContain(
       "([MUL-1](mention://issue/MUL-1))",
+    );
+  });
+
+  it("skips identifiers inside HTML attributes and anchors", () => {
+    const source =
+      '<img src="https://host/a.png" alt="MUL-1 screenshot"> <a href="#x">MUL-2</a> MUL-3';
+    expect(preprocessIssueIdentifiers(source)).toBe(
+      '<img src="https://host/a.png" alt="MUL-1 screenshot"> <a href="#x">MUL-2</a> [MUL-3](mention://issue/MUL-3)',
     );
   });
 

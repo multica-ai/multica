@@ -29,6 +29,15 @@
     "toast_renamed": "Issue renamed",
     "toast_failed": "Failed to rename issue"
   },
+  "rename_project": {
+    "title": "Rename project",
+    "placeholder": "Project title",
+    "submit": "Save",
+    "title_required": "Enter a title",
+    "offline_error": "You're offline. Reconnect and try renaming again.",
+    "toast_renamed": "Project renamed",
+    "toast_failed": "Failed to rename project"
+  },
   "feedback": {
     "title": "Feedback",
     "placeholder": "Tell us about your experience, bugs you've found, or features you'd like to see…",
@@ -156,7 +165,8 @@
     "local_pick_failed": "Could not open the directory picker.",
     "local_invalid_dir": "This directory can't be used. Pick another.",
     "local_hint": "Agents on other machines won't see this path — they'll fail to start. Use repos for shared work.",
-    "repos_ref_default": "Default branch"
+    "repos_ref_default": "Default branch",
+    "repos_remove_aria": "Remove {{repo}}"
   },
   "create_issue": {
     "sr_manual": "New Issue",
@@ -273,5 +283,13 @@
     "toast_failed": "Failed to mark as duplicate",
     "error_target_is_duplicate": "{{identifier}} is itself a duplicate. Pick its original instead.",
     "error_has_duplicates": "Other issues are marked as duplicates of this one. Remove those marks first."
+  },
+  "copy_parent_fields": {
+    "trigger": "Copy parent fields",
+    "title": "Copy parent fields",
+    "description": "From {{identifier}}. Replaces selected draft values once; later changes do not sync.",
+    "apply": "Copy {{count}} fields",
+    "no_labels": "No labels",
+    "manual_only": "Labels, start date and custom properties apply only to manual creation."
   }
 }

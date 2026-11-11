@@ -35,7 +35,7 @@ back for review. Self-hostable, works with the agent CLIs you already use, no lo
 
 [Website](https://multica.ai) · [Docs](https://multica.ai/docs) · [Quickstart](https://multica.ai/docs/cloud-quickstart) · [Download](https://multica.ai/download) · [Vision](VISION.md) · [Self-Hosting](SELF_HOSTING.md) · [Discord](https://discord.gg/W8gYBn226t) · [X](https://x.com/MulticaAI)
 
-**English | [简体中文](README.zh.md)**
+**English | [简体中文](README.zh.md) | [日本語](README.ja.md)**
 
 </div>
 
@@ -175,7 +175,7 @@ Full walkthrough: [Quickstart](https://multica.ai/docs/cloud-quickstart) · [Tut
 ## Runtimes
 
 Multica does not ship a model. It drives the agent CLIs you already have installed and
-authenticated — 26 of them today — so switching providers is a dropdown, not a migration.
+authenticated — 29 of them today — so switching providers is a dropdown, not a migration.
 
 | Provider | CLI | Provider | CLI |
 | --- | --- | --- | --- |
@@ -192,6 +192,7 @@ authenticated — 26 of them today — so switching providers is a dropdown, not
 | DeepSeek Harness | `dsh` | Oh-My-Pi | `omp` |
 | MiniMax Code | `mcode` | Dim | `dim` |
 | Huawei Cloud CodeArts | `codearts` | ZeroClaw | `zeroclaw` |
+| Muse Code | `muse` | Devin CLI | `devin` |
 | ZCode | `zcode` / ZCode Desktop | | |
 
 Installing and authenticating them: [Install an agent runtime](https://multica.ai/docs/install-agent-runtime) ·

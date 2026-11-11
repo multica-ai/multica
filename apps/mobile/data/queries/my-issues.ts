@@ -22,7 +22,7 @@ export function buildMyIssuesFilter(
     case "assigned":
       return { assignee_id: userId };
     case "created":
-      return { creator_id: userId };
+      return { created_by_user_id: userId };
     case "agents":
       return { involves_user_id: userId };
   }

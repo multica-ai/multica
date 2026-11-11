@@ -62,6 +62,7 @@ import {
   modifiedFilterDimensions,
 } from "@multica/core/issue-views/definition";
 import { useIssueViewRenameStore } from "@multica/core/issue-views/rename-store";
+import { useIssueViewEditStore } from "@multica/core/issue-views/edit-store";
 import {
   myIssuesViewStore,
   type MyIssuesScope,
@@ -193,10 +194,19 @@ export function IssueViewHeader({
   // does; its filter menu opens as soon as the view is named.
   const needsSetup = !!activeView && canManage && isIssueViewUndefined(activeView);
   const [setupFilterOpen, setSetupFilterOpen] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const editViewId = useIssueViewEditStore((s) => s.viewId);
+  const stopEdit = useIssueViewEditStore((s) => s.stop);
+  useEffect(() => {
+    if (!activeView || editViewId !== activeView.id) return;
+    stopEdit();
+    if (needsSetup) setSetupFilterOpen(true);
+    else setFilterOpen(true);
+  }, [activeView, editViewId, needsSetup, stopEdit]);
   const unreadView = isUnreadView(activeView);
   const activeViewName = unreadView ? t(($) => $.views.builtin.unread) : activeView?.name;
   const starId = unreadView
-    ? null
+    ? builtinViewItemId("unread")
     : activeView
       ? savedViewItemId(activeView.id)
       : builtinKey
@@ -487,6 +497,8 @@ export function IssueViewHeader({
 
           <IssueFilterMenu
             align="start"
+            open={filterOpen}
+            onOpenChange={setFilterOpen}
             tooltip={filterTooltip}
             trigger={
               <Button

@@ -1,6 +1,7 @@
 "use client";
 
 import { ArrowUpRight, X } from "@multica/ui/icons";
+import { useConfigStore } from "@multica/core/config";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../i18n";
@@ -22,7 +23,7 @@ function formatReleaseDate(date: string, language: string) {
   return new Intl.DateTimeFormat(language, { month: "short", day: "numeric", timeZone: "UTC" }).format(parsed);
 }
 
-/** Every announced release, opened from the rail button. */
+/** Every announced release, opened from the Help menu. */
 export function WhatsNewPanel({
   releases,
   unreadVersions,
@@ -35,6 +36,7 @@ export function WhatsNewPanel({
   onClose: () => void;
 }) {
   const { t, i18n } = useT("layout");
+  const serverVersion = useConfigStore((state) => state.serverVersion);
 
   return (
     <div className="flex flex-col" data-slot="whats-new-panel">
@@ -60,8 +62,7 @@ export function WhatsNewPanel({
                 </span>
                 <span className="text-muted-foreground">{formatReleaseDate(release.date, i18n.language)}</span>
                 {unread && (
-                  <span className="ml-auto inline-flex items-center gap-1.5 text-micro font-medium text-brand">
-                    <span aria-hidden className="size-1.5 rounded-full bg-brand" />
+                  <span className="ml-auto inline-flex h-[18px] items-center rounded-xs bg-brand/10 px-1.5 text-micro font-medium text-brand">
                     {t(($) => $.whats_new.panel.new)}
                   </span>
                 )}
@@ -82,7 +83,7 @@ export function WhatsNewPanel({
                         <p className="text-label text-muted-foreground">{copy.body}</p>
                         {highlight.action && (
                           <div className="mt-0.5">
-                            <HighlightActionButton action={highlight.action} variant="link" onDone={onClose} />
+                            <HighlightActionButton action={highlight.action} onDone={onClose} />
                           </div>
                         )}
                       </div>
@@ -104,12 +105,17 @@ export function WhatsNewPanel({
         })}
       </div>
 
-      <div className="flex h-11 shrink-0 items-center justify-end border-t border-border px-4">
+      <div className="flex h-11 shrink-0 items-center gap-3 border-t border-border px-4">
+        {serverVersion && (
+          <span className="min-w-0 truncate text-caption text-muted-foreground">
+            {t(($) => $.help.server_version, { version: serverVersion })}
+          </span>
+        )}
         <a
           href={CHANGELOG_URL}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-0.5 text-label font-medium hover:underline"
+          className="ml-auto inline-flex shrink-0 items-center gap-0.5 text-label font-medium hover:underline"
         >
           {t(($) => $.whats_new.panel.full_changelog)}
           <ArrowUpRight className="size-3.5 text-faint-foreground" />

@@ -11,6 +11,18 @@ describe("settings location", () => {
     ["tab=issue", { tab: "preferences", section: "issue", integration: null }],
     ["tab=chat", { tab: "preferences", section: "chat", integration: null }],
     ["tab=labs", { tab: "workspace", section: null, integration: null }],
+    [
+      "tab=preferences&section=appearance",
+      { tab: "appearance", section: null, integration: null },
+    ],
+    [
+      "tab=preferences&section=theme",
+      { tab: "appearance", section: "mode", integration: null },
+    ],
+    [
+      "tab=preferences&section=style",
+      { tab: "appearance", section: "theme", integration: null },
+    ],
     ["tab=lark", { tab: "channels", section: null, integration: "lark" }],
     [
       "tab=integrations&integration=slack",

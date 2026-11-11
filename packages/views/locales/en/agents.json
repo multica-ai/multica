@@ -65,15 +65,6 @@
     "search_runtime_filtered": "No agents on \"{{machine}}\" match \"{{query}}\".",
     "runtime_filtered": "No agents on \"{{machine}}\"."
   },
-  "runtime_filter": {
-    "all": "All runtimes",
-    "section_local": "Local",
-    "section_remote": "Remote",
-    "section_cloud": "Cloud",
-    "agent_count_one": "{{count}} agent",
-    "agent_count_other": "{{count}} agents",
-    "empty": "No machines yet"
-  },
   "columns": {
     "agent": "Agent",
     "status": "Status",
@@ -209,7 +200,6 @@
     "rename_required": "Name is required",
     "edit_description_title": "Edit description",
     "description_placeholder": "What does this agent do?",
-    "save": "Save",
     "cancel": "Cancel"
   },
   "overview": {
@@ -235,12 +225,7 @@
     "edit_access_aria": "Access: {{value}}. Change access",
     "all_settings": "All settings"
   },
-  "skill_attach": {
-    "trigger_aria": "Attach a workspace skill",
-    "trigger_label": "Attach"
-  },
   "pickers": {
-    "concurrency_tooltip": "Concurrency · {{value}} max concurrent runs",
     "concurrency_range": "Max concurrent runs ({{min}}–{{max}})",
     "runtime_none": "No runtime",
     "runtime_tooltip": "Runtime · {{name}} · {{status}}",
@@ -301,7 +286,7 @@
     "environment": "Environment",
     "custom_args": "Custom Args",
     "mcp_config": "MCP",
-    "composio_mcp": "MCP Apps",
+    "composio_mcp": "Apps",
     "integrations": "Integrations",
     "runtime_config": "Routing",
     "qoder_agent": "Qoder Cloud Agents",
@@ -465,23 +450,17 @@
     }
   },
   "create_dialog": {
-    "title_create": "Create Agent",
-    "title_duplicate": "Duplicate Agent",
-    "description_duplicate": "Create a new agent based on \"{{name}}\". Instructions, env, and skills are copied for you.",
     "name_label": "Name",
     "name_placeholder": "e.g. Deep Research Agent",
     "description_label": "Description",
     "description_placeholder": "What does this agent do?",
-    "visibility_label": "Visibility",
     "access": {
-      "label": "Access",
       "private_title": "Private",
       "private_desc": "Only you can run this agent",
       "public_title": "Public",
       "public_desc": "Choose who can run this agent",
       "public_workspace_option": "Everyone in this workspace",
       "public_members_group": "Specific people",
-      "public_members_empty": "No workspace members to choose from",
       "public_targets_empty_hint": "Pick at least one option below — otherwise the agent stays private."
     },
     "runtime_label": "Runtime",
@@ -496,17 +475,10 @@
     "runtime_no_results": "No matching machines",
     "runtime_group_online": "{{online}}/{{total}} online",
     "duplicate_copy_suffix": " (Copy)",
-    "create": "Create",
-    "creating": "Creating...",
-    "cancel": "Cancel",
-    "create_failed_toast": "Failed to create agent",
     "skill_attach_failed_toast": "Agent created, but failed to attach skills: {{error}}",
     "squad_join_failed_toast": "Agent \"{{name}}\" was created but couldn't join the squad: {{error}}. You can add it manually from Members.",
     "instructions": {
       "label": "Instructions",
-      "placeholder_blank": "Click to write instructions…",
-      "placeholder_duplicate": "Click to view or edit the duplicated instructions",
-      "collapse": "Collapse",
       "editor_placeholder": "Write what this agent should do, what to focus on, what to avoid…"
     },
     "skills_section": {
@@ -724,22 +696,6 @@
       "redacted_hint": "Only the agent owner or a workspace admin can read this config.",
       "dialog_json_help": "Edit the full server configuration as JSON."
     },
-    "composio_mcp": {
-      "subtitle": "Check a toolkit to let this agent mount it as an MCP server — but only when you (its creator) are the one who triggered the run, directly or down a sub-agent chain.",
-      "loading": "Loading your connections…",
-      "load_failed": "Couldn't load your connected apps. Try again shortly.",
-      "empty_title": "No connected apps yet",
-      "empty_link_to_settings": "Connect one in Settings → Integrations",
-      "open_settings": "Open settings",
-      "connected": "Connected",
-      "toggle_aria": "Allow {{toolkit}} for this agent",
-      "saving": "Saving…",
-      "save_failed_toast": "Couldn't save — please try again",
-      "redacted_title": "Configured — hidden from your view",
-      "redacted_hint": "Only the agent's creator can view or change which apps it may use.",
-      "shared_warning": "This agent is shared. People who can run this agent may use the Composio apps you enable here. Use Private or narrow the access list if these apps expose sensitive data.",
-      "workspace_warning": "Public to workspace: any workspace member may use these Composio apps through this agent."
-    },
     "runtime_config": {
       "mode_label": "Routing mode",
       "mode_local": "Local",
@@ -854,6 +810,27 @@
       "started_prefix": "Started {{when}}",
       "dispatched_prefix": "Dispatched {{when}}",
       "queued_prefix": "Queued {{when}}"
+    },
+    "connected_apps": {
+      "loading": "Loading apps…",
+      "load_failed": "Couldn't load this agent's apps.",
+      "empty": "No connected apps available.",
+      "level": "Level",
+      "team_connected": "Team account connected",
+      "team_missing": "Team account not connected",
+      "personal_connected": "Your account is connected",
+      "personal_missing": "You haven't connected this app",
+      "team_admin_only": "Only workspace admins can give an agent a team account.",
+      "team_shared_warning": "Anyone who can run this agent can use this team account through it.",
+      "manage_link": "Manage accounts in Settings → Connected apps",
+      "save_failed_toast": "Couldn't save — please try again",
+      "team_help": "Shared workspace account, connected by admins.",
+      "personal_help": "Each run uses the account of whoever triggers it. They must connect their own account.",
+      "available_accounts": "Available: {{accounts}}",
+      "enable": "Enable {{app}}",
+      "account_for": "Account for {{app}}",
+      "connect_hint": "Connect another account in Settings if you don’t see the app you need.",
+      "available_personal": "Your account"
     }
   },
   "char_counter": {

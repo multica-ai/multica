@@ -579,8 +579,9 @@ class ApiClient {
     });
   }
 
-  async listAgents(opts?: { signal?: AbortSignal }): Promise<Agent[]> {
-    const raw = await this.fetch<unknown>("/api/agents", {
+  async listAgents(opts?: { signal?: AbortSignal; includeArchived?: boolean }): Promise<Agent[]> {
+    const path = opts?.includeArchived ? "/api/agents?include_archived=true" : "/api/agents";
+    const raw = await this.fetch<unknown>(path, {
       signal: opts?.signal,
     });
     return parseWithFallback(raw, AgentListSchema, EMPTY_AGENT_LIST, {
@@ -648,6 +649,9 @@ class ApiClient {
       `/api/issues${qs ? `?${qs}` : ""}`,
       { signal: opts?.signal },
     );
+    if (params?.created_by_user_id && (!raw || typeof raw !== "object" || !("created_by_user_id" in raw) || raw.created_by_user_id !== params.created_by_user_id)) {
+      return this.listIssues({ ...params, created_by_user_id: undefined, creator_id: params.creator_id ?? params.created_by_user_id }, opts);
+    }
     return parseWithFallback(raw, ListIssuesResponseSchema, EMPTY_LIST_ISSUES_RESPONSE, {
       endpoint: "GET /api/issues",
     });

@@ -64,14 +64,6 @@
     "search_runtime_filtered": "\"{{machine}}\"上没有匹配\"{{query}}\"的智能体。",
     "runtime_filtered": "\"{{machine}}\"上还没有智能体。"
   },
-  "runtime_filter": {
-    "all": "全部运行时",
-    "section_local": "本地",
-    "section_remote": "远程",
-    "section_cloud": "云端",
-    "agent_count_other": "{{count}} 个智能体",
-    "empty": "还没有机器"
-  },
   "columns": {
     "agent": "智能体",
     "status": "状态",
@@ -200,7 +192,6 @@
     "rename_required": "名称必填",
     "edit_description_title": "编辑描述",
     "description_placeholder": "这个智能体做什么？",
-    "save": "保存",
     "cancel": "取消"
   },
   "overview": {
@@ -223,12 +214,7 @@
     "edit_access_aria": "访问权限：{{value}}。更改访问权限",
     "all_settings": "全部设置"
   },
-  "skill_attach": {
-    "trigger_aria": "附加工作区 skill",
-    "trigger_label": "附加"
-  },
   "pickers": {
-    "concurrency_tooltip": "并发 · 最多 {{value}} 次并行运行",
     "concurrency_range": "最大并行运行数（{{min}}–{{max}}）",
     "runtime_none": "无运行时",
     "runtime_tooltip": "运行时 · {{name}} · {{status}}",
@@ -289,7 +275,7 @@
     "environment": "环境变量",
     "custom_args": "自定义参数",
     "mcp_config": "MCP",
-    "composio_mcp": "MCP 应用",
+    "composio_mcp": "应用",
     "integrations": "集成",
     "runtime_config": "路由",
     "qoder_agent": "Qoder Cloud Agents",
@@ -450,23 +436,17 @@
     }
   },
   "create_dialog": {
-    "title_create": "创建智能体",
-    "title_duplicate": "复制智能体",
-    "description_duplicate": "基于\"{{name}}\"创建一个新智能体。指令、环境变量和 skill 会一并复制。",
     "name_label": "名称",
     "name_placeholder": "例如：深度研究智能体",
     "description_label": "描述",
     "description_placeholder": "这个智能体做什么？",
-    "visibility_label": "可见性",
     "access": {
-      "label": "访问权限",
       "private_title": "私有",
       "private_desc": "只有你可以运行该智能体",
       "public_title": "公开",
       "public_desc": "选择谁可以运行该智能体",
       "public_workspace_option": "工作区内所有人",
       "public_members_group": "指定成员",
-      "public_members_empty": "没有可选择的工作区成员",
       "public_targets_empty_hint": "至少勾选下方一项——否则该智能体仍为私有。"
     },
     "runtime_label": "运行时",
@@ -481,17 +461,10 @@
     "runtime_no_results": "没有匹配的机器",
     "runtime_group_online": "{{online}}/{{total}} 在线",
     "duplicate_copy_suffix": "（副本）",
-    "create": "创建",
-    "creating": "创建中...",
-    "cancel": "取消",
-    "create_failed_toast": "创建智能体失败",
     "skill_attach_failed_toast": "智能体已创建，但 skill 关联失败：{{error}}",
     "squad_join_failed_toast": "智能体\"{{name}}\"已创建，但加入小队失败：{{error}}。你可以在 Members 标签里手动添加。",
     "instructions": {
       "label": "指令",
-      "placeholder_blank": "点击撰写指令…",
-      "placeholder_duplicate": "点击查看或编辑复制的指令",
-      "collapse": "收起",
       "editor_placeholder": "写下这个智能体该做什么、关注什么、要避开什么…"
     },
     "skills_section": {
@@ -705,22 +678,6 @@
       "redacted_hint": "只有智能体 owner 或工作区 admin 可以查看此配置。",
       "dialog_json_help": "以 JSON 编辑完整的服务器配置。"
     },
-    "composio_mcp": {
-      "subtitle": "勾选 toolkit，只在你自己（这个智能体的创建者）直接或通过下级智能体链路触发这个智能体时，才把它挂载为 MCP server。",
-      "loading": "正在加载你的连接…",
-      "load_failed": "无法加载你已连接的应用，请稍后重试。",
-      "empty_title": "还没有已连接的应用",
-      "empty_link_to_settings": "去 \"设置 → 集成\" 连一个",
-      "open_settings": "打开设置",
-      "connected": "已连接",
-      "toggle_aria": "允许该智能体使用 {{toolkit}}",
-      "saving": "正在保存…",
-      "save_failed_toast": "保存失败，请重试",
-      "redacted_title": "已配置——对你隐藏",
-      "redacted_hint": "只有该智能体的创建者才能查看或修改它可使用的应用。",
-      "shared_warning": "该智能体已共享。能够运行该智能体的人可以通过它使用你在此启用的 Composio 应用。如果这些应用涉及敏感数据，请改用\"私有\"或缩小访问范围。",
-      "workspace_warning": "公开给工作区：工作区内任何成员都可以通过该智能体使用这些 Composio 应用。"
-    },
     "runtime_config": {
       "mode_label": "路由模式",
       "mode_local": "Local",
@@ -833,6 +790,27 @@
       "started_prefix": "{{when}}启动",
       "dispatched_prefix": "{{when}}派发",
       "queued_prefix": "{{when}}排队"
+    },
+    "connected_apps": {
+      "loading": "正在加载应用…",
+      "load_failed": "无法加载此智能体的应用。",
+      "empty": "暂无已连接的应用。",
+      "level": "权限",
+      "team_connected": "团队账号已连接",
+      "team_missing": "团队账号未连接",
+      "personal_connected": "你的账号已连接",
+      "personal_missing": "你还没有连接这个应用",
+      "team_admin_only": "只有工作区管理员可以给智能体团队账号。",
+      "team_shared_warning": "能运行这个智能体的人，都能通过它使用该团队账号。",
+      "manage_link": "在 设置 → 已连接应用 中管理账号",
+      "save_failed_toast": "保存失败，请重试",
+      "team_help": "工作区共用的账号，由管理员连接。",
+      "personal_help": "每次运行使用触发者自己已连接的账号；未连接时需先连接。",
+      "available_accounts": "可用：{{accounts}}",
+      "enable": "启用 {{app}}",
+      "account_for": "{{app}} 的账号",
+      "connect_hint": "没看到想要的应用？前往设置连接账号。",
+      "available_personal": "你的账号"
     }
   },
   "char_counter": {

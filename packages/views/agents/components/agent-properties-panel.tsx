@@ -26,6 +26,7 @@ import { AgentPresenceIndicator } from "./agent-presence-indicator";
 import { CHIP_CLASS } from "./inspector/chip";
 import { ModelPicker } from "./inspector/model-picker";
 import { RuntimePicker } from "./inspector/runtime-picker";
+import { ThinkingPropRow } from "./inspector/thinking-prop-row";
 import { useExecutionControls } from "./inspector/use-execution-controls";
 import { AgentPerformanceSummary, SuccessRate } from "./tabs/activity-tab";
 
@@ -37,7 +38,7 @@ const ACCESS_ICONS = {
 
 /**
  * The agent page's right panel: what it is and where it runs, with the
- * runtime and model editable in place.
+ * runtime, model, and thinking level editable in place.
  */
 export function AgentPropertiesPanel({
   agent,
@@ -165,15 +166,26 @@ export function AgentPropertiesPanel({
             </Value>
           </ObjectProperty>
         ) : (
-          <ObjectProperty label={t(($) => $.inspector.prop_model)}>
-            <ModelPicker
+          <>
+            <ObjectProperty label={t(($) => $.inspector.prop_model)}>
+              <ModelPicker
+                runtimeId={agent.runtime_id}
+                runtimeOnline={canDiscoverRuntimeModels}
+                value={agent.model ?? ""}
+                canEdit={canEdit}
+                onChange={changeModel}
+              />
+            </ObjectProperty>
+            <ThinkingPropRow
               runtimeId={agent.runtime_id}
               runtimeOnline={canDiscoverRuntimeModels}
-              value={agent.model ?? ""}
+              provider={runtime?.provider ?? ""}
+              model={agent.model ?? ""}
+              value={agent.thinking_level ?? ""}
               canEdit={canEdit}
-              onChange={changeModel}
+              onChange={(thinkingLevel) => update({ thinking_level: thinkingLevel })}
             />
-          </ObjectProperty>
+          </>
         )}
 
         <ObjectProperty label={t(($) => $.columns.access)}>

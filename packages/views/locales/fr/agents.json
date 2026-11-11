@@ -65,15 +65,6 @@
     "search_runtime_filtered": "Aucun agent sur « {{machine}} » ne correspond à « {{query}} ».",
     "runtime_filtered": "Aucun agent sur « {{machine}} »."
   },
-  "runtime_filter": {
-    "all": "Tous les runtimes",
-    "section_local": "Local",
-    "section_remote": "Distant",
-    "section_cloud": "Cloud",
-    "agent_count_one": "{{count}} agent",
-    "agent_count_other": "{{count}} agents",
-    "empty": "Aucune machine pour l'instant"
-  },
   "columns": {
     "agent": "Agent",
     "status": "Statut",
@@ -209,7 +200,6 @@
     "rename_required": "Le nom est obligatoire",
     "edit_description_title": "Modifier la description",
     "description_placeholder": "Que fait cet agent ?",
-    "save": "Enregistrer",
     "cancel": "Annuler"
   },
   "overview": {
@@ -235,12 +225,7 @@
     "edit_access_aria": "Accès : {{value}}. Modifier l'accès",
     "all_settings": "Tous les paramètres"
   },
-  "skill_attach": {
-    "trigger_aria": "Rattacher un skill de l'espace de travail",
-    "trigger_label": "Rattacher"
-  },
   "pickers": {
-    "concurrency_tooltip": "Concurrence · {{value}} exécutions simultanées au maximum",
     "concurrency_range": "Exécutions simultanées maximales ({{min}}–{{max}})",
     "runtime_none": "Aucun runtime",
     "runtime_tooltip": "Runtime · {{name}} · {{status}}",
@@ -301,7 +286,7 @@
     "environment": "Environnement",
     "custom_args": "Arguments personnalisés",
     "mcp_config": "MCP",
-    "composio_mcp": "Applications MCP",
+    "composio_mcp": "Apps",
     "integrations": "Intégrations",
     "runtime_config": "Routage",
     "qoder_agent": "Qoder Cloud Agents",
@@ -465,23 +450,17 @@
     }
   },
   "create_dialog": {
-    "title_create": "Créer un agent",
-    "title_duplicate": "Dupliquer l'agent",
-    "description_duplicate": "Créez un agent à partir de « {{name}} ». Les instructions, l'environnement et les skills sont copiés pour vous.",
     "name_label": "Nom",
     "name_placeholder": "ex. Agent de recherche approfondie",
     "description_label": "Description",
     "description_placeholder": "Que fait cet agent ?",
-    "visibility_label": "Visibilité",
     "access": {
-      "label": "Accès",
       "private_title": "Privé",
       "private_desc": "Vous seul pouvez exécuter cet agent",
       "public_title": "Public",
       "public_desc": "Choisissez qui peut exécuter cet agent",
       "public_workspace_option": "Tout le monde dans cet espace de travail",
       "public_members_group": "Personnes précises",
-      "public_members_empty": "Aucun membre de l'espace de travail à choisir",
       "public_targets_empty_hint": "Choisissez au moins une option ci-dessous — sinon l'agent reste privé."
     },
     "runtime_label": "Runtime",
@@ -496,17 +475,10 @@
     "runtime_no_results": "Aucune machine correspondante",
     "runtime_group_online": "{{online}}/{{total}} en ligne",
     "duplicate_copy_suffix": " (copie)",
-    "create": "Créer",
-    "creating": "Création...",
-    "cancel": "Annuler",
-    "create_failed_toast": "Échec de la création de l'agent",
     "skill_attach_failed_toast": "Agent créé, mais échec du rattachement des skills : {{error}}",
     "squad_join_failed_toast": "L'agent « {{name}} » a été créé mais n'a pas pu rejoindre le squad : {{error}}. Vous pouvez l'ajouter manuellement depuis Membres.",
     "instructions": {
       "label": "Instructions",
-      "placeholder_blank": "Cliquez pour rédiger les instructions…",
-      "placeholder_duplicate": "Cliquez pour consulter ou modifier les instructions dupliquées",
-      "collapse": "Replier",
       "editor_placeholder": "Indiquez ce que cet agent doit faire, sur quoi se concentrer, ce qu'il faut éviter…"
     },
     "skills_section": {
@@ -724,22 +696,6 @@
       "redacted_hint": "Seul le propriétaire de l'agent ou un administrateur de l'espace de travail peut lire cette configuration.",
       "dialog_json_help": "Modifiez la configuration complète du serveur en JSON."
     },
-    "composio_mcp": {
-      "subtitle": "Cochez une boîte à outils pour permettre à cet agent de la monter comme serveur MCP — mais uniquement lorsque c'est vous (son créateur) qui avez déclenché l'exécution, directement ou via une chaîne de sous-agents.",
-      "loading": "Chargement de vos connexions…",
-      "load_failed": "Impossible de charger vos applications connectées. Réessayez dans un instant.",
-      "empty_title": "Aucune application connectée pour l'instant",
-      "empty_link_to_settings": "Connectez-en un dans Paramètres → Intégrations",
-      "open_settings": "Ouvrir les paramètres",
-      "connected": "Connecté",
-      "toggle_aria": "Autoriser {{toolkit}} pour cet agent",
-      "saving": "Enregistrement…",
-      "save_failed_toast": "Impossible d'enregistrer — veuillez réessayer",
-      "redacted_title": "Configuré — masqué pour vous",
-      "redacted_hint": "Seul le créateur de l'agent peut voir ou modifier les applications qu'il peut utiliser.",
-      "shared_warning": "Cet agent est partagé. Les personnes qui peuvent l'exécuter pourront utiliser les applications Composio que vous activez ici. Passez en Privé ou restreignez la liste d'accès si ces applications exposent des données sensibles.",
-      "workspace_warning": "Public pour l'espace de travail : tout membre de l'espace de travail peut utiliser ces applications Composio via cet agent."
-    },
     "runtime_config": {
       "mode_label": "Mode de routage",
       "mode_local": "Local",
@@ -854,6 +810,27 @@
       "started_prefix": "Démarrée {{when}}",
       "dispatched_prefix": "Envoyée {{when}}",
       "queued_prefix": "Mise en file d'attente {{when}}"
+    },
+    "connected_apps": {
+      "loading": "Chargement des apps…",
+      "load_failed": "Impossible de charger les apps de cet agent.",
+      "empty": "Aucune app connectée disponible.",
+      "level": "Niveau",
+      "team_connected": "Compte d'équipe connecté",
+      "team_missing": "Compte d'équipe non connecté",
+      "personal_connected": "Votre compte est connecté",
+      "personal_missing": "Vous n'avez pas connecté cette app",
+      "team_admin_only": "Seuls les admins de l'espace peuvent donner un compte d'équipe à un agent.",
+      "team_shared_warning": "Toute personne pouvant exécuter cet agent peut utiliser ce compte d’équipe par son intermédiaire.",
+      "manage_link": "Gérer les comptes dans Paramètres → Applications connectées",
+      "save_failed_toast": "Échec de l'enregistrement, veuillez réessayer",
+      "team_help": "Compte partagé de l’espace de travail, connecté par les administrateurs.",
+      "personal_help": "Chaque exécution utilise le compte de la personne qui la déclenche. Chacun doit connecter son compte.",
+      "available_accounts": "Disponible : {{accounts}}",
+      "enable": "Activer {{app}}",
+      "account_for": "Compte pour {{app}}",
+      "connect_hint": "Vous ne trouvez pas l’app souhaitée ? Connectez un compte dans les paramètres.",
+      "available_personal": "Votre compte"
     }
   },
   "char_counter": {

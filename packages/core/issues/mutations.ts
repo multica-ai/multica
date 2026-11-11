@@ -1,4 +1,4 @@
-import { normalizeStatusPatch } from "./status-category";
+import { issueBehavesAs, normalizeStatusPatch } from "./status-category";
 import {
   hashKey,
   useMutation,
@@ -36,8 +36,11 @@ import {
   pruneDeletedIssueFromParentChildrenCaches,
 } from "./delete-cache";
 import { useWorkspaceId } from "../hooks";
+import { refreshSubscribedIssues } from "./subscribed";
+import { getCurrentWsId } from "../platform/workspace-storage";
 import { useRecentContextStore } from "../chat/recent-context-store";
 import { useRecentIssuesStore } from "./stores";
+import { useStarPromptStore } from "../star-prompt";
 import type { InboxItem, Issue, IssueReaction } from "../types";
 import type {
   CreateCommentSubIssueManualRequest,
@@ -350,6 +353,18 @@ export function useUpdateIssue() {
       );
       // The server has committed — safe to flush any drift it reported now.
       invalidateStaleListKeys(qc, reconcile.staleKeys);
+      if (
+        vars.status !== undefined &&
+        serverIssue.assignee_type === "agent" &&
+        serverIssue.assignee_id &&
+        issueBehavesAs(serverIssue, "done")
+      ) {
+        useStarPromptStore.getState().reportAgentIssueDone({
+          wsId,
+          agentId: serverIssue.assignee_id,
+          issueId: serverIssue.id,
+        });
+      }
     },
     onSettled: (_data, err, vars, ctx) => {
       settleInboxAfterIssueWrite(qc, wsId, ctx?.inboxWrite, err !== null);
@@ -1191,8 +1206,10 @@ export function useToggleIssueSubscriber(issueId: string) {
       if (ctx?.prev)
         qc.setQueryData(issueKeys.subscribers(issueId), ctx.prev);
     },
-    onSettled: () => {
+    onSettled: (_data, _err, { userType }) => {
       qc.invalidateQueries({ queryKey: issueKeys.subscribers(issueId) });
+      const wsId = getCurrentWsId();
+      if (wsId && userType === "member") void refreshSubscribedIssues(qc, wsId);
     },
   });
 }
@@ -1215,8 +1232,10 @@ export function useUnsubscribeFromIssueSubtree(issueId: string) {
     }) => {
       await api.unsubscribeFromIssueSubtree(issueId, userId, userType);
     },
-    onSettled: () => {
+    onSettled: (_data, _err, { userType }) => {
       qc.invalidateQueries({ queryKey: issueKeys.subscribersAll() });
+      const wsId = getCurrentWsId();
+      if (wsId && userType === "member") void refreshSubscribedIssues(qc, wsId);
     },
   });
 }

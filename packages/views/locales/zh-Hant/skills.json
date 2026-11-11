@@ -1,5 +1,6 @@
 {
   "page": {
+    "search": "搜尋 skill",
     "title": "Skills",
     "new_skill": "新建 skill",
     "scopes": {
@@ -126,6 +127,8 @@
     },
     "toast_saved": "已儲存 skill",
     "toast_save_failed": "儲存 skill 失敗",
+    "toast_saved_version": "已儲存為 v{{version}}",
+    "toast_view_history": "查看歷史",
     "toast_deleted": "已刪除 skill",
     "toast_delete_failed": "刪除 skill 失敗",
     "refresh": {
@@ -192,32 +195,57 @@
       "mode_edit": "編輯",
       "mode_raw": "純文字"
     },
+    "versions": {
+      "list_aria": "skill 版本",
+      "version_label": "v{{version}}",
+      "current": "目前",
+      "unknown_author": "未知",
+      "empty": "還沒有版本。這個 skill 下次被修改時，會先把目前內容記錄為第一個版本。",
+      "load_failed": "版本載入失敗。",
+      "restore": "還原",
+      "toast_restored": "已還原 v{{version}}",
+      "toast_restore_failed": "版本還原失敗",
+      "source": {
+        "baseline": "早期內容",
+        "create": "建立",
+        "update": "編輯",
+        "import": "匯入",
+        "refresh": "從來源更新",
+        "restore": "還原自 v{{version}}"
+      },
+      "dialog": {
+        "title": "還原到 v{{version}}？",
+        "description": "v{{version}} 的內容會成為一個新版本，智慧體從下一次執行起使用它。較新的版本仍保留在歷史中。",
+        "unsaved_warning": "未儲存的修改會被捨棄。",
+        "cancel": "取消",
+        "confirm": "還原",
+        "restoring": "還原中..."
+      }
+    },
     "sections": {
       "content": "內容",
       "files": "檔案",
       "edit": "編輯",
       "open": "開啟",
-      "add": "新增"
+      "add": "新增",
+      "history": "歷史"
     },
     "menu": {
       "copy_link": "複製連結",
       "link_copied": "已複製連結",
-      "delete": "刪除 skill"
+      "delete": "刪除 skill",
+      "version_history": "版本歷史"
     },
     "panel": {
-      "add_description": "新增描述"
+      "add_description": "新增描述",
+      "version": "版本",
+      "no_versions": "暫無版本"
     }
   },
   "create": {
-    "back": "返回",
-    "back_aria": "返回方式選擇",
     "close": "關閉",
     "close_aria": "關閉",
     "method": {
-      "chooser": {
-        "title": "新建 skill",
-        "desc": "選擇新增 skill 的方式。"
-      },
       "manual": {
         "title": "手動建立",
         "desc": "從空白 SKILL.md 開始寫。"
@@ -263,7 +291,19 @@
       "cancel": "取消",
       "import": "匯入",
       "importing": "匯入中...",
-      "toast_imported": "已匯入 skill"
+      "toast_imported": "已匯入 skill",
+      "select_all": "全選",
+      "import_count": "匯入 {{count}} 個",
+      "done": "完成",
+      "stop": "目前項目完成後停止",
+      "unreadable": "無法讀取此 skill，請重新選擇資料夾。",
+      "uncertain": "匯入結果尚不確定。請重新整理 skill 列表並核對後再重試；已有同名項目的匯入會保持鎖定，請前往列表查看。",
+      "check_results": "重新整理並核對",
+      "retry_ready": "重新整理後的列表中未找到此 skill，可以重試。",
+      "uncertain_manual": "匯入結果尚不確定，且無法確認壓縮包內的 skill 名稱。再次匯入此壓縮包前，請先手動核對 skill 列表。",
+      "check_failed": "無法核對 skill 列表，結果不確定的匯入項目仍保持鎖定。請重新核對，或前往列表手動查看。",
+      "workspace_changed": "工作區已切換，後續匯入已停止。請關閉此對話框，並在目標工作區重新開啟。",
+      "summary": "成功 {{success}} 個 · 失敗或待核對 {{failed}} 個"
     },
     "url": {
       "url_label": "Skill URL",

@@ -89,9 +89,27 @@ export function useCreateAgentForm(options?: {
     isError: runtimesFailed,
   } = useQuery(runtimeListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
-  const { data: workspaceSkills = [] } = useQuery(skillListOptions(wsId));
+  const {
+    data: workspaceSkills = [],
+    isSuccess: workspaceSkillsLoaded,
+    fetchStatus: workspaceSkillsFetchStatus,
+  } = useQuery(skillListOptions(wsId));
 
   const [draft, setDraft] = useState<AgentDraft>(EMPTY_AGENT_DRAFT);
+
+  // Drafts can arrive after the catalog through duplication or restoration.
+  // Persist the reconciliation in the draft so the picker, autosave and submit agree.
+  useEffect(() => {
+    // A background refresh still exposes the previous successful catalog.
+    if (!workspaceSkillsLoaded || workspaceSkillsFetchStatus !== "idle" || draft.skillIds.size === 0) return;
+    const validIds = new Set(workspaceSkills.map((skill) => skill.id));
+    setDraft((current) => {
+      const skillIds = new Set([...current.skillIds].filter((id) => validIds.has(id)));
+      return skillIds.size === current.skillIds.size
+        ? current
+        : { ...current, skillIds };
+    });
+  }, [draft.skillIds, workspaceSkills, workspaceSkillsLoaded, workspaceSkillsFetchStatus]);
 
   const usableRuntimes = useMemo(
     () =>

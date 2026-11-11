@@ -77,6 +77,9 @@ func (h *Handler) AddReaction(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "comment not found")
 		return
 	}
+	if !h.requireIssueIDVisible(w, r, workspaceID, comment.IssueID, http.StatusNotFound, "comment not found") {
+		return
+	}
 
 	var req struct {
 		Emoji string `json:"emoji"`
@@ -165,6 +168,9 @@ func (h *Handler) RemoveReaction(w http.ResponseWriter, r *http.Request) {
 	// A deleted comment's tombstone has no reactions left to remove.
 	if err != nil || comment.DeletedAt.Valid {
 		writeError(w, http.StatusNotFound, "comment not found")
+		return
+	}
+	if !h.requireIssueIDVisible(w, r, workspaceID, comment.IssueID, http.StatusNotFound, "comment not found") {
 		return
 	}
 

@@ -42,7 +42,7 @@ function buildMyRelationPlan(
     case "created":
       return {
         scopeKey,
-        queryFilter: { creator_id: scope.userId },
+        queryFilter: { created_by_user_id: scope.userId },
         createDefaults: {},
       };
     case "involved":

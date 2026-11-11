@@ -309,6 +309,9 @@ export interface TaskCancellationActor {
 }
 
 export interface AgentTask {
+  /** Owning issue labels supplied by subtree execution-history reads. */
+  issue_identifier?: string;
+  issue_title?: string;
   wakeup_id?: string;
   id: string;
   agent_id: string;
@@ -905,6 +908,32 @@ export interface SkillFile {
   content: string;
   created_at: string;
   updated_at: string;
+}
+
+/** How a skill reached a version. Unknown server values fall back to "update". */
+export type SkillVersionSource =
+  | "baseline"
+  | "create"
+  | "update"
+  | "import"
+  | "refresh"
+  | "restore";
+
+export interface SkillVersionSummary {
+  id: string;
+  skill_id: string;
+  version: number;
+  name: string;
+  source: SkillVersionSource;
+  restored_from_version: number | null;
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface SkillVersion extends SkillVersionSummary {
+  description: string;
+  content: string;
+  files: { path: string; content: string }[];
 }
 
 export interface CreateSkillRequest {

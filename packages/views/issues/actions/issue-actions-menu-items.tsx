@@ -15,6 +15,8 @@ import {
   FolderOpen,
   Hash,
   Link2,
+  LocateFixed,
+  Monitor,
   Network,
   Pin,
   PinOff,
@@ -25,10 +27,10 @@ import {
   Unlink,
   UserMinus,
 } from "@multica/ui/icons";
+import { useIssueDeletion } from "@multica/core/issues/use-issue-deletion";
 import type { AgentTask, Issue } from "@multica/core/types";
 import { resolveWorkdirCopyTarget } from "@multica/core/issues";
 import { todayDateOnly, addDaysDateOnly } from "@multica/core/issues/date";
-import { api } from "@multica/core/api";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import {
   PRIORITY_DISPLAY_ORDER,
@@ -42,7 +44,7 @@ import { stepHandsOff, workflowAllowsStatus, workflowStep } from "@multica/core/
 import { useModalStore } from "@multica/core/modals";
 import { useIssueStatusOptions } from "../utils/status-options";
 import { useStatusLabel } from "../utils/status-label";
-import { issueKeys } from "@multica/core/issues/queries";
+import { issueTasksOptions } from "@multica/core/issues/queries";
 import { StatusIcon } from "../components/status-icon";
 import { PriorityIcon } from "../components/priority-icon";
 import { selectIssueTasks } from "../surface/activity";
@@ -119,6 +121,8 @@ interface IssueActionsMenuItemsProps {
   variant?: "full" | "sidebar";
   /** Sidebar variant: asks the parent to confirm stopping a running task. */
   onStopRun?: (task: AgentTask) => void;
+  /** Adds "Show in sidebar", for the page the issue is open on. */
+  onShowInSidebar?: () => void;
 }
 
 export function IssueActionsMenuItems({
@@ -130,9 +134,11 @@ export function IssueActionsMenuItems({
   archivedInboxItemId,
   variant = "full",
   onStopRun,
+  onShowInSidebar,
 }: IssueActionsMenuItemsProps) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
+  const { canDelete } = useIssueDeletion(wsId);
   const sidebar = variant === "sidebar";
   const statusLabel = useStatusLabel(wsId);
   // Only the statuses the issue's workflow allows; entering a step that hands
@@ -154,6 +160,7 @@ export function IssueActionsMenuItems({
     isPinned,
     updateField,
     openInNewTab,
+    openInDesktop,
     togglePin,
     copyLink,
     openCreateSubIssue,
@@ -174,9 +181,7 @@ export function IssueActionsMenuItems({
   // The query shares its key with ExecutionLogSection, so navigating from
   // the issue detail page is a free cache hit.
   const { data: tasks } = useQuery({
-    queryKey: issueKeys.tasks(issue.id),
-    queryFn: () => api.listTasksByIssue(issue.id),
-    staleTime: 30_000,
+    ...issueTasksOptions(issue.id),
     enabled: !sidebar,
   });
   const workdirCopyTarget = useMemo(
@@ -411,6 +416,12 @@ export function IssueActionsMenuItems({
         <ExternalLink className="h-3.5 w-3.5" />
         {t(($) => $.actions.open_in_new_tab)}
       </P.Item>
+      {openInDesktop && (
+        <P.Item onClick={openInDesktop}>
+          <Monitor className="h-3.5 w-3.5" />
+          {t(($) => $.web.open_in_desktop)}
+        </P.Item>
+      )}
       <P.Item onClick={togglePin}>
         {isPinned ? (
           <PinOff className="h-3.5 w-3.5" />
@@ -419,6 +430,12 @@ export function IssueActionsMenuItems({
         )}
         {isPinned ? t(($) => $.actions.unpin_from_sidebar) : t(($) => $.actions.pin_to_sidebar)}
       </P.Item>
+      {onShowInSidebar && (
+        <P.Item onClick={onShowInSidebar}>
+          <LocateFixed className="h-3.5 w-3.5" />
+          {t(($) => $.actions.locate_in_sidebar)}
+        </P.Item>
+      )}
       {archivedInboxItemId && <InboxRestoreMenuItem itemId={archivedInboxItemId} Item={P.Item} />}
       {sidebar &&
         (unread ? (
@@ -505,6 +522,8 @@ export function IssueActionsMenuItems({
           <P.Separator />
 
           <P.Item
+            disabled={!canDelete(issue)}
+            title={!canDelete(issue) ? t(($) => $.batch.delete_restricted) : undefined}
             variant="destructive"
             onClick={() => openDeleteConfirm({ onDeletedFallbackPath })}
           >

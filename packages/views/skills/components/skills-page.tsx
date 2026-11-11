@@ -43,6 +43,7 @@ import {
   CollectionPageState,
   CollectionResetButton,
   CollectionScopeItems,
+  CollectionSearch,
 } from "../../layout/collection-page";
 import {
   CollectionDisplayMenu,
@@ -54,7 +55,11 @@ import {
 import { canEditSkill } from "../hooks/use-can-edit-skill";
 import { SkillsIntro } from "./skills-intro";
 import { originSourceUrl, readOrigin } from "../lib/origin";
-import { rowMatchesFilters, type SkillRow } from "./skill-list-filter";
+import {
+  matchesSkillSearch,
+  rowMatchesFilters,
+  type SkillRow,
+} from "./skill-list-filter";
 import {
   CreateSkillDialog,
   type CreateSkillMethod,
@@ -283,6 +288,8 @@ export default function SkillsPage() {
   const toggleColumn = useSkillsViewStore((s) => s.toggleColumn);
   const toggleFilter = useSkillsViewStore((s) => s.toggleFilter);
   const clearFilters = useSkillsViewStore((s) => s.clearFilters);
+  const search = useSkillsViewStore((s) => s.search);
+  const setSearch = useSkillsViewStore((s) => s.setSearch);
 
   const assignments = useMemo(() => selectSkillAssignments(agents), [agents]);
 
@@ -341,9 +348,11 @@ export default function SkillsPage() {
   // from this.
   const scopeRows = scope === "mine" ? mineRows : allRows;
 
-  // Visible rows: filters, then sort.
+  // Visible rows: search and filters, then sort.
   const rows = useMemo<SkillRow[]>(() => {
-    const filtered = scopeRows.filter((row) => rowMatchesFilters(row, filters));
+    const filtered = scopeRows.filter(
+      (row) => matchesSkillSearch(row, search) && rowMatchesFilters(row, filters),
+    );
 
     const dir = sortDirection === "asc" ? 1 : -1;
     filtered.sort((a, b) => {
@@ -367,7 +376,7 @@ export default function SkillsPage() {
       );
     });
     return filtered;
-  }, [scopeRows, filters, sortField, sortDirection]);
+  }, [scopeRows, search, filters, sortField, sortDirection]);
 
   const handleCreated = (skill: Skill) => {
     navigation.push(paths.skillDetail(skill.id));
@@ -435,6 +444,21 @@ export default function SkillsPage() {
   };
 
   const narrowed = countActiveFilterDimensions(filters) > 0;
+  const hasSearch = search.trim() !== "";
+  const resetNarrowing = () => {
+    clearFilters();
+    setSearch("");
+  };
+  const noMatchText = hasSearch
+    ? t(($) => $.page.no_matches.with_query, {
+        query: search.trim(),
+        filterSuffix: narrowed
+          ? t(($) => $.page.no_matches.with_query_filter_suffix)
+          : "",
+      })
+    : narrowed
+      ? t(($) => $.page.no_matches.filter_only)
+      : undefined;
   const scopeLabels: Record<SkillScope, string> = {
     all: t(($) => $.page.scopes.all.label),
     mine: t(($) => $.page.scopes.mine.label),
@@ -461,7 +485,14 @@ export default function SkillsPage() {
             onToggleFilter={toggleFilter}
             rows={scopeRows}
           />
-          {narrowed && <CollectionResetButton onClick={clearFilters} />}
+          <CollectionSearch
+            value={search}
+            onChange={setSearch}
+            label={t(($) => $.page.search)}
+          />
+          {(narrowed || hasSearch) && (
+            <CollectionResetButton onClick={resetNarrowing} />
+          )}
         </>
       }
       actions={
@@ -480,7 +511,7 @@ export default function SkillsPage() {
 
   const createDialog = createMethod && (
     <CreateSkillDialog
-      initialMethod={createMethod}
+      method={createMethod}
       onClose={() => setCreateMethod(null)}
       onCreated={handleCreated}
     />
@@ -555,9 +586,10 @@ export default function SkillsPage() {
           empty={
             <CollectionNoMatches
               title={t(($) => $.page.no_matches.title)}
-              description={narrowed ? t(($) => $.page.no_matches.filter_only) : undefined}
-              onReset={clearFilters}
+              description={noMatchText}
+              onReset={resetNarrowing}
               hasFilters={narrowed}
+              hasSearch={hasSearch}
             />
           }
         />

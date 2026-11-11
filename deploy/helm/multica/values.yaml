@@ -192,7 +192,7 @@ frontend:
   replicas: 1
   config:
     # Backend origin used by the frontend runtime proxy for /v1, /api, /auth,
-    # /uploads, and /ws. Empty defaults to this release's backend Service.
+    # /health, and /ws. Empty defaults to this release's backend Service.
     remoteApiUrl: ""
     # Optional docs origin used by the frontend runtime proxy for /docs.
     docsUrl: ""

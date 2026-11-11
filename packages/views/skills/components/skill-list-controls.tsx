@@ -33,6 +33,7 @@ import {
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
 import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
+import { stopMenuSearchKeys } from "../../issues/components/advanced-filter-panel";
 import {
   type SkillListFilters,
   type SkillOriginType,
@@ -276,6 +277,7 @@ export function SkillFilterMenu({
                   type="text"
                   value={labelSearch}
                   onChange={(e) => setLabelSearch(e.target.value)}
+                  onKeyDown={stopMenuSearchKeys}
                   placeholder={t(($) => $.toolbar.filter_search_placeholder)}
                   className="w-full bg-transparent text-body outline-none placeholder:text-muted-foreground"
                   autoFocus
@@ -357,11 +359,20 @@ export function SkillCreateMenu({
       <DropdownMenuTrigger
         render={trigger ?? <CollectionCreateButton label={t(($) => $.page.new_skill)} />}
       />
-      <DropdownMenuContent align={align} className="w-auto min-w-48">
+      <DropdownMenuContent align={align} className="w-72">
         {SKILL_CREATE_METHODS.map(({ key, icon: Icon }) => (
-          <DropdownMenuItem key={key} onClick={() => onCreate(key)}>
-            <Icon />
-            {t(($) => $.create.method[key].title)}
+          <DropdownMenuItem
+            key={key}
+            onClick={() => onCreate(key)}
+            className="items-start"
+          >
+            <Icon className="mt-0.5" />
+            <span className="min-w-0 flex-1">
+              <span className="block">{t(($) => $.create.method[key].title)}</span>
+              <span className="block text-caption text-muted-foreground">
+                {t(($) => $.create.method[key].desc)}
+              </span>
+            </span>
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>

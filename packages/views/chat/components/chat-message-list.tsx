@@ -50,6 +50,7 @@ import { TaskStatusPill } from "./task-status-pill";
 import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
 import { FOLLOW_EDGE_THRESHOLD } from "../../common/task-transcript/transcript-follow";
 import { LIVE_END_ROW_ATTR, useStickToBottom } from "./stick-to-bottom";
+import { JumpToLiveEndButton, useJumpToLiveEnd } from "./jump-to-live-end";
 import { formatElapsedMs } from "../lib/format";
 import {
   canonicalAnswerText,
@@ -58,6 +59,7 @@ import {
 } from "../lib/copy-text";
 import { stripChatQuickActionsProtocol } from "../lib/quick-actions";
 import { useT } from "../../i18n";
+import { isAnnotatableChatMessage, type ChatAnnotations } from "./use-chat-annotations";
 
 // ─── Public component ────────────────────────────────────────────────────
 
@@ -102,6 +104,8 @@ interface ChatMessageListProps {
    * that reply until chat:quick_actions resolves it.
    */
   quickActionsPendingMessageId?: string | null;
+  /** Lets the reader annotate settled assistant replies into the next message. */
+  annotations?: Pick<ChatAnnotations, "cardRef" | "captureProps" | "popup" | "revealSourceRef">;
 }
 
 // ─── Virtuoso chrome ─────────────────────────────────────────────────────
@@ -201,6 +205,7 @@ export function ChatMessageList({
   quickActionsDisabled = false,
   onRegenerateQuickActions,
   quickActionsPendingMessageId = null,
+  annotations,
 }: ChatMessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
@@ -215,7 +220,7 @@ export function ChatMessageList({
   const pinToLiveEnd = useCallback(() => {
     virtuosoRef.current?.scrollToIndex({ index: "LAST", align: "end" });
   }, []);
-  const { isFollowing, onContentHeightChanged, hasReachedLiveEnd } = useStickToBottom(
+  const { isFollowing, onContentHeightChanged, disengage, hasReachedLiveEnd } = useStickToBottom(
     scrollContainerEl,
     pinToLiveEnd,
     active,
@@ -295,8 +300,31 @@ export function ChatMessageList({
     return items;
   }, [messages, hasLive, pendingTaskId]);
 
+  const revealSourceRef = annotations?.revealSourceRef;
+  useEffect(() => {
+    if (!revealSourceRef) return;
+    revealSourceRef.current = (messageId) => {
+      const index = renderItems.findIndex((item) => item.kind === "message" && item.message.id === messageId);
+      if (index < 0) return false;
+      disengage();
+      virtuosoRef.current?.scrollToIndex({ index, align: "center" });
+      return true;
+    };
+    return () => { revealSourceRef.current = null; };
+  }, [revealSourceRef, renderItems, disengage]);
+
   const firstIndex = renderItems.length > 0 ? firstItemIndex : 0;
-  const liveEndKey = renderItems[renderItems.length - 1]?.key ?? null;
+  const tailItem = renderItems[renderItems.length - 1];
+  const liveEndKey = tailItem?.key ?? null;
+  // Changes when the last row is new or a live reply streamed more output.
+  const tailKey = tailItem
+    ? `${tailItem.key}:${tailItem.kind === "live" ? (liveTaskMessages?.length ?? 0) : "persisted"}`
+    : null;
+  const jumpToLiveEnd = useJumpToLiveEnd(scrollContainerEl, pinToLiveEnd, {
+    enabled: active && hasReachedLiveEnd,
+    tailKey,
+    tailIsReply: tailItem?.kind === "live" || tailItem?.message.role === "assistant",
+  });
 
   const listContext: ChatListContext = {
     isFetchingOlderMessages,
@@ -327,6 +355,10 @@ export function ChatMessageList({
 
   return (
     <PreviewSequenceProvider items={previewSequence}>
+    {/* Positioning box for the floating "Jump to latest" button, so it stays
+     *  pinned above the composer instead of scrolling with the rows. */}
+    <div ref={annotations?.cardRef} {...annotations?.captureProps} className="relative flex min-h-0 flex-1 flex-col">
+    {annotations?.popup}
     <div
       ref={setScrollContainerRef}
       data-tab-scroll-root
@@ -393,6 +425,8 @@ export function ChatMessageList({
         itemContent={(_, item) => (
           <div
             className={cn(CHAT_COLUMN, "py-2")}
+            data-mc="chat-message"
+            data-role={item.kind === "live" ? "assistant" : item.message.role}
             {...(item.key === liveEndKey ? { [LIVE_END_ROW_ATTR]: "" } : {})}
           >
             <MessageBubble
@@ -405,12 +439,21 @@ export function ChatMessageList({
               latestAssistantMessageId={latestAssistantMessageId}
               quickActionsPendingMessageId={quickActionsPendingMessageId}
               starterCardsMessageId={starterCardsMessageId}
+              annotatable={!!annotations}
             />
           </div>
         )}
       />
       </RichContentScrollRootProvider>
       )}
+    </div>
+    {jumpToLiveEnd.visible && (
+      <JumpToLiveEndButton
+        hasNewReply={jumpToLiveEnd.hasNewReply}
+        onClick={jumpToLiveEnd.jump}
+        className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2"
+      />
+    )}
     </div>
     </PreviewSequenceProvider>
   );
@@ -470,6 +513,7 @@ const MessageBubble = memo(function MessageBubble({
   latestAssistantMessageId,
   quickActionsPendingMessageId,
   starterCardsMessageId,
+  annotatable,
 }: {
   item: ChatRenderItem;
   isPending: boolean;
@@ -480,6 +524,7 @@ const MessageBubble = memo(function MessageBubble({
   latestAssistantMessageId: string | null;
   quickActionsPendingMessageId: string | null;
   starterCardsMessageId: string | null;
+  annotatable: boolean;
 }) {
   // The live row and the persisted assistant row both land here under one key,
   // and both render <AssistantMessage> — same component type, same position —
@@ -535,6 +580,7 @@ const MessageBubble = memo(function MessageBubble({
       canRegenerateQuickActions={message.id === latestAssistantMessageId}
       quickActionsPending={quickActionsPendingMessageId === message.id}
       showStarterCards={message.id === starterCardsMessageId}
+      sourceId={annotatable && isAnnotatableChatMessage(message) ? message.id : undefined}
     />
   );
 });
@@ -567,6 +613,7 @@ function AssistantMessage({
   canRegenerateQuickActions = false,
   quickActionsPending = false,
   showStarterCards = false,
+  sourceId,
 }: {
   taskId: string | null;
   message?: ChatMessage;
@@ -579,6 +626,8 @@ function AssistantMessage({
   quickActionsPending?: boolean;
   /** This turn is Mika's onboarding opening — render starter cards, not chips. */
   showStarterCards?: boolean;
+  /** Annotation source id for the settled answer text. */
+  sourceId?: string;
 }) {
   const canFetchTaskMessages = isTaskMessageTaskId(taskId);
 
@@ -639,18 +688,21 @@ function AssistantMessage({
           phase={phase}
           isStreaming={!message}
           settledContent={canonicalAnswer}
+          sourceId={sourceId}
         />
       )}
       {isNoResponse ? (
         <NoResponseNotice />
       ) : message && timeline.length === 0 ? (
-        <RichContent
-          content={settledContent ?? message.content}
-          attachments={message.attachments}
-          density="compact"
-          phase="settled"
-          className="leading-relaxed"
-        />
+        <div data-comment-content={sourceId}>
+          <RichContent
+            content={settledContent ?? message.content}
+            attachments={message.attachments}
+            density="compact"
+            phase="settled"
+            className="leading-relaxed"
+          />
+        </div>
       ) : null}
       {message && (
         <>
@@ -785,7 +837,7 @@ function QuickActions({
                   type="button"
                   variant={action.primary ? "brandSubtle" : "outline"}
                   size="sm"
-                  className="max-w-full rounded-full px-3"
+                  className="max-w-full px-3"
                   disabled={blocked}
                   onClick={() => void handleSelect(action)}
                 />
@@ -807,7 +859,7 @@ function QuickActions({
                   type="button"
                   variant="ghost"
                   size="icon-xs"
-                  className="shrink-0 rounded-full text-faint-foreground hover:text-foreground"
+                  className="shrink-0 text-faint-foreground hover:text-foreground"
                   disabled={blocked}
                   aria-label={regenerateLabel}
                   onClick={() => void handleRegenerate()}
@@ -843,7 +895,7 @@ function QuickActionsHeading() {
   );
 }
 
-// Pill-shaped placeholders shown between chat:done (which declared a pending
+// Chip-shaped placeholders shown between chat:done (which declared a pending
 // supplement) and chat:quick_actions. Widths are staggered so the row reads
 // as "buttons coming", not a loading bar. aria-hidden: nothing actionable to
 // announce yet.
@@ -856,9 +908,9 @@ function QuickActionsSkeleton() {
     <div className="mt-2 border-t border-border/40 pt-2 animate-in fade-in duration-300">
       <div className="flex flex-wrap items-center gap-2" aria-hidden="true">
         <QuickActionsHeading />
-        <Skeleton className="h-8 w-24 rounded-full" />
-        <Skeleton className="h-8 w-32 rounded-full" />
-        <Skeleton className="h-8 w-28 rounded-full" />
+        <Skeleton className="h-7 w-24" />
+        <Skeleton className="h-7 w-32" />
+        <Skeleton className="h-7 w-28" />
       </div>
     </div>
   );
@@ -1097,12 +1149,14 @@ function TimelineView({
   attachments,
   phase = "settled",
   settledContent,
+  sourceId,
 }: {
   items: ChatTimelineItem[];
   isStreaming?: boolean;
   attachments?: import("@multica/core/types").Attachment[];
   phase?: "streaming" | "settled";
   settledContent?: string;
+  sourceId?: string;
 }) {
   if (phase === "settled" && settledContent !== undefined) {
     const { preface, middle } = splitTimeline(items);
@@ -1119,14 +1173,15 @@ function TimelineView({
             stepCount={middle.length}
           />
         )}
-        <RichContent
-          key="answer"
-          content={settledContent}
-          attachments={attachments}
-          density="compact"
-          phase="settled"
-          className="leading-relaxed"
-        />
+        <div key="answer" data-comment-content={sourceId}>
+          <RichContent
+            content={settledContent}
+            attachments={attachments}
+            density="compact"
+            phase="settled"
+            className="leading-relaxed"
+          />
+        </div>
       </>
     );
   }
@@ -1155,14 +1210,16 @@ function TimelineView({
         />
       )}
       {final.length > 0 && (
-        <RichContent
-          key="answer"
-          content={final.map((t) => t.content ?? "").join("")}
-          attachments={attachments}
-          density="compact"
-          phase={phase}
-          className="leading-relaxed"
-        />
+        // Same element type as the settled answer so the handoff keeps it mounted.
+        <div key="answer">
+          <RichContent
+            content={final.map((t) => t.content ?? "").join("")}
+            attachments={attachments}
+            density="compact"
+            phase={phase}
+            className="leading-relaxed"
+          />
+        </div>
       )}
     </>
   );

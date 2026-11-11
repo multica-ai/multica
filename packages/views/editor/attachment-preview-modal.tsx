@@ -20,7 +20,8 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
+import { useReducedMotion } from "@multica/core/appearance";
 import { toast } from "sonner";
 import {
   PreviewTooLargeError,
@@ -41,6 +42,7 @@ import {
   FileVideo,
   ImageIcon,
   LayoutGrid,
+  Link2,
   ListTree,
   Loader2,
   Maximize2,
@@ -55,6 +57,12 @@ import {
   type IconComponent,
 } from "@multica/ui/icons";
 import type { Attachment } from "@multica/core/types";
+import {
+  attachmentIdFromDownloadURL,
+  attachmentIdFromLocalUploadURL,
+  attachmentIdFromStorageURL,
+} from "@multica/core/types/attachment-url";
+import { useConfigStore } from "@multica/core/config";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import { createShortcutChord } from "@multica/core/shortcuts";
 import { cn } from "@multica/ui/lib/utils";
@@ -85,8 +93,12 @@ import { parseStructured } from "./utils/parse-structured";
 import { formatBytes } from "../common/format-bytes";
 import { ShortcutKeycaps } from "../common/shortcut-keycaps";
 import { useDownloadAttachment } from "./use-download-attachment";
+import { useAttachmentDownloadState } from "./hooks/use-attachment-download-state";
 import { useAttachmentHtmlText } from "./hooks/use-attachment-html-text";
-import { useResignedInlineMedia } from "./hooks/use-inline-media-url";
+import {
+  useFreshStreamedMediaURL,
+  useResignedInlineMedia,
+} from "./hooks/use-inline-media-url";
 import { useZoomCanvas, type ZoomCanvasApi } from "./hooks/use-zoom-canvas";
 import { ZoomCanvas, ZoomControls } from "./zoom-canvas";
 import type { Size } from "./utils/zoom-transform";
@@ -104,6 +116,7 @@ import {
   HtmlViewportFrame,
   type HtmlViewport,
 } from "./html-viewport-frame";
+import { withWidthBridge } from "./utils/iframe-width-bridge";
 
 // Preview source — full attachment, or URL-only (media types only)
 //
@@ -187,7 +200,9 @@ function normalize(source: PreviewSource): PreviewState {
     filename: source.filename,
     contentType: "",
     mediaUrl: resolvePublicFileUrl(source.url) ?? source.url,
-    attachmentId: null,
+    attachmentId:
+      attachmentIdFromDownloadURL(source.url) ??
+      attachmentIdFromLocalUploadURL(source.url) ?? null,
     sizeBytes: 0,
     kind: source.forceKind ?? getPreviewKind("", source.filename),
   };
@@ -217,6 +232,15 @@ export interface PreviewLocateAction {
   onSelect: () => void;
 }
 
+/**
+ * Copy a link to the file on screen — labelled by the host, which knows what
+ * the link points at (for an issue deliverable, its newest version).
+ */
+export interface PreviewCopyLinkAction {
+  label: string;
+  onSelect: () => void;
+}
+
 /** The info panel beside the stage (MUL-7649). Its open state outlives the file. */
 export interface PreviewInfoPanel {
   content: ReactNode;
@@ -231,12 +255,19 @@ interface AttachmentPreviewModalProps {
   sequence?: PreviewSequence;
   /** Fired when the image kind fails to load — lets a gallery skip the frame. */
   onImageError?: () => void;
+  /**
+   * The image failed and the host is staying on it: show the failure on the
+   * stage (with a download) instead of a broken frame.
+   */
+  imageFailed?: boolean;
   /** Rendered after the file name, e.g. a version switcher. */
   titleAccessory?: ReactNode;
   /** Adds the info button and `I`. */
   info?: PreviewInfoPanel;
   /** Adds "show where this was posted": the caller closes the viewer and scrolls. */
   locate?: PreviewLocateAction;
+  /** Adds a "copy link" button for the file on screen. */
+  copyLink?: PreviewCopyLinkAction;
   /** Adds the overview button and `G`. */
   onOpenOverview?: () => void;
 }
@@ -410,13 +441,16 @@ export function AttachmentPreviewModal({
   onExitComplete,
   sequence,
   onImageError,
+  imageFailed,
   titleAccessory,
   info,
   locate,
+  copyLink,
   onOpenOverview,
 }: AttachmentPreviewModalProps & { onExitComplete?: () => void }) {
   const download = useDownloadAttachment();
-  const shouldReduceMotion = useReducedMotion() ?? false;
+  const cdnDomain = useConfigStore((s) => s.cdnDomain);
+  const shouldReduceMotion = useReducedMotion();
   const state = normalize(source);
   // useWorkspaceSlug (not useWorkspacePaths) — returns null outside a
   // workspace route instead of throwing, so the new-tab button just hides.
@@ -489,14 +523,17 @@ export function AttachmentPreviewModal({
   const kind = state.kind;
 
   // Download dispatcher: re-sign through `getAttachment` when an id is
-  // available; otherwise fall back to opening the (possibly stale) URL
-  // externally — same tradeoff as the file-card NodeView's download path.
+  // available (from the record, or parsed out of a CDN storage URL that
+  // didn't resolve to a record); otherwise fall back to opening the
+  // (possibly stale) URL externally — same tradeoff as the file-card
+  // NodeView's download path.
   const handleDownload = () => {
-    if (state.attachmentId) {
-      download(state.attachmentId);
-    } else {
-      openExternal(state.mediaUrl);
+    const attachmentId =
+      state.attachmentId ?? attachmentIdFromStorageURL(state.mediaUrl, cdnDomain);
+    if (attachmentId) {
+      return download(attachmentId);
     }
+    return openExternal(state.mediaUrl);
   };
 
   // Open-in-new-tab: the full-page route (/attachments/{id}/preview) shows
@@ -581,10 +618,12 @@ export function AttachmentPreviewModal({
             onOpenInNewTab={canOpenInNewTab ? handleOpenInNewTab : undefined}
             sequence={sequence}
             onImageError={onImageError}
+            imageFailed={imageFailed}
             reduceMotion={shouldReduceMotion}
             titleAccessory={titleAccessory}
             info={info}
             locate={locate}
+            copyLink={copyLink}
             onOpenOverview={onOpenOverview}
             onHtmlAddressChange={handleHtmlAddressChange}
           />
@@ -670,10 +709,12 @@ function PreviewPanel({
   onOpenInNewTab,
   sequence,
   onImageError,
+  imageFailed,
   reduceMotion,
   titleAccessory,
   info,
   locate,
+  copyLink,
   onOpenOverview,
   renderHtmlFrame = renderViewerHtmlFrame,
   initialHtmlAddress = "",
@@ -684,14 +725,16 @@ function PreviewPanel({
   source: PreviewSource;
   state: PreviewState;
   onClose?: () => void;
-  onDownload: () => void;
+  onDownload: () => void | Promise<unknown>;
   onOpenInNewTab?: () => void;
   sequence?: PreviewSequence;
   onImageError?: () => void;
+  imageFailed?: boolean;
   reduceMotion: boolean;
   titleAccessory?: ReactNode;
   info?: PreviewInfoPanel;
   locate?: PreviewLocateAction;
+  copyLink?: PreviewCopyLinkAction;
   onOpenOverview?: () => void;
   renderHtmlFrame?: HtmlFrameRenderer;
   /** Query and fragment an HTML file opens at. */
@@ -700,6 +743,11 @@ function PreviewPanel({
   onHtmlAddressChange?: (attachmentId: string, address: string) => void;
 }) {
   const { t } = useT("editor");
+
+  const { downloading, handleDownload } = useAttachmentDownloadState(
+    onDownload,
+    state.attachmentId ?? state.mediaUrl,
+  );
 
   // How the file is shown. Held here rather than in the stage so a choice
   // carries over as the reader pages through the sequence: the next HTML
@@ -759,6 +807,19 @@ function PreviewPanel({
   // reports against the next one.
   const imageLoadError =
     mediaUrl !== "" && mediaUrl === targetUrl ? onImageError : undefined;
+
+  // Video, audio and PDF stream straight from a URL the reader has never
+  // loaded, so they get a freshly signed one rather than the record's.
+  const cdnDomain = useConfigStore((s) => s.cdnDomain);
+  const streamed = useFreshStreamedMediaURL(
+    state.attachmentId ??
+      attachmentIdFromLocalUploadURL(state.mediaUrl) ??
+      attachmentIdFromStorageURL(state.mediaUrl, cdnDomain),
+    state.mediaUrl,
+    kind === "video" || kind === "audio" || kind === "pdf",
+    kind === "pdf",
+  );
+  const streamUrl = streamed.pending ? "" : streamed.url;
 
   // Copying reads the image's bytes from script. The desktop renderer can
   // read any origin; web script can't read the storage CDN (it sends no CORS
@@ -949,6 +1010,11 @@ function PreviewPanel({
               <MessageSquareText className="size-4" />
             </ChromeButton>
           )}
+          {copyLink && (
+            <ChromeButton label={copyLink.label} onClick={copyLink.onSelect}>
+              <Link2 className="size-4" />
+            </ChromeButton>
+          )}
           {onOpenInNewTab && (
             <ChromeButton
               label={t(($) => $.attachment.open_in_new_tab)}
@@ -966,8 +1032,17 @@ function PreviewPanel({
               <Copy className="size-4" />
             </ChromeButton>
           )}
-          <ChromeButton label={t(($) => $.image.download)} onClick={onDownload}>
-            <Download className="size-4" />
+          <ChromeButton
+            label={t(($) => $.image.download)}
+            onClick={handleDownload}
+            disabled={downloading}
+            busy={downloading}
+          >
+            {downloading ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Download className="size-4" />
+            )}
           </ChromeButton>
           {(onOpenOverview || info) && <ChromeDivider />}
           {onOpenOverview && (
@@ -1013,7 +1088,13 @@ function PreviewPanel({
               },
             }}
           >
-            {kind === "image" ? (
+            {kind === "image" && imageFailed ? (
+              <UnsupportedFallback
+                message={t(($) => $.attachment.preview_failed)}
+                onDownload={handleDownload}
+                downloading={downloading}
+              />
+            ) : kind === "image" ? (
               <ImagePreview
                 state={state}
                 mediaUrl={mediaUrl}
@@ -1027,8 +1108,12 @@ function PreviewPanel({
                 kind={kind}
                 source={source}
                 state={state}
+                streamUrl={streamUrl}
+                streamFailed={streamed.failed}
+                onStreamError={streamed.refreshIfExpired}
                 view={view}
-                onDownload={onDownload}
+                onDownload={handleDownload}
+                downloading={downloading}
                 onBackdropClick={closeOnBackdrop}
               />
             )}
@@ -1059,6 +1144,7 @@ function ChromeButton({
   shortcut,
   pressed,
   disabled,
+  busy,
   onClick,
   children,
 }: {
@@ -1068,6 +1154,7 @@ function ChromeButton({
   /** Toggle buttons pass their state; plain actions leave it unset. */
   pressed?: boolean;
   disabled?: boolean;
+  busy?: boolean;
   onClick: () => void;
   children: ReactNode;
 }) {
@@ -1090,6 +1177,7 @@ function ChromeButton({
         aria-label={label}
         aria-keyshortcuts={shortcut}
         aria-pressed={pressed}
+        aria-busy={busy}
         disabled={disabled}
         onClick={onClick}
       >
@@ -1328,15 +1416,24 @@ function PreviewContent({
   kind,
   source,
   state,
+  streamUrl,
+  streamFailed,
+  onStreamError,
   view,
   onDownload,
+  downloading,
   onBackdropClick,
 }: {
   kind: Exclude<PreviewKind, "image"> | null;
   source: PreviewSource;
   state: PreviewState;
+  /** Where video, audio and PDF load from; empty while it is being signed. */
+  streamUrl: string;
+  streamFailed: boolean;
+  onStreamError: () => Promise<boolean>;
   view: StageView;
   onDownload: () => void;
+  downloading: boolean;
   onBackdropClick: (e: React.MouseEvent) => void;
 }) {
   const { t } = useT("editor");
@@ -1346,6 +1443,7 @@ function PreviewContent({
       <UnsupportedFallback
         message={t(($) => $.attachment.preview_unsupported)}
         onDownload={onDownload}
+        downloading={downloading}
       />
     );
   }
@@ -1360,6 +1458,7 @@ function PreviewContent({
       <UnsupportedFallback
         message={t(($) => $.attachment.preview_unsupported)}
         onDownload={onDownload}
+        downloading={downloading}
       />
     );
   }
@@ -1376,38 +1475,42 @@ function PreviewContent({
     </DocumentSheet>
   );
 
+  if (kind === "pdf" && streamFailed) {
+    return <UnsupportedFallback message={t(($) => $.attachment.preview_failed)} onDownload={onDownload} downloading={downloading} />;
+  }
+  if ((kind === "pdf" || kind === "video" || kind === "audio") && !streamUrl) {
+    return <PreviewLoading />;
+  }
+
   switch (kind) {
     case "pdf":
       return (
         <div className="h-full pb-4">
           <iframe
-            src={state.mediaUrl}
+            src={streamUrl}
             className="h-full w-full rounded-lg bg-background"
             title={state.filename}
           />
         </div>
       );
     case "video":
-      return (
-        <div className="flex h-full w-full items-center justify-center pb-4">
-          <video
-            src={state.mediaUrl}
-            controls
-            className="h-full w-full object-contain"
-          />
-        </div>
-      );
     case "audio":
       return (
-        <div className="dark flex h-full w-full items-center justify-center p-8">
-          <audio src={state.mediaUrl} controls className="w-full max-w-xl" />
-        </div>
+        <MediaPlayer
+          key={state.attachmentId ?? state.mediaUrl}
+          kind={kind}
+          src={streamUrl}
+          onExpired={onStreamError}
+          onDownload={onDownload}
+          downloading={downloading}
+        />
       );
     case "markdown":
       return (
         <TextBackedPreview
           attachmentId={state.attachmentId!}
           onDownload={onDownload}
+          downloading={downloading}
           render={(text) => (
             <DocumentSheet width="prose" onBackdropClick={onBackdropClick}>
               <ReadonlyContent
@@ -1424,13 +1527,14 @@ function PreviewContent({
         <TextBackedPreview
           attachmentId={state.attachmentId!}
           onDownload={onDownload}
+          downloading={downloading}
           render={(text) =>
             view.htmlSource ? (
               code(text, "xml")
             ) : (
               <HtmlViewportFrame viewport={view.htmlViewport}>
                 {view.renderHtmlFrame({
-                  html: text,
+                  html: withWidthBridge(text),
                   title: state.filename,
                   location: view.htmlLocation,
                 })}
@@ -1444,6 +1548,7 @@ function PreviewContent({
         <TextBackedPreview
           attachmentId={state.attachmentId!}
           onDownload={onDownload}
+          downloading={downloading}
           render={(text) => (
             // Keyed on the file: sort order and column widths belong to it.
             <TablePreview
@@ -1459,6 +1564,7 @@ function PreviewContent({
         <TextBackedPreview
           attachmentId={state.attachmentId!}
           onDownload={onDownload}
+          downloading={downloading}
           render={(text) => {
             const parse = view.structuredParse;
             if (parse?.ok && view.structuredView === "tree") {
@@ -1494,6 +1600,7 @@ function PreviewContent({
         <TextBackedPreview
           attachmentId={state.attachmentId!}
           onDownload={onDownload}
+          downloading={downloading}
           render={(text) => code(text, extensionToLanguage(state.filename))}
         />
       );
@@ -1536,29 +1643,25 @@ function DocumentSheet({
 function TextBackedPreview({
   attachmentId,
   onDownload,
+  downloading,
   render,
 }: {
   attachmentId: string;
   onDownload: () => void;
+  downloading: boolean;
   render: (text: string) => ReactNode;
 }) {
   const { t } = useT("editor");
   const query = useAttachmentHtmlText(attachmentId);
 
-  if (query.isLoading) {
-    return (
-      <div className="dark flex h-full items-center justify-center gap-2 text-body text-muted-foreground">
-        <Loader2 className="size-4 animate-spin" />
-        {t(($) => $.attachment.preview_loading)}
-      </div>
-    );
-  }
+  if (query.isLoading) return <PreviewLoading />;
   if (query.error) {
     if (query.error instanceof PreviewTooLargeError) {
       return (
         <UnsupportedFallback
           message={t(($) => $.attachment.preview_too_large)}
           onDownload={onDownload}
+          downloading={downloading}
         />
       );
     }
@@ -1567,6 +1670,7 @@ function TextBackedPreview({
         <UnsupportedFallback
           message={t(($) => $.attachment.preview_unsupported)}
           onDownload={onDownload}
+          downloading={downloading}
         />
       );
     }
@@ -1574,6 +1678,7 @@ function TextBackedPreview({
       <UnsupportedFallback
         message={t(($) => $.attachment.preview_failed)}
         onDownload={onDownload}
+        downloading={downloading}
       />
     );
   }
@@ -1581,14 +1686,103 @@ function TextBackedPreview({
   return <>{render(query.data.text)}</>;
 }
 
+function PreviewLoading() {
+  const { t } = useT("editor");
+  return (
+    <div className="dark flex h-full items-center justify-center gap-2 text-body text-muted-foreground">
+      <Loader2 className="size-4 animate-spin" />
+      {t(($) => $.attachment.preview_loading)}
+    </div>
+  );
+}
+
+// Video and audio — the browser's own player. A file it cannot play (an
+// unsupported container or codec, a URL that stopped working) would otherwise
+// leave an empty player with no explanation.
+function MediaPlayer({
+  kind,
+  src,
+  onExpired,
+  onDownload,
+  downloading,
+}: {
+  kind: "video" | "audio";
+  src: string;
+  onExpired: () => Promise<boolean>;
+  onDownload: () => void;
+  downloading: boolean;
+}) {
+  const { t } = useT("editor");
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const mediaRef = useRef<HTMLMediaElement | null>(null);
+  const resumeRef = useRef<{ currentTime: number; paused: boolean; playbackRate: number } | null>(null);
+
+  useEffect(() => {
+    const media = mediaRef.current;
+    if (!media || media.getAttribute("src") === src) return;
+    // Replacing an expired capability reloads the native player. Snapshot
+    // before assigning src so renewal preserves both the seek and play state.
+    const { currentTime, paused, playbackRate } = resumeRef.current ?? media;
+    const restore = () => {
+      media.currentTime = currentTime;
+      media.playbackRate = playbackRate;
+      if (!paused) void media.play().catch(() => {});
+      resumeRef.current = null;
+    };
+    media.addEventListener("loadedmetadata", restore, { once: true });
+    media.src = src;
+    return () => media.removeEventListener("loadedmetadata", restore);
+  }, [src]);
+
+  const handleError = async () => {
+    const media = mediaRef.current;
+    if (media) resumeRef.current = { currentTime: media.currentTime, paused: media.paused, playbackRate: media.playbackRate };
+    if (!(await onExpired())) setFailedSrc(src);
+  };
+
+  if (failedSrc === src) {
+    return (
+      <UnsupportedFallback
+        message={t(($) => $.attachment.preview_failed)}
+        onDownload={onDownload}
+        downloading={downloading}
+      />
+    );
+  }
+  if (kind === "audio") {
+    return (
+      <div className="dark flex h-full w-full items-center justify-center p-8">
+        <audio
+          ref={(element) => { mediaRef.current = element; }}
+          controls
+          className="w-full max-w-xl"
+          onError={handleError}
+        />
+      </div>
+    );
+  }
+  return (
+    <div className="flex h-full w-full items-center justify-center pb-4">
+      <video
+        ref={(element) => { mediaRef.current = element; }}
+        controls
+        className="h-full w-full object-contain"
+        onError={handleError}
+      />
+    </div>
+  );
+}
+
 // Fallback — used for 413 / 415 / unknown kinds. Sits on the stage, so dark.
 
 function UnsupportedFallback({
   message,
   onDownload,
+  downloading,
 }: {
   message: string;
   onDownload: () => void;
+  downloading: boolean;
 }) {
   const { t } = useT("editor");
   return (
@@ -1599,8 +1793,14 @@ function UnsupportedFallback({
         type="button"
         className="inline-flex items-center gap-2 rounded-md border border-input bg-secondary px-3 py-1.5 text-body text-foreground transition-colors hover:bg-muted"
         onClick={onDownload}
+        disabled={downloading}
+        aria-busy={downloading}
       >
-        <Download className="size-4" />
+        {downloading ? (
+          <Loader2 className="size-4 animate-spin" />
+        ) : (
+          <Download className="size-4" />
+        )}
         {t(($) => $.image.download)}
       </button>
     </div>

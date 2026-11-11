@@ -1,4 +1,11 @@
 {
+  "web": {
+    "open_in_desktop": "在桌面版開啟"
+  },
+  "desktop": {
+    "link_other_instance": "桌面版連線的是另一個 Multica 執行個體。",
+    "link_workspace_unavailable": "此工作區在桌面版中無法使用。"
+  },
   "inline_run": {
     "label": "{{name}} 的執行",
     "stop": "停止",
@@ -45,6 +52,10 @@
     "title": "狀態列表載入失敗",
     "hint": "載入狀態後才能顯示任務。",
     "retry": "重試"
+  },
+  "relation_filter_error": {
+    "title": "「與我的關係」篩選載入失敗",
+    "hint": "載入訂閱和 AI 代理後才能顯示按「我訂閱的」或「我的 AI 代理在做」篩選的任務。"
   },
   "source_context": {
     "create_action": "從這條評論建立子任務",
@@ -181,7 +192,8 @@
     "section_relation": "與我的關係",
     "relation_assigned": "分配給我的",
     "relation_created": "我建立的",
-    "relation_my_agents": "分配給我的 AI 代理的",
+    "relation_my_agents": "我的 AI 代理在做",
+    "relation_subscribed": "我訂閱的",
     "section_agent_status": "AI 代理狀態",
     "agent_status_running": "執行中",
     "section_read_state": "閱讀狀態",
@@ -454,6 +466,8 @@
     "metadata_description": "AI 代理和整合記錄的鍵值資料，用於銜接工作流程。",
     "section_load_failed_retry": "載入失敗，點選重試",
     "not_found": "這個任務不存在或已在該工作區被刪除。",
+    "load_failed": "無法載入任務。",
+    "load_retry": "重試",
     "not_found_title": "未找到該任務",
     "breadcrumb_project_unknown": "未知專案",
     "back": "返回",
@@ -565,7 +579,8 @@
   },
   "timeline": {
     "loading": "載入中…",
-    "jump_to_latest": "跳到最新"
+    "jump_to_latest": "跳到最新",
+    "new_comments_other": "{{count}} 則新評論"
   },
   "activity": {
     "created": "建立了這個任務",
@@ -620,7 +635,10 @@
     "wakeup_checkin": "靜默檢查：{{note}}",
     "wakeup_checkin_coalesced_other": "靜默檢查 {{count}} 次 · 最近一次：{{note}}",
     "wakeup_chip_created_by": "{{name}} 建立",
-    "wakeup_chip_system": "系統規則"
+    "wakeup_chip_system": "系統規則",
+    "environment_stopped": "停止了環境 {{name}}",
+    "environment_restarted": "重新啟動了環境 {{name}}",
+    "environment_started": "啟動了環境 {{name}}"
   },
   "comment": {
     "add_reaction": "新增表情回應",
@@ -720,10 +738,17 @@
     "restart_failed": "沒能停止當前執行，訊息還沒有傳送。"
   },
   "reply": {
+    "recipients_changed": "回覆目標已變更。請重新確認收件者後再傳送。",
     "placeholder": "回覆...",
     "annotations": {
+      "send_all": "全部傳送",
+      "send_with_annotations_and_body": "將連同下方 {{count}} 條批註和正文一起傳送",
+      "send_with_annotations": "將連同下方 {{count}} 條批註一起傳送",
+      "send_with_body": "將連同下方正文一起傳送",
       "confirm_add": "新增批註",
       "save": "儲存批註",
+      "confirm_add_short": "新增",
+      "save_short": "儲存",
       "add_comment": "加入評論",
       "add": "加入回覆",
       "note_label": "批註",
@@ -775,6 +800,11 @@
     "cancel_failed": "取消執行失敗"
   },
   "execution_log": {
+    "latest": "最近",
+    "include_children": "包含子任務",
+    "loading": "正在載入執行記錄...",
+    "load_failed_retry": "無法載入執行記錄，點擊重試",
+    "empty": "此範圍內暫無執行記錄。",
     "section": "執行日誌",
     "cancel_task_tooltip": "取消執行",
     "cancel_task_aria": "取消執行",
@@ -893,6 +923,7 @@
     "confirm": "停止執行"
   },
   "batch": {
+    "delete_restricted": "你可以刪除本人或本人擁有的智慧體建立的任務。工作區 owner 和 admin 可以刪除任意任務。",
     "selected": "已選擇 {{count}} 個",
     "status": "狀態",
     "priority": "優先順序",
@@ -905,7 +936,6 @@
     "delete_failed": "刪除任務失敗",
     "delete_dialog_title_other": "刪除 {{count}} 個任務？",
     "delete_dialog_desc_other": "此操作無法撤銷，所選任務及其全部關聯資料都會被永久刪除。",
-    "delete_dialog_warning": "任何工作區成員都可以刪除任務。",
     "cancel": "取消"
   },
   "card": {
@@ -930,6 +960,7 @@
     "unassigned": "未分配",
     "open_in_new_tab": "在新標籤頁開啟",
     "pin_to_sidebar": "固定到側邊欄",
+    "locate_in_sidebar": "在側邊欄中定位",
     "unpin_from_sidebar": "從側邊欄取消固定",
     "restore_to_inbox": "恢復到收件箱",
     "mark_read": "標為已讀",
@@ -1043,7 +1074,7 @@
     "variant_my_any": "任何相關",
     "variant_my_assigned": "分配給我",
     "variant_my_created": "我建立的",
-    "variant_my_involved": "我參與的"
+    "variant_my_involved": "我的 AI 代理在做"
   },
   "plugins": {
     "panels": "Plugins",
@@ -1444,6 +1475,9 @@
     "version_short": "v{{version}}",
     "locate_comment": "定位到評論",
     "locate_description": "定位到描述",
+    "copy_link": "複製最新版連結",
+    "not_found": "這個任務裡沒有名為「{{name}}」的產物",
+    "link_load_failed": "沒能載入這個任務的產物，打不開「{{name}}」。重新整理頁面再試一次。",
     "version_label": "第 {{version}} 版，共 {{total}} 版",
     "version_of": "v{{version}}（共 {{total}} 版）",
     "info_source": "來源",
@@ -1643,7 +1677,6 @@
       "brief_header": "這次執行收到的工作流說明"
     },
     "detail": {
-      "follows_project": "（跟隨專案）",
       "card_title": "「{{workflow}}」· 跟隨專案「{{project}}」"
     },
     "list_separator": "、",
@@ -1683,15 +1716,12 @@
       "name_placeholder": "狀態名稱",
       "add": "新增"
     },
-    "menu": {
-      "view_flow": "檢視完整流程",
-      "switch": "切換工作流"
-    },
     "flow": {
       "title": "「{{workflow}}」工作流",
       "scope_own": "只有這個專案使用這個工作流。",
       "no_handoff_here": "不交接",
-      "scope_shared_other": "{{count}} 個專案使用這個工作流，它的交接對這些專案都生效。"
+      "scope_shared_other": "{{count}} 個專案使用這個工作流，它的交接對這些專案都生效。",
+      "switch": "切換工作流"
     },
     "templates": {
       "delivery": {
@@ -1790,5 +1820,132 @@
       "empty_title": "還沒有儲存的檢視",
       "empty_description": "在任務列表裡調好篩選和顯示方式，然後另存為檢視。"
     }
+  },
+  "app_calls": {
+    "section_title": "應用",
+    "chips_label": "本次執行用到的應用",
+    "calls_count_other": "{{count}} 次呼叫",
+    "more": "還有 {{count}} 個",
+    "scope": {
+      "team": "團隊帳號",
+      "personal": "個人帳號"
+    },
+    "outcome": {
+      "ok": "已執行",
+      "error": "失敗",
+      "blocked": "已攔截",
+      "pending": "等待確認",
+      "approved": "已核准",
+      "rejected": "已拒絕",
+      "rate_limited": "已限流"
+    }
+  },
+  "environments": {
+    "section_title": "環境",
+    "running_count_other": "{{count}} 個執行中",
+    "this_machine": "本機",
+    "unknown_machine": "未知裝置",
+    "state": {
+      "starting": "啟動中",
+      "running": "執行中",
+      "exited": "已退出",
+      "stopped": "已停止",
+      "unreachable": "無回應",
+      "stopping": "停止中",
+      "preparing": "準備中"
+    },
+    "expires_in_minutes_other": "{{count}} 分鐘後到期",
+    "expires_in_hours_other": "{{count}} 小時後到期",
+    "expires_in_days_other": "{{count}} 天後到期",
+    "started_ago": "{{time}}啟動",
+    "ended_ago": "{{time}}結束",
+    "last_seen": "{{time}}最後回應",
+    "ended_count_other": "{{count}} 個已結束",
+    "detected_hint": "在這個任務某次執行的目錄中發現的服務",
+    "remote_hint": "執行於 {{machine}}，localhost 位址只能在那台機器上開啟。",
+    "localhost_hint": "localhost 位址只能在執行它的那台機器上開啟。",
+    "open": "開啟",
+    "copy_url": "複製位址",
+    "copied": "已複製位址",
+    "copy_failed": "無法複製位址",
+    "offline": "離線",
+    "machine_offline": "{{machine}} 已離線",
+    "more_actions": "更多操作",
+    "view_logs": "查看日誌",
+    "restart": "重新啟動",
+    "stop": "停止",
+    "stop_confirm_item": "停止…",
+    "run_first": "首次執行",
+    "run_nth_other": "第 {{count}} 次執行",
+    "someone": "有人",
+    "started_by": "由 {{name}} 啟動",
+    "restarted_by": "由 {{name}} 重新啟動",
+    "started_by_agent_in_run": "由 {{name}} 在「{{run}}」中啟動",
+    "stopped_by": "由 {{name}} 停止",
+    "stopped_on_expiry": "到期自動停止",
+    "exited_ago": "{{time}}退出",
+    "exit_code": "退出碼 {{code}}",
+    "detected_label": "自動識別的服務 · {{name}}",
+    "detected_no_logs": "這個服務不是按環境設定啟動的，所以看不到日誌，也不能重新啟動。",
+    "offline_hint": "這台機器重新上線後才能操作。",
+    "outdated_hint": "這台機器上的 Multica 更新後，才能在這裡操作。",
+    "no_permission_hint": "只有能使用這台機器的成員可以停止或重新啟動。",
+    "waiting_machine": "等待機器回應",
+    "waiting_ready": "等待服務就緒",
+    "no_response": "沒有回應",
+    "action_failed": {
+      "stop": "停止失敗",
+      "restart": "重新啟動失敗",
+      "start": "啟動失敗"
+    },
+    "stop_confirm_title": "停止 {{name}}？",
+    "stop_confirm_body": "這個服務（{{process}}）是自動識別的，不是按環境設定啟動的。停止後不能在這裡重新啟動，需要讓代理重新啟動它。",
+    "cancel": "取消",
+    "preparing_title": "{{name}} 正在準備環境",
+    "preparing_hint": "啟動後會顯示在這裡",
+    "start_menu": {
+      "trigger": "啟動環境",
+      "note": "按專案裡的環境設定啟動，使用這台機器上最近一次執行的程式碼。",
+      "no_permission": "只有能使用這台機器的成員可以在上面啟動環境。",
+      "nothing_to_start": "這個任務還沒執行過，或者之前執行的程式碼已被清理，沒有可以直接啟動的環境。",
+      "ask_agent": "讓 {{name}} 啟動",
+      "ask_any_agent": "讓代理啟動",
+      "new_run": "新建執行",
+      "preparing": "準備中",
+      "ask_agent_hint": "{{name}} 會準備好這個任務的程式碼，再啟動環境。專案裡沒有環境設定時，它會自己判斷怎麼啟動。",
+      "ask_any_agent_hint": "代理會準備好這個任務的程式碼，再啟動環境。專案裡沒有環境設定時，它會自己判斷怎麼啟動。",
+      "ask_failed": "沒能交給代理",
+      "agent_instruction": "啟動環境：先準備好這個任務的程式碼，再用 `multica env start` 啟動專案裡設定的環境；專案裡沒有環境設定時，自己判斷怎麼啟動。讓服務保持運行，並回覆存取網址。"
+    },
+    "log": {
+      "title": "{{name}} · 日誌",
+      "filter": "篩選日誌",
+      "wrap": "自動換行",
+      "follow": "跟隨最新",
+      "copy": "複製",
+      "copied": "已複製日誌",
+      "copy_failed": "無法複製日誌",
+      "refresh": "重新整理",
+      "footer_other": "顯示最近 {{count}} 行 · {{time}} 更新",
+      "loading": "正在讀取日誌…",
+      "empty": "還沒有輸出",
+      "no_match": "沒有符合的行",
+      "no_response": "機器沒有回應",
+      "failed": "沒能讀取日誌：{{error}}",
+      "offline_excerpt": "這台機器已離線，下面是它退出前最後輸出的內容。",
+      "offline_empty": "這台機器重新上線後才能查看日誌。",
+      "exit_divider": "{{time}} 退出",
+      "exit_divider_code": "{{time}} 退出 · 退出碼 {{code}}",
+      "stopped_divider": "{{time}} 停止"
+    },
+    "app_desktop_hint": "桌面 App。在執行它的那台機器上，用 Multica Desktop 切到它的視窗。",
+    "app_remote_hint": "在 {{machine}} 上執行。在那台機器上用 Multica Desktop 切到它的視窗。",
+    "focus": "切到視窗",
+    "focus_gone": "{{name}} 已不在執行",
+    "focus_unsupported": "這台機器的 daemon 暫時無法切換 App 視窗。更新 Multica 後再試。",
+    "focus_unavailable": "本機 daemon 沒有執行",
+    "focus_failed": "無法切到 {{name}}",
+    "retry": "重試",
+    "dismiss": "忽略"
   }
 }

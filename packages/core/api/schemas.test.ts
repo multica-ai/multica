@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   AgentTaskSchema,
+  IssueSchema,
   AppConfigSchema,
   WecomInstallationSchema,
   ListWecomInstallationsResponseSchema,
@@ -1111,6 +1112,30 @@ describe("UserSchema whats_new_seen_version drift", () => {
     );
     expect(parsed.email).toBe("ada@example.com");
     expect(parsed.whats_new_seen_version).toBeUndefined();
+  });
+});
+
+describe("UserSchema star prompt drift", () => {
+  const base = {
+    id: "11111111-1111-1111-1111-111111111111",
+    name: "Ada",
+    email: "ada@example.com",
+  };
+
+  it("leaves the showing count undefined when an older server omits it", () => {
+    expect(UserSchema.parse(base).star_prompt_shown_count).toBeUndefined();
+  });
+
+  it("degrades wrong-type values to undefined without discarding the user", () => {
+    const parsed = parseWithFallback(
+      { ...base, star_prompt_shown_count: "2", star_prompt_starred_at: 1 },
+      UserSchema,
+      EMPTY_USER,
+      { endpoint: "GET /api/me" },
+    );
+    expect(parsed.email).toBe("ada@example.com");
+    expect(parsed.star_prompt_shown_count).toBeUndefined();
+    expect(parsed.star_prompt_starred_at).toBeUndefined();
   });
 });
 
@@ -2491,5 +2516,15 @@ describe("task usage credits", () => {
     });
     expect(parsed.usage).toHaveLength(1);
     expect(parsed.usage?.[0]?.credits_micros).toBeUndefined();
+  });
+});
+
+
+describe("Issue requester compatibility", () => {
+  it("preserves known null versus unknown legacy or malformed values", () => {
+    expect(IssueSchema.parse(baseIssue).requester_id).toBeUndefined();
+    expect(IssueSchema.parse({ ...baseIssue, requester_id: null }).requester_id).toBeNull();
+    expect(IssueSchema.parse({ ...baseIssue, requester_id: "member" }).requester_id).toBe("member");
+    expect(IssueSchema.parse({ ...baseIssue, requester_id: 42 }).requester_id).toBeUndefined();
   });
 });
