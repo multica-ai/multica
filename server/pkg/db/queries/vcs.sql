@@ -61,6 +61,14 @@ SET webhook_secret_encrypted = $3,
 WHERE id = $1 AND workspace_id = $2
 RETURNING *;
 
+-- name: UpdateVCSConnectionToken :one
+UPDATE vcs_connection
+SET access_token_encrypted = $3,
+    account_login = $4,
+    updated_at = now()
+WHERE id = $1 AND workspace_id = $2
+RETURNING *;
+
 -- =====================
 -- VCS Pull Request
 -- =====================
