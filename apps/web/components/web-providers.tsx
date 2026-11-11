@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo } from "react";
+import dynamic from "next/dynamic";
 import { CoreProvider } from "@multica/core/platform";
 import { installUserTimingCap } from "@multica/core/diagnostics";
 import { createBrowserCookieLocaleAdapter } from "@multica/core/i18n/browser";
@@ -14,6 +15,13 @@ import {
 } from "@/features/auth/auth-cookie";
 import { detectWebOS } from "@/platform/client-os";
 import { useUserLocaleSyncEnabled } from "@/platform/user-locale-sync";
+
+// Client-only: every reading is a live client measurement the server cannot
+// render, so server HTML would only ever mismatch on hydration.
+const WebDevToolbar = dynamic(
+  () => import("./web-dev-toolbar").then((m) => m.WebDevToolbar),
+  { ssr: false },
+);
 
 // Legacy token in localStorage → keep this session in token mode so users who
 // logged in before the cookie-auth migration stay authed. They migrate to
@@ -51,12 +59,15 @@ export function WebProviders({
   resources,
   apiBaseUrl,
   wsUrl,
+  devToolbarApiUrl,
 }: {
   children: React.ReactNode;
   locale: SupportedLocale;
   resources: Record<string, LocaleResources>;
   apiBaseUrl?: string;
   wsUrl?: string;
+  /** Set only when the dev toolbar is enabled; the backend it reports. */
+  devToolbarApiUrl?: string;
 }) {
   const cookieAuth = !hasLegacyToken();
   const syncUserLocale = useUserLocaleSyncEnabled();
@@ -87,6 +98,9 @@ export function WebProviders({
     >
       <WebNavigationProvider>
         <WebScrollRestorationProvider>{children}</WebScrollRestorationProvider>
+        {process.env.NODE_ENV === "development" && devToolbarApiUrl && (
+          <WebDevToolbar apiUrl={devToolbarApiUrl} />
+        )}
       </WebNavigationProvider>
     </CoreProvider>
   );

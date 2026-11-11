@@ -592,6 +592,16 @@ make migrate-down
 
 These generic targets require a valid env file in the current directory.
 
+### Dev Toolbar
+
+Set `VITE_DEV_TOOLBAR=1` to pin a status bar to the bottom of the Web and Desktop dev builds. It shows the client, backend host, workspace, your role, and route, plus live JS heap, last navigation time, main-thread long-task share, in-flight requests, and WebSocket state. Production builds never render it.
+
+```bash
+VITE_DEV_TOOLBAR=1 make up          # or: VITE_DEV_TOOLBAR=1 pnpm dev:web / pnpm dev:desktop
+```
+
+To keep it on, add the line to the env file `make` loads (`.env` / `.env.worktree`), or to `apps/web/.env.local` / `apps/desktop/.env.development.local` for a direct `pnpm dev:*`. The minimize button at its right end collapses it to a small handle.
+
 ## How Database Creation Works
 
 Database creation is automatic.
