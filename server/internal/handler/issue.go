@@ -62,16 +62,16 @@ type IssueResponse struct {
 	// field at all: with omitempty a built-in fixture hides it from BOTH
 	// renderings, and the drift guard goes green on a payload that has drifted.
 	// (MUL-6749)
-	StatusName    string  `json:"status_name"`
-	Priority      string  `json:"priority"`
-	AssigneeType  *string `json:"assignee_type"`
-	AssigneeID    *string `json:"assignee_id"`
-	CreatorType   string  `json:"creator_type"`
-	CreatorID     string  `json:"creator_id"`
-	RequesterID   *string `json:"requester_id"`
-	ParentIssueID *string `json:"parent_issue_id"`
-	BlockedBy []IssueBlockerResponse `json:"blocked_by"`
-	BlockedCount int `json:"blocked_count"`
+	StatusName    string                 `json:"status_name"`
+	Priority      string                 `json:"priority"`
+	AssigneeType  *string                `json:"assignee_type"`
+	AssigneeID    *string                `json:"assignee_id"`
+	CreatorType   string                 `json:"creator_type"`
+	CreatorID     string                 `json:"creator_id"`
+	RequesterID   *string                `json:"requester_id"`
+	ParentIssueID *string                `json:"parent_issue_id"`
+	BlockedBy     []IssueBlockerResponse `json:"blocked_by"`
+	BlockedCount  int                    `json:"blocked_count"`
 	// DuplicateOf is the original this issue duplicates (MUL-7349), set only
 	// while the mark counts: the issue is cancelled and the original still
 	// exists. newStatusCategoryFiller resolves it from duplicateOfIssueID;
