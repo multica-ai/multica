@@ -128,3 +128,55 @@ func TestClaimChatSourceAbsentWithoutSlackDelivery(t *testing.T) {
 		})
 	}
 }
+
+func TestClaimFeishuSourceFromDelivery(t *testing.T) {
+	agentID, sessionID, runtimeID := newChatSourceSession(t)
+	installationID := dbfx.Insert(t, "channel_installation", testutil.Cols{
+		"workspace_id": testWorkspaceID, "agent_id": agentID,
+		"channel_type": "feishu", "installer_user_id": testUserID,
+	})
+	// A Lark topic session: the binding key is the composite "chat:thread" and
+	// the real chat id lives in the config.
+	bindingID := dbfx.Insert(t, "channel_chat_session_binding", testutil.Cols{
+		"chat_session_id": sessionID, "installation_id": installationID,
+		"channel_type": "feishu", "channel_chat_id": "oc_group1:omt_topic1", "chat_type": "group",
+		"config": testutil.Raw(`'{"chat_id":"oc_group1"}'::jsonb`),
+	})
+	taskID := dbfx.Task(t, agentID, testutil.Cols{"runtime_id": runtimeID, "chat_session_id": sessionID})
+	dbfx.InsertNoID(t, "channel_task_delivery", testutil.Cols{
+		"task_id": taskID, "binding_id": bindingID, "installation_id": installationID,
+		"channel_type": "feishu", "channel_chat_id": "oc_group1:omt_topic1", "chat_type": "group",
+		"channel_message_id": "om_trigger1", "channel_thread_id": "omt_topic1",
+		"channel_sender_id": "ou_sender1", "route_revision": 1,
+		"config": testutil.Raw(`'{"chat_id":"oc_group1"}'::jsonb`),
+	}, "task_id=$1", taskID)
+	// A newer message moves the binding's cursor before this task claims.
+	dbfx.Exec(t, `UPDATE channel_chat_session_binding SET last_message_id='om_newer',last_thread_id='omt_other' WHERE id=$1`, bindingID)
+
+	claimed := claimTaskSource(t, runtimeID)
+	want := protocol.FeishuSource{ChatID: "oc_group1", ChatType: "group", MessageID: "om_trigger1", ThreadID: "omt_topic1", SenderOpenID: "ou_sender1"}
+	if claimed.ID != taskID || claimed.ChatFeishuSource == nil || *claimed.ChatFeishuSource != want {
+		t.Fatalf("feishu source = %+v, want %+v", claimed.ChatFeishuSource, want)
+	}
+	if claimed.ChatSource != nil {
+		t.Fatalf("slack source on a feishu task: %+v", claimed.ChatSource)
+	}
+}
+
+func TestClaimFeishuSourceAbsentForOtherSurfaces(t *testing.T) {
+	for _, platform := range []string{"", "slack"} {
+		t.Run("platform="+platform, func(t *testing.T) {
+			agentID, sessionID, runtimeID := newChatSourceSession(t)
+			bindingID, installationID := seedChatSourceBinding(t, agentID, sessionID)
+			taskID := dbfx.Task(t, agentID, testutil.Cols{"runtime_id": runtimeID, "chat_session_id": sessionID})
+			if platform != "" {
+				seedChatSourceDelivery(t, taskID, bindingID, installationID, platform)
+			}
+			withSlackHistory(t, &claimSourceReader{})
+			claimed := claimTaskSource(t, runtimeID)
+			if claimed.ID != taskID || claimed.ChatFeishuSource != nil {
+				t.Fatalf("feishu source invented: %+v", claimed.ChatFeishuSource)
+			}
+		})
+	}
+}
