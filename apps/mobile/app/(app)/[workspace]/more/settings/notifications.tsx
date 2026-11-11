@@ -40,6 +40,11 @@ const INBOX_GROUPS: {
     descriptionKey: "groups.comments_description",
   },
   {
+    key: "chat_replies",
+    labelKey: "groups.chat_replies",
+    descriptionKey: "groups.chat_replies_description",
+  },
+  {
     key: "mentions",
     labelKey: "groups.mentions",
     descriptionKey: "groups.mentions_description",

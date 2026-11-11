@@ -826,7 +826,7 @@
   },
   "notifications": {
     "title": "Notifications de la boîte de réception",
-    "description": "Les événements désactivés restent visibles dans la tâche.",
+    "description": "Les événements désactivés restent visibles dans la tâche ou le chat.",
     "toast_failed": "Échec de la mise à jour des réglages de notification",
     "groups": {
       "assignments": {
@@ -856,6 +856,10 @@
       "agent_activity": {
         "label": "Activité des agents",
         "description": "Lorsqu'une exécution d'agent échoue"
+      },
+      "chat_replies": {
+        "label": "Réponses de chat",
+        "description": "Lorsqu’un agent termine sa réponse dans un chat."
       }
     },
     "system": {

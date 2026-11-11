@@ -826,7 +826,7 @@
   },
   "notifications": {
     "title": "Notificaciones de la bandeja",
-    "description": "Los eventos silenciados siguen visibles en la tarea.",
+    "description": "Los eventos silenciados siguen visibles en la tarea o el chat.",
     "toast_failed": "Error al actualizar la configuración de notificaciones",
     "groups": {
       "assignments": {
@@ -856,6 +856,10 @@
       "agent_activity": {
         "label": "Actividad de agentes",
         "description": "Cuando falla una ejecución de agente"
+      },
+      "chat_replies": {
+        "label": "Respuestas de chat",
+        "description": "Cuando un agente termina de responder en un chat."
       }
     },
     "system": {

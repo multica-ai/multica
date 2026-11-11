@@ -10,6 +10,7 @@ const NOTIFICATION_GROUPS = [
   "assignments",
   "status_changes",
   "comments",
+  "chat_replies",
   "mentions",
   "updates",
   "new_issues",

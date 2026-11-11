@@ -826,7 +826,7 @@
   },
   "notifications": {
     "title": "Inbox Notifications",
-    "description": "Muted events remain visible on the issue.",
+    "description": "Muted events remain visible in the issue or chat.",
     "toast_failed": "Failed to update notification settings",
     "groups": {
       "assignments": {
@@ -856,6 +856,10 @@
       "agent_activity": {
         "label": "Agent activity",
         "description": "When an agent run fails"
+      },
+      "chat_replies": {
+        "label": "Chat replies",
+        "description": "When an agent finishes replying in a chat."
       }
     },
     "system": {

@@ -85,6 +85,14 @@ describe("getInboxDisplayTitle", () => {
 });
 
 describe("getInboxNavigationTarget", () => {
+  it("opens chat reply notifications in the workspace chat tab", () => {
+    expect(getInboxNavigationTarget(item({
+      issue_id: null, type: "chat_reply", details: { chat_session_id: "session-1" },
+    }), "acme", "history-1")).toEqual({
+      pathname: "/[workspace]/(tabs)/chat", params: { workspace: "acme" },
+    });
+  });
+
   it("opens issue-less quota notices in their workspace sheet", () => {
     expect(
       getInboxNavigationTarget(

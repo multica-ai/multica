@@ -54,6 +54,7 @@ vi.mock("@multica/core/hooks", () => ({
 vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
     inbox: () => "/acme/inbox",
+    chat: () => "/acme/chat",
     issueDetail: (id: string) => `/acme/issues/${id}`,
   }),
 }));
@@ -278,6 +279,19 @@ function reset() {
 }
 
 describe("InboxPage", () => {
+  it.each([false, true])("opens chat replies from a row or notification link (deep link=%s)", (deepLink) => {
+    reset();
+    listData.active = [item({
+      id: "chat-notification", type: "chat_reply", issue_id: null,
+      details: { chat_session_id: "session-1", message_id: "message-1" },
+    })];
+    if (deepLink) searchParams = new URLSearchParams("issue=chat-notification");
+    render(<InboxPage />);
+    if (!deepLink) fireEvent.click(screen.getByTestId("row"));
+    expect(replace).toHaveBeenCalledWith("/acme/chat?session=session-1");
+    expect(markReadMutate).toHaveBeenCalledWith("chat-notification", expect.any(Object));
+  });
+
   it.each([false, true])("enabling idle hides an already busy row with unread pin=%s", (unreadOnly) => {
     reset();
     layout.width = DESKTOP;

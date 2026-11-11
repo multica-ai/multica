@@ -817,7 +817,7 @@
   },
   "notifications": {
     "title": "收件箱通知",
-    "description": "關閉通知後，仍可在任務中檢視相關動態。",
+    "description": "關閉通知後，仍可在任務或聊天中檢視相關動態。",
     "toast_failed": "更新通知設定失敗",
     "groups": {
       "assignments": {
@@ -847,6 +847,10 @@
       "agent_activity": {
         "label": "AI 代理活動",
         "description": "AI 代理執行失敗時"
+      },
+      "chat_replies": {
+        "label": "聊天回覆",
+        "description": "AI 代理在聊天中完成回覆時通知。"
       }
     },
     "system": {

@@ -3,6 +3,7 @@ import type { InboxItem } from "@multica/core/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { router } from "expo-router";
 import Inbox from "@/app/(app)/[workspace]/(tabs)/inbox";
+import { useChatSessionPickerStore } from "@/data/stores/chat-session-picker-store";
 
 const state = vi.hoisted(() => ({ rows: [] as InboxItem[], markRead: vi.fn() }));
 vi.mock("react", async (importOriginal) => ({
@@ -48,6 +49,21 @@ vi.mock("@/components/inbox/swipeable-inbox-row", () => ({ SwipeableInboxRow: "S
 
 describe("Inbox navigation wiring", () => {
   beforeEach(() => vi.clearAllMocks());
+
+  it("selects the reply's chat before opening the chat tab", () => {
+    useChatSessionPickerStore.getState().reset();
+    const reply: InboxItem = {
+      id: "chat-reply", workspace_id: "workspace-1", recipient_type: "member", recipient_id: "member-1",
+      actor_type: "agent", actor_id: "agent-1", type: "chat_reply", severity: "info", issue_id: null,
+      title: "Review changes", body: "Done", issue_status: null, read: false, archived: false,
+      created_at: "2026-06-15T08:01:00Z", details: { chat_session_id: "session-1" },
+    };
+    state.rows = [reply];
+    Inbox().props.children[1].props.renderItem({ item: reply }).props.onPress();
+    expect(useChatSessionPickerStore.getState().selectRequest?.id).toBe("session-1");
+    expect(state.markRead).toHaveBeenCalledWith(reply.id);
+    expect(router.push).toHaveBeenCalledWith({ pathname: "/[workspace]/(tabs)/chat", params: { workspace: "acme" } });
+  });
 
   it.each([true, false])("reads the whole issue before navigation when the latest row read=%s", (read) => {
     const comment: InboxItem = {

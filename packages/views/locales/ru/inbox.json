@@ -104,7 +104,8 @@
     "app_action_requested": "Требуется ваше подтверждение",
     "app_action_reminder": "Срок подтверждения скоро истечёт",
     "app_connect_requested": "Подключить приложение",
-    "app_action_result": "Результат действия приложения"
+    "app_action_result": "Результат действия приложения",
+    "chat_reply": "Ответ в чате"
   },
   "labels": {
     "set_status_to": "Установлен статус",

@@ -26,6 +26,7 @@ export function useTypeLabels(): Record<InboxItemType, string> {
     start_date_changed: t(($) => $.types.start_date_changed),
     due_date_changed: t(($) => $.types.due_date_changed),
     new_comment: t(($) => $.types.new_comment),
+    chat_reply: t(($) => $.types.chat_reply),
     mentioned: t(($) => $.types.mentioned),
     review_requested: t(($) => $.types.review_requested),
     task_completed: t(($) => $.types.task_completed),
@@ -114,7 +115,8 @@ export function InboxDetailLabel({ item }: { item: InboxItem }) {
       if (details.to) return <span>{t(($) => $.labels.set_due_date_to, { date: shortDate(details.to, locale) })}</span>;
       return <span>{t(($) => $.labels.removed_due_date)}</span>;
     }
-    case "new_comment": {
+    case "new_comment":
+    case "chat_reply": {
       if (item.body) return <span>{item.body}</span>;
       return <span>{typeLabels[item.type]}</span>;
     }

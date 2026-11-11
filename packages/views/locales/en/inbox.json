@@ -100,7 +100,8 @@
     "app_action_requested": "Needs your confirmation",
     "app_action_reminder": "Confirmation expiring soon",
     "app_connect_requested": "Connect an app",
-    "app_action_result": "App action result"
+    "app_action_result": "App action result",
+    "chat_reply": "Chat reply"
   },
   "labels": {
     "set_status_to": "Set status to",

@@ -817,7 +817,7 @@
   },
   "notifications": {
     "title": "インボックス通知",
-    "description": "通知をオフにしても、タスク上で履歴を確認できます。",
+    "description": "通知をオフにしても、タスクやチャットで履歴を確認できます。",
     "toast_failed": "通知設定を更新できませんでした",
     "groups": {
       "assignments": {
@@ -847,6 +847,10 @@
       "agent_activity": {
         "label": "エージェントのアクティビティ",
         "description": "エージェントの実行が失敗したとき"
+      },
+      "chat_replies": {
+        "label": "チャットの返信",
+        "description": "エージェントがチャットでの返信を完了したとき。"
       }
     },
     "system": {

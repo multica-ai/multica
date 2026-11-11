@@ -93,6 +93,12 @@ export function getInboxNavigationTarget(
   historyToken: string,
 ) {
   if (!workspace) return null;
+  if (item.type === "chat_reply" && item.details?.chat_session_id) {
+    return {
+      pathname: "/[workspace]/(tabs)/chat" as const,
+      params: { workspace },
+    };
+  }
   if (item.issue_id) {
     return {
       pathname: "/[workspace]/issue/[id]" as const,

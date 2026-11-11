@@ -817,7 +817,7 @@
   },
   "notifications": {
     "title": "인박스 알림",
-    "description": "알림을 꺼도 태스크에서 관련 활동을 볼 수 있습니다.",
+    "description": "알림을 꺼도 태스크나 채팅에서 관련 활동을 볼 수 있습니다.",
     "toast_failed": "알림 설정을 업데이트하지 못했습니다",
     "groups": {
       "assignments": {
@@ -847,6 +847,10 @@
       "agent_activity": {
         "label": "에이전트 활동",
         "description": "에이전트 실행이 실패할 때"
+      },
+      "chat_replies": {
+        "label": "채팅 답장",
+        "description": "에이전트가 채팅 답변을 완료할 때."
       }
     },
     "system": {
