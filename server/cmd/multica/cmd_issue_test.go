@@ -4656,6 +4656,52 @@ func TestRunIssueListFieldsFiltersJSONOutput(t *testing.T) {
 	}
 }
 
+func TestRunIssueListRequesterFieldProjection(t *testing.T) {
+	requesterID := "user-requester"
+	for _, tc := range []struct {
+		name string
+		id   *string
+	}{
+		{"attributed", &requesterID},
+		{"unattributed", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			issue := sampleIssueResponse()
+			issue.CreatorType = "agent"
+			issue.RequesterID = tc.id
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				json.NewEncoder(w).Encode(map[string]any{"issues": []any{issue}, "total": 1})
+			}))
+			defer srv.Close()
+			setCLITestServerEnv(t, srv.URL)
+			t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+			t.Setenv("MULTICA_TOKEN", "test-token")
+
+			cmd := newIssueListTestCmd()
+			_ = cmd.Flags().Set("output", "json")
+			_ = cmd.Flags().Set("fields", "id,requester_id")
+			out, err := captureStdout(t, func() error { return runIssueList(cmd, nil) })
+			if err != nil {
+				t.Fatalf("runIssueList: %v", err)
+			}
+			var resp struct {
+				Issues []map[string]any `json:"issues"`
+			}
+			if err := json.Unmarshal([]byte(out), &resp); err != nil {
+				t.Fatalf("unmarshal output: %v", err)
+			}
+			var wantRequester any
+			if tc.id != nil {
+				wantRequester = *tc.id
+			}
+			want := []map[string]any{{"id": issue.ID, "requester_id": wantRequester}}
+			if !reflect.DeepEqual(resp.Issues, want) {
+				t.Fatalf("issues = %#v, want %#v", resp.Issues, want)
+			}
+		})
+	}
+}
+
 // TestRunIssueListDefaultKeepsFullIssueUnchanged guards backward
 // compatibility: omitting --fields must return the full issue object,
 // description included, exactly as before this flag existed.

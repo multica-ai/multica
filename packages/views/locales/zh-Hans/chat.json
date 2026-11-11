@@ -170,7 +170,6 @@
       "label": "推荐一个操作",
       "prompt": "根据你对我的工作区的了解，推荐一个有用的初始操作。"
     },
-    "customize": "自定义开场建议",
     "uploading": "请等待附件上传完成后再使用开场建议。",
     "draft_in_progress": "请先发送或清空草稿，再使用开场建议。"
   },
@@ -236,8 +235,6 @@
     "no_response_preview": "无文字回复",
     "quick_agents": "常用智能体",
     "add": "添加",
-    "add_agent": "添加常用智能体",
-    "unpin_agent": "移出常用",
     "waiting": "等待回复",
     "pin": "置顶",
     "unpin": "取消置顶",

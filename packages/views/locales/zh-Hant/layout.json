@@ -129,6 +129,7 @@
       "assignee_me": "我",
       "assignee_my_agents": "我的 AI 代理",
       "assignee_me_and_my_agents": "我和我的 AI 代理",
+      "assignee_projects_only": "僅作用於側邊欄「專案」下展開的任務",
       "reset": "重設",
       "load_more": "載入更多",
       "show_less": "收合",

@@ -11,7 +11,7 @@ import { clearWorkspaceStorage } from "../platform/storage-cleanup";
 import { defaultStorage } from "../platform/storage";
 import { getCurrentWsId, getCurrentSlug } from "../platform/workspace-storage";
 import { issueKeys } from "../issues/queries";
-import { isSidebarTableRequest, type SidebarIssuesRequest } from "../issues/sidebar-list";
+import type { SidebarIssuesRequest } from "../issues/sidebar-list";
 import { refreshIssueUnread } from "../issues/unread";
 import { refreshSubscribedIssues, subscribedIssueKeys } from "../issues/subscribed";
 import { projectKeys } from "../projects/queries";
@@ -743,7 +743,7 @@ async function refreshWorkingAgentQueries(qc: QueryClient, wsId: string): Promis
       queryKey: issueKeys.sidebarAll(wsId),
       predicate: ({ queryKey }) => {
         const request = queryKey[4] as SidebarIssuesRequest | undefined;
-        return !!request && isSidebarTableRequest(request) && request.table.filters.working_only === true;
+        return request?.table.filters.working_only === true;
       },
     },
   ];
@@ -1283,17 +1283,23 @@ export function useRealtimeSync(
     // through `refetchOnMount`. Active observers stay fresh via the
     // granular setQueryData handlers in `useIssueTimeline`.
     const invalidateTimeline = (issueId: string) => {
-      qc.invalidateQueries({ queryKey: issueKeys.deliverables(issueId) });
       qc.invalidateQueries({
         queryKey: issueKeys.timeline(issueId),
         refetchType: "none",
       });
+    };
+    // The issue attachment list is the complete file inventory, labelled with
+    // each file's comment. Only comment writes bind, rebind or delete comment
+    // files; activity, reactions and resolutions leave it as it is.
+    const invalidateCommentFiles = (issueId: string) => {
+      qc.invalidateQueries({ queryKey: issueKeys.attachments(issueId) });
     };
 
     const unsubCommentCreated = ws.on("comment:created", (p) => {
       const { comment, issue_revision: issueRevision } = p as CommentCreatedPayload;
       if (!comment?.issue_id) return;
       invalidateTimeline(comment.issue_id);
+      invalidateCommentFiles(comment.issue_id);
       // A new comment bumps the parent issue's updated_at server-side
       // (MUL-5009), so any open board/list sorted by "Updated date" has
       // drifted. Refetch just those keys to re-sort the commented card into
@@ -1318,6 +1324,7 @@ export function useRealtimeSync(
       const { comment, issue_revision } = p as CommentUpdatedPayload;
       if (!comment?.issue_id) return;
       invalidateTimeline(comment.issue_id);
+      invalidateCommentFiles(comment.issue_id);
       const wsId = getCurrentWsId();
       if (wsId) {
         invalidateLastActivitySortedIssueLists(qc, wsId);
@@ -1333,6 +1340,7 @@ export function useRealtimeSync(
       const { issue_id, issue_revision } = p as CommentDeletedPayload;
       if (!issue_id) return;
       invalidateTimeline(issue_id);
+      invalidateCommentFiles(issue_id);
       const wsId = getCurrentWsId();
       if (wsId) {
         invalidateLastActivitySortedIssueLists(qc, wsId);
@@ -1425,6 +1433,7 @@ export function useRealtimeSync(
         hasOnboardedRef.current,
       );
       if (typeof window !== "undefined") {
+        // eslint-disable-next-line no-restricted-syntax -- in-app path, not an external URL; core has no router to hand it to
         window.location.assign(target);
       }
     };

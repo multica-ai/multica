@@ -23,7 +23,6 @@ import { api, dispatchReasonCode } from "@multica/core/api";
 import {
   isAgentRuntimeBound,
   useAgentPresenceDetail,
-  useCustomizeConversationStartersHref,
   useWorkspaceAgentAvailability,
 } from "@multica/core/agents";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -73,6 +72,7 @@ import { useChatInputFocus } from "./use-chat-input-focus";
 import { useChatOpenReveal } from "./use-chat-open-reveal";
 import { ChatWindowMessages } from "./chat-window-messages";
 import { ChatInput } from "./chat-input";
+import { useChatAnnotations } from "./use-chat-annotations";
 import { ChatQueue } from "./chat-queue";
 import { ChatAppRequests } from "../../common/app-requests";
 import { EmptyState } from "./chat-empty-state";
@@ -246,13 +246,6 @@ export function ChatWindow() {
   const isAgentAccessRevoked =
     !!activeAgent && !canAssignAgent(activeAgent, user?.id, memberRole);
 
-  // "Customize" under the starter buttons — the only place the empty state
-  // admits that those buttons are configuration at all.
-  const customizeConversationStartersHref = useCustomizeConversationStartersHref(
-    activeAgent,
-    wsId,
-  );
-
   const projectContextSupport = useChatProjectContextSupport(wsId, activeAgent);
 
   // Three-state availability — "loading" stays neutral (no banner, no
@@ -261,6 +254,11 @@ export function ChatWindow() {
   // (server confirmed: zero usable agents) drives the disabled UI.
   const agentAvailability = useWorkspaceAgentAvailability();
   const noAgent = agentAvailability === "none";
+  const annotations = useChatAnnotations({
+    sessionId: activeSessionId,
+    agentName: activeAgent?.name,
+    enabled: !isSessionArchived && !isAgentArchived && !isAgentAccessRevoked && activeAgentRuntimeBound && !noAgent,
+  });
 
   // Presence drives both the avatar status dot (via ActorAvatar) and the
   // OfflineBanner / TaskStatusPill availability copy. `useAgentPresenceDetail`
@@ -920,12 +918,12 @@ export function ChatWindow() {
             }
             quickActionsPendingMessageId={quickActionsPending?.message_id ?? null}
             onReady={markContentReady}
+            annotations={annotations}
           >
             <EmptyState
               agent={activeAgent}
               hasSessions={sessions.length > 0}
               onPickPrompt={sendConversationStarter}
-              customizeHref={customizeConversationStartersHref}
             />
           </ChatWindowMessages>
         )}
@@ -1010,6 +1008,7 @@ export function ChatWindow() {
         }
         contextItems={contextItems}
         focusRequest={focusRequest}
+        annotations={annotations}
       />
     </motion.div>
   );

@@ -67,9 +67,7 @@ function workspaceScoped(slug: string) {
     newAgentAiSession: (sessionId: string) =>
       `${ws}/agents/new/ai/${encode(sessionId)}`,
     agentDetail: (id: string) => `${ws}/agents/${encode(id)}`,
-    // Deep link behind "customize" in a chat's empty state: the agent's
-    // General settings, scrolled to the conversation starters that produced
-    // the buttons the viewer just looked at.
+    // The agent's General settings, scrolled to its conversation starters.
     agentConversationStarters: (id: string) =>
       `${ws}/agents/${encode(id)}?view=general&focus=${AGENT_FOCUS_CONVERSATION_STARTERS}`,
     memberDetail: (id: string) => `${ws}/members/${encode(id)}`,

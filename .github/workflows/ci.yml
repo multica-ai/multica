@@ -40,8 +40,11 @@ jobs:
         with:
           node-version: 22
 
-      - name: Test CI selection and repository tooling
-        run: node --test scripts/ci-scope.test.mjs scripts/check-image-budget.test.mjs scripts/pr-shots.test.mjs
+      # Path selection must be proven before it skips anything. Every other
+      # scripts/**/*.test.mjs suite runs through `pnpm test:scripts` in the
+      # frontend-quality action.
+      - name: Test CI selection
+        run: node --test scripts/ci-scope.test.mjs
 
       - name: Filter paths
         id: filter
@@ -914,11 +917,11 @@ jobs:
       - name: Test development environment registry
         run: bash scripts/dev-env.test.sh
 
+      - name: Test agent environment lifecycle
+        run: bash scripts/agent-environment.test.sh
+
       - name: Test UI performance comparison runner
         run: bash scripts/perf-compare.test.sh
-
-      - name: Test Desktop window capture
-        run: node --test scripts/desktop-window-capture.test.mjs
 
       - name: Verify reserved-slugs.ts is up to date
         # Re-runs the generator and fails on any drift from the
@@ -935,13 +938,6 @@ jobs:
         run: |
           node scripts/generate-attachment-text-preview.mjs
           git diff --exit-code -- packages/views/editor/utils/text-preview-whitelist.generated.ts
-
-      - name: Verify brand copies match multica-brand.ts
-        # The mobile wordmark, the CLI login page and the logo SVGs are text
-        # copies of packages/ui/lib/multica-brand.ts; bitmaps are not rendered here.
-        run: |
-          node scripts/brand/sync.mjs --check
-          node --test scripts/brand/sync.test.mjs
 
       - name: Setup Helm
         uses: azure/setup-helm@v4

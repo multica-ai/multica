@@ -1274,6 +1274,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// as WeCom above).
 			var telegramMedia engine.MediaResolver
 			telegramOutbound := telegram.NewOutbound(queries, box.Open, "", nil, slog.Default())
+			// How much of a run's tool calls the streamed reply shows: auto
+			// (default), off, summary or detail.
+			progressMode, known := telegram.ParseProgressMode(os.Getenv("MULTICA_TELEGRAM_TOOL_PROGRESS"))
+			if !known {
+				slog.Warn("telegram: unknown MULTICA_TELEGRAM_TOOL_PROGRESS; using auto",
+					"value", os.Getenv("MULTICA_TELEGRAM_TOOL_PROGRESS"))
+			}
+			telegramOutbound.SetProgressMode(progressMode)
 			if store != nil {
 				telegramMedia = telegram.NewMediaResolver(box.Open, store, engine.NewDBMediaIntentLedger(queries), "", nil, slog.Default())
 				telegramOutbound.EnableFileDelivery(store)
@@ -1668,6 +1676,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/runtimes/{runtimeId}/models/{requestId}/result", h.ReportModelListResult)
 		r.Post("/runtimes/{runtimeId}/local-skills/{requestId}/result", h.ReportLocalSkillListResult)
 		r.Post("/runtimes/{runtimeId}/local-skills/import/{requestId}/result", h.ReportLocalSkillImportResult)
+		r.Post("/runtimes/{runtimeId}/environment-commands/claim", h.ClaimEnvironmentCommands)
+		r.Post("/runtimes/{runtimeId}/environment-commands/{commandId}/result", h.ReportEnvironmentCommandResult)
 
 		r.Get("/tasks/{taskId}/status", h.GetTaskStatus)
 		r.Post("/tasks/{taskId}/start", h.StartTask)
@@ -1679,6 +1689,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/tasks/{taskId}/fail", h.FailTask)
 		r.Post("/tasks/{taskId}/usage", h.ReportTaskUsage)
 		r.Post("/tasks/{taskId}/environments", h.ReportTaskEnvironments)
+		r.Post("/tasks/{taskId}/environment-configs", h.ReportTaskEnvironmentConfigs)
 		r.Post("/tasks/{taskId}/messages", h.ReportTaskMessages)
 		r.Get("/tasks/{taskId}/messages", h.ListTaskMessages)
 		r.Post("/tasks/{taskId}/cancel-ack", h.AckTaskCancelled)
@@ -2170,7 +2181,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/reactions", h.AddIssueReaction)
 					r.Delete("/reactions", h.RemoveIssueReaction)
 					r.Get("/attachments", h.ListAttachments)
-					r.Get("/deliverables", h.ListIssueDeliverables)
 					r.Get("/children", h.ListChildIssues)
 					r.Get("/duplicates", h.ListIssueDuplicates)
 					r.Get("/labels", h.ListLabelsForIssue)
@@ -2182,6 +2192,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/properties/{propertyId}", h.SetIssueProperty)
 					r.Delete("/properties/{propertyId}", h.DeleteIssueProperty)
 					r.Get("/environments", h.ListIssueEnvironments)
+					r.With(handler.RequireHumanActor).Post("/environments/start", h.StartIssueEnvironment)
+					r.With(handler.RequireHumanActor).Post("/environments/{environmentId}/stop", h.StopIssueEnvironment)
+					r.With(handler.RequireHumanActor).Post("/environments/{environmentId}/restart", h.RestartIssueEnvironment)
+					r.Post("/environments/{environmentId}/logs", h.ReadIssueEnvironmentLogs)
+					r.Get("/environment-commands/{commandId}", h.GetIssueEnvironmentCommand)
 					r.Get("/pull-requests", h.ListPullRequestsForIssue)
 					r.Post("/pull-requests", h.LinkIssuePullRequest)
 					r.Delete("/pull-requests/{prId}", h.UnlinkIssuePullRequest)
@@ -2278,6 +2293,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/squads", func(r chi.Router) {
 				r.Get("/", h.ListSquads)
 				r.Post("/", h.CreateSquad)
+				// The squads behind the caller's "my agents" relation; backs
+				// that filter on client-filtered surfaces.
+				r.Get("/involved", h.ListInvolvedSquadIDs)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetSquad)
 					r.Put("/", h.UpdateSquad)

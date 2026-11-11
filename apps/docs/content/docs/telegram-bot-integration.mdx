@@ -100,7 +100,7 @@ When a reply that addresses the Bot quotes a message carrying a photo or file, t
 
 ### Replies and supported content
 
-The Bot streams text by posting and editing a Telegram message, quotes the triggering message, preserves forum topics, and splits long replies under Telegram's message limit.
+The Bot streams text by posting and editing a Telegram message, quotes the triggering message, preserves forum topics, and splits long replies under Telegram's message limit. While the agent works, the same message lists its current steps, such as running a command or reading a file, with the time elapsed. A private chat shows what each step is working on; a group shows only the kind of work. Set `MULTICA_TELEGRAM_TOOL_PROGRESS` to `off`, `summary` or `detail` to change this.
 
 Photos, files, video, voice, and audio messages reach the agent as attachments on the same conversation, with the caption as the message text, and files the agent produces are sent back into the chat after its reply. Both directions need object storage on the server (see the self-hosting section below).
 
