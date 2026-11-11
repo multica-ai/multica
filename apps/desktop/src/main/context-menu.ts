@@ -7,7 +7,6 @@ import { isSafeExternalHttpUrl, openExternalSafely } from "./external-url";
 import {
   CONTEXT_MENU_COMMAND_CHANNEL,
   CONTEXT_MENU_REQUEST_CHANNEL,
-  hasContextMenuItems,
   isOfferedCommand,
   parseContextMenuCommand,
   type ContextMenuCommand,
@@ -19,8 +18,9 @@ import {
 // issue, a comment, a project) handle the DOM `contextmenu` event and
 // preventDefault it, which keeps Electron from firing `context-menu` at all.
 // What reaches this handler is the content layer the page left alone — text
-// fields, selected text, links, images — and main forwards it to the
-// renderer to draw rather than popping a native menu.
+// fields, selected text, links, images, code, tables, attachments — and main
+// forwards every one to the renderer, which adds what only the page knows
+// (the code, the comment around it) and skips a menu with nothing in it.
 export function installContextMenu(webContents: WebContents): void {
   // The latest right-click and the params it came with. A command answers
   // only this one, once; anything older or repeated is dropped.
@@ -30,10 +30,6 @@ export function installContextMenu(webContents: WebContents): void {
   webContents.on("context-menu", (_event, params) => {
     nextId += 1;
     const request = buildContextMenuRequest(nextId, params);
-    if (!hasContextMenuItems(request)) {
-      pending = null;
-      return;
-    }
     pending = { request, params };
     webContents.send(CONTEXT_MENU_REQUEST_CHANNEL, request);
   });

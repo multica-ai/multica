@@ -18,6 +18,7 @@ import { installContextMenu } from "./context-menu";
 import {
   CONTEXT_MENU_COMMAND_CHANNEL,
   CONTEXT_MENU_REQUEST_CHANNEL,
+  hasContextMenuItems,
   type ContextMenuRequest,
 } from "../shared/context-menu";
 
@@ -125,16 +126,17 @@ describe("installContextMenu — forwarding", () => {
     });
   });
 
-  it("sends nothing when there is nothing to offer", () => {
+  it("forwards a right-click with nothing of main's to offer, for the page's own items", () => {
     const wc = setup();
     wc.fire(params({}));
-    expect(wc.sent).toHaveLength(0);
+    expect(wc.sent).toHaveLength(1);
+    expect(hasContextMenuItems(wc.lastRequest())).toBe(false);
   });
 
   it("does not offer copy for a whitespace-only selection", () => {
     const wc = setup();
     wc.fire(params({ selectionText: "   ", editFlags: { ...baseEditFlags, canCopy: true } }));
-    expect(wc.sent).toHaveLength(0);
+    expect(wc.lastRequest()).toMatchObject({ canCopy: false });
   });
 
   it("does not offer cut or paste outside an editable field", () => {
@@ -289,8 +291,9 @@ describe("installContextMenu — links and images", () => {
   it("does not offer links that are not http(s)", () => {
     const wc = setup();
     wc.fire(params({ linkURL: "javascript:alert(1)" }));
+    expect(wc.lastRequest().hasLink).toBe(false);
     wc.fire(params({ linkURL: "file:///index.html#/acme/issues/1" }));
-    expect(wc.sent).toHaveLength(0);
+    expect(wc.lastRequest().hasLink).toBe(false);
   });
 
   it("copies the pixels of a loaded image under the cursor", () => {
@@ -304,7 +307,7 @@ describe("installContextMenu — links and images", () => {
   it("does not offer copy image before the image has loaded", () => {
     const wc = setup();
     wc.fire(params({ mediaType: "image", hasImageContents: false }));
-    expect(wc.sent).toHaveLength(0);
+    expect(wc.lastRequest().hasImage).toBe(false);
   });
 });
 
