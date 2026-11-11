@@ -209,6 +209,7 @@ const CONTROLS: Entry[] = [
   ["menu-item-hover-background", "Highlighted menu item.", "var(--accent)"],
   ["menu-item-hover-color", "Text of the highlighted menu item.", "var(--accent-foreground)"],
   ["popover-radius", "Popovers.", "var(--radius)"],
+  ["floating-border-color", "Hairline around layers that float over the page without a backdrop: menus, popovers, select lists and floating panels.", "color-mix(in oklab, var(--surface-border), var(--foreground) 6%)"],
   ["dialog-radius", "Dialogs and alert dialogs.", "calc(var(--radius) * 1.5)"],
   ["tooltip-radius", "Tooltips.", "var(--radius)"],
   ["avatar-radius", "Avatars. Set a length for square avatars.", "calc(infinity * 1px)"],

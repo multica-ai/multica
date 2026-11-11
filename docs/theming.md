@@ -459,6 +459,7 @@ and dark differ, both defaults are given.
 | `--menu-item-hover-background` | `var(--accent)` | Highlighted menu item. |
 | `--menu-item-hover-color` | `var(--accent-foreground)` | Text of the highlighted menu item. |
 | `--popover-radius` | `var(--radius)` | Popovers. |
+| `--floating-border-color` | `color-mix(in oklab, var(--surface-border), var(--foreground) 6%)` | Hairline around layers that float over the page without a backdrop: menus, popovers, select lists and floating panels. |
 | `--dialog-radius` | `calc(var(--radius) * 1.5)` | Dialogs and alert dialogs. |
 | `--tooltip-radius` | `var(--radius)` | Tooltips. |
 | `--avatar-radius` | `calc(infinity * 1px)` | Avatars. Set a length for square avatars. |
