@@ -182,6 +182,49 @@ describe("theme check", () => {
     expect(found.some((m) => /light mode \(frame\): --foreground is below 4\.5:1 on --app-shell/.test(m))).toBe(true);
   });
 
+  it("measures tooltips with the dark-mode text they always use", () => {
+    const pale = ".theme-light { --tooltip: #f4f4f4; }";
+    expect(errors(pale)).toEqual([
+      expect.stringMatching(/^Contrast, light mode \(tooltip\): --foreground is below 4\.5:1 on --tooltip \(1\.\d\d:1\)\. .*--tooltip-foreground/),
+    ]);
+    // MS-DOS 1.0.0: a grey tooltip under the app's near-white dark-mode text.
+    expect(errors(".theme-dark { --tooltip: #aaaaaa; }")).toEqual([
+      expect.stringMatching(/^Contrast, dark mode \(tooltip\): --foreground is below 4\.5:1 on --tooltip/),
+    ]);
+    expect(check(`${pale}\n.theme-light { --tooltip-foreground: #111111; }`)).toMatchObject({ ok: true, issues: [] });
+    expect(check(`${pale}\n.theme-light [data-slot="tooltip-content"] { --foreground: #111111; }`)).toMatchObject({
+      ok: true,
+      issues: [],
+    });
+    const tip = check(`${pale}\n[data-slot='tooltip-content'] { --tooltip-foreground: #111111; }`).contrast.filter(
+      (c) => c.area === "tooltip",
+    );
+    expect(tip.map((c) => [c.mode, c.foreground, c.background])).toEqual([
+      ["light", "--tooltip-foreground", "--tooltip"],
+      ["dark", "--tooltip-foreground", "--tooltip"],
+    ]);
+  });
+
+  it("measures pressed display chips in the popover they sit in", () => {
+    expect(errors(".theme-light { --input: #111111; }")).toEqual([
+      expect.stringMatching(
+        /^Contrast, light mode \(display chip\): --foreground is below 4\.5:1 on --input \(1\.\d\d:1\)\. .*--display-chip-pressed-background/,
+      ),
+    ]);
+    expect(errors('.theme-dark [data-slot="popover-content"] { --input: oklch(0.985 0 0); }')).toEqual([
+      expect.stringMatching(/^Contrast, dark mode \(display chip\): --foreground is below 4\.5:1 on --input \(1\.00:1\)/),
+    ]);
+    const split = ".theme-light { --input: #111111; --display-chip-pressed-background: #e6e6e6; }";
+    expect(check(split)).toMatchObject({ ok: true, issues: [] });
+    expect(errors(`${split}\n.theme-light { --display-chip-pressed-color: #ffffff; }`)).toEqual([
+      expect.stringMatching(/^Contrast, light mode \(display chip\): --display-chip-pressed-color is below 4\.5:1 on --display-chip-pressed-background/),
+    ]);
+    // Dark mode's default --input is translucent; it is measured over the popover.
+    const chips = check("").contrast.filter((c) => c.area === "display chip");
+    expect(chips.map((c) => c.mode)).toEqual(["light", "dark"]);
+    expect(chips.every((c) => c.ratio >= c.required)).toBe(true);
+  });
+
   it("warns instead of guessing when a colour cannot be read", () => {
     const report = check(".theme-light { --muted-foreground: color-mix(in oklab, red, blue); }");
     expect(report.ok).toBe(true);

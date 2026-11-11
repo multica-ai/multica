@@ -178,7 +178,7 @@ Escapes, case, and comments don't get around the check; it reads the CSS the way
 - uses a variable that isn't public, unless it is an option id or the theme reads it itself with `var()`;
 - sets variables anywhere other than `.theme-light` and `.theme-dark` without a descendant selector, so the theme picker can't read the theme's colors back;
 - names a generic family (`sans-serif`, `serif`, …) or a `ui-*` keyword in a font stack, which would override the person's CJK font;
-- misses WCAG AA contrast in either mode: `--foreground` and `--muted-foreground` need 4.5:1 on every surface, `--brand` 4.5:1 on reading surfaces, the primary button label 4.5:1 on the button, and `--faint-foreground` 3:1.
+- misses WCAG AA contrast in either mode: `--foreground` and `--muted-foreground` need 4.5:1 on every surface, `--brand` 4.5:1 on reading surfaces, the primary button label 4.5:1 on the button, and `--faint-foreground` 3:1. Tooltip text needs 4.5:1 on `--tooltip`, and a pressed display chip's text 4.5:1 on its fill. Tooltips always use dark-mode text, so set `--tooltip-foreground` to change it; pressed chips fill with `--input` unless you set `--display-chip-pressed-background`.
 
 ## Check and preview
 

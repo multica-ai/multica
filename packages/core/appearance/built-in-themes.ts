@@ -75,6 +75,8 @@ const POP_SHARED: ThemeTokens = {
   "menu-item-radius": "0.125rem",
   "menu-item-hover-background": "var(--surface-selected)",
   "menu-item-hover-color": "var(--foreground)",
+  "display-chip-pressed-background": "var(--surface-selected)",
+  "display-chip-pressed-color": "var(--foreground)",
   "label-radius": "0.25rem",
   "board-column-radius": "0.25rem",
   "board-card-radius": "0.25rem",

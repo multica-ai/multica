@@ -138,7 +138,7 @@ function luminance({ r, g, b }: Rgba): number {
 }
 
 /** `top` painted over an opaque `bottom`. */
-function over(top: Rgba, bottom: Rgba): Rgba {
+export function over(top: Rgba, bottom: Rgba): Rgba {
   const mix = (t: number, b: number) => Math.round(t * top.a + b * (1 - top.a));
   return { r: mix(top.r, bottom.r), g: mix(top.g, bottom.g), b: mix(top.b, bottom.b), a: 1 };
 }
@@ -167,10 +167,16 @@ export function readDeclarations(css: string, selector: string): Map<string, str
 export interface BasePalette {
   light: Palette;
   dark: Palette;
+  /**
+   * What `.dark` declares, alone. An element with the `dark` class, such as
+   * the tooltip, resets these to the app's dark values in either mode.
+   */
+  darkScope: Palette;
 }
 
 /** Reads the base palette from packages/ui/styles/tokens.css. */
 export function basePaletteFromTokens(tokensCss: string): BasePalette {
   const light = readDeclarations(tokensCss, ":root");
-  return { light, dark: new Map([...light, ...readDeclarations(tokensCss, ".dark")]) };
+  const darkScope = readDeclarations(tokensCss, ".dark");
+  return { light, dark: new Map([...light, ...darkScope]), darkScope };
 }

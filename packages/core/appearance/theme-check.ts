@@ -1,7 +1,7 @@
 import type { ArchiveFile } from "./theme-archive";
 import { parseTheme, readThemeFiles, type ThemePackageInput } from "./theme-package";
 import { THEME_VARIABLE_NAMES } from "./theme-variables";
-import { contrastRatio, resolveColor, type BasePalette } from "./theme-contrast";
+import { contrastRatio, over, resolveColor, type BasePalette, type Rgba } from "./theme-contrast";
 import {
   THEME_OPTION_ATTR_PREFIX,
   themeOptionAttributes,
@@ -26,8 +26,11 @@ export interface ThemeCheckIssue {
 
 export interface ContrastCheck {
   mode: "light" | "dark";
-  /** Where the pair is painted: the page, or the frame (rail, toolbar, tabs). */
-  area: "page" | "frame";
+  /**
+   * Where the pair is painted: the page, the frame (rail, toolbar, tabs),
+   * a tooltip, or a pressed chip in a display popover.
+   */
+  area: "page" | "frame" | "tooltip" | "display chip";
   foreground: string;
   background: string;
   ratio: number;
@@ -79,6 +82,20 @@ const GENERIC_FAMILY =
   /^(?:serif|sans-serif|monospace|cursive|fantasy|system-ui|math|emoji|fangsong|ui-[a-z-]+)$/i;
 const LATIN_STACKS = new Set(["font-ui", "font-content-latin"]);
 const FRAME_ANCHOR = /data-mc="(?:app-rail|window-toolbar|tab-bar|bottom-bar)"/;
+/** How to fix a pair the theme reaches only through a default. */
+function contrastHint({ area, foreground, background }: ContrastCheck): string {
+  if (area === "tooltip" && foreground === "--foreground") {
+    return " Tooltip text is the app's dark-mode --foreground in both modes; set --tooltip-foreground to choose it.";
+  }
+  if (area === "display chip" && background === "--input") {
+    return " Pressed chips fill with --input, the input border colour; set --display-chip-pressed-background to colour them on their own.";
+  }
+  return "";
+}
+const SLOT = /^\[data-slot=(["']?)([\w-]+)\1\]$/;
+/** Slots portalled to <body> whose own variables the check follows. */
+type Slot = "tooltip-content" | "popover-content";
+const SLOTS: readonly Slot[] = ["tooltip-content", "popover-content"];
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
@@ -153,6 +170,23 @@ function splitSelectors(prelude: string): string[] {
   }
   out.push(prelude.slice(start).trim());
   return out;
+}
+
+/**
+ * The slots a selector sets variables on, and in which modes: `[data-slot="x"]`,
+ * optionally after `.theme-light ` or `.theme-dark `, alone or in an `:is()`
+ * list. Null for any other selector.
+ */
+function slotSelector(selector: string): { modes: Mode[]; slots: Slot[] } | null {
+  const match = /^(?:(?::root|html)?\.theme-(light|dark)\s+)?(\S[\s\S]*)$/.exec(selector);
+  if (!match) return null;
+  const target = match[2]!.trim();
+  const list = /^:(?:is|where)\(([\s\S]*)\)$/.exec(target)?.[1];
+  const slots = (list === undefined ? [target] : splitSelectors(list))
+    .map((s) => SLOT.exec(s)?.[2])
+    .filter((s): s is Slot => SLOTS.includes(s as Slot));
+  if (slots.length === 0) return null;
+  return { modes: match[1] ? [match[1] as Mode] : ["light", "dark"], slots };
 }
 
 /** A palette that records which variables a contrast check read. */
@@ -279,6 +313,10 @@ function checkContrast(
     dark: new Map([...base.dark].map(([name, value]) => [name, { value, specificity: 10 }])),
   };
   const frame = { light: [] as [string, string][], dark: [] as [string, string][] };
+  const slotted: Record<Slot, Record<Mode, [string, string][]>> = {
+    "tooltip-content": { light: [], dark: [] },
+    "popover-content": { light: [], dark: [] },
+  };
   const unmodelled = new Map<string, string>();
   const attributes = new Map<string, string>();
   for (const [name, value] of Object.entries(theme ? themeOptionAttributes(theme, undefined) : {})) {
@@ -288,6 +326,7 @@ function checkContrast(
     for (const selector of rule.selectors) {
       const target = rule.nested ? null : rootSelector(selector, attributes);
       if (target === "inactive") continue;
+      const slot = rule.nested || target ? null : slotSelector(selector);
       if (target) {
         for (const m of target.modes) {
           for (const [name, value] of declarations(rule.body)) {
@@ -297,6 +336,8 @@ function checkContrast(
             }
           }
         }
+      } else if (slot) {
+        for (const s of slot.slots) for (const m of slot.modes) slotted[s][m].push(...declarations(rule.body));
       } else if (!/[\s>+~]/.test(selector)) {
         // Sets variables on <html> or <body> in a way the check does not follow.
         for (const [name] of declarations(rule.body)) {
@@ -327,6 +368,8 @@ function checkContrast(
       foreground: string,
       backgrounds: readonly string[],
       required: number,
+      /** Where the backgrounds are resolved, when not where the text is; and what a translucent one sits on. */
+      { surface = p, under }: { surface?: Map<string, string>; under?: string } = {},
     ) => {
       const fg = resolveColor(p, foreground);
       if ("unresolved" in fg) {
@@ -334,16 +377,21 @@ function checkContrast(
         return;
       }
       for (const background of backgrounds) {
-        const bg = resolveColor(p, background);
+        const bg = resolveColor(surface, background);
         if ("unresolved" in bg) {
           unresolved.add(`${m}: ${bg.unresolved}`);
           continue;
         }
-        if (bg.color.a < 1) {
+        let fill: Rgba = bg.color;
+        if (fill.a < 1 && under) {
+          const floor = resolveColor(surface, under);
+          if ("color" in floor && floor.color.a === 1) fill = over(fill, floor.color);
+        }
+        if (fill.a < 1) {
           unresolved.add(`${m}: ${background} is translucent, so its contrast depends on what is underneath`);
           continue;
         }
-        const ratio = contrastRatio(fg.color, bg.color);
+        const ratio = contrastRatio(fg.color, fill);
         results.push({ mode: m, area, foreground, background, ratio: Math.round(ratio * 100) / 100, required });
       }
     };
@@ -364,6 +412,25 @@ function checkContrast(
       }
       measure("frame", framePalette, "--faint-foreground", FRAME_BACKGROUNDS, NON_TEXT);
     }
+
+    // The tooltip is a `.dark` scope in both modes: its text takes the app's
+    // dark tokens, and the theme's own values only through rules on the
+    // tooltip or --tooltip-foreground. Its fill is resolved outside, in the
+    // page's mode. A --tooltip-foreground set on <html> is resolved there.
+    const tooltip = new ReadTracker(read, [...palette, ...base.darkScope, ...slotted["tooltip-content"][m]]);
+    const ownTip = slotted["tooltip-content"][m].some(([name]) => name === "--tooltip-foreground");
+    const tipText = !ownTip && palette.has("--tooltip-foreground") ? palette : tooltip;
+    measure("tooltip", tipText, tipText.has("--tooltip-foreground") ? "--tooltip-foreground" : "--foreground", ["--tooltip"], TEXT, {
+      surface: palette,
+    });
+
+    // Display chips sit in popovers; pressed, they fill with
+    // --display-chip-pressed-background, which defaults to --input (translucent
+    // in dark mode, over the popover's --surface-raised).
+    const popover = new ReadTracker(read, [...palette, ...slotted["popover-content"][m]]);
+    const chipText = popover.has("--display-chip-pressed-color") ? "--display-chip-pressed-color" : "--foreground";
+    const chipFill = popover.has("--display-chip-pressed-background") ? "--display-chip-pressed-background" : "--input";
+    measure("display chip", popover, chipText, [chipFill], TEXT, { under: "--surface-raised" });
   }
 
   for (const [name, where] of unmodelled) {
@@ -382,7 +449,7 @@ function checkContrast(
     const list = surfaces.length > 1 ? `${surfaces.slice(0, -1).join(", ")} and ${surfaces.at(-1)}` : surfaces[0];
     issues.push({
       level: "error",
-      message: `Contrast, ${m} mode${area === "frame" ? " (frame)" : ""}: ${foreground} is below ${required}:1 on ${list}.`,
+      message: `Contrast, ${m} mode${area === "page" ? "" : ` (${area})`}: ${foreground} is below ${required}:1 on ${list}.${contrastHint(checks[0]!)}`,
     });
   }
   for (const reason of unresolved) {

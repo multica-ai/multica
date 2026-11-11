@@ -308,6 +308,20 @@ families in font stacks and WCAG contrast in both modes, each with its line
 in `theme.css`, and exits with status 1 when there is an error. Warnings,
 such as a colour it cannot resolve, do not fail the check.
 
+Contrast covers the page, the frame, and two places a theme reaches only
+indirectly:
+
+- **Tooltips** are always drawn with dark-mode text: the tooltip is a
+  `.dark` scope, so its `--foreground` is the app's dark value in both
+  modes, not the theme's `.theme-dark` one. The text is measured on
+  `--tooltip` in each mode. Set `--tooltip-foreground` to choose it.
+- **Pressed display chips** (the on/off chips in the Display and sidebar
+  settings popovers) fill with `--input`, the input border colour, and use
+  `--foreground`. They are measured inside the popover, with the rules a
+  theme sets on `[data-slot="popover-content"]`. Set
+  `--display-chip-pressed-background` and `--display-chip-pressed-color` to
+  colour them apart from input borders.
+
 To see the theme the way the theme store shows it:
 
 ```sh
@@ -386,7 +400,7 @@ and dark differ, both defaults are given.
 | `--accent` | `oklch(0.967 0.001 286.375)` / `oklch(0.274 0.006 286.033)` | Hover fill in menus and lists. |
 | `--accent-foreground` | `oklch(0.21 0.006 285.885)` / `oklch(0.985 0 0)` | Text on accent. |
 | `--border` | `oklch(0.945 0.003 286.32)` / `oklch(1 0 0 / 6%)` | Dividers and table borders. |
-| `--input` | `oklch(0.92 0.004 286.32)` / `oklch(1 0 0 / 15%)` | Input borders. |
+| `--input` | `oklch(0.92 0.004 286.32)` / `oklch(1 0 0 / 15%)` | Input borders, and pressed display chips unless `display-chip-pressed-background` is set. |
 | `--ring` | `oklch(0.705 0.015 286.067)` / `oklch(0.552 0.016 285.938)` | Focus ring. |
 | `--sidebar` | `oklch(0.964435 0.001327 286.375)` / `oklch(0.21 0.006 285.885)` | Sidebar background (shadcn sidebar). |
 | `--sidebar-foreground` | `oklch(0.141 0.005 285.823)` / `oklch(0.985 0 0)` | Sidebar text. |
@@ -443,6 +457,7 @@ and dark differ, both defaults are given.
 | `--floating-shadow` | `0 16px 40px rgb(15 23 42 / 0.14), 0 3px 10px rgb(15 23 42 / 0.08)` / `0 20px 48px rgb(0 0 0 / 0.46), 0 4px 12px rgb(0 0 0 / 0.28)` | Dialogs and sheets. |
 | `--menu-shadow` | `0 8px 24px rgb(15 23 42 / 0.08), 0 2px 6px rgb(15 23 42 / 0.05)` / `0 10px 28px rgb(0 0 0 / 0.3), 0 2px 8px rgb(0 0 0 / 0.18)` | Menus, selects and popovers. |
 | `--tooltip` | `oklch(0.21 0.006 285.885)` / `oklch(0.3 0.006 286.033)` | Tooltip fill (dark in both modes). |
+| `--tooltip-foreground` | `var(--foreground)` | Tooltip text. Unset, it is the app's dark-mode `--foreground` in both modes, whatever the theme sets on `.theme-dark`. |
 | `--tooltip-shadow` | `0 4px 12px rgb(15 23 42 / 0.16), 0 1px 3px rgb(15 23 42 / 0.12)` / `0 0 0 1px oklch(1 0 0 / 10%), 0 8px 24px rgb(0 0 0 / 0.4)` | Tooltip shadow. |
 | `--icon-stroke-width` | `2` | Stroke width of line icons. |
 
@@ -502,6 +517,8 @@ and dark differ, both defaults are given.
 | `--menu-item-radius` | `calc(var(--radius) * 0.75)` | Items inside a menu. |
 | `--menu-item-hover-background` | `var(--accent)` | Highlighted menu item. |
 | `--menu-item-hover-color` | `var(--accent-foreground)` | Text of the highlighted menu item. |
+| `--display-chip-pressed-background` | `var(--input)` | Fill of a pressed on/off chip in the Display and sidebar settings popovers. |
+| `--display-chip-pressed-color` | `var(--foreground)` | Text of a pressed display chip. |
 | `--popover-radius` | `var(--radius)` | Popovers. |
 | `--floating-border-color` | `color-mix(in oklab, var(--surface-border), var(--foreground) 6%)` | Hairline around layers that float over the page without a backdrop: menus, popovers, select lists and floating panels. |
 | `--dialog-radius` | `calc(var(--radius) * 1.5)` | Dialogs and alert dialogs. |

@@ -18,7 +18,7 @@ export function DisplayChip({ className, ...props }: ComponentProps<typeof Toggl
       size="sm"
       variant="outline"
       className={cn(
-        "h-6 max-w-40 gap-1.5 rounded-md px-2 text-caption text-muted-foreground hover:border-foreground/25 hover:bg-transparent hover:text-foreground aria-pressed:border-transparent aria-pressed:bg-input aria-pressed:text-foreground aria-pressed:hover:bg-input/70",
+        "h-6 max-w-40 gap-1.5 rounded-md px-2 text-caption text-muted-foreground hover:border-foreground/25 hover:bg-transparent hover:text-foreground aria-pressed:border-transparent aria-pressed:bg-display-chip-pressed aria-pressed:text-display-chip-pressed-foreground aria-pressed:hover:bg-display-chip-pressed/70",
         className,
       )}
       {...props}

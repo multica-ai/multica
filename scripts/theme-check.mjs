@@ -58,7 +58,7 @@ if (json) {
       const failing = contrast.filter((c) => c.ratio < c.required).length;
       const lowest = [...contrast].sort((a, b) => a.ratio / a.required - b.ratio / b.required)[0];
       console.log(
-        `  contrast  ${contrast.length} pairs checked, ${failing} below WCAG AA. Lowest: ${lowest.foreground} on ${lowest.background}, ${lowest.mode}${lowest.area === "frame" ? " frame" : ""}, ${lowest.ratio.toFixed(2)}:1 (needs ${lowest.required}:1)`,
+        `  contrast  ${contrast.length} pairs checked, ${failing} below WCAG AA. Lowest: ${lowest.foreground} on ${lowest.background}, ${lowest.mode}${lowest.area === "page" ? "" : ` ${lowest.area}`}, ${lowest.ratio.toFixed(2)}:1 (needs ${lowest.required}:1)`,
       );
     }
   }
