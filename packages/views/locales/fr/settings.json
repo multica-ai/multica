@@ -1409,7 +1409,10 @@
       "close_others": "Fermer les autres onglets",
       "open_window": "Ouvrir dans une nouvelle fenêtre",
       "new": "Nouvel onglet",
-      "pinned_name": "{{title}} (épinglé)"
+      "pinned_name": "{{title}} (épinglé)",
+      "copy_link": "Copier le lien",
+      "link_copied": "Lien copié",
+      "close_right": "Fermer les onglets à droite"
     },
     "updates": {
       "title": "Mises à jour",

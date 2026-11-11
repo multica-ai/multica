@@ -1409,7 +1409,10 @@
       "close_others": "Close other tabs",
       "open_window": "Open as new window",
       "new": "New tab",
-      "pinned_name": "{{title}} (pinned)"
+      "pinned_name": "{{title}} (pinned)",
+      "copy_link": "Copy link",
+      "link_copied": "Link copied",
+      "close_right": "Close tabs to the right"
     },
     "updates": {
       "title": "Updates",
