@@ -228,15 +228,18 @@ function ProjectIssuesGroup({
           ))}
         </div>
       </div>
-      <Field label={t(($) => $.panels.work.settings_assignee)}>
-        <SortSelect
-          label={t(($) => $.panels.work.settings_assignee)}
-          value={settings.assignee}
-          options={assigneeOptions}
-          onChange={(assignee) => update({ assignee })}
-          className="w-44"
-        />
-      </Field>
+      <div className="space-y-1">
+        <Field label={t(($) => $.panels.work.settings_assignee)}>
+          <SortSelect
+            label={t(($) => $.panels.work.settings_assignee)}
+            value={settings.assignee}
+            options={assigneeOptions}
+            onChange={(assignee) => update({ assignee })}
+            className="w-44"
+          />
+        </Field>
+        <p className="text-caption text-muted-foreground">{t(($) => $.panels.work.assignee_projects_only)}</p>
+      </div>
       <SwitchField
         label={ti(($) => $.display.show_sub_issues)}
         checked={settings.showSubIssues}

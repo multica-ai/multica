@@ -27,13 +27,7 @@
     "success": "Squad archivé"
   },
   "name_editor": {
-    "title": "Renommer le squad",
-    "placeholder": "Nom du squad",
-    "required": "Le nom est obligatoire",
-    "cancel": "Annuler",
-    "save": "Enregistrer",
-    "saved": "Enregistré",
-    "save_failed": "Échec de l'enregistrement"
+    "placeholder": "Nom du squad"
   },
   "add_member_dialog": {
     "title": "Ajouter un membre",
@@ -53,12 +47,9 @@
     "empty": "Ajouter un rôle…",
     "placeholder": "Rôle (par exemple : Relecteur)"
   },
-  "description_dialog": {
-    "title": "Modifier la description",
-    "placeholder_empty": "Ajouter une description",
-    "cancel": "Annuler",
-    "responsibility_placeholder": "De quoi ce squad est-il responsable ?",
-    "save": "Enregistrer"
+  "description_editor": {
+    "empty": "Ajouter une description",
+    "placeholder": "De quoi ce squad est-il responsable ?"
   },
   "members_tab": {
     "section_title": "Membres",
@@ -112,7 +103,8 @@
     "leader_updated": "Responsable mis à jour",
     "leader_update_failed": "Échec de la mise à jour du responsable",
     "archive_failed": "Échec de l'archivage du squad",
-    "instructions_saved": "Instructions enregistrées"
+    "instructions_saved": "Instructions enregistrées",
+    "update_failed": "Échec de l'enregistrement"
   },
   "profile_card": {
     "unavailable": "Squad indisponible",

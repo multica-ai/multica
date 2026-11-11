@@ -52,6 +52,8 @@
     "action_failed_toast": "No se ha podido actualizar el mensaje en cola"
   },
   "message_list": {
+    "jump_to_latest": "Ir a lo más reciente",
+    "new_reply": "Nueva respuesta",
     "show_details": "Mostrar detalles",
     "replied_in": "Respondió en {{elapsed}}",
     "failed_after": "Falló tras {{elapsed}}",
@@ -238,8 +240,6 @@
     "no_response_preview": "Sin respuesta de texto",
     "quick_agents": "Agentes frecuentes",
     "add": "Añadir",
-    "add_agent": "Añadir un agente frecuente",
-    "unpin_agent": "Quitar de frecuentes",
     "waiting": "Esperando respuesta",
     "pin": "Fijar",
     "unpin": "Dejar de fijar",

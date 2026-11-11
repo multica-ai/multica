@@ -64,14 +64,6 @@
     "search_runtime_filtered": "\"{{machine}}\"上沒有匹配\"{{query}}\"的 AI 代理。",
     "runtime_filtered": "\"{{machine}}\"上還沒有 AI 代理。"
   },
-  "runtime_filter": {
-    "all": "全部執行時",
-    "section_local": "本地",
-    "section_remote": "遠端",
-    "section_cloud": "雲端",
-    "agent_count_other": "{{count}} 個 AI 代理",
-    "empty": "還沒有機器"
-  },
   "columns": {
     "agent": "AI 代理",
     "status": "狀態",
@@ -199,7 +191,6 @@
     "rename_required": "名稱必填",
     "edit_description_title": "編輯描述",
     "description_placeholder": "這個 AI 代理做什麼？",
-    "save": "儲存",
     "cancel": "取消"
   },
   "overview": {
@@ -222,12 +213,7 @@
     "edit_access_aria": "訪問權限：{{value}}。變更訪問權限",
     "all_settings": "全部設定"
   },
-  "skill_attach": {
-    "trigger_aria": "附加工作區 skill",
-    "trigger_label": "附加"
-  },
   "pickers": {
-    "concurrency_tooltip": "併發 · 最多 {{value}} 次並行執行",
     "concurrency_range": "最大並行執行數（{{min}}–{{max}}）",
     "runtime_none": "無執行時",
     "runtime_tooltip": "執行時 · {{name}} · {{status}}",
@@ -448,23 +434,17 @@
     }
   },
   "create_dialog": {
-    "title_create": "建立 AI 代理",
-    "title_duplicate": "複製 AI 代理",
-    "description_duplicate": "基於\"{{name}}\"建立一個新 AI 代理。指令、環境變數和 skill 會一併複製。",
     "name_label": "名稱",
     "name_placeholder": "例如：深度研究 AI 代理",
     "description_label": "描述",
     "description_placeholder": "這個 AI 代理做什麼？",
-    "visibility_label": "可見性",
     "access": {
-      "label": "訪問權限",
       "private_title": "私有",
       "private_desc": "只有你可以執行該 AI 代理",
       "public_title": "公開",
       "public_desc": "選擇誰可以執行該 AI 代理",
       "public_workspace_option": "工作區內所有人",
       "public_members_group": "指定成員",
-      "public_members_empty": "沒有可選擇的工作區成員",
       "public_targets_empty_hint": "至少勾選下方一項——否則該 AI 代理仍為私有。"
     },
     "runtime_label": "執行時",
@@ -479,17 +459,10 @@
     "runtime_no_results": "沒有匹配的機器",
     "runtime_group_online": "{{online}}/{{total}} 線上",
     "duplicate_copy_suffix": "（副本）",
-    "create": "建立",
-    "creating": "建立中...",
-    "cancel": "取消",
-    "create_failed_toast": "建立 AI 代理失敗",
     "skill_attach_failed_toast": "AI 代理已建立，但 skill 關聯失敗：{{error}}",
     "squad_join_failed_toast": "AI 代理\"{{name}}\"已建立，但加入小隊失敗：{{error}}。你可以在 Members 標籤裡手動新增。",
     "instructions": {
       "label": "指令",
-      "placeholder_blank": "點選撰寫指令…",
-      "placeholder_duplicate": "點選檢視或編輯複製的指令",
-      "collapse": "收起",
       "editor_placeholder": "寫下這個 AI 代理該做什麼、關注什麼、要避開什麼…"
     },
     "skills_section": {

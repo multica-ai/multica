@@ -131,6 +131,7 @@
       "assignee_me": "Moi",
       "assignee_my_agents": "Mes agents",
       "assignee_me_and_my_agents": "Moi et mes agents",
+      "assignee_projects_only": "S'applique uniquement aux tâches affichées sous Projets",
       "reset": "Réinitialiser",
       "load_more": "Afficher plus",
       "show_less": "Afficher moins",

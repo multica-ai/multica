@@ -96,6 +96,8 @@ describe("RichContent image preview sequence", () => {
     ["angle destination", "![Reference](</chart v2.png>)", "", [], "/chart%20v2.png", "Reference"],
     ["escaped destination", String.raw`![Reference](/chart\(v2\).png)`, "", [], "/chart(v2).png", "Reference"],
     ["parenthesized URL", "![Reference](/chart(v2).png)", "", [], "/chart(v2).png", "Reference"],
+    ["HTML image", '<img src="https://cdn.example/a.png" alt="Reference">', "", [], "https://cdn.example/a.png", "Reference"],
+    ["HTML image with a character reference", '<img src="https://cdn.example/a.png?a=1&amp;b=2" alt="Reference">', "", [], "https://cdn.example/a.png?a=1&b=2", "Reference"],
   ] as const)("opens the %s in the shared viewer and pages through rendered images", (_name, image, definition, attachments, expectedSrc, imageAlt) => {
     const content = [
       "![First](/first.png)",

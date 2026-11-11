@@ -3,15 +3,11 @@
 import { useLayoutEffect, useRef, useState, type ChangeEvent } from "react";
 import {
   AlertCircle,
-  ArrowLeft,
-  ChevronRight,
   Download,
   FileArchive,
   FolderOpen,
-  HardDrive,
   Loader2,
   Pencil,
-  Plus,
   X as XIcon,
 } from "@multica/ui/icons";
 import { toast } from "sonner";
@@ -57,9 +53,7 @@ import { RuntimeLocalSkillImportPanel } from "./runtime-local-skill-import-panel
 import { useT } from "../../i18n";
 import { isNameConflictError } from "../lib/utils";
 
-type Method = "chooser" | "manual" | "local" | "url" | "runtime";
-
-export type CreateSkillMethod = Exclude<Method, "chooser">;
+export type CreateSkillMethod = "manual" | "local" | "url" | "runtime";
 
 function seedAfterCreate(
   qc: ReturnType<typeof useQueryClient>,
@@ -70,46 +64,6 @@ function seedAfterCreate(
   qc.setQueryData(skillDetailOptions(wsId, skill.id).queryKey, skill);
   qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId), refetchType });
   qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId), refetchType });
-}
-
-// Chooser — initial method picker (4 cards)
-
-function MethodChooser({ onChoose }: { onChoose: (m: Method) => void }) {
-  const { t } = useT("skills");
-  const methods: {
-    key: CreateSkillMethod;
-    icon: typeof Plus;
-  }[] = [
-    { key: "manual", icon: Plus },
-    { key: "local", icon: FolderOpen },
-    { key: "url", icon: Download },
-    { key: "runtime", icon: HardDrive },
-  ];
-  return (
-    <div className="grid gap-2 p-5">
-      {methods.map(({ key, icon: Icon }) => (
-        <button
-          key={key}
-          type="button"
-          onClick={() => onChoose(key)}
-          className="group flex items-start gap-3 rounded-lg border bg-card p-4 text-left transition-colors hover:border-primary/40 hover:bg-accent/40"
-        >
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground group-hover:text-foreground">
-            <Icon className="h-4 w-4" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="text-body font-medium">
-              {t(($) => $.create.method[key].title)}
-            </div>
-            <div className="mt-0.5 text-caption text-muted-foreground">
-              {t(($) => $.create.method[key].desc)}
-            </div>
-          </div>
-          <ChevronRight className="h-4 w-4 shrink-0 text-faint-foreground transition-colors group-hover:text-muted-foreground" />
-        </button>
-      ))}
-    </div>
-  );
 }
 
 // Manual form
@@ -439,7 +393,6 @@ function LocalForm({
   selectionWorkspace,
   onCreated,
   onCancel,
-  onDone,
   onChooseFolder,
   onChooseArchive,
   onBusyChange,
@@ -449,7 +402,6 @@ function LocalForm({
   preparing: boolean;
   onCreated: (skill: Skill) => void;
   onCancel: () => void;
-  onDone: () => void;
   onChooseFolder: () => void;
   onChooseArchive: () => void;
   onBusyChange: (busy: boolean) => void;
@@ -822,7 +774,7 @@ function LocalForm({
             type="button"
             variant="ghost"
             size="sm"
-            onClick={completed ? onDone : onCancel}
+            onClick={onCancel}
           >
             {completed
               ? t(($) => $.create.local.done)
@@ -855,19 +807,17 @@ function LocalForm({
 // Root dialog
 
 export function CreateSkillDialog({
-  initialMethod,
+  method,
   onClose,
   onCreated,
 }: {
-  /** Opens straight on one method; without it the dialog starts on the chooser. */
-  initialMethod?: CreateSkillMethod;
+  method: CreateSkillMethod;
   onClose: () => void;
   onCreated?: (skill: Skill) => void;
 }) {
   const { t } = useT("skills");
   const wsId = useWorkspaceId();
   const localSelectionWorkspace = useRef({ wsId, slug: getCurrentSlug() });
-  const [method, setMethod] = useState<Method>(initialMethod ?? "chooser");
   const [localPrepared, setLocalPrepared] =
     useState<SkillArchiveDiscovery | null>(null);
   const [localPreparing, setLocalPreparing] = useState(false);
@@ -895,12 +845,6 @@ export function CreateSkillDialog({
     return next;
   };
 
-  const resetLocal = () => {
-    beginLocalSelection();
-    setLocalPrepared(null);
-    setLocalPreparing(false);
-  };
-
   const bindDirectoryInput = (el: HTMLInputElement | null) => {
     folderInputRef.current = el;
     if (!el) return;
@@ -916,11 +860,6 @@ export function CreateSkillDialog({
     archiveInputRef.current?.click();
   };
 
-  const handleChoose = (next: Method) => {
-    resetLocal();
-    setMethod(next);
-  };
-
   const onFolderPicked = async (e: ChangeEvent<HTMLInputElement>) => {
     // FileList is live: clearing the input empties the same object. Snapshot
     // File handles first so resetting `value` (to allow picking the same
@@ -930,7 +869,6 @@ export function CreateSkillDialog({
     e.target.value = "";
     if (files.length === 0) return;
     const gen = beginLocalSelection();
-    setMethod("local");
     setLocalPreparing(true);
     setLocalPrepared(null);
     try {
@@ -951,7 +889,6 @@ export function CreateSkillDialog({
     e.target.value = "";
     if (!file) return;
     beginLocalSelection();
-    setMethod("local");
     setLocalPreparing(false);
     const archive = wrapExistingSkillArchive(file);
     setLocalPrepared(
@@ -970,13 +907,6 @@ export function CreateSkillDialog({
     );
   };
 
-  // Opened on a method, Cancel leaves the dialog: the chooser it would fall
-  // back to is a step the user never took.
-  const cancelForm = () => {
-    if (initialMethod) onClose();
-    else setMethod("chooser");
-  };
-
   const wide = method === "runtime";
 
   return (
@@ -990,7 +920,6 @@ export function CreateSkillDialog({
         showCloseButton={false}
         className={cn(
           "flex flex-col gap-0 overflow-hidden p-0",
-          "!transition-all !duration-300 !ease-out",
           wide
             ? "!h-[min(600px,85vh)] !max-w-2xl !w-full"
             : "!h-auto !max-h-[85vh] !max-w-md !w-full",
@@ -998,38 +927,13 @@ export function CreateSkillDialog({
       >
         {/* Header */}
         <div className="flex shrink-0 items-start justify-between gap-3 border-b px-5 pt-4 pb-3">
-          <div className="flex items-start gap-2 min-w-0">
-            {method !== "chooser" && (
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <button
-                      type="button"
-                      disabled={localBusy}
-                      onClick={() => {
-                        resetLocal();
-                        setMethod("chooser");
-                      }}
-                      className="-ml-1 mt-px rounded-sm p-1 text-faint-foreground transition-colors hover:bg-accent/60 hover:text-muted-foreground"
-                      aria-label={t(($) => $.create.back_aria)}
-                    >
-                      <ArrowLeft className="h-3.5 w-3.5" />
-                    </button>
-                  }
-                />
-                <TooltipContent side="bottom">
-                  {t(($) => $.create.back)}
-                </TooltipContent>
-              </Tooltip>
-            )}
-            <div className="min-w-0">
-              <DialogTitle className="truncate text-title-sm font-medium">
-                {t(($) => $.create.method[method].title)}
-              </DialogTitle>
-              <p className="mt-0.5 text-caption text-muted-foreground">
-                {t(($) => $.create.method[method].desc)}
-              </p>
-            </div>
+          <div className="min-w-0">
+            <DialogTitle className="truncate text-title-sm font-medium">
+              {t(($) => $.create.method[method].title)}
+            </DialogTitle>
+            <p className="mt-0.5 text-caption text-muted-foreground">
+              {t(($) => $.create.method[method].desc)}
+            </p>
           </div>
           <Tooltip>
             <TooltipTrigger
@@ -1072,29 +976,24 @@ export function CreateSkillDialog({
         />
 
         {/* Method body — each form owns its scroll middle + footer */}
-        {method === "chooser" && <MethodChooser onChoose={handleChoose} />}
         {method === "manual" && (
-          <ManualForm onCreated={handleCreated} onCancel={cancelForm} />
+          <ManualForm onCreated={handleCreated} onCancel={onClose} />
         )}
         {method === "local" && (
           <LocalForm
             key={localEpoch}
-            onDone={onClose}
             onBusyChange={setLocalBusyState}
             selectionWorkspace={localSelectionWorkspace.current}
             prepared={localPrepared}
             preparing={localPreparing}
             onCreated={handleCreated}
-            onCancel={() => {
-              resetLocal();
-              cancelForm();
-            }}
+            onCancel={onClose}
             onChooseFolder={openFolderPicker}
             onChooseArchive={openArchivePicker}
           />
         )}
         {method === "url" && (
-          <UrlForm onCreated={handleCreated} onCancel={cancelForm} />
+          <UrlForm onCreated={handleCreated} onCancel={onClose} />
         )}
         {method === "runtime" && (
           <RuntimeLocalSkillImportPanel

@@ -210,7 +210,7 @@
     "section_relation": "Relación conmigo",
     "relation_assigned": "Asignadas a mí",
     "relation_created": "Creadas por mí",
-    "relation_my_agents": "Asignadas a mis agentes",
+    "relation_my_agents": "Trabajo de mis agentes",
     "relation_subscribed": "Suscrito por mí",
     "section_agent_status": "Estado del agente",
     "agent_status_running": "En ejecución",
@@ -570,7 +570,9 @@
   },
   "timeline": {
     "loading": "Cargando...",
-    "jump_to_latest": "Ir a lo más reciente"
+    "jump_to_latest": "Ir a lo más reciente",
+    "new_comments_one": "{{count}} comentario nuevo",
+    "new_comments_other": "{{count}} comentarios nuevos"
   },
   "activity": {
     "created": "creó esta tarea",
@@ -632,7 +634,10 @@
     "wakeup_checkin_coalesced_other": "{{count}} comprobaciones silenciosas · última: {{note}}",
     "wakeup_chip_created_by": "activación de {{name}}",
     "wakeup_chip_system": "Regla del sistema",
-    "wakeup_created_scheduled": "añadió una activación para {{agent}}: {{condition}}"
+    "wakeup_created_scheduled": "añadió una activación para {{agent}}: {{condition}}",
+    "environment_stopped": "detuvo el entorno {{name}}",
+    "environment_restarted": "reinició el entorno {{name}}",
+    "environment_started": "inició el entorno {{name}}"
   },
   "comment": {
     "add_reaction": "Añadir reacción",
@@ -1029,7 +1034,7 @@
     "variant_my_any": "Cualquier relación",
     "variant_my_assigned": "Asignadas a mí",
     "variant_my_created": "Creadas por mí",
-    "variant_my_involved": "En las que participo"
+    "variant_my_involved": "Trabajo de mis agentes"
   },
   "plugins": {
     "panels": "Plugins",
@@ -1772,16 +1777,13 @@
       "name_placeholder": "Nombre del estado",
       "add": "Añadir"
     },
-    "menu": {
-      "view_flow": "Ver el flujo completo",
-      "switch": "Cambiar de flujo de trabajo"
-    },
     "flow": {
       "title": "Flujo de trabajo {{workflow}}",
       "scope_own": "Solo este proyecto usa este flujo de trabajo.",
       "no_handoff_here": "Sin traspaso",
       "scope_shared_one": "{{count}} proyecto usa este flujo de trabajo. Sus traspasos se aplican a todos los proyectos que lo usan.",
-      "scope_shared_other": "{{count}} proyectos usan este flujo de trabajo. Sus traspasos se aplican a todos ellos."
+      "scope_shared_other": "{{count}} proyectos usan este flujo de trabajo. Sus traspasos se aplican a todos ellos.",
+      "switch": "Cambiar de flujo de trabajo"
     },
     "templates": {
       "delivery": {
@@ -1819,7 +1821,7 @@
   },
   "relation_filter_error": {
     "title": "No se ha podido cargar el filtro «Relación conmigo»",
-    "hint": "Las tareas filtradas por «Suscrito por mí» o «Asignadas a mis agentes» no se pueden mostrar hasta que se carguen tus suscripciones y agentes."
+    "hint": "Las tareas filtradas por «Suscrito por mí» o «Trabajo de mis agentes» no se pueden mostrar hasta que se carguen tus suscripciones y agentes."
   },
   "views": {
     "builtin": {
@@ -1920,7 +1922,9 @@
       "running": "En ejecución",
       "exited": "Terminado",
       "stopped": "Detenido",
-      "unreachable": "Sin respuesta"
+      "unreachable": "Sin respuesta",
+      "stopping": "Deteniendo",
+      "preparing": "Preparando"
     },
     "expires_in_minutes_one": "Caduca en {{count}} min",
     "expires_in_minutes_other": "Caduca en {{count}} min",
@@ -1939,6 +1943,87 @@
     "open": "Abrir",
     "copy_url": "Copiar URL",
     "copied": "URL copiada",
-    "copy_failed": "No se pudo copiar la URL"
+    "copy_failed": "No se pudo copiar la URL",
+    "offline": "Sin conexión",
+    "machine_offline": "{{machine}} está sin conexión",
+    "more_actions": "Más acciones",
+    "view_logs": "Ver registros",
+    "restart": "Reiniciar",
+    "stop": "Detener",
+    "stop_confirm_item": "Detener…",
+    "run_first": "la primera ejecución",
+    "run_nth_one": "la ejecución {{count}}",
+    "run_nth_other": "la ejecución {{count}}",
+    "someone": "Alguien",
+    "started_by": "Iniciado por {{name}}",
+    "restarted_by": "Reiniciado por {{name}}",
+    "started_by_agent_in_run": "Iniciado por {{name}} en {{run}}",
+    "stopped_by": "Detenido por {{name}}",
+    "stopped_on_expiry": "Detenido al caducar",
+    "exited_ago": "Terminó {{time}}",
+    "exit_code": "Código de salida {{code}}",
+    "detected_label": "Servicio detectado · {{name}}",
+    "detected_no_logs": "Este servicio no se inició desde la configuración de entornos, así que no tiene registros ni se puede reiniciar.",
+    "offline_hint": "Disponible cuando este equipo vuelva a estar en línea.",
+    "outdated_hint": "Actualiza Multica en este equipo para gestionarlo desde aquí.",
+    "no_permission_hint": "Solo los miembros que pueden usar este equipo pueden detenerlo o reiniciarlo.",
+    "waiting_machine": "Esperando al equipo",
+    "waiting_ready": "Esperando a que esté listo",
+    "no_response": "Sin respuesta",
+    "action_failed": {
+      "stop": "No se pudo detener",
+      "restart": "No se pudo reiniciar",
+      "start": "No se pudo iniciar"
+    },
+    "stop_confirm_title": "¿Detener {{name}}?",
+    "stop_confirm_body": "Este servicio ({{process}}) se detectó automáticamente; no se inició desde la configuración de entornos. Una vez detenido, no se puede reiniciar aquí: un agente tendrá que volver a iniciarlo.",
+    "cancel": "Cancelar",
+    "preparing_title": "{{name}} está preparando el entorno",
+    "preparing_hint": "Aparecerá aquí cuando se inicie",
+    "start_menu": {
+      "trigger": "Iniciar un entorno",
+      "note": "Se inicia según la configuración de entornos del proyecto, con el código de la última ejecución en este equipo.",
+      "no_permission": "Solo los miembros que pueden usar un equipo pueden iniciar entornos en él.",
+      "nothing_to_start": "Esta tarea aún no se ha ejecutado, o el código de ejecuciones anteriores se ha limpiado, así que no hay nada que iniciar directamente.",
+      "ask_agent": "Pedir a {{name}} que lo inicie",
+      "ask_any_agent": "Pedir a un agente que lo inicie",
+      "new_run": "Nueva ejecución",
+      "preparing": "Preparando",
+      "ask_agent_hint": "{{name}} preparará el código de esta tarea y luego iniciará el entorno. Si el proyecto no tiene configuración de entornos, decidirá cómo iniciarlo.",
+      "ask_any_agent_hint": "El agente preparará el código de esta tarea y luego iniciará el entorno. Si el proyecto no tiene configuración de entornos, decidirá cómo iniciarlo.",
+      "ask_failed": "No se pudo pedir al agente",
+      "agent_instruction": "Inicia el entorno: prepara el código de esta tarea y ejecuta `multica env start` para los entornos que declara el proyecto; si no declara ninguno, decide tú cómo iniciarlo. Déjalo en marcha y responde con su dirección."
+    },
+    "log": {
+      "title": "{{name}} · Registros",
+      "filter": "Filtrar registros",
+      "wrap": "Ajustar líneas",
+      "follow": "Seguir lo último",
+      "copy": "Copiar",
+      "copied": "Registros copiados",
+      "copy_failed": "No se pudieron copiar los registros",
+      "refresh": "Actualizar",
+      "footer_one": "Mostrando la última línea · actualizado a las {{time}}",
+      "footer_other": "Mostrando las últimas {{count}} líneas · actualizado a las {{time}}",
+      "loading": "Leyendo los registros…",
+      "empty": "Todavía no hay salida",
+      "no_match": "Ninguna línea coincide",
+      "no_response": "El equipo no respondió",
+      "failed": "No se pudieron leer los registros: {{error}}",
+      "offline_excerpt": "Este equipo está sin conexión. Estas son las últimas líneas que imprimió antes de terminar.",
+      "offline_empty": "Los registros estarán disponibles cuando este equipo vuelva a estar en línea.",
+      "exit_divider": "Terminó a las {{time}}",
+      "exit_divider_code": "Terminó a las {{time}} · código de salida {{code}}",
+      "stopped_divider": "Detenido a las {{time}}"
+    },
+    "app_desktop_hint": "Una app de escritorio. Cambia a su ventana desde Multica Desktop en la máquina que la ejecuta.",
+    "app_remote_hint": "Se ejecuta en {{machine}}. Cambia a su ventana desde Multica Desktop en esa máquina.",
+    "focus": "Ir a la ventana",
+    "focus_gone": "{{name}} ya no se está ejecutando",
+    "focus_unsupported": "El daemon de esta máquina aún no puede cambiar a ventanas de apps. Actualiza Multica e inténtalo de nuevo.",
+    "focus_unavailable": "El daemon local no se está ejecutando",
+    "focus_failed": "No se pudo cambiar a {{name}}",
+    "retry": "Reintentar",
+    "dismiss": "Descartar"
   }
 }

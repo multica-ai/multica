@@ -18,12 +18,15 @@ SELECT parent_issue_id,
 FROM issue
 WHERE workspace_id = $1
   AND parent_issue_id IS NOT NULL
+  -- MUL-8472: private projects the caller cannot see.
+  AND ($3::uuid[] IS NULL OR project_id IS NULL OR NOT (project_id = ANY($3::uuid[])))
 GROUP BY parent_issue_id
 `
 
 type ChildIssueProgressParams struct {
-	WorkspaceID        pgtype.UUID `json:"workspace_id"`
-	TerminalStatusKeys []string    `json:"terminal_status_keys"`
+	WorkspaceID        pgtype.UUID   `json:"workspace_id"`
+	TerminalStatusKeys []string      `json:"terminal_status_keys"`
+	HiddenProjectIds   []pgtype.UUID `json:"hidden_project_ids"`
 }
 
 type ChildIssueProgressRow struct {
@@ -33,7 +36,7 @@ type ChildIssueProgressRow struct {
 }
 
 func (q *Queries) ChildIssueProgress(ctx context.Context, arg ChildIssueProgressParams) ([]ChildIssueProgressRow, error) {
-	rows, err := q.db.Query(ctx, childIssueProgress, arg.WorkspaceID, arg.TerminalStatusKeys)
+	rows, err := q.db.Query(ctx, childIssueProgress, arg.WorkspaceID, arg.TerminalStatusKeys, arg.HiddenProjectIds)
 	if err != nil {
 		return nil, err
 	}
@@ -514,6 +517,12 @@ cleared_unread AS (
 ),
 cleared_environments AS (
     DELETE FROM issue_environment WHERE issue_id IN (SELECT target.id FROM target)
+),
+cleared_environment_commands AS (
+    DELETE FROM issue_environment_command WHERE issue_id IN (SELECT target.id FROM target)
+),
+cleared_environment_configs AS (
+    DELETE FROM issue_environment_config WHERE issue_id IN (SELECT target.id FROM target)
 )
 DELETE FROM issue WHERE issue.id IN (SELECT target.id FROM target)
 `

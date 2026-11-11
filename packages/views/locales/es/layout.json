@@ -131,6 +131,7 @@
       "assignee_me": "Yo",
       "assignee_my_agents": "Mis agentes",
       "assignee_me_and_my_agents": "Yo y mis agentes",
+      "assignee_projects_only": "Solo se aplica a las tareas que se muestran en Proyectos",
       "reset": "Restablecer",
       "load_more": "Cargar más",
       "show_less": "Mostrar menos",

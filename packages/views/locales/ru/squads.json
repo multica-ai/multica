@@ -27,13 +27,7 @@
     "success": "Команда архивирована"
   },
   "name_editor": {
-    "title": "Переименовать команду",
-    "placeholder": "Название команды",
-    "required": "Название обязательно",
-    "cancel": "Отмена",
-    "save": "Сохранить",
-    "saved": "Сохранено",
-    "save_failed": "Не удалось сохранить"
+    "placeholder": "Название команды"
   },
   "add_member_dialog": {
     "title": "Добавить участника",
@@ -53,12 +47,9 @@
     "empty": "Добавить роль…",
     "placeholder": "Роль (например, Ревьюер)"
   },
-  "description_dialog": {
-    "title": "Изменить описание",
-    "placeholder_empty": "Добавить описание",
-    "cancel": "Отмена",
-    "responsibility_placeholder": "За что отвечает эта команда?",
-    "save": "Сохранить"
+  "description_editor": {
+    "empty": "Добавить описание",
+    "placeholder": "За что отвечает эта команда?"
   },
   "members_tab": {
     "section_title": "Участники",
@@ -112,7 +103,8 @@
     "leader_updated": "Лидер обновлён",
     "leader_update_failed": "Не удалось обновить лидера",
     "archive_failed": "Не удалось архивировать команду",
-    "instructions_saved": "Инструкции сохранены"
+    "instructions_saved": "Инструкции сохранены",
+    "update_failed": "Не удалось сохранить"
   },
   "profile_card": {
     "unavailable": "Команда недоступна",

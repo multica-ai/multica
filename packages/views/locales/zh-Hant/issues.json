@@ -55,7 +55,7 @@
   },
   "relation_filter_error": {
     "title": "「與我的關係」篩選載入失敗",
-    "hint": "載入訂閱和 AI 代理後才能顯示按「我訂閱的」或「分配給我的 AI 代理的」篩選的任務。"
+    "hint": "載入訂閱和 AI 代理後才能顯示按「我訂閱的」或「我的 AI 代理在做」篩選的任務。"
   },
   "source_context": {
     "create_action": "從這條評論建立子任務",
@@ -192,7 +192,7 @@
     "section_relation": "與我的關係",
     "relation_assigned": "分配給我的",
     "relation_created": "我建立的",
-    "relation_my_agents": "分配給我的 AI 代理的",
+    "relation_my_agents": "我的 AI 代理在做",
     "relation_subscribed": "我訂閱的",
     "section_agent_status": "AI 代理狀態",
     "agent_status_running": "執行中",
@@ -579,7 +579,8 @@
   },
   "timeline": {
     "loading": "載入中…",
-    "jump_to_latest": "跳到最新"
+    "jump_to_latest": "跳到最新",
+    "new_comments_other": "{{count}} 則新評論"
   },
   "activity": {
     "created": "建立了這個任務",
@@ -634,7 +635,10 @@
     "wakeup_checkin": "靜默檢查：{{note}}",
     "wakeup_checkin_coalesced_other": "靜默檢查 {{count}} 次 · 最近一次：{{note}}",
     "wakeup_chip_created_by": "{{name}} 建立",
-    "wakeup_chip_system": "系統規則"
+    "wakeup_chip_system": "系統規則",
+    "environment_stopped": "停止了環境 {{name}}",
+    "environment_restarted": "重新啟動了環境 {{name}}",
+    "environment_started": "啟動了環境 {{name}}"
   },
   "comment": {
     "add_reaction": "新增表情回應",
@@ -1070,7 +1074,7 @@
     "variant_my_any": "任何相關",
     "variant_my_assigned": "分配給我",
     "variant_my_created": "我建立的",
-    "variant_my_involved": "我參與的"
+    "variant_my_involved": "我的 AI 代理在做"
   },
   "plugins": {
     "panels": "Plugins",
@@ -1712,15 +1716,12 @@
       "name_placeholder": "狀態名稱",
       "add": "新增"
     },
-    "menu": {
-      "view_flow": "檢視完整流程",
-      "switch": "切換工作流"
-    },
     "flow": {
       "title": "「{{workflow}}」工作流",
       "scope_own": "只有這個專案使用這個工作流。",
       "no_handoff_here": "不交接",
-      "scope_shared_other": "{{count}} 個專案使用這個工作流，它的交接對這些專案都生效。"
+      "scope_shared_other": "{{count}} 個專案使用這個工作流，它的交接對這些專案都生效。",
+      "switch": "切換工作流"
     },
     "templates": {
       "delivery": {
@@ -1849,7 +1850,9 @@
       "running": "執行中",
       "exited": "已退出",
       "stopped": "已停止",
-      "unreachable": "無回應"
+      "unreachable": "無回應",
+      "stopping": "停止中",
+      "preparing": "準備中"
     },
     "expires_in_minutes_other": "{{count}} 分鐘後到期",
     "expires_in_hours_other": "{{count}} 小時後到期",
@@ -1864,6 +1867,85 @@
     "open": "開啟",
     "copy_url": "複製位址",
     "copied": "已複製位址",
-    "copy_failed": "無法複製位址"
+    "copy_failed": "無法複製位址",
+    "offline": "離線",
+    "machine_offline": "{{machine}} 已離線",
+    "more_actions": "更多操作",
+    "view_logs": "查看日誌",
+    "restart": "重新啟動",
+    "stop": "停止",
+    "stop_confirm_item": "停止…",
+    "run_first": "首次執行",
+    "run_nth_other": "第 {{count}} 次執行",
+    "someone": "有人",
+    "started_by": "由 {{name}} 啟動",
+    "restarted_by": "由 {{name}} 重新啟動",
+    "started_by_agent_in_run": "由 {{name}} 在「{{run}}」中啟動",
+    "stopped_by": "由 {{name}} 停止",
+    "stopped_on_expiry": "到期自動停止",
+    "exited_ago": "{{time}}退出",
+    "exit_code": "退出碼 {{code}}",
+    "detected_label": "自動識別的服務 · {{name}}",
+    "detected_no_logs": "這個服務不是按環境設定啟動的，所以看不到日誌，也不能重新啟動。",
+    "offline_hint": "這台機器重新上線後才能操作。",
+    "outdated_hint": "這台機器上的 Multica 更新後，才能在這裡操作。",
+    "no_permission_hint": "只有能使用這台機器的成員可以停止或重新啟動。",
+    "waiting_machine": "等待機器回應",
+    "waiting_ready": "等待服務就緒",
+    "no_response": "沒有回應",
+    "action_failed": {
+      "stop": "停止失敗",
+      "restart": "重新啟動失敗",
+      "start": "啟動失敗"
+    },
+    "stop_confirm_title": "停止 {{name}}？",
+    "stop_confirm_body": "這個服務（{{process}}）是自動識別的，不是按環境設定啟動的。停止後不能在這裡重新啟動，需要讓代理重新啟動它。",
+    "cancel": "取消",
+    "preparing_title": "{{name}} 正在準備環境",
+    "preparing_hint": "啟動後會顯示在這裡",
+    "start_menu": {
+      "trigger": "啟動環境",
+      "note": "按專案裡的環境設定啟動，使用這台機器上最近一次執行的程式碼。",
+      "no_permission": "只有能使用這台機器的成員可以在上面啟動環境。",
+      "nothing_to_start": "這個任務還沒執行過，或者之前執行的程式碼已被清理，沒有可以直接啟動的環境。",
+      "ask_agent": "讓 {{name}} 啟動",
+      "ask_any_agent": "讓代理啟動",
+      "new_run": "新建執行",
+      "preparing": "準備中",
+      "ask_agent_hint": "{{name}} 會準備好這個任務的程式碼，再啟動環境。專案裡沒有環境設定時，它會自己判斷怎麼啟動。",
+      "ask_any_agent_hint": "代理會準備好這個任務的程式碼，再啟動環境。專案裡沒有環境設定時，它會自己判斷怎麼啟動。",
+      "ask_failed": "沒能交給代理",
+      "agent_instruction": "啟動環境：先準備好這個任務的程式碼，再用 `multica env start` 啟動專案裡設定的環境；專案裡沒有環境設定時，自己判斷怎麼啟動。讓服務保持運行，並回覆存取網址。"
+    },
+    "log": {
+      "title": "{{name}} · 日誌",
+      "filter": "篩選日誌",
+      "wrap": "自動換行",
+      "follow": "跟隨最新",
+      "copy": "複製",
+      "copied": "已複製日誌",
+      "copy_failed": "無法複製日誌",
+      "refresh": "重新整理",
+      "footer_other": "顯示最近 {{count}} 行 · {{time}} 更新",
+      "loading": "正在讀取日誌…",
+      "empty": "還沒有輸出",
+      "no_match": "沒有符合的行",
+      "no_response": "機器沒有回應",
+      "failed": "沒能讀取日誌：{{error}}",
+      "offline_excerpt": "這台機器已離線，下面是它退出前最後輸出的內容。",
+      "offline_empty": "這台機器重新上線後才能查看日誌。",
+      "exit_divider": "{{time}} 退出",
+      "exit_divider_code": "{{time}} 退出 · 退出碼 {{code}}",
+      "stopped_divider": "{{time}} 停止"
+    },
+    "app_desktop_hint": "桌面 App。在執行它的那台機器上，用 Multica Desktop 切到它的視窗。",
+    "app_remote_hint": "在 {{machine}} 上執行。在那台機器上用 Multica Desktop 切到它的視窗。",
+    "focus": "切到視窗",
+    "focus_gone": "{{name}} 已不在執行",
+    "focus_unsupported": "這台機器的 daemon 暫時無法切換 App 視窗。更新 Multica 後再試。",
+    "focus_unavailable": "本機 daemon 沒有執行",
+    "focus_failed": "無法切到 {{name}}",
+    "retry": "重試",
+    "dismiss": "忽略"
   }
 }
