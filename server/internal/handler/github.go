@@ -1150,12 +1150,10 @@ type IssuePullRequestSummaryResponse struct {
 	Title     string `json:"title"`
 	State     string `json:"state"`
 	HtmlURL   string `json:"html_url"`
-	// prCreatedAt orders an issue's PRs newest-first; kept off the wire.
-	prCreatedAt time.Time
 }
 
 // ListIssuePullRequestSummaries returns every linked PR in the workspace,
-// GitHub and self-hosted providers merged, newest first. Like child-progress
+// GitHub and self-hosted providers together, newest first. Like child-progress
 // it is one workspace-wide read so board / list / table views never fetch PRs
 // per issue.
 func (h *Handler) ListIssuePullRequestSummaries(w http.ResponseWriter, r *http.Request) {
@@ -1168,43 +1166,20 @@ func (h *Handler) ListIssuePullRequestSummaries(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusInternalServerError, "failed to list pull requests")
 		return
 	}
-	vcsRows, err := h.Queries.ListIssueVCSPullRequestSummaries(r.Context(), wsUUID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list pull requests")
-		return
-	}
-	out := make([]IssuePullRequestSummaryResponse, 0, len(rows)+len(vcsRows))
+	out := make([]IssuePullRequestSummaryResponse, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, IssuePullRequestSummaryResponse{
-			IssueID:     uuidToString(row.IssueID),
-			ID:          uuidToString(row.ID),
-			Provider:    "github",
-			RepoOwner:   row.RepoOwner,
-			RepoName:    row.RepoName,
-			Number:      row.PrNumber,
-			Title:       row.Title,
-			State:       row.State,
-			HtmlURL:     row.HtmlUrl,
-			prCreatedAt: row.PrCreatedAt.Time,
+			IssueID:   uuidToString(row.IssueID),
+			ID:        uuidToString(row.ID),
+			Provider:  row.Provider,
+			RepoOwner: row.RepoOwner,
+			RepoName:  row.RepoName,
+			Number:    row.PrNumber,
+			Title:     row.Title,
+			State:     row.State,
+			HtmlURL:   row.HtmlUrl,
 		})
 	}
-	for _, row := range vcsRows {
-		out = append(out, IssuePullRequestSummaryResponse{
-			IssueID:     uuidToString(row.IssueID),
-			ID:          uuidToString(row.ID),
-			Provider:    row.Provider,
-			RepoOwner:   row.RepoOwner,
-			RepoName:    row.RepoName,
-			Number:      row.PrNumber,
-			Title:       row.Title,
-			State:       row.State,
-			HtmlURL:     row.HtmlUrl,
-			prCreatedAt: row.PrCreatedAt.Time,
-		})
-	}
-	sort.SliceStable(out, func(i, j int) bool {
-		return out[i].prCreatedAt.After(out[j].prCreatedAt)
-	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"pull_requests": out,
 	})

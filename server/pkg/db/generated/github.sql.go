@@ -536,16 +536,26 @@ func (q *Queries) ListIssueIDsForPullRequest(ctx context.Context, pullRequestID 
 const listIssuePullRequestSummaries = `-- name: ListIssuePullRequestSummaries :many
 SELECT
     ipr.issue_id,
-    pr.id, pr.repo_owner, pr.repo_name, pr.pr_number, pr.title, pr.state,
-    pr.html_url, pr.pr_created_at
+    pr.id, 'github'::text AS provider, pr.repo_owner, pr.repo_name,
+    pr.pr_number, pr.title, pr.state, pr.html_url, pr.pr_created_at
 FROM github_pull_request pr
 JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
 WHERE pr.workspace_id = $1
+UNION ALL
+SELECT
+    ipr.issue_id,
+    pr.id, pr.provider, pr.repo_owner, pr.repo_name,
+    pr.pr_number, pr.title, pr.state, pr.html_url, pr.pr_created_at
+FROM vcs_pull_request pr
+JOIN issue_vcs_pull_request ipr ON ipr.pull_request_id = pr.id
+WHERE pr.workspace_id = $1
+ORDER BY pr_created_at DESC
 `
 
 type ListIssuePullRequestSummariesRow struct {
 	IssueID     pgtype.UUID        `json:"issue_id"`
 	ID          pgtype.UUID        `json:"id"`
+	Provider    string             `json:"provider"`
 	RepoOwner   string             `json:"repo_owner"`
 	RepoName    string             `json:"repo_name"`
 	PrNumber    int32              `json:"pr_number"`
@@ -555,9 +565,10 @@ type ListIssuePullRequestSummariesRow struct {
 	PrCreatedAt pgtype.Timestamptz `json:"pr_created_at"`
 }
 
-// Every issue -> PR link in the workspace, carrying only what an issue card or
-// row needs to render a PR chip (no CI/merge snapshot). Backs the workspace
-// wide "Pull requests" display option on board / list / table views.
+// Every issue -> PR link in the workspace, GitHub and self-hosted providers
+// together, newest first. Carries only what an issue card or row needs to
+// render a PR chip (no CI/merge snapshot). Backs the workspace wide "Pull
+// requests" display option on board / list / table views.
 func (q *Queries) ListIssuePullRequestSummaries(ctx context.Context, workspaceID pgtype.UUID) ([]ListIssuePullRequestSummariesRow, error) {
 	rows, err := q.db.Query(ctx, listIssuePullRequestSummaries, workspaceID)
 	if err != nil {
@@ -570,6 +581,7 @@ func (q *Queries) ListIssuePullRequestSummaries(ctx context.Context, workspaceID
 		if err := rows.Scan(
 			&i.IssueID,
 			&i.ID,
+			&i.Provider,
 			&i.RepoOwner,
 			&i.RepoName,
 			&i.PrNumber,
