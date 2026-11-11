@@ -98,16 +98,3 @@ function matchesNoProxyHost(host: string, entry: string): boolean {
   if (host === normalized) return true;
   return host.endsWith(`.${normalized}`);
 }
-
-/**
- * True when `url` targets a loopback address (localhost / 127.x / ::1).
- * These requests must never traverse a proxy.
- */
-function isLoopback(url: string | URL): boolean {
-  try {
-    const parsed = typeof url === "string" ? new URL(url) : url;
-    return isLoopbackHost(parsed.hostname.toLowerCase());
-  } catch {
-    return false;
-  }
-}
