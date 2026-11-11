@@ -41,7 +41,8 @@
     "mark_unread": "Mark as unread",
     "archive": "Archive",
     "unarchive": "Unarchive",
-    "open_in_new_tab": "Open in new tab"
+    "open_in_new_tab": "Open in new tab",
+    "delete": "Delete"
   },
   "list": {
     "loading_selection": "Loading notification…",
@@ -119,7 +120,8 @@
   "toasts": {
     "source_context_retry_started": "Retry started with the original context",
     "archived": "Notification archived",
-    "unarchived": "Notification restored"
+    "unarchived": "Notification restored",
+    "deleted": "Notification deleted"
   },
   "errors": {
     "archived_lookup_failed": "Failed to load the linked notification",
@@ -135,6 +137,13 @@
     "archive_completed_failed": "Failed to archive completed",
     "unarchive_failed": "Failed to unarchive",
     "archived_load_failed": "Failed to load archived notifications",
-    "filters_load_failed": "Could not load filters"
+    "filters_load_failed": "Could not load filters",
+    "delete_failed": "Failed to delete notification. Try again."
+  },
+  "delete_dialog": {
+    "title": "Delete notification?",
+    "description": "This permanently deletes this notification. Related issues and runs are kept.",
+    "issue_description": "This permanently deletes the notifications for this issue in this view. The issue and its runs are kept.",
+    "cancel": "Cancel"
   }
 }

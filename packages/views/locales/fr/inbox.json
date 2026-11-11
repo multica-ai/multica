@@ -41,7 +41,8 @@
     "mark_unread": "Marquer comme non lu",
     "archive": "Archiver",
     "unarchive": "Désarchiver",
-    "open_in_new_tab": "Ouvrir dans un nouvel onglet"
+    "open_in_new_tab": "Ouvrir dans un nouvel onglet",
+    "delete": "Supprimer"
   },
   "list": {
     "loading_selection": "Chargement de la notification…",
@@ -119,7 +120,8 @@
   "toasts": {
     "source_context_retry_started": "Nouvelle tentative démarrée avec le contexte d'origine",
     "archived": "Notification archivée",
-    "unarchived": "Notification restaurée"
+    "unarchived": "Notification restaurée",
+    "deleted": "Notification supprimée"
   },
   "errors": {
     "archived_lookup_failed": "Échec du chargement de la notification liée",
@@ -135,6 +137,13 @@
     "archive_completed_failed": "Échec de l'archivage des éléments terminés",
     "unarchive_failed": "Échec du désarchivage",
     "archived_load_failed": "Échec du chargement des notifications archivées",
-    "filters_load_failed": "Impossible de charger les filtres"
+    "filters_load_failed": "Impossible de charger les filtres",
+    "delete_failed": "Impossible de supprimer la notification. Réessayez."
+  },
+  "delete_dialog": {
+    "title": "Supprimer la notification ?",
+    "description": "Cette notification sera supprimée définitivement. Les tâches et exécutions associées seront conservées.",
+    "issue_description": "Les notifications de cette tâche dans cette vue seront supprimées définitivement. La tâche et ses exécutions seront conservées.",
+    "cancel": "Annuler"
   }
 }

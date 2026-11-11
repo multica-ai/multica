@@ -159,7 +159,11 @@ function InboxContextMenuSingleton({
           <Fragment key={group[0]?.key ?? index}>
             {index > 0 && <ContextMenuSeparator />}
             {group.map((action) => (
-              <ContextMenuItem key={action.key} onClick={action.onSelect}>
+              <ContextMenuItem
+                key={action.key}
+                variant={action.danger ? "destructive" : "default"}
+                onClick={action.onSelect}
+              >
                 {action.icon}
                 {action.label}
               </ContextMenuItem>

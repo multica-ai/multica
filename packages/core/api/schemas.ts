@@ -2978,6 +2978,11 @@ export const IssueInboxReadSchema = z
   })
   .loose();
 
+// Deletion returns the number of notifications removed from the selected view.
+export const InboxDeleteSchema = z
+  .object({ count: z.number().int().nonnegative() })
+  .loose();
+
 // The viewer's subscribed issue ids (`/api/issues/subscribed` GET), behind the
 // "subscribed" relation filter on client-filtered surfaces. A non-string entry
 // is dropped; a body without the list has no safe fallback — an empty set

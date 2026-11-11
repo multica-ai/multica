@@ -95,6 +95,7 @@ function renderRow({
     onMarkRead: vi.fn(),
     onMarkUnread: vi.fn(),
     onAction: vi.fn(),
+    onDelete: vi.fn(),
     ...actions,
   };
   render(
@@ -116,6 +117,13 @@ function renderRow({
 }
 
 describe("inbox row context menu", () => {
+  it.each(["inbox", "archived"] as const)("offers deletion in the %s view", async (view) => {
+    const onDelete = vi.fn();
+    const { row } = renderRow({ view, actions: { onDelete } });
+    fireEvent.contextMenu(row);
+    fireEvent.click(await screen.findByText("Delete"));
+    expect(onDelete).toHaveBeenCalledWith("inbox-1");
+  });
   it("offers mark-as-unread on a read row and reports the item id", async () => {
     const onMarkUnread = vi.fn();
     const { row } = renderRow({
@@ -200,6 +208,13 @@ describe("inbox row context menu", () => {
 // A touch pointer has neither hover nor right-click, so the row's compact menu
 // is the only way in. It must therefore offer what right-click offers.
 describe("inbox row compact menu", () => {
+  it("offers deletion without selecting the row", async () => {
+    const onDelete = vi.fn();
+    renderRow({ actions: { onDelete } });
+    fireEvent.click(screen.getByRole("button", { name: "Notification actions" }));
+    fireEvent.click(await screen.findByText("Delete"));
+    expect(onDelete).toHaveBeenCalledWith("inbox-1");
+  });
   const openMenu = () =>
     fireEvent.click(screen.getByRole("button", { name: "Notification actions" }));
 
@@ -251,7 +266,7 @@ describe("inbox row compact menu", () => {
       wrap(
         <InboxContextMenuProvider
           view="inbox"
-          actions={{ onMarkRead: vi.fn(), onMarkUnread: vi.fn(), onAction: vi.fn() }}
+          actions={{ onMarkRead: vi.fn(), onMarkUnread: vi.fn(), onAction: vi.fn(), onDelete: vi.fn() }}
         >
           <InboxListItem
             item={item()}

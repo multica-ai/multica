@@ -170,6 +170,16 @@ export function useArchiveInbox() {
   });
 }
 
+export function useDeleteInbox() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteInbox(id),
+    // Deletion is not optimistic: keep the row and selection on failure.
+    onSuccess: () => refreshInboxAfterWrite(qc, wsId),
+  });
+}
+
 /**
  * Restore an archived notification to the main inbox.
  *

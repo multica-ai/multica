@@ -320,6 +320,28 @@ func (h *Handler) MarkInboxUnread(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+func (h *Handler) DeleteInboxItem(w http.ResponseWriter, r *http.Request) {
+	item, ok := h.loadInboxItemForUser(w, r, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	count, err := h.Queries.DeleteInboxGroup(r.Context(), db.DeleteInboxGroupParams{
+		ID:          item.ID,
+		WorkspaceID: item.WorkspaceID,
+		RecipientID: item.RecipientID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete notification")
+		return
+	}
+	h.publish(protocol.EventInboxDeleted, uuidToString(item.WorkspaceID), "member", requestUserID(r), map[string]any{
+		"item_id":      uuidToString(item.ID),
+		"recipient_id": uuidToString(item.RecipientID),
+		"count":        count,
+	})
+	writeJSON(w, http.StatusOK, map[string]any{"count": count})
+}
+
 func (h *Handler) ArchiveInboxItem(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	prev, ok := h.loadInboxItemForUser(w, r, id)
