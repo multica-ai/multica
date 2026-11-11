@@ -84,23 +84,6 @@
     "workflow_usage_other": "{{count}} 個工作流在用",
     "workflow_usage_none": "未被工作流使用"
   },
-  "wakeups": {
-    "description": "平臺對所有任務生效的規則。每個任務可以在自己的「喚醒」區域單獨修改。",
-    "child_done_title": "子任務結束時",
-    "child_done_description": "某個階段的子任務全部結束、且後面還有階段在等待時，喚醒父任務的負責人；全部子任務結束時再喚醒一次。負責人是成員時，改為傳送收件箱通知。",
-    "enabled": "預設開啟",
-    "instruction": "預設指令",
-    "instruction_hint": "發給被喚醒的 AI 代理。留空則使用下方的內建指令。",
-    "instruction_placeholder": "留空則使用內建指令",
-    "builtin": "內建指令",
-    "instruction_invalid": "指令最多 4,000 位元組。",
-    "save": "儲存",
-    "saving": "儲存中…",
-    "save_error": "無法儲存預設值。",
-    "customized_other": "{{count}} 個進行中的任務使用了自己的設定，不跟隨此預設值。",
-    "admin_only": "只有所有者和管理員可以修改預設值。",
-    "load_error": "無法載入喚醒預設值。"
-  },
   "quick_actions": {
     "title": "快捷操作",
     "description": "在任務側欄執行預設的 AI 代理和提示詞。",
@@ -538,7 +521,6 @@
       "members": "成員",
       "labels": "標籤",
       "issue_statuses": "任務狀態",
-      "wakeups": "喚醒",
       "properties": "屬性",
       "quick_actions": "快捷操作",
       "plugins": "外掛",

@@ -1351,15 +1351,16 @@
       "enable": "在此任务上启用",
       "toggle": "子任务结束时唤醒负责人",
       "save_error": "无法保存系统规则。",
-      "default_on": "工作区默认开启，可在「设置 → 唤醒」中修改默认值。",
-      "default_off": "工作区默认关闭，可在「设置 → 唤醒」中修改默认值。",
+      "default_on": "工作区默认开启。",
+      "default_off": "工作区默认关闭。",
       "notify_member": "通过收件箱通知 {{name}}",
       "instruction": "唤醒后要做什么",
       "instruction_edit": "编辑指令",
       "instruction_default": "此任务未设置，使用默认指令：",
       "instruction_placeholder": "留空则使用默认指令",
       "instruction_invalid": "指令最多 4,000 字节。",
-      "paused": "已暂停：{{reason}}"
+      "paused": "已暂停：{{reason}}",
+      "default_change": "修改默认值"
     },
     "cond": {
       "status": "当状态变为{{status}}时",

@@ -1351,15 +1351,16 @@
       "enable": "在此任務上啟用",
       "toggle": "子任務結束時喚醒負責人",
       "save_error": "無法儲存系統規則。",
-      "default_on": "工作區預設開啟，可在「設定 → 喚醒」中修改預設值。",
-      "default_off": "工作區預設關閉，可在「設定 → 喚醒」中修改預設值。",
+      "default_on": "工作區預設開啟。",
+      "default_off": "工作區預設關閉。",
       "notify_member": "透過收件箱通知 {{name}}",
       "instruction": "喚醒後要做什麼",
       "instruction_edit": "編輯指令",
       "instruction_default": "此任務未設定，使用預設指令：",
       "instruction_placeholder": "留空則使用預設指令",
       "instruction_invalid": "指令最多 4,000 位元組。",
-      "paused": "已暫停：{{reason}}"
+      "paused": "已暫停：{{reason}}",
+      "default_change": "修改預設值"
     },
     "cond": {
       "status": "當狀態變為{{status}}時",

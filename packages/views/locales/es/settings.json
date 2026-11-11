@@ -532,7 +532,6 @@
       "apps": "Apps conectadas",
       "channels": "Mensajería",
       "code": "Código",
-      "wakeups": "Despertares",
       "workflows": "Flujos de trabajo"
     },
     "groups": {
@@ -1569,24 +1568,6 @@
     "description": "Se aplica cuando todos los PR enlazados a una tarea se hayan fusionado, y solo a fusiones a partir de ahora.",
     "label": "Al fusionarse los PR, mover la tarea a",
     "none": "No cambiar"
-  },
-  "wakeups": {
-    "admin_only": "Solo los propietarios y administradores pueden cambiar estos valores predeterminados.",
-    "builtin": "Instrucción integrada",
-    "child_done_description": "Despierta al responsable del padre cuando una etapa termina y otra posterior está en espera, y una vez más cuando todas las subtareas se cierran. Si el responsable es un miembro, recibe una notificación en la bandeja de entrada.",
-    "child_done_title": "Al terminar las subtareas",
-    "customized_one": "{{count}} tarea abierta tiene su propio ajuste e ignora este valor predeterminado.",
-    "customized_other": "{{count}} tareas abiertas tienen su propio ajuste e ignoran este valor predeterminado.",
-    "description": "Reglas de la plataforma que se aplican a cada tarea. Cada tarea puede cambiarlas en su sección de Despertares.",
-    "enabled": "Activado por defecto",
-    "instruction": "Instrucción predeterminada",
-    "instruction_hint": "Se envía al agente despertado. Déjala vacía para usar la instrucción integrada de abajo.",
-    "instruction_invalid": "Mantén la instrucción dentro de 4.000 bytes.",
-    "instruction_placeholder": "Déjala vacía para usar la instrucción integrada",
-    "load_error": "No se han podido cargar los valores predeterminados de despertares.",
-    "save": "Guardar",
-    "save_error": "No se ha podido guardar el valor predeterminado.",
-    "saving": "Guardando…"
   },
   "connected_apps": {
     "description": "Cuentas que usan tus agentes para acceder a aplicaciones externas. Las acciones permitidas se ejecutan de inmediato.",

@@ -2,7 +2,6 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  AlarmClock,
   Bell,
   Blocks,
   CreditCard,
@@ -25,7 +24,7 @@ import {
   Workflow,
   Zap,
 } from "@multica/ui/icons";
-import { useCurrentWorkspace } from "@multica/core/paths";
+import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useFeatureEnabled } from "@multica/core/config";
 import { useCurrentMember } from "@multica/core/permissions";
 import {
@@ -62,7 +61,7 @@ import {
 import { searchSettings } from "./settings-search";
 import { HighlightText } from "../../search/highlight-text";
 import { useSettingsSearchIndex } from "./use-settings-search-index";
-import { WakeupsTab } from "./wakeups-tab";
+import { wakeupsHref } from "../../autopilots/components/wakeups-tab";
 import { CollapsedNavTrigger, PageHeader } from "../../layout/page-header";
 import { PanelHeader } from "../../layout/panel-nav";
 import { useListColumnCollapsed } from "../../layout/app-shell-context";
@@ -129,6 +128,7 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
   const { role } = useCurrentMember(workspace?.id ?? "");
   const isMember = role === "member";
   const navigation = useNavigation();
+  const paths = useWorkspacePaths();
   const listCollapsed = useListColumnCollapsed();
   const pluginsEnabled = useFeatureEnabled(PLUGINS_V1_FLAG, false);
   const billingEnabled = useFeatureEnabled(
@@ -215,10 +215,6 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
             entry("workflows", t(($) => $.page.tabs.workflows), Workflow, <WorkflowsTab />, {
               wide: true,
             }),
-            entry("wakeups", t(($) => $.page.tabs.wakeups), AlarmClock, <WakeupsTab />, {
-              wide: true,
-              adminOnly: true,
-            }),
             entry("labels", t(($) => $.page.tabs.labels), Tags, <LabelsTab />, {
               wide: true,
             }),
@@ -282,6 +278,13 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
     group.subgroups.flatMap((subgroup) => subgroup.entries),
   );
   const location = resolveSettingsLocation(navigation.searchParams);
+  // Wakeup defaults moved to the issue wakeups list; old links land there.
+  const wakeupsMoved = location.tab === "wakeups";
+  const wakeupsTarget = wakeupsHref(paths.autopilots());
+  const { replace } = navigation;
+  useEffect(() => {
+    if (wakeupsMoved) replace(wakeupsTarget);
+  }, [wakeupsMoved, wakeupsTarget, replace]);
   const candidate =
     location.tab === "billing" && !billingEnabled ? "workspace" : location.tab;
   const active =

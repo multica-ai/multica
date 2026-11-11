@@ -545,6 +545,26 @@
         "reply": "«El PR está fusionado. Actualizando la documentación y cerrando la tarea.»",
         "event_examples": "PR fusionado, comentario nuevo"
       }
+    },
+    "defaults": {
+      "title": "Al terminar las subtareas",
+      "description": "Despierta al responsable del padre cuando una etapa termina y otra posterior está en espera, y una vez más cuando todas las subtareas se cierran. Si el responsable es un miembro, recibe una notificación en la bandeja de entrada.",
+      "badge": "Valor predeterminado del espacio de trabajo",
+      "admin_only": "Solo los propietarios y administradores pueden cambiar estos valores predeterminados.",
+      "builtin": "Instrucción integrada",
+      "customized_one": "{{count}} tarea abierta tiene su propio ajuste e ignora este valor predeterminado.",
+      "customized_other": "{{count}} tareas abiertas tienen su propio ajuste e ignoran este valor predeterminado.",
+      "enabled": "Activado por defecto",
+      "instruction": "Instrucción predeterminada",
+      "instruction_hint": "Se envía al agente despertado. Déjala vacía para usar la instrucción integrada de abajo.",
+      "instruction_invalid": "Mantén la instrucción dentro de 4.000 bytes.",
+      "instruction_placeholder": "Déjala vacía para usar la instrucción integrada",
+      "load_error": "No se han podido cargar los valores predeterminados de despertares.",
+      "save": "Guardar",
+      "save_error": "No se ha podido guardar el valor predeterminado.",
+      "saving": "Guardando…",
+      "edit_instruction": "Editar instrucción predeterminada",
+      "view_instruction": "Ver instrucción predeterminada"
     }
   },
   "intro": {
