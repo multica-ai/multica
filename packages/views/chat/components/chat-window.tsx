@@ -497,7 +497,7 @@ export function AgentDropdown({
     setOpen(false);
   };
 
-  if (!activeAgent) {
+  if (!activeAgent && agents.length === 0) {
     return <span className="text-caption text-muted-foreground">{t(($) => $.window.no_agents)}</span>;
   }
 
@@ -519,14 +519,18 @@ export function AgentDropdown({
       }
       trigger={
         <>
-          <ActorAvatar
-            actorType="agent"
-            actorId={activeAgent.id}
-            size="md"
-            enableHoverCard
-            showStatusDot
-          />
-          <span className="text-caption font-medium max-w-28 truncate">{activeAgent.name}</span>
+          {activeAgent && (
+            <ActorAvatar
+              actorType="agent"
+              actorId={activeAgent.id}
+              size="md"
+              enableHoverCard
+              showStatusDot
+            />
+          )}
+          <span className="text-caption font-medium max-w-28 truncate">
+            {activeAgent?.name ?? t(($) => $.window.agent_filter_placeholder)}
+          </span>
           <ChevronDown className="size-3 text-muted-foreground shrink-0" />
         </>
       }
@@ -541,7 +545,7 @@ export function AgentDropdown({
                 <AgentPickerItem
                   key={agent.id}
                   agent={agent}
-                  isCurrent={agent.id === activeAgent.id}
+                  isCurrent={agent.id === activeAgent?.id}
                   onSelect={handlePick}
                 />
               ))}
@@ -553,7 +557,7 @@ export function AgentDropdown({
                 <AgentPickerItem
                   key={agent.id}
                   agent={agent}
-                  isCurrent={agent.id === activeAgent.id}
+                  isCurrent={agent.id === activeAgent?.id}
                   onSelect={handlePick}
                 />
               ))}
