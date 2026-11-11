@@ -199,6 +199,9 @@ export type { StorageAdapter } from "./storage";
 export type {
   Project,
   ProjectStatus,
+  ProjectVisibility,
+  ProjectMember,
+  ListProjectMembersResponse,
   ProjectPriority,
   CreateProjectRequest,
   UpdateProjectRequest,
@@ -232,6 +235,20 @@ export type {
   ListGitHubRepositoriesResponse,
   GitHubConnectResponse,
 } from "./github";
+export type {
+  DeclaredEnvironment,
+  IssueEnvironment,
+  IssueEnvironmentAction,
+  IssueEnvironmentActionRecord,
+  IssueEnvironmentActionStatus,
+  IssueEnvironmentCommand,
+  IssueEnvironmentConfig,
+  IssueEnvironmentSource,
+  IssueEnvironmentKind,
+  IssueEnvironmentState,
+  IssueEnvironmentsResponse,
+  StartIssueEnvironmentRequest,
+} from "./environment";
 export type {
   VCSProvider,
   VCSConnection,

@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
+import { useReducedMotion } from "@multica/core/appearance";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
@@ -504,7 +505,7 @@ export function RuntimeLocalSkillImportPanel({
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
   const userId = useAuthStore((s) => s.user?.id ?? null);
-  const shouldReduceMotion = useReducedMotion() ?? false;
+  const shouldReduceMotion = useReducedMotion();
 
   const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
   const localRuntimes = useMemo(

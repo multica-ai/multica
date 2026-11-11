@@ -39,6 +39,7 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
     assignee_id: null,
     creator_type: "member",
     creator_id: "u-1",
+    requester_id: null,
     parent_issue_id: null,
     project_id: null,
     position: 0,
@@ -829,15 +830,45 @@ describe("relation filters", () => {
     ).toEqual(["2", "3", "4"]);
   });
 
-  it("answers subscribed without the viewer's agents, leaving only my_agents open", () => {
+  describe("my_agents with squads", () => {
+    const mine = makeIssue({ id: "mine", assignee_type: "squad", assignee_id: "my-squad", priority: "medium" });
+    const theirs = makeIssue({ id: "theirs", assignee_type: "squad", assignee_id: "their-squad", priority: "medium" });
+    const agent = makeIssue({ id: "agent", assignee_type: "agent", assignee_id: "a-1", priority: "medium" });
+    const viewer = { userId: "u-1", myAgentIds: new Set(["a-1"]), mySquadIds: new Set(["my-squad"]) };
+    const squadIds = (filters: Partial<IssueFilters>) =>
+      filterIssues([mine, theirs, agent], { ...NO_FILTER, relationContext: viewer, ...filters }).map((i) => i.id);
+
+    it("keeps the viewer's squads and drops the others", () => {
+      expect(squadIds({ relationFilters: ["my_agents"] })).toEqual(["mine", "agent"]);
+    });
+
+    it("negated, keeps only the other squads", () => {
+      expect(squadIds({ relationFilters: ["my_agents"], negatedFilters: ["relation"] })).toEqual(["theirs"]);
+    });
+
+    it("keeps a squad row an OR sibling does not match", () => {
+      const advancedFilter = createFilterGroup("any", [
+        createFilterCondition("relation", ["my_agents"]),
+        createFilterCondition("priority", ["urgent"]),
+      ]);
+      expect(squadIds({ advancedFilter })).toEqual(["mine", "agent"]);
+    });
+
+    it("leaves squad rows to the server until the viewer's squads load", () => {
+      const agentsOnly = { userId: "u-1", myAgentIds: new Set(["a-1"]) };
+      expect(squadIds({ relationContext: agentsOnly, relationFilters: ["my_agents"] })).toEqual([
+        "mine",
+        "theirs",
+        "agent",
+      ]);
+    });
+  });
+
+  it("answers subscribed without the viewer's agents, leaving only agent rows of my_agents open", () => {
     const subscriptionsOnly = { userId: "u-1", subscribedIssueIds: new Set(["3"]) };
     expect(ids({ relationContext: subscriptionsOnly, relationFilters: ["subscribed"] })).toEqual(["3"]);
-    expect(ids({ relationContext: subscriptionsOnly, relationFilters: ["my_agents"] })).toEqual([
-      "1",
-      "2",
-      "3",
-      "4",
-    ]);
+    // Member and unassigned rows are never an agent's work.
+    expect(ids({ relationContext: subscriptionsOnly, relationFilters: ["my_agents"] })).toEqual(["2"]);
   });
 });
 
@@ -967,5 +998,20 @@ describe("advanced filter", () => {
         ]),
       ),
     ).toEqual(["B", "U"]);
+  });
+});
+
+
+describe("persisted requester relation", () => {
+  it("matches requester, negates known null, and defers missing legacy fields", () => {
+    const rows = [
+      makeIssue({ id: "mine", creator_type: "agent", requester_id: "me" }),
+      makeIssue({ id: "peer", creator_type: "agent", requester_id: "peer" }),
+      makeIssue({ id: "none", creator_type: "agent", requester_id: null }),
+      makeIssue({ id: "legacy", creator_type: "agent", requester_id: undefined }),
+    ];
+    const filters: IssueFilters = { ...NO_FILTER, relationContext: { userId: "me" }, relationFilters: ["created"] };
+    expect(filterIssues(rows, filters).map((i) => i.id)).toEqual(["mine", "legacy"]);
+    expect(filterIssues(rows, { ...filters, negatedFilters: ["relation"] }).map((i) => i.id)).toEqual(["peer", "none", "legacy"]);
   });
 });

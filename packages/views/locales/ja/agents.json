@@ -191,7 +191,6 @@
     "rename_required": "名前は必須です",
     "edit_description_title": "説明を編集",
     "description_placeholder": "このエージェントは何をしますか？",
-    "save": "保存",
     "cancel": "キャンセル"
   },
   "overview": {
@@ -214,12 +213,7 @@
     "edit_access_aria": "アクセス: {{value}}。アクセスを変更",
     "all_settings": "すべての設定"
   },
-  "skill_attach": {
-    "trigger_aria": "ワークスペースのスキルを追加",
-    "trigger_label": "追加"
-  },
   "pickers": {
-    "concurrency_tooltip": "同時実行数 · 最大 {{value}} 件",
     "concurrency_range": "最大同時実行数（{{min}}–{{max}}）",
     "runtime_none": "ランタイムなし",
     "runtime_tooltip": "ランタイム · {{name}} · {{status}}",
@@ -290,23 +284,17 @@
     "discard_confirm": "変更を破棄"
   },
   "create_dialog": {
-    "title_create": "エージェントを作成",
-    "title_duplicate": "エージェントを複製",
-    "description_duplicate": "\"{{name}}\" を基に新しいエージェントを作成します。指示、環境変数、スキルがコピーされます。",
     "name_label": "名前",
     "name_placeholder": "例: ディープリサーチエージェント",
     "description_label": "説明",
     "description_placeholder": "このエージェントは何をしますか？",
-    "visibility_label": "公開範囲",
     "access": {
-      "label": "アクセス",
       "private_title": "プライベート",
       "private_desc": "このエージェントを実行できるのはあなただけです",
       "public_title": "公開",
       "public_desc": "このエージェントを実行できる人を選択します",
       "public_workspace_option": "ワークスペース全員",
       "public_members_group": "特定のメンバー",
-      "public_members_empty": "選択できるワークスペースメンバーがいません",
       "public_targets_empty_hint": "以下から少なくとも1つを選択してください。そうでないとエージェントはプライベートのままになります。"
     },
     "runtime_label": "ランタイム",
@@ -321,17 +309,10 @@
     "runtime_no_results": "一致するマシンがありません",
     "runtime_group_online": "{{online}}/{{total}} オンライン",
     "duplicate_copy_suffix": " (コピー)",
-    "create": "作成",
-    "creating": "作成中...",
-    "cancel": "キャンセル",
-    "create_failed_toast": "エージェントを作成できませんでした",
     "skill_attach_failed_toast": "エージェントは作成されましたが、スキルを追加できませんでした: {{error}}",
     "squad_join_failed_toast": "エージェント \"{{name}}\" は作成されましたが、スクワッドに参加できませんでした: {{error}}。メンバーから手動で追加できます。",
     "instructions": {
       "label": "指示",
-      "placeholder_blank": "クリックして指示を作成...",
-      "placeholder_duplicate": "クリックして複製された指示を表示または編集",
-      "collapse": "折りたたむ",
       "editor_placeholder": "このエージェントが何をすべきか、何に集中すべきか、何を避けるべきかを記述してください..."
     },
     "skills_section": {
@@ -659,22 +640,25 @@
       "queued_prefix": "{{when}} に待機開始"
     },
     "connected_apps": {
-      "subtitle": "このエージェントが使えるアプリです。各アプリはチームアカウントか、実行を起動した人のアカウントとして、選んだレベルで動作します。",
       "loading": "アプリを読み込み中…",
       "load_failed": "このエージェントのアプリを読み込めませんでした。",
-      "empty": "アプリはまだありません。",
-      "add_placeholder": "アプリを追加…",
-      "account": "アカウント",
+      "empty": "接続済みのアプリはありません。",
       "level": "レベル",
-      "remove": "{{app}} を削除",
       "team_connected": "チームアカウント接続済み",
       "team_missing": "チームアカウント未接続",
       "personal_connected": "あなたのアカウントは接続済み",
       "personal_missing": "このアプリはまだ接続していません",
       "team_admin_only": "エージェントにチームアカウントを付与できるのはワークスペース管理者のみです。",
-      "team_shared_warning": "このエージェントを実行できる人は誰でも、これらのアプリをチームアカウントとして使います。",
+      "team_shared_warning": "このエージェントを実行できる人は、このチームアカウントを通じて操作できます。",
       "manage_link": "設定 → 接続済みアプリ でアカウントを管理",
-      "save_failed_toast": "保存できませんでした。もう一度お試しください"
+      "save_failed_toast": "保存できませんでした。もう一度お試しください",
+      "team_help": "管理者が接続する、ワークスペース共有のアカウントです。",
+      "personal_help": "実行を開始した人のアカウントを使います。各自で接続する必要があります。",
+      "available_accounts": "利用可能：{{accounts}}",
+      "enable": "{{app}} を有効にする",
+      "account_for": "{{app}} のアカウント",
+      "connect_hint": "必要なアプリがない場合は、設定からアカウントを接続してください。",
+      "available_personal": "自分のアカウント"
     }
   },
   "char_counter": {
@@ -871,14 +855,6 @@
       "user_cancelled": "ユーザーがキャンセルしました"
     }
   },
-  "runtime_filter": {
-    "all": "すべてのランタイム",
-    "section_local": "ローカル",
-    "section_remote": "リモート",
-    "section_cloud": "クラウド",
-    "agent_count_other": "エージェント {{count}} 件",
-    "empty": "まだマシンがありません"
-  },
   "last_active": {
     "today": "今日",
     "days_ago_other": "{{count}} 日前",
@@ -897,13 +873,8 @@
     "duplicate_title": "{{name}} を複製",
     "step_ai": "会話で作成",
     "modes": {
-      "template": {
-        "title": "テンプレートを使用",
-        "description": "整理された指示とスキルを基に、ワークスペースに合わせて詳細を調整します。"
-      },
       "ai": {
-        "title": "AI で作成",
-        "description": "対話で編集可能な設定の下書きを作成します。"
+        "title": "AI で作成"
       }
     },
     "sections": {
@@ -931,10 +902,6 @@
       }
     },
     "builder": {
-      "setup_title": "Agent Builder のランタイムを選択",
-      "setup_description": "このランタイムは作成時の対話と、新しいエージェントの既定値に使われます。",
-      "start": "会話を開始",
-      "connect_runtime": "ランタイムを接続",
       "draft_parse_failed": "この返信からフォームを入力できませんでした。エージェントに下書きの再生成を依頼するか、手動で入力してください。",
       "start_failed": "Agent Builder を開始できませんでした。",
       "send_failed": "メッセージを送信できませんでした。",

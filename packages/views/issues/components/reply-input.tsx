@@ -118,6 +118,9 @@ function ReplyInput({
     resetKey: `${issueId}:${previewParentId}`,
   });
   const stopRunsBeforeSend = useStopRunsBeforeSend(issueId);
+  // A pending annotation note previews recipients while the reply itself is
+  // still empty, so the chip row can render under the one-line placeholder.
+  const showsTriggerChips = recipients.length > 0 || triggerPreview.blocked.length > 0 || triggerPreview.hasAllMembersMention;
 
   // Readonly-first: static shell until intent; an unsent draft mounts the
   // real editor immediately (see CommentInput). This is also what keeps the
@@ -257,7 +260,7 @@ function ReplyInput({
         ref={composerRef}
         className={cn(
           "relative min-w-0 flex-1 flex flex-col",
-          (!isEmpty || annotations.length > 0) && "pb-9",
+          (!isEmpty || annotations.length > 0 || showsTriggerChips) && "pb-9",
         )}
       >
         {attachmentsBlockSteer && <SteerAttachmentNotice />}

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   AgentTaskSchema,
+  IssueSchema,
   AppConfigSchema,
   WecomInstallationSchema,
   ListWecomInstallationsResponseSchema,
@@ -2515,5 +2516,15 @@ describe("task usage credits", () => {
     });
     expect(parsed.usage).toHaveLength(1);
     expect(parsed.usage?.[0]?.credits_micros).toBeUndefined();
+  });
+});
+
+
+describe("Issue requester compatibility", () => {
+  it("preserves known null versus unknown legacy or malformed values", () => {
+    expect(IssueSchema.parse(baseIssue).requester_id).toBeUndefined();
+    expect(IssueSchema.parse({ ...baseIssue, requester_id: null }).requester_id).toBeNull();
+    expect(IssueSchema.parse({ ...baseIssue, requester_id: "member" }).requester_id).toBe("member");
+    expect(IssueSchema.parse({ ...baseIssue, requester_id: 42 }).requester_id).toBeUndefined();
   });
 });

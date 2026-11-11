@@ -64,7 +64,7 @@ function usage(overrides: Partial<TaskUsage> = {}): TaskUsage {
 
 function open(tasks: AgentTask[], locale?: "zh-Hans") {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  queryClient.setQueryData(issueKeys.tasks("issue-1"), tasks);
+  queryClient.setQueryData([...issueKeys.tasks("issue-1"), "history"], tasks);
   return renderWithI18n(
     <QueryClientProvider client={queryClient}>
       <IssueRunsDialog

@@ -12,7 +12,12 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
-import { attachmentIdFromDownloadURL } from "@multica/core/types/attachment-url";
+import { ApiError } from "@multica/core/api/client";
+import {
+  attachmentDownloadPath,
+  attachmentIdFromDownloadURL,
+  attachmentIdFromLocalUploadURL,
+} from "@multica/core/types/attachment-url";
 
 // Keep refetches well inside the server's signed-URL TTL (30 min default,
 // server/internal/handler/file.go) so a re-render never serves an expired
@@ -61,16 +66,12 @@ export function __resetInlineMediaBlobCacheForTests(): void {
 // the same re-sign the click-time download path already does — and swap in
 // the response's signed `download_url`.
 //
-// The server only has a signed URL to offer under CloudFront signing or
-// presign mode. In **proxy** download mode `GetAttachmentByID` hands back the
-// auth-gated API path again, and before MUL-5445 the renderer simply kept the
-// original URL — the image stayed broken and the metadata request was pure
-// overhead. Proxy is not an exotic setting: the default `auto` mode forces it
-// whenever the storage URL points at an internal host, which is exactly the
-// docker-compose MinIO (`http://minio:9000`) self-host shape. So when the
-// refreshed metadata confirms there is no signed URL, fall back to pulling the
-// bytes through the authenticated client and rendering them from an object
-// URL. `blobFallback` gates that on the caller actually rendering a native
+// CloudFront and presign URLs can load natively. Proxy capabilities last just
+// 60 seconds, so images deliberately ignore those and fetch durable bytes
+// through the authenticated client instead. Proxy is the default when `auto`
+// mode encounters an internal storage host, such as docker-compose MinIO
+// (`http://minio:9000`). Without a storage signature, pull authenticated bytes
+// and render an object URL. `blobFallback` gates that on rendering a native
 // `<img>`: a file card only needs a link, and downloading a 100 MB archive
 // into renderer memory to draw a chip would be a bad trade.
 //
@@ -80,9 +81,10 @@ export function __resetInlineMediaBlobCacheForTests(): void {
 // instead of rendering it.
 export function useResignedInlineMedia(
   attachmentId: string | undefined,
-  pickedUrl: string,
+  rawPickedUrl: string,
   blobFallback: boolean,
 ): { url: string; pending: boolean } {
+  const pickedUrl = resolveLegacyLocalMediaURL(rawPickedUrl);
   const idFromPickedUrl = attachmentIdFromDownloadURL(pickedUrl);
   const resignAttachmentId = attachmentId ?? idFromPickedUrl;
   const isCrossOriginWebURL = (() => {
@@ -166,34 +168,139 @@ export function useResignedInlineMedia(
 //
 // So for these kinds the viewer always asks the authenticated metadata
 // endpoint for a fresh signature, the same exchange the Download button makes.
-// It shares the re-sign query above, so an attachment is fetched once per TTL.
-// Proxy mode has no storage URL to sign; the picked URL stands there, as it
-// does when the request fails.
+// Proxy capabilities last only 60 seconds. Keep them in a separate query so
+// image metadata caching cannot pin one into a native stream after it expires.
+// Reopen authenticates again. Loaded media keeps its source until a native
+// request fails after expiry, so reading/playing never triggers a periodic reload.
 export function useFreshStreamedMediaURL(
   attachmentId: string | undefined,
-  pickedUrl: string,
+  rawPickedUrl: string,
   enabled: boolean,
-): { url: string; pending: boolean } {
-  const active = enabled && !!attachmentId && !!pickedUrl;
-  const { data: fresh, isError, isStale, isFetching } = useQuery({
-    queryKey: ["attachment-inline-resign", attachmentId],
-    queryFn: () => api.getAttachment(attachmentId as string),
+  pdf = false,
+): { url: string; pending: boolean; failed: boolean; refreshIfExpired: () => Promise<boolean> } {
+  const pickedUrl = resolveLegacyLocalMediaURL(rawPickedUrl);
+  const id = attachmentId ?? attachmentIdFromDownloadURL(pickedUrl);
+  const active = enabled && !!id && !!pickedUrl;
+  const stablePDFURL = id ? absolutizeAPIPath(attachmentDownloadPath(id)) : "";
+  const { data: fresh, error, isError, refetch } = useQuery({
+    queryKey: ["attachment-stream-resign", id],
+    queryFn: () => api.getAttachment(id as string),
     enabled: active,
-    staleTime: RESIGN_STALE_MS,
-    gcTime: RESIGN_STALE_MS,
+    staleTime: Infinity,
+    gcTime: 0,
+    retry: retryAttachmentPreview,
+    retryDelay: (attempt) => 1000 * 2 ** attempt,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: recoverFailedPreview,
+    refetchOnReconnect: recoverFailedPreview,
   });
 
-  if (!active) return { url: pickedUrl, pending: false };
-  // A cached answer past its stale time may hold a signature that has
-  // already expired: wait for the refetch it triggers rather than start a
-  // stream on it and restart once the new URL lands.
-  if (fresh && !(isStale && isFetching)) {
-    const dl = fresh.download_url ?? "";
+  const dl = fresh?.download_url ?? "";
+  const expiresAt = capabilityExpiresAt(dl);
+  // The authenticated route redirects to forced downloads for presign/CDN
+  // storage. Use it for PDFs only after metadata confirms inline proxying.
+  const sameOriginPDF = active && pdf && expiresAt !== undefined && isSameOriginHTTPURL(stablePDFURL);
+  const proxyPDF = active && pdf && !sameOriginPDF && expiresAt !== undefined;
+  const pdfBytes = useQuery({
+    queryKey: ["attachment-preview-pdf", id],
+    queryFn: async ({ signal }) => {
+      const blob = await api.getAttachmentBlob(id as string, signal);
+      // Never let an HTML file named *.pdf become same-origin active content.
+      return blob.slice(0, blob.size, "application/pdf");
+    },
+    enabled: proxyPDF && !isError,
+    staleTime: Infinity,
+    gcTime: 0,
+    retry: retryAttachmentPreview,
+    retryDelay: (attempt) => 1000 * 2 ** attempt,
+    refetchOnWindowFocus: recoverFailedPreview,
+    refetchOnReconnect: recoverFailedPreview,
+  });
+  const pdfURL = usePDFObjectURL(proxyPDF && !isPermanentAttachmentError(error) ? pdfBytes.data : undefined);
+  const refreshIfExpired = async () => {
+    if (!active || isPermanentAttachmentError(error) || expiresAt === undefined || expiresAt > Date.now() + 5000) return false;
+    const result = await refetch();
+    return !result.isError && !!result.data?.download_url && result.data.download_url !== dl;
+  };
+  if (!active) return { url: pickedUrl, pending: false, failed: false, refreshIfExpired };
+  if (sameOriginPDF) return { url: stablePDFURL, pending: false, failed: false, refreshIfExpired };
+  // Cross-origin proxy PDFs cannot depend on iframe error events. Fetch their
+  // complete authenticated bytes once; the local blob has no signature expiry.
+  if (proxyPDF) {
+    const failed = isError || pdfBytes.isError;
+    return { url: pdfURL, pending: !failed && !pdfURL, failed, refreshIfExpired };
+  }
+  if (expiresAt !== undefined) {
+    return { url: absolutizeAPIPath(dl), pending: false, failed: false, refreshIfExpired };
+  }
+  if (fresh) {
     const signed =
       /^https?:\/\//i.test(dl) && attachmentIdFromDownloadURL(dl) === undefined;
-    return { url: signed ? dl : pickedUrl, pending: false };
+    return { url: signed ? dl : pickedUrl, pending: false, failed: false, refreshIfExpired };
   }
-  return { url: pickedUrl, pending: !isError };
+  const privatePDF = pdf && (attachmentIdFromDownloadURL(pickedUrl) !== undefined || capabilityExpiresAt(pickedUrl) !== undefined);
+  return { url: pickedUrl, pending: !isError, failed: privatePDF && isError, refreshIfExpired };
+}
+
+function isPermanentAttachmentError(error: unknown): boolean {
+  return error instanceof ApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429;
+}
+
+function retryAttachmentPreview(failures: number, error: unknown): boolean {
+  return failures < 2 && !isPermanentAttachmentError(error);
+}
+
+function recoverFailedPreview(query: { state: { status: string; error: unknown } }): "always" | false {
+  return query.state.status === "error" && !isPermanentAttachmentError(query.state.error) ? "always" : false;
+}
+
+function isSameOriginHTTPURL(url: string): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const parsed = new URL(url, window.location.href);
+    return /^https?:$/.test(parsed.protocol) && parsed.origin === window.location.origin;
+  } catch {
+    return false;
+  }
+}
+
+// PDFs can be large. Keep one local URL only while its viewer is mounted;
+// unlike inline images, do not retain its bytes in the five-minute image cache.
+function usePDFObjectURL(blob: Blob | undefined): string {
+  const [current, setCurrent] = useState<{ blob: Blob; url: string }>();
+  useEffect(() => {
+    if (!blob) {
+      setCurrent(undefined);
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    setCurrent({ blob, url });
+    return () => URL.revokeObjectURL(url);
+  }, [blob]);
+  return current?.blob === blob ? current?.url ?? "" : "";
+}
+
+function absolutizeAPIPath(url: string): string {
+  if (!url.startsWith("/") || url.startsWith("//")) return url;
+  return `${(api.getBaseUrl?.() ?? "").replace(/\/+$/, "")}${url}`;
+}
+
+function resolveLegacyLocalMediaURL(url: string): string {
+  const id = attachmentIdFromLocalUploadURL(url);
+  return id ? absolutizeAPIPath(attachmentDownloadPath(id)) : url;
+}
+
+function capabilityExpiresAt(url: string): number | undefined {
+  // Only the server's per-attachment capability has the short proxy TTL.
+  try {
+    const parsed = new URL(url, "https://attachment.invalid");
+    if (!/^\/api\/attachments\/[^/]+\/signed-download$/.test(parsed.pathname)) return undefined;
+    if (!parsed.searchParams.get("sig")) return undefined;
+    const exp = Number(parsed.searchParams.get("exp"));
+    return Number.isFinite(exp) && exp > 0 ? exp * 1000 : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 // useObjectURL turns a Blob into a `blob:` URL. The module cache keeps the

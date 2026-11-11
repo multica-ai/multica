@@ -62,7 +62,7 @@ import { UnreadViewIcon } from "../../issue-views/unread-view-icon";
 import { useBuiltinViewNavigation } from "../../issue-views/builtin-views";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
-import { PANEL_ROW_CLASS, PanelCount, PanelLink, PanelList, PanelSection, isPathWithin, panelRowStateClass } from "../panel-nav";
+import { PANEL_ROW_CLASS, PanelCount, PanelLink, PanelList, PanelSection, isPathWithin, panelRowAnchor, panelRowStateClass } from "../panel-nav";
 import { useDragClickGuard } from "../use-drag-click-guard";
 import { SidebarIssueList, TREE_ROW_BUTTON_CLASS, TreeRow } from "./sidebar-tree";
 
@@ -566,7 +566,7 @@ function SavedViewRow({
 
   if (renaming) {
     return (
-      <div className={cn(PANEL_ROW_CLASS, panelRowStateClass(active), "py-1")}>
+      <div {...panelRowAnchor(active)} className={cn(PANEL_ROW_CLASS, panelRowStateClass(active), "py-1")}>
         <Layers className="size-4 shrink-0" />
         <ViewNameInput
           initial={view.name}

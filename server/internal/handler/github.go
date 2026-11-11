@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
@@ -27,6 +28,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/qoderruntime"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -936,6 +938,131 @@ func revokeGitHubInstallationToken(client *http.Client, token string) {
 	}
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, githubAPIResponseLimit))
+}
+
+// ── Qoder repository credentials from the workspace GitHub App ─────────────
+
+// issueQoderRepositoryToken mints a short-lived installation token bound to
+// one repository through a GitHub App installation the workspace connected.
+// It backs the Qoder bridge's credential fallback: repositories covered by
+// the installation need no hand-entered PAT. The caller must supply lowercase
+// owner/repo of the canonical repository URL; a token that comes back scoped
+// to anything else is refused. qoderruntime.ErrGitHubAppNotCovered reports
+// that no bound installation authorizes the repository.
+func (h *Handler) issueQoderRepositoryToken(ctx context.Context, workspaceID, owner, repo string) (string, int64, error) {
+	ws, err := parseStrictUUID(workspaceID)
+	if err != nil {
+		return "", 0, qoderruntime.ErrGitHubAppNotCovered
+	}
+	appJWT, err := signGitHubAppJWT(time.Now())
+	if err != nil {
+		return "", 0, fmt.Errorf("sign GitHub App JWT: %w", err)
+	}
+	if appJWT == "" {
+		return "", 0, qoderruntime.ErrGitHubAppNotCovered
+	}
+	installations, err := h.Queries.ListGitHubInstallationsByWorkspace(ctx, ws)
+	if err != nil {
+		return "", 0, fmt.Errorf("list workspace GitHub installations: %w", err)
+	}
+	for _, installation := range installations {
+		if !strings.EqualFold(installation.AccountLogin, owner) {
+			continue
+		}
+		token, err := createRepositoryInstallationToken(ctx, appJWT, installation.InstallationID, owner, repo)
+		if err == nil {
+			return token, installation.InstallationID, nil
+		}
+		if errors.Is(err, errGitHubRepositoryNotCovered) {
+			continue
+		}
+		if errors.Is(err, errGitHubAppPermissionsNotGranted) {
+			return "", 0, qoderruntime.ErrGitHubAppPermissions
+		}
+		return "", 0, err
+	}
+	return "", 0, qoderruntime.ErrGitHubAppNotCovered
+}
+
+// errGitHubRepositoryNotCovered marks a 4xx refusal from the access-token
+// endpoint: the installation exists but does not include the repository (for
+// example a selected-repositories installation or a revoked grant).
+var errGitHubRepositoryNotCovered = errors.New("github app installation does not include the repository")
+
+// errGitHubAppPermissionsNotGranted marks GitHub's 422 reply when the token
+// request asks for permissions the installation never granted. That is an
+// operator-actionable configuration gap, not a missing repository.
+var errGitHubAppPermissionsNotGranted = errors.New("github app installation has not granted the requested permissions")
+
+// createRepositoryInstallationToken creates a 1-hour installation access
+// token locked to a single repository with the minimum permissions remote
+// work needs (clone, push branches, open pull requests). The request names
+// the repository explicitly, and the response must confirm exactly that
+// repository; anything wider is discarded.
+func createRepositoryInstallationToken(ctx context.Context, appJWT string, installationID int64, owner, repo string) (string, error) {
+	client := &http.Client{Timeout: 15 * time.Second}
+	endpoint := fmt.Sprintf("%s/app/installations/%d/access_tokens", strings.TrimRight(githubAPIBase, "/"), installationID)
+	// The repository list is explicit and singular: GitHub refuses a name the
+	// installation cannot access, so the grant can never widen past one repo.
+	body, err := json.Marshal(map[string]any{
+		"repositories": []string{repo},
+		"permissions":  map[string]string{"contents": "write", "pull_requests": "write", "metadata": "read"},
+	})
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	setGitHubAPIHeaders(req, appJWT)
+	req.Header.Set("Content-Type", "application/json")
+	res, err := client.Do(req)
+	if err != nil {
+		// The wrapped *url.Error embeds the endpoint (and with it the
+		// admin-only installation id); keep that out of member-visible
+		// task failures and log it instead.
+		slog.WarnContext(ctx, "github: create repository installation token request failed", "error", err)
+		return "", errors.New("cannot reach GitHub to create a repository installation token")
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusCreated {
+		raw, _ := io.ReadAll(io.LimitReader(res.Body, 16<<10))
+		if res.StatusCode >= 400 && res.StatusCode < 500 && res.StatusCode != 408 && res.StatusCode != 429 {
+			// A 422 naming ungranted permissions is a configuration gap the
+			// workspace admin can fix; anything else means the installation
+			// does not cover this repository.
+			var refusal struct {
+				Message string `json:"message"`
+			}
+			if json.Unmarshal(raw, &refusal) == nil && strings.Contains(strings.ToLower(refusal.Message), "permissions requested are not granted") {
+				return "", errGitHubAppPermissionsNotGranted
+			}
+			return "", errGitHubRepositoryNotCovered
+		}
+		return "", fmt.Errorf("create repository installation token: github status %d", res.StatusCode)
+	}
+	var payload struct {
+		Token        string `json:"token"`
+		Repositories []struct {
+			Name  string `json:"name"`
+			Owner struct {
+				Login string `json:"login"`
+			} `json:"owner"`
+		} `json:"repositories"`
+	}
+	if err := json.NewDecoder(io.LimitReader(res.Body, githubAPIResponseLimit)).Decode(&payload); err != nil {
+		return "", fmt.Errorf("decode repository installation token: %w", err)
+	}
+	if payload.Token == "" {
+		return "", errors.New("github returned an empty repository installation token")
+	}
+	// The token must be scoped to exactly the requested repository; a wider
+	// or different scope is a boundary violation and is never handed out.
+	if len(payload.Repositories) != 1 || !strings.EqualFold(payload.Repositories[0].Name, repo) || !strings.EqualFold(payload.Repositories[0].Owner.Login, owner) {
+		return "", fmt.Errorf("repository installation token scope mismatch for %s/%s", owner, repo)
+	}
+	return payload.Token, nil
 }
 
 func (h *Handler) DeleteGitHubInstallation(w http.ResponseWriter, r *http.Request) {

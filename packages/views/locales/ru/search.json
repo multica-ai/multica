@@ -36,6 +36,7 @@
   },
   "commands": {
     "current_theme_aria": "Текущая тема",
+    "current_mode_aria": "Текущий режим",
     "new_issue": "Новая задача",
     "new_project": "Новый проект",
     "new_autopilot": "Новый автопилот",
@@ -112,7 +113,6 @@
     "project": "Проект",
     "parent": "Родительская задача",
     "quick_actions": "Быстрые действия",
-    "theme": "Тема",
     "project_status": "Статус проекта",
     "no_project": "Без проекта",
     "current": "Текущий"
@@ -142,14 +142,8 @@
     "type_to_find_people": "Введите текст для поиска участников и агентов"
   },
   "delegate": {
-    "heading": "Передать агенту",
-    "create_and_assign": "Создать задачу и назначить агенту {{name}}",
-    "squad": "Отряд",
-    "context_aria": "Создано с",
-    "parent": "Подзадача {{identifier}}",
-    "pick_crumb": "Выбрать",
-    "pick_another": "Передать другому агенту или отряду...",
-    "detected": "Инструкция"
+    "row": "Передать агенту: «{{prompt}}»",
+    "hint": "Быстрое создание"
   },
   "best": {
     "assign": "Назначить «{{subject}}»: {{name}}",
@@ -168,8 +162,6 @@
     "navigate": "Навигация",
     "select": "Выбрать",
     "open_in_new_tab": "Открыть в новой вкладке",
-    "delegate": "Создать и передать: {{name}}",
-    "search_instead": "Искать по ключевым словам",
     "back": "Назад",
     "prefix_commands": "Команды",
     "prefix_issues": "Задачи",

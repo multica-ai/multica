@@ -6,7 +6,9 @@
  * bypassing our `--radius-*` scale. Fixed arbitrary lengths create the same
  * drift. The few 2–3px data-visualization marks below are intentional
  * micro-geometry, not product surfaces, and are allowlisted by exact file so
- * the exception cannot spread silently.
+ * the exception cannot spread silently. The landing page's phone mockup is
+ * the one other exception: its status-bar glyphs and its hardware frame copy
+ * a device's geometry, which no product radius describes.
  *
  * Run: node scripts/check-ui-radius-tokens.mjs
  */
@@ -26,6 +28,12 @@ const fixedCssLength = /^(?:\d+(?:\.\d+)?|\.\d+)(?:px|rem|em|%|cm|mm|in|pt|pc|q|
 
 const microGeometryAllowlist = new Set([
   "apps/web/features/landing/components/features-section.tsx:rounded-[2px]",
+  "apps/web/features/landing/site/demo/hero-blocks.tsx:rounded-[2px]",
+  "apps/web/features/landing/site/demo/hero-blocks.tsx:rounded-t-[2px]",
+  "apps/web/features/landing/site/demo/mobile-visuals.tsx:rounded-[1px]",
+  "apps/web/features/landing/site/demo/mobile-visuals.tsx:rounded-[1.5px]",
+  "apps/web/features/landing/site/demo/mobile-visuals.tsx:rounded-[39px]",
+  "apps/web/features/landing/site/demo/mobile-visuals.tsx:rounded-[46px]",
   "packages/ui/components/ui/chart.tsx:rounded-[2px]",
   "packages/views/common/task-transcript/run-timeline.tsx:rounded-[3px]",
   "packages/views/dashboard/components/errors-tab.tsx:rounded-[2px]",

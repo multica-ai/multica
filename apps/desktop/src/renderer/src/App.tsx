@@ -24,6 +24,7 @@ import { useDaemonIPCBridge } from "./platform/daemon-ipc-bridge";
 import { syncDaemonOnLogin } from "./platform/daemon-login-sync";
 import { createDesktopLocaleAdapter } from "./platform/i18n-adapter";
 import { captureEvent } from "@multica/core/analytics";
+import { AppearanceSync } from "@multica/views/common/appearance-sync";
 import { RESOURCES } from "@multica/views/locales";
 import { DesktopClientUsageReporter } from "./platform/client-usage-reporter";
 import { DiagnosticRouteReporter } from "./platform/diagnostic-route-reporter";
@@ -141,12 +142,12 @@ function AppContent() {
 
   // Listen for invite IDs delivered via deep link (multica://invite/<id>).
   // We open the overlay regardless of login state — if the user isn't logged
-  // in, InvitePage's queries will fail and render the "not found" state,
+  // in, InvitationsPage's queries will fail and render the "not found" state,
   // which is acceptable; the expected pre-flight happens in the web app
   // (login + next=/invite/... dance) before the deep link is ever dispatched.
   useEffect(() => {
     return window.desktopAPI.onInviteOpen((invitationId) => {
-      useWindowOverlayStore.getState().open({ type: "invite", invitationId });
+      useWindowOverlayStore.getState().open({ type: "invitations", invitationId });
     });
   }, []);
 
@@ -468,6 +469,7 @@ export default function App() {
 
   return (
     <ThemeProvider>
+      <AppearanceSync />
       {runtimeConfigResult.ok ? (
         <CoreProvider
           apiBaseUrl={runtimeConfigResult.config.apiUrl}

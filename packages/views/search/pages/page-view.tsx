@@ -1,6 +1,6 @@
 "use client";
 
-import type { DelegateActor, PalettePage } from "../types";
+import type { PalettePage } from "../types";
 import {
   IssueAssigneePage,
   IssueDueDatePage,
@@ -14,20 +14,11 @@ import {
 import {
   AgentAssignIssuePage,
   ChatProjectPage,
-  DelegateTargetPage,
   ProjectStatusPage,
   ThemePage,
 } from "./other-pages";
 
-export function PageView({
-  page,
-  query,
-  onDelegate,
-}: {
-  page: PalettePage;
-  query: string;
-  onDelegate: (actor: DelegateActor, prompt: string) => void;
-}) {
+export function PageView({ page, query }: { page: PalettePage; query: string }) {
   switch (page.type) {
     case "issue-status":
       return <IssueStatusPage target={page.target} query={query} />;
@@ -53,7 +44,5 @@ export function PageView({
       return <AgentAssignIssuePage agent={page.agent} query={query} />;
     case "chat-project":
       return <ChatProjectPage session={page.session} changeProject={page.changeProject} query={query} />;
-    case "delegate-target":
-      return <DelegateTargetPage query={query} onSubmit={(actor) => onDelegate(actor, page.prompt)} />;
   }
 }

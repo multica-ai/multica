@@ -17,7 +17,6 @@ import { api, dispatchReasonCode } from "@multica/core/api";
 import {
   isAgentRuntimeBound as hasAgentRuntime,
   useAgentPresenceDetail,
-  useCustomizeConversationStartersHref,
   useWorkspaceAgentAvailability,
 } from "@multica/core/agents";
 import {
@@ -84,9 +83,6 @@ export function deriveChatTitle(content: string): string {
  * the draft slot — that is not "navigating away" (MUL-4864). Counting it as
  * such would leave a completed send's text sitting in the composer, primed to
  * be sent a second time to the agent just picked.
- *
- * Shared by both send chains — the chat tab's controller and the floating
- * ChatWindow — so the rule cannot drift between the two surfaces.
  */
 export function isStillOnComposeTarget(
   liveActiveSessionId: string | null,
@@ -111,9 +107,6 @@ export function isStillOnComposeTarget(
  *    different agent, sending the lazily-created session to the wrong agent.
  *  - `setDraftProject`: no open session, so this only adjusts the new-chat
  *    draft's project.
- *
- * Shared by both send chains — the chat tab's controller and the floating
- * ChatWindow — so the stale-agent rule cannot drift between the two surfaces.
  */
 export type ProjectContextChange =
   | { kind: "awaitSession" }
@@ -232,7 +225,12 @@ export function useChatController(opts?: { isActive?: boolean }) {
     fetchNextPage: fetchOlderMessages,
     hasNextPage: hasOlderMessages,
     isFetchingNextPage: isFetchingOlderMessages,
-  } = useInfiniteQuery(chatMessagesPageOptions(activeSessionId ?? ""));
+  } = useInfiniteQuery({
+    ...chatMessagesPageOptions(activeSessionId ?? ""),
+    // The floating window stays mounted while closed; it must not load a
+    // persisted session's transcript nobody is looking at.
+    enabled: !!activeSessionId && isActive,
+  });
 
   const messagePages = activeSessionId ? rawMessagePages?.pages ?? [] : [];
   const allMessages = [...messagePages].reverse().flatMap((page) => page.messages);
@@ -272,8 +270,8 @@ export function useChatController(opts?: { isActive?: boolean }) {
     handleSendQueuedTaskNow,
   } = useChatTaskActions(activeSessionId, enqueueLocalRestore);
   // Nonce handed to ChatInput to pull focus into the compose box when a new
-  // chat starts. Bumped by handleNewChat / handleStartNewChat only, so
-  // selecting an existing chat or a deep link never steals focus.
+  // chat starts (new chat, agent switch, project change, conversation
+  // starter), so selecting an existing chat or a deep link never steals focus.
   const [focusInputRequest, setFocusInputRequest] = useState(0);
   const requestInputFocus = useCallback(
     () => setFocusInputRequest((n) => n + 1),
@@ -373,14 +371,6 @@ export function useChatController(opts?: { isActive?: boolean }) {
   // (MUL-6380). Same rule the server enforces, via the shared predicate.
   const isAgentAccessRevoked =
     !!activeAgent && !canAssignAgent(activeAgent, user?.id, memberRole);
-
-  // "Customize" under the starter buttons in the empty state — the only place
-  // that admits those buttons are configuration. Resolved here so the full
-  // page and the floating window cannot disagree about who sees it.
-  const customizeConversationStartersHref = useCustomizeConversationStartersHref(
-    activeAgent,
-    wsId,
-  );
 
   const agentAvailability = useWorkspaceAgentAvailability();
   const noAgent = agentAvailability === "none";
@@ -743,6 +733,40 @@ export function useChatController(opts?: { isActive?: boolean }) {
     ],
   );
 
+  // Switch the composer to another agent (the floating window's agent picker).
+  const handleSelectAgent = useCallback(
+    (agent: Agent) => {
+      // No-op when clicking the already-active agent — don't clobber the
+      // current session just because the user closed the menu this way.
+      // Compare against activeAgent (what the UI shows), not selectedAgentId
+      // (which may be null / point to an archived agent on first load).
+      if (activeAgent && agent.id === activeAgent.id) return;
+      uiLogger.info("selectAgent", {
+        from: selectedAgentId,
+        to: agent.id,
+        previousSessionId: activeSessionId,
+      });
+      setSelectedAgentId(agent.id);
+      // Preserve an explicitly chosen project while composing an unsent chat,
+      // but never inherit project context from the historical session being
+      // left behind.
+      setSelectedProjectId(currentSession ? null : activeProjectId);
+      setActiveSession(null);
+      requestInputFocus();
+    },
+    [
+      activeAgent,
+      selectedAgentId,
+      activeSessionId,
+      activeProjectId,
+      currentSession,
+      setSelectedAgentId,
+      setSelectedProjectId,
+      setActiveSession,
+      requestInputFocus,
+    ],
+  );
+
   const handleSelectSession = useCallback(
     (session: { id: string; agent_id: string; project_id?: string | null }) => {
       // Sessions are bound 1:1 to an agent — picking a session from a
@@ -851,12 +875,12 @@ export function useChatController(opts?: { isActive?: boolean }) {
     isAgentAccessRevoked,
     isAgentRuntimeBound,
     activeAgent,
-    customizeConversationStartersHref,
     noAgent,
     availability,
     // messages
     messages,
     pendingTask,
+    pendingTaskLoading,
     pendingTaskId,
     showSkeleton,
     hasMessages,
@@ -882,6 +906,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
     uploadEnabled,
     handleNewChat,
     handleStartNewChat,
+    handleSelectAgent,
     handleSelectSession,
     handleProjectChange,
     advanceSelectionAfterArchive,

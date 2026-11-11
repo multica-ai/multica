@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,7 +27,7 @@ func setupDevEnvTask(t *testing.T) {
 	clearDaemonTaskEnv(t)
 	t.Setenv("MULTICA_TOKEN", "")
 	t.Setenv("MULTICA_SERVER_URL", "")
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	t.Setenv(devEnvHomeEnv, t.TempDir())
 
 	writeDevEnvManifest(t, devEnvTestName, "NAME="+devEnvTestName+"\nDIR=/tmp/checkout\nBACKEND_PORT="+devEnvTestPort+"\nPROFILE="+devEnvTestProfile+"\n")
@@ -85,9 +86,24 @@ func TestDevEnvDaemonProfileAllowedInsideTask(t *testing.T) {
 			if want := healthPortForProfile(profile); port != want {
 				t.Fatalf("status port = %d, want the profile's own %d", port, want)
 			}
-			// The real command, end to end: nothing is running on the port.
+
+			// The real command, end to end, against a daemon this test owns.
+			// The daemon.port record steers stop off the hashed port, which
+			// another profile's daemon on this machine may already hold.
+			ln, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			pid := startBlockingChild(t)
+			stub := serveStubDaemon(t, ln, map[string]any{"profile": profile}, pid)
+			if err := publishDaemonPort(profile, daemonPortRecord{Port: stub.port, PID: pid}); err != nil {
+				t.Fatal(err)
+			}
 			if err := runDaemonStop(cmd, nil); err != nil {
 				t.Fatalf("runDaemonStop --profile %s: %v", profile, err)
+			}
+			if got := stub.shutdownCount(); got != 1 {
+				t.Fatalf("stub daemon received %d shutdown requests, want 1", got)
 			}
 		})
 	}

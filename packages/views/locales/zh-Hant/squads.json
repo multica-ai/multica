@@ -27,13 +27,7 @@
     "success": "已歸檔小隊"
   },
   "name_editor": {
-    "title": "重新命名小隊",
-    "placeholder": "小隊名稱",
-    "required": "名稱不能為空",
-    "cancel": "取消",
-    "save": "儲存",
-    "saved": "已儲存",
-    "save_failed": "儲存失敗"
+    "placeholder": "小隊名稱"
   },
   "add_member_dialog": {
     "title": "新增成員",
@@ -53,12 +47,9 @@
     "empty": "新增角色…",
     "placeholder": "角色（例如：審查者）"
   },
-  "description_dialog": {
-    "title": "編輯描述",
-    "placeholder_empty": "新增描述",
-    "cancel": "取消",
-    "responsibility_placeholder": "這個小隊負責什麼？",
-    "save": "儲存"
+  "description_editor": {
+    "empty": "新增描述",
+    "placeholder": "這個小隊負責什麼？"
   },
   "members_tab": {
     "section_title": "成員",
@@ -112,7 +103,8 @@
     "leader_updated": "隊長已更新",
     "leader_update_failed": "更新隊長失敗",
     "archive_failed": "歸檔小隊失敗",
-    "instructions_saved": "指引已儲存"
+    "instructions_saved": "指引已儲存",
+    "update_failed": "儲存失敗"
   },
   "profile_card": {
     "unavailable": "小隊不可用",

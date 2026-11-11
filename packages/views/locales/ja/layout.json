@@ -78,9 +78,6 @@
     "workspaces_label": "ワークスペース",
     "create_workspace": "ワークスペースを作成",
     "pending_invitations_label": "保留中の招待",
-    "invitation_workspace_fallback": "ワークスペース",
-    "invitation_join": "参加",
-    "invitation_decline": "辞退",
     "log_out": "ログアウト",
     "new_issue": "新規タスク",
     "pinned_label": "ピン留め済み",
@@ -100,7 +97,6 @@
     "chat": "チャット",
     "autopilots": "自動化",
     "switch_workspace": "ワークスペースを切り替え",
-    "invitation_from": "{{name}} さんから招待されています",
     "pin_workspace": "ワークスペースをピン留め",
     "unpin_workspace": "ピン留めを解除",
     "open_in_new_window": "新しいウィンドウで開く",
@@ -108,6 +104,10 @@
     "open_in_other_window": "別のウィンドウで開いています",
     "in_other_window": "別ウィンドウ",
     "all_workspaces_open": "すべてのワークスペースがすでにウィンドウで開いています"
+  },
+  "bottom_bar": {
+    "label": "ステータスバー",
+    "working_other": "{{count}} 体のエージェントが作業中"
   },
   "panels": {
     "work": {
@@ -129,6 +129,7 @@
       "assignee_me": "自分",
       "assignee_my_agents": "自分のエージェント",
       "assignee_me_and_my_agents": "自分と自分のエージェント",
+      "assignee_projects_only": "サイドバーの「プロジェクト」に表示されるタスクにのみ適用されます",
       "reset": "リセット",
       "load_more": "さらに表示",
       "show_less": "表示を減らす",
@@ -182,6 +183,8 @@
       "dark": "ダーク",
       "system": "システム"
     },
+    "mode": "モード",
+    "appearance_settings": "外観の設定",
     "language": "言語",
     "shortcuts": "キーボードショートカット"
   },
