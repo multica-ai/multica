@@ -378,6 +378,7 @@ export const EMPTY_LIST_GITHUB_INSTALLATIONS_RESPONSE: ListGitHubInstallationsRe
 };
 
 export const GitHubConnectResponseSchema = z.object({
+  connection_id: z.string().optional().catch(undefined),
   url: z.string().optional(),
   configured: z.boolean().optional().default(false),
 }).loose();
@@ -398,6 +399,7 @@ export const GitHubRepositorySchema = z.object({
 }).loose();
 
 export const ListGitHubRepositoriesResponseSchema = z.object({
+  repository_selection: z.enum(["all", "selected", "unknown"]).catch("unknown").optional(),
   repositories: z.array(GitHubRepositorySchema).default([]),
   total_count: z.number().optional().default(0),
   next_page: z.number().nullable().optional().default(null),

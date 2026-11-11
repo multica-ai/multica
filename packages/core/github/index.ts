@@ -5,3 +5,4 @@ export * from "./settings";
 export * from "./use-github-settings";
 export * from "./repo-ref";
 export * from "./stars";
+export * from "./connection-event";

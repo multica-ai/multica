@@ -5224,13 +5224,10 @@ export class ApiClient {
   // GitHub integration
   async getGitHubConnectURL(
     workspaceId: string,
-    returnTo?: "github" | "repositories",
+    options?: { desktop?: boolean },
   ): Promise<GitHubConnectResponse> {
-    const search = new URLSearchParams();
-    if (returnTo) search.set("return_to", returnTo);
-    const suffix = search.size > 0 ? `?${search.toString()}` : "";
     const raw = await this.fetch<unknown>(
-      `/api/workspaces/${workspaceId}/github/connect${suffix}`,
+      `/api/workspaces/${workspaceId}/github/connect${options?.desktop ? "?desktop=1" : ""}`,
     );
     return parseWithFallback(
       raw,

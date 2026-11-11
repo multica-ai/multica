@@ -9,7 +9,7 @@ import enSettings from "../../locales/en/settings.json";
 
 const mockUpdateWorkspace = vi.hoisted(() => vi.fn());
 const mockDeleteInstallation = vi.hoisted(() => vi.fn());
-const mockGetConnectURL = vi.hoisted(() => vi.fn());
+const mockConnectGitHub = vi.hoisted(() => vi.fn());
 const mockInvalidate = vi.hoisted(() => vi.fn());
 
 const workspaceRef = vi.hoisted(() => ({
@@ -66,11 +66,14 @@ vi.mock("@multica/core/api", () => ({
   api: {
     updateWorkspace: mockUpdateWorkspace,
     deleteGitHubInstallation: mockDeleteInstallation,
-    getGitHubConnectURL: mockGetConnectURL,
+    getGitHubConnectURL: mockConnectGitHub,
   },
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 // The repository list and self-hosted rows have their own tests.
+vi.mock("./use-connect-github", () => ({
+  useConnectGitHub: () => ({ connecting: false, connect: mockConnectGitHub, connectedInstallationID: "", reset: vi.fn() }),
+}));
 vi.mock("./repositories-section", () => ({ RepositoriesSection: () => null }));
 vi.mock("./code-vcs", () => ({ VCSConnectionRows: () => <div>VCS rows</div> }));
 // The merge rule editor has its own test on the statuses it offers.
@@ -121,19 +124,12 @@ function connect() {
 }
 
 describe("CodeTab — GitHub", () => {
-  it("offers to connect GitHub and opens the install flow", async () => {
-    mockGetConnectURL.mockResolvedValue({ configured: true, url: "https://github.com/apps/x" });
-    const open = vi.spyOn(window, "open").mockImplementation(() => null);
+  it("offers to connect GitHub through the shared connection action", async () => {
     const user = userEvent.setup();
     render(<CodeTab />, { wrapper: Wrapper });
-
     expect(screen.getByText("Not connected")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Connect GitHub" }));
-
-    await waitFor(() =>
-      expect(open).toHaveBeenCalledWith("https://github.com/apps/x", "_blank", "noopener"),
-    );
-    open.mockRestore();
+    expect(mockConnectGitHub).toHaveBeenCalledOnce();
   });
 
   it("names the account and who connected it", () => {
