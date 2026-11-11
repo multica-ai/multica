@@ -178,7 +178,15 @@ describe("AgentDropdown unresolved automatic target", () => {
       <QueryClientProvider client={new QueryClient()}>
         <I18nProvider locale="en" resources={TEST_RESOURCES}>
           <WorkspaceSlugProvider slug="ws">
-            <NavigationProvider adapter={{ pathname: "/ws/issues", searchParams: new URLSearchParams(), push: vi.fn(), replace: vi.fn(), back: vi.fn() }}>
+            <NavigationProvider value={{
+              pathname: "/ws/issues",
+              searchParams: new URLSearchParams(),
+              hash: "",
+              getShareableUrl: (path) => path,
+              push: vi.fn(),
+              replace: vi.fn(),
+              back: vi.fn(),
+            }}>
               <AgentDropdown agents={[agent]} activeAgent={null} userId="user-1" onSelect={onSelect} />
             </NavigationProvider>
           </WorkspaceSlugProvider>
