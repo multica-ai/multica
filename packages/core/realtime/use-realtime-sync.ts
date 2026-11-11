@@ -32,6 +32,7 @@ import {
   agentTasksKeys,
 } from "../agents/queries";
 import { githubKeys } from "../github/queries";
+import { useGitHubConnectionStore } from "../github/connection-store";
 import { larkKeys } from "../lark/queries";
 import { slackKeys } from "../slack/queries";
 import { dingtalkKeys } from "../dingtalk/queries";
@@ -1152,6 +1153,10 @@ export function useRealtimeSync(
     // Filtering by actor_id would block other tabs of the same user.
     // Instead, both mutations and WS handlers use dedup checks to be idempotent.
 
+    const unsubGitHubInstallationCreated = ws.on("github_installation:created", (payload) => {
+      useGitHubConnectionStore.getState().complete(payload);
+    });
+
     const unsubIssueUpdated = ws.on("issue:updated", (p) => {
       const payload = p as IssueUpdatedPayload;
       const { issue } = payload;
@@ -1923,6 +1928,7 @@ export function useRealtimeSync(
 
     return () => {
       unsubAny();
+      unsubGitHubInstallationCreated();
       unsubIssueUpdated();
       unsubIssueCreated();
       unsubIssueDeleted();
