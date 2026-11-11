@@ -161,6 +161,7 @@ import { memberListOptions, agentListOptions } from "@multica/core/workspace/que
 import {
   selectExpandedResolved,
   useCommentCollapseStore,
+  useCommentComposerStore,
   useRecentIssuesStore,
   useResolvedExpandStore,
   useSubIssuesCollapseStore,
@@ -1615,6 +1616,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // User preference: pin the bottom comment bar to the scroll viewport. Off
   // below `md` regardless of the preference — see the hook.
   const stickyComposer = useStickyComposer();
+  // Read by the image rules in editor/styles/attachment.css.
+  const commentImageLayout = useCommentComposerStore((s) => s.imageLayout);
   // Mobile shows it only near the top of the page, where it covers the text
   // column the least; desktop shows it whenever the latest entry is more than
   // a screen away.
@@ -3929,7 +3932,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           <div className="my-8 border-t" />
 
           {/* Activity / Comments */}
-          <div>
+          <div data-comment-images={commentImageLayout}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <h2 className="text-title-sm font-semibold">{t(($) => $.detail.activity_section)}</h2>
@@ -4144,6 +4147,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           <IssueAppRequests issueId={id} highlightId={highlightAppRequestId} highlightToken={highlightRequestToken} />
           <div
             ref={composerRef}
+            data-comment-images={commentImageLayout}
             className={cn(
               "mt-4",
               stickyComposer &&
