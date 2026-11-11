@@ -8068,6 +8068,7 @@ func IssueToMap(issue db.Issue, issuePrefix string) map[string]any {
 		"assignee_type":   util.TextToPtr(issue.AssigneeType),
 		"assignee_id":     util.UUIDToPtr(issue.AssigneeID),
 		"creator_type":    issue.CreatorType,
+		"requester_id":    util.UUIDToPtr(issue.RequesterUserID),
 		"creator_id":      util.UUIDToString(issue.CreatorID),
 		"parent_issue_id": util.UUIDToPtr(issue.ParentIssueID),
 		// Mirrors handler.IssueResponse.DuplicateOf. Null is only true for a

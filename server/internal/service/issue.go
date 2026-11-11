@@ -419,27 +419,37 @@ func (s *IssueService) createOnce(ctx context.Context, p IssueCreateParams, opts
 	var issue db.Issue
 	var assignedTask db.AgentTaskQueue
 	if p.OriginType.Valid {
+		var requester pgtype.UUID
+		if p.CreatorType == "agent" && p.OriginID.Valid && (p.OriginType.String == "quick_create" || p.OriginType.String == "agent_create") {
+			requester, err = qtx.ResolveIssueRequester(ctx, db.ResolveIssueRequesterParams{
+				OriginID: p.OriginID, CreatorID: p.CreatorID, WorkspaceID: p.WorkspaceID, OriginType: p.OriginType.String,
+			})
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return IssueCreateResult{}, fmt.Errorf("resolve issue requester: %w", err)
+			}
+		}
 		issue, err = qtx.CreateIssueWithOrigin(ctx, db.CreateIssueWithOriginParams{
-			ID:            dbid.NewV7(),
-			WorkspaceID:   p.WorkspaceID,
-			Title:         p.Title,
-			Description:   p.Description,
-			Status:        p.Status,
-			Priority:      p.Priority,
-			AssigneeType:  p.AssigneeType,
-			AssigneeID:    p.AssigneeID,
-			CreatorType:   p.CreatorType,
-			CreatorID:     p.CreatorID,
-			ParentIssueID: p.ParentIssueID,
-			Position:      newPosition,
-			StartDate:     p.StartDate,
-			DueDate:       p.DueDate,
-			Number:        issueNumber,
-			ProjectID:     projectID,
-			OriginType:    p.OriginType,
-			OriginID:      p.OriginID,
-			Stage:         p.Stage,
-			Properties:    properties,
+			ID:              dbid.NewV7(),
+			WorkspaceID:     p.WorkspaceID,
+			Title:           p.Title,
+			Description:     p.Description,
+			Status:          p.Status,
+			Priority:        p.Priority,
+			AssigneeType:    p.AssigneeType,
+			AssigneeID:      p.AssigneeID,
+			CreatorType:     p.CreatorType,
+			CreatorID:       p.CreatorID,
+			ParentIssueID:   p.ParentIssueID,
+			Position:        newPosition,
+			StartDate:       p.StartDate,
+			DueDate:         p.DueDate,
+			Number:          issueNumber,
+			ProjectID:       projectID,
+			OriginType:      p.OriginType,
+			OriginID:        p.OriginID,
+			RequesterUserID: requester,
+			Stage:           p.Stage,
+			Properties:      properties,
 		})
 	} else {
 		issue, err = qtx.CreateIssue(ctx, db.CreateIssueParams{

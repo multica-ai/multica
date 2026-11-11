@@ -5,11 +5,14 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -83,21 +86,27 @@ func NewDetector(ignoreCommands []string) *Detector {
 }
 
 // Detect lists the servers whose working directory belongs to a task.
-// resolve maps a working directory to its task; owned reports process groups
-// the manager already supervises. A server is reported from its second
-// sighting on, so test servers that live for a moment never show up.
+// resolve maps a working directory to its task; owner names the declared
+// environment a process belongs to, if any. A server is reported from its
+// second sighting on, so test servers that live for a moment never show up.
 //
 // A desktop app is reported once, as an app with no URL, however many ports
 // it listens on. A DevTools port is never reported as a URL: opening it shows
 // a debugger page, not the app.
-func (d *Detector) Detect(ctx context.Context, resolve func(cwd string) (Task, bool), owned func(pgid int) bool) ([]Environment, error) {
+//
+// The servers of a declared environment are already listed under it and are
+// left out. A desktop app among them is returned under the environment's own
+// key, with the config source, so the caller can show that environment as the
+// app and bring its window forward.
+func (d *Detector) Detect(ctx context.Context, resolve func(cwd string) (Task, bool), owner func(pid int) string) ([]Environment, error) {
 	listeners, err := d.list(ctx)
 	if err != nil {
 		return nil, err
 	}
 	type candidate struct {
 		Listener
-		task Task
+		task  Task
+		owner string
 	}
 	var candidates []candidate
 	for _, l := range listeners {
@@ -108,10 +117,7 @@ func (d *Detector) Detect(ctx context.Context, resolve func(cwd string) (Task, b
 		if !ok {
 			continue
 		}
-		if pgid := processGroup(l.PID); pgid > 0 && owned(pgid) {
-			continue
-		}
-		candidates = append(candidates, candidate{l, task})
+		candidates = append(candidates, candidate{l, task, owner(l.PID)})
 	}
 	pids := make([]int, 0, len(candidates))
 	for _, c := range candidates {
@@ -124,6 +130,16 @@ func (d *Detector) Detect(ctx context.Context, resolve func(cwd string) (Task, b
 	debugPorts := make(map[string][]int)
 	for _, c := range candidates {
 		proc := procs[c.PID]
+		if c.owner != "" {
+			if _, dup := found[c.owner]; proc.App != "" && !dup {
+				found[c.owner] = Environment{
+					Key: c.owner, TaskID: c.task.TaskID, IssueID: c.task.IssueID, Source: SourceConfig, Kind: KindApp,
+					Name: truncateName(proc.App), State: StateRunning, Dir: c.task.RootDir,
+					pid: c.PID, bundle: proc.Bundle,
+				}
+			}
+			continue
+		}
 		// A process that may yet be an app is probed like one, so its debug
 		// port is not offered as a link while it starts.
 		debug := proc.debugs(c.Port) || ((proc.App != "" || proc.Unsettled) && d.speaksCDP(ctx, c.PID, c.Port))
@@ -150,7 +166,7 @@ func (d *Detector) Detect(ctx context.Context, resolve func(cwd string) (Task, b
 		found[key] = Environment{
 			Key: key, TaskID: c.task.TaskID, IssueID: c.task.IssueID, Source: SourceDetected, Kind: KindServer,
 			Name: truncateName(c.Command), URL: fmt.Sprintf("http://localhost:%d", c.Port), Port: c.Port, State: StateRunning,
-			Dir: c.task.RootDir,
+			Dir: c.task.RootDir, pid: c.PID,
 		}
 	}
 	for key, ports := range debugPorts {
@@ -281,6 +297,57 @@ func truncateName(name string) string {
 		return string(r[:64])
 	}
 	return name
+}
+
+// Stop ends a detected server and waits for its port to be released. It
+// signals the listening process only, never its process group: a server an
+// agent started in the background shares the agent's group.
+func (d *Detector) Stop(ctx context.Context, env Environment) error {
+	if !supported {
+		return ErrUnsupported
+	}
+	if env.Source != SourceDetected || env.pid <= 0 || env.pid == os.Getpid() {
+		return ErrUnknown
+	}
+	listening := func() bool {
+		listeners, err := d.list(ctx)
+		if err != nil {
+			return true
+		}
+		for _, l := range listeners {
+			if l.PID == env.pid && l.Port == env.Port {
+				return true
+			}
+		}
+		return false
+	}
+	// The process may have exited, and its pid been reused, since detection.
+	if !listening() {
+		return nil
+	}
+	for _, step := range []struct {
+		sig  syscall.Signal
+		wait time.Duration
+	}{{syscall.SIGTERM, stopGrace}, {syscall.SIGKILL, 2 * time.Second}} {
+		if err := signalProcess(env.pid, step.sig); err != nil {
+			if errors.Is(err, syscall.ESRCH) {
+				return nil
+			}
+			return fmt.Errorf("stop %s: %w", env.Name, err)
+		}
+		deadline := time.Now().Add(step.wait)
+		for time.Now().Before(deadline) {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(500 * time.Millisecond):
+			}
+			if !listening() {
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("%s is still listening on port %d", env.Name, env.Port)
 }
 
 // detectedKey is stable across restarts of the same server, and carries no

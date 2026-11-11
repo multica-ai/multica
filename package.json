@@ -22,6 +22,7 @@
     "build": "turbo build --filter=!@multica/mobile",
     "typecheck": "turbo typecheck --filter=!@multica/mobile",
     "test": "turbo test --filter=!@multica/mobile",
+    "test:scripts": "node --test \"scripts/**/*.test.mjs\"",
     "lint": "turbo lint --filter=!@multica/mobile",
     "knip": "knip",
     "check:ui-exports": "node scripts/check-ui-wildcard-exports.mjs",
