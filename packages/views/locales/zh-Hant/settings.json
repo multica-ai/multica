@@ -413,6 +413,10 @@
         "label": "顯示或隱藏聊天窗",
         "description": "開啟或關閉懸浮聊天窗，開啟時自動聚焦輸入框。"
       },
+      "newChat": {
+        "label": "問 Multica",
+        "description": "在懸浮聊天窗裡開始新對話。"
+      },
       "findInIssue": {
         "label": "在任務中查詢",
         "description": "搜尋當前開啟的任務詳情。"

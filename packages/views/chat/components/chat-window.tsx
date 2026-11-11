@@ -162,9 +162,11 @@ export function ChatWindow() {
     handleSendQueuedTaskNow,
   } = useChatTaskActions(activeSessionId, enqueueLocalRestore);
   // Nonce handed to ChatInput to pull focus into the compose box: when a new
-  // chat starts (⊕ or switching agent), and whenever the window itself opens.
+  // chat starts (⊕, Ask Multica, or switching agent), and whenever the window
+  // itself opens.
   const windowRef = useRef<HTMLDivElement>(null);
-  const { focusRequest, requestInputFocus } = useChatInputFocus(isOpen, windowRef);
+  const newChatRequest = useChatStore((s) => s.newChatRequest);
+  const { focusRequest, requestInputFocus } = useChatInputFocus(isOpen, windowRef, newChatRequest);
   const [conversationStarterRequest, setConversationStarterRequest] = useState<{
     id: number;
     content: string;
