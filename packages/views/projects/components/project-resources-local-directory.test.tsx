@@ -176,9 +176,9 @@ describe("ProjectResourcesSection — local folders", () => {
     expect(screen.getByText(strings.local_unknown_computer)).toBeInTheDocument();
   });
 
-  // Picking needs this machine's daemon, so web lists what exists and nothing
-  // more.
-  it("shows folders read-only on web, without a slot for this computer", () => {
+  // Picking needs this machine's daemon, so web cannot add a folder; editing
+  // one only rewrites the resource, so that stays available.
+  it("lets web edit existing folders but not add one", () => {
     state.desktop = false;
     state.daemon = { daemonId: null, deviceName: null, running: false };
     state.runtimes = [runtime("daemon-2", "studio-pc.local", "online")];
@@ -188,6 +188,8 @@ describe("ProjectResourcesSection — local folders", () => {
     expect(screen.getByText("studio-pc.local")).toBeInTheDocument();
     expect(screen.queryByText(`· ${strings.local_offline}`)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: strings.local_pick })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: strings.mode_badge_worktree })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: strings.remove_tooltip })).toBeInTheDocument();
   });
 
   it("asks to start the daemon before a folder can be chosen", () => {

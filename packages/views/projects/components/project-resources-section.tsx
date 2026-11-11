@@ -108,10 +108,23 @@ function errorMessage(err: unknown, fallback: string): string {
   return err instanceof Error && err.message ? err.message : fallback;
 }
 
-/** A user-typed clone URL, as opposed to a search for a workspace repository. */
+/**
+ * A user-typed clone URL, as opposed to a search for a workspace repository.
+ * Accepts the same shapes as the server's isValidGitRepoURL: a URL with a
+ * scheme, or the scp-like `[user@]host:path` shorthand — which is also how SSH
+ * host aliases (`github-work:team/repo.git`) for multiple accounts are written.
+ */
 function looksLikeRepoUrl(value: string): boolean {
   const trimmed = value.trim();
-  return trimmed.includes("://") || trimmed.startsWith("git@");
+  if (trimmed.includes("://")) return true;
+  if (/\s/.test(trimmed)) return false;
+  const colon = trimmed.indexOf(":");
+  if (colon <= 0 || colon === trimmed.length - 1) return false;
+  // `@` only separates a user when it comes before the colon, and a host
+  // must remain between the two.
+  const at = trimmed.indexOf("@");
+  if (at >= colon) return false;
+  return at + 1 < colon;
 }
 
 const chipClassName =
@@ -130,8 +143,9 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
   const others = resources.filter(
     (r) => !isGithubRef(r) && !isLocalDirectoryRef(r),
   );
-  // Picking a folder needs the desktop's daemon_id, so web only ever shows
-  // folders that already exist, read-only on where they live.
+  // Picking a folder needs the desktop's daemon_id, so web cannot add one. It
+  // still lists existing folders, and changing their mode or removing them
+  // only rewrites the resource, which works from anywhere.
   const desktopMode = isDesktopShell();
 
   return (

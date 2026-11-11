@@ -257,6 +257,42 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
     });
   });
 
+  // The server accepts scp-like `[user@]host:path`, and SSH host aliases for
+  // multiple git accounts are written exactly that way, so the field has to
+  // treat them as addresses rather than as search terms.
+  it.each([
+    ["an SSH host alias", "github-work:team/repo.git"],
+    ["a user@host address on another server", "alice@git.example.com:team/repo.git"],
+  ])("offers to add %s that is not in the workspace list", async (_label, address) => {
+    renderWithI18n(<ProjectResourcesSection projectId="p1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: /add repository/i }));
+    const input = screen.getByLabelText(/paste a github url/i);
+    fireEvent.change(input, { target: { value: address } });
+
+    expect(screen.getByRole("button", { name: `Add ${address}` })).toBeTruthy();
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(createMock).toHaveBeenCalledTimes(1));
+    expect(createMock.mock.calls[0]?.[0]).toEqual({
+      resource_type: "github_repo",
+      resource_ref: { url: address },
+    });
+  });
+
+  it.each(["multica", "agent sdk"])("keeps %j a search rather than an address", (term) => {
+    renderWithI18n(<ProjectResourcesSection projectId="p1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: /add repository/i }));
+    const input = screen.getByLabelText(/paste a github url/i);
+    fireEvent.change(input, { target: { value: term } });
+
+    expect(screen.queryByRole("button", { name: `Add ${term}` })).toBeNull();
+    expect(screen.queryByLabelText(/starting branch/i)).toBeNull();
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(createMock).not.toHaveBeenCalled();
+  });
+
   it("splits a pasted /tree/ URL into the repo and the branch it points at", async () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
