@@ -109,9 +109,10 @@ export interface GithubRepoResourceRef {
  * - `in_place`: the agent works directly in the user's directory and tasks run
  *   one at a time — a second task waits in `waiting_local_directory`. Edits
  *   land in the user's working copy.
- * - `worktree`: each task gets its own git worktree of that repo inside the
- *   runtime's workspace, so tasks run concurrently and deliver their work as a
- *   branch instead of touching the working copy. Every task of one conversation
+ * - `worktree`: tasks read the local repo and request a private git worktree
+ *   before writing. Runs that never request one create no branch. Written work
+ *   is delivered as a branch; reading the user's copy relies on agent instructions.
+ *   Writing tasks of one conversation
  *   shares that branch — `agent/<agent>/<issue>` — so a follow-up continues the
  *   previous turn's work; a task with no conversation behind it gets
  *   `agent/<agent>/<task>`. Continuation is decided by an ownership record in

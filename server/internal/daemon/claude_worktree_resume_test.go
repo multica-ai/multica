@@ -179,11 +179,11 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id
 		ProjectResources: []ProjectResourceData{{ID: "repo-config", ResourceType: localDirectoryResourceType, ResourceRef: ref}},
 	}
 	first, err := d.runTask(context.Background(), task, "claude", 0, logger)
-	if err != nil || first.Status != "completed" || first.BranchName == "" {
+	if err != nil || first.Status != "completed" || first.BranchName != "" {
 		t.Fatalf("first turn = %+v, %v", first, err)
 	}
-	if _, err := os.Stat(first.WorkDir); !os.IsNotExist(err) {
-		t.Fatalf("prior worktree was not removed: %v", err)
+	if _, err := os.Stat(first.WorkDir); err != nil {
+		t.Fatalf("managed session directory was removed: %v", err)
 	}
 	src := filepath.Join(configDir, "projects", encodeClaudeCwd(first.WorkDir), first.SessionID+".jsonl")
 	if err := os.MkdirAll(filepath.Dir(src), 0o700); err != nil {
@@ -197,6 +197,9 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id
 	second, err := d.runTask(context.Background(), task, "claude", 0, logger)
 	if err != nil || second.Status != "completed" || second.BranchName != first.BranchName {
 		t.Fatalf("second turn = %+v, %v", second, err)
+	}
+	if !sameDir(t, first.WorkDir, second.WorkDir) {
+		t.Fatal("on-demand session did not reuse its cwd")
 	}
 	args, err := os.ReadFile(captureFile)
 	if err != nil || !strings.Contains(string(args), "--resume\n"+first.SessionID+"\n") || !strings.HasSuffix(string(args), configDir+"\n"+home+"\n") {

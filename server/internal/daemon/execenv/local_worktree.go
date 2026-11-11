@@ -17,8 +17,8 @@ import (
 	"time"
 )
 
-// Local worktree mode gives every task on a local_directory resource its own
-// git worktree of the user's repo, created inside the daemon-owned env root.
+// Local worktree mode gives a task that needs to write its own git worktree
+// of the user's repo, created on demand inside the daemon-owned env root.
 // Tasks on the same directory then run concurrently instead of queueing on the
 // per-path mutex, and each one delivers its work as a branch in the user's own
 // repo — discoverable with `git branch`, no new result channel needed.
@@ -121,6 +121,9 @@ type LocalWorktreeParams struct {
 	WorkspaceID    string
 	AgentID        string
 	ConversationID string
+	// PreserveExisting refuses to replace a worktree left by a prior run. A
+	// reused env root can hold the only copy of an aborted run's edits.
+	PreserveExisting bool
 }
 
 // owner is the identity a branch created for this task is recorded under.
@@ -152,14 +155,30 @@ func localWorktreeConversation(params PrepareParams) (key, id string) {
 	return "", ""
 }
 
+// LocalWorktreeParamsForRun uses the same branch ownership and naming for eager
+// preparation and an agent's later on-demand checkout.
+func LocalWorktreeParamsForRun(params PrepareParams, envRoot string) LocalWorktreeParams {
+	key, id := localWorktreeConversation(params)
+	return LocalWorktreeParams{EnvRoot: envRoot, AgentName: params.AgentName, TaskID: params.TaskID,
+		ConversationKey: key, ConversationID: id, WorkspaceID: params.WorkspaceID, AgentID: params.Task.AgentID}
+}
+
+// HasLocalWorktree also fails closed on an unreadable path: a residual checkout
+// must be inspected rather than overwritten by reuse or redispatch.
+func HasLocalWorktree(envRoot string) bool {
+	_, err := os.Lstat(filepath.Join(envRoot, localWorktreeDirName))
+	return !errors.Is(err, os.ErrNotExist)
+}
+
 // LocalWorktree is a prepared worktree plus everything the daemon needs to
 // finalize it after the agent exits.
 type LocalWorktree struct {
+	SnapshotAt time.Time
 	// GitRoot is the user's repository root — the repo that owns the branch.
 	GitRoot string
 	// Path is the worktree root inside the env root.
 	Path string
-	// WorkDir is the agent's cwd: Path, plus the offset of LocalPath inside
+	// WorkDir is the code directory: Path, plus the offset of LocalPath inside
 	// the repo when the user pointed the resource at a subdirectory.
 	WorkDir string
 	// Branch is the branch created for this task, in the user's repo.
@@ -361,7 +380,10 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 	}
 	defer unlock()
 
-	if _, statErr := os.Stat(worktreePath); statErr == nil {
+	if _, statErr := os.Lstat(worktreePath); statErr == nil {
+		if params.PreserveExisting {
+			return nil, fmt.Errorf("execenv: preserving the existing worktree at %s; inspect it before retrying in a fresh task directory", worktreePath)
+		}
 		// Prepare wipes and recreates envRoot, so an existing worktree path
 		// means a stale registration in the user's repo pointing here. Remove
 		// both rather than failing the task.
@@ -395,6 +417,7 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 	// tracked edits and their untracked files in one tree. Everything below
 	// reasons about the user's state through this single object.
 	userState, err := captureUserSnapshot(gitRoot, params.EnvRoot, headSHA, logger)
+	snapshotAt := time.Now().UTC()
 	if err != nil {
 		// Fail closed. The promise of this mode is that the agent reasons about
 		// the code the user actually has; silently starting from HEAD instead
@@ -412,6 +435,7 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 	}
 
 	wt := &LocalWorktree{
+		SnapshotAt:    snapshotAt,
 		GitRoot:       gitRoot,
 		Path:          worktreePath,
 		WorkDir:       filepath.Join(worktreePath, rel),
@@ -519,6 +543,10 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 	// time anything is committed. That also preserves a genuine agent edit to a
 	// tracked CLAUDE.md, which a blanket exclude would have swallowed.
 
+	if err := os.MkdirAll(wt.WorkDir, 0o755); err != nil {
+		rollback()
+		return nil, fmt.Errorf("execenv: create worktree workdir: %w", err)
+	}
 	if logger != nil {
 		logger.Info("execenv: local worktree ready",
 			"git_root", gitRoot,
@@ -531,6 +559,35 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 		)
 	}
 	return wt, nil
+}
+
+// LocalWorktreeBranches lists this conversation's recorded deliveries without
+// creating a worktree or taking the repository lock. Names are read from owner
+// records rather than guessed: collisions and busy branches have other names.
+func LocalWorktreeBranches(localPath, workspaceID, agentID, conversationID string) []string {
+	owner := branchOwner{WorkspaceID: workspaceID, AgentID: agentID, ConversationID: conversationID}
+	if !owner.valid() {
+		return nil
+	}
+	root, err := resolveGitRoot(localPath)
+	if err != nil {
+		return nil
+	}
+	refs, err := runGitTrimmed(root, "for-each-ref", "--sort=-committerdate", "--format=%(refname)", localStateRefPrefix)
+	if err != nil {
+		return nil
+	}
+	var branches []string
+	for _, ref := range strings.Fields(refs) {
+		branch := strings.TrimPrefix(ref, localStateRefPrefix)
+		if _, owned := branchOwnedBy(root, branch, owner, nil); owned {
+			branches = append(branches, branch)
+			if len(branches) == 5 {
+				break
+			}
+		}
+	}
+	return branches
 }
 
 // Finalize commits whatever the agent left behind, removes the worktree, and

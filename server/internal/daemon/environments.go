@@ -442,7 +442,11 @@ func (d *Daemon) environmentTask(w http.ResponseWriter, r *http.Request) (locale
 			"run them from inside the task, while it is running", http.StatusUnauthorized)
 		return localenv.Task{}, false
 	}
-	return localenv.Task{TaskID: active.TaskID, IssueID: active.IssueID, WorkspaceID: active.WorkspaceID, RootDir: active.WorkDir}, true
+	root := active.WorkDir
+	if active.LocalCheckout != nil {
+		root = active.EnvRoot
+	}
+	return localenv.Task{TaskID: active.TaskID, IssueID: active.IssueID, WorkspaceID: active.WorkspaceID, RootDir: root}, true
 }
 
 func (d *Daemon) environmentStartHandler() http.HandlerFunc {

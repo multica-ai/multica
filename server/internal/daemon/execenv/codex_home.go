@@ -8,11 +8,65 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/pelletier/go-toml/v2"
 )
+
+// AllowLocalWorktreeWrites grants a workspace-write Codex session access to the
+// daemon's sibling worktree and its shared Git metadata, without adding the
+// user's working directory. Existing roots and sandbox mode remain intact.
+func AllowLocalWorktreeWrites(codexHome, envRoot, localPath string) error {
+	gitRoot, err := resolveGitRoot(localPath)
+	if err != nil {
+		return err
+	}
+	commonDir, err := gitCommonDirFor(gitRoot)
+	if err != nil {
+		return err
+	}
+	configPath := filepath.Join(codexHome, "config.toml")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return err
+	}
+	var config map[string]any
+	if err := toml.Unmarshal(data, &config); err != nil {
+		return err
+	}
+	if config == nil {
+		config = map[string]any{}
+	}
+	section, ok := config["sandbox_workspace_write"].(map[string]any)
+	if !ok {
+		section = map[string]any{}
+		config["sandbox_workspace_write"] = section
+	}
+	var roots []string
+	if values, ok := section["writable_roots"].([]any); ok {
+		for _, value := range values {
+			if root, ok := value.(string); ok {
+				roots = append(roots, root)
+			}
+		}
+	}
+	for _, path := range []string{envRoot, commonDir} {
+		if resolved, err := filepath.EvalSymlinks(path); err == nil {
+			path = resolved
+		}
+		if !slices.Contains(roots, path) {
+			roots = append(roots, path)
+		}
+	}
+	section["writable_roots"] = roots
+	data, err = toml.Marshal(config)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(configPath, data, 0o600)
+}
 
 // Files to symlink from the shared ~/.codex/ into the per-task CODEX_HOME.
 // Symlinks share state (e.g. auth tokens) so changes propagate automatically.
@@ -63,13 +117,9 @@ type CodexHomeOptions struct {
 	// whole shared history back in. Empty means a fresh thread (no rollout to
 	// expose). See prepareCodexSessionsDir (MUL-4424).
 	ResumeSessionID string
-	// IsLocalDirectory marks a task whose env root is never reused across task
-	// IDs — every local_directory task, in_place or worktree. Worktree tasks
-	// get a fresh env root per task just like in-place ones do
-	// (shouldReusePriorWorkdir refuses any local assignment), so they need the
-	// same per-issue session store; keying this on "runs in the user's
-	// directory" instead would silently drop a Codex agent's conversation
-	// history between turns on the same issue.
+	// IsLocalDirectory marks in-place or eagerly prepared local worktrees whose
+	// env root cannot be reused. On-demand local tasks use a managed cwd and
+	// keep their sessions in that reusable env root instead.
 	//
 	// These tasks get a fresh codex-home per task ID (the
 	// daemon never reuses their workdir), so their sessions/ is pointed at the
