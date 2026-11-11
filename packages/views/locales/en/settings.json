@@ -1631,7 +1631,6 @@
     "last_message": "Last message {{time}}",
     "ask_admin": "Ask an admin",
     "unavailable": "Connection unavailable",
-    "server_unavailable": "Not enabled on this server: {{platforms}}",
     "permissions_title": "Who can connect",
     "owner_or_admin": "Agent owner or workspace admin",
     "admin_only": "Workspace admins only",

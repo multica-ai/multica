@@ -1616,7 +1616,6 @@
     "last_message": "最終メッセージ：{{time}}",
     "ask_admin": "管理者に依頼",
     "unavailable": "接続できません",
-    "server_unavailable": "サーバーで未有効：{{platforms}}",
     "permissions_title": "接続できるユーザー",
     "owner_or_admin": "エージェント所有者またはワークスペース管理者",
     "admin_only": "ワークスペース管理者のみ",

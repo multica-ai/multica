@@ -1616,7 +1616,6 @@
     "last_message": "최근 메시지: {{time}}",
     "ask_admin": "관리자에게 요청",
     "unavailable": "연결할 수 없음",
-    "server_unavailable": "서버에서 활성화되지 않음: {{platforms}}",
     "permissions_title": "연결 권한",
     "owner_or_admin": "에이전트 소유자 또는 워크스페이스 관리자",
     "admin_only": "워크스페이스 관리자만",
