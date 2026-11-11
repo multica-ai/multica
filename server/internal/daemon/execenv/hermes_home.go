@@ -69,9 +69,6 @@ var hermesOverriddenEntries = map[string]struct{}{
 	"active_profile":           {},
 	"profiles":                 {},
 	".env":                     {},
-	"logs":                     {},
-	"sessions":                 {},
-	"cron":                     {},
 	hermesGatewayStateMarker:   {},
 	hermesTaskLocalStateMarker: {},
 }
@@ -81,11 +78,14 @@ var hermesOverriddenEntries = map[string]struct{}{
 // session store and uses WAL mode; mirroring its main file and journal sidecars
 // separately can produce an inconsistent snapshot, exposes host conversation
 // history, and fails on Windows when SQLite byte-range-locks state.db-shm.
-func isHermesOverlayOwnedEntry(name string) bool {
+// Gateway state (logs, sessions, cron, gateway.*) is overlay-owned only when
+// the task home owns its gateway; otherwise it is mirrored so Hermes attaches
+// to the shared owner (see HermesGatewayStateIsolated).
+func isHermesOverlayOwnedEntry(name string, isolatedGateway bool) bool {
 	if _, owned := hermesOverriddenEntries[name]; owned {
 		return true
 	}
-	return isHermesTaskLocalStateEntry(name) || isHermesGatewayStateEntry(name)
+	return isHermesTaskLocalStateEntry(name) || (isolatedGateway && isHermesGatewayStateEntry(name))
 }
 
 func isHermesTaskLocalStateEntry(name string) bool {
@@ -371,8 +371,11 @@ func prepareHermesHome(hermesHome, sourceHome string, sourceMustExist bool, work
 	if err := prepareHermesTaskLocalState(hermesHome); err != nil {
 		return hermesSessionMount{}, fmt.Errorf("prepare task-local state: %w", err)
 	}
-	if err := prepareHermesGatewayState(hermesHome); err != nil {
-		return hermesSessionMount{}, fmt.Errorf("prepare gateway state: %w", err)
+	isolatedGateway := HermesGatewayStateIsolated()
+	if isolatedGateway {
+		if err := prepareHermesGatewayState(hermesHome); err != nil {
+			return hermesSessionMount{}, fmt.Errorf("prepare gateway state: %w", err)
+		}
 	}
 	// Memory: link memories/ at the agent's persistent store so it survives the
 	// task, or fall back to a fresh task-local dir when there is no store (no
@@ -385,7 +388,7 @@ func prepareHermesHome(hermesHome, sourceHome string, sourceMustExist bool, work
 		return hermesSessionMount{}, fmt.Errorf("create task memories dir: %w", err)
 	}
 
-	if err := mirrorSharedHermesHome(sharedHome, hermesHome, logger); err != nil {
+	if err := mirrorSharedHermesHome(sharedHome, hermesHome, isolatedGateway, logger); err != nil {
 		return hermesSessionMount{}, fmt.Errorf("mirror shared hermes home: %w", err)
 	}
 	if err := writeDerivedHermesConfig(sharedHome, hermesHome, env, logger); err != nil {
@@ -519,20 +522,20 @@ func dotenvLineKey(line string) string {
 // user's real home (auth/OAuth refreshes propagate, no credential copy lingers
 // in task scratch). The shared home itself is never written — we only read it
 // and create links pointing into it.
-func mirrorSharedHermesHome(sharedHome, hermesHome string, logger *slog.Logger) error {
+func mirrorSharedHermesHome(sharedHome, hermesHome string, isolatedGateway bool, logger *slog.Logger) error {
 	entries, err := os.ReadDir(sharedHome)
 	if err != nil {
 		if os.IsNotExist(err) {
 			// No shared home to mirror. The derived config + bound skills still
 			// give Hermes a working home, so this is not fatal on its own.
-			return reconcileMirroredEntries(hermesHome, nil)
+			return reconcileMirroredEntries(hermesHome, nil, isolatedGateway)
 		}
 		return fmt.Errorf("read shared home: %w", err)
 	}
 	mirrored := make(map[string]struct{}, len(entries))
 	for _, entry := range entries {
 		name := entry.Name()
-		if isHermesOverlayOwnedEntry(name) {
+		if isHermesOverlayOwnedEntry(name, isolatedGateway) {
 			continue
 		}
 		src := filepath.Join(sharedHome, name)
@@ -542,20 +545,20 @@ func mirrorSharedHermesHome(sharedHome, hermesHome string, logger *slog.Logger) 
 		}
 		mirrored[name] = struct{}{}
 	}
-	return reconcileMirroredEntries(hermesHome, mirrored)
+	return reconcileMirroredEntries(hermesHome, mirrored, isolatedGateway)
 }
 
 // reconcileMirroredEntries removes overlay entries that are neither overlay-owned
 // nor currently mirrored from the shared home, so a shared entry deleted between
 // runs (or a Windows copy-fallback left behind) doesn't survive as stale state.
-func reconcileMirroredEntries(hermesHome string, mirrored map[string]struct{}) error {
+func reconcileMirroredEntries(hermesHome string, mirrored map[string]struct{}, isolatedGateway bool) error {
 	entries, err := os.ReadDir(hermesHome)
 	if err != nil {
 		return fmt.Errorf("read overlay home: %w", err)
 	}
 	for _, entry := range entries {
 		name := entry.Name()
-		if isHermesOverlayOwnedEntry(name) {
+		if isHermesOverlayOwnedEntry(name, isolatedGateway) {
 			continue
 		}
 		if _, keep := mirrored[name]; keep {

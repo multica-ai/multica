@@ -11,6 +11,41 @@ import (
 
 const hermesGatewayStateMarker = ".multica-gateway-state-v1"
 
+const hermesGatewayStateEnv = "MULTICA_HERMES_GATEWAY_STATE"
+
+// HermesGatewayStateIsolated reports whether a task home must own its own
+// Hermes gateway record.
+//
+// Hermes only runs a gateway for its root home or <root>/profiles/<name> when
+// it is itself supervised by s6 (the official container image): any other home
+// is refused with "profile_mismatch", and `hermes gateway run` there delegates
+// to the supervisor instead of starting an unmanaged daemon. In that
+// environment every task must share the container's single gateway, so the
+// overlay keeps the mirrored gateway.lock instead of detaching it.
+//
+// Override with MULTICA_HERMES_GATEWAY_STATE=isolated|shared; default is
+// auto-detect.
+func HermesGatewayStateIsolated() bool {
+	return hermesGatewayStateIsolated(os.Getenv(hermesGatewayStateEnv), "/proc/1/comm", "/run/s6/basedir")
+}
+
+// hermesGatewayStateIsolated mirrors the s6 probe Hermes itself uses: PID 1 is
+// s6-svscan and the s6 base directory exists. Any probe error means isolated.
+func hermesGatewayStateIsolated(mode, initComm, s6Basedir string) bool {
+	switch strings.TrimSpace(mode) {
+	case "isolated":
+		return true
+	case "shared":
+		return false
+	}
+	comm, err := os.ReadFile(initComm)
+	if err != nil || strings.TrimSpace(string(comm)) != "s6-svscan" {
+		return true
+	}
+	fi, err := os.Stat(s6Basedir)
+	return err != nil || !fi.IsDir()
+}
+
 func isHermesGatewayStateEntry(name string) bool {
 	return name == "logs" || name == "sessions" || name == "cron" ||
 		strings.HasPrefix(name, "gateway.") || strings.HasPrefix(name, "gateway_")

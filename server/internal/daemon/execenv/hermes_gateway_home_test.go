@@ -34,6 +34,7 @@ func TestHermesConversationHomeOwnsDatabase(t *testing.T) {
 }
 
 func TestHermesTaskDisablesGatewayIngress(t *testing.T) {
+	t.Setenv(hermesGatewayStateEnv, "isolated")
 	shared, home := t.TempDir(), filepath.Join(t.TempDir(), "hermes-home")
 	mustWrite(t, filepath.Join(shared, "config.yaml"), "model: {provider: custom, default: fixture-model}\nplatforms:\n  api_server: {enabled: true, port: 8642}\n  discord: {enabled: true}\n  custom-chat: {enabled: true}\n")
 	for _, name := range []string{"gateway.pid", "gateway.lock", "gateway_state.json", "gateway.sock.path", "gateway.json", "cron/jobs.json", "sessions/sessions.json", "logs/gateway.log"} {
@@ -79,6 +80,58 @@ func TestHermesTaskDisablesGatewayIngress(t *testing.T) {
 		if got, err := os.ReadFile(path); err != nil || string(got) != want {
 			t.Errorf("runtime state %s = %q, %v; want %q", path, got, err, want)
 		}
+	}
+}
+
+func TestHermesTaskSharesContainerGateway(t *testing.T) {
+	requireSymlinks(t)
+	t.Setenv(hermesGatewayStateEnv, "shared")
+	shared, home := t.TempDir(), filepath.Join(t.TempDir(), "hermes-home")
+	for _, name := range []string{"gateway.lock", "gateway_state.json", "cron/jobs.json", "sessions/sessions.json", "logs/gateway.log"} {
+		mustWrite(t, filepath.Join(shared, name), "container gateway")
+	}
+	for range 2 { // Reuse must keep the attachment too.
+		if _, err := prepareHermesHome(home, shared, false, nil, nil, "", "", testLogger()); err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range []string{"gateway.lock", "gateway_state.json", "cron", "sessions", "logs"} {
+			target, err := os.Readlink(filepath.Join(home, name))
+			if err != nil || target != filepath.Join(shared, name) {
+				t.Errorf("%s = link to %q, %v; want link to the shared home", name, target, err)
+			}
+		}
+		if _, err := os.Lstat(filepath.Join(home, hermesGatewayStateMarker)); !os.IsNotExist(err) {
+			t.Errorf("shared gateway mode wrote the isolation marker (err %v)", err)
+		}
+	}
+}
+
+func TestHermesGatewayStateMode(t *testing.T) {
+	dir := t.TempDir()
+	comm, basedir := filepath.Join(dir, "comm"), filepath.Join(dir, "basedir")
+	mustWrite(t, comm, "s6-svscan\n")
+	if err := os.Mkdir(basedir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, filepath.Join(dir, "init"), "systemd\n")
+	for _, tc := range []struct {
+		name, mode, comm, basedir string
+		want                      bool
+	}{
+		{"s6 container", "", comm, basedir, false},
+		{"other init", "", filepath.Join(dir, "init"), basedir, true},
+		{"no s6 basedir", "", comm, filepath.Join(dir, "missing"), true},
+		{"basedir is a file", "", comm, comm, true},
+		{"unreadable init", "", filepath.Join(dir, "missing"), basedir, true},
+		{"forced isolated", "isolated", comm, basedir, true},
+		{"forced shared", "shared", filepath.Join(dir, "missing"), "", false},
+		{"unknown override", "bogus", comm, basedir, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := hermesGatewayStateIsolated(tc.mode, tc.comm, tc.basedir); got != tc.want {
+				t.Fatalf("isolated = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
