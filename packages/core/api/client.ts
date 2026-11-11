@@ -3251,9 +3251,17 @@ export class ApiClient {
 
   // Fetched as bytes rather than linked: Desktop authenticates with a bearer
   // token that an <img> request would not carry.
-  async getStoreThemeScreenshot(id: string, mode: StoreThemeMode, signal?: AbortSignal): Promise<Blob> {
+  // The revision only keeps the browser's HTTP cache from answering for an
+  // older screenshot; the server ignores it.
+  async getStoreThemeScreenshot(
+    id: string,
+    mode: StoreThemeMode,
+    revision?: string,
+    signal?: AbortSignal,
+  ): Promise<Blob> {
+    const query = revision ? `?revision=${encodeURIComponent(revision)}` : "";
     const res = await this.fetchRaw(
-      `/api/theme-store/themes/${encodeURIComponent(id)}/screenshots/${mode}`,
+      `/api/theme-store/themes/${encodeURIComponent(id)}/screenshots/${mode}${query}`,
       { signal },
     );
     return res.blob();
