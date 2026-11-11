@@ -49,6 +49,20 @@ func TestPrivateProjectDuplicateMarkNeedsVisibleTarget(t *testing.T) {
 	if strings.Contains(hidden.Text(), secretTitle) {
 		t.Errorf("refused mark leaks the hidden original: %s", hidden.Text())
 	}
+	// A second invalid field must not let the two answers drift apart: the
+	// target is checked before the assignee, for a hidden and a missing one
+	// alike.
+	badAssignee := func(target string) *testutil.Response {
+		return putIssueAs(t, f.outsider, f.publicIssue, map[string]any{
+			"duplicate_of_issue_id": target, "assignee_type": "agent", "assignee_id": uuid.NewString(),
+		})
+	}
+	hiddenWithAssignee, missingWithAssignee := badAssignee(f.secretIssue), badAssignee(uuid.NewString())
+	hiddenWithAssignee.Want(http.StatusBadRequest)
+	if hiddenWithAssignee.Code != missingWithAssignee.Code || hiddenWithAssignee.Text() != missingWithAssignee.Text() {
+		t.Errorf("with an invalid assignee, hidden target answers %d %s, missing target %d %s",
+			hiddenWithAssignee.Code, hiddenWithAssignee.Text(), missingWithAssignee.Code, missingWithAssignee.Text())
+	}
 	var status string
 	var duplicateOf *string
 	dbfx.QueryRow(t, `SELECT status, duplicate_of_issue_id::text FROM issue WHERE id = $1`, f.publicIssue).Scan(&status, &duplicateOf)

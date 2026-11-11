@@ -3989,8 +3989,9 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// MUL-8472: a target the caller cannot see answers like a missing one,
-	// before the mark writes anything (including the activity on the target).
-	if !h.requireIssueIDVisible(w, r, workspaceID, duplicateOfID, http.StatusBadRequest, "duplicate target not found in this workspace") {
+	// before any other field is validated and before the mark writes anything
+	// (including the activity on the target).
+	if !h.requireDuplicateTarget(w, r, prevIssue.WorkspaceID, duplicateOfID) {
 		return
 	}
 
