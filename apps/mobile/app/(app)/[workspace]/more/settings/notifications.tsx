@@ -50,6 +50,11 @@ const INBOX_GROUPS: {
     descriptionKey: "groups.updates_description",
   },
   {
+    key: "new_issues",
+    labelKey: "groups.new_issues",
+    descriptionKey: "groups.new_issues_description",
+  },
+  {
     key: "agent_activity",
     labelKey: "groups.agent_activity",
     descriptionKey: "groups.agent_activity_description",

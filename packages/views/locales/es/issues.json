@@ -464,6 +464,18 @@
     "section_pull_requests": "Pull requests",
     "section_metadata": "Metadatos",
     "section_details": "Detalles",
+    "sidebar_settings": {
+      "open": "Personalizar barra lateral",
+      "title": "Barra lateral",
+      "reset": "Restablecer",
+      "footer": "Arrastra para reordenar. Se aplica a todas las tareas.",
+      "always_shown": "Siempre visible",
+      "empty": "Nada en esta tarea",
+      "customize": "Personalizar",
+      "drag_handle": "Reordenar {{section}}",
+      "hidden_count_one": "{{count}} sección oculta",
+      "hidden_count_other": "{{count}} secciones ocultas"
+    },
     "section_quick_actions": "Acciones rápidas",
     "quick_actions_more": "Mostrar {{count}} más",
     "quick_action_runs_as": "Se ejecuta como {{name}}",
@@ -512,6 +524,8 @@
     "unsubscribe": "Darse de baja",
     "delegated_subscription_badge": "Observando a través de un agente",
     "delegated_subscription_hint": "Tu agente creó esta tarea en tu nombre, así que estás suscrito. Recibirás una notificación cuando necesite revisión, termine o se quede atascada.",
+    "project_subscription_badge": "Suscrito a través del proyecto",
+    "project_subscription_hint": "Estás suscrito a todas las tareas de este proyecto. Darte de baja aquí solo detiene las notificaciones de esta tarea.",
     "unsubscribe_this": "Darse de baja de esta tarea",
     "unsubscribe_subtree": "Darse de baja de esta tarea y sus subtareas",
     "unsubscribe_subtree_failed": "No se ha podido dar de baja de las subtareas. Inténtalo de nuevo.",
@@ -741,7 +755,10 @@
     "recipient_count_other": "{{count}} agentes recibirán esto",
     "steer_attachment_notice": "Solo el texto puede unirse a una ejecución en marcha, así que un mensaje con archivos se procesa después.",
     "restart_send": "Detener y enviar",
-    "restart_failed": "No se ha podido detener la ejecución actual. Tu mensaje no se envió."
+    "restart_failed": "No se ha podido detener la ejecución actual. Tu mensaje no se envió.",
+    "reply_action": "Responder",
+    "actions_label": "Acciones del comentario",
+    "create_issue_from_selection": "Crear subtarea a partir de la selección"
   },
   "reply": {
     "recipients_changed": "El destino de la respuesta ha cambiado. Revisa los destinatarios antes de volver a enviar.",
@@ -896,7 +913,12 @@
     "cancel": "Cancelar",
     "update_partial_one": "Actualizada {{updated}} de {{count}} tarea. El resto no admite este cambio y se quedó como estaba.",
     "update_partial_other": "Actualizadas {{updated}} de {{count}} tareas. El resto no admite este cambio y se quedó como estaba.",
-    "delete_restricted": "Puedes eliminar las tareas que hayas creado tú o tus agentes. Los usuarios con rol owner o admin del espacio de trabajo pueden eliminar cualquier tarea."
+    "delete_restricted": "Puedes eliminar las tareas que hayas creado tú o tus agentes. Los usuarios con rol owner o admin del espacio de trabajo pueden eliminar cualquier tarea.",
+    "copy_links": "Copiar enlaces",
+    "links_copied_one": "{{count}} enlace copiado",
+    "links_copied_other": "{{count}} enlaces copiados",
+    "delete_count_one": "Eliminar {{count}} tarea",
+    "delete_count_other": "Eliminar {{count}} tareas"
   },
   "card": {
     "update_failed": "No se ha podido actualizar la tarea",
@@ -926,6 +948,7 @@
     "copy_project_directory_path": "Copiar ruta del directorio del proyecto",
     "relations": "Relaciones",
     "create_sub_issue": "Crear subtarea",
+    "quick_actions": "Acciones rápidas",
     "set_parent_issue": "Establecer tarea principal...",
     "remove_parent_issue": "Quitar tarea principal",
     "remove_parent_issue_success": "Tarea principal quitada",
@@ -938,7 +961,8 @@
     "mark_unread": "Marcar como no leído",
     "copy_identifier": "Copiar identificador",
     "identifier_copied": "{{identifier}} copiado",
-    "stop_agent_run": "Detener la ejecución de {{name}}"
+    "stop_agent_run": "Detener la ejecución de {{name}}",
+    "open_in_new_window": "Abrir en una ventana nueva"
   },
   "pickers": {
     "custom_property": {
@@ -1314,15 +1338,16 @@
       "enable": "Activada para esta tarea",
       "toggle": "Activar al asignado cuando terminen las subtareas",
       "save_error": "No se ha podido guardar la regla del sistema.",
-      "default_on": "Activada por defecto en este espacio de trabajo. Cambia el valor por defecto en Ajustes > Activaciones.",
-      "default_off": "Desactivada por defecto en este espacio de trabajo. Cambia el valor por defecto en Ajustes > Activaciones.",
+      "default_on": "Activada por defecto en este espacio de trabajo.",
+      "default_off": "Desactivada por defecto en este espacio de trabajo.",
       "notify_member": "Notificar a {{name}} en su bandeja de entrada",
       "instruction": "Qué hacer al activarse",
       "instruction_edit": "Editar instrucción",
       "instruction_default": "Sin definir en esta tarea; usa el valor por defecto:",
       "instruction_placeholder": "Déjalo vacío para usar el valor por defecto",
       "instruction_invalid": "Mantén la instrucción dentro de 4.000 bytes.",
-      "paused": "Pausada: {{reason}}"
+      "paused": "Pausada: {{reason}}",
+      "default_change": "Cambiar el valor por defecto"
     },
     "cond": {
       "status": "Cuando esta tarea pasa a {{status}}",

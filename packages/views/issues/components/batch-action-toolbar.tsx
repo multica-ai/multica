@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Trash2 } from "@multica/ui/icons";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Check, CircleDot, Link2, Trash2, UserMinus, X } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -14,6 +14,18 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+} from "@multica/ui/components/ui/context-menu";
+import { copyText } from "@multica/ui/lib/clipboard";
+import { PRIORITY_CONFIG, PRIORITY_DISPLAY_ORDER } from "@multica/core/issues/config";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { useQuery } from "@tanstack/react-query";
 import { useIssueDeletion } from "@multica/core/issues/use-issue-deletion";
 import type { Issue, UpdateIssueRequest } from "@multica/core/types";
@@ -23,7 +35,13 @@ import { sharedWorkflowStatusKeys, useIssueWorkflows } from "@multica/core/issue
 import { projectListOptions } from "@multica/core/projects/queries";
 import { useBatchUpdateIssues, useBatchDeleteIssues } from "@multica/core/issues/mutations";
 import { useModalStore } from "@multica/core/modals";
-import { StatusPicker, PriorityPicker, AssigneePicker } from "./pickers";
+import { StatusPicker, PriorityPicker, AssigneePicker, AssigneePickerPanel } from "./pickers";
+import { StatusIcon } from "./status-icon";
+import { PriorityIcon } from "./priority-icon";
+import { useIssueStatusOptions } from "../utils/status-options";
+import { SubmenuPanel } from "../actions/issue-actions-menu-items";
+import { useRegisterIssueBatchMenu } from "../actions/issue-actions-context-menu";
+import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 import { CollectionBatchBar } from "../../layout/collection-list";
 import { useIssueSurfaceActionsOptional } from "../surface/actions-context";
@@ -110,6 +128,23 @@ export function BatchActionToolbar({
   const [priorityOpen, setPriorityOpen] = useState(false);
   const [assigneeOpen, setAssigneeOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [menuPoint, setMenuPoint] = useState<{ x: number; y: number } | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const selectedRef = useRef(selectedIssues);
+  selectedRef.current = selectedIssues;
+  useRegisterIssueBatchMenu(
+    useMemo(
+      () => ({
+        covers: (issueId: string) =>
+          selectedRef.current.length > 1 && selectedRef.current.some((issue) => issue.id === issueId),
+        openAt: (point: { x: number; y: number }) => {
+          setMenuPoint(point);
+          setMenuOpen(true);
+        },
+      }),
+      [],
+    ),
+  );
   const surfaceActions = useIssueSurfaceActionsOptional();
   const batchUpdate = useBatchUpdateIssues();
   const batchDelete = useBatchDeleteIssues();
@@ -124,6 +159,7 @@ export function BatchActionToolbar({
     setPriorityOpen(false);
     setAssigneeOpen(false);
     setDeleteOpen(false);
+    setMenuOpen(false);
   }, [count]);
 
   const handleBatchUpdate = async (updates: Partial<UpdateIssueRequest>) => {
@@ -265,6 +301,25 @@ export function BatchActionToolbar({
         </Button>
       </CollectionBatchBar>
 
+      {menuPoint && count > 1 && (
+        <BatchContextMenu
+          point={menuPoint}
+          open={menuOpen}
+          onOpenChange={setMenuOpen}
+          issues={selectedIssues}
+          projectId={sharedProjectId}
+          allowedStatuses={allowedStatuses}
+          common={common}
+          disabled={loading}
+          canDelete={canDeleteSelection}
+          onStatus={(status) => handleBatchStatus({ status })}
+          onPriority={(priority) => void handleBatchUpdate({ priority })}
+          onAssignee={handleBatchAssignee}
+          onClear={clear}
+          onDelete={() => setDeleteOpen(true)}
+        />
+      )}
+
       {count > 0 && <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -288,5 +343,149 @@ export function BatchActionToolbar({
         </AlertDialogContent>
       </AlertDialog>}
     </>
+  );
+}
+
+/** The batch bar's actions at the cursor, for a right-click on a selected row. */
+function BatchContextMenu({
+  point,
+  open,
+  onOpenChange,
+  issues,
+  projectId,
+  allowedStatuses,
+  common,
+  disabled,
+  canDelete,
+  onStatus,
+  onPriority,
+  onAssignee,
+  onClear,
+  onDelete,
+}: {
+  point: { x: number; y: number };
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  issues: Issue[];
+  projectId: string | null;
+  allowedStatuses: ReadonlySet<string> | null;
+  common: ReturnType<typeof commonIssueFields>;
+  disabled: boolean;
+  canDelete: boolean;
+  onStatus: (status: string) => void;
+  onPriority: (priority: Issue["priority"]) => void;
+  onAssignee: (updates: Partial<UpdateIssueRequest>) => void;
+  onClear: () => void;
+  onDelete: () => void;
+}) {
+  const { t } = useT("issues");
+  const { t: tLayout } = useT("layout");
+  const wsId = useWorkspaceId();
+  const paths = useWorkspacePaths();
+  const { getShareableUrl } = useNavigation();
+  const { options } = useIssueStatusOptions(wsId, projectId ?? undefined, common.status);
+  const statusOptions = allowedStatuses ? options.filter((o) => allowedStatuses.has(o.key)) : options;
+  const count = issues.length;
+  const anchor = useMemo(
+    () => ({
+      getBoundingClientRect: () => DOMRect.fromRect({ x: point.x, y: point.y, width: 0, height: 0 }),
+    }),
+    [point.x, point.y],
+  );
+  const copyLinks = () => {
+    const links = issues.map((issue) => getShareableUrl(paths.issueDetail(issue.identifier || issue.id)));
+    void copyText(links.join("\n")).then((ok) => {
+      if (ok) toast.success(t(($) => $.batch.links_copied, { count }));
+    });
+  };
+
+  return (
+    <ContextMenu open={open} onOpenChange={onOpenChange}>
+      <ContextMenuContent anchor={anchor} className="w-auto min-w-52">
+        <div className="px-2 pt-1 pb-1.5 text-caption text-muted-foreground">
+          {t(($) => $.batch.selected, { count })}
+        </div>
+        <ContextMenuSeparator />
+        <ContextMenuSub>
+          <ContextMenuSubTrigger disabled={disabled}>
+            {common.status ? (
+              <StatusIcon status={common.status} className="h-3.5 w-3.5" />
+            ) : (
+              <CircleDot className="h-3.5 w-3.5" />
+            )}
+            {t(($) => $.batch.status)}
+          </ContextMenuSubTrigger>
+          <ContextMenuSubContent>
+            {statusOptions.map((option) => (
+              <ContextMenuItem key={option.key} onClick={() => onStatus(option.key)}>
+                <StatusIcon
+                  status={option.key}
+                  category={option.category}
+                  color={option.color}
+                  icon={option.icon}
+                  className="h-3.5 w-3.5"
+                />
+                {option.label}
+                {common.status === option.key && <Check className="ml-auto size-3.5 text-muted-foreground" />}
+              </ContextMenuItem>
+            ))}
+          </ContextMenuSubContent>
+        </ContextMenuSub>
+        <ContextMenuSub>
+          <ContextMenuSubTrigger disabled={disabled}>
+            <PriorityIcon priority={common.priority ?? "none"} />
+            {t(($) => $.batch.priority)}
+          </ContextMenuSubTrigger>
+          <ContextMenuSubContent>
+            {PRIORITY_DISPLAY_ORDER.map((p) => (
+              <ContextMenuItem key={p} onClick={() => onPriority(p)}>
+                <span
+                  className={`inline-flex items-center gap-1 rounded-xs px-1.5 py-0.5 text-caption font-medium ${PRIORITY_CONFIG[p].badgeBg} ${PRIORITY_CONFIG[p].badgeText}`}
+                >
+                  <PriorityIcon priority={p} className="h-3 w-3" inheritColor />
+                  {t(($) => $.priority[p])}
+                </span>
+                {common.priority === p && <Check className="ml-auto size-3.5 text-muted-foreground" />}
+              </ContextMenuItem>
+            ))}
+          </ContextMenuSubContent>
+        </ContextMenuSub>
+        <ContextMenuSub>
+          <ContextMenuSubTrigger disabled={disabled}>
+            <UserMinus className="h-3.5 w-3.5" />
+            {t(($) => $.batch.assignee)}
+          </ContextMenuSubTrigger>
+          <ContextMenuSubContent className="w-64 p-0">
+            <SubmenuPanel>
+              <AssigneePickerPanel
+                assigneeType={common.assignee?.type ?? null}
+                assigneeId={common.assignee?.id ?? null}
+                onUpdate={onAssignee}
+                onPicked={() => onOpenChange(false)}
+              />
+            </SubmenuPanel>
+          </ContextMenuSubContent>
+        </ContextMenuSub>
+        <ContextMenuSeparator />
+        <ContextMenuItem onClick={copyLinks}>
+          <Link2 className="h-3.5 w-3.5" />
+          {t(($) => $.batch.copy_links)}
+        </ContextMenuItem>
+        <ContextMenuItem onClick={onClear}>
+          <X className="h-3.5 w-3.5" />
+          {tLayout(($) => $.collection.clear_selection)}
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem
+          variant="destructive"
+          disabled={disabled || !canDelete}
+          title={!canDelete ? t(($) => $.batch.delete_restricted) : undefined}
+          onClick={onDelete}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+          {t(($) => $.batch.delete_count, { count })}
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }

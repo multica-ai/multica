@@ -33,6 +33,7 @@
   },
   "commands": {
     "current_theme_aria": "当前主题",
+    "current_mode_aria": "当前模式",
     "new_issue": "新建任务",
     "new_project": "新建项目",
     "new_autopilot": "新建自动化",
@@ -103,7 +104,6 @@
     "project": "项目",
     "parent": "父任务",
     "quick_actions": "快捷操作",
-    "theme": "主题",
     "project_status": "项目状态",
     "no_project": "无项目",
     "current": "当前"

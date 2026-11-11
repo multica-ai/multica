@@ -13,7 +13,6 @@ export * from "./use-agent-activity";
 export * from "./use-workspace-presence-prefetch";
 export * from "./constants";
 export * from "./conversation-starters";
-export * from "./use-customize-conversation-starters-href";
 export * from "./visibility-label";
 export * from "./use-workspace-agent-availability";
 export * from "./mcp-support";

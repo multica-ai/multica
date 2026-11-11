@@ -486,6 +486,17 @@
     "section_pull_requests": "Pull requests",
     "section_metadata": "メタデータ",
     "section_details": "詳細",
+    "sidebar_settings": {
+      "open": "サイドバーをカスタマイズ",
+      "title": "サイドバー",
+      "reset": "リセット",
+      "footer": "ドラッグで並べ替え。すべてのタスクに適用されます。",
+      "always_shown": "常に表示",
+      "empty": "このタスクにはありません",
+      "customize": "カスタマイズ",
+      "drag_handle": "{{section}}を並べ替え",
+      "hidden_count_other": "{{count}} 個のセクションを非表示"
+    },
     "section_quick_actions": "クイックアクション",
     "quick_actions_more": "残り {{count}} 件を表示",
     "quick_action_runs_as": "{{name}} が実行します",
@@ -536,6 +547,8 @@
     "unsubscribe": "購読解除",
     "delegated_subscription_badge": "エージェント経由で購読中",
     "delegated_subscription_hint": "エージェントがあなたに代わってこのタスクを作成したため、購読しています。レビュー待ち・完了・ブロック時に通知されます。",
+    "project_subscription_badge": "プロジェクト経由で購読中",
+    "project_subscription_hint": "このプロジェクトのすべてのタスクを購読しています。ここで購読解除すると、このタスクの通知だけが止まります。",
     "unsubscribe_this": "このタスクの購読を解除",
     "unsubscribe_subtree": "このタスクとサブタスクの購読を解除",
     "unsubscribe_subtree_failed": "サブタスクの購読解除に失敗しました。もう一度お試しください。",
@@ -735,7 +748,10 @@
     "recipient_count_other": "{{count}} 個のエージェントが受け取ります",
     "steer_attachment_notice": "実行中に追加できるのはテキストのみのため、ファイル付きのメッセージはこの実行の後に処理されます。",
     "restart_send": "停止して送信",
-    "restart_failed": "現在の実行を停止できませんでした。メッセージは送信されていません。"
+    "restart_failed": "現在の実行を停止できませんでした。メッセージは送信されていません。",
+    "reply_action": "返信",
+    "actions_label": "コメントの操作",
+    "create_issue_from_selection": "選択内容からサブタスクを作成"
   },
   "reply": {
     "recipients_changed": "返信先が変更されました。送信先を確認してから、もう一度送信してください。",
@@ -936,7 +952,10 @@
     "delete_failed": "タスクを削除できませんでした",
     "delete_dialog_title_other": "タスク {{count}} 件を削除しますか？",
     "delete_dialog_desc_other": "この操作は元に戻せません。選択したタスクと関連データがすべて完全に削除されます。",
-    "cancel": "キャンセル"
+    "cancel": "キャンセル",
+    "copy_links": "リンクをコピー",
+    "links_copied_other": "{{count}} 件のリンクをコピーしました",
+    "delete_count_other": "タスク {{count}} 件を削除"
   },
   "card": {
     "update_failed": "タスクを更新できませんでした",
@@ -973,12 +992,14 @@
     "stop_agent_run": "{{name}} の実行を停止",
     "relations": "関係",
     "create_sub_issue": "サブタスクを作成",
+    "quick_actions": "クイックアクション",
     "set_parent_issue": "親タスクを設定...",
     "remove_parent_issue": "親タスクを解除",
     "remove_parent_issue_success": "親タスクを解除しました",
     "add_sub_issue": "サブタスクを追加...",
     "delete_issue": "タスクを削除",
-    "mark_duplicate": "重複としてマーク..."
+    "mark_duplicate": "重複としてマーク...",
+    "open_in_new_window": "新しいウィンドウで開く"
   },
   "pickers": {
     "custom_property": {
@@ -1351,15 +1372,16 @@
       "enable": "このタスクで有効",
       "toggle": "サブタスク完了時に担当者を起こす",
       "save_error": "システムルールを保存できませんでした。",
-      "default_on": "ワークスペースでは既定でオン。既定値は「設定 → ウェイクアップ」で変更できます。",
-      "default_off": "ワークスペースでは既定でオフ。既定値は「設定 → ウェイクアップ」で変更できます。",
+      "default_on": "ワークスペースでは既定でオン。",
+      "default_off": "ワークスペースでは既定でオフ。",
       "notify_member": "{{name}} に受信トレイで通知",
       "instruction": "起きたあとにすること",
       "instruction_edit": "指示を編集",
       "instruction_default": "このタスクでは未設定のため、既定の指示を使います：",
       "instruction_placeholder": "空欄のままなら既定の指示を使います",
       "instruction_invalid": "指示は 4,000 バイト以内にしてください。",
-      "paused": "一時停止中：{{reason}}"
+      "paused": "一時停止中：{{reason}}",
+      "default_change": "既定値を変更"
     },
     "cond": {
       "status": "ステータスが{{status}}になったとき",

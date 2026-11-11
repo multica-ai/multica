@@ -20,7 +20,10 @@
   "workspaces": {
     ".": {
       "entry": ["scripts/*.mjs", "scripts/brand/*.mjs"],
-      "project": ["scripts/*.mjs", "scripts/brand/*.mjs"]
+      "project": ["scripts/*.mjs", "scripts/brand/*.mjs"],
+      // scripts/theme-preview.mjs drives Tailwind through the PostCSS API; the
+      // root has no Tailwind stylesheets for the plugin to read.
+      "tailwind": false
     },
 
     "apps/web": {

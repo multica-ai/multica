@@ -486,6 +486,17 @@
     "section_pull_requests": "Pull Request",
     "section_metadata": "後設資料",
     "section_details": "詳情",
+    "sidebar_settings": {
+      "open": "自訂側邊欄",
+      "title": "側邊欄",
+      "reset": "恢復預設",
+      "footer": "拖動調整順序。所有任務共用這套設定。",
+      "always_shown": "始終顯示",
+      "empty": "本任務暫無",
+      "customize": "自訂",
+      "drag_handle": "調整{{section}}的位置",
+      "hidden_count_other": "已隱藏 {{count}} 個區塊"
+    },
     "section_quick_actions": "快捷操作",
     "quick_actions_more": "顯示其餘 {{count}} 條",
     "quick_action_runs_as": "由 {{name}} 執行",
@@ -536,6 +547,8 @@
     "unsubscribe": "取消訂閱",
     "delegated_subscription_badge": "由 AI 代理代你關注",
     "delegated_subscription_hint": "你的 AI 代理代你建立了這個任務，因此你在關注它。待評審、完成或受阻時會通知你。",
+    "project_subscription_badge": "透過專案訂閱",
+    "project_subscription_hint": "你訂閱了這個專案的全部任務。在這裡取消訂閱只會停止這個任務的通知。",
     "unsubscribe_this": "取消訂閱此任務",
     "unsubscribe_subtree": "取消訂閱此任務及其子任務",
     "unsubscribe_subtree_failed": "取消訂閱子任務失敗，請重試。",
@@ -735,7 +748,10 @@
     "recipient_count_other": "{{count}} 個 AI 代理會收到",
     "steer_attachment_notice": "插話只支援文字，帶附件的訊息會在本輪結束後處理。",
     "restart_send": "停止併傳送",
-    "restart_failed": "沒能停止當前執行，訊息還沒有傳送。"
+    "restart_failed": "沒能停止當前執行，訊息還沒有傳送。",
+    "reply_action": "回覆",
+    "actions_label": "評論操作",
+    "create_issue_from_selection": "用選取內容建立子任務"
   },
   "reply": {
     "recipients_changed": "回覆目標已變更。請重新確認收件者後再傳送。",
@@ -936,7 +952,10 @@
     "delete_failed": "刪除任務失敗",
     "delete_dialog_title_other": "刪除 {{count}} 個任務？",
     "delete_dialog_desc_other": "此操作無法撤銷，所選任務及其全部關聯資料都會被永久刪除。",
-    "cancel": "取消"
+    "cancel": "取消",
+    "copy_links": "複製連結",
+    "links_copied_other": "已複製 {{count}} 個連結",
+    "delete_count_other": "刪除 {{count}} 個任務"
   },
   "card": {
     "update_failed": "更新任務失敗",
@@ -973,12 +992,14 @@
     "stop_agent_run": "停止 {{name}} 的執行",
     "relations": "關係",
     "create_sub_issue": "建立子任務",
+    "quick_actions": "快捷操作",
     "set_parent_issue": "設定父任務...",
     "remove_parent_issue": "移除父任務",
     "remove_parent_issue_success": "已移除父任務",
     "add_sub_issue": "新增子任務...",
     "delete_issue": "刪除任務",
-    "mark_duplicate": "標記為重複..."
+    "mark_duplicate": "標記為重複...",
+    "open_in_new_window": "在新視窗中開啟"
   },
   "pickers": {
     "custom_property": {
@@ -1351,15 +1372,16 @@
       "enable": "在此任務上啟用",
       "toggle": "子任務結束時喚醒負責人",
       "save_error": "無法儲存系統規則。",
-      "default_on": "工作區預設開啟，可在「設定 → 喚醒」中修改預設值。",
-      "default_off": "工作區預設關閉，可在「設定 → 喚醒」中修改預設值。",
+      "default_on": "工作區預設開啟。",
+      "default_off": "工作區預設關閉。",
       "notify_member": "透過收件箱通知 {{name}}",
       "instruction": "喚醒後要做什麼",
       "instruction_edit": "編輯指令",
       "instruction_default": "此任務未設定，使用預設指令：",
       "instruction_placeholder": "留空則使用預設指令",
       "instruction_invalid": "指令最多 4,000 位元組。",
-      "paused": "已暫停：{{reason}}"
+      "paused": "已暫停：{{reason}}",
+      "default_change": "修改預設值"
     },
     "cond": {
       "status": "當狀態變為{{status}}時",

@@ -78,9 +78,6 @@
     "workspaces_label": "워크스페이스",
     "create_workspace": "워크스페이스 만들기",
     "pending_invitations_label": "대기 중인 초대",
-    "invitation_workspace_fallback": "워크스페이스",
-    "invitation_join": "참가",
-    "invitation_decline": "거절",
     "log_out": "로그아웃",
     "new_issue": "새 태스크",
     "pinned_label": "고정됨",
@@ -100,14 +97,25 @@
     "chat": "채팅",
     "autopilots": "자동화",
     "switch_workspace": "워크스페이스 전환",
-    "invitation_from": "{{name}} 님이 초대했습니다",
     "pin_workspace": "작업 공간 고정",
     "unpin_workspace": "고정 해제",
     "open_in_new_window": "새 창에서 열기",
     "open_in_new_window_click": "클릭",
     "open_in_other_window": "다른 창에서 열려 있음",
     "in_other_window": "다른 창",
-    "all_workspaces_open": "모든 워크스페이스가 이미 창에 열려 있습니다"
+    "all_workspaces_open": "모든 워크스페이스가 이미 창에 열려 있습니다",
+    "copy_link": "링크 복사",
+    "link_copied": "링크를 복사했습니다",
+    "workspace_settings": "작업 공간 설정",
+    "mark_all_read": "모두 읽음으로 표시",
+    "mark_all_read_failed": "모두 읽음으로 표시하지 못했습니다",
+    "reset_order": "기본 순서로 재설정",
+    "copy_workspace_link": "작업 공간 링크 복사",
+    "workspace_meta_other": "{{slug}} · 멤버 {{count}}명"
+  },
+  "bottom_bar": {
+    "label": "상태 표시줄",
+    "working_other": "에이전트 {{count}}개 작업 중"
   },
   "panels": {
     "work": {
@@ -150,7 +158,8 @@
       "view_edit": "뷰 편집",
       "view_rename": "이름 변경",
       "view_duplicate": "복제",
-      "view_delete": "뷰 삭제"
+      "view_delete": "뷰 삭제",
+      "new_issue_here": "이 프로젝트에 새 태스크"
     },
     "team": {
       "new_agent": "새 에이전트",
@@ -166,7 +175,8 @@
       "members_other": "멤버 {{count}}명",
       "resources": "리소스",
       "runtimes_online_other": "{{count}}대 온라인",
-      "invite_member": "멤버 초대"
+      "invite_member": "멤버 초대",
+      "open_issue": "{{identifier}} 열기"
     },
     "autopilots": {
       "all": "전체 오토파일럿",
@@ -183,6 +193,8 @@
       "dark": "다크",
       "system": "시스템"
     },
+    "mode": "모드",
+    "appearance_settings": "모양 설정",
     "language": "언어",
     "shortcuts": "키보드 단축키"
   },
@@ -218,5 +230,19 @@
     "go_to_slide": "{{index}}번째 슬라이드로 이동",
     "previous": "이전",
     "next": "다음"
+  },
+  "context_menu": {
+    "cut": "잘라내기",
+    "copy": "복사",
+    "paste": "붙여넣기",
+    "select_all": "모두 선택",
+    "add_to_dictionary": "사전에 추가",
+    "open_link": "브라우저에서 링크 열기",
+    "copy_link_address": "링크 주소 복사",
+    "copy_image": "이미지 복사",
+    "copy_code": "코드 복사",
+    "copy_table": "표 복사",
+    "copied": "복사했습니다",
+    "copy_failed": "복사하지 못했습니다"
   }
 }

@@ -289,13 +289,8 @@
     "duplicate_title": "复制 {{name}}",
     "step_ai": "通过对话创建",
     "modes": {
-      "template": {
-        "title": "使用模板",
-        "description": "从整理好的指令和 skill 开始，再根据工作区需要修改每个细节。"
-      },
       "ai": {
-        "title": "通过 AI 创建",
-        "description": "通过对话生成可编辑的配置草稿。"
+        "title": "通过 AI 创建"
       }
     },
     "sections": {
@@ -323,10 +318,6 @@
       }
     },
     "builder": {
-      "setup_title": "为智能体构建器选择运行时",
-      "setup_description": "该运行时用于创建对话，并默认用于新智能体。",
-      "start": "开始对话",
-      "connect_runtime": "连接运行时",
       "draft_parse_failed": "本次回复未能填入表单。请让智能体重新生成草稿，或手动填写。",
       "start_failed": "无法启动智能体构建器。",
       "send_failed": "无法发送消息。",
@@ -539,6 +530,7 @@
       "bulk_placeholder": "API_KEY=值\nBASE_URL=https://example.com",
       "bulk_plaintext_notice": "批量编辑时，值以明文显示。",
       "bulk_unsupported_toast": "\"{{key}}\" 的值无法用文本表示，请用逐条编辑修改",
+      "bulk_invalid_key_toast": "批量编辑只支持 API_KEY 这类变量名，请用逐条编辑修改 \"{{key}}\"",
       "parse_error_malformed": "第 {{line}} 行不是 KEY=value 格式",
       "parse_error_duplicate": "第 {{line}} 行的 key \"{{key}}\" 重复",
       "paste_invalid_toast": "无法解析粘贴的环境变量",
@@ -741,7 +733,7 @@
       "add_failed_toast": "添加 skill 失败"
     },
     "integrations": {
-      "members_note": "只有工作区的所有者和管理员可以管理此连接。你可以在\"设置 → 集成\"中查看已连接的 Bot。"
+      "members_note": "在智能体主页查看和管理消息渠道。"
     },
     "activity": {
       "status": {

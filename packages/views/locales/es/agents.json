@@ -282,13 +282,8 @@
     "duplicate_title": "Duplicar {{name}}",
     "step_ai": "Crear conversando",
     "modes": {
-      "template": {
-        "title": "Usar una plantilla",
-        "description": "Parte de instrucciones y skills seleccionadas, y adapta cada detalle a tu espacio de trabajo."
-      },
       "ai": {
-        "title": "Crear con IA",
-        "description": "Crea una configuración editable conversando."
+        "title": "Crear con IA"
       }
     },
     "sections": {
@@ -316,10 +311,6 @@
       }
     },
     "builder": {
-      "setup_title": "Elige un runtime para Agent Builder",
-      "setup_description": "Este runtime alimenta la configuración y es el predeterminado para el nuevo agente.",
-      "start": "Iniciar conversación",
-      "connect_runtime": "Conectar un runtime",
       "start_failed": "No se ha podido iniciar Agent Builder.",
       "send_failed": "No se ha podido enviar tu mensaje.",
       "stop_failed": "No se ha podido detener la generación actual.",
@@ -538,6 +529,7 @@
       "bulk_placeholder": "API_KEY=value\nBASE_URL=https://example.com",
       "bulk_plaintext_notice": "Los valores se muestran en texto plano durante la edición masiva.",
       "bulk_unsupported_toast": "\"{{key}}\" no se puede mostrar como texto: edítala como fila",
+      "bulk_invalid_key_toast": "La edición masiva solo admite nombres como API_KEY: edita \"{{key}}\" como fila",
       "parse_error_malformed": "La línea {{line}} no es una asignación CLAVE=valor",
       "parse_error_duplicate": "Clave duplicada \"{{key}}\" en la línea {{line}}",
       "paste_invalid_toast": "No se han podido analizar las variables de entorno pegadas",
@@ -742,7 +734,7 @@
       "add_failed_toast": "No se ha podido añadir la skill"
     },
     "integrations": {
-      "members_note": "Solo los propietarios y administradores del espacio de trabajo pueden gestionar esta conexión. Puedes ver los bots conectados en Ajustes → Integraciones."
+      "members_note": "Consulta y gestiona los canales de mensajería en la página del agente."
     },
     "activity": {
       "status": {
