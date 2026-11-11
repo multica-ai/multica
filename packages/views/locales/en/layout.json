@@ -194,6 +194,8 @@
       "dark": "Dark",
       "system": "System"
     },
+    "mode": "Mode",
+    "appearance_settings": "Appearance settings",
     "language": "Language",
     "shortcuts": "Keyboard shortcuts"
   },

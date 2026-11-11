@@ -187,6 +187,8 @@
       "dark": "深色",
       "system": "跟隨系統"
     },
+    "mode": "模式",
+    "appearance_settings": "外觀設定",
     "language": "語言",
     "shortcuts": "快捷鍵"
   },
