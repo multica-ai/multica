@@ -596,6 +596,9 @@ export function ChatWindow() {
       return true;
     },
     [
+      wsId,
+      agentsLoaded,
+      membersLoaded,
       activeSessionId,
       activeAgent,
       activeAgentRuntimeBound,
