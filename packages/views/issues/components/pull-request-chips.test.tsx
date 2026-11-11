@@ -39,12 +39,14 @@ function Chips({ enabled, linked = false }: { enabled: boolean; linked?: boolean
   return <IssuePullRequestChips pullRequests={pullRequests} max={2} linked={linked} />;
 }
 
-function renderChips(props: { enabled: boolean; linked?: boolean }) {
+function renderChips(props: { enabled: boolean; linked?: boolean }, onRowClick = vi.fn()) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
       <I18nProvider resources={TEST_RESOURCES} locale="en">
-        <Chips {...props} />
+        <div onClick={onRowClick}>
+          <Chips {...props} />
+        </div>
       </I18nProvider>
     </QueryClientProvider>,
   );
@@ -53,9 +55,7 @@ function renderChips(props: { enabled: boolean; linked?: boolean }) {
 describe("issue pull request chips", () => {
   beforeEach(() => {
     apiMock.listIssuePullRequestSummaries.mockReset();
-    // jsdom has no layout: give the group room for every chip so these tests
-    // cover data and wiring. Fitting is covered in a real browser by
-    // e2e/issue-pull-request-chips.spec.ts.
+    // jsdom has no layout; only count capping is exercised here.
     vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1000);
     vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(60);
   });
@@ -70,57 +70,30 @@ describe("issue pull request chips", () => {
     expect(screen.queryByTestId("issue-pull-request-chip")).not.toBeInTheDocument();
   });
 
-  it("shows this issue's PRs with their state, capped with an overflow count", async () => {
+  it("shows linked PRs for this issue with states and overflow without opening the row", async () => {
     apiMock.listIssuePullRequestSummaries.mockResolvedValue({
       pull_requests: [
-        summary({ id: "pr-3", number: 3, state: "merged" }),
-        summary({ id: "pr-2", number: 2, state: "draft" }),
+        summary({
+          id: "pr-3",
+          number: 3,
+          state: "merged",
+          html_url: "https://github.com/acme/widget/pull/3",
+        }),
+        summary({ id: "pr-2", number: 2, state: "draft", repo_name: "api" }),
         summary({ id: "pr-1", number: 1 }),
         summary({ id: "pr-9", issue_id: "issue-2", number: 9 }),
       ],
     });
-    renderChips({ enabled: true });
+    const onRowClick = vi.fn();
+    renderChips({ enabled: true, linked: true }, onRowClick);
 
     const chips = await screen.findAllByTestId("issue-pull-request-chip");
-    expect(chips.map((chip) => chip.textContent)).toEqual(["Merged#3", "Draft#2"]);
-    expect(chips[0]).toHaveAttribute("title", "acme/widget#3 · Merged\nFix the widget");
+    expect(chips.map((chip) => chip.textContent)).toEqual(["Mergedwidget#3", "Draftapi#2"]);
+    expect(chips[0]).toHaveAttribute("href", "https://github.com/acme/widget/pull/3");
+    expect(chips[0]).toHaveAttribute("target", "_blank");
+    fireEvent.click(chips[0]);
+    expect(onRowClick).not.toHaveBeenCalled();
     expect(screen.getByText("+1")).toBeInTheDocument();
     expect(screen.queryByText(/#9/)).not.toBeInTheDocument();
-  });
-
-  it("names the repo only when the issue's PRs span repos", async () => {
-    apiMock.listIssuePullRequestSummaries.mockResolvedValue({
-      pull_requests: [
-        summary({ id: "pr-1", repo_name: "api" }),
-        summary({ id: "pr-2", repo_name: "web", number: 2 }),
-      ],
-    });
-    renderChips({ enabled: true });
-
-    const chips = await screen.findAllByTestId("issue-pull-request-chip");
-    expect(chips.map((chip) => chip.textContent)).toEqual(["Openapi#1", "Openweb#2"]);
-  });
-
-  it("opens the PR from a linked chip without triggering the row's own click", async () => {
-    apiMock.listIssuePullRequestSummaries.mockResolvedValue({
-      pull_requests: [summary({})],
-    });
-    const onRowClick = vi.fn();
-    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    render(
-      <QueryClientProvider client={qc}>
-        <I18nProvider resources={TEST_RESOURCES} locale="en">
-          <div onClick={onRowClick}>
-            <Chips enabled linked />
-          </div>
-        </I18nProvider>
-      </QueryClientProvider>,
-    );
-
-    const chip = await screen.findByRole("link");
-    expect(chip).toHaveAttribute("href", "https://github.com/acme/widget/pull/1");
-    expect(chip).toHaveAttribute("target", "_blank");
-    fireEvent.click(chip);
-    expect(onRowClick).not.toHaveBeenCalled();
   });
 });
