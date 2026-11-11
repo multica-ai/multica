@@ -1349,6 +1349,45 @@ func (q *Queries) ListIssueGCStatuses(ctx context.Context, arg ListIssueGCStatus
 	return items, nil
 }
 
+const listIssueIDsCreatedForMember = `-- name: ListIssueIDsCreatedForMember :many
+SELECT i.id
+FROM issue i
+JOIN agent_task_queue origin_task ON origin_task.id = i.origin_id
+WHERE i.workspace_id = $1
+  AND i.creator_type = 'agent'
+  AND i.origin_type = 'quick_create'
+  AND origin_task.originator_user_id = $2
+  AND origin_task.originator_source = 'direct_human'
+`
+
+type ListIssueIDsCreatedForMemberParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+// Issues an agent quick-created for the member: the agent-filed half of the
+// "created" relation, for clients that evaluate it on rows they filter
+// themselves (#4673). Must match issueTableCreatedPredicate.
+func (q *Queries) ListIssueIDsCreatedForMember(ctx context.Context, arg ListIssueIDsCreatedForMemberParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listIssueIDsCreatedForMember, arg.WorkspaceID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listIssueRefsInWorkspace = `-- name: ListIssueRefsInWorkspace :many
 SELECT id, number, title, status FROM issue
 WHERE workspace_id = $1

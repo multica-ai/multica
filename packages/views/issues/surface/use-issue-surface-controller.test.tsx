@@ -167,6 +167,7 @@ describe("useIssueSurfaceController", () => {
   let listSubscribedIssueIds: ReturnType<typeof vi.fn<() => Promise<string[]>>>;
   let listAgents: ReturnType<typeof vi.fn<() => Promise<Agent[]>>>;
   let listInvolvedSquadIds: ReturnType<typeof vi.fn<() => Promise<string[]>>>;
+  let listIssueIdsCreatedForMe: ReturnType<typeof vi.fn<() => Promise<string[]>>>;
   // Every row the current fixture holds, kept outside the mocked list endpoint
   // so the working-agents facet stand-in can read it without registering a
   // call that Table-isolation tests assert never happens.
@@ -195,6 +196,7 @@ describe("useIssueSurfaceController", () => {
     listSubscribedIssueIds = vi.fn(() => never<string[]>());
     listAgents = vi.fn(() => Promise.resolve([] satisfies Agent[]));
     listInvolvedSquadIds = vi.fn(() => Promise.resolve([]));
+    listIssueIdsCreatedForMe = vi.fn(() => Promise.resolve([]));
     setApiInstance({
       // The board pages by category, so every surface stub answers the catalog
       // read. Empty is the real shape for a workspace with no custom statuses:
@@ -213,6 +215,7 @@ describe("useIssueSurfaceController", () => {
       listAgents,
       listInvolvedSquadIds,
       listSubscribedIssueIds,
+      listIssueIdsCreatedForMe,
     } as unknown as ApiClient);
     pruneIssueSurfaceViewStates([]);
     updateIssueMutate.mockClear();
@@ -1954,6 +1957,52 @@ describe("useIssueSurfaceController", () => {
       assignee_id: "agent-3",
     }),
   ];
+
+  // Gantt fetches rows unfiltered and filters on the client, so "created" has
+  // to decide agent-filed rows exactly from the viewer's created-for-me set.
+  describe("Gantt filtered by created", () => {
+    const dated = { start_date: "2026-01-01", due_date: "2026-01-05" };
+    const createdFixture = [
+      makeIssue({ id: "by-me", status: "todo", ...dated }),
+      makeIssue({ id: "for-me", status: "todo", creator_type: "agent", creator_id: "agent-9", ...dated }),
+      makeIssue({ id: "by-agent", status: "todo", creator_type: "agent", creator_id: "agent-9", ...dated }),
+      makeIssue({ id: "by-other", status: "todo", creator_id: "user-2", ...dated }),
+    ];
+    const renderCreatedGantt = () => {
+      mockGanttIssues(createdFixture);
+      const store = getIssueSurfaceViewStore("project:p1");
+      act(() => {
+        store.getState().setViewMode("gantt");
+        store.getState().toggleRelationFilter("created");
+      });
+      return renderHook(
+        () => useIssueSurfaceController({ scope: { type: "project", projectId: "p1" }, modes: ["gantt"] }),
+        { wrapper: makeWrapper(qc, "project:p1") },
+      );
+    };
+
+    it("keeps my issues and the ones filed for me, not other agent-filed ones", async () => {
+      listIssueIdsCreatedForMe.mockResolvedValue(["for-me"]);
+      const { result } = renderCreatedGantt();
+
+      await waitFor(() => expect(result.current.ganttIssues).toHaveLength(createdFixture.length));
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      expect(result.current.filteredGanttIssues.map((issue) => issue.id)).toEqual(["by-me", "for-me"]);
+    });
+
+    it("holds loading until the set arrives", async () => {
+      let finish!: (ids: string[]) => void;
+      listIssueIdsCreatedForMe.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+      const { result } = renderCreatedGantt();
+
+      await waitFor(() => expect(result.current.ganttIssues).toHaveLength(createdFixture.length));
+      expect(result.current.isLoading).toBe(true);
+
+      await act(async () => finish([]));
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      expect(result.current.filteredGanttIssues.map((issue) => issue.id)).toEqual(["by-me"]);
+    });
+  });
 
   describe("Gantt filtered by subscribed", () => {
     const renderSubscribedGantt = (relations: IssueRelationFilter[] = ["subscribed"]) => {

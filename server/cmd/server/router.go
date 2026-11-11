@@ -2124,6 +2124,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// The caller's subscribed issue ids; backs the "subscribed"
 				// relation filter on client-filtered surfaces.
 				r.Get("/subscribed", h.ListSubscribedIssueIDs)
+				// Issues an agent quick-created for the caller; backs the
+				// "created" relation filter on client-filtered surfaces.
+				r.Get("/created-for-me", h.ListIssueIDsCreatedForMe)
 				r.Get("/", h.ListIssues)
 				// POST twin of GET /api/issues for oversized filter sets
 				// (agents-working ids facet) — see QueryIssues.

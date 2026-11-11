@@ -14,6 +14,7 @@ import { issueKeys } from "../issues/queries";
 import type { SidebarIssuesRequest } from "../issues/sidebar-list";
 import { refreshIssueUnread } from "../issues/unread";
 import { refreshSubscribedIssues, subscribedIssueKeys } from "../issues/subscribed";
+import { createdForMeIssueKeys } from "../issues/created-for-me";
 import { projectKeys } from "../projects/queries";
 import { pinKeys } from "../pins/queries";
 import { autopilotKeys } from "../autopilots/queries";
@@ -656,6 +657,7 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
     qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
     void refreshIssueUnread(qc, wsId);
     qc.invalidateQueries({ queryKey: subscribedIssueKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: createdForMeIssueKeys.all(wsId) });
     // Through the inbox's own entry point, not a plain invalidate: a reconnect
     // can land during the list's first load, and a plain invalidate would be
     // answered by the request already on the wire (see refreshInboxQuery).
@@ -1399,9 +1401,21 @@ export function useRealtimeSync(
         void refreshSubscribedIssues(qc, wsId);
       }
     };
-    const unsubSubscriberAdded = ws.on("subscriber:added", (p) =>
-      onSubscriberChanged(p as SubscriberAddedPayload),
-    );
+    const unsubSubscriberAdded = ws.on("subscriber:added", (p) => {
+      const added = p as SubscriberAddedPayload;
+      onSubscriberChanged(added);
+      // An agent filing an issue for the viewer subscribes them as its
+      // creator; that issue now counts under the "created" relation.
+      const wsId = getCurrentWsId();
+      if (
+        wsId &&
+        added.reason === "creator" &&
+        added.user_type === "member" &&
+        added.user_id === authStore.getState().user?.id
+      ) {
+        qc.invalidateQueries({ queryKey: createdForMeIssueKeys.all(wsId) });
+      }
+    });
     const unsubSubscriberRemoved = ws.on("subscriber:removed", (p) =>
       onSubscriberChanged(p as SubscriberRemovedPayload),
     );

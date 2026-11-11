@@ -9,6 +9,7 @@ import type { WSClient } from "../api/ws-client";
 import { EMPTY_ISSUE_VIEW_PREFERENCE } from "../api/schemas";
 import { defaultStorage } from "../platform/storage";
 import { issueKeys } from "../issues/queries";
+import { createdForMeIssueKeys } from "../issues/created-for-me";
 import { chatKeys } from "../chat/queries";
 import { runtimeKeys } from "../runtimes/queries";
 import { agentTasksKeys, workspaceWorkingAgentsKeys } from "../agents/queries";
@@ -134,12 +135,13 @@ describe("useRealtimeSync — ws instance change", () => {
     // and view preferences] + 6 per-issue prefixes + the workspace
     // working-agents projection + 5 per-chat prefixes + 1 workspaceKeys.list()
     // + 1 cross-workspace inbox unread summary + 1 issue unread marks + 1
-    // subscribed issue ids + 1 account invitation list = 37 calls).
+    // subscribed issue ids + 1 issue ids created for the viewer + 1 account
+    // invitation list = 38 calls).
     //
     // Awaited rather than counted synchronously: the inbox unread summary
     // refresh cancels any in-flight request before invalidating (see
     // onInboxSummaryInvalidate), so that one lands after the synchronous ones.
-    await waitFor(() => expect(invalidateSpy).toHaveBeenCalledTimes(37));
+    await waitFor(() => expect(invalidateSpy).toHaveBeenCalledTimes(38));
   });
 
   it("does not re-invalidate when rerendered with the same ws instance", () => {
@@ -827,6 +829,25 @@ describe("useRealtimeSync — Table server membership invalidation", () => {
     qc.setQueryData(rows, {});
     handler("subscriber:removed")({ issue_id: "i-1", user_type: "member", user_id: "u1" });
     await waitFor(() => expect(isStale()).toBe(true));
+  });
+
+  it("refreshes the issues created for the viewer when an agent files one for them", async () => {
+    const ws = createMockWs();
+    renderHook(() => useRealtimeSync(ws, stores), {
+      wrapper: createWrapper(qc),
+    });
+    const handler = (event: string) =>
+      vi.mocked(ws.on).mock.calls.find(([name]) => name === event)?.[1] as (payload: unknown) => void;
+    const key = createdForMeIssueKeys.all("ws-1");
+    const isStale = () => qc.getQueryState(key)?.isInvalidated;
+
+    qc.setQueryData(key, []);
+    handler("subscriber:added")({ issue_id: "i-1", user_type: "member", user_id: "u1", reason: "manual" });
+    handler("subscriber:added")({ issue_id: "i-1", user_type: "member", user_id: "someone-else", reason: "creator" });
+    expect(isStale()).toBe(false);
+
+    handler("subscriber:added")({ issue_id: "i-1", user_type: "member", user_id: "u1", reason: "creator" });
+    expect(isStale()).toBe(true);
   });
 });
 

@@ -168,7 +168,8 @@ export function useIssueSurfaceData({
   relationFilters: IssueRelationFilter[];
   relationContext: IssueRelationContext | undefined;
   /** What the active relation values read: the viewer's agents and squads
-   *  for "my_agents", their subscriptions for "subscribed". */
+   *  for "my_agents", their subscriptions for "subscribed", the issues filed
+   *  for them for "created". */
   relationSources: readonly (FilterDependencySource | false)[];
   dueDateFilters: DueDateFilter[];
   /** The scoped, pruned rule tree. */

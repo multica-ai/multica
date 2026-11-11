@@ -460,6 +460,7 @@ import {
   TeamAppImpactSchema,
   EMPTY_ISSUE_UNREAD_PAGE,
   SubscribedIssueIdsSchema,
+  CreatedForMeIssueIdsSchema,
   InvolvedSquadIdsSchema,
   IssueInboxReadSchema,
   InboxItemListSchema,
@@ -3054,6 +3055,15 @@ export class ApiClient {
       endpoint: "GET /api/issues/subscribed",
     });
     if (!parsed) throw new Error("GET /api/issues/subscribed returned a malformed body");
+    return parsed.issue_ids;
+  }
+
+  async listIssueIdsCreatedForMe(): Promise<string[]> {
+    const raw = await this.fetch<unknown>("/api/issues/created-for-me");
+    const parsed = parseWithFallback<{ issue_ids: string[] } | null>(raw, CreatedForMeIssueIdsSchema, null, {
+      endpoint: "GET /api/issues/created-for-me",
+    });
+    if (!parsed) throw new Error("GET /api/issues/created-for-me returned a malformed body");
     return parsed.issue_ids;
   }
 

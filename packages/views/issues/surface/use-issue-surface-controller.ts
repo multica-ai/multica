@@ -60,6 +60,7 @@ import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { useAuthStore } from "@multica/core/auth";
 import { agentListOptions, involvedSquadIdsOptions } from "@multica/core/workspace/queries";
 import { subscribedIssueIdsOptions } from "@multica/core/issues/subscribed";
+import { createdForMeIssueIdsOptions } from "@multica/core/issues/created-for-me";
 import { useShallow } from "zustand/react/shallow";
 import type { IssueFilters, IssueRelationContext } from "../utils/filter";
 import type { ChildProgress } from "../components/list-row";
@@ -335,6 +336,9 @@ export function useIssueSurfaceController({
   const usesSubscribed =
     relationFilters.includes("subscribed") ||
     advancedFilterUsesValue(advancedFilter, "relation", "subscribed");
+  const usesCreated =
+    relationFilters.includes("created") ||
+    advancedFilterUsesValue(advancedFilter, "relation", "created");
   const agentsQuery = useQuery({
     ...agentListOptions(wsId),
     enabled: usesMyAgents,
@@ -350,10 +354,16 @@ export function useIssueSurfaceController({
     enabled: usesSubscribed,
   });
   const subscribedIssueIds = subscribedIssueIdsQuery.data;
+  const createdForMeIssueIdsQuery = useQuery({
+    ...createdForMeIssueIdsOptions(wsId),
+    enabled: usesCreated,
+  });
+  const createdForMeIssueIds = createdForMeIssueIdsQuery.data;
   const relationSources = [
     usesMyAgents && agentsQuery,
     usesMyAgents && involvedSquadIdsQuery,
     usesSubscribed && subscribedIssueIdsQuery,
+    usesCreated && createdForMeIssueIdsQuery,
   ];
   const relationContext = useMemo<IssueRelationContext | undefined>(() => {
     if (!userId) return undefined;
@@ -370,8 +380,20 @@ export function useIssueSurfaceController({
       ...(usesSubscribed && subscribedIssueIds
         ? { subscribedIssueIds: new Set(subscribedIssueIds) }
         : {}),
+      ...(usesCreated && createdForMeIssueIds
+        ? { createdForMeIssueIds: new Set(createdForMeIssueIds) }
+        : {}),
     };
-  }, [agents, involvedSquadIds, subscribedIssueIds, userId, usesMyAgents, usesSubscribed]);
+  }, [
+    agents,
+    createdForMeIssueIds,
+    involvedSquadIds,
+    subscribedIssueIds,
+    userId,
+    usesCreated,
+    usesMyAgents,
+    usesSubscribed,
+  ]);
 
   const allowedModes = useMemo(() => new Set<IssueSurfaceMode>(modes), [modes]);
   const fallbackMode = modes[0] ?? "list";

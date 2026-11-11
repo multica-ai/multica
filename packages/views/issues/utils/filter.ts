@@ -123,6 +123,10 @@ export interface IssueRelationContext {
   /** Issues the viewer subscribes to. Loaded only while a filter tests the
    *  relation; without it "subscribed" is left to the server. */
   subscribedIssueIds?: ReadonlySet<string>;
+  /** Issues an agent quick-created for the viewer, the agent-filed half of
+   *  "created". Loaded only while a filter tests the relation; without it
+   *  agent-filed rows are left to the server. */
+  createdForMeIssueIds?: ReadonlySet<string>;
 }
 
 /**
@@ -403,10 +407,11 @@ function issueMatchesRelation(
       return issue.assignee_type === "member" && issue.assignee_id === context.userId;
     case "created":
       if (issue.creator_type === "member") return issue.creator_id === context.userId;
-      // An agent-filed issue counts when it was quick-created for this member.
-      // That provenance lives on the server (the run that filed it), so leave
-      // the decision to the server rather than dropping the row (#4673).
-      return issue.creator_type === "agent" ? undefined : false;
+      if (issue.creator_type !== "agent") return false;
+      // An agent-filed issue counts when it was quick-created for this member
+      // (#4673); the run that filed it is server-side, so this reads the set.
+      if (!context.createdForMeIssueIds) return undefined;
+      return context.createdForMeIssueIds.has(issue.id);
     case "my_agents": {
       const ids =
         issue.assignee_type === "agent"

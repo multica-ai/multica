@@ -784,3 +784,16 @@ FROM (
     WHERE workspace_id = $1
     LIMIT sqlc.arg('limit')::bigint
 ) bounded_issues;
+
+-- name: ListIssueIDsCreatedForMember :many
+-- Issues an agent quick-created for the member: the agent-filed half of the
+-- "created" relation, for clients that evaluate it on rows they filter
+-- themselves (#4673). Must match issueTableCreatedPredicate.
+SELECT i.id
+FROM issue i
+JOIN agent_task_queue origin_task ON origin_task.id = i.origin_id
+WHERE i.workspace_id = sqlc.arg(workspace_id)
+  AND i.creator_type = 'agent'
+  AND i.origin_type = 'quick_create'
+  AND origin_task.originator_user_id = sqlc.arg(user_id)
+  AND origin_task.originator_source = 'direct_human';

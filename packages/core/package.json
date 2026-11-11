@@ -55,6 +55,7 @@
     "./issues/run-steering": "./issues/run-steering.ts",
     "./issues/unread": "./issues/unread.ts",
     "./issues/subscribed": "./issues/subscribed.ts",
+    "./issues/created-for-me": "./issues/created-for-me.ts",
     "./issues/date": "./issues/date.ts",
     "./issues/ws-updaters": "./issues/ws-updaters.ts",
     "./issues/sidebar-list": "./issues/sidebar-list.ts",

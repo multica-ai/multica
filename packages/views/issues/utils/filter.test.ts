@@ -796,13 +796,51 @@ describe("relation filters", () => {
     expect(ids({ relationFilters: ["assigned"] })).toEqual(["1"]);
     expect(ids({ relationFilters: ["my_agents"] })).toEqual(["2"]);
     expect(ids({ relationFilters: ["assigned", "my_agents"] })).toEqual(["1", "2"]);
-    // Issue 2 was filed by agent a-1: only the server knows whether that was a
-    // quick-create for u-1, so the client keeps it either way round.
+    // Issue 2 was filed by agent a-1: without the viewer's created-for-me
+    // set the client cannot tell, so it keeps the row either way round.
     expect(ids({ relationFilters: ["created"] })).toEqual(["1", "2", "4"]);
   });
 
   it("can be negated", () => {
     expect(ids({ relationFilters: ["created"], negatedFilters: ["relation"] })).toEqual(["2", "3"]);
+  });
+
+  describe("created with issues filed for the viewer", () => {
+    const filedForMe = makeIssue({ id: "for-me", creator_type: "agent", creator_id: "a-9", priority: "medium" });
+    const filedByAgent = makeIssue({ id: "by-agent", creator_type: "agent", creator_id: "a-9", priority: "medium" });
+    const direct = makeIssue({ id: "direct", creator_type: "member", creator_id: "u-1", priority: "medium" });
+    const viewer = { userId: "u-1", createdForMeIssueIds: new Set(["for-me"]) };
+    const createdIds = (filters: Partial<IssueFilters>) =>
+      filterIssues([filedForMe, filedByAgent, direct], { ...NO_FILTER, relationContext: viewer, ...filters }).map(
+        (i) => i.id,
+      );
+
+    it("keeps the issues filed for the viewer and drops other agent-filed ones", () => {
+      expect(createdIds({ relationFilters: ["created"] })).toEqual(["for-me", "direct"]);
+    });
+
+    it("negated, keeps only the other agent-filed issues", () => {
+      expect(createdIds({ relationFilters: ["created"], negatedFilters: ["relation"] })).toEqual(["by-agent"]);
+    });
+
+    // Swimlanes and Gantt filter on the client: an OR sibling that misses must
+    // not drop a row the server counted as created (the case #10310 fixed for
+    // squads under "my agents").
+    it("keeps an issue filed for the viewer that an OR sibling does not match", () => {
+      const advancedFilter = createFilterGroup("any", [
+        createFilterCondition("relation", ["created"]),
+        createFilterCondition("priority", ["urgent"]),
+      ]);
+      expect(createdIds({ advancedFilter })).toEqual(["for-me", "direct"]);
+    });
+
+    it("leaves agent-filed rows to the server until the set loads", () => {
+      expect(createdIds({ relationContext: { userId: "u-1" }, relationFilters: ["created"] })).toEqual([
+        "for-me",
+        "by-agent",
+        "direct",
+      ]);
+    });
   });
 
   it("is a no-op until the viewer is known", () => {

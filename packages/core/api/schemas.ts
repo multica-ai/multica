@@ -2971,6 +2971,18 @@ export const SubscribedIssueIdsSchema = z
   })
   .loose();
 
+// The issues an agent quick-created for the viewer (`/api/issues/created-for-me`
+// GET), the agent-filed half of the "created" relation on client-filtered
+// surfaces. Same rules as `SubscribedIssueIdsSchema`: an empty set would hide
+// those rows under the filter, so a body without the list fails.
+export const CreatedForMeIssueIdsSchema = z
+  .object({
+    issue_ids: z
+      .array(z.unknown())
+      .transform((ids) => ids.filter((id): id is string => typeof id === "string" && id.length > 0)),
+  })
+  .loose();
+
 // The squads behind the viewer's "my agents" relation (`/api/squads/involved`
 // GET). Same rules as `SubscribedIssueIdsSchema`: an empty set would hide
 // every squad row under the filter, so a body without the list fails.

@@ -7,7 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/testutil"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // "Created by me" covers issues a member filed directly and issues an agent
@@ -150,4 +152,61 @@ func TestListWorkspaceWorkingAgentsCreatedIncludesQuickCreateForRequester(t *tes
 		return
 	}
 	t.Fatalf("agent %s running on an issue quick-created for me was not returned", agent)
+}
+
+// The id list backs "created" on client-filtered surfaces (swimlanes, Gantt),
+// so it must name exactly the agent-filed issues the table query counts: the
+// caller's direct quick-creates in this workspace, nothing else.
+func TestListIssueIDsCreatedForMe(t *testing.T) {
+	suffix := time.Now().UnixNano()
+	otherUser := dbfx.User(t, fmt.Sprintf("ids on-behalf other %d", suffix), fmt.Sprintf("ids-on-behalf-%d@example.com", suffix))
+	otherWorkspace := dbfx.Workspace(t, fmt.Sprintf("ids on-behalf ws %d", suffix), fmt.Sprintf("ids-on-behalf-ws-%d", suffix))
+
+	n := 0
+	filedBy := func(workspaceID, originType, originator, source string) string {
+		n++
+		runtime := dbfx.Runtime(t, fmt.Sprintf("ids on-behalf runtime %d-%d", n, suffix), testutil.Cols{"workspace_id": workspaceID})
+		agent := dbfx.Agent(t, fmt.Sprintf("ids on-behalf agent %d-%d", n, suffix), runtime, testutil.Cols{"workspace_id": workspaceID})
+		origin := dbfx.Task(t, agent, testutil.Cols{
+			"runtime_id":          runtime,
+			"status":              "completed",
+			"originator_user_id":  originator,
+			"accountable_user_id": originator,
+			"originator_source":   source,
+		})
+		return dbfx.Issue(t, fmt.Sprintf("ids on-behalf %s %d-%d", originType, n, suffix), testutil.Cols{
+			"workspace_id": workspaceID,
+			"creator_type": "agent", "creator_id": agent,
+			"origin_type": originType, "origin_id": origin,
+		})
+	}
+
+	quickForMe := filedBy(testWorkspaceID, "quick_create", testUserID, "direct_human")
+	excluded := map[string]string{
+		filedBy(testWorkspaceID, "quick_create", otherUser, "direct_human"):    "quick-created for someone else",
+		filedBy(testWorkspaceID, "quick_create", testUserID, "owner_fallback"): "owner-fallback quick-create",
+		filedBy(testWorkspaceID, "agent_create", testUserID, "direct_human"):   "agent-filed sub-issue",
+		filedBy(otherWorkspace, "quick_create", testUserID, "direct_human"):    "quick-created in another workspace",
+		dbfx.Issue(t, fmt.Sprintf("ids on-behalf direct %d", suffix)):          "created directly (decided by the client)",
+	}
+
+	var out struct {
+		IssueIDs []string `json:"issue_ids"`
+	}
+	req := newRequest(http.MethodGet, "/api/issues/created-for-me", nil)
+	req = req.WithContext(middleware.SetMemberContext(req.Context(), testWorkspaceID, db.Member{}))
+	testutil.Call(t, testHandler.ListIssueIDsCreatedForMe, req).Want(http.StatusOK).JSON(&out)
+
+	listed := make(map[string]struct{}, len(out.IssueIDs))
+	for _, id := range out.IssueIDs {
+		listed[id] = struct{}{}
+	}
+	if _, ok := listed[quickForMe]; !ok {
+		t.Fatalf("issue quick-created for me (%s) is missing from %v", quickForMe, out.IssueIDs)
+	}
+	for id, why := range excluded {
+		if _, ok := listed[id]; ok {
+			t.Fatalf("%s (%s) must not be listed", why, id)
+		}
+	}
 }
