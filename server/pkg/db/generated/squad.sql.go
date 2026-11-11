@@ -267,6 +267,59 @@ func (q *Queries) ListAllSquads(ctx context.Context, workspaceID pgtype.UUID) ([
 	return items, nil
 }
 
+const listInvolvedSquadIDs = `-- name: ListInvolvedSquadIDs :many
+SELECT sm.squad_id
+  FROM squad_member sm
+  JOIN squad s ON s.id = sm.squad_id
+ WHERE s.workspace_id = $1
+   AND sm.member_type = 'member'
+   AND sm.member_id   = $2
+UNION
+SELECT s.id
+  FROM squad s
+  JOIN agent a ON a.id = s.leader_id
+ WHERE s.workspace_id = $1
+   AND a.workspace_id = $1
+   AND a.owner_id     = $2
+UNION
+SELECT sm.squad_id
+  FROM squad_member sm
+  JOIN squad s ON s.id = sm.squad_id
+  JOIN agent a ON a.id = sm.member_id
+ WHERE s.workspace_id = $1
+   AND sm.member_type = 'agent'
+   AND a.workspace_id = $1
+   AND a.owner_id     = $2
+`
+
+type ListInvolvedSquadIDsParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+// Squads whose issues count as the user's agents' work: the user is a member,
+// or an agent they own leads or is a member. Must match the squad branch of
+// issueTableInvolvedPredicate.
+func (q *Queries) ListInvolvedSquadIDs(ctx context.Context, arg ListInvolvedSquadIDsParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listInvolvedSquadIDs, arg.WorkspaceID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var squad_id pgtype.UUID
+		if err := rows.Scan(&squad_id); err != nil {
+			return nil, err
+		}
+		items = append(items, squad_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSquadMemberPreviewRows = `-- name: ListSquadMemberPreviewRows :many
 SELECT
     sm.squad_id,

@@ -11,9 +11,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -30,6 +33,18 @@ func TestHelperProcess(t *testing.T) {
 		}
 		fmt.Println("serving", os.Getenv("MULTICA_ENVIRONMENT"))
 		http.Serve(ln, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, "ok") }))
+	case "detach":
+		// What `make up` does: start the server in a process group of its
+		// own, then stay around for as long as the environment should live.
+		server := exec.Command(os.Args[0], "-test.run=^TestHelperProcess$")
+		server.Env = append(os.Environ(), "LOCALENV_HELPER=serve")
+		server.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		if err := server.Start(); err != nil {
+			fmt.Println("detach:", err)
+			os.Exit(2)
+		}
+		os.WriteFile(os.Getenv("LOCALENV_PID_FILE"), []byte(strconv.Itoa(server.Process.Pid)), 0o600)
+		server.Wait()
 	case "crash":
 		fmt.Println("boom: cannot reach postgres://demo:" + crashSecret + "@db.invalid/app")
 		os.Exit(3)
@@ -81,6 +96,11 @@ func TestManagerStartsSupervisesAndStops(t *testing.T) {
 	env = waitReady(t, m, env.Key)
 	if env.State != StateRunning || env.Label != "Web app" || env.URL != fmt.Sprintf("http://localhost:%d", env.Port) {
 		t.Fatalf("started environment = %+v", env)
+	}
+	// The repository is named as DiscoverDeclared names it, so the sidebar
+	// can match the two.
+	if want := filepath.Base(task.RootDir); env.Repo != want {
+		t.Fatalf("Repo = %q, want %q", env.Repo, want)
 	}
 	if env.ExpiresAt == nil || env.ExpiresAt.Sub(env.StartedAt) != DefaultTTL {
 		t.Fatalf("ExpiresAt = %v, want start + %s", env.ExpiresAt, DefaultTTL)
@@ -197,8 +217,8 @@ func TestManagerAdoptsEnvironmentsAfterRestart(t *testing.T) {
 	if len(adopted) != 1 || adopted[0].Key != env.Key || adopted[0].State != StateRunning {
 		t.Fatalf("adopted = %+v, want the running environment", adopted)
 	}
-	if !restarted.Owns(env.pgid) {
-		t.Fatal("restarted manager does not own the adopted process group")
+	if got := restarted.Owner(env.pgid); got != env.Key {
+		t.Fatalf("restarted manager names %q as the owner of the adopted process, want %q", got, env.Key)
 	}
 	if _, err := restarted.Stop(task, "web"); err != nil {
 		t.Fatalf("Stop after restart: %v", err)
@@ -262,5 +282,117 @@ func TestManagerAllocatesDistinctPortBlocks(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(m.dir, strings.TrimPrefix(first.Key, "config:"), stateFile)); err != nil {
 		t.Fatalf("state was not persisted: %v", err)
+	}
+}
+
+func TestManagerOwnsAServerDetachedIntoItsOwnProcessGroup(t *testing.T) {
+	root := t.TempDir()
+	pidFile := filepath.Join(t.TempDir(), "server.pid")
+	writeConfig(t, root, fmt.Sprintf(`
+[environments.web]
+start = "LOCALENV_PID_FILE='%s' %s"
+`, pidFile, helperCommand("detach")))
+	m := NewManager(t.TempDir(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	task := Task{TaskID: "task-1", IssueID: "issue-1", WorkspaceID: "ws-1", RootDir: root}
+	env, err := m.Start(task, root, "web", os.Getenv("PATH"))
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if ready := waitReady(t, m, env.Key); ready.State != StateRunning {
+		t.Fatalf("environment = %+v, want running", ready)
+	}
+	data, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatalf("read the detached server's pid: %v", err)
+	}
+	server, _ := strconv.Atoi(string(data))
+	t.Cleanup(func() {
+		m.Stop(task, "web")
+		syscall.Kill(server, syscall.SIGKILL)
+	})
+
+	if processGroup(server) == env.pgid {
+		t.Fatal("the server shares the start command's process group; the test proves nothing")
+	}
+	if got := m.Owner(server); got != env.Key {
+		t.Fatalf("Owner(detached server) = %q, want %q", got, env.Key)
+	}
+	if got := m.Owner(os.Getpid()); got != "" {
+		t.Fatalf("Owner(this test) = %q, want none", got)
+	}
+	if _, err := m.Stop(task, "web"); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if got := m.Owner(server); got != "" {
+		t.Fatalf("Owner after stop = %q, want none: a stopped environment owns nothing", got)
+	}
+}
+
+func TestManagerPassesASharedServerToTheEnvironmentStillUsingIt(t *testing.T) {
+	for _, first := range []string{"api", "web"} {
+		t.Run("stop "+first+" first", func(t *testing.T) {
+			root := t.TempDir()
+			pidFile := filepath.Join(t.TempDir(), "server.pid")
+			// api detaches a server the way `make up` detaches the API that
+			// both environments of a checkout use.
+			writeConfig(t, root, fmt.Sprintf(`
+[environments.api]
+start = "LOCALENV_PID_FILE='%s' %s"
+
+[environments.web]
+start = "%s"
+`, pidFile, helperCommand("detach"), helperCommand("serve")))
+			dir := t.TempDir()
+			m := NewManager(dir, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			task := Task{TaskID: "task-1", IssueID: "issue-1", WorkspaceID: "ws-1", RootDir: root}
+			keys := map[string]string{}
+			for _, name := range []string{"api", "web"} {
+				env, err := m.Start(task, root, name, os.Getenv("PATH"))
+				if err != nil {
+					t.Fatalf("Start %s: %v", name, err)
+				}
+				if ready := waitReady(t, m, env.Key); ready.State != StateRunning {
+					t.Fatalf("%s = %+v, want running", name, ready)
+				}
+				keys[name] = env.Key
+			}
+			data, err := os.ReadFile(pidFile)
+			if err != nil {
+				t.Fatalf("read the detached server's pid: %v", err)
+			}
+			server, _ := strconv.Atoi(string(data))
+			t.Cleanup(func() {
+				m.Stop(task, "api")
+				m.Stop(task, "web")
+				syscall.Kill(server, syscall.SIGKILL)
+			})
+
+			second := map[string]string{"api": "web", "web": "api"}[first]
+			if _, err := m.Stop(task, first); err != nil {
+				t.Fatalf("Stop %s: %v", first, err)
+			}
+			if !groupAlive(processGroup(server)) {
+				t.Fatal("the shared server stopped with the first environment; the test proves nothing")
+			}
+			if got := m.Owner(server); got != keys[second] {
+				t.Fatalf("Owner(shared server) after stopping %s = %q, want %s, which still runs", first, got, second)
+			}
+
+			// The ownership survives a daemon restart.
+			restarted := NewManager(dir, m.logger)
+			if err := restarted.Load(); err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if got := restarted.Owner(server); got != keys[second] {
+				t.Fatalf("after a restart Owner(shared server) = %q, want %s", got, keys[second])
+			}
+
+			if _, err := m.Stop(task, second); err != nil {
+				t.Fatalf("Stop %s: %v", second, err)
+			}
+			if got := m.Owner(server); got != "" {
+				t.Fatalf("Owner after both stopped = %q, want none", got)
+			}
+		})
 	}
 }

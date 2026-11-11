@@ -59,6 +59,33 @@ ORDER BY
     (sm.member_type = 'agent' AND sm.member_id = s.leader_id) DESC,
     sm.created_at ASC;
 
+-- name: ListInvolvedSquadIDs :many
+-- Squads whose issues count as the user's agents' work: the user is a member,
+-- or an agent they own leads or is a member. Must match the squad branch of
+-- issueTableInvolvedPredicate.
+SELECT sm.squad_id
+  FROM squad_member sm
+  JOIN squad s ON s.id = sm.squad_id
+ WHERE s.workspace_id = sqlc.arg(workspace_id)
+   AND sm.member_type = 'member'
+   AND sm.member_id   = sqlc.arg(user_id)
+UNION
+SELECT s.id
+  FROM squad s
+  JOIN agent a ON a.id = s.leader_id
+ WHERE s.workspace_id = sqlc.arg(workspace_id)
+   AND a.workspace_id = sqlc.arg(workspace_id)
+   AND a.owner_id     = sqlc.arg(user_id)
+UNION
+SELECT sm.squad_id
+  FROM squad_member sm
+  JOIN squad s ON s.id = sm.squad_id
+  JOIN agent a ON a.id = sm.member_id
+ WHERE s.workspace_id = sqlc.arg(workspace_id)
+   AND sm.member_type = 'agent'
+   AND a.workspace_id = sqlc.arg(workspace_id)
+   AND a.owner_id     = sqlc.arg(user_id);
+
 -- name: ListAllSquads :many
 SELECT * FROM squad WHERE workspace_id = $1 ORDER BY created_at ASC;
 

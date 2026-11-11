@@ -34,6 +34,7 @@ const state = vi.hoisted(() => ({
   togglePin: vi.fn<(tabId: string) => void>(),
   closeTab: vi.fn<(tabId: string) => void>(),
   closeOtherTabs: vi.fn<(tabId: string) => void>(),
+  closeTabsToRight: vi.fn<(tabId: string) => void>(),
   setActiveTab: vi.fn<(tabId: string) => void>(),
   moveTab: vi.fn<(from: number, to: number) => void>(),
   addTab: vi.fn<(path: string, title: string) => string>(),
@@ -52,6 +53,7 @@ vi.mock("@/stores/tab-store", () => {
     togglePin: state.togglePin,
     closeTab: state.closeTab,
     closeOtherTabs: state.closeOtherTabs,
+    closeTabsToRight: state.closeTabsToRight,
     setActiveTab: state.setActiveTab,
     moveTab: state.moveTab,
     addTab: state.addTab,
@@ -68,6 +70,10 @@ vi.mock("@/stores/tab-store", () => {
       : null;
   return { useTabStore, useActiveGroup };
 });
+
+vi.mock("@multica/views/navigation", () => ({
+  useNavigation: () => ({ getShareableUrl: (path: string) => `https://app.example${path}` }),
+}));
 
 vi.mock("@multica/core/paths", async (importOriginal) => ({
   // Spread the real module so pure helpers (parseTabSubject etc.) keep working.
@@ -133,6 +139,7 @@ function reset() {
   state.togglePin.mockReset();
   state.closeTab.mockReset();
   state.closeOtherTabs.mockReset();
+  state.closeTabsToRight.mockReset();
   state.setActiveTab.mockReset();
   state.moveTab.mockReset();
   state.addTab.mockReset();
@@ -564,6 +571,28 @@ describe("TabBar context menu", () => {
     fireEvent.click(await findByText("Close other tabs"));
 
     expect(state.closeOtherTabs).toHaveBeenCalledWith("tB");
+  });
+
+  it("closes the tabs to the right, and only offers it when one would close", async () => {
+    state.byWorkspace.acme.tabs = [
+      { id: "tA", url: "/acme/issues", title: "Issues", pinned: false },
+      { id: "tB", url: "/acme/projects", title: "Projects", pinned: false },
+      { id: "tC", url: "/acme/agents", title: "Agents", pinned: true },
+    ];
+
+    const { findByRole, getByLabelText, unmount } = render(<TabBar />);
+    fireEvent.contextMenu(getByLabelText("Issues"));
+    fireEvent.click(await findByRole("menuitem", { name: "Close tabs to the right" }));
+    expect(state.closeTabsToRight).toHaveBeenCalledWith("tA");
+    unmount();
+
+    // Only a pinned tab sits to the right of Projects.
+    const second = render(<TabBar />);
+    fireEvent.contextMenu(second.getByLabelText("Projects"));
+    expect(await second.findByRole("menuitem", { name: "Close tabs to the right" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
   });
 
 });

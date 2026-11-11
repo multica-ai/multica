@@ -80,6 +80,7 @@
   "types": {
     "issue_assigned": "Назначено",
     "issue_subscribed": "Подписка оформлена",
+    "issue_created": "Новая задача",
     "unassigned": "Исполнитель снят",
     "assignee_changed": "Исполнитель изменён",
     "status_changed": "Статус изменён",

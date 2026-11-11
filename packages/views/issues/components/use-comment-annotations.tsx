@@ -17,8 +17,8 @@ import type { ContentEditorRef } from "../../editor/content-editor";
 type CapturedSelection = NonNullable<ReturnType<typeof captureCommentSelection>>;
 type SourceAnchor = { id: string; range: Range; root: HTMLElement };
 
-export function useCommentAnnotations({ issueId, draftKey, sources, enabled, onAdded, onOpen, editable = false }: {
-  issueId: string;
+export function useCommentAnnotations({ issueId, draftKey, sources, enabled, onAdded, onOpen, editable = false, markerZIndex }: {
+  issueId?: string;
   draftKey: CommentDraftKey;
   sources: { id: string; name: string; revision?: number }[];
   enabled: boolean;
@@ -26,9 +26,18 @@ export function useCommentAnnotations({ issueId, draftKey, sources, enabled, onA
   /** Editable descriptions use their existing toolbar to call addSelection. */
   editable?: boolean;
   onOpen?: () => void;
+  /** Markers must stack above a floating host such as the chat window. */
+  markerZIndex?: number;
 }) {
   const { t } = useT("issues");
-  const cardRef = useRef<HTMLDivElement>(null);
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  // The source container may mount after this hook (chat lists render behind
+  // a skeleton), so anchoring must re-run when it appears.
+  const [card, setCard] = useState<HTMLDivElement | null>(null);
+  const setCardRef = useCallback((node: HTMLDivElement | null) => {
+    cardRef.current = node;
+    setCard(node);
+  }, []);
   const inputRef = useRef<ContentEditorRef>(null);
   const submittingRef = useRef<string | null>(null);
   const pendingFocusId = useRef<string | null>(null);
@@ -137,8 +146,7 @@ export function useCommentAnnotations({ issueId, draftKey, sources, enabled, onA
       setAnchors((current) => current.length ? [] : current);
       return;
     }
-    if (!cardRef.current) return;
-    const card = cardRef.current;
+    if (!card) return;
     const canHighlight = typeof Highlight !== "undefined" && typeof CSS !== "undefined" && !!CSS.highlights;
     const update = () => {
       const next = annotationsRef.current.flatMap((a) => {
@@ -178,7 +186,7 @@ export function useCommentAnnotations({ issueId, draftKey, sources, enabled, onA
     });
     observer.observe(card, { childList: true, subtree: true, characterData: true });
     return () => { observer.disconnect(); if (canHighlight) CSS.highlights.delete(highlightName); };
-  }, [anchorKey, highlightName, draftKey, editable, enabled, editingId]);
+  }, [anchorKey, highlightName, draftKey, editable, enabled, editingId, card]);
 
   useEffect(() => {
     if (!selection || (editor?.existing && !annotations.some((a) => a.id === editingId))) {
@@ -285,7 +293,7 @@ export function useCommentAnnotations({ issueId, draftKey, sources, enabled, onA
   };
 
   return {
-    cardRef,
+    cardRef: setCardRef,
     editAnnotation,
     addSelection,
     composer: editing ? { pending: editing, render: renderComposer } : undefined,
@@ -311,7 +319,7 @@ export function useCommentAnnotations({ issueId, draftKey, sources, enabled, onA
         const index = annotations.findIndex((a) => a.id === anchor.id);
         if (index < 0) return null;
         return <CommentSelectionBubble key={anchor.id} range={anchor.range} source={anchor.root} owner={draftKey}
-          markerRanges={markerRanges.get(anchor.root)}>
+          markerRanges={markerRanges.get(anchor.root)} markerZIndex={markerZIndex}>
           <IconButton variant="brandSubtle" size="icon-sm" className="size-6 text-caption tabular-nums aria-expanded:ring-2 aria-expanded:ring-brand"
             aria-expanded={editingId === anchor.id}
             label={t(($) => $.reply.annotations.edit, { number: index + 1 })}

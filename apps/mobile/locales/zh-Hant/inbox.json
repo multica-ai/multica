@@ -46,6 +46,7 @@
   "type": {
     "assigned": "已分配",
     "subscribed": "已訂閱",
+    "issue_created": "新任務",
     "unassigned": "已取消分配",
     "reassigned": "重新分配",
     "status_changed": "狀態已更改",

@@ -197,6 +197,47 @@ func doEnvironmentRequest(handler http.HandlerFunc, path, token, body string) *h
 	return rec
 }
 
+func TestEnvironmentFocusRefusesBrowsersAndUnknownApps(t *testing.T) {
+	s, _ := newTestEnvironmentService(t)
+	s.detected = []localenv.Environment{detectedEnv("task-a", "detected:server")}
+	d := &Daemon{logger: s.logger, environments: s}
+	focus := func(body string, header map[string]string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/environments/focus", strings.NewReader(body))
+		for k, v := range header {
+			req.Header.Set(k, v)
+		}
+		rec := httptest.NewRecorder()
+		d.environmentFocusHandler()(rec, req)
+		return rec
+	}
+	jsonBody := map[string]string{"Content-Type": "application/json"}
+
+	if rec := focus(`{"key":"detected:server"}`, map[string]string{"Content-Type": "application/json", "Origin": "https://evil.example"}); rec.Code != http.StatusForbidden {
+		t.Fatalf("a request from a web page = %d, want 403", rec.Code)
+	}
+	if rec := focus(`{"key":"detected:server"}`, map[string]string{"Content-Type": "text/plain"}); rec.Code != http.StatusForbidden {
+		t.Fatalf("a request a browser could send without a preflight = %d, want 403", rec.Code)
+	}
+	for _, key := range []string{"detected:server", "detected:gone"} {
+		rec := focus(`{"key":"`+key+`"}`, jsonBody)
+		if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), `"reason":"gone"`) {
+			t.Fatalf("focus %s = %d %s, want 404 gone: only a detected app can be brought forward", key, rec.Code, rec.Body)
+		}
+	}
+}
+
+func TestEnvironmentReportCarriesTheKind(t *testing.T) {
+	s, reporter := newTestEnvironmentService(t)
+	app := detectedEnv("task-a", "detected:app")
+	app.Kind, app.URL, app.Port = localenv.KindApp, "", 0
+	s.detected = []localenv.Environment{app}
+	s.report(context.Background(), time.Now())
+	calls := reporter.take()
+	if len(calls) != 1 || calls[0].envs[0].Kind != localenv.KindApp || calls[0].envs[0].URL != "" {
+		t.Fatalf("reported = %+v, want the app kind without a URL", calls)
+	}
+}
+
 func TestEnvironmentHandlersRequireATaskCredential(t *testing.T) {
 	s, _ := newTestEnvironmentService(t)
 	d := &Daemon{logger: s.logger, environments: s}

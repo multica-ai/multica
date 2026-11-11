@@ -5,7 +5,6 @@ import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { CalendarClock, CalendarX, FolderMinus, Lock, Network, UserMinus, Zap } from "@multica/ui/icons";
 import { Command as CommandPrimitive } from "cmdk";
-import { dispatchReasonCode } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { PRIORITY_DISPLAY_ORDER } from "@multica/core/issues/config";
 import { addDaysDateOnly, todayDateOnly } from "@multica/core/issues/date";
@@ -19,11 +18,11 @@ import { issueLabelsOptions, labelListOptions } from "@multica/core/labels/queri
 import { useAttachLabelToIssue, useDetachLabel } from "@multica/core/labels/mutations";
 import { useModalStore } from "@multica/core/modals";
 import { projectListOptions } from "@multica/core/projects/queries";
-import { quickActionListOptions, useRunQuickAction } from "@multica/core/quick-actions";
+import { quickActionListOptions } from "@multica/core/quick-actions";
 import type { Issue, IssuePriority, Label } from "@multica/core/types";
 import { StatusIcon } from "../../issues/components/status-icon";
 import { PriorityIcon } from "../../issues/components/priority-icon";
-import { outcomeMessage } from "../../issues/components/quick-actions-section";
+import { useQuickActionRunner } from "../../issues/hooks/use-quick-action-runner";
 import { useIssueStatusOptions } from "../../issues/utils/status-options";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { useT } from "../../i18n";
@@ -519,7 +518,7 @@ export function IssueQuickActionPage({ issue, query }: { issue: Issue; query: st
   const wsId = useWorkspaceId();
   const palette = usePalette();
   const { data = [] } = useQuery(quickActionListOptions(wsId));
-  const run = useRunQuickAction(issue.id);
+  const run = useQuickActionRunner(issue.id);
   const actions = filterByLabel(
     data.filter((action) => action.status === "active"),
     query,
@@ -536,21 +535,7 @@ export function IssueQuickActionPage({ issue, query }: { issue: Issue; query: st
             value={`quick-action:${action.id}`}
             onSelect={() => {
               palette.close();
-              run.mutateAsync({ quickActionId: action.id }).then(
-                (comment) => {
-                  const { message, kind } = outcomeMessage(comment.trigger_outcomes?.[0], targetName, tIssues);
-                  if (kind === "success") toast.success(message);
-                  else if (kind === "error") toast.error(message);
-                  else toast.info(message);
-                },
-                (error: unknown) => {
-                  if (dispatchReasonCode(error) === "invocation_not_allowed") {
-                    toast.error(tIssues(($) => $.detail.quick_action_blocked_body, { name: action.name }));
-                    return;
-                  }
-                  toast.error(error instanceof Error ? error.message : String(error));
-                },
-              );
+              run(action);
             }}
             className={ROW_CLASS}
           >

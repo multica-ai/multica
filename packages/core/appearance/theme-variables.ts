@@ -75,7 +75,7 @@ function section(name: ThemeVariableSection, entries: readonly Entry[]): ThemeVa
 }
 
 const COLORS: Entry[] = [
-  ["app-shell", "The frame around the page: rail, desktop toolbar and tab bar."],
+  ["app-shell", "The frame around the page: rail, bottom bar, desktop toolbar and tab bar."],
   ["page-canvas", "The page that lists, boards and conversations sit on."],
   ["surface", "Bounded content groups: cards, board cards, panels."],
   ["surface-foreground", "Text on a surface."],
@@ -100,7 +100,7 @@ const COLORS: Entry[] = [
   ["accent", "Hover fill in menus and lists."],
   ["accent-foreground", "Text on accent."],
   ["border", "Dividers and table borders."],
-  ["input", "Input borders."],
+  ["input", "Input borders, and pressed display chips unless `display-chip-pressed-background` is set."],
   ["ring", "Focus ring."],
   ["sidebar", "Sidebar background (shadcn sidebar)."],
   ["sidebar-foreground", "Sidebar text."],
@@ -153,6 +153,7 @@ const SHAPE: Entry[] = [
   ["floating-shadow", "Dialogs and sheets."],
   ["menu-shadow", "Menus, selects and popovers."],
   ["tooltip", "Tooltip fill (dark in both modes)."],
+  ["tooltip-foreground", "Tooltip text. Unset, it is the app's dark-mode `--foreground` in both modes, whatever the theme sets on `.theme-dark`.", "var(--foreground)"],
   ["tooltip-shadow", "Tooltip shadow."],
   ["icon-stroke-width", "Stroke width of line icons.", "2"],
 ];
@@ -208,7 +209,10 @@ const CONTROLS: Entry[] = [
   ["menu-item-radius", "Items inside a menu.", "calc(var(--radius) * 0.75)"],
   ["menu-item-hover-background", "Highlighted menu item.", "var(--accent)"],
   ["menu-item-hover-color", "Text of the highlighted menu item.", "var(--accent-foreground)"],
+  ["display-chip-pressed-background", "Fill of a pressed on/off chip in the Display and sidebar settings popovers.", "var(--input)"],
+  ["display-chip-pressed-color", "Text of a pressed display chip.", "var(--foreground)"],
   ["popover-radius", "Popovers.", "var(--radius)"],
+  ["floating-border-color", "Hairline around layers that float over the page without a backdrop: menus, popovers, select lists and floating panels.", "color-mix(in oklab, var(--surface-border), var(--foreground) 6%)"],
   ["dialog-radius", "Dialogs and alert dialogs.", "calc(var(--radius) * 1.5)"],
   ["tooltip-radius", "Tooltips.", "var(--radius)"],
   ["avatar-radius", "Avatars. Set a length for square avatars.", "calc(infinity * 1px)"],

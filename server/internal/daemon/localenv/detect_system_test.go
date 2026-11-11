@@ -51,3 +51,32 @@ func TestListListenersFindsAServerAndItsDirectory(t *testing.T) {
 	}
 	t.Fatalf("server pid %d on port %d was never listed", cmd.Process.Pid, port)
 }
+
+func TestInspectProcessesReadsArgumentsOfAProcessWithoutWindows(t *testing.T) {
+	// The trailing `:` keeps the shell from exec'ing sleep in its place.
+	cmd := exec.Command("/bin/sh", "-c", "sleep 30; :", "sh", "--remote-debugging-port=9333")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cmd.Process.Kill(); cmd.Wait() })
+
+	// Start can return while the kernel is still finishing the exec, before
+	// /proc/<pid>/cmdline holds the new arguments.
+	var procs map[int]Process
+	var p Process
+	var ok bool
+	for deadline := time.Now().Add(5 * time.Second); ; {
+		procs = inspectProcesses(context.Background(), []int{cmd.Process.Pid})
+		p, ok = procs[cmd.Process.Pid]
+		if (ok && p.debugs(9333)) || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !ok || !p.debugs(9333) {
+		t.Fatalf("inspected = %+v, want the arguments the process was started with", procs)
+	}
+	if p.App != "" || p.Bundle != "" {
+		t.Fatalf("a test binary was reported as the app %q at %q", p.App, p.Bundle)
+	}
+}
