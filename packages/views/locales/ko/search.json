@@ -33,6 +33,7 @@
   },
   "commands": {
     "current_theme_aria": "현재 테마",
+    "current_mode_aria": "현재 모드",
     "new_issue": "새 태스크",
     "new_project": "새 프로젝트",
     "new_autopilot": "새 오토파일럿",
@@ -103,7 +104,6 @@
     "project": "프로젝트",
     "parent": "상위 태스크",
     "quick_actions": "빠른 작업",
-    "theme": "테마",
     "project_status": "프로젝트 상태",
     "no_project": "프로젝트 없음",
     "current": "현재"

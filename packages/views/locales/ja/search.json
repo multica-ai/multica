@@ -33,6 +33,7 @@
   },
   "commands": {
     "current_theme_aria": "現在のテーマ",
+    "current_mode_aria": "現在のモード",
     "new_issue": "新規タスク",
     "new_project": "新規プロジェクト",
     "new_autopilot": "新規オートパイロット",
@@ -103,7 +104,6 @@
     "project": "プロジェクト",
     "parent": "親タスク",
     "quick_actions": "クイックアクション",
-    "theme": "テーマ",
     "project_status": "プロジェクトのステータス",
     "no_project": "プロジェクトなし",
     "current": "現在"
