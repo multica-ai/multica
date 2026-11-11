@@ -13,7 +13,8 @@ import { useT } from "../../i18n";
  * We do NOT commit on the input's `blur` event: the history popover can
  * move focus to sibling rows and nested actions while the user is still
  * interacting with the panel. Instead a document-level `pointerdown`
- * listener commits only when the user actually clicks outside the input.
+ * listener commits only when the user actually clicks outside the input
+ * (the input's own context menu is not outside).
  */
 export function SessionRenameInput({
   initialValue,
@@ -35,6 +36,9 @@ export function SessionRenameInput({
   valueRef.current = value;
   const onSubmitRef = useRef(onSubmit);
   onSubmitRef.current = onSubmit;
+  // A right-click on the input opens its edit menu; picking Cut or Paste
+  // there is still editing, not a click outside.
+  const ownMenuOpenRef = useRef(false);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -44,6 +48,8 @@ export function SessionRenameInput({
       const input = inputRef.current;
       if (!input) return;
       if (input.contains(e.target as Node)) return;
+      if (ownMenuOpenRef.current && e.target instanceof Element && e.target.closest('[role="menu"]')) return;
+      ownMenuOpenRef.current = false;
       onSubmitRef.current(valueRef.current);
     };
     // Capture phase — commit before outside-click handling can close the
@@ -64,6 +70,9 @@ export function SessionRenameInput({
       onChange={(e) => setValue(e.target.value)}
       onClick={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
+      onContextMenu={() => {
+        ownMenuOpenRef.current = true;
+      }}
       onKeyDown={(e) => {
         // Keep editing keys inside the input instead of letting the row
         // selection keyboard handler consume them.

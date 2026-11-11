@@ -50,6 +50,35 @@ describe("SessionRenameInput", () => {
     expect(onSubmit).toHaveBeenCalledWith("研究");
   });
 
+  it("keeps editing while its own context menu is used", () => {
+    const input = renderInput();
+    const menu = document.createElement("div");
+    menu.setAttribute("role", "menu");
+    const cut = menu.appendChild(document.createElement("div"));
+    cut.setAttribute("role", "menuitem");
+    document.body.appendChild(menu);
+
+    fireEvent.contextMenu(input);
+    fireEvent.pointerDown(cut);
+    fireEvent.click(cut);
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(input).toBeInTheDocument();
+
+    fireEvent.pointerDown(document.body);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    menu.remove();
+  });
+
+  it("submits on a menu it did not open", () => {
+    renderInput();
+    const menu = document.body.appendChild(document.createElement("div"));
+    menu.setAttribute("role", "menu");
+
+    fireEvent.pointerDown(menu);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    menu.remove();
+  });
+
   it.each([
     ["standard composition signal", { isComposing: true, keyCode: 27 }],
     ["Safari composition signal", { isComposing: false, keyCode: 229 }],

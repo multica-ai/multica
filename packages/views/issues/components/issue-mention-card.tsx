@@ -1,6 +1,7 @@
 "use client";
 
 import { AppLink } from "../../navigation";
+import { yieldsToTextMenu } from "../../common/point-menu";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { IssueChip, useChipIssue } from "./issue-chip";
 import { IssueHoverCard } from "./issue-hover-card";
@@ -91,9 +92,10 @@ function IssueMentionLink({ issueId, fallbackLabel }: IssueMentionCardProps) {
         issue
           ? (event) => {
               // The innermost object's menu wins; a row around the mention
-              // must not open its own as well.
+              // must not open its own as well. Selected text and an editor
+              // keep their text menu.
               event.stopPropagation();
-              openMenu(issue, event);
+              if (!yieldsToTextMenu(event.target as Element)) openMenu(issue, event);
             }
           : undefined
       }

@@ -24,7 +24,8 @@ export function isContextMenuKey(event: KeyboardEvent): boolean {
  * so the keyboard gets the same menus with no per-menu wiring. Chromium does
  * this itself on Windows and Linux but not on macOS, and its event lands at
  * the element's corner; ours does it everywhere, near the element's start.
- * Text fields keep the platform's own behaviour.
+ * The key is only taken over when an app menu claims the event; otherwise
+ * (a plain link, text fields) the platform's own path stays intact.
  */
 export function useKeyboardContextMenu() {
   useEffect(() => {
@@ -33,10 +34,8 @@ export function useKeyboardContextMenu() {
       if (event.defaultPrevented || !isContextMenuKey(event)) return;
       const target = document.activeElement;
       if (!target || target === document.body || isEditable(target)) return;
-      event.preventDefault();
       const rect = target.getBoundingClientRect();
-      dispatchedAt = performance.now();
-      target.dispatchEvent(
+      const claimed = !target.dispatchEvent(
         new MouseEvent("contextmenu", {
           bubbles: true,
           cancelable: true,
@@ -45,6 +44,9 @@ export function useKeyboardContextMenu() {
           clientY: rect.top + Math.min(rect.height, 24) / 2,
         }),
       );
+      if (!claimed) return;
+      event.preventDefault();
+      dispatchedAt = performance.now();
     };
     const swallowEcho = (event: MouseEvent) => {
       if (!event.isTrusted || performance.now() - dispatchedAt > NATIVE_ECHO_MS) return;

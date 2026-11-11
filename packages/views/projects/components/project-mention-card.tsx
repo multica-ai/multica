@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { AppLink } from "../../navigation";
-import { useRowMenu } from "../../common/point-menu";
+import { useRowMenu, yieldsToTextMenu } from "../../common/point-menu";
 import {
   ContextMenuScopeSubmenu,
   findContextMenuScope,
@@ -68,8 +68,10 @@ export function ProjectMentionCard({
           project
             ? (event) => {
                 // The innermost object's menu wins; a row around the mention
-                // must not open its own as well.
+                // must not open its own as well. Selected text and an editor
+                // keep their text menu.
                 event.stopPropagation();
+                if (yieldsToTextMenu(event.target as Element)) return;
                 setOuter(findContextMenuScope(event.currentTarget.parentElement).submenu);
                 rowMenu.openAtPointer(event);
               }

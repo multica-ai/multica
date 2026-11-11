@@ -47,20 +47,26 @@ export function nextRowMenuState(
   return open ? { open: true, point: null } : { open: false, point: menu.point };
 }
 
-function isContentTarget(target: Element): boolean {
-  if (
-    target.closest(
-      "a[href], img, video, input, textarea, [contenteditable='true'], pre, table, [data-context-menu-content]",
-    )
-  ) {
-    return true;
-  }
+/**
+ * Whether a right-click on `target` belongs to the text menu: the target is
+ * inside a field or an editor, or selected text runs through it. An inline
+ * object with a menu of its own (a mention) yields to it then.
+ */
+export function yieldsToTextMenu(target: Element): boolean {
+  if (target.closest("input, textarea, [contenteditable='true']")) return true;
   const selection = window.getSelection();
   if (!selection || selection.isCollapsed) return false;
   for (let i = 0; i < selection.rangeCount; i++) {
     if (selection.getRangeAt(i).intersectsNode(target)) return true;
   }
   return false;
+}
+
+function isContentTarget(target: Element): boolean {
+  return (
+    !!target.closest("a[href], img, video, pre, table, [data-context-menu-content]") ||
+    yieldsToTextMenu(target)
+  );
 }
 
 /**

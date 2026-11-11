@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useState } from "react";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
 import type { SupportedLocale } from "@multica/core/i18n";
 import { RESOURCES } from "@multica/views/locales";
 import { useContextMenuScope, type ContextMenuScope } from "@multica/views/common/context-menu-scope";
 import type { ContextMenuRequest } from "../../../shared/context-menu";
+import { SessionRenameInput } from "../../../../../../packages/views/chat/components/session-rename-input";
 import { NativeContextMenu, tableToMarkdown } from "./native-context-menu";
 
 const api = vi.hoisted(() => ({
@@ -251,10 +253,36 @@ describe("NativeContextMenu", () => {
     const button = screen.getByText("row");
     button.focus();
 
-    fireEvent.keyDown(button, { key: "F10", shiftKey: true });
+    expect(fireEvent.keyDown(button, { key: "F10", shiftKey: true })).toBe(false);
     expect(onContextMenu).toHaveBeenCalledTimes(1);
 
     fireEvent.keyDown(button, { key: "F10" });
     expect(onContextMenu).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not suppress the native key when no DOM handler claims the link", () => {
+    renderHost("en", <a href="https://example.com">regular link</a>);
+    const link = screen.getByRole("link");
+    link.focus();
+    const handled = fireEvent.keyDown(link, { key: "F10", shiftKey: true });
+    expect({ nativeAllowed: handled, customMenu: !!screen.queryByRole("menu") }).toEqual({ nativeAllowed: true, customMenu: false });
+  });
+
+  it("does not commit an inline title when choosing Cut from its context menu", async () => {
+    const submit = vi.fn();
+    function RenameHost() {
+      const [editing, setEditing] = useState(true);
+      return editing ? <SessionRenameInput initialValue="alpha beta" onSubmit={(value) => { submit(value); setEditing(false); }} onCancel={() => setEditing(false)} /> : <span>Committed title</span>;
+    }
+    renderHost("en", <RenameHost />);
+    const input = screen.getByRole("textbox") as HTMLInputElement;
+    input.focus();
+    input.setSelectionRange(0, 5);
+    rightClick(input, request({ isEditable: true, canCut: true, canCopy: true }));
+    const cut = await screen.findByRole("menuitem", { name: /^Cut/ });
+    fireEvent.pointerDown(cut, { button: 0 });
+    fireEvent.click(cut);
+    await waitFor(() => expect(api.runContextMenuCommand).toHaveBeenCalled());
+    expect({ submitted: submit.mock.calls.length, inputConnected: input.isConnected }).toEqual({ submitted: 0, inputConnected: true });
   });
 });
