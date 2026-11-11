@@ -3,6 +3,7 @@ import { QueryClient, type InfiniteData } from "@tanstack/react-query";
 import { chatKeys } from "@multica/core/chat/queries";
 import type { ChatMessage, ChatMessagesPage, ChatPendingTask } from "@multica/core/types";
 import {
+  deriveChatTitle,
   hasInFlightPendingTask,
   isStillOnComposeTarget,
   planProjectContextChange,
@@ -151,6 +152,39 @@ describe("isStillOnComposeTarget", () => {
 
   it("is false when the user starts a new chat mid-send from a session", () => {
     expect(isStillOnComposeTarget(null, sid)).toBe(false);
+  });
+});
+
+// The title a new chat gets from its first message, shared by BOTH send chains.
+describe("deriveChatTitle", () => {
+  it("uses the first line without its markdown", () => {
+    expect(deriveChatTitle("\n**Fix** the `login` bug\nsteps below")).toBe("Fix the login bug");
+  });
+
+  it("shows a link as its text", () => {
+    expect(deriveChatTitle("see [the spec](https://example.com/spec) first")).toBe("see the spec first");
+  });
+
+  it("caps a long first line", () => {
+    expect(deriveChatTitle("a".repeat(40))).toBe(`${"a".repeat(29)}…`);
+  });
+
+  // The page sent with a message goes ahead of it as a line of its own.
+  it("skips a line of mentions for the text written under it", () => {
+    expect(
+      deriveChatTitle("[DEV-43](mention://issue/issue-1)\n\nWhy is this failing?"),
+    ).toBe("Why is this failing?");
+    expect(
+      deriveChatTitle("[Q3 \\[beta\\]](mention://project/p-1) [DEV-43](mention://issue/issue-1)\nCompare these"),
+    ).toBe("Compare these");
+  });
+
+  it("names a message of only mentions after them", () => {
+    expect(deriveChatTitle("[DEV-43](mention://issue/issue-1)")).toBe("DEV-43");
+  });
+
+  it("keeps a line that says something beside its mention", () => {
+    expect(deriveChatTitle("[DEV-43](mention://issue/issue-1) is blocked\nwhy?")).toBe("DEV-43 is blocked");
   });
 });
 

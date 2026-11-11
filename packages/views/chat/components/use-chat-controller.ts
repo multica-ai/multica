@@ -59,9 +59,15 @@ const apiLogger = createLogger("chat.api");
 // markdown stripped, whitespace collapsed, capped. A deterministic title
 // (no LLM) — the server has no summarization model, so this is the sensible
 // default until a runtime-generated title is wired up.
+//
+// A line of nothing but mentions is what the message is about (the page sent
+// with it goes ahead of the text that way), so the title comes from the text
+// written under it, when there is any.
 const CHAT_TITLE_MAX = 30;
+const MENTIONS_ONLY_LINE = /^(?:\[(?:\\.|[^\]\\])*\]\(mention:\/\/[^)]*\)\s*)+$/;
 export function deriveChatTitle(content: string): string {
-  const firstLine = (content.split("\n").find((l) => l.trim()) ?? content).trim();
+  const lines = content.split("\n").map((l) => l.trim()).filter(Boolean);
+  const firstLine = lines.find((l) => !MENTIONS_ONLY_LINE.test(l)) ?? lines[0] ?? "";
   const cleaned = firstLine
     .replace(/```[\s\S]*?```/g, " ")
     .replace(/[#*`>~_]/g, "")

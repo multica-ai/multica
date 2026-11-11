@@ -86,6 +86,7 @@ import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { CHAT_WINDOW_INSET, useChatWindowAnchor } from "./use-chat-window-anchor";
 import { useFormatTimeAgo } from "./use-format-time-ago";
 import {
+  deriveChatTitle,
   hasInFlightPendingTask,
   isStillOnComposeTarget,
   planProjectContextChange,
@@ -343,8 +344,8 @@ export function ChatWindow() {
   // promise ref dedupes those races: the first caller starts the create,
   // every subsequent caller awaits the same promise until it settles.
   //
-  // titleSeed is the first 50 chars of the user's message when called from
-  // send; the upload path passes "" and we leave the title empty so the
+  // titleSeed is the user's message when called from send (titled the way the
+  // chat tab does); the upload path passes "" and we leave the title empty so the
   // session-dropdown's existing localized `window.untitled` fallback kicks
   // in. A follow-up task may back-fill the real title from the first user
   // message — until then this keeps the session list scannable across locales.
@@ -376,7 +377,7 @@ export function ChatWindow() {
         try {
           const session = await createSession.mutateAsync({
             agent_id: activeAgent.id,
-            title: titleSeed.slice(0, 50),
+            title: deriveChatTitle(titleSeed),
             project_id: activeProjectId,
           });
           return session.id;

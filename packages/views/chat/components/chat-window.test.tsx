@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createChatStore, registerChatStore, useChatStore } from "@multica/core/chat";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
-import type { ChatSession } from "@multica/core/types";
+import { agentListOptions } from "@multica/core/workspace/queries";
+import type { Agent, ChatSession } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enChat from "../../locales/en/chat.json";
@@ -23,11 +24,26 @@ registerChatStore(
   }),
 );
 
-// The header is what's under test, so the conversation body, composer and
-// network layer are stubbed; requests stay pending forever.
+// The header and the send wiring are what's under test, so the conversation
+// body, composer and network layer are stubbed; requests are recorded and stay
+// pending forever.
+const apiCalls = vi.hoisted(() => [] as { method: string; args: unknown[] }[]);
+const composer = vi.hoisted(() => ({
+  onSend: null as ((content: string) => Promise<boolean>) | null,
+}));
 vi.mock("@multica/core/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/api")>()),
-  api: new Proxy({}, { get: () => () => new Promise(() => {}) }),
+  api: new Proxy(
+    {},
+    {
+      get:
+        (_, method: string) =>
+        (...args: unknown[]) => {
+          apiCalls.push({ method, args });
+          return new Promise(() => {});
+        },
+    },
+  ),
 }));
 vi.mock("@multica/core/auth", () => ({
   useAuthStore: (sel: (s: { user: { id: string } }) => unknown) =>
@@ -61,7 +77,12 @@ vi.mock("./use-chat-resize", () => ({
 vi.mock("./use-chat-context-items", () => ({ useChatContextItems: () => [] }));
 vi.mock("./chat-window-messages", () => ({ ChatWindowMessages: () => null }));
 vi.mock("../../common/app-requests", () => ({ ChatAppRequests: () => null }));
-vi.mock("./chat-input", () => ({ ChatInput: () => null }));
+vi.mock("./chat-input", () => ({
+  ChatInput: ({ onSend }: { onSend: (content: string) => Promise<boolean> }) => {
+    composer.onSend = onSend;
+    return null;
+  },
+}));
 vi.mock("./chat-queue", () => ({ ChatQueue: () => null }));
 vi.mock("./chat-empty-state", () => ({ EmptyState: () => null }));
 vi.mock("./session-history-list", () => ({ SessionHistoryList: () => null }));
@@ -88,9 +109,19 @@ const session: ChatSession = {
   updated_at: "2026-11-01T00:00:00Z",
 };
 
-function renderWindow() {
+const agent = {
+  id: "agent-1",
+  name: "Agent",
+  owner_id: "user-1",
+  runtime_id: "runtime-1",
+  runtime_bound: true,
+  archived_at: null,
+} as Agent;
+
+function renderWindow(agents: Agent[] = []) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   qc.setQueryData(chatSessionsOptions("ws-1").queryKey, [session]);
+  if (agents.length > 0) qc.setQueryData(agentListOptions("ws-1").queryKey, agents);
   return render(
     <QueryClientProvider client={qc}>
       <I18nProvider locale="en" resources={TEST_RESOURCES}>
@@ -102,6 +133,8 @@ function renderWindow() {
 
 beforeEach(() => {
   resize.isAtMax = false;
+  apiCalls.length = 0;
+  composer.onSend = null;
   act(() => {
     useChatStore.setState({ isOpen: true, isExpanded: false, activeSessionId: session.id });
   });
@@ -136,5 +169,27 @@ describe("ChatWindow header buttons", () => {
     renderWindow();
 
     expect(screen.getByRole("button", { name: enChat.window.restore_tooltip })).toBeInTheDocument();
+  });
+});
+
+describe("ChatWindow first message", () => {
+  // The page attached to a message goes ahead of it as a mention link. Cut
+  // raw, that link was the whole title: "[DEV-43](mention://issue/…".
+  it("titles the new chat after what was written, not the page sent with it", async () => {
+    act(() => {
+      useChatStore.setState({ activeSessionId: null });
+    });
+    renderWindow([agent]);
+
+    await act(async () => {
+      void composer.onSend?.("[DEV-43](mention://issue/issue-1)\n\nWhy is this failing?");
+    });
+
+    await waitFor(() =>
+      expect(apiCalls.find((call) => call.method === "createChatSession")?.args[0]).toMatchObject({
+        agent_id: "agent-1",
+        title: "Why is this failing?",
+      }),
+    );
   });
 });
