@@ -98,6 +98,13 @@ func (fakeAudienceQuerier) GetAgentTask(_ context.Context, id pgtype.UUID) (db.A
 	return db.AgentTaskQueue{}, pgx.ErrNoRows
 }
 
+func (fakeAudienceQuerier) GetAutopilot(_ context.Context, id pgtype.UUID) (db.Autopilot, error) {
+	if util.UUIDToString(id) == ppAutopilot {
+		return db.Autopilot{ID: id, ProjectID: ppUUID(ppPrivate)}, nil
+	}
+	return db.Autopilot{}, pgx.ErrNoRows
+}
+
 func (f fakeAudienceQuerier) ListIssueProjectIDs(ctx context.Context, ids []pgtype.UUID) ([]db.ListIssueProjectIDsRow, error) {
 	var rows []db.ListIssueProjectIDsRow
 	for _, id := range ids {
@@ -145,6 +152,11 @@ func TestRegisterListeners_PrivateProjectEventsReachOnlyItsAudience(t *testing.T
 		{Type: protocol.EventProjectUpdated, Payload: map[string]any{"project": map[string]any{"id": ppPrivate}}},
 		{Type: protocol.EventProjectMembersChanged, Payload: map[string]any{"project_id": ppPrivate}},
 		{Type: protocol.EventTaskMessage, TaskID: ppSecretTask, Payload: map[string]any{"task_id": ppSecretTask}},
+		// Autopilots bound to the project, by payload object and by bare id.
+		{Type: protocol.EventAutopilotCreated, Payload: map[string]any{"autopilot": map[string]any{"id": ppAutopilot, "project_id": ppPrivate}}},
+		{Type: protocol.EventAutopilotUpdated, Payload: map[string]any{"autopilot_id": ppAutopilot}},
+		{Type: protocol.EventAutopilotRunStart, Payload: map[string]any{"autopilot_id": ppAutopilot, "run_id": "r"}},
+		{Type: protocol.EventAutopilotRunDone, Payload: map[string]any{"autopilot_id": ppAutopilot, "run_id": "r"}},
 		// Issue-less runs read the project too: a run-only autopilot and a
 		// quick-create into it.
 		{Type: protocol.EventTaskMessage, TaskID: ppAutopilotTask, Payload: map[string]any{"task_id": ppAutopilotTask}},
@@ -171,6 +183,8 @@ func TestRegisterListeners_PrivateProjectEventsReachOnlyItsAudience(t *testing.T
 		// A deleted issue cannot be resolved: keep fanout, never go silent.
 		{Type: protocol.EventIssueDeleted, Payload: map[string]any{"issue_id": "00000000-0000-0000-0000-00000000dead"}},
 		{Type: protocol.EventAgentStatus, Payload: map[string]any{"agent_id": "a"}},
+		{Type: protocol.EventAutopilotUpdated, Payload: map[string]any{"autopilot": map[string]any{"id": "x", "project_id": nil}}},
+		{Type: protocol.EventAutopilotDeleted, Payload: map[string]any{"autopilot_id": "00000000-0000-0000-0000-00000000dead"}},
 	}
 	for _, e := range public {
 		bus := events.New()
