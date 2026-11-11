@@ -201,6 +201,7 @@ vi.mock("@tanstack/react-query", async (importOriginal) => {
 
 import { useChatController } from "./use-chat-controller";
 import { api, ApiError } from "@multica/core/api";
+import { chatKeys } from "@multica/core/chat/queries";
 
 // --- Fixtures ---------------------------------------------------------------
 function makeSession(
@@ -404,6 +405,39 @@ describe("useChatController project context", () => {
 
     expect(h.createSessionMutate).toHaveBeenCalledWith(
       expect.objectContaining({ project_id: project.id }),
+    );
+  });
+
+  it("creates the session untitled and refetches the list once the first send lands", async () => {
+    h.store.activeSessionId = null;
+    h.store.selectedAgentId = agentA.id;
+    h.sessions = [];
+    h.agents = [agentA];
+    h.queryClient.invalidateQueries.mockClear();
+    h.queryClient.cancelQueries.mockClear();
+    vi.mocked(api.sendChatMessage).mockResolvedValue({
+      message_id: "message-1",
+      task_id: "task-1",
+      created_at: new Date(0).toISOString(),
+    } as Awaited<ReturnType<typeof api.sendChatMessage>>);
+
+    const { result } = renderHook(() => useChatController());
+    await act(async () => {
+      await result.current.handleSend("# Release checklist\nmore", undefined, vi.fn());
+    });
+
+    expect(h.createSessionMutate).toHaveBeenCalledWith(
+      expect.not.objectContaining({ title: expect.anything() }),
+    );
+    const sessionsKey = { queryKey: chatKeys.sessions("ws-1") };
+    expect(h.queryClient.cancelQueries).toHaveBeenCalledWith(sessionsKey);
+    expect(h.queryClient.invalidateQueries).toHaveBeenCalledWith(sessionsKey);
+    const cancelOrder = h.queryClient.cancelQueries.mock.invocationCallOrder[0]!;
+    const refetchOrder = h.queryClient.invalidateQueries.mock.calls.findIndex(
+      ([arg]) => JSON.stringify(arg) === JSON.stringify(sessionsKey),
+    );
+    expect(cancelOrder).toBeLessThan(
+      h.queryClient.invalidateQueries.mock.invocationCallOrder[refetchOrder]!,
     );
   });
 

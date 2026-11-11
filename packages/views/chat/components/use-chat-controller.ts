@@ -36,6 +36,7 @@ import {
 } from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
 import { upsertChatMessageToCaches } from "@multica/core/chat/message-cache";
+import { refetchChatSessionsAfterCommit } from "@multica/core/chat/session-list";
 import {
   enqueuePendingChatTask,
   hideQueuedChatMessages,
@@ -55,23 +56,6 @@ import { useAppForeground } from "../../common/use-app-foreground";
 
 const uiLogger = createLogger("chat.ui");
 const apiLogger = createLogger("chat.api");
-
-// Derive a concise session title from the first user message: first line,
-// markdown stripped, whitespace collapsed, capped. A deterministic title
-// (no LLM) — the server has no summarization model, so this is the sensible
-// default until a runtime-generated title is wired up.
-const CHAT_TITLE_MAX = 30;
-export function deriveChatTitle(content: string): string {
-  const firstLine = (content.split("\n").find((l) => l.trim()) ?? content).trim();
-  const cleaned = firstLine
-    .replace(/```[\s\S]*?```/g, " ")
-    .replace(/[#*`>~_]/g, "")
-    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1") // markdown links/images → their text
-    .replace(/\s+/g, " ")
-    .trim();
-  if (cleaned.length <= CHAT_TITLE_MAX) return cleaned;
-  return cleaned.slice(0, CHAT_TITLE_MAX - 1).trimEnd() + "…";
-}
 
 /**
  * After a send resolves: is the user still composing to the target they sent
@@ -417,7 +401,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
 
   const sessionPromiseRef = useRef<Promise<string | null> | null>(null);
   const ensureSession = useCallback(
-    async (titleSeed: string): Promise<string | null> => {
+    async (): Promise<string | null> => {
       // A partial page cannot establish that a selected session is gone.
       if (
         activeSessionId &&
@@ -431,9 +415,10 @@ export function useChatController(opts?: { isActive?: boolean }) {
 
       const promise = (async () => {
         try {
+          // Untitled on purpose: the server derives the title from the first
+          // message it accepts, the same rule for every client and channel.
           const session = await createSession.mutateAsync({
             agent_id: activeAgent.id,
-            title: deriveChatTitle(titleSeed),
             project_id: activeProjectId,
           });
           return session.id;
@@ -524,7 +509,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
 
       let sessionId: string | null = null;
       try {
-        sessionId = await ensureSession(finalContent);
+        sessionId = await ensureSession();
       } catch (err) {
         apiLogger.error("sendChatMessage.ensureSession.error", err);
         // A revoked invoke permission blocks session create with a structured
@@ -608,6 +593,10 @@ export function useChatController(opts?: { isActive?: boolean }) {
         supports_queue: result.supports_queue,
         queued: result.queued,
       });
+      // This send just committed the new session's server-derived title.
+      if (sessionId !== activeSessionId) {
+        void refetchChatSessionsAfterCommit(qc, chatKeys.sessions(wsId));
+      }
       // Cache primed → publish the new active session, but only if the user
       // hasn't navigated away mid-send. See isStillOnComposeTarget. commitInput
       // clears the sent draft, and scrubs the shared editor only when the user
@@ -644,6 +633,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
       return true;
     },
     [
+      wsId,
       activeSessionId,
       activeAgent,
       isAgentArchived,
