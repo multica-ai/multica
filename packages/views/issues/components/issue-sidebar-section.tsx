@@ -25,7 +25,7 @@ export function IssueSidebarSectionHeader({
   id?: string;
 }) {
   return (
-    <div className="mb-1 flex min-w-0 items-center gap-1 px-2">
+    <div data-slot="issue-sidebar-section-header" className="mb-1 flex min-w-0 items-center gap-1 px-2">
       {collapsible ? <Button
         id={id}
         type="button"
@@ -55,8 +55,8 @@ export function IssueSidebarSectionHeader({
 }
 
 /** Shared spacing separates rendered sections without adding divider lines. */
-export function IssueSidebarStack({ children }: { children: ReactNode }) {
-  return <div className="flex flex-col gap-6 [overflow-anchor:none] [&>*]:flow-root">{children}</div>;
+export function IssueSidebarStack({ children, className }: { children: ReactNode; className?: string }) {
+  return <div className={cn("flex flex-col gap-6 [overflow-anchor:none] [&>*]:flow-root", className)}>{children}</div>;
 }
 
 /** Fits labels to their content while reserving space for values and the hover gutter. */

@@ -486,6 +486,17 @@
     "section_pull_requests": "Pull requests",
     "section_metadata": "メタデータ",
     "section_details": "詳細",
+    "sidebar_settings": {
+      "open": "サイドバーをカスタマイズ",
+      "title": "サイドバー",
+      "reset": "リセット",
+      "footer": "ドラッグで並べ替え。すべてのタスクに適用されます。",
+      "always_shown": "常に表示",
+      "empty": "このタスクにはありません",
+      "customize": "カスタマイズ",
+      "drag_handle": "{{section}}を並べ替え",
+      "hidden_count_other": "{{count}} 個のセクションを非表示"
+    },
     "section_quick_actions": "クイックアクション",
     "quick_actions_more": "残り {{count}} 件を表示",
     "quick_action_runs_as": "{{name}} が実行します",

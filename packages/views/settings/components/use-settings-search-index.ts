@@ -143,6 +143,12 @@ export function useSettingsSearchIndex(
       },
       {
         tab: "preferences",
+        anchor: "comment-images",
+        title: t(($) => $.preferences.comment_images.title),
+        description: t(($) => $.preferences.comment_images.hint),
+      },
+      {
+        tab: "preferences",
         anchor: "chat",
         title: t(($) => $.chat.floating_label),
         description: t(($) => $.chat.floating_hint),

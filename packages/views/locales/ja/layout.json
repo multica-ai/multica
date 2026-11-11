@@ -187,6 +187,8 @@
       "dark": "ダーク",
       "system": "システム"
     },
+    "mode": "モード",
+    "appearance_settings": "外観の設定",
     "language": "言語",
     "shortcuts": "キーボードショートカット"
   },

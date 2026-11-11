@@ -6639,10 +6639,11 @@ func (h *Handler) ListTaskMessagesByUser(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusNotFound, "task not found")
 		return
 	}
-	// An issue run's transcript is visible exactly where its issue is
-	// (MUL-8472). Task ids reach every member through task lifecycle events,
-	// so this cannot rely on the issue page being unreachable.
-	if !h.requireIssueIDVisible(w, r, wsID, task.IssueID, http.StatusNotFound, "task not found") {
+	// A run's transcript is visible exactly where the projects it reads are
+	// (MUL-8472), including runs that have no issue. Task ids reach every
+	// member through task lifecycle events, so this cannot rely on the issue
+	// page being unreachable.
+	if !h.requireTaskVisible(w, r, wsID, task, http.StatusNotFound, "task not found") {
 		return
 	}
 

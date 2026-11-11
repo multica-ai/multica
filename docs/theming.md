@@ -308,6 +308,14 @@ families in font stacks and WCAG contrast in both modes, each with its line
 in `theme.css`, and exits with status 1 when there is an error. Warnings,
 such as a colour it cannot resolve, do not fail the check.
 
+Contrast is measured with every option at its default, then once for each
+other value of a `select` and the other state of a `toggle`, one option at a
+time with the rest at their defaults. Options are not combined. A failure
+names the value it comes from, for example
+`Contrast, dark mode (Screen = Amber): …`. Options that set a variable
+(`color`, `variable-select`, `number`, `slider`, `text`, `font`) are measured
+at their defaults only, so check the other values you offer yourself.
+
 Contrast covers the page, the frame, and two places a theme reaches only
 indirectly:
 
@@ -321,6 +329,11 @@ indirectly:
   theme sets on `[data-slot="popover-content"]`. Set
   `--display-chip-pressed-background` and `--display-chip-pressed-color` to
   colour them apart from input borders.
+
+Rules on a slot are applied by specificity, then order, as the browser
+does. A variable set on `<html>` reaches the slot with the value it has
+there: `--display-chip-pressed-color: var(--foreground)` on `.theme-light`
+keeps the page's `--foreground`, even if the popover sets its own.
 
 To see the theme the way the theme store shows it:
 

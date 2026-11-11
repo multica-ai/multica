@@ -17,6 +17,13 @@ import {
 import enAgents from "../../locales/en/agents.json";
 import enCommon from "../../locales/en/common.json";
 import enIssues from "../../locales/en/issues.json";
+import { useIssueSidebarSectionsStore } from "@multica/core/issues/stores/issue-sidebar-sections-store";
+
+vi.mock("./issue-wakeup-header-chip", () => ({
+  IssueWakeupHeaderChip: ({ onOpen }: { onOpen: () => void }) => (
+    <button type="button" onClick={onOpen}>Review open wakeups</button>
+  ),
+}));
 
 const TEST_RESOURCES = { en: { agents: enAgents, common: enCommon, issues: enIssues } };
 
@@ -388,6 +395,10 @@ vi.mock("@multica/core/issues/stores", async () => ({
   ...(await vi.importActual<
     typeof import("@multica/core/issues/stores/sub-issues-collapse-store")
   >("@multica/core/issues/stores/sub-issues-collapse-store")),
+  // Real store, in-memory: the sidebar reads its section order and visibility.
+  ...(await vi.importActual<
+    typeof import("@multica/core/issues/stores/issue-sidebar-sections-store")
+  >("@multica/core/issues/stores/issue-sidebar-sections-store")),
   useRecentIssuesStore: Object.assign(
     (selector?: any) => {
       const state = { byWorkspace: {}, recordVisit: mockRecordVisit, pruneWorkspaces: vi.fn() };
@@ -825,6 +836,66 @@ describe("IssueDetail (shared)", () => {
     // Reset project mock — individual tests override per case. Default fixture
     // has project_id: null so getProject is not invoked.
     mockApiObj.getProject.mockReset();
+    useIssueSidebarSectionsStore.getState().reset();
+  });
+
+  describe("sidebar section settings", () => {
+    const wakeupsSlot = (container: HTMLElement) => container.querySelector('[data-issue-sidebar-section="wakeups"]');
+    const wakeupsSwitch = async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Customize sidebar" }));
+      return within(await screen.findByRole("dialog")).getByRole("switch", { name: "Wakeups" });
+    };
+
+    it("hides wakeups from settings after the header chip opened them", async () => {
+      const { container } = renderIssueDetail();
+      fireEvent.click(await screen.findByRole("button", { name: "Review open wakeups" }));
+      expect(wakeupsSlot(container)).not.toBeNull();
+
+      fireEvent.click(await wakeupsSwitch());
+      expect(useIssueSidebarSectionsStore.getState().hidden).toContain("wakeups");
+      expect(wakeupsSlot(container)).toBeNull();
+    });
+
+    it("lets settings hide again the wakeups the header chip revealed", async () => {
+      useIssueSidebarSectionsStore.getState().setHidden("wakeups", true);
+      const { container } = renderIssueDetail();
+      fireEvent.click(await screen.findByRole("button", { name: "Review open wakeups" }));
+      expect(wakeupsSlot(container)).not.toBeNull();
+      expect(useIssueSidebarSectionsStore.getState().hidden).toContain("wakeups");
+
+      const toggle = await wakeupsSwitch();
+      fireEvent.click(toggle);
+      expect(useIssueSidebarSectionsStore.getState().hidden).not.toContain("wakeups");
+      fireEvent.click(toggle);
+      expect(useIssueSidebarSectionsStore.getState().hidden).toContain("wakeups");
+      expect(wakeupsSlot(container)).toBeNull();
+    });
+
+    it("ends the header chip's reveal when the reader moves to another issue", async () => {
+      useIssueSidebarSectionsStore.getState().setHidden("wakeups", true);
+      const issue2 = { ...mockIssue, id: "issue-2", title: "Second issue", description: "Second description" };
+      mockApiObj.getIssue.mockImplementation((issueId: string) =>
+        Promise.resolve(issueId === "issue-2" ? issue2 : mockIssue),
+      );
+      const queryClient = createTestQueryClient();
+      queryClient.setQueryData(["issues", "ws-1", "detail", "issue-2"], issue2);
+      const ui = (issueId: string) => (
+        <I18nProvider locale="en" resources={TEST_RESOURCES}>
+          <QueryClientProvider client={queryClient}>
+            <IssueDetail issueId={issueId} />
+          </QueryClientProvider>
+        </I18nProvider>
+      );
+      const { container, rerender } = render(ui("issue-1"));
+      fireEvent.click(await screen.findByRole("button", { name: "Review open wakeups" }));
+      expect(wakeupsSlot(container)).not.toBeNull();
+
+      rerender(ui("issue-2"));
+      await screen.findByDisplayValue("Second description");
+      rerender(ui("issue-1"));
+      await screen.findByDisplayValue("Add JWT auth to the backend");
+      expect(wakeupsSlot(container)).toBeNull();
+    });
   });
 
   it("passes the issue's agent assignment to the local-directory hint", async () => {

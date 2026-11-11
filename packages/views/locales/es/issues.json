@@ -464,6 +464,18 @@
     "section_pull_requests": "Pull requests",
     "section_metadata": "Metadatos",
     "section_details": "Detalles",
+    "sidebar_settings": {
+      "open": "Personalizar barra lateral",
+      "title": "Barra lateral",
+      "reset": "Restablecer",
+      "footer": "Arrastra para reordenar. Se aplica a todas las tareas.",
+      "always_shown": "Siempre visible",
+      "empty": "Nada en esta tarea",
+      "customize": "Personalizar",
+      "drag_handle": "Reordenar {{section}}",
+      "hidden_count_one": "{{count}} sección oculta",
+      "hidden_count_other": "{{count}} secciones ocultas"
+    },
     "section_quick_actions": "Acciones rápidas",
     "quick_actions_more": "Mostrar {{count}} más",
     "quick_action_runs_as": "Se ejecuta como {{name}}",

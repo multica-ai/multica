@@ -187,6 +187,8 @@
       "dark": "다크",
       "system": "시스템"
     },
+    "mode": "모드",
+    "appearance_settings": "모양 설정",
     "language": "언어",
     "shortcuts": "키보드 단축키"
   },

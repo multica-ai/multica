@@ -169,6 +169,12 @@
       "after_run": "本輪結束後開始",
       "hint": "只決定預設選項，每條訊息傳送前仍可單獨修改。"
     },
+    "comment_images": {
+      "title": "留言中的圖片",
+      "thumbnails": "縮圖",
+      "full": "原尺寸",
+      "hint": "縮圖讓長討論更精簡，點擊圖片可查看原圖。"
+    },
     "comments_title": "評論與聊天",
     "region_title": "語言與地區",
     "issue_fields_title": "建立任務時顯示的欄位",
