@@ -7,7 +7,6 @@ import type {
   IssueTableRelation,
   IssueTableScope,
   IssueTableSortField,
-  ListIssuesParams,
   Project,
 } from "../types";
 import { assigneeTypesForActorKind } from "./surface/scope";
@@ -61,30 +60,17 @@ export function projectSidebarRequest(
   const shown = shownSidebarStatuses(settings, statuses);
   if (shown.length === 0) return null;
   if (settings.assignee !== "anyone" && !userId) return null;
-  const statusFilter = shown.length < statuses.length ? { statuses: shown } : {};
-  // The list endpoint cannot OR the user with their agents: `involves_user_id`
-  // never matches issues assigned to the user directly.
-  if (settings.assignee === "me_and_my_agents") {
-    return {
-      table: {
-        scope: { kind: "project", project_id: projectId },
-        filters: {
-          ...statusFilter,
-          relations: ASSIGNEE_RELATIONS.me_and_my_agents,
-          include_sub_issues: settings.showSubIssues,
-        },
-        sort: { field: settings.sortBy, direction: settings.sortDirection },
-      },
-    };
-  }
+  const relations = ASSIGNEE_RELATIONS[settings.assignee] ?? [];
   return {
-    project_id: projectId,
-    ...statusFilter,
-    ...(settings.assignee === "me" ? { assignee_id: userId } : {}),
-    ...(settings.assignee === "my_agents" ? { involves_user_id: userId } : {}),
-    ...(settings.showSubIssues ? {} : { top_level_only: true }),
-    sort_by: settings.sortBy,
-    sort_direction: settings.sortDirection,
+    table: {
+      scope: { kind: "project", project_id: projectId },
+      filters: {
+        ...(shown.length < statuses.length ? { statuses: shown } : {}),
+        ...(relations.length > 0 ? { relations } : {}),
+        include_sub_issues: settings.showSubIssues,
+      },
+      sort: { field: settings.sortBy, direction: settings.sortDirection },
+    },
   };
 }
 
@@ -103,15 +89,10 @@ const VIEW_SORTS = new Set<string>([
 type SidebarViewFields = Pick<IssueView, "query" | "display" | "scope_variant"> &
   Partial<Pick<IssueView, "scope_type" | "scope_id">>;
 
-/** A sidebar list read through the table query, which can express every view filter. */
-export interface SidebarTableRequest {
+/** A sidebar list, read through the table query, which can express every view filter. */
+export interface SidebarIssuesRequest {
   table: IssueTableQuerySpec;
 }
-
-export type SidebarIssuesRequest = ListIssuesParams | SidebarTableRequest;
-
-export const isSidebarTableRequest = (request: SidebarIssuesRequest): request is SidebarTableRequest =>
-  "table" in request;
 
 function viewTableScope(view: SidebarViewFields): IssueTableScope | null {
   const assigneeTypes = assigneeTypesForActorKind(
@@ -157,7 +138,7 @@ export function viewSidebarRequest(
   view: SidebarViewFields,
   today: string,
   unreadIssueIds: readonly string[] = [],
-): SidebarTableRequest | null {
+): SidebarIssuesRequest | null {
   const scope = viewTableScope(view);
   if (!scope) return null;
   const { raw } = baselineFromQuery(view.query);
@@ -203,25 +184,24 @@ export function viewSidebarRequest(
 
 /**
  * The request for an expanded built-in view: the page's scope, listed with
- * the same sidebar settings as an expanded project. `null` when the settings
- * leave nothing to list.
+ * the same status, sub-issue and ordering settings as an expanded project.
+ * The assignee setting is for projects only: the scope already says whose
+ * issues a built-in lists. `null` when the settings leave nothing to list.
  */
 export function builtinSidebarRequest(
   builtin: Exclude<BuiltinViewKey, "unread">,
   myRelation: MyIssuesRelation,
   settings: SidebarIssueSettings,
   statuses: readonly StatusRef[],
-): SidebarTableRequest | null {
+): SidebarIssuesRequest | null {
   const shown = shownSidebarStatuses(settings, statuses);
   if (shown.length === 0) return null;
   const relation = builtin === "my_agents" ? "involved" : myRelation === "all" ? "any" : myRelation;
-  const relations = ASSIGNEE_RELATIONS[settings.assignee] ?? [];
   return {
     table: {
       scope: builtin === "all_issues" ? { kind: "workspace" } : { kind: "my", relation },
       filters: {
         ...(shown.length < statuses.length ? { statuses: shown } : {}),
-        ...(relations.length > 0 ? { relations } : {}),
         include_sub_issues: settings.showSubIssues,
       },
       sort: { field: settings.sortBy, direction: settings.sortDirection },

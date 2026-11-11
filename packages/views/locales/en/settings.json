@@ -85,24 +85,6 @@
     "workflow_usage_other": "{{count}} workflows use it",
     "workflow_usage_none": "In no workflow"
   },
-  "wakeups": {
-    "description": "Platform rules that apply to every issue. Each issue can change them in its Wakeups section.",
-    "child_done_title": "When sub-issues finish",
-    "child_done_description": "Wakes the parent's assignee when a stage finishes and a later stage is waiting, and once more when every sub-issue is closed. A member assignee gets an inbox notification instead.",
-    "enabled": "On by default",
-    "instruction": "Default instruction",
-    "instruction_hint": "Sent to the woken agent. Leave empty to use the built-in instruction below.",
-    "instruction_placeholder": "Leave empty to use the built-in instruction",
-    "builtin": "Built-in instruction",
-    "instruction_invalid": "Keep the instruction within 4,000 bytes.",
-    "save": "Save",
-    "saving": "Saving…",
-    "save_error": "Could not save the default.",
-    "customized_one": "{{count}} open issue has its own setting and ignores this default.",
-    "customized_other": "{{count}} open issues have their own setting and ignore this default.",
-    "admin_only": "Only owners and admins can change these defaults.",
-    "load_error": "Could not load wakeup defaults."
-  },
   "quick_actions": {
     "title": "Quick Actions",
     "description": "Run a preset agent and prompt from an issue's sidebar.",
@@ -211,9 +193,49 @@
     },
     "theme": {
       "title": "Theme",
-      "description": "Colors, borders, shadows and corners across the app.",
+      "description": "Colors, borders, shadows and corners across the app. Import a theme file to add more.",
       "default": "Default",
-      "pop": "Pop"
+      "pop": "Pop",
+      "built_in": "Built in",
+      "installed": "Installed",
+      "remove": "Remove {{name}}",
+      "safe_mode": "Safe mode: your theme is paused until you close this window.",
+      "safe_mode_exit": "Use my theme",
+      "folder": "Themes folder",
+      "folder_problems": "Some themes in the themes folder don't pass the checks. Fix them and save; the last version that passed stays in use."
+    },
+    "import": {
+      "button": "Import theme",
+      "from_zip": "Theme file (.zip)",
+      "from_folder": "Theme folder",
+      "storage_full": "There isn't enough space on this device to save the theme. Remove another theme and try again.",
+      "confirm_title": "Install “{{name}}”?",
+      "warning": "A theme can restyle every page, including dialogs and warnings. Only install themes from people you trust.",
+      "author": "Author",
+      "version": "Version",
+      "replaces": "{{to}} (replaces {{from}})",
+      "includes": "Includes",
+      "cancel": "Cancel",
+      "confirm": "Install and use",
+      "error_title": "Couldn't install this theme",
+      "error_description": "Nothing was changed. The theme file has these problems:",
+      "close": "Close",
+      "has_options_one": "{{count}} option",
+      "has_options_other": "{{count}} options",
+      "has_assets_one": "{{count}} font or image",
+      "has_assets_other": "{{count}} fonts and images",
+      "menu_label": "Custom themes",
+      "beta": "Beta",
+      "beta_note": "Custom themes are in beta. The variables and manifest a theme uses may change, and a theme may need updating."
+    },
+    "tools": {
+      "label": "More theme actions",
+      "duplicate": "Duplicate “{{name}}” as a new theme",
+      "open_folder": "Open themes folder",
+      "guide": "How to make a theme",
+      "duplicated_web": "Downloaded {{file}}. Unzip it, edit theme.css, then import the folder.",
+      "duplicated_desktop": "Created “{{name}}” in the themes folder. Edits to its theme.css apply when you save.",
+      "duplicate_failed": "Couldn't create the copy: {{error}}"
     },
     "theme_options": {
       "title": "Theme options",
@@ -431,7 +453,10 @@
   },
   "chat": {
     "floating_label": "Floating chat window",
-    "floating_hint": "Show the floating chat button on every page."
+    "floating_hint": "Show the floating chat button on every page.",
+    "ask_agent_label": "Ask Multica agent",
+    "ask_agent_hint": "The agent a new chat from the bottom bar starts with, in this workspace.",
+    "ask_agent_last_used": "Last used"
   },
   "issue": {
     "opening": {
@@ -499,7 +524,6 @@
       "members": "Members",
       "labels": "Labels",
       "issue_statuses": "Issue Statuses",
-      "wakeups": "Wakeups",
       "properties": "Properties",
       "quick_actions": "Quick Actions",
       "plugins": "Plugins",

@@ -55,7 +55,7 @@
   },
   "relation_filter_error": {
     "title": "“与我的关系”筛选加载失败",
-    "hint": "加载订阅和智能体后才能显示按“我订阅的”或“分配给我的智能体的”筛选的任务。"
+    "hint": "加载订阅和智能体后才能显示按“我订阅的”或“我的智能体在做”筛选的任务。"
   },
   "source_context": {
     "create_action": "从这条评论创建子任务",
@@ -192,7 +192,7 @@
     "section_relation": "与我的关系",
     "relation_assigned": "分配给我的",
     "relation_created": "我创建的",
-    "relation_my_agents": "分配给我的智能体的",
+    "relation_my_agents": "我的智能体在做",
     "relation_subscribed": "我订阅的",
     "section_agent_status": "智能体状态",
     "agent_status_running": "运行中",
@@ -579,7 +579,8 @@
   },
   "timeline": {
     "loading": "加载中…",
-    "jump_to_latest": "跳到最新"
+    "jump_to_latest": "跳到最新",
+    "new_comments_other": "{{count}} 条新评论"
   },
   "activity": {
     "created": "创建了这个任务",
@@ -634,7 +635,10 @@
     "wakeup_checkin": "静默检查：{{note}}",
     "wakeup_checkin_coalesced_other": "静默检查 {{count}} 次 · 最近一次：{{note}}",
     "wakeup_chip_created_by": "{{name}} 创建",
-    "wakeup_chip_system": "系统规则"
+    "wakeup_chip_system": "系统规则",
+    "environment_stopped": "停止了环境 {{name}}",
+    "environment_restarted": "重启了环境 {{name}}",
+    "environment_started": "启动了环境 {{name}}"
   },
   "comment": {
     "add_reaction": "添加表情回应",
@@ -1070,7 +1074,7 @@
     "variant_my_any": "任何相关",
     "variant_my_assigned": "分配给我",
     "variant_my_created": "我创建的",
-    "variant_my_involved": "我参与的"
+    "variant_my_involved": "我的智能体在做"
   },
   "plugins": {
     "panels": "Plugins",
@@ -1347,15 +1351,16 @@
       "enable": "在此任务上启用",
       "toggle": "子任务结束时唤醒负责人",
       "save_error": "无法保存系统规则。",
-      "default_on": "工作区默认开启，可在「设置 → 唤醒」中修改默认值。",
-      "default_off": "工作区默认关闭，可在「设置 → 唤醒」中修改默认值。",
+      "default_on": "工作区默认开启。",
+      "default_off": "工作区默认关闭。",
       "notify_member": "通过收件箱通知 {{name}}",
       "instruction": "唤醒后要做什么",
       "instruction_edit": "编辑指令",
       "instruction_default": "此任务未设置，使用默认指令：",
       "instruction_placeholder": "留空则使用默认指令",
       "instruction_invalid": "指令最多 4,000 字节。",
-      "paused": "已暂停：{{reason}}"
+      "paused": "已暂停：{{reason}}",
+      "default_change": "修改默认值"
     },
     "cond": {
       "status": "当状态变为{{status}}时",
@@ -1712,15 +1717,12 @@
       "name_placeholder": "状态名称",
       "add": "添加"
     },
-    "menu": {
-      "view_flow": "查看完整流程",
-      "switch": "切换工作流"
-    },
     "flow": {
       "title": "「{{workflow}}」工作流",
       "scope_own": "只有这个项目使用这个工作流。",
       "no_handoff_here": "不交接",
-      "scope_shared_other": "{{count}} 个项目使用这个工作流，它的交接对这些项目都生效。"
+      "scope_shared_other": "{{count}} 个项目使用这个工作流，它的交接对这些项目都生效。",
+      "switch": "切换工作流"
     },
     "templates": {
       "delivery": {
@@ -1849,7 +1851,9 @@
       "running": "运行中",
       "exited": "已退出",
       "stopped": "已停止",
-      "unreachable": "无响应"
+      "unreachable": "无响应",
+      "stopping": "停止中",
+      "preparing": "准备中"
     },
     "expires_in_minutes_other": "{{count}} 分钟后过期",
     "expires_in_hours_other": "{{count}} 小时后过期",
@@ -1864,6 +1868,85 @@
     "open": "打开",
     "copy_url": "复制地址",
     "copied": "已复制地址",
-    "copy_failed": "无法复制地址"
+    "copy_failed": "无法复制地址",
+    "offline": "离线",
+    "machine_offline": "{{machine}} 已离线",
+    "more_actions": "更多操作",
+    "view_logs": "查看日志",
+    "restart": "重启",
+    "stop": "停止",
+    "stop_confirm_item": "停止…",
+    "run_first": "首次运行",
+    "run_nth_other": "第 {{count}} 次运行",
+    "someone": "有人",
+    "started_by": "由 {{name}} 启动",
+    "restarted_by": "由 {{name}} 重启",
+    "started_by_agent_in_run": "由 {{name}} 在「{{run}}」中启动",
+    "stopped_by": "由 {{name}} 停止",
+    "stopped_on_expiry": "到期自动停止",
+    "exited_ago": "{{time}}退出",
+    "exit_code": "退出码 {{code}}",
+    "detected_label": "自动识别的服务 · {{name}}",
+    "detected_no_logs": "这个服务不是按环境配置启动的，所以看不到日志，也不能重启。",
+    "offline_hint": "这台机器重新上线后才能操作。",
+    "outdated_hint": "这台机器上的 Multica 更新后，才能在这里操作。",
+    "no_permission_hint": "只有能使用这台机器的成员可以停止或重启。",
+    "waiting_machine": "等待机器响应",
+    "waiting_ready": "等待服务就绪",
+    "no_response": "没有响应",
+    "action_failed": {
+      "stop": "停止失败",
+      "restart": "重启失败",
+      "start": "启动失败"
+    },
+    "stop_confirm_title": "停止 {{name}}？",
+    "stop_confirm_body": "这个服务（{{process}}）是自动识别的，不是按环境配置启动的。停止后不能在这里重启，需要让智能体重新启动它。",
+    "cancel": "取消",
+    "preparing_title": "{{name}} 正在准备环境",
+    "preparing_hint": "启动后会显示在这里",
+    "start_menu": {
+      "trigger": "启动环境",
+      "note": "按项目里的环境配置启动，使用这台机器上最近一次运行的代码。",
+      "no_permission": "只有能使用这台机器的成员可以在上面启动环境。",
+      "nothing_to_start": "这个任务还没运行过，或者之前运行的代码已被清理，没有可以直接启动的环境。",
+      "ask_agent": "让 {{name}} 启动",
+      "ask_any_agent": "让智能体启动",
+      "new_run": "新建运行",
+      "preparing": "准备中",
+      "ask_agent_hint": "{{name}} 会准备好这个任务的代码，再启动环境。项目里没有环境配置时，它会自己判断怎么启动。",
+      "ask_any_agent_hint": "智能体会准备好这个任务的代码，再启动环境。项目里没有环境配置时，它会自己判断怎么启动。",
+      "ask_failed": "没能交给智能体",
+      "agent_instruction": "启动环境：先准备好这个任务的代码，再用 `multica env start` 启动项目里配置的环境；项目里没有环境配置时，自己判断怎么启动。让服务保持运行，并回复访问地址。"
+    },
+    "log": {
+      "title": "{{name}} · 日志",
+      "filter": "筛选日志",
+      "wrap": "自动换行",
+      "follow": "跟随最新",
+      "copy": "复制",
+      "copied": "已复制日志",
+      "copy_failed": "无法复制日志",
+      "refresh": "刷新",
+      "footer_other": "显示最近 {{count}} 行 · {{time}} 更新",
+      "loading": "正在读取日志…",
+      "empty": "还没有输出",
+      "no_match": "没有匹配的行",
+      "no_response": "机器没有响应",
+      "failed": "没能读取日志：{{error}}",
+      "offline_excerpt": "这台机器已离线，下面是它退出前最后输出的内容。",
+      "offline_empty": "这台机器重新上线后才能查看日志。",
+      "exit_divider": "{{time}} 退出",
+      "exit_divider_code": "{{time}} 退出 · 退出码 {{code}}",
+      "stopped_divider": "{{time}} 停止"
+    },
+    "app_desktop_hint": "桌面 App。在运行它的那台机器上，用 Multica Desktop 切到它的窗口。",
+    "app_remote_hint": "运行在 {{machine}} 上。在那台机器上用 Multica Desktop 切到它的窗口。",
+    "focus": "切到窗口",
+    "focus_gone": "{{name}} 已经不在运行",
+    "focus_unsupported": "这台机器的 daemon 暂时不能切换 App 窗口。更新 Multica 后再试。",
+    "focus_unavailable": "本机 daemon 没有运行",
+    "focus_failed": "无法切到 {{name}}",
+    "retry": "重试",
+    "dismiss": "忽略"
   }
 }

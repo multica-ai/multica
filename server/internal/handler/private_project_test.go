@@ -825,6 +825,54 @@ func TestPrivateProjectWakeupListsSkipOutsiders(t *testing.T) {
 	}
 }
 
+// Sub-issue progress is read for every parent in one call, not through an
+// issue, so its counts have to leave out sub-issues in a project the caller
+// cannot see.
+func TestPrivateProjectChildProgressSkipsHiddenSubIssues(t *testing.T) {
+	f := newPrivateProjectFixture(t)
+	dbfx.Issue(t, f.marker+" public child", testutil.Cols{"parent_issue_id": f.publicIssue})
+	dbfx.Issue(t, f.marker+" secret child", testutil.Cols{"project_id": f.projectID, "parent_issue_id": f.publicIssue, "status": "done"})
+	secretOnlyParent := dbfx.Issue(t, f.marker+" parent of one secret child")
+	dbfx.Issue(t, f.marker+" lone secret child", testutil.Cols{"project_id": f.projectID, "parent_issue_id": secretOnlyParent})
+
+	type counts struct{ Total, Done int64 }
+	progress := func(userID string) map[string]counts {
+		t.Helper()
+		var body struct {
+			Progress []struct {
+				ParentIssueID string `json:"parent_issue_id"`
+				Total         int64  `json:"total"`
+				Done          int64  `json:"done"`
+			} `json:"progress"`
+		}
+		req := asUser(newRequest(http.MethodGet, "/api/issues/child-progress", nil), userID)
+		testutil.Call(t, testHandler.ChildIssueProgress, req).Want(http.StatusOK).JSON(&body)
+		out := map[string]counts{}
+		for _, p := range body.Progress {
+			out[p.ParentIssueID] = counts{p.Total, p.Done}
+		}
+		return out
+	}
+	for _, tc := range []struct {
+		name       string
+		userID     string
+		mixed      counts
+		secretOnly counts
+	}{
+		{"project member", f.insider, counts{2, 1}, counts{1, 0}},
+		{"workspace owner outside the member list", testUserID, counts{2, 1}, counts{1, 0}},
+		{"workspace member outside the project", f.outsider, counts{1, 0}, counts{}},
+	} {
+		got := progress(tc.userID)
+		if got[f.publicIssue] != tc.mixed {
+			t.Errorf("%s: parent with a public and a secret sub-issue = %+v, want %+v", tc.name, got[f.publicIssue], tc.mixed)
+		}
+		if got[secretOnlyParent] != tc.secretOnly {
+			t.Errorf("%s: parent with only a secret sub-issue = %+v, want %+v", tc.name, got[secretOnlyParent], tc.secretOnly)
+		}
+	}
+}
+
 // A public parent can hold sub-issues from a private project. Its child-done
 // system rule counts and names only the sub-issues the viewer can see.
 func TestPrivateProjectSystemWakeupSkipsHiddenChildren(t *testing.T) {

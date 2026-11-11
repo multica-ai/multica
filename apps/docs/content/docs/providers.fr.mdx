@@ -49,6 +49,7 @@ Les étapes d'installation se trouvent dans [Installer les outils de codage IA](
 | Trae CLI | `traecli` | ✓ | ✓ | ✓ | `.traecli/skills/` |
 | Dim | `dim` | ✓ | ✓ | ✓ | — |
 | ZeroClaw | `zeroclaw` | ✓ | — | — | — |
+| ZCode | `zcode` / ZCode Desktop | ✓ | ✓ | ✓ | `.zcode/skills/` |
 
 « MCP géré par Multica » signifie que vous pouvez définir des serveurs MCP dans la configuration de l'agent et que Multica les transmet à l'outil avant une exécution. Cette colonne indique seulement si Multica peut s'en charger, pas si l'outil dispose d'autres moyens de configurer MCP.
 
@@ -113,3 +114,9 @@ Pour créer et rattacher des skills, consultez [Skills](/skills).
 - [Créer et configurer un agent](/agents-create) — réglages du modèle et du niveau de réflexion.
 - [Installer les outils de codage IA](/install-agent-runtime) — étapes d'installation et de détection.
 - [Daemon et runtimes](/daemon-runtimes) — enregistrement des runtimes et parallélisme.
+
+## ZCode
+
+ZCode utilise son protocole natif NDJSON `app-server` pour créer, reprendre et annuler les sessions, découvrir les modèles, gérer les niveaux de raisonnement et configurer MCP. Les tâches s'exécutent en mode yolo, sans approbation interactive des outils. Les niveaux de raisonnement viennent du catalogue de modèles du runtime ; la création d'un agent conserve le niveau par défaut du modèle sélectionné.
+
+Sur macOS, le daemon détecte aussi le point d'entrée Node intégré à ZCode Desktop ; Node.js doit être installé. Les connexions API-key/Coding Plan activées dans l'application sont importées dans une configuration temporaire propre au processus, supprimée à sa fermeture sans modifier les fichiers d'origine. Les jetons d'identité Start Plan ne sont pas des clés API et ce mode d'authentification n'est pas pris en charge. Si aucun modèle n'est découvert, configurez une connexion API fonctionnelle dans ZCode Desktop.

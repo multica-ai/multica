@@ -110,6 +110,11 @@
     "in_other_window": "Otra ventana",
     "all_workspaces_open": "Todos los espacios de trabajo ya están abiertos en una ventana"
   },
+  "bottom_bar": {
+    "label": "Barra de estado",
+    "working_one": "{{count}} agente trabajando",
+    "working_other": "{{count}} agentes trabajando"
+  },
   "panels": {
     "work": {
       "my_agents": "Trabajo de mis agentes",
@@ -131,6 +136,7 @@
       "assignee_me": "Yo",
       "assignee_my_agents": "Mis agentes",
       "assignee_me_and_my_agents": "Yo y mis agentes",
+      "assignee_projects_only": "Solo se aplica a las tareas que se muestran en Proyectos",
       "reset": "Restablecer",
       "load_more": "Cargar más",
       "show_less": "Mostrar menos",

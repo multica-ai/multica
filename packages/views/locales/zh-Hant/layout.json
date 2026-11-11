@@ -109,6 +109,10 @@
     "in_other_window": "其他視窗",
     "all_workspaces_open": "所有工作區都已在視窗中開啟"
   },
+  "bottom_bar": {
+    "label": "狀態列",
+    "working_other": "{{count}} 個 AI 代理正在工作"
+  },
   "panels": {
     "work": {
       "my_agents": "我的 AI 代理在做",
@@ -129,6 +133,7 @@
       "assignee_me": "我",
       "assignee_my_agents": "我的 AI 代理",
       "assignee_me_and_my_agents": "我和我的 AI 代理",
+      "assignee_projects_only": "僅作用於側邊欄「專案」下展開的任務",
       "reset": "重設",
       "load_more": "載入更多",
       "show_less": "收合",

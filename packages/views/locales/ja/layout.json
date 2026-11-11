@@ -109,6 +109,10 @@
     "in_other_window": "別ウィンドウ",
     "all_workspaces_open": "すべてのワークスペースがすでにウィンドウで開いています"
   },
+  "bottom_bar": {
+    "label": "ステータスバー",
+    "working_other": "{{count}} 体のエージェントが作業中"
+  },
   "panels": {
     "work": {
       "my_agents": "マイエージェントの作業",
@@ -129,6 +133,7 @@
       "assignee_me": "自分",
       "assignee_my_agents": "自分のエージェント",
       "assignee_me_and_my_agents": "自分と自分のエージェント",
+      "assignee_projects_only": "サイドバーの「プロジェクト」に表示されるタスクにのみ適用されます",
       "reset": "リセット",
       "load_more": "さらに表示",
       "show_less": "表示を減らす",

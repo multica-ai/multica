@@ -109,6 +109,10 @@
     "in_other_window": "다른 창",
     "all_workspaces_open": "모든 워크스페이스가 이미 창에 열려 있습니다"
   },
+  "bottom_bar": {
+    "label": "상태 표시줄",
+    "working_other": "에이전트 {{count}}개 작업 중"
+  },
   "panels": {
     "work": {
       "my_agents": "내 에이전트의 작업",
@@ -129,6 +133,7 @@
       "assignee_me": "나",
       "assignee_my_agents": "내 에이전트",
       "assignee_me_and_my_agents": "나와 내 에이전트",
+      "assignee_projects_only": "사이드바의 '프로젝트' 아래에 표시되는 태스크에만 적용됩니다",
       "reset": "초기화",
       "load_more": "더 보기",
       "show_less": "간단히 보기",

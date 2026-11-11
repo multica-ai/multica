@@ -84,23 +84,6 @@
     "workflow_usage_other": "워크플로 {{count}}개에서 사용 중",
     "workflow_usage_none": "사용하는 워크플로 없음"
   },
-  "wakeups": {
-    "description": "모든 태스크에 적용되는 플랫폼 규칙입니다. 각 태스크의 깨우기 섹션에서 따로 바꿀 수 있습니다.",
-    "child_done_title": "하위 태스크가 끝나면",
-    "child_done_description": "한 단계가 끝나고 다음 단계가 기다리고 있으면 상위 태스크 담당자를 깨우고, 모든 하위 태스크가 끝나면 한 번 더 깨웁니다. 담당자가 멤버면 받은편지함으로 알립니다.",
-    "enabled": "기본으로 켜기",
-    "instruction": "기본 지시",
-    "instruction_hint": "깨운 에이전트에게 전달됩니다. 비워 두면 아래 기본 제공 지시를 사용합니다.",
-    "instruction_placeholder": "비워 두면 기본 제공 지시를 사용합니다",
-    "builtin": "기본 제공 지시",
-    "instruction_invalid": "지시는 4,000바이트 이내로 입력하세요.",
-    "save": "저장",
-    "saving": "저장 중…",
-    "save_error": "기본값을 저장하지 못했습니다.",
-    "customized_other": "진행 중인 태스크 {{count}}개가 자체 설정을 사용해 이 기본값을 따르지 않습니다.",
-    "admin_only": "소유자와 관리자만 기본값을 바꿀 수 있습니다.",
-    "load_error": "깨우기 기본값을 불러오지 못했습니다."
-  },
   "quick_actions": {
     "title": "퀵 액션",
     "description": "태스크 사이드바에서 미리 설정한 에이전트와 프롬프트를 실행합니다.",
@@ -209,9 +192,47 @@
     },
     "theme": {
       "title": "테마",
-      "description": "앱 전체의 색상, 테두리, 그림자, 모서리.",
+      "description": "앱 전체의 색상, 테두리, 그림자, 모서리. 테마 파일을 가져와 더 추가할 수 있어요.",
       "default": "기본",
-      "pop": "팝"
+      "pop": "팝",
+      "built_in": "기본 제공",
+      "installed": "설치됨",
+      "remove": "{{name}} 제거",
+      "safe_mode": "안전 모드: 이 창을 닫을 때까지 테마가 꺼져 있어요.",
+      "safe_mode_exit": "내 테마 사용",
+      "folder": "테마 폴더",
+      "folder_problems": "테마 폴더의 일부 테마가 검사를 통과하지 못했어요. 고친 뒤 저장하세요. 그동안은 마지막으로 통과한 버전을 사용해요."
+    },
+    "import": {
+      "button": "테마 가져오기",
+      "from_zip": "테마 파일(.zip)",
+      "from_folder": "테마 폴더",
+      "storage_full": "이 기기에 테마를 저장할 공간이 부족해요. 다른 테마를 제거한 뒤 다시 시도하세요.",
+      "confirm_title": "‘{{name}}’을(를) 설치할까요?",
+      "warning": "테마는 대화상자와 경고를 포함한 모든 화면의 모양을 바꿀 수 있어요. 신뢰하는 사람이 만든 테마만 설치하세요.",
+      "author": "만든 사람",
+      "version": "버전",
+      "replaces": "{{to}} ({{from}} 대체)",
+      "includes": "포함",
+      "cancel": "취소",
+      "confirm": "설치하고 사용",
+      "error_title": "이 테마를 설치할 수 없어요",
+      "error_description": "아무것도 바뀌지 않았어요. 테마 파일에 다음 문제가 있어요:",
+      "close": "닫기",
+      "has_options_other": "옵션 {{count}}개",
+      "has_assets_other": "글꼴·이미지 {{count}}개",
+      "menu_label": "사용자 테마",
+      "beta": "베타",
+      "beta_note": "사용자 테마는 베타예요. 테마가 쓰는 변수와 매니페스트가 바뀔 수 있어 테마를 업데이트해야 할 수도 있어요."
+    },
+    "tools": {
+      "label": "테마 작업 더 보기",
+      "duplicate": "“{{name}}” 복제해서 새 테마 만들기",
+      "open_folder": "테마 폴더 열기",
+      "guide": "테마 만드는 방법",
+      "duplicated_web": "{{file}}을(를) 내려받았어요. 압축을 풀고 theme.css를 고친 다음 폴더를 가져오세요.",
+      "duplicated_desktop": "테마 폴더에 “{{name}}”을(를) 만들었어요. theme.css를 저장하면 바로 반영돼요.",
+      "duplicate_failed": "복사본을 만들지 못했어요: {{error}}"
     },
     "theme_options": {
       "title": "테마 옵션",
@@ -429,7 +450,10 @@
   },
   "chat": {
     "floating_label": "플로팅 채팅 창",
-    "floating_hint": "모든 페이지에 플로팅 채팅 버튼을 표시합니다."
+    "floating_hint": "모든 페이지에 플로팅 채팅 버튼을 표시합니다.",
+    "ask_agent_label": "Multica에게 묻기 에이전트",
+    "ask_agent_hint": "이 워크스페이스에서 하단 바로 시작하는 새 채팅의 에이전트입니다.",
+    "ask_agent_last_used": "마지막으로 사용한 에이전트"
   },
   "issue": {
     "opening": {
@@ -497,7 +521,6 @@
       "members": "멤버",
       "labels": "레이블",
       "issue_statuses": "태스크 상태",
-      "wakeups": "깨우기",
       "properties": "속성",
       "quick_actions": "퀵 액션",
       "plugins": "플러그인",

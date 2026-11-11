@@ -84,23 +84,6 @@
     "workflow_usage_other": "{{count}} 個工作流在用",
     "workflow_usage_none": "未被工作流使用"
   },
-  "wakeups": {
-    "description": "平臺對所有任務生效的規則。每個任務可以在自己的「喚醒」區域單獨修改。",
-    "child_done_title": "子任務結束時",
-    "child_done_description": "某個階段的子任務全部結束、且後面還有階段在等待時，喚醒父任務的負責人；全部子任務結束時再喚醒一次。負責人是成員時，改為傳送收件箱通知。",
-    "enabled": "預設開啟",
-    "instruction": "預設指令",
-    "instruction_hint": "發給被喚醒的 AI 代理。留空則使用下方的內建指令。",
-    "instruction_placeholder": "留空則使用內建指令",
-    "builtin": "內建指令",
-    "instruction_invalid": "指令最多 4,000 位元組。",
-    "save": "儲存",
-    "saving": "儲存中…",
-    "save_error": "無法儲存預設值。",
-    "customized_other": "{{count}} 個進行中的任務使用了自己的設定，不跟隨此預設值。",
-    "admin_only": "只有所有者和管理員可以修改預設值。",
-    "load_error": "無法載入喚醒預設值。"
-  },
   "quick_actions": {
     "title": "快捷操作",
     "description": "在任務側欄執行預設的 AI 代理和提示詞。",
@@ -209,9 +192,47 @@
     },
     "theme": {
       "title": "主題",
-      "description": "全域的顏色、邊框、陰影和圓角。",
+      "description": "全域的顏色、邊框、陰影和圓角。可以匯入主題檔案加入更多主題。",
       "default": "預設",
-      "pop": "普普"
+      "pop": "普普",
+      "built_in": "內建",
+      "installed": "已安裝",
+      "remove": "移除 {{name}}",
+      "safe_mode": "安全模式：關閉這個視窗之前，你的主題暫停生效。",
+      "safe_mode_exit": "恢復我的主題",
+      "folder": "主題資料夾",
+      "folder_problems": "主題資料夾裡有主題沒通過檢查。修改後儲存即可；在此之前繼續使用最後一個通過檢查的版本。"
+    },
+    "import": {
+      "button": "匯入主題",
+      "from_zip": "主題檔案（.zip）",
+      "from_folder": "主題資料夾",
+      "storage_full": "這台裝置的儲存空間不夠儲存這個主題。移除其他主題後再試。",
+      "confirm_title": "安裝「{{name}}」？",
+      "warning": "主題可以改變每個頁面的樣式，包括對話框和警告。只安裝你信任的人做的主題。",
+      "author": "作者",
+      "version": "版本",
+      "replaces": "{{to}}（取代 {{from}}）",
+      "includes": "包含",
+      "cancel": "取消",
+      "confirm": "安裝並使用",
+      "error_title": "無法安裝這個主題",
+      "error_description": "沒有做任何變更。主題檔案有以下問題：",
+      "close": "關閉",
+      "has_options_other": "{{count}} 個選項",
+      "has_assets_other": "{{count}} 個字型和圖片",
+      "menu_label": "自訂主題",
+      "beta": "Beta",
+      "beta_note": "自訂主題處於 Beta 階段。主題用到的變數和清單可能會變，主題可能需要更新。"
+    },
+    "tools": {
+      "label": "更多主題操作",
+      "duplicate": "複製「{{name}}」為新主題",
+      "open_folder": "開啟主題資料夾",
+      "guide": "如何製作主題",
+      "duplicated_web": "已下載 {{file}}。解壓縮後編輯 theme.css，再匯入這個資料夾。",
+      "duplicated_desktop": "已在主題資料夾中建立「{{name}}」。儲存 theme.css 後變更立即生效。",
+      "duplicate_failed": "無法建立副本：{{error}}"
     },
     "theme_options": {
       "title": "主題選項",
@@ -429,7 +450,10 @@
   },
   "chat": {
     "floating_label": "懸浮聊天窗",
-    "floating_hint": "在每個頁面顯示懸浮聊天按鈕。"
+    "floating_hint": "在每個頁面顯示懸浮聊天按鈕。",
+    "ask_agent_label": "「問 Multica」的 AI 代理",
+    "ask_agent_hint": "在此工作區從底部列發起新對話時使用的 AI 代理。",
+    "ask_agent_last_used": "上次使用的"
   },
   "issue": {
     "opening": {
@@ -497,7 +521,6 @@
       "members": "成員",
       "labels": "標籤",
       "issue_statuses": "任務狀態",
-      "wakeups": "喚醒",
       "properties": "屬性",
       "quick_actions": "快捷操作",
       "plugins": "外掛",

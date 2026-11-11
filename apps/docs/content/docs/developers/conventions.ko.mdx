@@ -30,7 +30,7 @@ Multica 코드를 작성하거나, 번역을 변경하거나, 중국어 제품 �
 
 | 패키지 | 의존 가능 | 의존 금지 |
 | --- | --- | --- |
-| `packages/core` | 앱 종속적이지 않은 것만 | `react-dom`, `next/*`, UI 라이브러리, `process.env`, `localStorage` 직접 사용(영속화는 `StorageAdapter` 경유) |
+| `packages/core` | 앱 종속적이지 않은 것만 | `react-dom`, `next/*`, UI 라이브러리, `process.env`, `localStorage`·`sessionStorage` 직접 사용(영속화는 `StorageAdapter` 경유. 탭 단위 `sessionStorage`는 `analytics/exception-dedupe.ts`와 `appearance/safe-mode.ts`만 사용) |
 | `packages/ui` | 없음 | `@multica/core`, 비즈니스 로직 |
 | `packages/views` | `core/`, `ui/` | `next/*`, `react-router-dom`, store 정의 |
 | `apps/web/platform/` | `next/*` | 다른 앱 |

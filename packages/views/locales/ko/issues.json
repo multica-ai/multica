@@ -55,7 +55,7 @@
   },
   "relation_filter_error": {
     "title": "'나와의 관계' 필터를 불러오지 못했습니다",
-    "hint": "구독과 에이전트를 불러온 후에 '내가 구독 중' 또는 '내 에이전트가 담당' 필터의 태스크를 표시할 수 있습니다."
+    "hint": "구독과 에이전트를 불러온 후에 '내가 구독 중' 또는 '내 에이전트의 작업' 필터의 태스크를 표시할 수 있습니다."
   },
   "source_context": {
     "create_action": "이 댓글에서 하위 태스크 만들기",
@@ -192,7 +192,7 @@
     "section_relation": "나와의 관계",
     "relation_assigned": "내가 담당",
     "relation_created": "내가 생성",
-    "relation_my_agents": "내 에이전트가 담당",
+    "relation_my_agents": "내 에이전트의 작업",
     "relation_subscribed": "내가 구독 중",
     "section_agent_status": "에이전트 상태",
     "agent_status_running": "실행 중",
@@ -579,7 +579,8 @@
   },
   "timeline": {
     "loading": "불러오는 중...",
-    "jump_to_latest": "최신으로 이동"
+    "jump_to_latest": "최신으로 이동",
+    "new_comments_other": "새 댓글 {{count}}개"
   },
   "activity": {
     "created": "이 태스크를 만들었습니다",
@@ -634,7 +635,10 @@
     "wakeup_checkin": "조용한 확인: {{note}}",
     "wakeup_checkin_coalesced_other": "조용한 확인 {{count}}회 · 최근: {{note}}",
     "wakeup_chip_created_by": "{{name}} 생성",
-    "wakeup_chip_system": "시스템 규칙"
+    "wakeup_chip_system": "시스템 규칙",
+    "environment_stopped": "환경 {{name}}을(를) 중지했습니다",
+    "environment_restarted": "환경 {{name}}을(를) 재시작했습니다",
+    "environment_started": "환경 {{name}}을(를) 시작했습니다"
   },
   "comment": {
     "add_reaction": "반응 추가",
@@ -1070,7 +1074,7 @@
     "variant_my_any": "모든 관련",
     "variant_my_assigned": "나에게 할당됨",
     "variant_my_created": "내가 생성함",
-    "variant_my_involved": "참여 중"
+    "variant_my_involved": "내 에이전트의 작업"
   },
   "plugins": {
     "panels": "Plugins",
@@ -1347,15 +1351,16 @@
       "enable": "이 태스크에서 사용",
       "toggle": "하위 태스크 완료 시 담당자 깨우기",
       "save_error": "시스템 규칙을 저장할 수 없습니다.",
-      "default_on": "워크스페이스 기본값은 켜짐입니다. 기본값은 설정 → 깨우기에서 바꿀 수 있습니다.",
-      "default_off": "워크스페이스 기본값은 꺼짐입니다. 기본값은 설정 → 깨우기에서 바꿀 수 있습니다.",
+      "default_on": "워크스페이스 기본값은 켜짐입니다.",
+      "default_off": "워크스페이스 기본값은 꺼짐입니다.",
       "notify_member": "받은편지함으로 {{name}}에게 알림",
       "instruction": "깨운 뒤 할 일",
       "instruction_edit": "지시 편집",
       "instruction_default": "이 태스크에는 설정되지 않아 기본 지시를 사용합니다:",
       "instruction_placeholder": "비워 두면 기본 지시를 사용합니다",
       "instruction_invalid": "지시는 4,000바이트 이내로 입력하세요.",
-      "paused": "일시 중지됨: {{reason}}"
+      "paused": "일시 중지됨: {{reason}}",
+      "default_change": "기본값 변경"
     },
     "cond": {
       "status": "상태가 {{status}}(으)로 바뀌면",
@@ -1712,15 +1717,12 @@
       "name_placeholder": "상태 이름",
       "add": "추가"
     },
-    "menu": {
-      "view_flow": "전체 흐름 보기",
-      "switch": "워크플로 전환"
-    },
     "flow": {
       "title": "“{{workflow}}” 워크플로",
       "scope_own": "이 워크플로는 이 프로젝트만 사용합니다.",
       "no_handoff_here": "인계 없음",
-      "scope_shared_other": "프로젝트 {{count}}개가 이 워크플로를 사용합니다. 인계는 모두에 적용됩니다."
+      "scope_shared_other": "프로젝트 {{count}}개가 이 워크플로를 사용합니다. 인계는 모두에 적용됩니다.",
+      "switch": "워크플로 전환"
     },
     "templates": {
       "delivery": {
@@ -1849,7 +1851,9 @@
       "running": "실행 중",
       "exited": "종료됨",
       "stopped": "중지됨",
-      "unreachable": "응답 없음"
+      "unreachable": "응답 없음",
+      "stopping": "중지 중",
+      "preparing": "준비 중"
     },
     "expires_in_minutes_other": "{{count}}분 후 만료",
     "expires_in_hours_other": "{{count}}시간 후 만료",
@@ -1864,6 +1868,85 @@
     "open": "열기",
     "copy_url": "URL 복사",
     "copied": "URL을 복사했습니다",
-    "copy_failed": "URL을 복사할 수 없습니다"
+    "copy_failed": "URL을 복사할 수 없습니다",
+    "offline": "오프라인",
+    "machine_offline": "{{machine}} 오프라인",
+    "more_actions": "추가 작업",
+    "view_logs": "로그 보기",
+    "restart": "재시작",
+    "stop": "중지",
+    "stop_confirm_item": "중지…",
+    "run_first": "첫 실행",
+    "run_nth_other": "{{count}}번째 실행",
+    "someone": "누군가",
+    "started_by": "{{name}} 님이 시작함",
+    "restarted_by": "{{name}} 님이 재시작함",
+    "started_by_agent_in_run": "{{name}} 님이 '{{run}}'에서 시작함",
+    "stopped_by": "{{name}} 님이 중지함",
+    "stopped_on_expiry": "만료되어 자동 중지됨",
+    "exited_ago": "{{time}} 종료됨",
+    "exit_code": "종료 코드 {{code}}",
+    "detected_label": "자동 감지된 서비스 · {{name}}",
+    "detected_no_logs": "이 서비스는 환경 설정으로 시작되지 않아 로그를 볼 수 없고 재시작할 수도 없습니다.",
+    "offline_hint": "이 기기가 다시 온라인이 되면 사용할 수 있습니다.",
+    "outdated_hint": "이 기기의 Multica를 업데이트하면 여기서 관리할 수 있습니다.",
+    "no_permission_hint": "이 기기를 사용할 수 있는 멤버만 중지하거나 재시작할 수 있습니다.",
+    "waiting_machine": "기기 응답 대기 중",
+    "waiting_ready": "서비스 준비 대기 중",
+    "no_response": "응답 없음",
+    "action_failed": {
+      "stop": "중지하지 못했습니다",
+      "restart": "재시작하지 못했습니다",
+      "start": "시작하지 못했습니다"
+    },
+    "stop_confirm_title": "{{name}}을(를) 중지할까요?",
+    "stop_confirm_body": "이 서비스({{process}})는 자동 감지된 것으로, 환경 설정으로 시작되지 않았습니다. 중지하면 여기서 재시작할 수 없으며 에이전트가 다시 시작해야 합니다.",
+    "cancel": "취소",
+    "preparing_title": "{{name}} 님이 환경을 준비하는 중",
+    "preparing_hint": "시작되면 여기에 표시됩니다",
+    "start_menu": {
+      "trigger": "환경 시작",
+      "note": "프로젝트의 환경 설정에 따라 이 기기의 최근 실행 코드로 시작합니다.",
+      "no_permission": "기기를 사용할 수 있는 멤버만 그 기기에서 환경을 시작할 수 있습니다.",
+      "nothing_to_start": "이 태스크는 아직 실행된 적이 없거나 이전 실행의 코드가 정리되어, 바로 시작할 수 있는 환경이 없습니다.",
+      "ask_agent": "{{name}}에게 시작 요청",
+      "ask_any_agent": "에이전트에게 시작 요청",
+      "new_run": "새 실행",
+      "preparing": "준비 중",
+      "ask_agent_hint": "{{name}}이(가) 이 태스크의 코드를 준비한 뒤 환경을 시작합니다. 프로젝트에 환경 설정이 없으면 시작 방법을 스스로 판단합니다.",
+      "ask_any_agent_hint": "에이전트가 이 태스크의 코드를 준비한 뒤 환경을 시작합니다. 프로젝트에 환경 설정이 없으면 시작 방법을 스스로 판단합니다.",
+      "ask_failed": "에이전트에게 요청하지 못했습니다",
+      "agent_instruction": "환경 시작: 이 태스크의 코드를 준비한 뒤 `multica env start`로 프로젝트에 설정된 환경을 시작하세요. 환경 설정이 없으면 시작 방법을 스스로 판단하세요. 서비스는 계속 실행해 두고 접속 주소를 답글로 알려 주세요."
+    },
+    "log": {
+      "title": "{{name}} · 로그",
+      "filter": "로그 필터",
+      "wrap": "자동 줄바꿈",
+      "follow": "최신 따라가기",
+      "copy": "복사",
+      "copied": "로그를 복사했습니다",
+      "copy_failed": "로그를 복사하지 못했습니다",
+      "refresh": "새로고침",
+      "footer_other": "최근 {{count}}줄 표시 · {{time}} 업데이트",
+      "loading": "로그를 읽는 중…",
+      "empty": "아직 출력이 없습니다",
+      "no_match": "일치하는 줄이 없습니다",
+      "no_response": "기기가 응답하지 않았습니다",
+      "failed": "로그를 읽지 못했습니다: {{error}}",
+      "offline_excerpt": "이 기기는 오프라인입니다. 종료 전에 마지막으로 출력한 내용입니다.",
+      "offline_empty": "이 기기가 다시 온라인이 되면 로그를 볼 수 있습니다.",
+      "exit_divider": "{{time}} 종료",
+      "exit_divider_code": "{{time}} 종료 · 종료 코드 {{code}}",
+      "stopped_divider": "{{time}} 중지"
+    },
+    "app_desktop_hint": "데스크톱 앱입니다. 실행 중인 머신의 Multica Desktop에서 창으로 전환할 수 있습니다.",
+    "app_remote_hint": "{{machine}}에서 실행 중입니다. 해당 머신의 Multica Desktop에서 창으로 전환할 수 있습니다.",
+    "focus": "창으로 전환",
+    "focus_gone": "{{name}}이(가) 더 이상 실행되고 있지 않습니다",
+    "focus_unsupported": "이 머신의 데몬은 아직 앱 창으로 전환할 수 없습니다. Multica를 업데이트한 뒤 다시 시도하세요.",
+    "focus_unavailable": "로컬 데몬이 실행되고 있지 않습니다",
+    "focus_failed": "{{name}}(으)로 전환할 수 없습니다",
+    "retry": "다시 시도",
+    "dismiss": "닫기"
   }
 }

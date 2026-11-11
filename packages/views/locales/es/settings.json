@@ -193,9 +193,49 @@
     },
     "theme": {
       "title": "Tema",
-      "description": "Colores, bordes, sombras y esquinas de toda la app.",
+      "description": "Colores, bordes, sombras y esquinas de toda la app. Importa un archivo de tema para añadir más.",
       "default": "Predeterminado",
-      "pop": "Pop"
+      "pop": "Pop",
+      "built_in": "Integrados",
+      "installed": "Instalados",
+      "remove": "Quitar {{name}}",
+      "safe_mode": "Modo seguro: tu tema está en pausa hasta que cierres esta ventana.",
+      "safe_mode_exit": "Usar mi tema",
+      "folder": "Carpeta de temas",
+      "folder_problems": "Algunos temas de la carpeta de temas no pasan las comprobaciones. Corrígelos y guarda; mientras tanto se usa la última versión que las pasó."
+    },
+    "import": {
+      "button": "Importar tema",
+      "from_zip": "Archivo de tema (.zip)",
+      "from_folder": "Carpeta del tema",
+      "storage_full": "No hay espacio suficiente en este dispositivo para guardar el tema. Quita otro tema e inténtalo de nuevo.",
+      "confirm_title": "¿Instalar «{{name}}»?",
+      "warning": "Un tema puede cambiar el aspecto de todas las páginas, incluidos los diálogos y avisos. Instala solo temas de personas de confianza.",
+      "author": "Autor",
+      "version": "Versión",
+      "replaces": "{{to}} (sustituye a {{from}})",
+      "includes": "Incluye",
+      "cancel": "Cancelar",
+      "confirm": "Instalar y usar",
+      "error_title": "No se pudo instalar este tema",
+      "error_description": "No se ha cambiado nada. El archivo de tema tiene estos problemas:",
+      "close": "Cerrar",
+      "has_options_one": "{{count}} opción",
+      "has_options_other": "{{count}} opciones",
+      "has_assets_one": "{{count}} fuente o imagen",
+      "has_assets_other": "{{count}} fuentes e imágenes",
+      "menu_label": "Temas personalizados",
+      "beta": "Beta",
+      "beta_note": "Los temas personalizados están en beta. Las variables y el manifiesto que usa un tema pueden cambiar, y puede que haya que actualizarlo."
+    },
+    "tools": {
+      "label": "Más acciones de tema",
+      "duplicate": "Duplicar «{{name}}» como tema nuevo",
+      "open_folder": "Abrir carpeta de temas",
+      "guide": "Cómo crear un tema",
+      "duplicated_web": "Se descargó {{file}}. Descomprímelo, edita theme.css e importa la carpeta.",
+      "duplicated_desktop": "Se creó «{{name}}» en la carpeta de temas. Los cambios en su theme.css se aplican al guardar.",
+      "duplicate_failed": "No se pudo crear la copia: {{error}}"
     },
     "theme_options": {
       "title": "Opciones del tema",
@@ -413,7 +453,10 @@
   },
   "chat": {
     "floating_label": "Ventana de chat flotante",
-    "floating_hint": "Muestra el botón de chat flotante en todas las páginas."
+    "floating_hint": "Muestra el botón de chat flotante en todas las páginas.",
+    "ask_agent_label": "Agente de Preguntar a Multica",
+    "ask_agent_hint": "El agente con el que empieza un chat nuevo desde la barra inferior, en este espacio de trabajo.",
+    "ask_agent_last_used": "El último usado"
   },
   "issue": {
     "description": "Elige qué campos mantiene cada diálogo de creación en su barra de herramientas. Los campos ocultos siguen disponibles en el menú ⋯ y reaparecen mientras tengan un valor.",
@@ -489,7 +532,6 @@
       "apps": "Apps conectadas",
       "channels": "Mensajería",
       "code": "Código",
-      "wakeups": "Despertares",
       "workflows": "Flujos de trabajo"
     },
     "groups": {
@@ -1526,24 +1568,6 @@
     "description": "Se aplica cuando todos los PR enlazados a una tarea se hayan fusionado, y solo a fusiones a partir de ahora.",
     "label": "Al fusionarse los PR, mover la tarea a",
     "none": "No cambiar"
-  },
-  "wakeups": {
-    "admin_only": "Solo los propietarios y administradores pueden cambiar estos valores predeterminados.",
-    "builtin": "Instrucción integrada",
-    "child_done_description": "Despierta al responsable del padre cuando una etapa termina y otra posterior está en espera, y una vez más cuando todas las subtareas se cierran. Si el responsable es un miembro, recibe una notificación en la bandeja de entrada.",
-    "child_done_title": "Al terminar las subtareas",
-    "customized_one": "{{count}} tarea abierta tiene su propio ajuste e ignora este valor predeterminado.",
-    "customized_other": "{{count}} tareas abiertas tienen su propio ajuste e ignoran este valor predeterminado.",
-    "description": "Reglas de la plataforma que se aplican a cada tarea. Cada tarea puede cambiarlas en su sección de Despertares.",
-    "enabled": "Activado por defecto",
-    "instruction": "Instrucción predeterminada",
-    "instruction_hint": "Se envía al agente despertado. Déjala vacía para usar la instrucción integrada de abajo.",
-    "instruction_invalid": "Mantén la instrucción dentro de 4.000 bytes.",
-    "instruction_placeholder": "Déjala vacía para usar la instrucción integrada",
-    "load_error": "No se han podido cargar los valores predeterminados de despertares.",
-    "save": "Guardar",
-    "save_error": "No se ha podido guardar el valor predeterminado.",
-    "saving": "Guardando…"
   },
   "connected_apps": {
     "description": "Cuentas que usan tus agentes para acceder a aplicaciones externas. Las acciones permitidas se ejecutan de inmediato.",

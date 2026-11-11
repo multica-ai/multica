@@ -109,6 +109,10 @@
     "in_other_window": "其他窗口",
     "all_workspaces_open": "所有工作区都已在窗口中打开"
   },
+  "bottom_bar": {
+    "label": "状态栏",
+    "working_other": "{{count}} 个智能体正在工作"
+  },
   "panels": {
     "work": {
       "my_agents": "我的智能体在做",
@@ -129,6 +133,7 @@
       "assignee_me": "我",
       "assignee_my_agents": "我的智能体",
       "assignee_me_and_my_agents": "我和我的智能体",
+      "assignee_projects_only": "仅作用于侧边栏“项目”下展开的任务",
       "reset": "重置",
       "load_more": "加载更多",
       "show_less": "收起",

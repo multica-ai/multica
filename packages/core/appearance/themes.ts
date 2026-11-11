@@ -1,11 +1,13 @@
 /**
- * A theme is a manifest that names it and declares its options, plus CSS that
- * overrides the public variables (./theme-variables) under `.theme-light` and
- * `.theme-dark` and may restyle the public anchors (./anchors).
+ * A theme is a folder: `manifest.json` names it and declares its options,
+ * `theme.css` overrides the public variables (./theme-variables) under
+ * `.theme-light` and `.theme-dark` and may restyle the public anchors
+ * (./anchors), and any fonts or images the CSS references sit next to it.
  *
- * Only the built-in themes (./built-in-themes) exist for now. They are written
- * as token tables so the contrast test can read them, and compiled to that
- * CSS. docs/theming.md is the reference; keep it in step with this file.
+ * Built-in themes (./built-in-themes) are written as token tables so the
+ * contrast test can read them, and compiled to the same CSS an outside theme
+ * ships. Everything a theme ships goes through `sanitizeThemeCss` (./theme-css).
+ * docs/theming.md is the public reference; keep it in step with this file.
  */
 
 /** Bumped only for changes that would break existing themes. */
@@ -99,9 +101,11 @@ export interface ThemeManifest {
   options?: readonly ThemeOption[];
 }
 
-/** A theme ready to apply: its manifest and CSS. */
+/** A theme ready to apply: its manifest, theme.css and the files the CSS references. */
 export interface Theme extends ThemeManifest {
   css: string;
+  /** Relative path to a base64 `data:` URL. */
+  assets?: Readonly<Record<string, string>>;
 }
 
 /** Variable name (without `--`) to value. */
@@ -109,29 +113,35 @@ export type ThemeTokens = Readonly<Record<string, string>>;
 
 export interface BuiltInTheme extends Theme {
   tokens: { light: ThemeTokens; dark: ThemeTokens };
-  /** Tokens for what sits on the frame: the rail, desktop toolbar and tab bar. */
+  /** Tokens for what sits on the frame: the rail, desktop toolbar, tab bar and bottom bar. */
   frame?: { light?: ThemeTokens; dark?: ThemeTokens };
 }
 
-const FRAME_ANCHORS = ':is([data-mc="app-rail"], [data-mc="window-toolbar"], [data-mc="tab-bar"])';
+const FRAME_ANCHORS = ':is([data-mc="app-rail"], [data-mc="window-toolbar"], [data-mc="tab-bar"], [data-mc="bottom-bar"])';
 
-function declarations(tokens: ThemeTokens | undefined): string {
-  return Object.entries(tokens ?? {})
-    .map(([name, value]) => `--${name}: ${value};`)
-    .join(" ");
-}
-
-/** The CSS a token table stands for. */
-export function themeTokensCss(theme: Pick<BuiltInTheme, "tokens" | "frame">): string {
+/**
+ * The CSS a token table stands for: one line per rule, or with `readable`
+ * one declaration per line, as a theme author would write it.
+ */
+export function themeTokensCss(
+  theme: Pick<BuiltInTheme, "tokens" | "frame">,
+  { readable = false }: { readable?: boolean } = {},
+): string {
   const blocks: string[] = [];
-  const add = (selector: string, body: string) => {
-    if (body) blocks.push(`${selector} { ${body} }`);
+  const add = (selector: string, tokens: ThemeTokens | undefined) => {
+    const lines = Object.entries(tokens ?? {}).map(([name, value]) => `--${name}: ${value};`);
+    if (lines.length === 0) return;
+    blocks.push(
+      readable
+        ? `${selector} {\n${lines.map((line) => `  ${line}`).join("\n")}\n}`
+        : `${selector} { ${lines.join(" ")} }`,
+    );
   };
-  add(".theme-light", declarations(theme.tokens.light));
-  add(".theme-dark", declarations(theme.tokens.dark));
-  add(`.theme-light ${FRAME_ANCHORS}`, declarations(theme.frame?.light));
-  add(`.theme-dark ${FRAME_ANCHORS}`, declarations(theme.frame?.dark));
-  return blocks.join("\n");
+  add(".theme-light", theme.tokens.light);
+  add(".theme-dark", theme.tokens.dark);
+  add(`.theme-light ${FRAME_ANCHORS}`, theme.frame?.light);
+  add(`.theme-dark ${FRAME_ANCHORS}`, theme.frame?.dark);
+  return blocks.join(readable ? "\n\n" : "\n");
 }
 
 const SAFE_VALUE = /^[\w\s#.,%()/+-]+$/;

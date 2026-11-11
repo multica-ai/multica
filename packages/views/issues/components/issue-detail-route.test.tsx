@@ -7,7 +7,7 @@ import { ApiError } from "@multica/core/api/client";
 import type { ApiClient } from "@multica/core/api/client";
 import { NavigationProvider } from "../../navigation";
 import type { NavigationAdapter } from "../../navigation";
-import { IssueDetail } from "./issue-detail";
+import { IssueDetail, IssueDetailSkeleton } from "./issue-detail";
 import {
   IssueDetailRoute,
   parseCommentHighlightHash,
@@ -209,5 +209,53 @@ describe("IssueDetailRoute with an identifier that names no issue", () => {
     // A failed resolve must never rewrite the URL.
     expect(replace).not.toHaveBeenCalled();
     qc.clear();
+  });
+});
+
+describe("IssueDetailRoute loading sidebar layout", () => {
+  it.each([
+    [undefined, true],
+    [{ content: 80, sidebar: 20 }, true],
+    [{ content: 100, sidebar: 0 }, false],
+  ])("respects saved layout %j while resolving", (layout, sidebarVisible) => {
+    const storageKey = "react-resizable-panels:multica_issue_detail_layout";
+    if (layout) localStorage.setItem(storageKey, JSON.stringify(layout));
+    else localStorage.removeItem(storageKey);
+    const getIssue = vi.fn(() => new Promise<never>(() => {}));
+    setApiInstance({ getIssue } as unknown as ApiClient);
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    const view = render(
+      <QueryClientProvider client={qc}>
+        {wrapper({ children: <IssueDetailRoute routeId="TES-1" /> })}
+      </QueryClientProvider>,
+    );
+    expect(!!view.container.querySelector(".w-80.border-l")).toBe(sidebarVisible);
+    expect(getIssue).toHaveBeenCalledTimes(1);
+    view.unmount();
+    qc.clear();
+    localStorage.removeItem(storageKey);
+  });
+});
+
+describe("IssueDetailSkeleton embedded layouts", () => {
+  it("reads the host layout without borrowing the page layout", () => {
+    const pageKey = "react-resizable-panels:multica_issue_detail_layout";
+    const hostKey = "react-resizable-panels:embedded-detail";
+    localStorage.setItem(pageKey, JSON.stringify({ content: 80, sidebar: 20 }));
+    localStorage.setItem(hostKey, JSON.stringify({ content: 100, sidebar: 0 }));
+    const view = render(wrapper({ children: <IssueDetailSkeleton layoutId="embedded-detail" /> }));
+    expect(view.container.querySelector(".w-80.border-l")).toBeNull();
+    view.unmount();
+    localStorage.removeItem(pageKey);
+    localStorage.removeItem(hostKey);
+  });
+
+  it("keeps sidebar-free surfaces clear even when the saved layout is open", () => {
+    const storageKey = "react-resizable-panels:multica_issue_detail_layout";
+    localStorage.setItem(storageKey, JSON.stringify({ content: 80, sidebar: 20 }));
+    const view = render(wrapper({ children: <IssueDetailSkeleton sidebar={false} /> }));
+    expect(view.container.querySelector(".w-80.border-l")).toBeNull();
+    view.unmount();
+    localStorage.removeItem(storageKey);
   });
 });

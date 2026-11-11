@@ -2,6 +2,8 @@ import { useSyncExternalStore } from "react";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { defaultStorage } from "../platform/storage";
+import { findTheme } from "./installed-themes";
+import { THEME_ID_PATTERN, themeCss } from "./theme-package";
 import { DEFAULT_THEME_ID, findBuiltInTheme } from "./built-in-themes";
 import { isLocalFont, localFontFamily, type LocalFont } from "./local-fonts";
 import {
@@ -14,9 +16,15 @@ import {
 
 export * from "./themes";
 export * from "./built-in-themes";
+export * from "./theme-css";
+export * from "./theme-package";
+export * from "./installed-themes";
 export * from "./anchors";
 export * from "./theme-variables";
 export * from "./local-fonts";
+export * from "./theme-archive";
+export * from "./theme-export";
+export * from "./safe-mode";
 
 /**
  * Appearance sits on top of light/dark mode: a theme (see ./themes) with its
@@ -118,7 +126,7 @@ function sanitizeThemeOptions(value: unknown): Record<string, ThemeOptionValues>
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const out: Record<string, ThemeOptionValues> = {};
   for (const [themeId, options] of Object.entries(value).slice(0, 40)) {
-    if (!findBuiltInTheme(themeId) || !options || typeof options !== "object") continue;
+    if (!THEME_ID_PATTERN.test(themeId) || !options || typeof options !== "object") continue;
     const clean: Record<string, ThemeOptionValue> = {};
     for (const [key, v] of Object.entries(options).slice(0, 24)) {
       const value = sanitizeOptionValue(v);
@@ -147,7 +155,7 @@ export function sanitizeAppearance(stored: unknown): AppearancePreferences {
   return {
     theme: pick(
       "theme",
-      (v): v is string => typeof v === "string" && findBuiltInTheme(v) !== undefined,
+      (v): v is string => typeof v === "string" && THEME_ID_PATTERN.test(v),
       p.theme ?? p.style,
     ),
     themeOptions: sanitizeThemeOptions(p.themeOptions),
@@ -238,9 +246,11 @@ export function appearanceRootVariables(
   };
 }
 
-/** The theme to render: the chosen one, or Default when it is not a built-in theme. */
-export function activeTheme(prefs: Pick<AppearancePreferences, "theme">): Theme {
-  return findBuiltInTheme(prefs.theme) ?? findBuiltInTheme(DEFAULT_THEME_ID)!;
+/** The theme to render: the chosen one, or Default in safe mode or when it is not installed. */
+export function activeTheme(prefs: Pick<AppearancePreferences, "theme">, safeMode = false): Theme {
+  const fallback = findBuiltInTheme(DEFAULT_THEME_ID)!;
+  if (safeMode) return fallback;
+  return findTheme(prefs.theme) ?? fallback;
 }
 
 const BOTH_MODES = ":root:not(.dark), :root.dark";
@@ -276,9 +286,9 @@ export function appearanceStylesheet(theme: Theme, prefs: AppearancePreferences)
   return parts.filter(Boolean).join("\n");
 }
 
-/** The theme's own CSS. */
+/** The theme's own CSS, checked and with assets resolved. */
 export function appearanceThemeCss(theme: Theme): string {
-  return theme.css ?? "";
+  return themeCss(theme);
 }
 
 /** Attributes for <html>: `data-theme` and the theme's options; `null` removes one. */

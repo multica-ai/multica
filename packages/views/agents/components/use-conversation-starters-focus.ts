@@ -8,12 +8,12 @@ import { useOptionalNavigation } from "../../navigation";
 export const CONVERSATION_STARTERS_FOCUS_FLASH_MS = 1600;
 
 /**
- * Arriving from "customize" in a chat's empty state: bring the starter
+ * Arriving via the conversation-starters deep link: bring the starter
  * prompts into view and flash them, so the deep link lands ON the setting
  * rather than on a long page that happens to contain it. The param is
  * consumed on arrival, so a refresh never replays an animation nobody asked
- * for — but every fresh click must land, including a second one from a chat
- * window still open beside this page, and one aimed at a different agent.
+ * for — but every fresh click must land, including a repeat while this page
+ * is already open, and one aimed at a different agent.
  *
  * Navigation is read optionally: the editors that host this are leaves that
  * tests mount in isolation, and without an adapter there is nothing to focus.
