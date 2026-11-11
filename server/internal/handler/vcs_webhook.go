@@ -2,10 +2,13 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -136,11 +139,22 @@ func (h *Handler) HandleVCSWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	switch provider.EventKind(r.Header) {
+	systemHook := conn.Provider == string(vcs.KindGitLab) && r.Header.Get("X-Gitlab-Event") == "System Hook"
+	switch provider.EventKind(r.Header, body) {
 	case vcs.EventPullRequest:
 		if pr, err := provider.ParsePullRequest(body); err != nil {
 			slog.Warn("vcs: bad pull_request payload", "provider", conn.Provider, "err", err)
 		} else {
+			if systemHook {
+				ws, err := h.Queries.GetWorkspace(r.Context(), conn.WorkspaceID)
+				if err != nil {
+					slog.Warn("vcs: load workspace for system hook failed", "err", err)
+					break
+				}
+				if !gitLabSystemHookRepoAllowed(ws.Repos, conn.InstanceUrl, pr.RepoOwner, pr.RepoName) {
+					break
+				}
+			}
 			h.mirrorVCSPullRequest(r.Context(), conn, pr)
 		}
 	case vcs.EventCIStatus:
@@ -153,6 +167,36 @@ func (h *Handler) HandleVCSWebhook(w http.ResponseWriter, r *http.Request) {
 		// Acknowledge unmodelled events so the provider doesn't flag the hook.
 	}
 	w.WriteHeader(http.StatusAccepted)
+}
+
+// A system hook covers the entire GitLab instance. Only repositories explicitly
+// configured in this workspace may affect its issues; a similarly named repo
+// on another host or under another namespace must not match.
+func gitLabSystemHookRepoAllowed(raw []byte, instanceURL, owner, name string) bool {
+	var repos []workspaceRepoRef
+	if json.Unmarshal(raw, &repos) != nil || owner == "" || name == "" {
+		return false
+	}
+	instance, err := url.Parse(instanceURL)
+	if err != nil || instance.Host == "" {
+		return false
+	}
+	want := strings.Trim(instance.Path, "/")
+	if want != "" {
+		want += "/"
+	}
+	want += owner + "/" + name
+	for _, repo := range repos {
+		u, err := url.Parse(strings.TrimSpace(repo.URL))
+		if err != nil || u.Scheme != instance.Scheme || !strings.EqualFold(u.Host, instance.Host) || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
+			continue
+		}
+		path := strings.TrimSuffix(strings.Trim(u.Path, "/"), ".git")
+		if path == want {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnection, ev vcs.PullRequestEvent) {

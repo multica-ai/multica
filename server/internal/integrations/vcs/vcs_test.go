@@ -96,11 +96,11 @@ func TestForgejoEventKindAndParse(t *testing.T) {
 	p, _ := For("gitea")
 	h := http.Header{}
 	h.Set("X-Gitea-Event", "pull_request")
-	if p.EventKind(h) != EventPullRequest {
+	if p.EventKind(h, nil) != EventPullRequest {
 		t.Error("pull_request not classified")
 	}
 	h.Set("X-Gitea-Event", "status")
-	if p.EventKind(h) != EventCIStatus {
+	if p.EventKind(h, nil) != EventCIStatus {
 		t.Error("status not classified")
 	}
 
@@ -139,7 +139,7 @@ func TestGitlabParse(t *testing.T) {
 	p, _ := For("gitlab")
 	h := http.Header{}
 	h.Set("X-Gitlab-Event", "Merge Request Hook")
-	if p.EventKind(h) != EventPullRequest {
+	if p.EventKind(h, nil) != EventPullRequest {
 		t.Error("MR hook not classified")
 	}
 
@@ -164,7 +164,7 @@ func TestGitlabParse(t *testing.T) {
 	}
 
 	h.Set("X-Gitlab-Event", "Pipeline Hook")
-	if p.EventKind(h) != EventCIStatus {
+	if p.EventKind(h, nil) != EventCIStatus {
 		t.Error("pipeline hook not classified")
 	}
 	st, err := p.ParseCIStatus([]byte(`{"object_kind":"pipeline","object_attributes":{"sha":"deadbeef","status":"failed"}}`))
@@ -173,6 +173,29 @@ func TestGitlabParse(t *testing.T) {
 	}
 	if st.SHA != "deadbeef" || st.State != "failed" || st.Context != "gitlab/pipeline" {
 		t.Errorf("bad status: %+v", st)
+	}
+}
+
+func TestGitlabSystemHookMergeRequest(t *testing.T) {
+	p, _ := For("gitlab")
+	h := http.Header{}
+	h.Set("X-Gitlab-Event", "System Hook")
+	body := []byte(`{"object_kind":"merge_request","event_type":"merge_request",
+		"project":{"path_with_namespace":"group/sub/widget"},
+		"object_attributes":{"iid":59,"title":"MUL-44: fix","state_id":3,
+			"source_branch":"fix/mul-44","url":"https://gitlab.test/group/sub/widget/-/merge_requests/59"}}`)
+	if got := p.EventKind(h, body); got != EventPullRequest {
+		t.Fatalf("system MR kind = %v, want EventPullRequest", got)
+	}
+	pr, err := p.ParsePullRequest(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pr.State != "merged" || pr.RepoOwner != "group/sub" || pr.Number != 59 {
+		t.Fatalf("system MR = %+v", pr)
+	}
+	if got := p.EventKind(h, []byte(`{"object_kind":"project_create"}`)); got != EventOther {
+		t.Fatalf("unrelated system event kind = %v, want EventOther", got)
 	}
 }
 

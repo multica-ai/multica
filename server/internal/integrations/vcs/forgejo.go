@@ -29,7 +29,7 @@ func init() {
 
 func (p forgejoProvider) Kind() Kind { return p.kind }
 
-func (p forgejoProvider) EventKind(h http.Header) EventKind {
+func (p forgejoProvider) EventKind(h http.Header, _ []byte) EventKind {
 	event := h.Get("X-Gitea-Event")
 	if event == "" {
 		event = h.Get("X-GitHub-Event") // Gitea mirrors this header too

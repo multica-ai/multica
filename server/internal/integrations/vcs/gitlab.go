@@ -24,15 +24,21 @@ func init() { register(gitlabProvider{}) }
 
 func (gitlabProvider) Kind() Kind { return KindGitLab }
 
-func (gitlabProvider) EventKind(h http.Header) EventKind {
+func (gitlabProvider) EventKind(h http.Header, body []byte) EventKind {
 	switch h.Get("X-Gitlab-Event") {
 	case "Merge Request Hook":
 		return EventPullRequest
 	case "Pipeline Hook":
 		return EventCIStatus
-	default:
-		return EventOther
+	case "System Hook":
+		var event struct {
+			ObjectKind string `json:"object_kind"`
+		}
+		if json.Unmarshal(body, &event) == nil && event.ObjectKind == "merge_request" {
+			return EventPullRequest
+		}
 	}
+	return EventOther
 }
 
 // VerifySignature compares the X-Gitlab-Token header to the stored secret in
@@ -60,6 +66,7 @@ type glMergeRequestPayload struct {
 		Title          string `json:"title"`
 		Description    string `json:"description"`
 		State          string `json:"state"` // opened|closed|merged|locked
+		StateID        int    `json:"state_id"`
 		Action         string `json:"action"`
 		SourceBranch   string `json:"source_branch"`
 		URL            string `json:"url"`
@@ -81,6 +88,15 @@ func (gitlabProvider) ParsePullRequest(body []byte) (PullRequestEvent, error) {
 	owner, name := splitNamespace(d.Project.PathWithNamespace)
 	draft := d.ObjectAttributes.Draft || d.ObjectAttributes.WorkInProgress ||
 		strings.HasPrefix(strings.ToLower(d.ObjectAttributes.Title), "draft:")
+	state := d.ObjectAttributes.State
+	if state == "" {
+		switch d.ObjectAttributes.StateID {
+		case 2:
+			state = "closed"
+		case 3:
+			state = "merged"
+		}
+	}
 	return PullRequestEvent{
 		Action:          d.ObjectAttributes.Action,
 		RepoOwner:       owner,
@@ -88,7 +104,7 @@ func (gitlabProvider) ParsePullRequest(body []byte) (PullRequestEvent, error) {
 		Number:          d.ObjectAttributes.IID,
 		Title:           d.ObjectAttributes.Title,
 		Body:            d.ObjectAttributes.Description,
-		State:           normalizeGitLabMRState(d.ObjectAttributes.State, draft),
+		State:           normalizeGitLabMRState(state, draft),
 		HTMLURL:         d.ObjectAttributes.URL,
 		Branch:          d.ObjectAttributes.SourceBranch,
 		HeadSHA:         d.ObjectAttributes.LastCommit.ID,

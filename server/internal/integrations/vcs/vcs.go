@@ -117,7 +117,7 @@ type Account struct {
 type Provider interface {
 	Kind() Kind
 	// EventKind classifies an inbound webhook from its headers.
-	EventKind(h http.Header) EventKind
+	EventKind(h http.Header, body []byte) EventKind
 	// VerifySignature authenticates the raw body against the connection's
 	// stored secret. Forgejo/Gitea use HMAC-SHA256 (X-Gitea-Signature);
 	// GitLab uses a plaintext token compare (X-Gitlab-Token).
