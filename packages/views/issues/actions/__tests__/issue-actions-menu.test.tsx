@@ -276,7 +276,8 @@ describe("IssueActionsDropdown", () => {
     const labels = screen
       .getAllByRole("menuitem")
       .map((item) => item.textContent?.trim());
-    expect(labels.slice(0, 3)).toEqual(["Rename issue", "Create sub-issue", "Status"]);
+    // Status trails its current value.
+    expect(labels.slice(0, 3)).toEqual(["Rename issue", "Create sub-issue", "StatusTodo"]);
   });
 
   it("opens Assignee as a submenu holding the shared assignee picker", async () => {
@@ -468,7 +469,7 @@ describe("IssueActionsDropdown", () => {
 
     fireEvent.click(screen.getByTestId("trigger"));
     await waitFor(() => {
-      expect(listTasksByIssueMock).toHaveBeenCalledWith("issue-1");
+      expect(listTasksByIssueMock).toHaveBeenCalledWith("issue-1", false, { view: "timeline" });
     });
     fireEvent.click(await screen.findByText("Copy local workdir path"));
 

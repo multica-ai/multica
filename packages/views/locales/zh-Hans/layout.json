@@ -78,9 +78,6 @@
     "workspaces_label": "工作区",
     "create_workspace": "创建工作区",
     "pending_invitations_label": "待处理的邀请",
-    "invitation_workspace_fallback": "工作区",
-    "invitation_join": "加入",
-    "invitation_decline": "拒绝",
     "log_out": "退出登录",
     "new_issue": "新建任务",
     "pinned_label": "固定",
@@ -100,14 +97,25 @@
     "chat": "聊天",
     "autopilots": "自动化",
     "switch_workspace": "切换工作区",
-    "invitation_from": "{{name}} 邀请你加入",
     "pin_workspace": "置顶工作区",
     "unpin_workspace": "取消置顶",
     "open_in_new_window": "在新窗口打开",
     "open_in_new_window_click": "点击",
     "open_in_other_window": "已在其他窗口打开",
     "in_other_window": "其他窗口",
-    "all_workspaces_open": "所有工作区都已在窗口中打开"
+    "all_workspaces_open": "所有工作区都已在窗口中打开",
+    "copy_link": "复制链接",
+    "link_copied": "链接已复制",
+    "workspace_settings": "工作区设置",
+    "mark_all_read": "全部标为已读",
+    "mark_all_read_failed": "全部标为已读失败",
+    "reset_order": "恢复默认顺序",
+    "copy_workspace_link": "复制工作区链接",
+    "workspace_meta_other": "{{slug}} · {{count}} 位成员"
+  },
+  "bottom_bar": {
+    "label": "状态栏",
+    "working_other": "{{count}} 个智能体正在工作"
   },
   "panels": {
     "work": {
@@ -129,6 +137,7 @@
       "assignee_me": "我",
       "assignee_my_agents": "我的智能体",
       "assignee_me_and_my_agents": "我和我的智能体",
+      "assignee_projects_only": "仅作用于侧边栏“项目”下展开的任务",
       "reset": "重置",
       "load_more": "加载更多",
       "show_less": "收起",
@@ -149,7 +158,8 @@
       "view_edit": "编辑视图",
       "view_rename": "重命名",
       "view_duplicate": "创建副本",
-      "view_delete": "删除视图"
+      "view_delete": "删除视图",
+      "new_issue_here": "在此项目中新建任务"
     },
     "team": {
       "new_agent": "新建智能体",
@@ -165,7 +175,8 @@
       "members_other": "{{count}} 位成员",
       "resources": "资源",
       "runtimes_online_other": "{{count}} 台在线",
-      "invite_member": "邀请成员"
+      "invite_member": "邀请成员",
+      "open_issue": "打开 {{identifier}}"
     },
     "autopilots": {
       "all": "全部自动化",
@@ -182,6 +193,8 @@
       "dark": "深色",
       "system": "跟随系统"
     },
+    "mode": "模式",
+    "appearance_settings": "外观设置",
     "language": "语言",
     "shortcuts": "快捷键"
   },
@@ -217,5 +230,19 @@
     "go_to_slide": "转到第 {{index}} 张",
     "previous": "上一张",
     "next": "下一张"
+  },
+  "context_menu": {
+    "cut": "剪切",
+    "copy": "复制",
+    "paste": "粘贴",
+    "select_all": "全选",
+    "add_to_dictionary": "添加到词典",
+    "open_link": "在浏览器中打开链接",
+    "copy_link_address": "复制链接地址",
+    "copy_image": "复制图片",
+    "copy_code": "复制代码",
+    "copy_table": "复制表格",
+    "copied": "已复制",
+    "copy_failed": "复制失败"
   }
 }

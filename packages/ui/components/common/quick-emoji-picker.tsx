@@ -17,10 +17,25 @@ interface QuickEmojiPickerProps {
   align?: "start" | "end";
   className?: string;
   ariaLabel?: string;
+  /** Controlled open state, for opening the picker from elsewhere (a menu). */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
-function QuickEmojiPicker({ onSelect, align = "start", className, ariaLabel = "Add reaction" }: QuickEmojiPickerProps) {
-  const [open, setOpen] = useState(false);
+function QuickEmojiPicker({
+  onSelect,
+  align = "start",
+  className,
+  ariaLabel = "Add reaction",
+  open: controlledOpen,
+  onOpenChange,
+}: QuickEmojiPickerProps) {
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const open = controlledOpen ?? uncontrolledOpen;
+  const setOpen = (v: boolean) => {
+    setUncontrolledOpen(v);
+    onOpenChange?.(v);
+  };
   const [showFull, setShowFull] = useState(false);
 
   const handleOpenChange = (v: boolean) => {

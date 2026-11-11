@@ -130,6 +130,29 @@ func (h *Handler) requireIssueIDVisible(w http.ResponseWriter, r *http.Request, 
 	return true
 }
 
+// requireTaskVisible is requireIssueIDVisible for a run. A run without an
+// issue (a run-only autopilot, a quick-create) still reads a project, so its
+// visibility comes from projectaccess.TaskProjects rather than its issue id.
+func (h *Handler) requireTaskVisible(w http.ResponseWriter, r *http.Request, workspaceID string, task db.AgentTaskQueue, status int, notFoundMsg string) bool {
+	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+	if !ok {
+		return false
+	}
+	if hidden.Empty() {
+		return true
+	}
+	projects, err := projectaccess.TaskProjects(r.Context(), h.Queries, task)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve project access")
+		return false
+	}
+	if !hidden.CanSeeProjects(projects) {
+		writeError(w, status, notFoundMsg)
+		return false
+	}
+	return true
+}
+
 // commentInHiddenProject reports whether a comment sits on an issue in a
 // private project the request cannot see. A missing comment is not hidden;
 // the caller's own lookup answers for it.

@@ -90,9 +90,7 @@
     "section_labels": "라벨",
     "filter_search_placeholder": "필터...",
     "no_labels": "아직 라벨이 없습니다",
-    "no_results": "결과 없음",
-    "manage_labels": "라벨 관리...",
-    "manage_labels_title": "스킬 라벨"
+    "no_results": "결과 없음"
   },
   "detail": {
     "read_only": "읽기 전용",
@@ -243,15 +241,9 @@
     }
   },
   "create": {
-    "back": "뒤로",
-    "back_aria": "방식 선택으로 돌아가기",
     "close": "닫기",
     "close_aria": "닫기",
     "method": {
-      "chooser": {
-        "title": "새 스킬",
-        "desc": "스킬을 추가할 방식을 선택하세요."
-      },
       "manual": {
         "title": "직접 만들기",
         "desc": "빈 SKILL.md에서 시작합니다."

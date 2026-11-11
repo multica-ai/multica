@@ -24,6 +24,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/logger"
@@ -3666,6 +3667,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 					delivery.ChannelThreadID.String != "" &&
 					delivery.ChannelThreadID.String != delivery.ChannelMessageID.String
 			}
+			resp.ChatFeishuSource = lark.TaskSource(delivery)
 		} else if !errors.Is(deliveryErr, pgx.ErrNoRows) {
 			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount,
 				h.rejectClaimSourceLoad(r.Context(), task, deliveryErr, "channel task delivery", uuidToString(task.ID))
@@ -6319,6 +6321,12 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	view := r.URL.Query().Get("view")
+	if view != "" && view != "timeline" {
+		writeError(w, http.StatusBadRequest, "view must be 'timeline' when specified")
+		return
+	}
+
 	scope := r.URL.Query().Get("scope")
 	if scope != "" && scope != "issue" && scope != "family" && scope != "subtree" {
 		writeError(w, http.StatusBadRequest, "scope must be 'issue', 'family', or 'subtree'")
@@ -6447,6 +6455,11 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if view == "timeline" {
+		for i := range resp {
+			resp[i] = issueTimelineTaskResponse(resp[i])
+		}
+	}
 
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -6471,6 +6484,18 @@ func (h *Handler) hydrateSubtreeTaskUsage(ctx context.Context, tasks []db.AgentT
 			row.CacheWriteTokens, row.CostUsdTicks, row.CreditsMicros)
 	}
 	attachTaskUsage(resp, byTask)
+}
+
+// issueTimelineTaskResponse keeps inline replies, lineage, controls and pricing.
+// Provider output and daemon handoff instructions belong to on-demand history.
+func issueTimelineTaskResponse(task AgentTaskResponse) AgentTaskResponse {
+	task.HandoffNote = ""
+	result, _ := task.Result.(map[string]any)
+	task.Result = nil
+	if comment, ok := result["comment"].(string); ok {
+		task.Result = map[string]any{"comment": comment}
+	}
+	return task
 }
 
 // hydrateTaskUsage attaches each run's own token usage to the execution-log
@@ -6616,10 +6641,11 @@ func (h *Handler) ListTaskMessagesByUser(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusNotFound, "task not found")
 		return
 	}
-	// An issue run's transcript is visible exactly where its issue is
-	// (MUL-8472). Task ids reach every member through task lifecycle events,
-	// so this cannot rely on the issue page being unreachable.
-	if !h.requireIssueIDVisible(w, r, wsID, task.IssueID, http.StatusNotFound, "task not found") {
+	// A run's transcript is visible exactly where the projects it reads are
+	// (MUL-8472), including runs that have no issue. Task ids reach every
+	// member through task lifecycle events, so this cannot rely on the issue
+	// page being unreachable.
+	if !h.requireTaskVisible(w, r, wsID, task, http.StatusNotFound, "task not found") {
 		return
 	}
 

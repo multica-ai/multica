@@ -100,7 +100,7 @@ Multica 會實時請求 Telegram 驗證 Bot，檢查是否存在與長輪詢衝�
 
 ### 回覆與內容範圍
 
-Bot 透過傳送並編輯 Telegram 訊息來流式展示文字回覆，引用觸發訊息、保留 forum topic，並按 Telegram 長度限制自動分段。
+Bot 透過傳送並編輯 Telegram 訊息來流式展示文字回覆，引用觸發訊息、保留 forum topic，並按 Telegram 長度限制自動分段。AI 代理工作時，同一則訊息下方會列出它目前的步驟（如執行命令、讀取檔案）和已用時間：私聊顯示每一步的具體物件，群聊只顯示工作型別。可用 `MULTICA_TELEGRAM_TOOL_PROGRESS`（`off`、`summary`、`detail`）調整。
 
 圖片、檔案、影片、語音和音訊訊息會作為同一對話的附件交給 AI 代理，caption 作為訊息正文；AI 代理生成的檔案會在回覆之後發回聊天。這兩個方向都需要服務端配置物件儲存（見下文自託管部分）。
 

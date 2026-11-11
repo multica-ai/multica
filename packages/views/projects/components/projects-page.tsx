@@ -1,24 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
-  ExternalLink,
   FolderKanban,
   LayoutGrid,
-  Pencil,
   Pin,
-  PinOff,
   Rows3,
   Trash2,
 } from "@multica/ui/icons";
 import { matchesProjectLifecycle, PROJECT_LIFECYCLE_VIEWS, type ProjectLifecycleView } from "@multica/core/projects/lifecycle";
 import { useQuery } from "@tanstack/react-query";
-import { toast } from "sonner";
 import {
   projectListOptions,
   useUpdateProject,
-  useDeleteProject,
-  ProjectDeletionOfflineError,
   useProjectViewStore,
   type ProjectColumnKey,
   type ProjectListFilters,
@@ -28,7 +22,6 @@ import {
 import {
   pinListOptions,
   useCreatePin,
-  useDeletePin,
 } from "@multica/core/pins";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -40,26 +33,15 @@ import {
 } from "@multica/core/workspace/queries";
 import { canDeleteProject } from "@multica/core/projects/deletion-permissions";
 import { useModalStore } from "@multica/core/modals";
-import { AppLink, useIntentNavigate } from "../../navigation";
+import { AppLink } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
-import { Spinner } from "@multica/ui/components/ui/spinner";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@multica/ui/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
@@ -87,13 +69,17 @@ import {
   CollectionEmptyValue,
   CollectionList,
   CollectionNameCell,
-  CollectionRowMenu,
   type CollectionColumn,
   type CollectionSort,
 } from "../../layout/collection-list";
 import { ProjectIcon } from "./project-icon";
 import { ProjectsIntro } from "./projects-intro";
 import { useT } from "../../i18n";
+import {
+  DeleteProjectsDialog,
+  ProjectRowActions,
+  type ProjectDeletionContext,
+} from "./project-row-actions";
 import { useFormatRelativeDate } from "./labels";
 import { ProjectStatusBadge, ProjectPriorityBadge } from "./project-badge";
 import { ProjectLeadPicker } from "./project-lead-picker";
@@ -150,188 +136,6 @@ function ProgressRing({ project }: { project: Project }) {
         {project.done_count}/{project.issue_count}
       </span>
     </span>
-  );
-}
-
-interface ProjectDeletionContext {
-  key: string;
-  projects: Project[];
-  selectedIds: string[];
-}
-
-function DeleteProjectsDialog({
-  rows,
-  open,
-  onOpenChange,
-  onDeleted,
-  context,
-}: {
-  rows: Project[];
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onDeleted?: () => void;
-  context?: ProjectDeletionContext;
-}) {
-  const { t } = useT("projects");
-  const deleteProject = useDeleteProject();
-  const [deleting, setDeleting] = useState(false);
-  const previousContext = useRef(context);
-  const deletedIds = useRef(new Set<string>());
-
-  useEffect(() => {
-    const contextKey = (value: ProjectDeletionContext | undefined) => value && JSON.stringify([
-      value.key,
-      value.projects.filter((project) => !deletedIds.current.has(project.id)),
-      value.selectedIds.filter((id) => !deletedIds.current.has(id)),
-    ]);
-    // Account for this batch's successful deletions even when Query notifies
-    // React after a later deletion has failed and the retry dialog is idle.
-    if (contextKey(previousContext.current) !== contextKey(context) && !deleting) {
-      onOpenChange(false);
-    }
-    previousContext.current = context;
-    if (!open) deletedIds.current.clear();
-  }, [context, deleting, onOpenChange, open]);
-
-  const handleDelete = async () => {
-    if (deleting) return;
-    setDeleting(true);
-    try {
-      for (const project of rows) {
-        await deleteProject.mutateAsync(project.id);
-        deletedIds.current.add(project.id);
-      }
-      onOpenChange(false);
-      onDeleted?.();
-    } catch (err) {
-      toast.error(
-        err instanceof ProjectDeletionOfflineError
-          ? t(($) => $.delete_dialog.offline_error)
-          : err instanceof Error ? err.message : String(err),
-      );
-    } finally {
-      setDeleting(false);
-    }
-  };
-
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={(nextOpen) => {
-        if (!deleting) onOpenChange(nextOpen);
-      }}
-    >
-      <DialogContent className="sm:max-w-md" showCloseButton={!deleting}>
-        <DialogHeader>
-          <DialogTitle>{t(($) => $.delete_dialog.title)}</DialogTitle>
-          <DialogDescription>
-            {t(($) => $.delete_dialog.description)}
-          </DialogDescription>
-        </DialogHeader>
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={deleting}
-            onClick={() => onOpenChange(false)}
-          >
-            {t(($) => $.delete_dialog.cancel)}
-          </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            size="sm"
-            disabled={deleting}
-            aria-busy={deleting}
-            onClick={handleDelete}
-          >
-            {deleting && <Spinner className="size-3.5" aria-hidden="true" />}
-            {t(($) => $.delete_dialog.confirm)}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// Shared by table rows (⋯ and right-click) and cards.
-function ProjectRowActions({
-  project,
-  pinned,
-  canDelete,
-}: {
-  project: Project;
-  pinned: boolean;
-  canDelete: boolean;
-}) {
-  const { t } = useT("projects");
-  const { t: tCommon } = useT("common");
-  const wsPaths = useWorkspacePaths();
-  const intentNavigate = useIntentNavigate();
-  const createPin = useCreatePin();
-  const deletePin = useDeletePin();
-  const [deleteOpen, setDeleteOpen] = useState(false);
-
-  const togglePin = () => {
-    if (pinned) deletePin.mutate({ itemType: "project", itemId: project.id });
-    else createPin.mutate({ item_type: "project", item_id: project.id });
-  };
-
-  return (
-    <>
-      <CollectionRowMenu label={t(($) => $.page.row_menu)} contentClassName="w-44">
-        <DropdownMenuItem
-          onClick={() =>
-            useModalStore
-              .getState()
-              .open("project-rename", { projectId: project.id, title: project.title })
-          }
-        >
-          <Pencil className="size-3.5" />
-          {t(($) => $.page.rename)}
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          onClick={() =>
-            intentNavigate(
-              wsPaths.projectDetail(project.id),
-              "foreground-tab",
-              project.title,
-            )
-          }
-        >
-          <ExternalLink className="size-3.5" />
-          {tCommon(($) => $.navigation.open_in_new_tab)}
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={togglePin}>
-          {pinned ? (
-            <PinOff className="size-3.5" />
-          ) : (
-            <Pin className="size-3.5" />
-          )}
-          {pinned ? t(($) => $.page.unpin) : t(($) => $.page.pin)}
-        </DropdownMenuItem>
-        {canDelete && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              variant="destructive"
-              onClick={() => setDeleteOpen(true)}
-            >
-              <Trash2 className="size-3.5" />
-              {t(($) => $.page.delete)}
-            </DropdownMenuItem>
-          </>
-        )}
-      </CollectionRowMenu>
-
-      <DeleteProjectsDialog
-        rows={[project]}
-        open={deleteOpen}
-        onOpenChange={setDeleteOpen}
-      />
-    </>
   );
 }
 

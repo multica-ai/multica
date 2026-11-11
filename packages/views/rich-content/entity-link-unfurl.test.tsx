@@ -67,6 +67,7 @@ vi.mock("../issues/components/issue-mention-card", () => ({
 }));
 
 vi.mock("../projects/components/project-chip", () => ({
+  useChipProject: () => undefined,
   ProjectChip: ({ projectId }: { projectId: string }) => (
     <span data-testid="project-chip">{projectId}</span>
   ),

@@ -19,7 +19,7 @@ WITH base AS MATERIALIZED (
                WHEN i.type IN ('new_comment', 'reaction_added') THEN 'comment'
                WHEN i.type IN ('issue_assigned', 'unassigned', 'assignee_changed', 'issue_subscribed') THEN 'assign'
                WHEN i.type = 'review_requested' THEN 'review'
-               WHEN i.type IN ('status_changed', 'priority_changed', 'start_date_changed', 'due_date_changed', 'children_done') THEN 'change'
+               WHEN i.type IN ('issue_created', 'status_changed', 'priority_changed', 'start_date_changed', 'due_date_changed', 'children_done') THEN 'change'
                WHEN i.type IN ('task_completed', 'task_failed', 'agent_blocked', 'agent_completed') THEN 'run'
                ELSE 'system'
            END AS type_group,
@@ -214,7 +214,7 @@ WITH base AS MATERIALIZED (
                WHEN i.type IN ('new_comment', 'reaction_added') THEN 'comment'
                WHEN i.type IN ('issue_assigned', 'unassigned', 'assignee_changed', 'issue_subscribed') THEN 'assign'
                WHEN i.type = 'review_requested' THEN 'review'
-               WHEN i.type IN ('status_changed', 'priority_changed', 'start_date_changed', 'due_date_changed', 'children_done') THEN 'change'
+               WHEN i.type IN ('issue_created', 'status_changed', 'priority_changed', 'start_date_changed', 'due_date_changed', 'children_done') THEN 'change'
                WHEN i.type IN ('task_completed', 'task_failed', 'agent_blocked', 'agent_completed') THEN 'run'
                ELSE 'system'
            END AS type_group,

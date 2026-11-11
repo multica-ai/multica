@@ -545,6 +545,26 @@
         "reply": "\"The PR is merged. Updating the docs and closing the issue.\"",
         "event_examples": "PR merged, new comment"
       }
+    },
+    "defaults": {
+      "title": "When sub-issues finish",
+      "description": "Wakes the parent's assignee when a stage finishes and a later stage is waiting, and once more when every sub-issue is closed. A member assignee gets an inbox notification instead.",
+      "badge": "Workspace default",
+      "enabled": "On by default",
+      "instruction": "Default instruction",
+      "instruction_hint": "Sent to the woken agent. Leave empty to use the built-in instruction below.",
+      "instruction_placeholder": "Leave empty to use the built-in instruction",
+      "builtin": "Built-in instruction",
+      "instruction_invalid": "Keep the instruction within 4,000 bytes.",
+      "save": "Save",
+      "saving": "Saving…",
+      "save_error": "Could not save the default.",
+      "customized_one": "{{count}} open issue has its own setting and ignores this default.",
+      "customized_other": "{{count}} open issues have their own setting and ignore this default.",
+      "admin_only": "Only owners and admins can change these defaults.",
+      "load_error": "Could not load wakeup defaults.",
+      "edit_instruction": "Edit default instruction",
+      "view_instruction": "View default instruction"
     }
   },
   "intro": {
