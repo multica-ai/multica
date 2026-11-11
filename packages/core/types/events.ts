@@ -481,6 +481,8 @@ export interface ChatMessageEventPayload {
 export interface ChatDonePayload {
   chat_session_id: string;
   task_id: string;
+  /** Optional OS-alert context for completed direct-chat replies. */
+  notification?: { workspace_id: string; title: string };
   /**
    * Server populates these from the freshly-persisted assistant ChatMessage
    * row so the WS handler can write it into the messages cache inline. Older

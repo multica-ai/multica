@@ -178,7 +178,6 @@ var notifTypeToGroup = map[string]string{
 	"assignee_changed":   "assignments",
 	"status_changed":     "status_changes",
 	"new_comment":        "comments",
-	"chat_reply":         "chat_replies",
 	"mentioned":          "mentions",
 	"priority_changed":   "updates",
 	"start_date_changed": "updates",
@@ -635,7 +634,7 @@ func notifyDirect(
 		RecipientID:   parseUUID(recipientID),
 		Type:          notifType,
 		Severity:      severity,
-		IssueID:       optionalUUID(issueID),
+		IssueID:       parseUUID(issueID),
 		Title:         title,
 		Body:          util.StrToText(body),
 		ActorType:     util.StrToText(e.ActorType),
@@ -790,7 +789,6 @@ func notifyMentionedMembers(
 // concern — see events.Bus for future improvements.
 func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 	ctx := context.Background()
-	registerChatReplyNotifications(bus, queries)
 
 	// issue:created — Direct notification to assignee if assignee != actor
 	bus.Subscribe(protocol.EventIssueCreated, func(e events.Event) {

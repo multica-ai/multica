@@ -790,26 +790,6 @@ describe("handleInboxNew", () => {
     return showNotification;
   }
 
-  it.each([false, true])("delivers chat reply banners through the inbox notification settings (muted=%s)", async (muted) => {
-    const qc = createQueryClient();
-    qc.setQueryData<Workspace[]>(workspaceKeys.list(), [workspace()]);
-    qc.setQueryData(notificationPreferenceKeys.all("ws-a"), {
-      preferences: { system_notifications: muted ? "muted" : "all" },
-    });
-    const showNotification = stubDesktopAPI();
-    await handleInboxNew(qc, inboxItem({
-      type: "chat_reply", issue_id: null, title: "Review changes", body: "Done",
-      details: { chat_session_id: "session-1", message_id: "message-1" },
-    }));
-    if (muted) {
-      expect(showNotification).not.toHaveBeenCalled();
-    } else {
-      expect(showNotification).toHaveBeenCalledExactlyOnceWith({
-        slug: "workspace-a", itemId: "item-1", issueKey: "item-1", title: "Review changes", body: "Done",
-      });
-    }
-  });
-
   afterEach(() => {
     delete (globalThis as Record<string, unknown>).desktopAPI;
   });

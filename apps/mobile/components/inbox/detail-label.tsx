@@ -45,7 +45,6 @@ const TYPE_KEY: Record<InboxItemType, string> = {
   start_date_changed: "type.start_date_changed",
   due_date_changed: "type.due_date_changed",
   new_comment: "type.new_comment",
-  chat_reply: "type.chat_reply",
   mentioned: "type.mentioned",
   review_requested: "type.review_requested",
   task_completed: "type.task_completed",
@@ -148,7 +147,6 @@ export function InboxDetailLabel({
           ? t("type.set_due_date", { date: shortDate(details.to) })
           : t("type.removed_due_date");
       case "new_comment":
-      case "chat_reply":
         return singleLine(item.body) || t(TYPE_KEY[item.type]);
       case "reaction_added":
         return details.emoji

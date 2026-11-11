@@ -26,7 +26,6 @@ import {
   useMarkInboxRead,
 } from "@/data/mutations/inbox";
 import { useWorkspaceStore } from "@/data/workspace-store";
-import { useChatSessionPickerStore } from "@/data/stores/chat-session-picker-store";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
 import { useT } from "@/lib/i18n";
@@ -62,9 +61,6 @@ export default function Inbox() {
     // snapshot for the native stack push transition.
     markRead.mutate(item.id);
     const target = getInboxNavigationTarget(item, wsSlug, String(Date.now()));
-    if (target && item.type === "chat_reply" && item.details?.chat_session_id) {
-      useChatSessionPickerStore.getState().requestSelect(item.details.chat_session_id);
-    }
     if (target) router.push(target);
   }, [markRead, wsSlug]);
 

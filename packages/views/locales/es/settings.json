@@ -826,7 +826,7 @@
   },
   "notifications": {
     "title": "Notificaciones de la bandeja",
-    "description": "Los eventos silenciados siguen visibles en la tarea o el chat.",
+    "description": "Los eventos silenciados siguen visibles en la tarea.",
     "toast_failed": "Error al actualizar la configuración de notificaciones",
     "groups": {
       "assignments": {

@@ -404,11 +404,6 @@ export function InboxPage() {
   const markReadMutate = markReadMutation.mutate;
   const selectedId = selected?.id;
   const selectedRead = selected?.read;
-  const replySessionId = selected?.type === "chat_reply" ? selected.details?.chat_session_id : undefined;
-  useEffect(() => {
-    if (replySessionId) replace(`${wsPaths.chat()}?session=${encodeURIComponent(replySessionId)}`);
-  }, [replySessionId, replace, wsPaths]);
-
   useEffect(() => {
     if (!selectedId) {
       openedItemIdRef.current = null;

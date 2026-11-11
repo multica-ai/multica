@@ -1,6 +1,6 @@
 /**
- * Notification preferences subscreen. 6 inbox groups + system_notifications
- * toggle, each backed by an optimistic PATCH /api/notification-preferences.
+ * Notification preferences subscreen. Inbox groups and system delivery
+ * settings are backed by an optimistic PATCH /api/notification-preferences.
  *
  * Copy mirrors packages/views/settings/components/notifications-tab.tsx.
  * Group labels describe the same server-side semantics as web; divergent
@@ -38,11 +38,6 @@ const INBOX_GROUPS: {
     key: "comments",
     labelKey: "groups.comments",
     descriptionKey: "groups.comments_description",
-  },
-  {
-    key: "chat_replies",
-    labelKey: "groups.chat_replies",
-    descriptionKey: "groups.chat_replies_description",
   },
   {
     key: "mentions",
@@ -159,6 +154,22 @@ export default function NotificationsSettingsScreen() {
             onCheckedChange={(checked) =>
               onToggle("system_notifications", checked)
             }
+          />
+        </View>
+        <Separator />
+        <View className="flex-row items-center px-4 py-3 gap-3">
+          <View className="flex-1">
+            <Text className="text-base font-medium text-foreground">
+              {t("groups.chat_replies")}
+            </Text>
+            <Text className="text-xs text-muted-foreground mt-0.5">
+              {t("groups.chat_replies_description")}
+            </Text>
+          </View>
+          <Switch
+            checked={preferences.chat_replies !== "muted"}
+            disabled={!systemEnabled}
+            onCheckedChange={(checked) => onToggle("chat_replies", checked)}
           />
         </View>
       </Section>

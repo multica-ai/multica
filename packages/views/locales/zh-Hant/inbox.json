@@ -98,8 +98,7 @@
     "app_action_requested": "等待你確認",
     "app_action_reminder": "確認即將過期",
     "app_connect_requested": "請連線應用",
-    "app_action_result": "應用操作結果",
-    "chat_reply": "聊天回覆"
+    "app_action_result": "應用操作結果"
   },
   "labels": {
     "set_status_to": "狀態設為",

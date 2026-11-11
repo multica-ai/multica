@@ -826,7 +826,7 @@
   },
   "notifications": {
     "title": "Inbox Notifications",
-    "description": "Muted events remain visible in the issue or chat.",
+    "description": "Muted events remain visible on the issue.",
     "toast_failed": "Failed to update notification settings",
     "groups": {
       "assignments": {

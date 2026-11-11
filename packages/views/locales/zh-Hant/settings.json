@@ -817,7 +817,7 @@
   },
   "notifications": {
     "title": "收件箱通知",
-    "description": "關閉通知後，仍可在任務或聊天中檢視相關動態。",
+    "description": "關閉通知後，仍可在任務中檢視相關動態。",
     "toast_failed": "更新通知設定失敗",
     "groups": {
       "assignments": {

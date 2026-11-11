@@ -22,7 +22,6 @@ const INBOX_GROUP_KEYS = [
   "assignments",
   "status_changes",
   "comments",
-  "chat_replies",
   "mentions",
   "updates",
   "new_issues",
@@ -100,6 +99,18 @@ export function NotificationsTab() {
                 aria-label={t(($) => $.notifications.system.label)}
                 onCheckedChange={(checked) => handleToggle("system_notifications", checked)}
               />
+          </SettingsRow>
+          <SettingsRow
+            anchor="chat_replies"
+            label={t(($) => $.notifications.groups.chat_replies.label)}
+            description={t(($) => $.notifications.groups.chat_replies.description)}
+          >
+            <Switch
+              checked={preferences.chat_replies !== "muted"}
+              disabled={!systemEnabled}
+              aria-label={t(($) => $.notifications.groups.chat_replies.label)}
+              onCheckedChange={(checked) => handleToggle("chat_replies", checked)}
+            />
           </SettingsRow>
         </SettingsCard>
 

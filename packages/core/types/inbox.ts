@@ -14,7 +14,6 @@ export type InboxItemType =
   | "start_date_changed"
   | "due_date_changed"
   | "new_comment"
-  | "chat_reply"
   | "mentioned"
   | "review_requested"
   | "task_completed"

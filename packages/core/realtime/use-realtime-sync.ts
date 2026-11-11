@@ -61,7 +61,7 @@ import {
 import { workspaceKeys, workspaceListOptions } from "../workspace/queries";
 import { isWorkspaceDeletePending } from "../workspace/pending-delete";
 import {
-  showWebNotification,
+  showSystemNotification,
   type SystemNotificationPayload,
 } from "../platform/system-notification";
 import type { Workspace } from "../types/workspace";
@@ -629,21 +629,41 @@ export async function handleInboxNew(
     title: item.title,
     body: item.body ?? "",
   };
-  const desktopAPI = (
-    globalThis as unknown as {
-      desktopAPI?: {
-        showNotification?: (payload: SystemNotificationPayload) => void;
-      };
+  showSystemNotification(payload);
+}
+
+export function createChatReplyNotifier(
+  qc: QueryClient,
+  getUserId: () => string | undefined,
+): (payload: ChatDonePayload) => Promise<void> {
+  const seen = new Set<string>();
+  return async (payload) => {
+    const context = payload.notification;
+    const messageId = payload.message_id;
+    const userId = getUserId();
+    if (!context?.workspace_id || !messageId || !payload.chat_session_id || !userId || seen.has(messageId)) return;
+    seen.add(messageId);
+    if (seen.size > 1_000) seen.delete(seen.values().next().value!);
+    if (typeof document !== "undefined" && document.hasFocus()) return;
+
+    const slug = await resolveInboxSourceSlug(qc, context.workspace_id);
+    if (!slug) return;
+    try {
+      const { preferences } = await qc.ensureQueryData(notificationPreferenceOptions(context.workspace_id, slug));
+      if (preferences.system_notifications === "muted" || preferences.chat_replies === "muted") return;
+    } catch {
+      // Match the existing default-on system-notification behavior.
     }
-  ).desktopAPI;
-  if (desktopAPI?.showNotification) {
-    // Desktop: native OS banner rendered by the Electron main process.
-    desktopAPI.showNotification(payload);
-    return;
-  }
-  // Web: the browser Notification API. No-op without granted permission or on
-  // SSR — the in-app inbox + unread badge still reflect the new item.
-  showWebNotification(payload);
+    if (getUserId() !== userId || (typeof document !== "undefined" && document.hasFocus())) return;
+    const preview = [...(payload.content ?? "").replace(/\s+/g, " ").trim()];
+    showSystemNotification({
+      slug,
+      itemId: `chat:${messageId}`,
+      chatSessionId: payload.chat_session_id,
+      title: context.title,
+      body: preview.slice(0, 200).join("") + (preview.length > 200 ? "…" : ""),
+    });
+  };
 }
 
 /**
@@ -1679,6 +1699,7 @@ export function useRealtimeSync(
       // by the task lifecycle handlers below (MUL-4159).
     });
 
+    const notifyChatReply = createChatReplyNotifier(qc, () => authStore.getState().user?.id);
     const unsubChatDone = ws.on("chat:done", (p) => {
       const payload = p as ChatDonePayload;
       chatWsLogger.info("chat:done (global)", {
@@ -1699,6 +1720,7 @@ export function useRealtimeSync(
       // work: they ignore the extra fields and rely on the invalidate
       // below, which keeps the old behavior alive.
       applyChatDoneToCache(qc, payload);
+      void notifyChatReply(payload);
       // NOTE: the pending aggregate is left to the task:completed / task:failed
       // handlers (which carry the task_id needed to remove the right entry).
       // chat:done no longer invalidates it, so a chatty session doesn't refetch
