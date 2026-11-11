@@ -1160,6 +1160,10 @@ export function useRealtimeSync(
     const unsubIssueUpdated = ws.on("issue:updated", (p) => {
       const payload = p as IssueUpdatedPayload;
       const { issue } = payload;
+      if (payload.status_changed || payload.parent_changed || payload.stage_changed) {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({queryKey: issueKeys.all(wsId)});
+      }
       if (!issue?.id) return;
       const subtreeFilter = {
         queryKey: issueKeys.tasksAll(),
@@ -1196,7 +1200,10 @@ export function useRealtimeSync(
       const { issue } = p as IssueCreatedPayload;
       if (!issue) return;
       const wsId = getCurrentWsId();
-      if (wsId) onIssueCreated(qc, wsId, issue);
+      if (wsId) {
+        onIssueCreated(qc, wsId, issue);
+        if (issue.parent_issue_id && issue.stage != null) qc.invalidateQueries({queryKey:issueKeys.all(wsId)});
+      }
     });
 
     const unsubIssueDeleted = ws.on("issue:deleted", (p) => {
@@ -1206,6 +1213,7 @@ export function useRealtimeSync(
       const wsId = getCurrentWsId();
       if (wsId) {
         onIssueDeleted(qc, wsId, issue_id);
+        qc.invalidateQueries({queryKey:issueKeys.all(wsId)});
         void onInboxIssueDeleted(qc, wsId, issue_id);
       }
     });

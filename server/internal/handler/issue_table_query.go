@@ -422,7 +422,7 @@ func parseIssueTableActor(w http.ResponseWriter, actor issueTableActorRef, field
 }
 
 // issueTableRelations are the viewer relations `filters.relations` accepts.
-var issueTableRelations = []string{"assigned", "created", "my_agents", "subscribed"}
+var issueTableRelations = []string{"assigned", "created", "my_agents", "subscribed", "blocked"}
 
 // issueTableNegatableFilters are the `filters` fields `filters.negate` may name.
 var issueTableNegatableFilters = []string{
@@ -441,6 +441,8 @@ func issueTableRelationPredicate(relation string, userRef string) string {
 		return fmt.Sprintf("(i.assignee_type = 'member' AND i.assignee_id = %s::uuid)", userRef)
 	case "created":
 		return issueCreatedByUserPredicate(userRef)
+	case "blocked":
+		return "issue_has_open_blockers(i.workspace_id,i.id)"
 	case "subscribed":
 		return fmt.Sprintf(`EXISTS (
     SELECT 1 FROM issue_subscriber isub
@@ -699,7 +701,13 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 			writeError(w, http.StatusUnauthorized, "user not authenticated")
 			return issueTableSQL{}, false
 		}
-		userRef := addArg(userUUID)
+		userRef := ""
+		for _, relation := range relations {
+			if relation != "blocked" {
+				userRef = addArg(userUUID)
+				break
+			}
+		}
 		ors := make([]string, 0, len(relations))
 		for _, relation := range relations {
 			ors = append(ors, issueTableRelationPredicate(relation, userRef))

@@ -100,7 +100,8 @@
     "app_action_requested": "Confirmation requise",
     "app_action_reminder": "Confirmation bientôt expirée",
     "app_connect_requested": "Connecter une app",
-    "app_action_result": "Résultat d'action d'app"
+    "app_action_result": "Résultat d'action d'app",
+    "blockers_done": "Les tâches attendues sont terminées"
   },
   "labels": {
     "set_status_to": "Statut défini sur",

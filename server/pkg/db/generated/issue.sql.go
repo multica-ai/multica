@@ -502,6 +502,9 @@ cleared_wakeup_receipts AS (
 cleared_wakeups AS (
  DELETE FROM issue_wakeup WHERE issue_id IN (SELECT target.id FROM target)
 ),
+cleared_blockers AS (
+ DELETE FROM issue_blocker WHERE workspace_id=$2 AND (issue_id IN (SELECT target.id FROM target) OR blocker_issue_id IN (SELECT target.id FROM target))
+),
 cleared_child_events AS (
  DELETE FROM issue_child_event WHERE parent_id IN (SELECT target.id FROM target) OR child_id IN (SELECT target.id FROM target)
 ),
@@ -1596,17 +1599,18 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.revision, i.duplicate_of_issue_id
 FROM issue i
 WHERE i.workspace_id = $1
+ AND (NOT $2::boolean OR issue_has_open_blockers(i.workspace_id,i.id))
   -- Negate only known terminal keys so an unknown legacy key remains visible.
-  AND NOT (i.status = ANY($2::text[]))
-  AND ($3::text IS NULL OR i.priority = $3)
-  AND ($4::uuid IS NULL OR i.assignee_id = $4)
-  AND ($5::uuid[] IS NULL OR i.assignee_id = ANY($5::uuid[]))
-  AND ($6::uuid IS NULL OR i.creator_id = $6)
-  AND ($7::uuid IS NULL OR (i.creator_type = 'member' AND i.creator_id = $7) OR i.requester_user_id = $7)
-  AND ($8::uuid IS NULL OR i.project_id = $8)
+  AND NOT (i.status = ANY($3::text[]))
+  AND ($4::text IS NULL OR i.priority = $4)
+  AND ($5::uuid IS NULL OR i.assignee_id = $5)
+  AND ($6::uuid[] IS NULL OR i.assignee_id = ANY($6::uuid[]))
+  AND ($7::uuid IS NULL OR i.creator_id = $7)
+  AND ($8::uuid IS NULL OR (i.creator_type = 'member' AND i.creator_id = $8) OR i.requester_user_id = $8)
+  AND ($9::uuid IS NULL OR i.project_id = $9)
   -- MUL-8472: private projects the caller cannot see.
-  AND ($9::uuid[] IS NULL OR i.project_id IS NULL OR NOT (i.project_id = ANY($9::uuid[])))
-  AND ($10::jsonb IS NULL OR i.metadata @> $10::jsonb)
+  AND ($10::uuid[] IS NULL OR i.project_id IS NULL OR NOT (i.project_id = ANY($10::uuid[])))
+  AND ($11::jsonb IS NULL OR i.metadata @> $11::jsonb)
   -- properties_filter is a jsonb array of groups, each group an array of
   -- patterns (built by parsePropertiesFilterParam): the issue must match at
   -- least one pattern from EVERY group (AND of ORs). Three pattern shapes:
@@ -1624,10 +1628,10 @@ WHERE i.workspace_id = $1
   -- terminal-status predicate intentionally remains a filter rather than a
   -- positive index narrowing so unknown legacy status keys stay visible.
   AND (
-    $11::jsonb IS NULL
+    $12::jsonb IS NULL
     OR NOT EXISTS (
       SELECT 1
-      FROM jsonb_array_elements($11::jsonb) AS pf(alternatives)
+      FROM jsonb_array_elements($12::jsonb) AS pf(alternatives)
       WHERE NOT EXISTS (
         SELECT 1
         FROM jsonb_array_elements(pf.alternatives) AS alt(pattern)
@@ -1665,11 +1669,11 @@ WHERE i.workspace_id = $1
     )
   )
   AND (
-    $12::uuid IS NULL
+    $13::uuid IS NULL
     OR (i.assignee_type = 'agent' AND i.assignee_id IN (
           SELECT a.id FROM agent a
            WHERE a.workspace_id = $1
-             AND a.owner_id     = $12::uuid
+             AND a.owner_id     = $13::uuid
     ))
     OR (i.assignee_type = 'squad' AND i.assignee_id IN (
           SELECT sm.squad_id
@@ -1677,14 +1681,14 @@ WHERE i.workspace_id = $1
             JOIN squad s ON s.id = sm.squad_id
            WHERE s.workspace_id = $1
              AND sm.member_type = 'member'
-             AND sm.member_id   = $12::uuid
+             AND sm.member_id   = $13::uuid
           UNION
           SELECT s.id
             FROM squad s
             JOIN agent a ON a.id = s.leader_id
            WHERE s.workspace_id = $1
              AND a.workspace_id = $1
-             AND a.owner_id     = $12::uuid
+             AND a.owner_id     = $13::uuid
           UNION
           SELECT sm.squad_id
             FROM squad_member sm
@@ -1693,7 +1697,7 @@ WHERE i.workspace_id = $1
            WHERE s.workspace_id = $1
              AND sm.member_type = 'agent'
              AND a.workspace_id = $1
-             AND a.owner_id     = $12::uuid
+             AND a.owner_id     = $13::uuid
     ))
   )
 ORDER BY i.position ASC, i.created_at DESC
@@ -1701,6 +1705,7 @@ ORDER BY i.position ASC, i.created_at DESC
 
 type ListOpenIssuesParams struct {
 	WorkspaceID        pgtype.UUID   `json:"workspace_id"`
+	BlockedOnly        bool          `json:"blocked_only"`
 	TerminalStatusKeys []string      `json:"terminal_status_keys"`
 	Priority           pgtype.Text   `json:"priority"`
 	AssigneeID         pgtype.UUID   `json:"assignee_id"`
@@ -1747,6 +1752,7 @@ type ListOpenIssuesRow struct {
 func (q *Queries) ListOpenIssues(ctx context.Context, arg ListOpenIssuesParams) ([]ListOpenIssuesRow, error) {
 	rows, err := q.db.Query(ctx, listOpenIssues,
 		arg.WorkspaceID,
+		arg.BlockedOnly,
 		arg.TerminalStatusKeys,
 		arg.Priority,
 		arg.AssigneeID,

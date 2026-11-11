@@ -189,7 +189,7 @@
     "section_project": "專案",
     "section_project_status": "專案狀態",
     "section_label": "標籤",
-    "section_relation": "與我的關係",
+    "section_relation": "任務關係",
     "relation_assigned": "分配給我的",
     "relation_created": "我建立的",
     "relation_my_agents": "我的 AI 代理在做",
@@ -272,7 +272,8 @@
     "advanced_group_match_trailing": "條件",
     "advanced_group_hint": "組內條件之間用「{{word}}」連接",
     "advanced_add_to_group": "新增到條件組",
-    "advanced_turn_into_group": "轉為條件組"
+    "advanced_turn_into_group": "轉為條件組",
+    "relation_blocked": "被阻塞"
   },
   "display": {
     "tooltip": "顯示設定",
@@ -1961,5 +1962,19 @@
     "focus_failed": "無法切到 {{name}}",
     "retry": "重試",
     "dismiss": "忽略"
+  },
+  "waiting": {
+    "title": "等待",
+    "add": "新增前置任務",
+    "remove": "移除 {{identifier}}",
+    "count": "等待 {{count}} 個任務",
+    "count_other": "等待 {{count}} 個任務",
+    "stage": "更早階段 · {{finished}}/{{total}} 已結束",
+    "hint": "全部結束後，負責人將自動開始或收到通知。",
+    "hint_backlog": "任務在待規劃中，全部結束後不會自動開始，移出待規劃後才會開始。",
+    "empty": "沒有等待的任務",
+    "picker_hint": "選擇一個必須先結束的任務。",
+    "restricted": "{{count}} 個無權查看的前置任務",
+    "ended": "等待的任務已結束"
   }
 }

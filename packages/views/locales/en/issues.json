@@ -191,7 +191,7 @@
     "section_project": "Project",
     "section_project_status": "Project status",
     "section_label": "Label",
-    "section_relation": "Relation to me",
+    "section_relation": "Relationships",
     "relation_assigned": "Assigned to me",
     "relation_created": "Created by me",
     "relation_my_agents": "My agents' work",
@@ -278,7 +278,8 @@
     "advanced_group_match_trailing": "of these",
     "advanced_group_hint": "Conditions in this group are joined with “{{word}}”",
     "advanced_add_to_group": "Add to group",
-    "advanced_turn_into_group": "Turn into group"
+    "advanced_turn_into_group": "Turn into group",
+    "relation_blocked": "Blocked"
   },
   "display": {
     "tooltip": "Display settings",
@@ -2040,5 +2041,20 @@
     "focus_failed": "Couldn't switch to {{name}}",
     "retry": "Retry",
     "dismiss": "Dismiss"
+  },
+  "waiting": {
+    "title": "Waiting",
+    "add": "Add blocker",
+    "remove": "Remove {{identifier}}",
+    "count": "Waiting for {{count}} tasks",
+    "stage": "Earlier stages · {{finished}}/{{total}} ended",
+    "hint": "After these tasks end, the assignee starts automatically or receives a notification.",
+    "hint_backlog": "This task is in Backlog, so it won't start automatically when these tasks end. It starts once it leaves Backlog.",
+    "empty": "No tasks to wait for",
+    "picker_hint": "Select a task that must end before this one can start.",
+    "restricted": "{{count}} restricted prerequisites",
+    "ended": "Waiting tasks ended",
+    "count_one": "Waiting for {{count}} task",
+    "count_other": "Waiting for {{count}} tasks"
   }
 }

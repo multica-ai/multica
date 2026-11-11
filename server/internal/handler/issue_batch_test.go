@@ -334,6 +334,9 @@ func TestBatchChildDoneCrossStage_Cancelled(t *testing.T) {
 // stage, the parent is told Stage 1 closed and pointed at Stage 2.
 func TestBatchChildDoneClosesLowerStageOnly(t *testing.T) {
 	fx := newStagedBatchFixture(t)
+	for _, child := range fx.stage2 {
+		dbfx.Exec(t, "UPDATE issue SET status='backlog' WHERE id=$1", child.ID)
+	}
 	batchSetStatus(t, []string{fx.stage1[0].ID, fx.stage1[1].ID}, "done")
 
 	entries := childDoneEntries(t, fx.parent.ID)

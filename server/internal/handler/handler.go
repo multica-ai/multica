@@ -782,6 +782,12 @@ func (h *Handler) channelDeliversFiles(channelType string) bool {
 
 // publish sends a domain event through the event bus.
 func (h *Handler) publish(eventType, workspaceID, actorType, actorID string, payload any) {
+	if fields, ok := payload.(map[string]any); ok {
+		if issue, ok := fields["issue"].(IssueResponse); ok {
+			fields["issue"] = publicBlockerResponse(issue)
+		}
+	}
+
 	h.Bus.Publish(events.Event{
 		Type:        eventType,
 		WorkspaceID: workspaceID,

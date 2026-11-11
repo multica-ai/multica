@@ -100,7 +100,8 @@
     "app_action_requested": "Necesita tu confirmación",
     "app_action_reminder": "La confirmación caduca pronto",
     "app_connect_requested": "Conectar una aplicación",
-    "app_action_result": "Resultado de la acción de la aplicación"
+    "app_action_result": "Resultado de la acción de la aplicación",
+    "blockers_done": "Las tareas en espera terminaron"
   },
   "labels": {
     "set_status_to": "Establecer estado en",

@@ -39,7 +39,7 @@ interface StoredPreview {
 
 interface WakeupDetails {
   wakeup?: StoredPreview;
-  rule?: "child_done";
+  rule?: "child_done" | "blockers_done";
   stage?: number;
   total?: number;
   target_type?: string;
@@ -106,9 +106,9 @@ export function formatWakeupActivity(
         ? t(($) => $.activity.wakeup_created_scheduled, { condition, agent })
         : t(($) => $.activity.wakeup_created, { condition, agent });
     case "wakeup_triggered": {
-      if (details.rule === "child_done") {
+      if (details.rule === "child_done" || details.rule === "blockers_done") {
         const count = details.total ?? 1;
-        const closed = details.stage
+        const closed = details.rule === "blockers_done" ? t(($) => $.waiting.ended) : details.stage
           ? t(($) => $.activity.wakeup_child_done_stage, { stage: details.stage, count })
           : t(($) => $.activity.wakeup_child_done_all, { count });
         // The squad's leader ran, but the entry names the assignee people see.
@@ -166,7 +166,7 @@ export function wakeupActivityChip(
   getActorName: ActorName,
 ): string | null {
   const details = detailsOf(entry);
-  if (details.rule === "child_done") return t(($) => $.activity.wakeup_chip_system);
+  if (details.rule === "child_done" || details.rule === "blockers_done") return t(($) => $.activity.wakeup_chip_system);
   if (entry.action === "wakeup_created" || !details.wakeup) return null;
   if (entry.action === "wakeup_checkin") return text.trigger(previewOf(details.wakeup, getActorName));
   const creator = details.wakeup.created_by_agent_id
@@ -180,7 +180,7 @@ export function wakeupActivityChip(
 export function WakeupActivityIcon({ entry }: { entry: TimelineEntry }) {
   const details = detailsOf(entry);
   const className = "h-4 w-4 shrink-0 text-muted-foreground";
-  if (details.rule === "child_done") return <ListChecks className={className} aria-hidden="true" />;
+  if (details.rule === "child_done" || details.rule === "blockers_done") return <ListChecks className={className} aria-hidden="true" />;
   switch (entry.action) {
     case "wakeup_timed_out":
       return <Hourglass className={className} aria-hidden="true" />;

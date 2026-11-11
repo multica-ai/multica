@@ -191,7 +191,7 @@
     "section_project": "Projet",
     "section_project_status": "Statut du projet",
     "section_label": "Étiquette",
-    "section_relation": "Lien avec moi",
+    "section_relation": "Relations",
     "relation_assigned": "Qui me sont assignés",
     "relation_created": "Créés par moi",
     "relation_my_agents": "Travail de mes agents",
@@ -278,7 +278,8 @@
     "advanced_group_match_trailing": "de ces conditions",
     "advanced_group_hint": "Les conditions de ce groupe sont reliées par « {{word}} »",
     "advanced_add_to_group": "Ajouter au groupe",
-    "advanced_turn_into_group": "Transformer en groupe"
+    "advanced_turn_into_group": "Transformer en groupe",
+    "relation_blocked": "Bloqué"
   },
   "display": {
     "tooltip": "Paramètres d'affichage",
@@ -2040,5 +2041,20 @@
     "focus_failed": "Impossible de basculer vers {{name}}",
     "retry": "Réessayer",
     "dismiss": "Ignorer"
+  },
+  "waiting": {
+    "title": "En attente",
+    "add": "Ajouter un prérequis",
+    "remove": "Retirer {{identifier}}",
+    "count": "En attente de {{count}} tâches",
+    "count_one": "En attente de {{count}} tâche",
+    "count_other": "En attente de {{count}} tâches",
+    "stage": "Étapes précédentes · {{finished}}/{{total}} terminées",
+    "hint": "Une fois ces tâches terminées, le responsable démarre automatiquement ou reçoit une notification.",
+    "hint_backlog": "Cette tâche est « À planifier » : elle ne démarrera pas automatiquement à la fin de ces tâches. Elle démarrera une fois sortie de « À planifier ».",
+    "empty": "Aucune tâche à attendre",
+    "picker_hint": "Sélectionnez une tâche qui doit se terminer avant celle-ci.",
+    "restricted": "{{count}} prérequis à accès restreint",
+    "ended": "Les tâches attendues sont terminées"
   }
 }

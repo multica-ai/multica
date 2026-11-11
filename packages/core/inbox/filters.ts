@@ -47,6 +47,7 @@ const TYPE_GROUP: Partial<Record<InboxItemType, InboxTypeGroup>> = {
   start_date_changed: "change",
   due_date_changed: "change",
   children_done: "change",
+  blockers_done: "change",
   task_completed: "run",
   task_failed: "run",
   agent_blocked: "run",

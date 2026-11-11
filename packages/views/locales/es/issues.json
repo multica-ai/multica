@@ -207,7 +207,7 @@
     "chip_edit": "Editar",
     "chip_save_as": "Guardar como",
     "active_section": "Activos",
-    "section_relation": "Relación conmigo",
+    "section_relation": "Relaciones",
     "relation_assigned": "Asignadas a mí",
     "relation_created": "Creadas por mí",
     "relation_my_agents": "Trabajo de mis agentes",
@@ -268,7 +268,8 @@
     "advanced_group_match_trailing": "de estas condiciones",
     "advanced_group_hint": "Las condiciones de este grupo se unen con «{{word}}»",
     "advanced_add_to_group": "Añadir al grupo",
-    "advanced_turn_into_group": "Convertir en grupo"
+    "advanced_turn_into_group": "Convertir en grupo",
+    "relation_blocked": "Bloqueado"
   },
   "display": {
     "tooltip": "Opciones de visualización",
@@ -2040,5 +2041,20 @@
     "focus_failed": "No se pudo cambiar a {{name}}",
     "retry": "Reintentar",
     "dismiss": "Descartar"
+  },
+  "waiting": {
+    "title": "En espera",
+    "add": "Añadir requisito",
+    "remove": "Quitar {{identifier}}",
+    "count": "Esperando {{count}} tareas",
+    "count_one": "Esperando {{count}} tarea",
+    "count_other": "Esperando {{count}} tareas",
+    "stage": "Etapas anteriores · {{finished}}/{{total}} terminadas",
+    "hint": "Al terminar estas tareas, el responsable comienza automáticamente o recibe una notificación.",
+    "hint_backlog": "Esta tarea está en Backlog, así que no comenzará automáticamente cuando terminen estas tareas. Comenzará cuando salga de Backlog.",
+    "empty": "Sin tareas pendientes",
+    "picker_hint": "Selecciona una tarea que deba terminar antes que esta.",
+    "restricted": "{{count}} requisitos restringidos",
+    "ended": "Las tareas en espera terminaron"
   }
 }
