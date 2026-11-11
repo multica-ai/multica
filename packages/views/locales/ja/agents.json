@@ -827,7 +827,7 @@
     "context_receipt_col_delivery": "渡し方",
     "context_receipt_col_load": "読み込み",
     "context_receipt_same_as_brief": "ランタイム説明と同じ",
-    "context_receipt_footnote": "エージェント開始前に daemon が記録。サイズと短いハッシュのみで、内容は保存されません。「検証済み」はこのランタイムのバージョンでファイルの読み込みを確認済みという意味です。",
+    "context_receipt_footnote": "エージェント開始前に daemon が記録。サイズと短いハッシュのみで、内容は保存されません。「検証済み」はこのランタイムのバージョンでファイルの読み込みを確認済みという意味です。 スキルのサイズとハッシュは、書き込まれたパッケージ全体を対象とします。",
     "context_source_runtime_brief": "ランタイム説明",
     "context_source_agent_instructions": "エージェントの指示",
     "context_source_project_description": "プロジェクトの説明",

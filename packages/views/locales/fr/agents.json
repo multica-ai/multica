@@ -993,7 +993,7 @@
     "context_receipt_col_delivery": "Transmis via",
     "context_receipt_col_load": "Chargé",
     "context_receipt_same_as_brief": "Comme les instructions d'exécution",
-    "context_receipt_footnote": "Enregistré par le daemon avant le démarrage de l'agent. Tailles et hachages courts uniquement ; aucun contenu n'est stocké. « Vérifié » signifie que cette version du runtime a été testée et charge le fichier.",
+    "context_receipt_footnote": "Enregistré par le daemon avant le démarrage de l'agent. Tailles et hachages courts uniquement ; aucun contenu n'est stocké. « Vérifié » signifie que cette version du runtime a été testée et charge le fichier. Les tailles et hachages des skills couvrent le paquet complet écrit sur disque.",
     "context_source_runtime_brief": "Instructions d'exécution",
     "context_source_agent_instructions": "Instructions de l'agent",
     "context_source_project_description": "Description du projet",

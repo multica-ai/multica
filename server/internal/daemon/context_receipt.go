@@ -131,15 +131,18 @@ func receiptHash(content string) string {
 type contextReceiptInput struct {
 	Provider       string
 	RuntimeVersion string
+	CustomRuntime  bool
 	Model          string
 	WorkDir        string
 	Prompt         string
 	RuntimeBrief   string
 	InlineBrief    bool
+	BriefWritten   bool
 	ResumedSession bool
 	FreshRetry     bool
 	MCPConfig      json.RawMessage
 	TaskCtx        execenv.TaskContextForEnv
+	Skills         []execenv.SkillReceipt
 	// ExistingInstructions is the repository's own content in the runtime
 	// config file, outside the managed block.
 	ExistingInstructions string
@@ -160,6 +163,11 @@ func buildContextReceipt(in contextReceiptInput) ContextReceipt {
 
 	configPath := execenv.RuntimeConfigRelPath(in.WorkDir, in.Provider)
 	fileLoad, fileVerifiedAt := contextFileLoadState(in.Provider, in.RuntimeVersion)
+	if in.CustomRuntime {
+		// A vendor CLI probe does not establish how an arbitrary command
+		// speaking the same protocol discovers its instruction files.
+		fileLoad, fileVerifiedAt = ReceiptLoadUnverified, ""
+	}
 
 	brief := ContextReceiptSource{
 		Kind:   ReceiptKindRuntimeBrief,
@@ -171,7 +179,7 @@ func buildContextReceipt(in contextReceiptInput) ContextReceipt {
 		// Inline wins over the file: providerNeedsInlineSystemPrompt exists
 		// because these runtimes do not read the file the daemon also writes.
 		brief.Delivery, brief.Load = ReceiptDeliveryInline, ReceiptLoadDelivered
-	case configPath != "":
+	case configPath != "" && in.BriefWritten:
 		brief.Delivery, brief.Path = ReceiptDeliveryFile, configPath
 		brief.Load, brief.VerifiedVersion = fileLoad, fileVerifiedAt
 	default:
@@ -220,25 +228,17 @@ func buildContextReceipt(in contextReceiptInput) ContextReceipt {
 		Load:     ReceiptLoadDelivered,
 	})
 
-	if len(in.TaskCtx.AgentSkills) > 0 {
-		skillsDir := execenv.SkillDeliveryLocation(in.WorkDir, in.Provider)
-		for _, skill := range in.TaskCtx.AgentSkills {
-			size := len(skill.Content)
-			for _, f := range skill.Files {
-				size += len(f.Content)
-			}
-			r.Sources = append(r.Sources, ContextReceiptSource{
-				Kind:     ReceiptKindSkill,
-				Name:     skill.Name,
-				Bytes:    size,
-				SHA256:   receiptHash(skill.Content),
-				Delivery: ReceiptDeliveryFile,
-				Path:     skillsDir + "/" + skill.Name + "/SKILL.md",
-				// No probe covers skill discovery for any runtime yet, so a
-				// written skill is only ever "unverified" here.
-				Load: ReceiptLoadUnverified,
-			})
+	for _, skill := range in.Skills {
+		source := ContextReceiptSource{
+			Kind: ReceiptKindSkill, Name: skill.Name, Bytes: skill.Bytes,
+			SHA256: skill.SHA256, Path: skill.Path,
+			Delivery: ReceiptDeliveryNone, Load: ReceiptLoadNotDelivered,
 		}
+		if skill.Available {
+			// Materialization is confirmed, discovery has not been probed.
+			source.Delivery, source.Load = ReceiptDeliveryFile, ReceiptLoadUnverified
+		}
+		r.Sources = append(r.Sources, source)
 	}
 	return r
 }

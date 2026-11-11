@@ -968,7 +968,7 @@
     "context_receipt_col_delivery": "交付方式",
     "context_receipt_col_load": "載入狀態",
     "context_receipt_same_as_brief": "同執行說明",
-    "context_receipt_footnote": "由 daemon 在代理程式啟動前記錄。只保存大小和短雜湊，不保存內容。「已驗證」表示該執行環境的這個版本經過測試，確認會載入該檔案。",
+    "context_receipt_footnote": "由 daemon 在代理程式啟動前記錄。只保存大小和短雜湊，不保存內容。「已驗證」表示該執行環境的這個版本經過測試，確認會載入該檔案。 技能的大小和雜湊涵蓋實際寫入的整個技能包。",
     "context_source_runtime_brief": "執行說明",
     "context_source_agent_instructions": "代理程式指令",
     "context_source_project_description": "專案描述",

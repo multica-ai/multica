@@ -975,7 +975,7 @@
     "context_receipt_col_delivery": "Entregado vía",
     "context_receipt_col_load": "Cargado",
     "context_receipt_same_as_brief": "Igual que las instrucciones de ejecución",
-    "context_receipt_footnote": "Registrado por el daemon antes de que arrancara el agente. Solo tamaños y hashes cortos; no se guarda contenido. \"Verificado\" significa que se comprobó que esta versión del runtime carga el archivo.",
+    "context_receipt_footnote": "Registrado por el daemon antes de que arrancara el agente. Solo tamaños y hashes cortos; no se guarda contenido. \"Verificado\" significa que se comprobó que esta versión del runtime carga el archivo. Los tamaños y hashes de los skills abarcan todo el paquete escrito.",
     "context_source_runtime_brief": "Instrucciones de ejecución",
     "context_source_agent_instructions": "Instrucciones del agente",
     "context_source_project_description": "Descripción del proyecto",

@@ -827,7 +827,7 @@
     "context_receipt_col_delivery": "전달 방식",
     "context_receipt_col_load": "로드",
     "context_receipt_same_as_brief": "런타임 안내와 동일",
-    "context_receipt_footnote": "에이전트 시작 전에 daemon이 기록했습니다. 크기와 짧은 해시만 저장하며 내용은 저장하지 않습니다. \"검증됨\"은 이 런타임 버전에서 파일을 로드하는 것이 확인되었다는 뜻입니다.",
+    "context_receipt_footnote": "에이전트 시작 전에 daemon이 기록했습니다. 크기와 짧은 해시만 저장하며 내용은 저장하지 않습니다. \"검증됨\"은 이 런타임 버전에서 파일을 로드하는 것이 확인되었다는 뜻입니다. 스킬 크기와 해시는 실제로 기록된 전체 패키지를 기준으로 합니다.",
     "context_source_runtime_brief": "런타임 안내",
     "context_source_agent_instructions": "에이전트 지침",
     "context_source_project_description": "프로젝트 설명",

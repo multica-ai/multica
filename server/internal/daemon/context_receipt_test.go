@@ -44,17 +44,17 @@ func TestBuildContextReceiptFileDeliveredBrief(t *testing.T) {
 		WorkDir:        workDir,
 		Prompt:         "do the task",
 		RuntimeBrief:   "# Multica Agent Runtime\nbrief",
+		BriefWritten:   true,
 		ResumedSession: true,
 		MCPConfig:      json.RawMessage(`{"mcpServers":{"zeta":{"command":"z","env":{"TOKEN":"secret"}},"alpha":{"url":"https://x"}}}`),
 		TaskCtx: execenv.TaskContextForEnv{
 			AgentInstructions:  "be precise",
 			ProjectDescription: "project ctx",
-			AgentSkills: []execenv.SkillContextForEnv{{
-				Name:    "pr-review",
-				Content: "---\nname: pr-review\n---\nbody",
-				Files:   []execenv.SkillFileContextForEnv{{Path: "ref.md", Content: "12345"}},
-			}},
 		},
+		Skills: []execenv.SkillReceipt{{
+			Name: "pr-review", Path: ".kiro/skills/pr-review/SKILL.md",
+			Bytes: 30, SHA256: "0123456789ab", Available: true,
+		}},
 		ExistingInstructions: "repo rules",
 	})
 
@@ -104,8 +104,8 @@ func TestBuildContextReceiptFileDeliveredBrief(t *testing.T) {
 	if skill.Path != ".kiro/skills/pr-review/SKILL.md" || skill.Load != ReceiptLoadUnverified {
 		t.Fatalf("skill row = %+v", skill)
 	}
-	if want := len("---\nname: pr-review\n---\nbody") + 5; skill.Bytes != want {
-		t.Fatalf("skill bytes = %d, want %d (content + files)", skill.Bytes, want)
+	if skill.Bytes != 30 || skill.SHA256 != "0123456789ab" {
+		t.Fatalf("skill metadata = %+v, want the prepared package's fingerprint", skill)
 	}
 
 	// Metadata only: no content or MCP secret may appear in the wire body.
@@ -145,6 +145,11 @@ func TestBuildContextReceiptLoadStates(t *testing.T) {
 			delivery: ReceiptDeliveryFile, load: ReceiptLoadUnverified, path: "QWEN.md",
 		},
 		{
+			name:     "custom command at vendor probed version is not the probed runtime",
+			in:       contextReceiptInput{Provider: "claude", RuntimeVersion: "2.1.220", CustomRuntime: true},
+			delivery: ReceiptDeliveryFile, load: ReceiptLoadUnverified, path: "CLAUDE.md",
+		},
+		{
 			name:     "inline system prompt wins over the file",
 			in:       contextReceiptInput{Provider: "traecli", InlineBrief: true},
 			delivery: ReceiptDeliveryInline, load: ReceiptLoadDelivered,
@@ -159,6 +164,7 @@ func TestBuildContextReceiptLoadStates(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.in.WorkDir = workDir
 			tc.in.RuntimeBrief = "brief"
+			tc.in.BriefWritten = true
 			r := buildContextReceipt(tc.in)
 			brief := receiptSource(t, r, ReceiptKindRuntimeBrief, "")
 			if brief.Delivery != tc.delivery || brief.Load != tc.load || brief.Path != tc.path {
@@ -181,12 +187,7 @@ func TestBuildContextReceiptOmitsEmptySections(t *testing.T) {
 }
 
 func TestSkillDeliveryLocationForHomeBasedRuntimes(t *testing.T) {
-	r := buildContextReceipt(contextReceiptInput{
-		Provider: "codex",
-		WorkDir:  t.TempDir(),
-		TaskCtx:  execenv.TaskContextForEnv{AgentSkills: []execenv.SkillContextForEnv{{Name: "s", Content: "x"}}},
-	})
-	if got := receiptSource(t, r, ReceiptKindSkill, "s").Path; got != "$CODEX_HOME/skills/s/SKILL.md" {
+	if got := execenv.SkillDeliveryLocation(t.TempDir(), "codex"); got != "$CODEX_HOME/skills" {
 		t.Fatalf("codex skill path = %q", got)
 	}
 }
@@ -243,4 +244,58 @@ func TestReportContextReceiptPostsAndToleratesOldServer(t *testing.T) {
 	// return (the run is not affected).
 	status = http.StatusNotFound
 	d.reportContextReceipt(context.Background(), "task-1", receipt, logger)
+}
+
+func TestContextReceiptFailedBriefWrite(t *testing.T) {
+	workDir := t.TempDir()
+	// A directory at the instruction-file path rejects the write on every
+	// platform, including test runners allowed to overwrite read-only files.
+	if err := os.Mkdir(filepath.Join(workDir, "CLAUDE.md"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	taskCtx := execenv.TaskContextForEnv{AgentInstructions: "required instruction"}
+	brief, err := execenv.InjectRuntimeConfig(workDir, "claude", taskCtx)
+	if err == nil {
+		t.Fatal("expected injection to fail")
+	}
+	r := buildContextReceipt(contextReceiptInput{
+		Provider: "claude", RuntimeVersion: "2.1.220", WorkDir: workDir,
+		RuntimeBrief: brief, TaskCtx: taskCtx,
+	})
+	for _, kind := range []string{ReceiptKindRuntimeBrief, ReceiptKindAgentInstructions} {
+		s := receiptSource(t, r, kind, "")
+		if s.Load != ReceiptLoadNotDelivered {
+			t.Errorf("%s after failed write: load = %s, want not_delivered", kind, s.Load)
+		}
+	}
+}
+
+func TestContextReceiptUsesMaterializedSkill(t *testing.T) {
+	taskCtx := execenv.TaskContextForEnv{AgentSkills: []execenv.SkillContextForEnv{{
+		Name: "Code Review", Content: "Be concise.",
+	}}}
+	env, err := execenv.Prepare(execenv.PrepareParams{
+		WorkspacesRoot: t.TempDir(), WorkspaceID: "receipt-workspace",
+		TaskID: "receipt-task", Provider: "kiro", Task: taskCtx,
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = env.Cleanup(true) })
+	taskCtx = execenv.ApplyPreparedSkillNames(taskCtx, env.PreparedSkillNames)
+	r := buildContextReceipt(contextReceiptInput{
+		Provider: "kiro", WorkDir: env.WorkDir, TaskCtx: taskCtx,
+		Skills: env.SkillReceipts("kiro", taskCtx.AgentSkills),
+	})
+	source := receiptSource(t, r, ReceiptKindSkill, taskCtx.AgentSkills[0].Name)
+	actual, err := os.ReadFile(filepath.Join(env.WorkDir, filepath.FromSlash(source.Path)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if source.Bytes != len(actual) {
+		t.Errorf("receipt bytes = %d, materialized file bytes = %d", source.Bytes, len(actual))
+	}
+	if source.SHA256 == receiptHash(taskCtx.AgentSkills[0].Content) || len(source.SHA256) != 12 {
+		t.Errorf("skill fingerprint = %q, want the materialized package fingerprint", source.SHA256)
+	}
 }

@@ -993,7 +993,7 @@
     "context_receipt_col_delivery": "Delivered via",
     "context_receipt_col_load": "Loaded",
     "context_receipt_same_as_brief": "Same as runtime brief",
-    "context_receipt_footnote": "Recorded by the daemon before the agent started. Sizes and short hashes only; no content is stored. \"Verified\" means this runtime version was tested to load the file.",
+    "context_receipt_footnote": "Recorded by the daemon before the agent started. Sizes and short hashes only; no content is stored. \"Verified\" means this runtime version was tested to load the file. Skill sizes and hashes cover the complete written package.",
     "context_source_runtime_brief": "Runtime brief",
     "context_source_agent_instructions": "Agent instructions",
     "context_source_project_description": "Project description",

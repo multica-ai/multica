@@ -968,7 +968,7 @@
     "context_receipt_col_delivery": "交付方式",
     "context_receipt_col_load": "加载状态",
     "context_receipt_same_as_brief": "同运行说明",
-    "context_receipt_footnote": "由 daemon 在智能体启动前记录。只保存大小和短哈希，不保存内容。“已验证”表示该运行环境的这个版本经过测试，确认会加载该文件。",
+    "context_receipt_footnote": "由 daemon 在智能体启动前记录。只保存大小和短哈希，不保存内容。“已验证”表示该运行环境的这个版本经过测试，确认会加载该文件。 技能的大小和哈希覆盖实际写入的整个技能包。",
     "context_source_runtime_brief": "运行说明",
     "context_source_agent_instructions": "智能体指令",
     "context_source_project_description": "项目描述",
