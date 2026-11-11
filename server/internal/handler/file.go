@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/imagemetadata"
+	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -610,8 +611,8 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		}
 		if err != nil {
 			if writeUploadCancellation(w, r, err) {
-				// The record write may have committed. Keep uploaded bytes
-				// available for reconciliation after an interrupted response.
+				// The record write may have committed. Deleting uploaded bytes
+				// could leave a committed attachment pointing at a missing object.
 				return
 			}
 			slog.Error("failed to create attachment record", "error", err)
@@ -1628,12 +1629,10 @@ func (h *Handler) deleteS3Objects(ctx context.Context, urls []string) {
 	h.Storage.DeleteKeys(ctx, keys)
 }
 
-const statusUploadClientClosedRequest = 499
-
 func writeUploadCancellation(w http.ResponseWriter, r *http.Request, err error) bool {
 	if !errors.Is(r.Context().Err(), context.Canceled) || !errors.Is(err, context.Canceled) {
 		return false
 	}
-	w.WriteHeader(statusUploadClientClosedRequest)
+	w.WriteHeader(middleware.StatusClientClosedRequest)
 	return true
 }
