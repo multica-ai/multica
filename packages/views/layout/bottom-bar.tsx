@@ -1,115 +1,19 @@
 "use client";
 
-import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { Activity, ArrowUpRight, TriangleAlert } from "@multica/ui/icons";
-import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
-import { HoverCard, HoverCardContent, HoverCardTrigger } from "@multica/ui/components/ui/hover-card";
+import { TriangleAlert } from "@multica/ui/icons";
 import { useChatStore } from "@multica/core/chat";
-import { agentTaskSnapshotOptions } from "@multica/core/agents/queries";
-import type { AgentPresenceDetail } from "@multica/core/agents";
-import { issueDetailOptions } from "@multica/core/issues/queries";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
-import type { Agent, AgentTask } from "@multica/core/types";
-import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { ChatBar } from "../chat/components/chat-bar";
 import { isFloatingChatRouteSuppressed } from "../chat/floating-chat-visibility";
+import { ActorAvatar } from "../common/actor-avatar";
 import { useT } from "../i18n";
 import { AppLink, useNavigation } from "../navigation";
 import { useAppShell } from "./app-shell-context";
 import { BOTTOM_BAR_ITEM_CLASS } from "./bottom-bar-styles";
 import { useTeamAgentStatus } from "./panels/team-status";
 
-const MAX_PREVIEW_AGENTS = 5;
-const EMPTY_TASKS: AgentTask[] = [];
-
-function WorkingAgentPreview({
-  wsId,
-  agent,
-  task,
-  runningCount,
-}: {
-  wsId: string;
-  agent: Agent;
-  task: AgentTask | undefined;
-  runningCount: number;
-}) {
-  const { t } = useT("layout");
-  const issueId = task?.issue_id ?? "";
-  const { data: issue } = useQuery({
-    ...issueDetailOptions(wsId, issueId),
-    enabled: !!issueId,
-  });
-
-  return (
-    <div className="flex min-w-0 items-center gap-2 text-caption">
-      <ActorAvatar
-        name={agent.name}
-        initials={agent.name.charAt(0).toUpperCase()}
-        avatarUrl={resolvePublicFileUrl(agent.avatar_url)}
-        isAgent
-        size="md"
-      />
-      <div className="min-w-0 flex-1">
-        <div className="truncate font-medium">{agent.name}</div>
-        <div className="truncate text-muted-foreground">
-          {issue?.title ?? t(($) => $.panels.team.running_tasks, { count: runningCount })}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function WorkingAgentsPreview({
-  wsId,
-  working,
-  byAgent,
-  teamHref,
-}: {
-  wsId: string;
-  working: Agent[];
-  byAgent: Map<string, AgentPresenceDetail>;
-  teamHref: string;
-}) {
-  const { t } = useT("layout");
-  const { data: tasks = EMPTY_TASKS } = useQuery(agentTaskSnapshotOptions(wsId));
-  const runningByAgent = useMemo(() => {
-    const result = new Map<string, AgentTask>();
-    for (const task of tasks) {
-      if (task.status === "running" && task.issue_id && !result.has(task.agent_id)) {
-        result.set(task.agent_id, task);
-      }
-    }
-    return result;
-  }, [tasks]);
-
-  return (
-    <div className="flex flex-col gap-3">
-      <div className="text-caption font-medium text-muted-foreground">
-        {t(($) => $.bottom_bar.working, { count: working.length })}
-      </div>
-      {working.slice(0, MAX_PREVIEW_AGENTS).map((agent) => (
-        <WorkingAgentPreview
-          key={agent.id}
-          wsId={wsId}
-          agent={agent}
-          task={runningByAgent.get(agent.id)}
-          runningCount={byAgent.get(agent.id)?.runningCount ?? 0}
-        />
-      ))}
-      <AppLink
-        href={teamHref}
-        className="flex items-center gap-1.5 border-t border-surface-border pt-2.5 text-caption text-muted-foreground outline-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
-      >
-        {working.length > MAX_PREVIEW_AGENTS
-          ? t(($) => $.panels.team.show_more_agents, { count: working.length - MAX_PREVIEW_AGENTS })
-          : t(($) => $.spaces.team)}
-        <ArrowUpRight aria-hidden className="size-3.5" />
-      </AppLink>
-    </div>
-  );
-}
+const MAX_WORKING_AVATARS = 3;
 
 /**
  * What the team is doing, at a glance: how many agents are working, and work
@@ -130,19 +34,23 @@ function TeamStatus({ wsId }: { wsId: string }) {
   return (
     <div className="flex min-w-0 items-center gap-1">
       {working.length > 0 && (
-        <HoverCard>
-          <HoverCardTrigger
-            render={<AppLink href={teamHref} className={BOTTOM_BAR_ITEM_CLASS} />}
-          >
-            <Activity aria-hidden className="size-3.5 shrink-0" />
-            <span className="truncate">
-              {t(($) => $.bottom_bar.working, { count: working.length })}
-            </span>
-          </HoverCardTrigger>
-          <HoverCardContent side="top" align="start" sideOffset={8} className="w-80">
-            <WorkingAgentsPreview wsId={wsId} working={working} byAgent={byAgent} teamHref={teamHref} />
-          </HoverCardContent>
-        </HoverCard>
+        <AppLink href={teamHref} className={BOTTOM_BAR_ITEM_CLASS}>
+          <span aria-hidden className="flex shrink-0 -space-x-1">
+            {working.slice(0, MAX_WORKING_AVATARS).map((agent) => (
+              <ActorAvatar
+                key={agent.id}
+                actorType="agent"
+                actorId={agent.id}
+                size="xs"
+                profileLink={false}
+                className="ring-[1.5px] ring-app-shell"
+              />
+            ))}
+          </span>
+          <span className="truncate">
+            {t(($) => $.bottom_bar.working, { count: working.length })}
+          </span>
+        </AppLink>
       )}
       {waitingTasks > 0 && (
         <AppLink
@@ -183,7 +91,7 @@ export function AppBottomBar() {
       data-mc="bottom-bar"
       // pr: the card's mr-2 plus a gutter that puts the last icon on the same
       // column as the page header's trailing action.
-      className="hidden h-8 shrink-0 items-center justify-between gap-4 pr-[18px] pl-6 md:flex"
+      className="hidden h-8 shrink-0 items-center justify-between gap-4 pr-[18px] pl-3 md:flex"
     >
       <TeamStatus wsId={wsId} />
       {showChat && <ChatBar />}
