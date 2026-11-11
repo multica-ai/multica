@@ -1621,7 +1621,6 @@
     "last_message": "最近訊息：{{time}}",
     "ask_admin": "請找管理員",
     "unavailable": "暫時無法連接",
-    "server_unavailable": "伺服器尚未啟用：{{platforms}}",
     "permissions_title": "誰可以連接",
     "owner_or_admin": "AI 代理擁有者或工作區管理員",
     "admin_only": "僅工作區管理員",

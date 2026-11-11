@@ -1636,7 +1636,6 @@
     "last_message": "Dernier message : {{time}}",
     "ask_admin": "Contacter un administrateur",
     "unavailable": "Connexion indisponible",
-    "server_unavailable": "Non activé sur ce serveur : {{platforms}}",
     "permissions_title": "Qui peut connecter",
     "owner_or_admin": "Propriétaire de l’agent ou administrateur de l’espace",
     "admin_only": "Administrateurs de l’espace uniquement",
