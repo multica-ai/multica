@@ -36,8 +36,8 @@ import (
 //     definition, and errors enumerate legal values so agents can self-correct.
 //   - Value writes are single-key atomic (mirror of issue metadata): two
 //     agents writing different properties never clobber each other.
-//   - Definitions archive instead of delete; archived definitions reject new
-//     values but keep existing ones resolvable.
+//   - Definitions archive first; permanent deletion is reserved for archived
+//     definitions and removes their values so the name can be reused safely.
 const (
 	maxActivePropertiesPerWorkspace = 20
 	maxPropertySelectOptions        = 200
@@ -654,6 +654,67 @@ func (h *Handler) UpdateProperty(w http.ResponseWriter, r *http.Request) {
 	resp := propertyToResponse(property, 0)
 	h.publish(protocol.EventPropertyUpdated, workspaceID, "member", userID, map[string]any{"property": resp})
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) DeleteProperty(w http.ResponseWriter, r *http.Request) {
+	workspaceID, userID, ok := h.requirePropertyAdmin(w, r)
+	if !ok {
+		return
+	}
+	idUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "property id")
+	if !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+
+	var httpStatus int
+	var httpMsg string
+	fail := func(status int, msg string) error {
+		httpStatus, httpMsg = status, msg
+		return errClientRejected
+	}
+	err := h.withPropertyLock(r, []string{"props:" + workspaceID, "prop:" + uuidToString(idUUID)}, func(q *db.Queries) error {
+		existing, err := q.GetIssueProperty(r.Context(), db.GetIssuePropertyParams{ID: idUUID, WorkspaceID: wsUUID})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return fail(http.StatusNotFound, "property not found")
+			}
+			return err
+		}
+		if !existing.ArchivedAt.Valid {
+			return fail(http.StatusConflict, "archive the property before deleting it")
+		}
+		if _, err := q.DeleteIssuePropertyValues(r.Context(), db.DeleteIssuePropertyValuesParams{
+			WorkspaceID: wsUUID,
+			Key:         uuidToString(existing.ID),
+		}); err != nil {
+			return err
+		}
+		if _, err := q.DeleteIssueProperty(r.Context(), db.DeleteIssuePropertyParams{
+			ID:          idUUID,
+			WorkspaceID: wsUUID,
+		}); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return fail(http.StatusNotFound, "property not found")
+			}
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, errClientRejected) {
+			writeError(w, httpStatus, httpMsg)
+			return
+		}
+		slog.Warn("DeleteProperty failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to delete property")
+		return
+	}
+	h.publish(protocol.EventPropertyDeleted, workspaceID, "member", userID, map[string]any{"property_id": uuidToString(idUUID)})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // Issue value handlers

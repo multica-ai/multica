@@ -190,6 +190,68 @@ func TestPropertyDefinitionCRUD(t *testing.T) {
 	}
 }
 
+func TestDeletePropertyRequiresArchiveAndRemovesIssueValues(t *testing.T) {
+	name := "OldName" + uuid.NewString()[:8]
+	property := createTestProperty(t, map[string]any{"name": name, "type": "text"})
+	issueID := createPropertyTestIssue(t, "property delete values")
+	if w := setIssuePropertyRaw(t, issueID, property.ID, "keep until deletion"); w.Code != http.StatusOK {
+		t.Fatalf("seed property value: %d %s", w.Code, w.Body.String())
+	}
+
+	deleteProperty := func() *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		req := withURLParam(newRequest(http.MethodDelete, "/api/properties/"+property.ID, nil), "id", property.ID)
+		testHandler.DeleteProperty(w, req)
+		return w
+	}
+
+	// Active definitions may still be in use, so deletion requires the
+	// explicit archive step first.
+	if w := deleteProperty(); w.Code != http.StatusConflict {
+		t.Fatalf("delete active property: expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+	var before []byte
+	if err := testPool.QueryRow(context.Background(), `SELECT properties FROM issue WHERE id = $1`, issueID).Scan(&before); err != nil {
+		t.Fatalf("load active property value: %v", err)
+	}
+	var beforeBag map[string]any
+	if err := json.Unmarshal(before, &beforeBag); err != nil {
+		t.Fatalf("decode active property value: %v", err)
+	}
+	if _, ok := beforeBag[property.ID]; !ok {
+		t.Fatalf("active deletion removed issue value: %v", beforeBag)
+	}
+
+	archive := withURLParam(newRequest(http.MethodPatch, "/api/properties/"+property.ID, map[string]any{"archived": true}), "id", property.ID)
+	testutil.Call(t, testHandler.UpdateProperty, archive).Want(http.StatusOK)
+	if w := deleteProperty(); w.Code != http.StatusNoContent {
+		t.Fatalf("delete archived property: expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+
+	get := httptest.NewRecorder()
+	testHandler.GetProperty(get, withURLParam(newRequest(http.MethodGet, "/api/properties/"+property.ID, nil), "id", property.ID))
+	if get.Code != http.StatusNotFound {
+		t.Fatalf("get deleted property: expected 404, got %d: %s", get.Code, get.Body.String())
+	}
+	var after []byte
+	if err := testPool.QueryRow(context.Background(), `SELECT properties FROM issue WHERE id = $1`, issueID).Scan(&after); err != nil {
+		t.Fatalf("load deleted property value: %v", err)
+	}
+	var afterBag map[string]any
+	if err := json.Unmarshal(after, &afterBag); err != nil {
+		t.Fatalf("decode deleted property value: %v", err)
+	}
+	if _, ok := afterBag[property.ID]; ok {
+		t.Fatalf("deleted property value still present: %v", afterBag)
+	}
+
+	// Deleting the archived definition releases its case-insensitive name.
+	recreated := createTestProperty(t, map[string]any{"name": strings.ToLower(name), "type": "text"})
+	if recreated.ID == property.ID {
+		t.Fatalf("recreated property reused deleted id %s", property.ID)
+	}
+}
+
 func TestPropertyDefinitionValidation(t *testing.T) {
 	cases := []struct {
 		name string

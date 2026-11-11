@@ -688,7 +688,8 @@
       "open": "{{name}} 的操作",
       "edit": "編輯",
       "archive": "歸檔",
-      "unarchive": "恢復"
+      "unarchive": "恢復",
+      "delete": "刪除"
     },
     "editor": {
       "create_title": "新建屬性",
@@ -717,6 +718,15 @@
       "cancel": "取消",
       "confirm": "歸檔屬性",
       "failed": "歸檔屬性失敗"
+    },
+    "delete_dialog": {
+      "title": "刪除屬性？",
+      "description_one": "永久刪除「{{name}}」？{{count}} 個任務上的值也會被移除。此操作無法復原。",
+      "description_other": "永久刪除「{{name}}」？{{count}} 個任務上的值也會被移除。此操作無法復原。",
+      "cancel": "取消",
+      "confirm": "刪除屬性",
+      "deleting": "正在刪除...",
+      "failed": "刪除屬性失敗"
     }
   },
   "labels": {

@@ -47,6 +47,23 @@ UPDATE issue_property SET
 WHERE id = $1 AND workspace_id = $2
 RETURNING *;
 
+-- name: DeleteIssuePropertyValues :execrows
+-- Permanent definition deletion also removes its values from every issue in
+-- the workspace. Revision and activity move together with the removed
+-- values so clients do not retain a stale property snapshot.
+UPDATE issue
+SET properties = properties - sqlc.arg('key')::text,
+    revision = revision + 1,
+    last_activity_at = GREATEST(COALESCE(last_activity_at, updated_at), now()),
+    updated_at = now()
+WHERE workspace_id = sqlc.arg('workspace_id')::uuid
+  AND properties ? sqlc.arg('key')::text;
+
+-- name: DeleteIssueProperty :one
+DELETE FROM issue_property
+WHERE id = $1 AND workspace_id = $2
+RETURNING *;
+
 -- name: SetIssuePropertyValue :one
 -- Single-key atomic write: concurrent writers on different property keys
 -- never clobber each other. Unlike SetIssueMetadataKey, a no-op still updates

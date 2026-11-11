@@ -4745,6 +4745,10 @@ export class ApiClient {
     });
   }
 
+  async deleteProperty(id: string): Promise<void> {
+    await this.fetch<void>(`/api/properties/${id}`, { method: "DELETE" });
+  }
+
   async setIssueProperty(issueId: string, propertyId: string, value: IssuePropertyValue): Promise<IssuePropertiesResponse> {
     const raw = await this.fetch<unknown>(`/api/issues/${issueId}/properties/${propertyId}`, {
       method: "PUT",

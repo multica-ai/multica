@@ -115,6 +115,36 @@ func (q *Queries) CreateIssueProperty(ctx context.Context, arg CreateIssueProper
 	return i, err
 }
 
+const deleteIssueProperty = `-- name: DeleteIssueProperty :one
+DELETE FROM issue_property
+WHERE id = $1 AND workspace_id = $2
+RETURNING id, workspace_id, name, type, description, config, position, archived_at, created_at, updated_at, icon
+`
+
+type DeleteIssuePropertyParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) DeleteIssueProperty(ctx context.Context, arg DeleteIssuePropertyParams) (IssueProperty, error) {
+	row := q.db.QueryRow(ctx, deleteIssueProperty, arg.ID, arg.WorkspaceID)
+	var i IssueProperty
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.Type,
+		&i.Description,
+		&i.Config,
+		&i.Position,
+		&i.ArchivedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Icon,
+	)
+	return i, err
+}
+
 const deleteIssuePropertyValue = `-- name: DeleteIssuePropertyValue :one
 UPDATE issue
 SET properties = properties - $1::text,
@@ -171,6 +201,32 @@ func (q *Queries) DeleteIssuePropertyValue(ctx context.Context, arg DeleteIssueP
 		&i.DuplicateOfIssueID,
 	)
 	return i, err
+}
+
+const deleteIssuePropertyValues = `-- name: DeleteIssuePropertyValues :execrows
+UPDATE issue
+SET properties = properties - $1::text,
+    revision = revision + 1,
+    last_activity_at = GREATEST(COALESCE(last_activity_at, updated_at), now()),
+    updated_at = now()
+WHERE workspace_id = $2::uuid
+  AND properties ? $1::text
+`
+
+type DeleteIssuePropertyValuesParams struct {
+	Key         string      `json:"key"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Permanent definition deletion also removes its values from every issue in
+// the workspace. Revision and activity move together with the removed
+// values so clients do not retain a stale property snapshot.
+func (q *Queries) DeleteIssuePropertyValues(ctx context.Context, arg DeleteIssuePropertyValuesParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteIssuePropertyValues, arg.Key, arg.WorkspaceID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const getIssueProperty = `-- name: GetIssueProperty :one

@@ -688,7 +688,17 @@
       "open": "{{name}} の操作",
       "edit": "編集",
       "archive": "アーカイブ",
-      "unarchive": "復元"
+      "unarchive": "復元",
+      "delete": "削除"
+    },
+    "delete_dialog": {
+      "title": "プロパティを削除しますか？",
+      "description_one": "「{{name}}」を完全に削除しますか？{{count}} 件のタスクの値も削除されます。この操作は元に戻せません。",
+      "description_other": "「{{name}}」を完全に削除しますか？{{count}} 件のタスクの値も削除されます。この操作は元に戻せません。",
+      "cancel": "キャンセル",
+      "confirm": "プロパティを削除",
+      "deleting": "削除中...",
+      "failed": "プロパティを削除できませんでした"
     },
     "editor": {
       "create_title": "新規プロパティ",

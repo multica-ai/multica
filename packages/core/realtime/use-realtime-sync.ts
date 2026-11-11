@@ -1093,7 +1093,7 @@ export function useRealtimeSync(
     // Event types handled by specific handlers below -- skip generic refresh
     const specificEvents = new Set([
       "workspace:updated",
-      "issue:updated", "issue:created", "issue:deleted", "issue_attachments:changed", "issue_labels:changed", "issue_unread:changed", "issue_metadata:changed", "issue_properties:changed", "property:created", "property:updated", "inbox:new",
+      "issue:updated", "issue:created", "issue:deleted", "issue_attachments:changed", "issue_labels:changed", "issue_unread:changed", "issue_metadata:changed", "issue_properties:changed", "property:created", "property:updated", "property:deleted", "inbox:new",
       "comment:created", "comment:updated", "comment:deleted",
       "comment:resolved", "comment:unresolved",
       "activity:created",
@@ -1259,6 +1259,15 @@ export function useRealtimeSync(
         }
       }),
     );
+
+    // Deleting a definition also removes its value from every issue, so all
+    // issue-derived surfaces must refetch in addition to the definition list.
+    const unsubPropertyDeleted = ws.on("property:deleted", () => {
+      const wsId = getCurrentWsId();
+      if (!wsId) return;
+      qc.invalidateQueries({ queryKey: propertyKeys.all(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
+    });
 
     const unsubInboxNew = ws.on("inbox:new", async (p) => {
       const { item } = p as InboxNewPayload;
@@ -1924,6 +1933,7 @@ export function useRealtimeSync(
       unsubIssueMetadataChanged();
       unsubIssuePropertiesChanged();
       unsubPropertyChanged.forEach((unsub) => unsub());
+      unsubPropertyDeleted();
       unsubInboxNew();
       unsubCommentCreated();
       unsubCommentUpdated();

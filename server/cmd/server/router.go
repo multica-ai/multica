@@ -2219,6 +2219,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetProperty)
 					r.Patch("/", h.UpdateProperty)
+					r.Delete("/", h.DeleteProperty)
 				})
 			})
 

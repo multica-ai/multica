@@ -677,7 +677,17 @@
       "open": "Acciones de {{name}}",
       "edit": "Editar",
       "archive": "Archivar",
-      "unarchive": "Restaurar"
+      "unarchive": "Restaurar",
+      "delete": "Eliminar"
+    },
+    "delete_dialog": {
+      "title": "¿Eliminar propiedad?",
+      "description_one": "¿Eliminar permanentemente \"{{name}}\"? También se eliminará su valor en {{count}} tarea. Esta acción no se puede deshacer.",
+      "description_other": "¿Eliminar permanentemente \"{{name}}\"? También se eliminarán sus valores en {{count}} tareas. Esta acción no se puede deshacer.",
+      "cancel": "Cancelar",
+      "confirm": "Eliminar propiedad",
+      "deleting": "Eliminando...",
+      "failed": "No se ha podido eliminar la propiedad"
     },
     "editor": {
       "create_title": "Nueva propiedad",

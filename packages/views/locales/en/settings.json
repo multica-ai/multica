@@ -695,7 +695,8 @@
       "open": "Actions for {{name}}",
       "edit": "Edit",
       "archive": "Archive",
-      "unarchive": "Restore"
+      "unarchive": "Restore",
+      "delete": "Delete"
     },
     "editor": {
       "create_title": "New property",
@@ -724,6 +725,15 @@
       "cancel": "Cancel",
       "confirm": "Archive property",
       "failed": "Couldn't archive property"
+    },
+    "delete_dialog": {
+      "title": "Delete property?",
+      "description_one": "Permanently delete \"{{name}}\"? Its value on {{count}} issue will also be removed. This can't be undone.",
+      "description_other": "Permanently delete \"{{name}}\"? Its values on {{count}} issues will also be removed. This can't be undone.",
+      "cancel": "Cancel",
+      "confirm": "Delete property",
+      "deleting": "Deleting...",
+      "failed": "Couldn't delete property"
     }
   },
   "labels": {

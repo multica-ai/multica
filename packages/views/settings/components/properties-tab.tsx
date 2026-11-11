@@ -11,6 +11,7 @@ import {
   Plus,
   Search,
   SlidersHorizontal,
+  Trash2,
   X,
 } from "@multica/ui/icons";
 import { toast } from "sonner";
@@ -20,6 +21,7 @@ import { memberListOptions } from "@multica/core/workspace/queries";
 import {
   propertyListOptions,
   useCreateProperty,
+  useDeleteProperty,
   useUpdateProperty,
 } from "@multica/core/properties";
 import type {
@@ -119,6 +121,7 @@ export function PropertiesTab() {
   const [editing, setEditing] = useState<IssueProperty | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [pendingArchive, setPendingArchive] = useState<IssueProperty | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<IssueProperty | null>(null);
 
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const currentMember = members.find((m) => m.user_id === user?.id) ?? null;
@@ -279,24 +282,33 @@ export function PropertiesTab() {
                           {t(($) => $.properties.actions.edit)}
                         </DropdownMenuItem>
                         {property.archived ? (
-                          <DropdownMenuItem
-                            onClick={() =>
-                              update.mutate(
-                                { id: property.id, archived: false },
-                                {
-                                  onError: (error) =>
-                                    toast.error(
-                                      error instanceof Error
-                                        ? error.message
-                                        : t(($) => $.properties.save_failed),
-                                    ),
-                                },
-                              )
-                            }
-                          >
-                            <ArchiveRestore className="size-4" />
-                            {t(($) => $.properties.actions.unarchive)}
-                          </DropdownMenuItem>
+                          <>
+                            <DropdownMenuItem
+                              onClick={() =>
+                                update.mutate(
+                                  { id: property.id, archived: false },
+                                  {
+                                    onError: (error) =>
+                                      toast.error(
+                                        error instanceof Error
+                                          ? error.message
+                                          : t(($) => $.properties.save_failed),
+                                      ),
+                                  },
+                                )
+                              }
+                            >
+                              <ArchiveRestore className="size-4" />
+                              {t(($) => $.properties.actions.unarchive)}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              variant="destructive"
+                              onClick={() => setPendingDelete(property)}
+                            >
+                              <Trash2 className="size-4" />
+                              {t(($) => $.properties.actions.delete)}
+                            </DropdownMenuItem>
+                          </>
                         ) : (
                           <DropdownMenuItem
                             variant="destructive"
@@ -327,6 +339,10 @@ export function PropertiesTab() {
       <ArchivePropertyDialog
         property={pendingArchive}
         onClose={() => setPendingArchive(null)}
+      />
+      <DeletePropertyDialog
+        property={pendingDelete}
+        onClose={() => setPendingDelete(null)}
       />
     </SettingsTab>
   );
@@ -706,6 +722,54 @@ function ArchivePropertyDialog({
             }}
           >
             {t(($) => $.properties.archive_dialog.confirm)}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+function DeletePropertyDialog({
+  property,
+  onClose,
+}: {
+  property: IssueProperty | null;
+  onClose: () => void;
+}) {
+  const { t } = useT("settings");
+  const remove = useDeleteProperty();
+  return (
+    <AlertDialog open={Boolean(property)} onOpenChange={(open) => !open && onClose()}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t(($) => $.properties.delete_dialog.title)}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t(($) => $.properties.delete_dialog.description, {
+              name: property?.name ?? "",
+              count: property?.usage_count ?? 0,
+            })}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>{t(($) => $.properties.delete_dialog.cancel)}</AlertDialogCancel>
+          <AlertDialogAction
+            disabled={remove.isPending}
+            onClick={() => {
+              if (!property) return;
+              remove.mutate(property.id, {
+                onSuccess: onClose,
+                onError: (error) =>
+                  toast.error(
+                    error instanceof Error
+                      ? error.message
+                      : t(($) => $.properties.delete_dialog.failed),
+                  ),
+              });
+            }}
+          >
+            {remove.isPending
+              ? t(($) => $.properties.delete_dialog.deleting)
+              : t(($) => $.properties.delete_dialog.confirm)}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

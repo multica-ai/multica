@@ -51,6 +51,20 @@ export function useUpdateProperty() {
   });
 }
 
+/** Permanently delete an archived definition and its values on every issue. */
+export function useDeleteProperty() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteProperty(id),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: propertyKeys.all(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
+      invalidatePropertyWindowQueries(qc, wsId);
+    },
+  });
+}
+
 /**
  * Read the issue's current property bag from whichever cache holds it: the
  * detail cache first, then any list cache bucket. Board/list surfaces never

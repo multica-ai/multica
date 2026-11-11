@@ -112,10 +112,11 @@ const (
 	EventLabelDeleted       = "label:deleted"
 	EventIssueLabelsChanged = "issue_labels:changed"
 
-	// Custom property events. Definitions are archived, never deleted, so
-	// there is no property:deleted — archive arrives as property:updated.
+	// Custom property events. Definitions can be archived or permanently deleted.
+	// Archive still arrives as property:updated; deletion removes the definition.
 	EventPropertyCreated        = "property:created"
 	EventPropertyUpdated        = "property:updated"
+	EventPropertyDeleted        = "property:deleted"
 	EventIssuePropertiesChanged = "issue_properties:changed"
 
 	// Issue status catalog events (MUL-6243). ONE event for all four writes

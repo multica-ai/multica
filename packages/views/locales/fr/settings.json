@@ -695,7 +695,17 @@
       "open": "Actions pour {{name}}",
       "edit": "Modifier",
       "archive": "Archiver",
-      "unarchive": "Restaurer"
+      "unarchive": "Restaurer",
+      "delete": "Supprimer"
+    },
+    "delete_dialog": {
+      "title": "Supprimer la propriété ?",
+      "description_one": "Supprimer définitivement « {{name}} » ? Sa valeur sur {{count}} tâche sera également supprimée. Cette action est irréversible.",
+      "description_other": "Supprimer définitivement « {{name}} » ? Ses valeurs sur {{count}} tâches seront également supprimées. Cette action est irréversible.",
+      "cancel": "Annuler",
+      "confirm": "Supprimer la propriété",
+      "deleting": "Suppression...",
+      "failed": "Impossible de supprimer la propriété"
     },
     "editor": {
       "create_title": "Nouvelle propriété",

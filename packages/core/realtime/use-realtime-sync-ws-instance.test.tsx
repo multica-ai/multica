@@ -17,6 +17,7 @@ import { issueStatusKeys } from "../issue-statuses/queries";
 import { issueWorkflowKeys } from "../issue-workflows/queries";
 import { issueViewKeys } from "../issue-views/queries";
 import { issueViewPrefKeys } from "../issue-views/preferences";
+import { propertyKeys } from "../properties/queries";
 import {
   markWorkspaceDeletePending,
   unmarkWorkspaceDeletePending,
@@ -803,6 +804,29 @@ describe("useRealtimeSync — Table server membership invalidation", () => {
 
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: issueKeys.tableAll("ws-1"),
+    });
+  });
+
+  it("invalidates properties and issues after a property definition is deleted", () => {
+    const ws = createMockWs();
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+    renderHook(() => useRealtimeSync(ws, stores), {
+      wrapper: createWrapper(qc),
+    });
+    const propertyDeleted = vi
+      .mocked(ws.on)
+      .mock.calls.find(([event]) => event === "property:deleted")?.[1];
+    expect(propertyDeleted).toBeDefined();
+
+    (propertyDeleted as (payload: { property_id: string }) => void)({
+      property_id: "property-1",
+    });
+
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: propertyKeys.all("ws-1"),
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: issueKeys.all("ws-1"),
     });
   });
 
