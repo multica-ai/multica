@@ -252,7 +252,7 @@ func TestCommentTombstoneIsNotTriggerInput(t *testing.T) {
 		t.Fatalf("new comments before delete = %d, want 2", got)
 	}
 
-	if _, err := testHandler.deleteComment(ctx, parseUUID(root), parseUUID(testWorkspaceID)); err != nil {
+	if _, err := testHandler.deleteComment(ctx, parseUUID(root), parseUUID(testWorkspaceID), false); err != nil {
 		t.Fatalf("deleteComment: %v", err)
 	}
 	if got := countSince(); got != 1 {
@@ -289,7 +289,7 @@ func TestReplyUnderDeletedAgentCommentWakesNoOne(t *testing.T) {
 	})
 	root := dbfx.Comment(t, issueID, "I am handling this", testutil.Cols{"author_type": "agent", "author_id": authorID})
 	dbfx.Comment(t, issueID, "earlier reply", testutil.Cols{"parent_id": root})
-	if _, err := testHandler.deleteComment(ctx, parseUUID(root), parseUUID(testWorkspaceID)); err != nil {
+	if _, err := testHandler.deleteComment(ctx, parseUUID(root), parseUUID(testWorkspaceID), false); err != nil {
 		t.Fatalf("deleteComment: %v", err)
 	}
 

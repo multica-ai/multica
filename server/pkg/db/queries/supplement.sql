@@ -314,11 +314,11 @@ WHERE s.task_id = t.id
   AND s.status = 'failed'
 RETURNING s.*;
 
--- name: LockTaskSupplementsByComment :many
+-- name: LockTaskSupplementsByComments :many
 SELECT * FROM task_supplement
-WHERE comment_id = @comment_id AND workspace_id = @workspace_id
+WHERE comment_id = ANY(@comment_ids::uuid[]) AND workspace_id = @workspace_id
 FOR UPDATE;
 
--- name: DeleteTaskSupplementByComment :exec
+-- name: DeleteTaskSupplementsByComments :exec
 DELETE FROM task_supplement
-WHERE comment_id = @comment_id AND workspace_id = @workspace_id;
+WHERE comment_id = ANY(@comment_ids::uuid[]) AND workspace_id = @workspace_id;

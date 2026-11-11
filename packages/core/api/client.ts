@@ -1864,6 +1864,15 @@ export class ApiClient {
     await this.fetch(path, { method: "DELETE" });
   }
 
+  /**
+   * Deletes a thread root with every reply, whoever wrote them. Older servers
+   * do not route the path, so the request fails there instead of deleting only
+   * the root.
+   */
+  async deleteCommentThread(rootId: string): Promise<void> {
+    await this.fetch(`/api/comments/${rootId}/thread`, { method: "DELETE" });
+  }
+
   async resolveComment(commentId: string): Promise<Comment> {
     return this.fetch(`/api/comments/${commentId}/resolve`, { method: "POST" });
   }

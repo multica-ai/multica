@@ -113,6 +113,22 @@ async function openMenuLayout(index: number): Promise<string[]> {
 const agentAuthor = { actor_type: "agent", actor_id: "agent-1" } as const;
 
 describe("CommentCard — actions menu layout", () => {
+  it.each([
+    { viewer: "root author", author: { actor_type: "member", actor_id: "user-1" } as const, allowed: true },
+    { viewer: "unrelated member", author: { actor_type: "member", actor_id: "user-2" } as const, allowed: false },
+  ])("offers whole-thread deletion only when authorized as $viewer", async ({ author, allowed }) => {
+    // A root author can delete the thread even when its descendants have other
+    // authors. Ordinary Delete must remain a separate, comment-only action.
+    renderThread(comment("root", null, author), [
+      comment("reply", "root", agentAuthor),
+      comment("nested", "reply", { actor_type: "member", actor_id: "user-2" }),
+    ]);
+
+    const menu = await openMenuLayout(0);
+    expect(menu.includes("Delete thread")).toBe(allowed);
+    expect(menu.includes("Delete")).toBe(allowed);
+  });
+
   it("groups the author's root menu as edit/resolve, copy/derive, delete", async () => {
     renderThread(comment("root", null), []);
 

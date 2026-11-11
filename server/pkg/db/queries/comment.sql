@@ -663,7 +663,9 @@ WHERE parent_id = @parent_id AND author_type = 'agent' AND author_id = @agent_id
 -- later statements start from a fresh snapshot taken after the locks, which is
 -- what makes their reply check exact.
 --
--- A tombstone is excluded: deleting an already-deleted comment finds nothing.
+-- A tombstone is excluded unless allow_deleted is set: deleting an
+-- already-deleted comment finds nothing, but deleting the thread below a
+-- tombstoned root still has replies to remove.
 WITH locked_issue AS MATERIALIZED (
     SELECT issue.id
     FROM issue
@@ -681,7 +683,7 @@ SELECT comment.*
 FROM comment
 CROSS JOIN issue_fence
 WHERE comment.id = @id AND comment.workspace_id = @workspace_id
-  AND comment.deleted_at IS NULL
+  AND (comment.deleted_at IS NULL OR @allow_deleted::bool)
   AND issue_fence.locked_count >= 0
 FOR UPDATE OF comment;
 
@@ -752,6 +754,27 @@ WHERE comment.id = @id AND comment.workspace_id = @workspace_id
   AND comment.deleted_at IS NOT NULL
   AND NOT EXISTS (SELECT 1 FROM comment child WHERE child.parent_id = comment.id)
 RETURNING comment.id, comment.parent_id;
+
+-- name: ListCommentThreadIDs :many
+-- The comment and every descendant, for deleting a whole thread. UNION, not
+-- UNION ALL, so a malformed parent cycle cannot recurse forever.
+WITH RECURSIVE thread AS (
+    SELECT comment.id FROM comment
+    WHERE comment.id = @id AND comment.workspace_id = @workspace_id
+    UNION
+    SELECT child.id FROM comment child
+    JOIN thread ON child.parent_id = thread.id
+    WHERE child.workspace_id = @workspace_id
+)
+SELECT thread.id FROM thread;
+
+-- name: DeleteCommentsByIDs :many
+-- Removes a whole thread at once. The caller lists the rows inside the delete
+-- transaction, after LockCommentForDelete froze the thread, and clears their
+-- tasks, attachments, reactions and receipts first.
+DELETE FROM comment
+WHERE workspace_id = @workspace_id AND id = ANY(@ids::uuid[])
+RETURNING id;
 
 -- name: TouchIssueForCommentDelete :one
 -- A delete counts as activity on its issue, like CreateComment and

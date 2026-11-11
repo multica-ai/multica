@@ -981,7 +981,12 @@ export function useDeleteComment(issueId: string) {
   return useMutation({
     // The capability is read when the delete runs, so the route matches the
     // copy the confirmation showed. Older servers delete the replies too.
-    mutationFn: async (commentId: string) => {
+    // `thread` deletes the root together with every reply.
+    mutationFn: async ({ commentId, thread = false }: { commentId: string; thread?: boolean }) => {
+      if (thread) {
+        await api.deleteCommentThread(commentId);
+        return false;
+      }
       const keepReplies = configStore.getState().commentDeleteKeepRepliesSupported;
       await api.deleteComment(commentId, { keepReplies });
       return keepReplies;
@@ -990,7 +995,7 @@ export function useDeleteComment(issueId: string) {
     // depends on replies only the server sees for certain (#8296). Once it
     // confirms, mirror its outcome; realtime events and the settle refetch
     // reconcile the rest.
-    onSuccess: (keptReplies, commentId) => {
+    onSuccess: (keptReplies, { commentId }) => {
       qc.setQueryData<TimelineCache>(issueKeys.timeline(issueId), (old) => {
         if (!old) return old;
         return keptReplies

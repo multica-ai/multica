@@ -125,8 +125,17 @@ describe("CommentCard — deleted comments", () => {
 
     expect(screen.getByText("This comment was deleted")).toBeTruthy();
     expect(screen.getByText("body bb")).toBeTruthy();
-    expect(actionMenus()).toHaveLength(1);
     expect(screen.getByText("Leave a reply...")).toBeTruthy();
+  });
+
+  // Deleting a root normally keeps its replies, so its author must still be
+  // able to remove the rest of the thread afterwards.
+  it("offers Delete thread on a deleted root that still has replies", async () => {
+    renderThread(tombstone("a", null), [comment("bb", "a", { actor_id: "user-2" })]);
+
+    fireEvent.click(actionMenus()[0]!);
+    expect(await screen.findByRole("menuitem", { name: "Delete thread" })).toBeTruthy();
+    expect(screen.getAllByRole("menuitem")).toHaveLength(1);
   });
 
   it("tells the user the replies are kept when the server keeps them", async () => {

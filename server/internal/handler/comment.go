@@ -3514,7 +3514,7 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 			issueRevision = updated.IssueRevision
 		}
 		if err == nil && oldContent != req.Content && strictContentEdit {
-			cancelled, err = qtx.CancelAgentTasksByTriggerComment(r.Context(), existing.ID)
+			cancelled, err = qtx.CancelAgentTasksByTriggerComments(r.Context(), []pgtype.UUID{existing.ID})
 			if err == nil {
 				err = service.SettleTerminalTaskState(r.Context(), qtx, cancelled...)
 			}
@@ -3613,6 +3613,18 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
+	h.deleteCommentRequest(w, r, false)
+}
+
+// DeleteCommentThread deletes a thread root with every reply below it, whoever
+// wrote them: the root author's or an admin's authority over the root covers
+// the whole thread. It has its own route so a request that reaches an older
+// server fails instead of deleting only the root.
+func (h *Handler) DeleteCommentThread(w http.ResponseWriter, r *http.Request) {
+	h.deleteCommentRequest(w, r, true)
+}
+
+func (h *Handler) deleteCommentRequest(w http.ResponseWriter, r *http.Request, thread bool) {
 	r = h.withWakeupActor(r)
 	commentId := chi.URLParam(r, "commentId")
 
@@ -3670,29 +3682,20 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 		slog.Info("comment parent issue no longer exists", "issue_id", uuidToString(comment.IssueID), "comment_id", commentId)
 	}
 
-	if comment.DeletedAt.Valid {
+	if thread && comment.ParentID.Valid {
+		writeError(w, http.StatusBadRequest, "only a thread's root comment can delete the thread")
+		return
+	}
+	// A tombstoned root can still have its thread deleted: ordinary deletion
+	// kept the replies, and this is how they go too.
+	if comment.DeletedAt.Valid && !thread {
 		writeError(w, http.StatusNotFound, "comment not found")
 		return
 	}
 
-	// Cancel any active task whose planned batch contains this comment so the
-	// agent does not run with the now-deleted content already embedded. Must
-	// run before the delete: a removed row would nullify trigger_comment_id
-	// through ON DELETE SET NULL and orphan those tasks in queued.
-	cancelled, cancelErr := h.TaskService.CancelTasksByTriggerComment(r.Context(), comment.ID)
-	if cancelErr != nil {
-		slog.Warn("cancel tasks for deleted trigger comment failed", append(logger.RequestAttrs(r), "error", cancelErr, "comment_id", commentId)...)
-	}
-
-	deleted, err := h.deleteComment(r.Context(), comment.ID, comment.WorkspaceID)
+	deleted, err := h.deleteComment(r.Context(), comment.ID, comment.WorkspaceID, thread)
 	if err != nil {
 		slog.Warn("delete comment failed", append(logger.RequestAttrs(r), "error", err, "comment_id", commentId)...)
-		// Cancellation already committed but deletion did not. If the parent
-		// issue still exists, rebuild the complete cancelled batch (including
-		// this trigger) before reporting the storage error or concurrent no-op.
-		if hasIssue {
-			h.retriggerCancelledTaskSurvivors(r.Context(), issue, cancelled, pgtype.UUID{})
-		}
 		if errors.Is(err, errTaskSupplementInFlight) {
 			writeError(w, http.StatusConflict, "additional message is still being delivered")
 		} else if errors.Is(err, pgx.ErrNoRows) {
@@ -3703,10 +3706,12 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.TaskService.BroadcastCancelledTasks(r.Context(), workspaceID, deleted.Cancelled)
 	h.deleteS3Objects(r.Context(), deleted.AttachmentURLs)
 	slog.Info("comment deleted", append(logger.RequestAttrs(r),
 		"comment_id", commentId,
 		"issue_id", uuidToString(comment.IssueID),
+		"thread", thread,
 		"tombstoned", deleted.Tombstone != nil,
 		"removed_count", len(deleted.RemovedIDs),
 	)...)
@@ -3732,7 +3737,7 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 		h.publish(protocol.EventCommentDeleted, workspaceID, actorType, actorID, eventPayload)
 	}
 	if hasIssue {
-		h.retriggerCancelledTaskSurvivors(r.Context(), issue, cancelled, comment.ID)
+		h.retriggerCancelledTaskSurvivors(r.Context(), issue, deleted.Cancelled, append(deleted.RemovedIDs, comment.ID)...)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -3743,12 +3748,17 @@ type commentDeletion struct {
 	Tombstone *db.Comment
 	// RemovedIDs lists every row removed outright: the comment itself when it
 	// had no replies, followed by each tombstone ancestor that lost its last
-	// reply as a result, nearest first.
+	// reply as a result, nearest first. A thread delete removes every row of
+	// the thread, in no particular order.
 	RemovedIDs []pgtype.UUID
-	// AttachmentURLs are the deleted comment's storage objects, for cleanup
+	// AttachmentURLs are the deleted comments' storage objects, for cleanup
 	// after commit.
 	AttachmentURLs []string
-	IssueRevision  int64
+	// Cancelled are the active tasks whose planned batch contained a deleted
+	// comment, cancelled in the same transaction. Broadcast them and replay
+	// their surviving inputs after commit.
+	Cancelled     []db.AgentTaskQueue
+	IssueRevision int64
 }
 
 // lockCommentAttachments validates and pins the full requested set, including
@@ -3806,14 +3816,36 @@ const commentTombstonePruneDepth = 256
 
 var errTaskSupplementInFlight = errors.New("additional message is still being delivered")
 
-// deleteComment deletes exactly one comment (#8296). A comment that still has
+// deleteComment deletes exactly one comment (#8296), or with thread set, a
+// thread root together with every reply below it. A comment that still has
 // replies becomes a tombstone — content, attachments, reactions and resolution
 // cleared, row kept — so each reply stays attached to its direct parent. A
 // comment without replies is removed, along with every tombstone ancestor
-// that is left without replies. Nothing here relies on the parent_id cascade.
+// that is left without replies. A thread delete removes every row of the
+// thread, and accepts a tombstoned root, since ordinary deletion kept its
+// replies. Nothing here relies on the parent_id cascade.
 //
-// Returns pgx.ErrNoRows when the comment is already gone or already deleted.
-func (h *Handler) deleteComment(ctx context.Context, commentID, workspaceID pgtype.UUID) (commentDeletion, error) {
+// Tasks built from the deleted comments are cancelled in the same
+// transaction, so the delete and the cancellation commit together or not at
+// all. Cancelling must precede the delete, because a removed row would null
+// trigger_comment_id through ON DELETE SET NULL and orphan its tasks in queued.
+//
+// Admission is fenced only when the row is removed. Every task insert takes
+// the issue row through lock_task_owner_rows and waits for this transaction,
+// and a merge into a pending task (MergeCommentIntoPendingTask) that waits on
+// a row this cancels re-points trigger_comment_id; once this commits, the
+// foreign key rejects either for a removed comment. A tombstone keeps its row,
+// so a waiting insert or merge that names it still succeeds after commit and
+// queues a task for the deleted comment. A thread delete removes every row it
+// locks and has no such gap.
+//
+// Locks are taken issue -> comment -> task -> task_supplement. Issue teardown
+// shares the issue -> comment prefix, and task terminal transitions settle
+// receipts task -> task_supplement.
+//
+// Returns pgx.ErrNoRows when the comment is already gone, or already deleted
+// and thread is unset.
+func (h *Handler) deleteComment(ctx context.Context, commentID, workspaceID pgtype.UUID, thread bool) (commentDeletion, error) {
 	var out commentDeletion
 	tx, err := h.beginWakeupWrite(ctx)
 	if err != nil {
@@ -3823,19 +3855,39 @@ func (h *Handler) deleteComment(ctx context.Context, commentID, workspaceID pgty
 	qtx := h.Queries.WithTx(tx)
 
 	target, err := qtx.LockCommentForDelete(ctx, db.LockCommentForDeleteParams{
-		ID:          commentID,
-		WorkspaceID: workspaceID,
+		ID:           commentID,
+		WorkspaceID:  workspaceID,
+		AllowDeleted: thread,
 	})
 	if err != nil {
 		return out, err
 	}
+	ids := []pgtype.UUID{target.ID}
+	if thread {
+		// Listed after the issue lock, so no reply can join the thread before
+		// the delete commits.
+		ids, err = qtx.ListCommentThreadIDs(ctx, db.ListCommentThreadIDsParams{
+			ID:          target.ID,
+			WorkspaceID: target.WorkspaceID,
+		})
+		if err != nil {
+			return out, err
+		}
+	}
+	out.Cancelled, err = qtx.CancelAgentTasksByTriggerComments(ctx, ids)
+	if err != nil {
+		return out, err
+	}
+	if err := service.SettleTerminalTaskState(ctx, qtx, out.Cancelled...); err != nil {
+		return out, err
+	}
 	// Keep receipt admission locked through deletion so a concurrent retry
 	// cannot resurrect or deliver the content being removed.
-	receipts, receiptErr := qtx.LockTaskSupplementsByComment(ctx, db.LockTaskSupplementsByCommentParams{
-		CommentID: commentID, WorkspaceID: workspaceID,
+	receipts, err := qtx.LockTaskSupplementsByComments(ctx, db.LockTaskSupplementsByCommentsParams{
+		CommentIds: ids, WorkspaceID: target.WorkspaceID,
 	})
-	if receiptErr != nil {
-		return out, receiptErr
+	if err != nil {
+		return out, err
 	}
 	for _, receipt := range receipts {
 		if receipt.Status == "pending" || receipt.Status == "delivering" {
@@ -3843,76 +3895,36 @@ func (h *Handler) deleteComment(ctx context.Context, commentID, workspaceID pgty
 		}
 	}
 	if len(receipts) > 0 {
-		if err := qtx.DeleteTaskSupplementByComment(ctx, db.DeleteTaskSupplementByCommentParams{
-			CommentID: commentID, WorkspaceID: workspaceID,
+		if err := qtx.DeleteTaskSupplementsByComments(ctx, db.DeleteTaskSupplementsByCommentsParams{
+			CommentIds: ids, WorkspaceID: target.WorkspaceID,
 		}); err != nil {
 			return out, err
 		}
 	}
-	// Separate statement on purpose: its snapshot postdates the locks above,
-	// so it sees every committed reply, and none can be added while they are
-	// held.
-	hasReplies, err := qtx.CommentHasReplies(ctx, db.CommentHasRepliesParams{
-		ID:          target.ID,
+	out.AttachmentURLs, err = qtx.DeleteCommentsAttachments(ctx, db.DeleteCommentsAttachmentsParams{
+		CommentIds:  ids,
 		WorkspaceID: target.WorkspaceID,
 	})
 	if err != nil {
 		return out, err
 	}
-	out.AttachmentURLs, err = qtx.DeleteCommentAttachments(ctx, db.DeleteCommentAttachmentsParams{
-		CommentID:   target.ID,
-		WorkspaceID: target.WorkspaceID,
-	})
-	if err != nil {
-		return out, err
-	}
-	if err := qtx.DeleteCommentReactions(ctx, db.DeleteCommentReactionsParams{
-		CommentID:   target.ID,
+	if err := qtx.DeleteCommentsReactions(ctx, db.DeleteCommentsReactionsParams{
+		CommentIds:  ids,
 		WorkspaceID: target.WorkspaceID,
 	}); err != nil {
 		return out, err
 	}
 
-	if hasReplies {
-		tombstone, err := qtx.TombstoneComment(ctx, db.TombstoneCommentParams{
-			ID:          target.ID,
+	if thread {
+		out.RemovedIDs, err = qtx.DeleteCommentsByIDs(ctx, db.DeleteCommentsByIDsParams{
+			Ids:         ids,
 			WorkspaceID: target.WorkspaceID,
 		})
 		if err != nil {
 			return out, err
 		}
-		// A deleted delegated-failure recovery signal is withdrawn: settle it so
-		// the recovery sweeper stops scanning its row. A no-op for every other
-		// comment.
-		if _, err := qtx.SettleDelegatedFailureRecoveryComment(ctx, target.ID); err != nil {
-			return out, err
-		}
-		out.Tombstone = &tombstone
-	} else {
-		removed, err := qtx.DeleteLeafComment(ctx, db.DeleteLeafCommentParams{
-			ID:          target.ID,
-			WorkspaceID: target.WorkspaceID,
-		})
-		if err != nil {
-			return out, err
-		}
-		out.RemovedIDs = append(out.RemovedIDs, removed.ID)
-		parentID := removed.ParentID
-		for depth := 0; parentID.Valid && depth < commentTombstonePruneDepth; depth++ {
-			pruned, err := qtx.DeleteReplylessCommentTombstone(ctx, db.DeleteReplylessCommentTombstoneParams{
-				ID:          parentID,
-				WorkspaceID: target.WorkspaceID,
-			})
-			if errors.Is(err, pgx.ErrNoRows) {
-				// A live comment, or a tombstone other replies still hold.
-				break
-			}
-			if err != nil {
-				return out, err
-			}
-			out.RemovedIDs = append(out.RemovedIDs, pruned.ID)
-			parentID = pruned.ParentID
-		}
+	} else if err := deleteSingleComment(ctx, qtx, target, &out); err != nil {
+		return out, err
 	}
 
 	out.IssueRevision, err = qtx.TouchIssueForCommentDelete(ctx, db.TouchIssueForCommentDeleteParams{
@@ -3922,10 +3934,65 @@ func (h *Handler) deleteComment(ctx context.Context, commentID, workspaceID pgty
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return out, err
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return out, err
+	return out, tx.Commit(ctx)
+}
+
+// deleteSingleComment tombstones target if it still has replies, and
+// otherwise removes it along with every tombstone ancestor it leaves without
+// replies.
+func deleteSingleComment(ctx context.Context, qtx *db.Queries, target db.Comment, out *commentDeletion) error {
+	// Separate statement on purpose: its snapshot postdates the caller's
+	// locks, so it sees every committed reply, and none can be added while
+	// they are held.
+	hasReplies, err := qtx.CommentHasReplies(ctx, db.CommentHasRepliesParams{
+		ID:          target.ID,
+		WorkspaceID: target.WorkspaceID,
+	})
+	if err != nil {
+		return err
 	}
-	return out, nil
+	if hasReplies {
+		tombstone, err := qtx.TombstoneComment(ctx, db.TombstoneCommentParams{
+			ID:          target.ID,
+			WorkspaceID: target.WorkspaceID,
+		})
+		if err != nil {
+			return err
+		}
+		// A deleted delegated-failure recovery signal is withdrawn: settle it so
+		// the recovery sweeper stops scanning its row. A no-op for every other
+		// comment.
+		if _, err := qtx.SettleDelegatedFailureRecoveryComment(ctx, target.ID); err != nil {
+			return err
+		}
+		out.Tombstone = &tombstone
+		return nil
+	}
+	removed, err := qtx.DeleteLeafComment(ctx, db.DeleteLeafCommentParams{
+		ID:          target.ID,
+		WorkspaceID: target.WorkspaceID,
+	})
+	if err != nil {
+		return err
+	}
+	out.RemovedIDs = append(out.RemovedIDs, removed.ID)
+	parentID := removed.ParentID
+	for depth := 0; parentID.Valid && depth < commentTombstonePruneDepth; depth++ {
+		pruned, err := qtx.DeleteReplylessCommentTombstone(ctx, db.DeleteReplylessCommentTombstoneParams{
+			ID:          parentID,
+			WorkspaceID: target.WorkspaceID,
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			// A live comment, or a tombstone other replies still hold.
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		out.RemovedIDs = append(out.RemovedIDs, pruned.ID)
+		parentID = pruned.ParentID
+	}
+	return nil
 }
 
 // retriggerCancelledTaskSurvivors repairs the surviving inputs from a
@@ -3934,9 +4001,15 @@ func (h *Handler) deleteComment(ctx context.Context, commentID, workspaceID pgty
 // normal authorization/routing path, scoped to the agent whose task carried
 // it. Chronological replay makes those survivors coalesce back into one batch
 // and lets the latest real comment restamp originator + connected-app context.
-func (h *Handler) retriggerCancelledTaskSurvivors(ctx context.Context, issue db.Issue, cancelled []db.AgentTaskQueue, excludedCommentID pgtype.UUID) {
+func (h *Handler) retriggerCancelledTaskSurvivors(ctx context.Context, issue db.Issue, cancelled []db.AgentTaskQueue, excludedCommentIDs ...pgtype.UUID) {
 	if len(cancelled) == 0 {
 		return
+	}
+	excluded := make(map[pgtype.UUID]bool, len(excludedCommentIDs))
+	for _, id := range excludedCommentIDs {
+		if id.Valid {
+			excluded[id] = true
+		}
 	}
 	targetsByComment := make(map[string]map[string]pgtype.UUID)
 	for _, task := range cancelled {
@@ -3948,7 +4021,7 @@ func (h *Handler) retriggerCancelledTaskSurvivors(ctx context.Context, issue db.
 			plannedCommentIDs = append(plannedCommentIDs, task.TriggerCommentID)
 		}
 		for _, commentID := range plannedCommentIDs {
-			if !commentID.Valid || (excludedCommentID.Valid && commentID == excludedCommentID) {
+			if !commentID.Valid || excluded[commentID] {
 				continue
 			}
 			commentKey := uuidToString(commentID)

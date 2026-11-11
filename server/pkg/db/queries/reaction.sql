@@ -41,7 +41,7 @@ SELECT * FROM comment_reaction
 WHERE comment_id = ANY($1::uuid[])
 ORDER BY created_at ASC;
 
--- name: DeleteCommentReactions :exec
--- Part of the comment delete transaction: reactions go with the comment.
+-- name: DeleteCommentsReactions :exec
+-- Part of the comment delete transaction: reactions go with their comments.
 DELETE FROM comment_reaction
-WHERE comment_id = @comment_id AND workspace_id = @workspace_id;
+WHERE comment_id = ANY(@comment_ids::uuid[]) AND workspace_id = @workspace_id;

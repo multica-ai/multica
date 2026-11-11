@@ -485,7 +485,7 @@ func TestDeleteComment_CancelsAndRequeuesWhenDeletedInputIsCoalesced(t *testing.
 	assertRepairedCommentBatch(t, fixture, fixture.commentID[2], fixture.commentID[1:2])
 }
 
-func TestDeleteComment_FailureRestoresCancelledCompleteBatch(t *testing.T) {
+func TestDeleteComment_FailureLeavesTaskAndBatchUntouched(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
@@ -512,30 +512,14 @@ func TestDeleteComment_FailureRestoresCancelledCompleteBatch(t *testing.T) {
 	if existing != 1 {
 		t.Fatalf("failed delete unexpectedly removed trigger")
 	}
-	assertRepairedCommentBatch(t, fixture, fixture.commentID[2], fixture.commentID[:2])
-}
-
-func TestDeleteComment_ConcurrentNoOpIsReportedAndRestoresCancelledBatch(t *testing.T) {
-	if testHandler == nil || testPool == nil {
-		t.Skip("database not available")
+	// The delete failed before its transaction cancelled anything, so the
+	// original task keeps its batch and nothing is requeued.
+	var status, trigger string
+	var coalesced []string
+	dbfx.QueryRow(t, `SELECT status, trigger_comment_id::text, coalesced_comment_ids::text[] FROM agent_task_queue WHERE id = $1`, fixture.taskID).Scan(&status, &trigger, &coalesced)
+	if status != "queued" || trigger != fixture.commentID[2] || !slices.Equal(coalesced, []string{fixture.commentID[1], fixture.commentID[0]}) {
+		t.Fatalf("original task = %s triggered by %s with %v, want it queued and unchanged", status, trigger, coalesced)
 	}
-	fixture := createCommentDeliveryFixture(t, "Concurrent deletion batch repair")
-	makeCommentDeliverySingleThread(t, fixture)
-	if _, err := testPool.Exec(context.Background(), `UPDATE issue SET assignee_type = 'agent', assignee_id = $2 WHERE id = $1`, fixture.issueID, fixture.agentID); err != nil {
-		t.Fatalf("assign concurrent-delete issue: %v", err)
-	}
-
-	zeroHandler := *testHandler
-	zeroHandler.TxStarter = &lockCommentForDeleteTxStarter{delegate: testPool, lockErr: pgx.ErrNoRows}
-	w := httptest.NewRecorder()
-	req := newRequest(http.MethodDelete, "/api/comments/"+fixture.commentID[2], nil)
-	req = withURLParam(req, "commentId", fixture.commentID[2])
-	zeroHandler.DeleteComment(w, req)
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("DeleteComment no-op: got %d: %s", w.Code, w.Body.String())
-	}
-
-	assertRepairedCommentBatch(t, fixture, fixture.commentID[2], fixture.commentID[:2])
 }
 
 func assertRepairedCommentBatch(t *testing.T, fixture commentDeliveryFixture, wantTrigger string, wantCoalesced []string) {

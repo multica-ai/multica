@@ -86,11 +86,11 @@ WHERE a.issue_id = $1
 SELECT url FROM attachment
 WHERE comment_id = $1;
 
--- name: DeleteCommentAttachments :many
--- Part of the comment delete transaction: removes the deleted comment's
+-- name: DeleteCommentsAttachments :many
+-- Part of the comment delete transaction: removes the deleted comments'
 -- attachments and returns their storage URLs for cleanup after commit.
 DELETE FROM attachment
-WHERE comment_id = @comment_id AND workspace_id = @workspace_id
+WHERE comment_id = ANY(@comment_ids::uuid[]) AND workspace_id = @workspace_id
 RETURNING url;
 
 -- name: LinkAttachmentsToComment :exec

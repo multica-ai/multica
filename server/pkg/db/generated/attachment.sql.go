@@ -340,21 +340,21 @@ func (q *Queries) DeleteAttachmentsBySourceContext(ctx context.Context, arg Dele
 	return items, nil
 }
 
-const deleteCommentAttachments = `-- name: DeleteCommentAttachments :many
+const deleteCommentsAttachments = `-- name: DeleteCommentsAttachments :many
 DELETE FROM attachment
-WHERE comment_id = $1 AND workspace_id = $2
+WHERE comment_id = ANY($1::uuid[]) AND workspace_id = $2
 RETURNING url
 `
 
-type DeleteCommentAttachmentsParams struct {
-	CommentID   pgtype.UUID `json:"comment_id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
+type DeleteCommentsAttachmentsParams struct {
+	CommentIds  []pgtype.UUID `json:"comment_ids"`
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
 }
 
-// Part of the comment delete transaction: removes the deleted comment's
+// Part of the comment delete transaction: removes the deleted comments'
 // attachments and returns their storage URLs for cleanup after commit.
-func (q *Queries) DeleteCommentAttachments(ctx context.Context, arg DeleteCommentAttachmentsParams) ([]string, error) {
-	rows, err := q.db.Query(ctx, deleteCommentAttachments, arg.CommentID, arg.WorkspaceID)
+func (q *Queries) DeleteCommentsAttachments(ctx context.Context, arg DeleteCommentsAttachmentsParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, deleteCommentsAttachments, arg.CommentIds, arg.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}

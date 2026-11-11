@@ -1240,7 +1240,7 @@ describe("comment mutations — owner revision and last activity", () => {
     });
 
     await act(async () => {
-      await result.current.mutateAsync("comment-1");
+      await result.current.mutateAsync({ commentId: "comment-1" });
     });
 
     expect(qc.getQueryState(detailKey)?.isInvalidated).toBe(true);
@@ -1269,7 +1269,7 @@ describe("comment mutations — owner revision and last activity", () => {
 
     let pending!: Promise<unknown>;
     await act(async () => {
-      pending = result.current.mutateAsync("comment-1");
+      pending = result.current.mutateAsync({ commentId: "comment-1" });
     });
     await waitFor(() => expect(deleteComment).toHaveBeenCalledWith("comment-1", { keepReplies: true }));
     expect(qc.getQueryData<TimelineEntry[]>(issueKeys.timeline(issueId))).toEqual([root, reply]);
@@ -1301,7 +1301,7 @@ describe("comment mutations — owner revision and last activity", () => {
     });
 
     await act(async () => {
-      await result.current.mutateAsync("comment-1");
+      await result.current.mutateAsync({ commentId: "comment-1" });
     });
 
     expect(deleteComment).toHaveBeenCalledWith("comment-1", { keepReplies: false });
@@ -1321,7 +1321,7 @@ describe("comment mutations — owner revision and last activity", () => {
     });
 
     await act(async () => {
-      await result.current.mutateAsync("comment-1").catch(() => undefined);
+      await result.current.mutateAsync({ commentId: "comment-1" }).catch(() => undefined);
     });
 
     expect(qc.getQueryData<TimelineEntry[]>(issueKeys.timeline(issueId))).toBe(before);
