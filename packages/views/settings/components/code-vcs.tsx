@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Copy, FolderGit2, GitBranch, KeyRound, Loader2, MoreHorizontal, RefreshCw, Unplug } from "@multica/ui/icons";
+import { Copy, FolderGit2, GitBranch, MoreHorizontal, RefreshCw, Unplug } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Input } from "@multica/ui/components/ui/input";
@@ -41,7 +41,7 @@ import {
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useUpdateVCSConnectionToken, vcsConnectionsOptions } from "@multica/core/vcs";
+import { vcsConnectionsOptions } from "@multica/core/vcs";
 import { api } from "@multica/core/api";
 import type { ConnectVCSResponse, VCSProvider } from "@multica/core/types";
 import { useT } from "../../i18n";
@@ -80,9 +80,6 @@ export function VCSConnectionRows() {
   const [instanceUrl, setInstanceUrl] = useState("");
   const [token, setToken] = useState("");
   const [connecting, setConnecting] = useState(false);
-  const [tokenTarget, setTokenTarget] = useState<string | null>(null);
-  const [replacementToken, setReplacementToken] = useState("");
-  const updateToken = useUpdateVCSConnectionToken(wsId);
   const [webhook, setWebhook] = useState<ConnectVCSResponse | null>(null);
   const [rotateTarget, setRotateTarget] = useState<string | null>(null);
   const [rotating, setRotating] = useState(false);
@@ -137,24 +134,6 @@ export function VCSConnectionRows() {
       toast.error(e instanceof Error ? e.message : t(($) => $.vcs.toast_disconnect_failed));
     } finally {
       setDeleting(false);
-    }
-  }
-
-  async function handleUpdateToken() {
-    if (!tokenTarget || updateToken.isPending || !replacementToken.trim()) return;
-    try {
-      await updateToken.mutateAsync({
-        connectionId: tokenTarget,
-        accessToken: replacementToken.trim(),
-      });
-      setReplacementToken("");
-      setTokenTarget(null);
-      toast.success(t(($) => $.vcs.toast_token_updated));
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : t(($) => $.vcs.toast_update_token_failed));
-    } finally {
-      // Mutation variables contain the token; retain it only in the open form.
-      updateToken.reset();
     }
   }
 
@@ -220,10 +199,6 @@ export function VCSConnectionRows() {
                 <MoreHorizontal />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-auto">
-                <DropdownMenuItem onClick={() => setTokenTarget(c.id)}>
-                  <KeyRound />
-                  {t(($) => $.vcs.update_token)}
-                </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setRotateTarget(c.id)}>
                   <RefreshCw />
                   {t(($) => $.vcs.regenerate_webhook)}
@@ -352,68 +327,6 @@ export function VCSConnectionRows() {
                 aria-busy={connecting || undefined}
               >
                 {connecting ? t(($) => $.vcs.connecting) : t(($) => $.vcs.connect)}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog
-        open={!!tokenTarget}
-        onOpenChange={(open) => {
-          if (!open && !updateToken.isPending) {
-            setTokenTarget(null);
-            setReplacementToken("");
-          }
-        }}
-      >
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>{t(($) => $.vcs.update_token)}</DialogTitle>
-            <DialogDescription>
-              {t(($) => $.vcs.update_token_description, {
-                url: connections.find((connection) => connection.id === tokenTarget)?.instance_url ?? "",
-              })}
-            </DialogDescription>
-          </DialogHeader>
-          <form
-            className="space-y-4"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void handleUpdateToken();
-            }}
-          >
-            <div className="space-y-1.5">
-              <Label htmlFor="vcs-replacement-token">{t(($) => $.vcs.form_token_label)}</Label>
-              <Input
-                id="vcs-replacement-token"
-                type="password"
-                autoComplete="off"
-                placeholder={t(($) => $.vcs.form_token_placeholder)}
-                value={replacementToken}
-                onChange={(event) => setReplacementToken(event.target.value)}
-                disabled={updateToken.isPending}
-              />
-            </div>
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                disabled={updateToken.isPending}
-                onClick={() => {
-                  setTokenTarget(null);
-                  setReplacementToken("");
-                }}
-              >
-                {t(($) => $.vcs.disconnect_confirm_cancel)}
-              </Button>
-              <Button
-                type="submit"
-                disabled={updateToken.isPending || !replacementToken.trim()}
-                aria-busy={updateToken.isPending || undefined}
-              >
-                {updateToken.isPending ? <Loader2 className="animate-spin" aria-hidden="true" /> : null}
-                {updateToken.isPending ? t(($) => $.vcs.updating_token) : t(($) => $.vcs.update_token)}
               </Button>
             </DialogFooter>
           </form>

@@ -2,7 +2,7 @@ import type { ZodType } from "zod";
 import { AgentRuntimeSchema, EMPTY_RUNTIME } from "../runtimes/schema";
 import type { IssueWakeup, IssueWakeupInput, IssueWakeupSummaryRow, PausedWakeup, SystemWakeup, WakeupRun, WorkspaceSystemWakeup } from "../types/issue-wakeup";
 import type { WorkspaceWakeupPage, WorkspaceWakeupFilters } from "../types/issue-wakeup";
-import { WorkspaceWakeupPageSchema, IssueWakeupSchema, IssueWakeupSummaryRowSchema, PausedWakeupSchema, SystemWakeupSchema, WakeupRunSchema, WorkspaceSystemWakeupSchema, VCSConnectionSchema, EMPTY_VCS_CONNECTION } from "./schemas";
+import { WorkspaceWakeupPageSchema, IssueWakeupSchema, IssueWakeupSummaryRowSchema, PausedWakeupSchema, SystemWakeupSchema, WakeupRunSchema, WorkspaceSystemWakeupSchema } from "./schemas";
 import { archivedInboxQuery, type ArchivedInboxFilters } from "../inbox/filters";
 import type { ArchivedInboxPage, ArchivedInboxFacets } from "../types/inbox";
 import { parseQoderConnection, parseQoderCatalog, type QoderInput } from "../runtimes/qoder-schema";
@@ -196,7 +196,6 @@ import type {
   ListVCSConnectionsResponse,
   ConnectVCSRequest,
   ConnectVCSResponse,
-  VCSConnection,
   ListLarkInstallationsResponse,
   BeginLarkInstallResponse,
   LarkInstallStatusResponse,
@@ -5435,23 +5434,6 @@ export class ApiClient {
   }
 
   // VCS integration (Forgejo / Gitea / GitLab)
-  async updateVCSConnectionToken(
-    workspaceId: string,
-    connectionId: string,
-    body: { access_token: string },
-  ): Promise<VCSConnection> {
-    const endpoint = `/api/workspaces/${workspaceId}/vcs/connections/${connectionId}/token`;
-    return parseWithFallback(
-      await this.fetch<unknown>(endpoint, {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
-      VCSConnectionSchema,
-      EMPTY_VCS_CONNECTION,
-      { endpoint },
-    );
-  }
-
   async listVCSConnections(workspaceId: string): Promise<ListVCSConnectionsResponse> {
     return this.fetch(`/api/workspaces/${workspaceId}/vcs/connections`);
   }
