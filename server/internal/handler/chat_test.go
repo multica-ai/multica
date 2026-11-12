@@ -1060,7 +1060,7 @@ func TestListChatSessionsPage_PaginatesAndFiltersActivity(t *testing.T) {
 		}
 	}
 
-	since := url.QueryEscape(staleAt.Add(-time.Hour).Format(time.RFC3339Nano))
+	since := url.QueryEscape(staleAt.Add(time.Hour).Format(time.RFC3339Nano))
 	filtered := callPage("?status=all&limit=50&activity_since=" + since)
 	foundRecent, foundStale := false, false
 	for _, s := range filtered.Sessions {
