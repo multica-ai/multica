@@ -204,12 +204,7 @@
     }
   },
   "access": {
-    "agent_notice": "AI 代理的權限跟隨其擁有者。",
-    "view_agents": "查看可用的 AI 代理",
-    "agents_title": "可在此專案中工作的 AI 代理",
-    "agents_load_failed": "無法載入 AI 代理。",
-    "no_agents": "暫無可用的 AI 代理。",
-    "unavailable_agents_other": "另外 {{count}} 個 AI 代理的擁有者沒有專案存取權限。",
+    "agent_notice": "AI 代理的權限跟隨其擁有者。將擁有者加入專案，即可讓其 AI 代理在此工作。",
     "label": "存取權限",
     "title": "{{title}}的存取權限",
     "description": "控制誰能查看專案及其中的任務、評論和附件。",

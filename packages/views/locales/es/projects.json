@@ -204,13 +204,7 @@
     }
   },
   "access": {
-    "agent_notice": "El acceso de cada agente depende de su propietario.",
-    "view_agents": "Ver agentes disponibles",
-    "agents_title": "Agentes disponibles en este proyecto",
-    "agents_load_failed": "No se pudieron cargar los agentes.",
-    "no_agents": "No hay agentes disponibles.",
-    "unavailable_agents_one": "El propietario de {{count}} agente más no tiene acceso al proyecto.",
-    "unavailable_agents_other": "Los propietarios de {{count}} agentes más no tienen acceso al proyecto.",
+    "agent_notice": "Los agentes tienen el mismo acceso que su propietario. Añade al propietario al proyecto para que sus agentes puedan trabajar aquí.",
     "label": "Acceso",
     "title": "Acceso a {{title}}",
     "description": "Define quién puede ver este proyecto, sus tareas, comentarios y archivos adjuntos.",

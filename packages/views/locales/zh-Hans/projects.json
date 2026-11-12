@@ -204,12 +204,7 @@
     }
   },
   "access": {
-    "agent_notice": "智能体的权限跟随其所有者。",
-    "view_agents": "查看可用的智能体",
-    "agents_title": "可在这个项目里工作的智能体",
-    "agents_load_failed": "无法加载智能体。",
-    "no_agents": "暂无可用的智能体。",
-    "unavailable_agents_other": "另外 {{count}} 个智能体的所有者没有项目访问权限。",
+    "agent_notice": "智能体的权限跟随其所有者。将所有者加入项目，即可让其智能体在此工作。",
     "label": "访问权限",
     "title": "{{title}}的访问权限",
     "description": "控制谁能查看项目及其中的任务、评论和附件。",
