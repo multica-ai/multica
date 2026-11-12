@@ -224,6 +224,23 @@ describe("DevToolbar", () => {
     expect(queryClient.getQueryState(["issues", "ws-1", "detail", "issue-1"])?.isInvalidated).toBe(false);
   });
 
+  it("keeps the cache fetch counter in place while queries load and settle", async () => {
+    const { queryClient } = renderToolbar();
+    const counter = screen.getByTestId("dev-toolbar-cache-fetching");
+    expect(counter).toHaveTextContent("↻0");
+
+    let settle!: (value: string[]) => void;
+    void queryClient.fetchQuery({
+      queryKey: ["labels", "ws-1"],
+      queryFn: () => new Promise<string[]>((resolve) => (settle = resolve)),
+    });
+    await waitFor(() => expect(counter).toHaveTextContent("↻1"));
+
+    settle([]);
+    await waitFor(() => expect(counter).toHaveTextContent("↻0"));
+    expect(screen.getByTestId("dev-toolbar-cache-fetching")).toBe(counter);
+  });
+
   it("shows runtime health and opens the issue a running agent task works on", async () => {
     setCurrentWorkspace("acme", "ws-1");
     mocks.listRuntimes.mockResolvedValue([
