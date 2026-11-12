@@ -415,7 +415,7 @@ and dark differ, both defaults are given.
 | `--card-foreground` | `oklch(0.141 0.005 285.823)` / `oklch(0.985 0 0)` | Text on a card. |
 | `--popover` | `var(--surface-raised)` | Shadcn alias; follows `surface-raised` unless set. |
 | `--popover-foreground` | `oklch(0.141 0.005 285.823)` / `oklch(0.985 0 0)` | Text in menus and popovers. |
-| `--primary` | `oklch(0.21 0.006 285.885)` / `oklch(0.92 0.004 286.32)` | Primary buttons and strong marks; also used as text. |
+| `--primary` | `oklch(0.21 0.006 285.885)` / `oklch(0.92 0.004 286.32)` | Primary buttons and strong marks; also used as text. Fills switches that are on unless `switch-checked-background` is set. |
 | `--primary-foreground` | `oklch(0.985 0 0)` / `oklch(0.21 0.006 285.885)` | Text on primary. |
 | `--secondary` | `oklch(0.967 0.001 286.375)` / `oklch(0.274 0.006 286.033)` | Secondary buttons. |
 | `--secondary-foreground` | `oklch(0.21 0.006 285.885)` / `oklch(0.985 0 0)` | Text on secondary. |
@@ -425,7 +425,7 @@ and dark differ, both defaults are given.
 | `--accent` | `oklch(0.967 0.001 286.375)` / `oklch(0.274 0.006 286.033)` | Hover fill in menus and lists. |
 | `--accent-foreground` | `oklch(0.21 0.006 285.885)` / `oklch(0.985 0 0)` | Text on accent. |
 | `--border` | `oklch(0.945 0.003 286.32)` / `oklch(1 0 0 / 6%)` | Dividers and table borders. |
-| `--input` | `oklch(0.92 0.004 286.32)` / `oklch(1 0 0 / 15%)` | Input borders, and pressed display chips unless `display-chip-pressed-background` is set. |
+| `--input` | `oklch(0.92 0.004 286.32)` / `oklch(1 0 0 / 15%)` | Input borders. Also fills pressed display chips and switches that are off, unless `display-chip-pressed-background` and `switch-unchecked-background` are set. |
 | `--ring` | `oklch(0.705 0.015 286.067)` / `oklch(0.552 0.016 285.938)` | Focus ring. |
 | `--sidebar` | `oklch(0.964435 0.001327 286.375)` / `oklch(0.21 0.006 285.885)` | Sidebar background (shadcn sidebar). |
 | `--sidebar-foreground` | `oklch(0.141 0.005 285.823)` / `oklch(0.985 0 0)` | Sidebar text. |
@@ -544,6 +544,11 @@ and dark differ, both defaults are given.
 | `--menu-item-hover-color` | `var(--accent-foreground)` | Text of the highlighted menu item. |
 | `--display-chip-pressed-background` | `var(--input)` | Fill of a pressed on/off chip in the Display and sidebar settings popovers. |
 | `--display-chip-pressed-color` | `var(--foreground)` | Text of a pressed display chip. |
+| `--switch-checked-background` | `var(--primary)` | Track of a switch that is on. |
+| `--switch-unchecked-background` | `var(--input)` / `color-mix(in oklab, var(--input) 80%, transparent)` | Track of a switch that is off. |
+| `--switch-checked-thumb` | `var(--background)` / `var(--primary-foreground)` | Thumb of a switch that is on. |
+| `--switch-unchecked-thumb` | `var(--background)` / `var(--foreground)` | Thumb of a switch that is off. |
+| `--switch-border-color` | `transparent` | Outline of a switch, on or off. |
 | `--popover-radius` | `var(--radius)` | Popovers. |
 | `--floating-border-color` | `color-mix(in oklab, var(--surface-border), var(--foreground) 6%)` | Hairline around layers that float over the page without a backdrop: menus, popovers, select lists and floating panels. |
 | `--dialog-radius` | `calc(var(--radius) * 1.5)` | Dialogs and alert dialogs. |
