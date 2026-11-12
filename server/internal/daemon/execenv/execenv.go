@@ -72,7 +72,8 @@ type PrepareParams struct {
 	// wrapper. Only consulted when Provider == "openclaw" and the agent's
 	// runtime_config selected gateway mode (issue #3260). Zero means "inherit
 	// whatever the user's global openclaw.json already configures".
-	OpenclawGateway OpenclawGatewayPin
+	OpenclawGateway       OpenclawGatewayPin
+	OpenclawIsolatedState bool
 	// LocalWorkDir, when non-empty, redirects the agent's working directory
 	// to a user-supplied absolute path instead of the synthesised envRoot/
 	// workdir. The path is NOT copied or mounted — the agent operates on
@@ -743,11 +744,13 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// OpenClaw without the agents / providers / API keys it expects.
 	if params.Provider == "openclaw" {
 		result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{
-			OpenclawBin: params.OpenclawBin,
-			CacheDir:    openclawProfileCacheDir(params.Profile, logger),
-			McpConfig:   params.McpConfig,
-			Gateway:     params.OpenclawGateway,
-			Logger:      logger,
+			OpenclawBin:    params.OpenclawBin,
+			CacheDir:       openclawProfileCacheDir(params.Profile, logger),
+			McpConfig:      params.McpConfig,
+			Gateway:        params.OpenclawGateway,
+			IsolatedState:  params.OpenclawIsolatedState,
+			PreparedSkills: env.PreparedSkillNames,
+			Logger:         logger,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("execenv: prepare openclaw config: %w", err)
@@ -791,7 +794,8 @@ type ReuseParams struct {
 	CursorMcpAuthSource string
 	// OpenclawGateway is the per-task Gateway pin re-applied on reuse so the
 	// agent picks up any runtime_config changes saved since the prior run.
-	OpenclawGateway OpenclawGatewayPin
+	OpenclawGateway       OpenclawGatewayPin
+	OpenclawIsolatedState bool
 	// Profile is the daemon's profile name (empty = default), mirroring
 	// PrepareParams.Profile so a reused task keys its per-issue Codex session
 	// store into the same profile namespace (MUL-4424).
@@ -1066,11 +1070,13 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	// without the registered agents.
 	if params.Provider == "openclaw" {
 		result, err := prepareOpenclawConfig(env.RootDir, params.WorkDir, OpenclawConfigPrep{
-			OpenclawBin: params.OpenclawBin,
-			CacheDir:    openclawProfileCacheDir(params.Profile, logger),
-			McpConfig:   params.McpConfig,
-			Gateway:     params.OpenclawGateway,
-			Logger:      logger,
+			OpenclawBin:    params.OpenclawBin,
+			CacheDir:       openclawProfileCacheDir(params.Profile, logger),
+			McpConfig:      params.McpConfig,
+			Gateway:        params.OpenclawGateway,
+			IsolatedState:  params.OpenclawIsolatedState,
+			PreparedSkills: env.PreparedSkillNames,
+			Logger:         logger,
 		})
 		if err != nil {
 			logger.Warn("execenv: refresh openclaw config failed", "error", err)

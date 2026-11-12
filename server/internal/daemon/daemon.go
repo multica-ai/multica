@@ -8351,6 +8351,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			McpConfig:             effectiveMcpConfig,
 			CursorMcpAuthSource:   cursorMcpAuthSource,
 			OpenclawGateway:       openclawGateway,
+			OpenclawIsolatedState: openclawMode == "isolated-local",
 			HermesSourceHome:      hermesSourceHome,
 			HermesSourceMustExist: hermesSourceMustExist,
 			HermesEnv:             hermesEnv,
@@ -8401,6 +8402,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			McpConfig:             effectiveMcpConfig,
 			CursorMcpAuthSource:   cursorMcpAuthSource,
 			OpenclawGateway:       openclawGateway,
+			OpenclawIsolatedState: openclawMode == "isolated-local",
 			HermesSourceHome:      hermesSourceHome,
 			HermesSourceMustExist: hermesSourceMustExist,
 			HermesEnv:             hermesEnv,
@@ -8486,6 +8488,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				return TaskResult{}, asEnvironmentSetupFailure(fmt.Errorf("prepare execution environment: %w", err))
 			}
 		}
+	}
+	if provider == "openclaw" && openclawMode == "isolated-local" && env.OpenclawConfigPath == "" {
+		return TaskResult{}, asEnvironmentSetupFailure(fmt.Errorf("prepare execution environment: isolated-local requires a prepared private OpenClaw config"))
 	}
 	phaseRecorder.Mark(taskPhaseEnvironmentReady)
 	// Belt-and-suspenders: also mark whatever root we ended up with, in case
@@ -8810,6 +8815,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// preparer didn't run (non-openclaw provider, or write failure).
 	if env.OpenclawConfigPath != "" {
 		agentEnv["OPENCLAW_CONFIG_PATH"] = env.OpenclawConfigPath
+		if openclawMode == "isolated-local" {
+			agentEnv["OPENCLAW_STATE_DIR"] = filepath.Join(env.RootDir, "openclaw-state")
+			agentEnv["OPENCLAW_AGENT_DIR"] = ""
+			agentEnv["PI_CODING_AGENT_DIR"] = ""
+		}
 	}
 	// Grant the wrapper config permission to $include the user's active
 	// config across directories. OpenClaw's $include defaults to confining
