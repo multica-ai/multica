@@ -958,7 +958,7 @@
     "delete_count_other": "刪除 {{count}} 個任務"
   },
   "card": {
-    "open_sub_issues_other": "{{count}} 個子任務未關閉",
+    "unfinished_sub_issues_other": "{{count}} 個子任務尚未結束",
     "update_failed": "更新任務失敗",
     "updated_ago": "更新於 {{time}}"
   },

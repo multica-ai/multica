@@ -28,9 +28,11 @@ vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({ issueDetail: (id: string) => `/acme/issues/${id}` }),
 }));
 
+const display = vi.hoisted(() => ({ childProgress: false }));
+
 vi.mock("@multica/core/issues/stores/view-store-context", () => ({
   useViewStore: (selector: (state: unknown) => unknown) =>
-    selector({ cardProperties: {}, cardPropertyIds: [] }),
+    selector({ cardProperties: display, cardPropertyIds: [] }),
 }));
 
 vi.mock("../../i18n", () => ({
@@ -92,6 +94,7 @@ function renderRow(peekedId: string | null = null) {
 describe("ListRow side peek", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    display.childProgress = false;
     useIssueOpeningStore.setState({ openMode: "page" });
   });
 
@@ -117,5 +120,24 @@ describe("ListRow side peek", () => {
     const { container } = renderRow("issue-1");
     const row = container.querySelector('[data-peek-target="issue-1"]');
     expect(row).toHaveAttribute("data-peeked");
+  });
+});
+
+describe("ListRow child-progress display", () => {
+  it("shows unfinished work only while child-progress display is enabled", () => {
+    display.childProgress = true;
+    const parent = { ...issue, status: "done" };
+    const progress = { done: 0, total: 1 };
+    const content = () => (
+      <NavigationProvider value={navigation}>
+        <ListRow issue={parent} childProgress={progress} />
+      </NavigationProvider>
+    );
+    const { unmount } = render(content());
+    expect(screen.getByText("Translated")).toBeInTheDocument();
+    unmount();
+    display.childProgress = false;
+    render(content());
+    expect(screen.queryByText("Translated")).not.toBeInTheDocument();
   });
 });

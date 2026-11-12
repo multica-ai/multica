@@ -1007,8 +1007,8 @@
     "delete_count_other": "Delete {{count}} issues"
   },
   "card": {
-    "open_sub_issues_one": "{{count}} open sub-issue",
-    "open_sub_issues_other": "{{count}} open sub-issues",
+    "unfinished_sub_issues_one": "{{count}} sub-issue still unfinished",
+    "unfinished_sub_issues_other": "{{count}} sub-issues still unfinished",
     "update_failed": "Failed to update issue",
     "updated_ago": "Updated {{time}}"
   },
