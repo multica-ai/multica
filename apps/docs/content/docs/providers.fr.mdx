@@ -45,6 +45,8 @@ Les étapes d'installation se trouvent dans [Installer les outils de codage IA](
 | Qoder CN CLI | `qoderclicn` | ✓ | ✓ | ✓ | `.qoder/skills/` |
 | Qwen Code | `qwen` | ✓ | ✓ | ✓ | `.qwen/skills/` |
 | QwenPaw | `qwenpaw` | ✓ | ✓ | — | `skills/` de l'espace de travail propre à chaque exécution |
+| Amp | `amp` | ✓ | — | ✓ | `.agents/skills/` |
+| Factory Droid | `droid` | ✓ | — | ✓ | `.factory/skills/` |
 | Reasonix | `reasonix` | ✓ | ✓ | ✓ | `.reasonix/skills/` |
 | Trae CLI | `traecli` | ✓ | ✓ | ✓ | `.traecli/skills/` |
 | Dim | `dim` | ✓ | ✓ | ✓ | — |
@@ -119,4 +121,4 @@ Pour créer et rattacher des skills, consultez [Skills](/skills).
 
 ZCode utilise son protocole natif NDJSON `app-server` pour créer, reprendre et annuler les sessions, découvrir les modèles, gérer les niveaux de raisonnement et configurer MCP. Les tâches s'exécutent en mode yolo, sans approbation interactive des outils. Les niveaux de raisonnement viennent du catalogue de modèles du runtime ; la création d'un agent conserve le niveau par défaut du modèle sélectionné.
 
-Sur macOS, le daemon détecte aussi le point d'entrée Node intégré à ZCode Desktop ; Node.js doit être installé. Les connexions API-key/Coding Plan activées dans l'application sont importées dans une configuration temporaire propre au processus, supprimée à sa fermeture sans modifier les fichiers d'origine. Les jetons d'identité Start Plan ne sont pas des clés API et ce mode d'authentification n'est pas pris en charge. Si aucun modèle n'est découvert, configurez une connexion API fonctionnelle dans ZCode Desktop.
+Sur macOS, le daemon détecte aussi le CLI intégré à ZCode Desktop ; Node.js doit être installé. Sur Linux, il détecte également ZCode Desktop et exécute son CLI intégré sans ouvrir de fenêtre ; aucune installation séparée de Node.js ni configuration manuelle de variables d'environnement n'est nécessaire. Les connexions API-key/Coding Plan activées dans l'application sont importées dans une configuration temporaire propre au processus, supprimée à sa fermeture sans modifier les fichiers d'origine. Les jetons d'identité Start Plan ne sont pas des clés API et ce mode d'authentification n'est pas pris en charge. Si aucun modèle n'est découvert, configurez une connexion API fonctionnelle dans ZCode Desktop.

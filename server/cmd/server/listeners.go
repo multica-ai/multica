@@ -86,6 +86,9 @@ func isChatPrivateEvent(e events.Event) bool {
 // MemberPrivateUserID is dropped instead of reaching the workspace.
 var memberPrivateEvents = map[string]bool{
 	protocol.EventIssueViewPreferenceChanged: true,
+	protocol.EventPinCreated:                 true,
+	protocol.EventPinDeleted:                 true,
+	protocol.EventPinReordered:               true,
 }
 
 // registerListeners wires up event bus listeners for WS broadcasting.
@@ -114,6 +117,7 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster, audience ...priv
 		protocol.EventInboxRead:          true,
 		protocol.EventInboxArchived:      true,
 		protocol.EventInboxUnarchived:    true,
+		protocol.EventInboxDeleted:       true,
 		protocol.EventInboxBatchRead:     true,
 		protocol.EventInboxBatchArchived: true,
 		protocol.EventInvitationCreated:  true,
@@ -153,6 +157,7 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster, audience ...priv
 	// top-level payload
 	for _, eventType := range []string{
 		protocol.EventInboxRead, protocol.EventInboxArchived, protocol.EventInboxUnarchived,
+		protocol.EventInboxDeleted,
 		protocol.EventInboxBatchRead, protocol.EventInboxBatchArchived,
 		protocol.EventIssueUnreadChanged,
 	} {

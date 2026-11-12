@@ -7,9 +7,9 @@
   Each element copies the structure and the Tailwind aliases of the component
   it stands for (app-rail.tsx, space-panel.tsx, panel-nav.tsx, list-view.tsx,
   list-row.tsx, label-chip.tsx, issue-peek.tsx, comment-card.tsx,
-  comment-input.tsx). States a component sets in script are written out:
-  `aria-current`, `data-active`, `data-peeked`, the selected row's
-  background. scripts/theme-preview.test.mjs checks the aliases against
+  comment-input.tsx, switch.tsx). States a component sets in script are
+  written out: `aria-current`, `data-active`, `data-peeked`, `data-checked`
+  and `data-unchecked`, the selected row's background. scripts/theme-preview.test.mjs checks the aliases against
   packages/ui/styles/theme-variables.css. Class names here are only for the
   fixture; themes must not rely on them.
 -->
@@ -149,7 +149,6 @@
               <div data-mc="content" class="rich-text-editor mt-5 text-body">
                 <p>New workspaces should see a short checklist on the dashboard: connect a repository, create an agent and assign it a first issue.</p>
                 <ul>
-                  <li><p>Hide it once every step is done.</p></li>
                   <li><p>Keep the copy in <code>checklist.json</code>.</p></li>
                 </ul>
                 <blockquote><p>Measure how many teams finish it in a week.</p></blockquote>
@@ -158,7 +157,10 @@
               <h2 class="text-title-sm font-semibold">Activity</h2>
               <div class="mt-4 flex flex-col gap-3 px-4 pb-3">
                 <div class="flex items-center text-label text-muted-foreground"><div class="mr-2 flex w-4 shrink-0 justify-center"><span data-slot="avatar" class="inline-flex size-4 shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted text-[9px] font-medium text-muted-foreground">A</span></div><div class="flex min-w-0 flex-1 items-center gap-1"><span class="shrink-0 font-medium">Ada</span><span class="truncate">created this issue</span><span class="ml-auto shrink-0">3h ago</span></div></div>
-                <div class="flex items-center text-label text-muted-foreground"><div class="mr-2 flex w-4 shrink-0 justify-center"><span data-slot="avatar" class="inline-flex size-4 shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted text-[9px] font-medium text-muted-foreground">L</span></div><div class="flex min-w-0 flex-1 items-center gap-1"><span class="shrink-0 font-medium">Lambda</span><span class="truncate">changed the status to In Progress</span><span class="ml-auto shrink-0">2h ago</span></div></div>
+              </div>
+              <div class="mb-2 flex flex-col">
+                <div class="flex min-h-8 items-center gap-2 px-2 text-label"><span class="min-w-0 flex-1 truncate">Wake Lambda when the PR merges</span><span role="switch" aria-checked="true" data-slot="switch" data-size="sm" data-checked="" class="peer group/switch relative inline-flex shrink-0 items-center rounded-full border border-switch-border transition-all outline-none data-[size=default]:h-[18.4px] data-[size=default]:w-[32px] data-[size=sm]:h-[14px] data-[size=sm]:w-[24px] data-checked:bg-switch-checked data-unchecked:bg-switch-unchecked dark:data-unchecked:bg-switch-unchecked-dark"><span data-slot="switch-thumb" data-checked="" class="pointer-events-none block rounded-full ring-0 transition-transform group-data-[size=default]/switch:size-4 group-data-[size=sm]/switch:size-3 group-data-[size=default]/switch:data-checked:translate-x-[calc(100%-2px)] group-data-[size=sm]/switch:data-checked:translate-x-[calc(100%-2px)] data-checked:bg-switch-checked-thumb dark:data-checked:bg-switch-checked-thumb-dark group-data-[size=default]/switch:data-unchecked:translate-x-0 group-data-[size=sm]/switch:data-unchecked:translate-x-0 data-unchecked:bg-switch-unchecked-thumb dark:data-unchecked:bg-switch-unchecked-thumb-dark"></span></span></div>
+                <div class="flex min-h-8 items-center gap-2 px-2 text-label"><span class="min-w-0 flex-1 truncate">Remind Ada tomorrow at 9:00</span><span role="switch" aria-checked="false" data-slot="switch" data-size="sm" data-unchecked="" class="peer group/switch relative inline-flex shrink-0 items-center rounded-full border border-switch-border transition-all outline-none data-[size=default]:h-[18.4px] data-[size=default]:w-[32px] data-[size=sm]:h-[14px] data-[size=sm]:w-[24px] data-checked:bg-switch-checked data-unchecked:bg-switch-unchecked dark:data-unchecked:bg-switch-unchecked-dark"><span data-slot="switch-thumb" data-unchecked="" class="pointer-events-none block rounded-full ring-0 transition-transform group-data-[size=default]/switch:size-4 group-data-[size=sm]/switch:size-3 group-data-[size=default]/switch:data-checked:translate-x-[calc(100%-2px)] group-data-[size=sm]/switch:data-checked:translate-x-[calc(100%-2px)] data-checked:bg-switch-checked-thumb dark:data-checked:bg-switch-checked-thumb-dark group-data-[size=default]/switch:data-unchecked:translate-x-0 group-data-[size=sm]/switch:data-unchecked:translate-x-0 data-unchecked:bg-switch-unchecked-thumb dark:data-unchecked:bg-switch-unchecked-thumb-dark"></span></span></div>
               </div>
               <div data-slot="card" data-size="default" data-mc="comment" data-author-type="agent" class="flex flex-col overflow-clip rounded-card border border-surface-border bg-surface text-body text-surface-foreground shadow-[var(--surface-shadow)]">
                 <div class="mb-1 bg-card px-4 pt-3 pb-1">

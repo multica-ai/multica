@@ -66,7 +66,14 @@ describe("chat reply OS notifications", () => {
     expect(qc.getQueryCache().getAll().some((query) => query.queryKey.includes("inbox"))).toBe(false);
   });
 
-  it("suppresses focused replies and does not replay them after switching away", async () => {
+  it("forwards a stale focused renderer to native main's focus gate", async () => {
+    hasFocus.mockReturnValue(true);
+    await notify(reply());
+    expect(showNotification).toHaveBeenCalledTimes(1);
+  });
+
+  it("suppresses focused browser replies and does not replay them after switching away", async () => {
+    vi.stubGlobal("desktopAPI", undefined);
     hasFocus.mockReturnValue(true);
     await notify(reply());
     hasFocus.mockReturnValue(false);

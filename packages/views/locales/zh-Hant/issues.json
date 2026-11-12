@@ -196,6 +196,7 @@
     "relation_subscribed": "我訂閱的",
     "section_agent_status": "AI 代理狀態",
     "agent_status_running": "執行中",
+    "agent_status_idle": "閒置",
     "section_read_state": "閱讀狀態",
     "read_state_unread": "未讀",
     "operator_label": "關係",
@@ -315,6 +316,7 @@
     "card_project": "專案",
     "card_labels": "標籤",
     "card_child_progress": "子任務進度",
+    "card_pull_requests": "Pull Request",
     "show_sub_issues": "顯示子任務",
     "layout_options": "{{layout}}選項"
   },
@@ -386,6 +388,7 @@
       "created_at": "建立時間",
       "updated_at": "更新時間",
       "child_progress": "子任務進度",
+      "pull_requests": "Pull Request",
       "creator": "建立者"
     },
     "calculation": {
@@ -510,6 +513,7 @@
     "quick_action_blocked_body": "\"{{name}}\"由一個你無權觸發的 AI 代理執行。可以請工作區管理員把該 AI 代理開放給團隊，或把這條操作改綁一個共享的 AI 代理。",
     "quick_action_blocked_ok": "知道了",
     "pull_requests_loading": "載入中...",
+    "pull_request_state_open": "Open",
     "pull_request_state_draft": "Draft",
     "pull_request_state_merged": "Merged",
     "pull_request_state_closed": "Closed",

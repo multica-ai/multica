@@ -198,6 +198,7 @@
     "relation_subscribed": "Auxquels je suis abonné",
     "section_agent_status": "Statut de l'agent",
     "agent_status_running": "En cours d'exécution",
+    "agent_status_idle": "Inactif",
     "section_read_state": "État de lecture",
     "read_state_unread": "Non lu",
     "operator_label": "Condition",
@@ -321,6 +322,7 @@
     "card_project": "Projet",
     "card_labels": "Étiquettes",
     "card_child_progress": "Avancement des sous-tâches",
+    "card_pull_requests": "Pull requests",
     "show_sub_issues": "Afficher les sous-tâches",
     "layout_options": "Options de la vue {{layout}}"
   },
@@ -392,6 +394,7 @@
       "created_at": "Création",
       "updated_at": "Mise à jour",
       "child_progress": "Avancement des sous-tâches",
+      "pull_requests": "Pull requests",
       "creator": "Créé par"
     },
     "calculation": {
@@ -517,6 +520,7 @@
     "quick_action_blocked_body": "« {{name}} » s'exécute sous un agent que vous n'êtes pas autorisé à déclencher. Demandez à un administrateur de l'espace de travail de rendre cet agent accessible à l'équipe, ou de rattacher cette action à un agent partagé.",
     "quick_action_blocked_ok": "Compris",
     "pull_requests_loading": "Chargement…",
+    "pull_request_state_open": "Ouverte",
     "pull_request_state_draft": "Brouillon",
     "pull_request_state_merged": "Fusionnée",
     "pull_request_state_closed": "Fermée",

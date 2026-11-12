@@ -32,6 +32,9 @@ func (s *TaskService) EnqueueAppDecisionRun(ctx context.Context, issueID, agentI
 	if !agent.RuntimeID.Valid {
 		return ErrChatTaskAgentNoRuntime
 	}
+	if err := s.guardRunProjectAccess(ctx, issue, agent, actorID, actorID); err != nil {
+		return err
+	}
 	waiting, err := s.Queries.FindWaitingIssueRun(ctx, db.FindWaitingIssueRunParams{IssueID: issueID, AgentID: agentID, OriginatorUserID: actorID})
 	if err == nil {
 		folded, err := s.Queries.AppendQueuedTaskHandoffNote(ctx, db.AppendQueuedTaskHandoffNoteParams{ID: waiting, Note: note})

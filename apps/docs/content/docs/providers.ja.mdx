@@ -45,6 +45,8 @@ Multica は、普段使っている AI コーディングツールの代わり�
 | Qoder CN CLI | `qoderclicn` | ✓ | ✓ | ✓ | `.qoder/skills/` |
 | Qwen Code | `qwen` | ✓ | ✓ | ✓ | `.qwen/skills/` |
 | QwenPaw | `qwenpaw` | ✓ | ✓ | — | 1 回の実行専用のワークスペース `skills/` |
+| Amp | `amp` | ✓ | — | ✓ | `.agents/skills/` |
+| Factory Droid | `droid` | ✓ | — | ✓ | `.factory/skills/` |
 | Reasonix | `reasonix` | ✓ | ✓ | ✓ | `.reasonix/skills/` |
 | Trae CLI | `traecli` | ✓ | ✓ | ✓ | `.traecli/skills/` |
 | Dim | `dim` | ✓ | ✓ | ✓ | — |
@@ -119,4 +121,4 @@ Codex、Hermes、OpenClaw の動作は少し異なります。
 
 ZCode はネイティブの NDJSON `app-server` プロトコルで、セッションの作成・再開・キャンセル、モデル検出、推論レベル、MCP に対応します。タスクは yolo モードで実行され、対話的なツール承認は求められません。推論レベルの選択肢はランタイムのモデルカタログから取得し、エージェント作成時には選択したモデルの既定値が維持されます。
 
-macOS では ZCode Desktop に同梱された Node エントリーポイントも自動検出します。Node.js のインストールが必要です。デスクトップアプリで有効になっている API-key/Coding Plan 接続を、プロセス専用の一時設定へ取り込みます。この設定は終了時に削除され、元のファイルは変更されません。Start Plan の認証トークンは API キーではなく、このアカウント認証方式には対応していません。モデルが検出されない場合は、ZCode Desktop で利用可能な API 接続を設定してください。
+macOS では ZCode Desktop に同梱された CLI も自動検出します。Node.js のインストールが必要です。Linux でも ZCode Desktop を自動検出し、デスクトップウィンドウを開かずに同梱 CLI を実行します。Node.js の追加インストールや環境変数の手動設定は不要です。デスクトップアプリで有効になっている API-key/Coding Plan 接続を、プロセス専用の一時設定へ取り込みます。この設定は終了時に削除され、元のファイルは変更されません。Start Plan の認証トークンは API キーではなく、このアカウント認証方式には対応していません。モデルが検出されない場合は、ZCode Desktop で利用可能な API 接続を設定してください。
