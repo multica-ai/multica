@@ -496,6 +496,52 @@ export interface TaskUsage {
 }
 
 /**
+ * Per-run context receipt (MUL-9013): which context sources the daemon handed
+ * a run, with sizes, short hashes, delivery and load evidence. Metadata only.
+ * String enums stay open (`string`) so a newer daemon's value still renders.
+ */
+export type ContextReceiptLoad =
+  | "delivered"
+  | "verified"
+  | "verified_other_version"
+  | "unverified"
+  | "not_delivered"
+  | (string & {});
+
+export interface ContextReceiptSource {
+  kind: string;
+  name?: string;
+  bytes: number;
+  sha256?: string;
+  delivery: string;
+  path?: string;
+  load: ContextReceiptLoad;
+  verified_version?: string;
+  /** Set when this source is a section inside another (e.g. `runtime_brief`). */
+  parent?: string;
+}
+
+export interface ContextReceipt {
+  schema_version: number;
+  runtime: string;
+  runtime_version?: string;
+  model?: string;
+  prompt_bytes: number;
+  brief_bytes: number;
+  brief_delivery: string;
+  resumed_session: boolean;
+  fresh_retry?: boolean;
+  mcp_servers: string[];
+  sources: ContextReceiptSource[];
+}
+
+export interface TaskContextReceiptResponse {
+  /** Null when the run has none: an older daemon, or a run that never launched. */
+  receipt: ContextReceipt | null;
+  recorded_at?: string;
+}
+
+/**
  * Response of the Mika bootstrap endpoint: the workspace's Mika plus the
  * caller's conversation with it, resolved together server-side so two clients
  * cannot each open their own onboarding session.

@@ -2396,6 +2396,48 @@ export const TaskMessagePayloadSchema = z.object({
 
 export const TaskMessageListSchema = z.array(TaskMessagePayloadSchema).default([]);
 
+// Context receipt (`GET /api/tasks/:id/context-receipt`, MUL-9013). Lenient:
+// unknown enum values pass through as strings, and a malformed row is dropped
+// rather than failing the whole receipt.
+const ContextReceiptSourceSchema = z.object({
+  kind: z.string(),
+  name: z.string().optional(),
+  bytes: z.number().catch(0),
+  sha256: z.string().optional(),
+  delivery: z.string().catch(""),
+  path: z.string().optional(),
+  load: z.string().catch("unverified"),
+  verified_version: z.string().optional(),
+  parent: z.string().optional(),
+}).loose();
+
+const ContextReceiptSchema = z.object({
+  schema_version: z.number().catch(1),
+  runtime: z.string().catch(""),
+  runtime_version: z.string().optional(),
+  model: z.string().optional(),
+  prompt_bytes: z.number().catch(0),
+  brief_bytes: z.number().catch(0),
+  brief_delivery: z.string().catch(""),
+  resumed_session: z.boolean().catch(false),
+  fresh_retry: z.boolean().optional().catch(undefined),
+  mcp_servers: z.array(z.string()).catch([]),
+  sources: z
+    .array(z.unknown())
+    .catch([])
+    .transform((rows) =>
+      rows.flatMap((row) => {
+        const parsed = ContextReceiptSourceSchema.safeParse(row);
+        return parsed.success ? [parsed.data] : [];
+      }),
+    ),
+}).loose();
+
+export const TaskContextReceiptResponseSchema = z.object({
+  receipt: ContextReceiptSchema.nullable().catch(null),
+  recorded_at: z.string().optional(),
+}).loose();
+
 // Task cancellation (`POST /api/tasks/:id/cancel`) is consumed directly by
 // chat recovery. Its optional message payload must be well-formed before the
 // UI deletes a message from cache or restores text into the input.
