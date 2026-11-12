@@ -23,22 +23,29 @@ func TestResolveAgentExecutablePath_PreservesDispatchShimName(t *testing.T) {
 		t.Skip("creating symlinks requires elevated privileges on Windows")
 	}
 
-	for _, shimName := range []string{"volta-shim", "vp"} {
-		t.Run(shimName, func(t *testing.T) {
+	for _, tt := range []struct {
+		shimName string
+		command  string
+	}{
+		{shimName: "volta-shim", command: "claude"},
+		{shimName: "vp", command: "claude"},
+		{shimName: "mise", command: "codex"},
+	} {
+		t.Run(tt.shimName, func(t *testing.T) {
 			managerDir := t.TempDir()
-			manager := filepath.Join(managerDir, shimName)
-			if err := os.WriteFile(manager, []byte("#!/bin/sh\nprintf '%s\\n' \"${0##*/}\"\n"), 0o755); err != nil {
+			manager := filepath.Join(managerDir, tt.shimName)
+			if err := os.WriteFile(manager, []byte("#!/bin/sh\nprintf '%s\\n' \"${0##*/}\" \"$1\" \"$PWD\"\n"), 0o755); err != nil {
 				t.Fatalf("write dispatcher: %v", err)
 			}
 
 			binDir := t.TempDir()
-			entrypoint := filepath.Join(binDir, "claude")
+			entrypoint := filepath.Join(binDir, tt.command)
 			if err := os.Symlink(manager, entrypoint); err != nil {
 				t.Fatalf("symlink dispatcher: %v", err)
 			}
 			t.Setenv("PATH", binDir)
 
-			got, err := resolveAgentExecutablePath("claude")
+			got, err := resolveAgentExecutablePath(tt.command)
 			if err != nil {
 				t.Fatalf("resolveAgentExecutablePath: %v", err)
 			}
@@ -46,16 +53,29 @@ func TestResolveAgentExecutablePath_PreservesDispatchShimName(t *testing.T) {
 			if err != nil {
 				t.Fatalf("resolve bin directory: %v", err)
 			}
-			want := filepath.Join(realBinDir, "claude")
+			want := filepath.Join(realBinDir, tt.command)
 			if got != want {
 				t.Fatalf("resolved path = %q, want command-preserving entrypoint %q", got, want)
 			}
-			output, err := exec.Command(got, "--version").CombinedOutput()
+			workDir, err := filepath.EvalSymlinks(t.TempDir())
 			if err != nil {
-				t.Fatalf("run resolved entrypoint: %v: %s", err, output)
+				t.Fatalf("resolve task workdir: %v", err)
 			}
-			if got := strings.TrimSpace(string(output)); got != "claude" {
-				t.Fatalf("dispatcher observed command name %q, want claude", got)
+			args := []string{"--version"}
+			if tt.command == "codex" {
+				args = append(args, "app-server")
+			}
+			for _, arg := range args {
+				cmd := exec.Command(got, arg)
+				cmd.Dir = workDir
+				output, err := cmd.CombinedOutput()
+				if err != nil {
+					t.Fatalf("run resolved entrypoint with %s: %v: %s", arg, err, output)
+				}
+				wantOutput := tt.command + "\n" + arg + "\n" + workDir + "\n"
+				if string(output) != wantOutput {
+					t.Fatalf("dispatcher invocation = %q, want %q", output, wantOutput)
+				}
 			}
 		})
 	}
