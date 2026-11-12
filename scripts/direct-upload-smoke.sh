@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Isolated end-to-end smoke test for presigned direct upload (MYS-2814).
+# Isolated end-to-end smoke test for presigned direct upload.
 #
 # What it proves, end to end and reproducibly on one machine:
 #
