@@ -705,10 +705,12 @@ describe("estimateCost", () => {
       expect(isModelPriced(model, "codex")).toBe(true);
       expect(estimateCost({ ...zeroUsage, provider: "codex", model, cache_read_tokens: 1_000_000 })).toBeCloseTo(0.1, 5);
     }
-    for (const model of ["openai:gpt-6.1-terra", "openai/gpt-6.1-terra", "gpt-6.1-terra[1m]"]) {
-      expect(isModelPriced(model, "codex")).toBe(true);
-      expect(estimateCost({ ...zeroUsage, provider: "codex", model, cache_read_tokens: 1_000_000 })).toBeCloseTo(0.05, 5);
-    }
+    // `gpt-6.1-terra` gets no loop here: the models.dev-generated snapshot
+    // (through the 2026-10-04 forward-port) carries no cost row for it, so it
+    // correctly surfaces as unmapped — per the standing pricing caveat tests
+    // adapt to the generated table and rows are never hand-patched in. The
+    // prefix/tag behaviour is covered by the sol loop above, and the negative
+    // assertions below keep the terra family pinned as unmapped.
   });
 
   it("flags catalog SKUs without a published price (gpt-5.5-mini) as unmapped", () => {
