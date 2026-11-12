@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/multica-ai/multica/server/pkg/redact"
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
@@ -395,7 +396,9 @@ func collectDiff(ctx context.Context, repo commitRepo, kind, from, to string, en
 			case isBinaryCommitPatch(patch):
 				change["binary"] = true
 			default:
-				change["diff"] = string(patch)
+				// Oversized patches are discarded above. Scrub complete patch
+				// bodies here so older servers never receive raw credentials.
+				change["diff"] = redact.Text(string(patch))
 			}
 		}
 		changes = append(changes, change)

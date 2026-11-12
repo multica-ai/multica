@@ -1,9 +1,11 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -214,6 +216,85 @@ func TestCommitDiffReportsThroughTaskMessages(t *testing.T) {
 		received[1].Input["kind"] != diffWorktree || received[1].Input["unavailable"] != true ||
 		len(received[1].Input["changes"].([]any)) != 0 {
 		t.Fatalf("expected commit changes and unavailable worktree: %+v", received)
+	}
+}
+
+func TestCommitDiffRedactsPatchBeforeSending(t *testing.T) {
+	dir := commitTestRepo(t)
+	deletedSecret := "ghp_" + strings.Repeat("A", 36)
+	addedSecret := "glpat-" + strings.Repeat("B", 24)
+	commitTestWrite(t, dir, "file.txt", "old credential "+deletedSecret+"\n")
+	commitTestCommit(t, dir)
+	recorder := newCommitDiffRecorder()
+	t.Cleanup(recorder.close)
+	recorder.record(dir)
+	commitTestWrite(t, dir, "file.txt", "new credential "+addedSecret+"\nordinary source\n")
+	commitTestWrite(t, dir, "small.pem", "-----BEGIN PRIVATE KEY-----\nsynthetic-private-key-body\n-----END PRIVATE KEY-----\n")
+	// Oversized private key patches must be omitted, not sent as a prefix.
+	commitTestWrite(t, dir, "oversized.pem", "-----BEGIN PRIVATE KEY-----\n"+strings.Repeat("test-only-key-material\n", 4000)+"-----END PRIVATE KEY-----\n")
+	commitTestCommit(t, dir)
+	requests := make(chan []byte, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		raw, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Error(err)
+		}
+		requests <- raw
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("{}"))
+	}))
+	defer srv.Close()
+	d := &Daemon{client: NewClient(srv.URL)}
+	var seq atomic.Int32
+	d.reportCommitDiff("redaction-test", recorder, &seq, slog.Default(), true, "")
+	var raw []byte
+	select {
+	case raw = <-requests:
+	default:
+		t.Fatal("no diff request received")
+	}
+	for _, secret := range []string{deletedSecret, addedSecret, "synthetic-private-key-body", "test-only-key-material", "-----BEGIN PRIVATE KEY-----"} {
+		if bytes.Contains(raw, []byte(secret)) {
+			t.Fatal("unredacted fixture credential reached the HTTP request")
+		}
+	}
+	var body struct {
+		Messages []TaskMessageData `json:"messages"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Messages) != 2 {
+		t.Fatalf("expected commit and worktree comparisons, got %d", len(body.Messages))
+	}
+	for _, message := range body.Messages {
+		files := message.Input["changes"].([]any)
+		if len(files) != 3 {
+			t.Fatalf("expected all three file entries, got %d", len(files))
+		}
+		for _, entry := range files {
+			file := entry.(map[string]any)
+			switch file["path"] {
+			case "file.txt":
+				patch, _ := file["diff"].(string)
+				for _, want := range []string{"-old credential [REDACTED GITHUB TOKEN]", "+new credential [REDACTED GITLAB TOKEN]", "+ordinary source"} {
+					if !strings.Contains(patch, want) {
+						t.Fatal("redacted patch lost expected source or masking markers")
+					}
+				}
+			case "oversized.pem":
+				if file["truncated"] != true || file["diff"] != nil {
+					t.Fatal("oversized patch was not omitted")
+				}
+			case "small.pem":
+				patch, _ := file["diff"].(string)
+				if !strings.Contains(patch, "[REDACTED PRIVATE KEY]") {
+					t.Fatal("complete multiline private key was not masked")
+				}
+			default:
+				t.Fatalf("unexpected file %v", file["path"])
+			}
+		}
 	}
 }
 func TestCommitDiffFileLimitIsExplicit(t *testing.T) {
