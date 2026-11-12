@@ -31,7 +31,9 @@ import {
   ChatDraftRestoresResponseSchema,
   ChatPendingTaskSchema,
   ChatSessionListSchema,
+  ChatSessionListPageResponseSchema,
   ChatSessionSchema,
+  EMPTY_CHAT_SESSION_LIST_PAGE,
   PrioritizeQueuedChatTaskResponseSchema,
   CreateFeedbackResponseSchema,
   DuplicateIssueErrorBodySchema,
@@ -205,6 +207,27 @@ describe("ChatSessionSchema", () => {
 
     expect(parsed.map((session) => session.id)).toEqual(["chat-1", "onboarding-chat"]);
     expect(parsed[1]?.last_message?.message_kind).toBe("onboarding_opening");
+  });
+
+  it("parses paginated session list and drops malformed rows", () => {
+    const parsed = ChatSessionListPageResponseSchema.parse({
+      sessions: [
+        { ...baseSession, last_activity_at: "2026-11-01T00:00:00Z" },
+        { id: 42 },
+      ],
+      total: 2,
+      has_more: true,
+      limit: 50,
+      offset: 0,
+    });
+    expect(parsed.sessions).toHaveLength(1);
+    expect(parsed.sessions[0]?.last_activity_at).toBe("2026-11-01T00:00:00Z");
+    expect(parsed.has_more).toBe(true);
+    expect(
+      parseWithFallback({ sessions: "nope" }, ChatSessionListPageResponseSchema, EMPTY_CHAT_SESSION_LIST_PAGE, {
+        endpoint: "GET /api/chat/sessions/page",
+      }).sessions,
+    ).toEqual([]);
   });
 });
 describe("IssueSchema (via ListIssuesResponseSchema)", () => {

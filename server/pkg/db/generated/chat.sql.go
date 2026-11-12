@@ -202,6 +202,55 @@ func (q *Queries) ClearChatSessionSessionIfMatches(ctx context.Context, arg Clea
 	return err
 }
 
+const countChatSessionsByCreator = `-- name: CountChatSessionsByCreator :one
+SELECT count(*)::bigint
+FROM chat_session cs
+LEFT JOIN LATERAL (
+  SELECT created_at
+    FROM chat_message m
+   WHERE m.chat_session_id = cs.id
+     AND m.message_kind != 'channel_command'
+   ORDER BY m.created_at DESC
+   LIMIT 1
+) lm ON true
+WHERE cs.workspace_id = $1 AND cs.creator_id = $2
+  AND (
+    $3::text = 'all'
+    OR ($3::text = 'active' AND cs.status = 'active')
+    OR ($3::text = 'archived' AND cs.status = 'archived')
+  )
+  AND (
+    cs.explicitly_created_at IS NOT NULL
+    OR
+    lm.created_at IS NOT NULL
+  )
+  AND ($4::timestamptz IS NULL
+       OR COALESCE(lm.created_at, cs.updated_at) >= $4::timestamptz)
+  AND ($5::timestamptz IS NULL
+       OR COALESCE(lm.created_at, cs.updated_at) < $5::timestamptz)
+`
+
+type CountChatSessionsByCreatorParams struct {
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	CreatorID      pgtype.UUID        `json:"creator_id"`
+	StatusFilter   string             `json:"status_filter"`
+	ActivityAfter  pgtype.Timestamptz `json:"activity_after"`
+	ActivityBefore pgtype.Timestamptz `json:"activity_before"`
+}
+
+func (q *Queries) CountChatSessionsByCreator(ctx context.Context, arg CountChatSessionsByCreatorParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countChatSessionsByCreator,
+		arg.WorkspaceID,
+		arg.CreatorID,
+		arg.StatusFilter,
+		arg.ActivityAfter,
+		arg.ActivityBefore,
+	)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const createChatDraftRestore = `-- name: CreateChatDraftRestore :one
 INSERT INTO chat_draft_restore (id, chat_session_id, task_id, content, attachment_ids)
 VALUES ($1, $2, $3, $4, $5)
@@ -2399,6 +2448,137 @@ func (q *Queries) ListChatSessionsByCreator(ctx context.Context, arg ListChatSes
 	items := []ListChatSessionsByCreatorRow{}
 	for rows.Next() {
 		var i ListChatSessionsByCreatorRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.AgentID,
+			&i.CreatorID,
+			&i.Title,
+			&i.SessionID,
+			&i.WorkDir,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.UnreadSince,
+			&i.RuntimeID,
+			&i.LastReadAt,
+			&i.IsAgentIntro,
+			&i.PinnedAt,
+			&i.ProjectID,
+			&i.ExplicitlyCreatedAt,
+			&i.UnreadCount,
+			&i.LastMessageContent,
+			&i.LastMessageRole,
+			&i.LastMessageAt,
+			&i.LastMessageFailureReason,
+			&i.LastMessageKind,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listChatSessionsByCreatorPage = `-- name: ListChatSessionsByCreatorPage :many
+SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_id, cs.work_dir, cs.status, cs.created_at, cs.updated_at, cs.unread_since, cs.runtime_id, cs.last_read_at, cs.is_agent_intro, cs.pinned_at, cs.project_id, cs.explicitly_created_at,
+       CASE WHEN cs.status = 'archived' THEN 0
+            ELSE (SELECT count(*) FROM chat_message m
+                    WHERE m.chat_session_id = cs.id
+                      AND m.role = 'assistant'
+                      AND m.created_at > cs.last_read_at)
+       END::int AS unread_count,
+       COALESCE(lm.content, '') AS last_message_content,
+       COALESCE(lm.role, '') AS last_message_role,
+       lm.created_at AS last_message_at,
+       lm.failure_reason AS last_message_failure_reason,
+       COALESCE(lm.message_kind, '') AS last_message_kind
+FROM chat_session cs
+LEFT JOIN LATERAL (
+  SELECT content, role, created_at, failure_reason, message_kind
+    FROM chat_message m
+   WHERE m.chat_session_id = cs.id
+     AND m.message_kind != 'channel_command'
+   ORDER BY m.created_at DESC
+   LIMIT 1
+) lm ON true
+WHERE cs.workspace_id = $1 AND cs.creator_id = $2
+  AND (
+    $5::text = 'all'
+    OR ($5::text = 'active' AND cs.status = 'active')
+    OR ($5::text = 'archived' AND cs.status = 'archived')
+  )
+  AND (
+    cs.explicitly_created_at IS NOT NULL
+    OR
+    lm.created_at IS NOT NULL
+  )
+  AND ($6::timestamptz IS NULL
+       OR COALESCE(lm.created_at, cs.updated_at) >= $6::timestamptz)
+  AND ($7::timestamptz IS NULL
+       OR COALESCE(lm.created_at, cs.updated_at) < $7::timestamptz)
+ORDER BY (cs.pinned_at IS NOT NULL) DESC, cs.pinned_at DESC, COALESCE(lm.created_at, cs.updated_at) DESC
+LIMIT $3 OFFSET $4
+`
+
+type ListChatSessionsByCreatorPageParams struct {
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	CreatorID      pgtype.UUID        `json:"creator_id"`
+	Limit          int32              `json:"limit"`
+	Offset         int32              `json:"offset"`
+	StatusFilter   string             `json:"status_filter"`
+	ActivityAfter  pgtype.Timestamptz `json:"activity_after"`
+	ActivityBefore pgtype.Timestamptz `json:"activity_before"`
+}
+
+type ListChatSessionsByCreatorPageRow struct {
+	ID                       pgtype.UUID        `json:"id"`
+	WorkspaceID              pgtype.UUID        `json:"workspace_id"`
+	AgentID                  pgtype.UUID        `json:"agent_id"`
+	CreatorID                pgtype.UUID        `json:"creator_id"`
+	Title                    string             `json:"title"`
+	SessionID                pgtype.Text        `json:"session_id"`
+	WorkDir                  pgtype.Text        `json:"work_dir"`
+	Status                   string             `json:"status"`
+	CreatedAt                pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                pgtype.Timestamptz `json:"updated_at"`
+	UnreadSince              pgtype.Timestamptz `json:"unread_since"`
+	RuntimeID                pgtype.UUID        `json:"runtime_id"`
+	LastReadAt               pgtype.Timestamptz `json:"last_read_at"`
+	IsAgentIntro             bool               `json:"is_agent_intro"`
+	PinnedAt                 pgtype.Timestamptz `json:"pinned_at"`
+	ProjectID                pgtype.UUID        `json:"project_id"`
+	ExplicitlyCreatedAt      pgtype.Timestamptz `json:"explicitly_created_at"`
+	UnreadCount              int32              `json:"unread_count"`
+	LastMessageContent       string             `json:"last_message_content"`
+	LastMessageRole          string             `json:"last_message_role"`
+	LastMessageAt            pgtype.Timestamptz `json:"last_message_at"`
+	LastMessageFailureReason pgtype.Text        `json:"last_message_failure_reason"`
+	LastMessageKind          string             `json:"last_message_kind"`
+}
+
+// Paginated workspace chat-session list for the caller (creator-scoped).
+// status_filter is one of active, archived, or all.
+func (q *Queries) ListChatSessionsByCreatorPage(ctx context.Context, arg ListChatSessionsByCreatorPageParams) ([]ListChatSessionsByCreatorPageRow, error) {
+	rows, err := q.db.Query(ctx, listChatSessionsByCreatorPage,
+		arg.WorkspaceID,
+		arg.CreatorID,
+		arg.Limit,
+		arg.Offset,
+		arg.StatusFilter,
+		arg.ActivityAfter,
+		arg.ActivityBefore,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListChatSessionsByCreatorPageRow{}
+	for rows.Next() {
+		var i ListChatSessionsByCreatorPageRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkspaceID,

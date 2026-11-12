@@ -111,6 +111,8 @@ export interface ChatSession {
   is_current_channel_route?: boolean;
   created_at: string;
   updated_at: string;
+  /** Last non-command message time, or updated_at when empty. Paginated list only. */
+  last_activity_at?: string;
 }
 
 export interface PendingChatTaskItem {

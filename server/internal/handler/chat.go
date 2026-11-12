@@ -252,6 +252,163 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+const chatSessionsPageMaxLimit = 100
+
+type ChatSessionsPageResponse struct {
+	Sessions []ChatSessionResponse `json:"sessions"`
+	Total    int64                 `json:"total"`
+	HasMore  bool                  `json:"has_more"`
+	Limit    int                   `json:"limit"`
+	Offset   int                   `json:"offset"`
+}
+
+func parseChatSessionsPageParams(r *http.Request) (statusFilter string, limit, offset int, activityAfter, activityBefore pgtype.Timestamptz, err error) {
+	statusFilter = strings.TrimSpace(r.URL.Query().Get("status"))
+	switch statusFilter {
+	case "", "active":
+		statusFilter = "active"
+	case "all", "archived":
+	default:
+		return "", 0, 0, pgtype.Timestamptz{}, pgtype.Timestamptz{}, errors.New("invalid status")
+	}
+
+	limit = 50
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		parsed, parseErr := strconv.Atoi(raw)
+		if parseErr != nil || parsed < 1 || parsed > chatSessionsPageMaxLimit {
+			return "", 0, 0, pgtype.Timestamptz{}, pgtype.Timestamptz{}, errors.New("invalid limit")
+		}
+		limit = parsed
+	}
+	if raw := r.URL.Query().Get("offset"); raw != "" {
+		parsed, parseErr := strconv.Atoi(raw)
+		if parseErr != nil || parsed < 0 {
+			return "", 0, 0, pgtype.Timestamptz{}, pgtype.Timestamptz{}, errors.New("invalid offset")
+		}
+		offset = parsed
+	}
+	if raw := r.URL.Query().Get("activity_since"); raw != "" {
+		t, parseErr := time.Parse(time.RFC3339Nano, raw)
+		if parseErr != nil {
+			return "", 0, 0, pgtype.Timestamptz{}, pgtype.Timestamptz{}, errors.New("invalid activity_since")
+		}
+		activityAfter = pgtype.Timestamptz{Time: t, Valid: true}
+	}
+	if raw := r.URL.Query().Get("activity_before"); raw != "" {
+		t, parseErr := time.Parse(time.RFC3339Nano, raw)
+		if parseErr != nil {
+			return "", 0, 0, pgtype.Timestamptz{}, pgtype.Timestamptz{}, errors.New("invalid activity_before")
+		}
+		activityBefore = pgtype.Timestamptz{Time: t, Valid: true}
+	}
+	if activityAfter.Valid && activityBefore.Valid && !activityAfter.Time.Before(activityBefore.Time) {
+		return "", 0, 0, pgtype.Timestamptz{}, pgtype.Timestamptz{}, errors.New("activity_since must be before activity_before")
+	}
+	return statusFilter, limit, offset, activityAfter, activityBefore, nil
+}
+
+func chatSessionCreatorPageRowToResponse(s db.ListChatSessionsByCreatorPageRow) ChatSessionResponse {
+	resp := ChatSessionResponse{
+		ID:              uuidToString(s.ID),
+		WorkspaceID:     uuidToString(s.WorkspaceID),
+		AgentID:         uuidToString(s.AgentID),
+		CreatorID:       uuidToString(s.CreatorID),
+		ProjectID:       uuidToPtr(s.ProjectID),
+		Title:           s.Title,
+		Status:          s.Status,
+		HasUnread:       s.UnreadCount > 0,
+		UnreadCount:     int(s.UnreadCount),
+		LastMessage:     buildChatLastMessage(s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason, s.LastMessageKind),
+		Pinned:          s.PinnedAt.Valid,
+		CreatedAt:       timestampToString(s.CreatedAt),
+		UpdatedAt:       timestampToString(s.UpdatedAt),
+		LastActivityAt:  chatSessionLastActivityAt(s.LastMessageAt, s.UpdatedAt),
+	}
+	return resp
+}
+
+func chatSessionLastActivityAt(lastMessageAt, updatedAt pgtype.Timestamptz) string {
+	if lastMessageAt.Valid {
+		return timestampToString(lastMessageAt)
+	}
+	return timestampToString(updatedAt)
+}
+
+// ListChatSessionsPage is the paginated, filterable workspace chat list for the
+// authenticated member (creator-scoped). Metadata only — message bodies require
+// per-session endpoints. Backs `multica session list` and housekeeping agents.
+func (h *Handler) ListChatSessionsPage(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := ctxWorkspaceID(r.Context())
+
+	statusFilter, limit, offset, activityAfter, activityBefore, err := parseChatSessionsPageParams(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
+		return
+	}
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	allowed, ok := h.accessibleAgentIDs(r.Context(), workspaceID, actorType, actorID, member.Role)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "failed to resolve agent access")
+		return
+	}
+
+	pageParams := db.ListChatSessionsByCreatorPageParams{
+		WorkspaceID:    parseUUID(workspaceID),
+		CreatorID:      parseUUID(userID),
+		StatusFilter:   statusFilter,
+		ActivityAfter:  activityAfter,
+		ActivityBefore: activityBefore,
+		Limit:          int32(limit),
+		Offset:         int32(offset),
+	}
+	rows, err := h.Queries.ListChatSessionsByCreatorPage(r.Context(), pageParams)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list chat sessions")
+		return
+	}
+	countParams := db.CountChatSessionsByCreatorParams{
+		WorkspaceID:    parseUUID(workspaceID),
+		CreatorID:      parseUUID(userID),
+		StatusFilter:   statusFilter,
+		ActivityAfter:  activityAfter,
+		ActivityBefore: activityBefore,
+	}
+	total, err := h.Queries.CountChatSessionsByCreator(r.Context(), countParams)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to count chat sessions")
+		return
+	}
+
+	resp := make([]ChatSessionResponse, 0, len(rows))
+	for _, s := range rows {
+		if _, ok := allowed[uuidToString(s.AgentID)]; !ok {
+			continue
+		}
+		resp = append(resp, chatSessionCreatorPageRowToResponse(s))
+	}
+	if err := h.hydrateChatSessionChannelMetadata(r.Context(), resp); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load chat channel metadata")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, ChatSessionsPageResponse{
+		Sessions: resp,
+		Total:    total,
+		HasMore:  int64(offset+limit) < total,
+		Limit:    limit,
+		Offset:   offset,
+	})
+}
+
 func (h *Handler) loadChatSessionForUser(w http.ResponseWriter, r *http.Request, userID, workspaceID, sessionID string) (db.ChatSession, bool) {
 	sessionUUID, ok := parseUUIDOrBadRequest(w, sessionID, "chat session id")
 	if !ok {
@@ -1979,6 +2136,9 @@ type ChatSessionResponse struct {
 	IsCurrentChannelRoute *bool                             `json:"is_current_channel_route,omitempty"`
 	CreatedAt             string                            `json:"created_at"`
 	UpdatedAt             string                            `json:"updated_at"`
+	// LastActivityAt is the last non-command message time, or updated_at when the
+	// session has no messages yet. Populated by paginated list endpoints.
+	LastActivityAt string `json:"last_activity_at,omitempty"`
 }
 
 type ChatSessionChannelSourceResponse struct {
