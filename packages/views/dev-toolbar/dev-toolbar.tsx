@@ -231,7 +231,7 @@ export function DevToolbar({ build, apiUrl, route, onNavigate }: DevToolbarProps
         >
           <SyncPanel recording={recording} status={sync} />
         </Metric>
-        <Metric label="Events" value={`${eventsInLastMinute(recording.events, now)}/m`} wide>
+        <Metric label="Events" value={`${eventsInLastMinute(recording.frameCounts, now)}/m`} wide>
           <EventsPanel recording={recording} now={now} onOpenIssue={openIssue} />
         </Metric>
         {wsId && (

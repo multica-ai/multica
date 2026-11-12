@@ -82,8 +82,9 @@ function EventRow({
   const summary = cacheEffectSummary(event.cache);
   const Chevron = expanded ? ChevronDown : ChevronRight;
   const replay = () => {
-    if (replayDevEvent(event.id)) toast.success(`Replayed ${event.type} locally`);
-    else toast.error("Cannot replay: the event aged out, or realtime sync is not running");
+    const refusal = replayDevEvent(event.id);
+    if (refusal) toast.error(`Cannot replay: ${refusal}`);
+    else toast.success(`Replayed ${event.type} locally`);
   };
   return (
     <div className={cn(event.kind === "replay" && "bg-brand/5")}>
@@ -192,7 +193,7 @@ export function EventsPanel({
       </PanelHeader>
       <Stats
         items={[
-          { label: "Last minute", value: String(eventsInLastMinute(events, now)) },
+          { label: "Last minute", value: String(eventsInLastMinute(recording.frameCounts, now)) },
           { label: "Recorded", value: String(events.length - reconnects) },
           { label: "Changed cache", value: String(changed) },
           { label: "Reconnects", value: String(reconnects), tone: reconnects > 0 ? "warn" : "normal" },

@@ -20,8 +20,10 @@ import {
   resetDevRecorder,
 } from "./dev-recorder";
 
+const workspace = vi.hoisted(() => ({ id: "ws-1" }));
+
 vi.mock("../platform/workspace-storage", () => ({
-  getCurrentWsId: () => "ws-1",
+  getCurrentWsId: () => workspace.id,
   getCurrentSlug: () => "acme",
   subscribeToCurrentSlug: () => () => {},
   createWorkspaceAwareStorage: (adapter: unknown) => adapter,
@@ -81,6 +83,7 @@ function hash(key: readonly unknown[]) {
 
 describe("dev recorder: realtime events", () => {
   beforeEach(() => {
+    workspace.id = "ws-1";
     vi.useFakeTimers();
     vi.stubGlobal("WebSocket", FakeSocket as unknown as typeof WebSocket);
   });
@@ -171,7 +174,7 @@ describe("dev recorder: realtime events", () => {
     const original = getDevRecording().events[0]!;
     qc.setQueryData(issueKeys.timeline("issue-1"), []);
 
-    expect(replayDevEvent(original.id)).toBe(true);
+    expect(replayDevEvent(original.id)).toBeNull();
     const replay = getDevRecording().events[1]!;
     expect(replay).toMatchObject({ kind: "replay", type: "comment:created", issueId: "issue-1" });
     expect(replay.cache.invalidated).toContain(hash(issueKeys.timeline("issue-1")));
@@ -195,6 +198,56 @@ describe("dev recorder: realtime events", () => {
     expect(fetchMock.mock.calls.map(([, init]) => init?.method ?? "GET")).toEqual(["GET", "POST"]);
   });
 
+  it("lets a read-only POST query refetch while a replayed event is handled", async () => {
+    const { qc } = setup();
+    const fetchMock = vi.fn((_url: string, _init?: RequestInit) =>
+      Promise.resolve(new Response(JSON.stringify({ rows: [], next_cursor: null }), { status: 200 })),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const api = new ApiClient("http://localhost:18080");
+    const key = [...issueKeys.tableAll("ws-1"), "rows", "replay"];
+    const unsubscribe = new QueryObserver(qc, {
+      queryKey: key,
+      queryFn: () => api.listIssueTableRows({} as Parameters<ApiClient["listIssueTableRows"]>[0]),
+    }).subscribe(() => {});
+    await vi.advanceTimersByTimeAsync(0);
+    const created = { issue: { id: "i1", workspace_id: "ws-1", status: "todo", status_category: "unstarted" } };
+    emit({ type: "issue:created", payload: created });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(replayDevEvent(getDevRecording().events[0]!.id)).toBeNull();
+    await vi.advanceTimersByTimeAsync(0);
+    const state = qc.getQueryState(key);
+    unsubscribe();
+    expect(state).toMatchObject({ status: "success", error: null });
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(
+      Array(3).fill("http://localhost:18080/api/issues/table/rows"),
+    );
+  });
+
+  it("does not replay an event into a workspace other than the one it arrived in", () => {
+    const { qc } = setup();
+    const created = { issue: { id: "issue-A", workspace_id: "ws-1", status: "todo", status_category: "unstarted" } };
+    emit({ type: "issue:created", payload: created });
+    const original = getDevRecording().events[0]!;
+    workspace.id = "ws-2";
+    const empty = { byStatus: { unstarted: { issues: [], total: 0 } } };
+    qc.setQueryData(issueKeys.list("ws-2"), empty);
+
+    expect(replayDevEvent(original.id)).toBe("it was recorded in another workspace");
+    expect(qc.getQueryData(issueKeys.list("ws-2"))).toEqual(empty);
+    expect(getDevRecording().events).toHaveLength(1);
+  });
+
+  it("counts every frame of a busy minute, apart from the capped event list and replays", () => {
+    setup();
+    for (let i = 0; i < 501; i++) emit({ type: "daemon:heartbeat", payload: {} });
+    replayDevEvent(getDevRecording().events.at(-1)!.id);
+    const { events, frameCounts } = getDevRecording();
+    expect(events).toHaveLength(500);
+    expect(frameCounts.reduce((sum, bucket) => sum + bucket.count, 0)).toBe(501);
+  });
+
   it("forgets events that aged out of the window, and can no longer replay them", () => {
     setup();
     emit({ type: "comment:created", payload: { comment: { id: "c1", issue_id: "issue-1" } } });
@@ -202,7 +255,7 @@ describe("dev recorder: realtime events", () => {
 
     vi.advanceTimersByTime(6 * 60_000);
     expect(getDevRecording().events).toEqual([]);
-    expect(replayDevEvent(id)).toBe(false);
+    expect(replayDevEvent(id)).toBe("the event aged out of the recording");
   });
 
   it("tags nothing and holds no causes when the recorder is not installed", () => {

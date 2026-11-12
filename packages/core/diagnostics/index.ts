@@ -20,6 +20,7 @@ export type {
   DevCacheEffects,
   DevError,
   DevErrorSource,
+  DevFrameCount,
   DevLongTask,
   DevMemorySample,
   DevNavigation,

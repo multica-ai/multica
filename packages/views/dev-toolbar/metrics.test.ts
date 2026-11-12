@@ -33,6 +33,7 @@ function event(overrides: Partial<DevRealtimeEvent>): DevRealtimeEvent {
     payload: null,
     payloadNote: null,
     actor: null,
+    workspaceId: "ws-1",
     cache: { written: [], invalidated: [], removed: [], refetched: [] },
     downMs: null,
     ...overrides,
@@ -179,14 +180,13 @@ describe("firstStackFrame", () => {
 });
 
 describe("eventsInLastMinute", () => {
-  it("counts server frames from the last minute only", () => {
-    const events = [
-      event({ at: 0 }),
-      event({ at: 50_000 }),
-      event({ at: 55_000, kind: "replay" }),
-      event({ at: 58_000, kind: "reconnect" }),
+  it("sums the per-second frame counts from the last minute only", () => {
+    const counts = [
+      { at: 0, count: 7 },
+      { at: 50_000, count: 400 },
+      { at: 60_000, count: 101 },
     ];
-    expect(eventsInLastMinute(events, 61_000)).toBe(1);
+    expect(eventsInLastMinute(counts, 61_000)).toBe(501);
   });
 });
 

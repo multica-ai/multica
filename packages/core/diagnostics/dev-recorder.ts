@@ -11,6 +11,7 @@ import {
   replayRealtimeEvent,
   setRealtimeObserver,
 } from "../api/realtime-observer";
+import { getCurrentWsId } from "../platform/workspace-storage";
 import type { WSMessage } from "../types/events";
 
 export interface DevRequest {
@@ -86,6 +87,8 @@ export interface DevRealtimeEvent {
   payloadNote: string | null;
   /** `member <id>` or `agent <id>` when the frame names who caused it. */
   actor: string | null;
+  /** Workspace that was current when the event arrived; replay runs only there. */
+  workspaceId: string | null;
   /**
    * What handling the event did to the query cache, including refreshes it
    * deferred to a timer. Work a handler does after an `await` is not seen.
@@ -95,6 +98,12 @@ export interface DevRealtimeEvent {
   downMs: number | null;
 }
 
+/** Frames received during one second, starting at `at`. */
+export interface DevFrameCount {
+  at: number;
+  count: number;
+}
+
 export interface DevRecording {
   requests: readonly DevRequest[];
   navigations: readonly DevNavigation[];
@@ -102,6 +111,8 @@ export interface DevRecording {
   errors: readonly DevError[];
   sync: readonly DevSyncChange[];
   events: readonly DevRealtimeEvent[];
+  /** Server frames per second, kept apart from `events` so its cap never lowers the rate. */
+  frameCounts: readonly DevFrameCount[];
   memory: readonly DevMemorySample[];
   /** JS heap ceiling on engines that report one. */
   heapLimit: number | null;
@@ -116,6 +127,7 @@ const CAPS: Record<Exclude<keyof DevRecording, "heapLimit">, number> = {
   errors: 100,
   sync: 50,
   events: 500,
+  frameCounts: DEV_RECORDING_WINDOW_MS / 1000,
   memory: 150,
 };
 
@@ -137,6 +149,7 @@ const EMPTY: DevRecording = {
   errors: [],
   sync: [],
   events: [],
+  frameCounts: [],
   memory: [],
   heapLimit: null,
 };
@@ -217,6 +230,7 @@ function pruneExpired(now: number) {
     errors: prune(recording.errors, CAPS.errors, now),
     sync: prune(recording.sync, CAPS.sync, now),
     events: prune(recording.events, CAPS.events, now),
+    frameCounts: prune(recording.frameCounts, CAPS.frameCounts, now),
     memory: prune(recording.memory, CAPS.memory, now),
   };
   const changed = (Object.keys(CAPS) as (keyof typeof CAPS)[]).some(
@@ -325,14 +339,28 @@ function recordEvent(event: Omit<DevRealtimeEvent, "id" | "cache">): number {
   return id;
 }
 
+function countFrame(now: number) {
+  const second = now - (now % 1000);
+  const counts = recording.frameCounts;
+  const last = counts[counts.length - 1];
+  const next =
+    last?.at === second
+      ? [...counts.slice(0, -1), { at: second, count: last.count + 1 }]
+      : prune([...counts, { at: second, count: 1 }], CAPS.frameCounts, now);
+  update({ frameCounts: next });
+}
+
 function recordFrame(msg: WSMessage, replayed: boolean): number {
+  const now = Date.now();
+  if (!replayed) countFrame(now);
   const id = recordEvent({
-    at: Date.now(),
+    at: now,
     kind: replayed ? "replay" : "frame",
     type: msg.type,
     ...eventIssue(msg.payload),
     ...recordablePayload(msg.payload),
     actor: msg.actor_type && msg.actor_id ? `${msg.actor_type} ${msg.actor_id}` : null,
+    workspaceId: getCurrentWsId(),
     downMs: null,
   });
   eventMessages.set(id, msg);
@@ -364,6 +392,7 @@ function recordReconnect(): number {
     payload: null,
     payloadNote: null,
     actor: null,
+    workspaceId: getCurrentWsId(),
     downMs: downtime(now),
   });
 }
@@ -467,8 +496,8 @@ function readHeap(): { used: number; limit: number } | null {
 }
 
 /** A write sent while a replayed event is being handled; replays stay local. */
-function refuseReplayWrite({ method }: { method: string }): string | null {
-  if (method === "GET" || method === "HEAD") return null;
+function refuseReplayWrite({ method, readOnly }: { method: string; readOnly: boolean }): string | null {
+  if (readOnly || method === "GET" || method === "HEAD") return null;
   const replaying = activeSyncCauses().some((id) => replayIds.has(id));
   return replaying ? `${method} not sent: a replayed realtime event runs locally only` : null;
 }
@@ -604,19 +633,23 @@ export function clearDevErrors(): void {
 }
 
 export function clearDevEvents(): void {
-  update({ events: [] });
+  update({ events: [], frameCounts: [] });
   forgetDroppedEvents();
 }
 
 /**
  * Run a recorded event through realtime sync's handlers again, recorded as a
  * new `replay` event. Only cache handling runs: no other subscriber sees it,
- * and a write request made while handling it is refused. False when the event
- * has aged out or nothing is subscribed.
+ * and a write request made while handling it is refused. Handlers write into
+ * the current workspace's caches, so an event recorded in another workspace
+ * does not run. Returns why it did not run, or null when it did.
  */
-export function replayDevEvent(id: number): boolean {
+export function replayDevEvent(id: number): string | null {
   const msg = eventMessages.get(id);
-  return msg ? replayRealtimeEvent(msg) : false;
+  const event = recording.events.find((e) => e.id === id);
+  if (!msg || !event) return "the event aged out of the recording";
+  if (event.workspaceId !== getCurrentWsId()) return "it was recorded in another workspace";
+  return replayRealtimeEvent(msg) ? null : "realtime sync is not running";
 }
 
 /** Close the live socket as a network drop would, to watch the reconnect. */

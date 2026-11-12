@@ -1,6 +1,7 @@
 import type {
   DevCacheChange,
   DevCacheEffects,
+  DevFrameCount,
   DevRealtimeEvent,
   DevRequest,
 } from "@multica/core/diagnostics";
@@ -140,9 +141,11 @@ export function formatAge(ms: number): string {
   return `${Math.floor(ms / 3_600_000)}h`;
 }
 
-/** Frames received from the server in the last minute; replays and reconnects do not count. */
-export function eventsInLastMinute(events: readonly DevRealtimeEvent[], now: number): number {
-  return events.filter((e) => e.kind === "frame" && now - e.at <= 60_000).length;
+/** Frames received from the server in the last minute, from the per-second counts. */
+export function eventsInLastMinute(frameCounts: readonly DevFrameCount[], now: number): number {
+  let total = 0;
+  for (const bucket of frameCounts) if (now - bucket.at < 60_000) total += bucket.count;
+  return total;
 }
 
 export const CACHE_CHANGE_LABEL: Record<DevCacheChange, string> = {
