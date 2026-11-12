@@ -23,6 +23,7 @@ qodercli
 qoderclicn
 qwen
 qwenpaw
+droid
 reasonix
 traecli
 zeroclaw

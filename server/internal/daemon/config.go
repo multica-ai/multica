@@ -110,7 +110,7 @@ type Config struct {
 	CLICommit                      string                // full build revision embedded in the running CLI; empty/unknown if unavailable
 	LaunchedBy                     string                // "desktop" when spawned by the Electron app, empty for standalone
 	Profile                        string                // profile name (empty = default)
-	Agents                         map[string]AgentEntry // keyed by provider: claude, codebuddy, codex, copilot, opencode, codearts, deveco, openclaw, hermes, pi, cursor, kimi, reasonix, dsh, kiro, antigravity, qoder, qoderclicn, traecli, grok, qwen, qwenpaw, mcode, muse, devin, dim, zeroclaw, museapp (plus built-in runtime identities from agent.BuiltinRuntimes, e.g. omp)
+	Agents                         map[string]AgentEntry // keyed by provider: claude, codebuddy, codex, copilot, opencode, codearts, deveco, openclaw, hermes, pi, cursor, kimi, reasonix, dsh, kiro, antigravity, qoder, qoderclicn, traecli, grok, qwen, qwenpaw, droid, mcode, muse, devin, dim, zeroclaw, museapp (plus built-in runtime identities from agent.BuiltinRuntimes, e.g. omp)
 	WorkspacesRoot                 string                // base path for execution envs (default: ~/multica_workspaces)
 	HealthPort                     int                   // local HTTP port for health checks (default: 19514)
 	MaxConcurrentTasks             int                   // max tasks running in parallel (default: 20)
@@ -155,6 +155,7 @@ type Config struct {
 	CodexArgs                   []string
 	CodebuddyArgs               []string
 	QwenArgs                    []string
+	DroidArgs                   []string
 	QwenpawArgs                 []string
 
 	// ProfileCommandOverrides maps a custom runtime profile_id -> the absolute
@@ -266,7 +267,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// can re-run the same discovery on a live daemon (MUL-5439).
 	agents := probeAgentCLIs()
 	if len(agents) == 0 && !overrides.AllowNoAgents {
-		return Config{}, fmt.Errorf("no agent CLI found: install claude, codebuddy, codearts, codex, copilot, opencode, deveco, openclaw, hermes, pi, omp, cursor-agent, kimi, reasonix, dsh, kiro-cli, agy, qodercli, qoderclicn, traecli, grok, qwen, qwenpaw, mcode, muse, devin, dim, zeroclaw, or zcode and ensure it is on PATH")
+		return Config{}, fmt.Errorf("no agent CLI found: install claude, codebuddy, codearts, codex, copilot, opencode, deveco, openclaw, hermes, pi, omp, cursor-agent, kimi, reasonix, dsh, kiro-cli, agy, qodercli, qoderclicn, traecli, grok, qwen, qwenpaw, droid, mcode, muse, devin, dim, zeroclaw, or zcode and ensure it is on PATH")
 	}
 
 	claudeArgs, err := shellArgsFromEnv("MULTICA_CLAUDE_ARGS")
@@ -282,6 +283,10 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		return Config{}, err
 	}
 	qwenArgs, err := shellArgsFromEnv("MULTICA_QWEN_ARGS")
+	if err != nil {
+		return Config{}, err
+	}
+	droidArgs, err := shellArgsFromEnv("MULTICA_DROID_ARGS")
 	if err != nil {
 		return Config{}, err
 	}
@@ -678,6 +683,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		CodexArgs:                       codexArgs,
 		CodebuddyArgs:                   codebuddyArgs,
 		QwenArgs:                        qwenArgs,
+		DroidArgs:                       droidArgs,
 		QwenpawArgs:                     qwenpawArgs,
 		ProfileCommandOverrides:         profileCommandOverrides,
 	}, nil
@@ -961,7 +967,7 @@ func isExecutableFile(path string) bool {
 // doesn't require editing this list by hand.
 var defaultAgentCommandNames = append([]string{
 	"claude", "codex", "opencode", "codearts", "deveco", "openclaw", "hermes",
-	"pi", "cursor-agent", "copilot", "kimi", "reasonix", "dsh", "kiro-cli", "codebuddy", "agy", "qodercli", "qoderclicn", "traecli", "grok", "qwen", "qwenpaw", "mcode", "muse", "devin", "dim", "zeroclaw", "zcode",
+	"pi", "cursor-agent", "copilot", "kimi", "reasonix", "dsh", "kiro-cli", "codebuddy", "agy", "qodercli", "qoderclicn", "traecli", "grok", "qwen", "qwenpaw", "droid", "mcode", "muse", "devin", "dim", "zeroclaw", "zcode",
 }, agent.BuiltinRuntimeCommands()...)
 
 // zcodeDesktopAppBundlePaths discovers the CLI in default Desktop installs.

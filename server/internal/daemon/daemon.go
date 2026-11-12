@@ -9612,7 +9612,7 @@ func shouldRetryWithFreshSession(result agent.Result, priorSessionID string, too
 	if !agent.ResumeRejectionUndetectable(provider) {
 		return false
 	}
-	// antigravity, codearts, copilot, cursor, deveco and opencode scrape SessionID out
+	// antigravity, codearts, copilot, cursor, deveco, droid and opencode scrape SessionID out
 	// of stream output and have no rejection string captured anywhere, so an
 	// empty SessionID is the only thing they can offer. It proves no session
 	// was established this run, which is exactly what the gate relied on for
@@ -11271,6 +11271,8 @@ func defaultArgsForProvider(cfg Config, provider string) []string {
 		args = cfg.CodebuddyArgs
 	case "qwen":
 		args = cfg.QwenArgs
+	case "droid":
+		args = cfg.DroidArgs
 	case "qwenpaw":
 		args = cfg.QwenpawArgs
 	default:
