@@ -987,7 +987,7 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, service.ErrChatSubmissionConflict):
 			h.writeChatSubmissionError(w, err)
-		case submissionID.Valid && errors.Is(err, pgx.ErrNoRows):
+		case submissionID.Valid && errors.Is(err, service.ErrChatSessionNotFound):
 			writeError(w, http.StatusNotFound, "chat session not found")
 		case errors.Is(err, service.ErrChatSessionArchived):
 			writeError(w, http.StatusConflict, "chat session is archived")

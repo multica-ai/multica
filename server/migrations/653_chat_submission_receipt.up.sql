@@ -8,5 +8,6 @@ CREATE TABLE chat_submission_receipt (
     actor_id UUID NOT NULL,
     submission_id UUID NOT NULL,
     request_fingerprint BYTEA NOT NULL,
-    response JSONB NOT NULL
+    response JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

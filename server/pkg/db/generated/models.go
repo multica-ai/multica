@@ -649,14 +649,15 @@ type ChatSession struct {
 }
 
 type ChatSubmissionReceipt struct {
-	ChatSessionID      pgtype.UUID `json:"chat_session_id"`
-	WorkspaceID        pgtype.UUID `json:"workspace_id"`
-	InitiatorUserID    pgtype.UUID `json:"initiator_user_id"`
-	ActorType          string      `json:"actor_type"`
-	ActorID            pgtype.UUID `json:"actor_id"`
-	SubmissionID       pgtype.UUID `json:"submission_id"`
-	RequestFingerprint []byte      `json:"request_fingerprint"`
-	Response           []byte      `json:"response"`
+	ChatSessionID      pgtype.UUID        `json:"chat_session_id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	InitiatorUserID    pgtype.UUID        `json:"initiator_user_id"`
+	ActorType          string             `json:"actor_type"`
+	ActorID            pgtype.UUID        `json:"actor_id"`
+	SubmissionID       pgtype.UUID        `json:"submission_id"`
+	RequestFingerprint []byte             `json:"request_fingerprint"`
+	Response           []byte             `json:"response"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 }
 
 type ClientUsageDaily struct {

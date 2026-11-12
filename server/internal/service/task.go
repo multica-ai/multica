@@ -2443,10 +2443,16 @@ func (s *TaskService) sendDirectChatMessage(
 		// running on the old runtime. Locking chat_session first also matches the
 		// delete path's lock order, so the two cannot deadlock.
 		if _, err := qtx.LockChatSessionForRuntimeBind(ctx, session.ID); err != nil {
+			if submission != nil && errors.Is(err, pgx.ErrNoRows) {
+				return ErrChatSessionNotFound
+			}
 			return fmt.Errorf("lock chat session: %w", err)
 		}
 		currentSession, err := qtx.GetChatSession(ctx, session.ID)
 		if err != nil {
+			if submission != nil && errors.Is(err, pgx.ErrNoRows) {
+				return ErrChatSessionNotFound
+			}
 			return fmt.Errorf("reload chat session: %w", err)
 		}
 		if submission != nil {

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -184,6 +185,41 @@ func TestChatSubmissionDeleteWinsBeforeSendTransaction(t *testing.T) {
 			submissionCounts(t, sessionID, 0, 0, 0)
 		})
 	}
+}
+
+type submissionMissingAgentPool struct{ pool *pgxpool.Pool }
+type submissionMissingAgentTx struct{ pgx.Tx }
+
+func (p submissionMissingAgentPool) Begin(ctx context.Context) (pgx.Tx, error) {
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return submissionMissingAgentTx{tx}, nil
+}
+
+func (tx submissionMissingAgentTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	// Inject an absent agent read without deleting the real session with it.
+	if strings.HasPrefix(sql, "-- name: GetAgentForClaimUpdate :one") {
+		return tx.Tx.QueryRow(ctx, "SELECT 1 WHERE false")
+	}
+	return tx.Tx.QueryRow(ctx, sql, args...)
+}
+
+func TestChatSubmissionMissingAgentIsNotMissingSession(t *testing.T) {
+	sessionID, _ := submissionSession(t)
+	hub := realtime.NewHub()
+	go hub.Run()
+	router, h := NewRouterWithOptions(testPool, hub, events.New(), analytics.NoopClient{}, nil, RouterOptions{})
+	server := httptest.NewServer(router)
+	t.Cleanup(server.Close)
+	h.TaskService.TxStarter = submissionMissingAgentPool{testPool}
+	body := map[string]any{"content": "agent disappears after preflight", "submission_id": uuid.NewString()}
+	submissionStatus(t, server.URL, testToken, testWorkspaceID, "POST", "/api/chat/sessions/"+sessionID+"/messages", body, http.StatusInternalServerError)
+	if got := workspaceFixture(t).Count(t, `SELECT count(*) FROM chat_session WHERE id=$1`, sessionID); got != 1 {
+		t.Fatalf("session count=%d, want 1", got)
+	}
+	submissionCounts(t, sessionID, 0, 0, 0)
 }
 
 type submissionOverlay struct{ calls atomic.Int32 }

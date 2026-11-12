@@ -17,6 +17,8 @@ import (
 
 var ErrChatSubmissionConflict = errors.New("submission_id was already accepted with a different payload")
 
+var ErrChatSessionNotFound = errors.New("chat session not found")
+
 // ChatSubmissionResponse is the original acceptance snapshot. Cancellation,
 // queue edits and attachment deletion do not change what was accepted.
 type ChatSubmissionResponse struct {
