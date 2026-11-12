@@ -63,6 +63,7 @@ import { workspaceKeys, workspaceListOptions } from "../workspace/queries";
 import { isWorkspaceDeletePending } from "../workspace/pending-delete";
 import {
   showSystemNotification,
+  systemNotificationSuppressedByFocus,
   type SystemNotificationPayload,
 } from "../platform/system-notification";
 import type { Workspace } from "../types/workspace";
@@ -586,7 +587,7 @@ export async function handleInboxNew(
   // the user is already looking at Multica, the inbox sidebar's unread
   // styling is enough — no need to interrupt with a banner. `desktopAPI`
   // is injected by the preload script; its absence (web app) skips silently.
-  if (typeof document !== "undefined" && document.hasFocus()) return;
+  if (systemNotificationSuppressedByFocus()) return;
   // Resolve the source workspace's slug once: it pins BOTH the mute check
   // and the deep link to the workspace the inbox item BELONGS to, never the
   // currently active one. Reading `getCurrentSlug()` here was the source of
@@ -645,7 +646,7 @@ export function createChatReplyNotifier(
     if (!payload.workspace_id || !messageId || !payload.chat_session_id || !userId || seen.has(messageId)) return;
     seen.add(messageId);
     if (seen.size > 1_000) seen.delete(seen.values().next().value!);
-    if (typeof document !== "undefined" && document.hasFocus()) return;
+    if (systemNotificationSuppressedByFocus()) return;
 
     const slug = await resolveInboxSourceSlug(qc, payload.workspace_id);
     if (!slug) return;
@@ -655,7 +656,7 @@ export function createChatReplyNotifier(
     } catch {
       // Match the existing default-on system-notification behavior.
     }
-    if (getUserId() !== userId || (typeof document !== "undefined" && document.hasFocus())) return;
+    if (getUserId() !== userId || systemNotificationSuppressedByFocus()) return;
     showSystemNotification({
       slug,
       itemId: `chat:${messageId}`,
@@ -741,6 +742,7 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
 async function refreshWorkingAgentQueries(qc: QueryClient, wsId: string): Promise<void> {
   const filters: QueryFilters[] = [
     { queryKey: workspaceWorkingAgentsKeys.all(wsId) },
+    { queryKey: agentTaskSnapshotKeys.all(wsId) },
     {
       queryKey: issueKeys.tableAll(wsId),
       predicate: ({ queryKey }) => {
@@ -757,6 +759,7 @@ async function refreshWorkingAgentQueries(qc: QueryClient, wsId: string): Promis
         // projection may contain newly started work. Other facets also
         // depend on this membership, not only rows and group descriptors.
         return spec?.filters.working_only === true ||
+          spec?.filters.idle_only === true ||
           spec?.filters.working_issue_ids !== undefined;
       },
     },
@@ -764,7 +767,7 @@ async function refreshWorkingAgentQueries(qc: QueryClient, wsId: string): Promis
       queryKey: issueKeys.sidebarAll(wsId),
       predicate: ({ queryKey }) => {
         const request = queryKey[4] as SidebarIssuesRequest | undefined;
-        return request?.table.filters.working_only === true;
+        return request?.table.filters.working_only === true || request?.table.filters.idle_only === true;
       },
     },
   ];
@@ -1031,16 +1034,13 @@ export function useRealtimeSync(
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: issueKeys.environmentsAll(wsId) });
       },
-      // Powers the agent presence cache: any task lifecycle change
-      // (dispatch / completed / failed / cancelled) refreshes the
-      // workspace-wide agent-task-snapshot query so per-agent presence
-      // reflects the change. task:message is NOT in this prefix path — it
-      // stays in specificEvents to avoid an invalidate storm during long runs.
+      // Task history and aggregates follow lifecycle changes. Activity
+      // membership, including the presence snapshot, uses the bounded
+      // refresh below so it cancels a pre-event first load without repeatedly
+      // cancelling its own slow refreshes. task:message stays in specificEvents.
       task: () => {
         const wsId = getCurrentWsId();
         if (!wsId) return;
-        qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.list(wsId) });
-        // Working-agent projections have their own bounded refresh below.
         // 30d activity series shares the same lifecycle signal — any task
         // completion / failure shifts the histogram. (Dispatch alone
         // doesn't change a completed_at-anchored series, but invalidating
@@ -1134,11 +1134,9 @@ export function useRealtimeSync(
       // every message would flood the network. Specific chat handlers below
       // still receive it via ws.on() (a separate subscription channel).
       "task:message",
-      // task:completed / task:failed deliberately NOT here. They go through
-      // both the task-prefix invalidate (refreshes the agent-task-snapshot
-      // cache) AND the chat-specific ws.on() handlers below. The two
-      // channels are independent — onAny dispatch and ws.on are separate
-      // subscriptions.
+      // task:completed / task:failed deliberately NOT here. They reach both
+      // onAny (task-prefix invalidation and bounded activity refresh) and the
+      // chat-specific ws.on() handlers below through independent subscriptions.
     ]);
 
     const unsubAny = ws.onAny((msg) => {

@@ -73,6 +73,8 @@ interface DesktopAPI {
     title: string;
     body: string;
   }) => void;
+  getWindowForeground: () => Promise<boolean>;
+  onWindowForegroundChanged: (callback: (foreground: boolean) => void) => () => void;
   /** Update the OS dock / taskbar unread badge. Pass 0 to clear. */
   setUnreadBadge: (count: number) => void;
   /** Listen for inbox/chat navigation from notification clicks. Returns an unsubscribe function. */

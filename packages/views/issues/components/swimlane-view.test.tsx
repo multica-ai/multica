@@ -1657,7 +1657,7 @@ describe("SwimLaneView", () => {
     });
   });
 
-  it("filters batch-fetched children using API-derived running issue ids", async () => {
+  it.each([false, true])("filters batch-fetched children by agent activity (idle=%s)", async (idle) => {
     mockViewState.swimlaneGrouping = "parent";
 
     const grandparent: Issue = {
@@ -1733,7 +1733,9 @@ describe("SwimLaneView", () => {
           priorityFilters: [],
           assigneeFilters: [],
           includeNoAssignee: false,
-          agentRunningFilter: true,
+          agentRunningFilter: !idle,
+          agentIdleFilter: idle,
+          activeIssueIds: new Set(["gc-running"]),
           runningIssueIds: new Set(["gc-running"]),
           creatorFilters: [],
           projectFilters: [],
@@ -1750,8 +1752,8 @@ describe("SwimLaneView", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText("Running Child")).toBeInTheDocument();
-      expect(screen.queryByText("Non-running Child")).toBeNull();
+      expect(screen.getByText(idle ? "Non-running Child" : "Running Child")).toBeInTheDocument();
+      expect(screen.queryByText(idle ? "Running Child" : "Non-running Child")).toBeNull();
     });
   });
 

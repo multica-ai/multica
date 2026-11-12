@@ -185,7 +185,7 @@ function useInternalLinkHandler() {
 }
 
 /**
- * Mirrors the inbox badge and routes native notification clicks. Chat alerts
+ * Mirrors Inbox and Chat unread badges and routes native notification clicks. Chat alerts
  * open Chat directly; inbox alerts retain their row selector. The shared path
  * resolver uses the source workspace, and the navigation adapter performs a
  * workspace switch when needed. Each destination owns its mark-read behavior.

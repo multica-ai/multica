@@ -1589,16 +1589,71 @@ func detectCLIVersion(ctx context.Context, runtimeCmd Command) (string, error) {
 	//
 	// Built through runtimeCmd.exec so a custom runtime's fixed_args prefix is
 	// still applied (MUL-6260). Desktop ZCode ships as a Node .cjs/.mjs bundle;
-	// those must go through chooseZcodeInvocation (node + script) the same way
-	// Execute does, with a clear error when node is missing from PATH.
-	var cmd *exec.Cmd
-	if isNodeScriptPath(runtimeCmd.Path) {
+	// those and Linux Electron entries use the same headless invocation as
+	// Execute, with a clear error when the required runtime or script is missing.
+	_, zcodeDesktop := zcodeDesktopScript(runtimeCmd.Path)
+	if isNodeScriptPath(runtimeCmd.Path) || zcodeDesktop {
 		if err := requireNodeForZcodeScript(runtimeCmd.Path); err != nil {
 			return "", err
 		}
-		cmd, _, _ = runtimeCmd.execVia(ctx, chooseZcodeInvocation, runtimeCmd.Path, []string{"--version"}, runtimeCmd.logger)
+	}
+
+	// A provider-specific probe (see Command.ForVersionProbe) runs first. A
+	// build too old to know it rejects the arguments outright, and only that
+	// case falls back to `--version`: a probe that hung or could not start would
+	// fail the same way again, and here it would also spend the remaining
+	// budget on the side effects the provider-specific probe exists to avoid.
+	if len(runtimeCmd.versionArgs) > 0 {
+		version, err := runVersionProbe(ctx, runtimeCmd, runtimeCmd.versionArgs)
+		if err == nil {
+			return version, nil
+		}
+		if !versionProbeRejectedArgs(ctx, err) {
+			return "", fmt.Errorf("detect version for %s: %w", runtimeCmd, ExplainExecError(err))
+		}
+		if runtimeCmd.logger != nil {
+			runtimeCmd.logger.Debug("agent: CLI rejected its version probe; falling back to --version",
+				"command", runtimeCmd.String(), "probe", strings.Join(runtimeCmd.versionArgs, " "), "err", err)
+		}
+	}
+
+	version, err := runVersionProbe(ctx, runtimeCmd, []string{"--version"})
+	if err != nil {
+		// One provider-agnostic boundary for probes: DetectVersion routes every
+		// provider through here, so an ENOEXEC diagnosis added at this point
+		// reaches the reason the daemon reports for a skipped runtime
+		// (MUL-6164).
+		return "", fmt.Errorf("detect version for %s: %w", runtimeCmd, ExplainExecError(err))
+	}
+	return version, nil
+}
+
+// versionProbeRejectedArgs reports whether a failed provider-specific version
+// probe is the CLI refusing its arguments: the process ran and exited non-zero
+// on its own, before the deadline. A kill on timeout also surfaces as an
+// *exec.ExitError, with exit code -1, which is why both the code and the
+// context are checked.
+func versionProbeRejectedArgs(ctx context.Context, err error) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	var exitErr *exec.ExitError
+	return errors.As(err, &exitErr) && exitErr.ExitCode() > 0
+}
+
+// runVersionProbe runs one `<cli> <args>` version probe and returns the
+// recognised version line. The error is unwrapped; detectCLIVersion adds the
+// command and the exec diagnosis.
+func runVersionProbe(ctx context.Context, runtimeCmd Command, args []string) (string, error) {
+	var cmd *exec.Cmd
+	_, zcodeDesktop := zcodeDesktopScript(runtimeCmd.Path)
+	if isNodeScriptPath(runtimeCmd.Path) || zcodeDesktop {
+		cmd, _, _ = runtimeCmd.execVia(ctx, chooseZcodeInvocation, runtimeCmd.Path, args, runtimeCmd.logger)
+		if zcodeDesktop {
+			cmd.Env = zcodeRuntimeEnv(runtimeCmd.Path, os.Environ())
+		}
 	} else {
-		cmd = runtimeCmd.exec(ctx, "--version")
+		cmd = runtimeCmd.exec(ctx, args...)
 	}
 	hideAgentWindow(cmd)
 	cmd.WaitDelay = probeWaitDelay
@@ -1620,14 +1675,10 @@ func detectCLIVersion(ctx context.Context, runtimeCmd Command) (string, error) {
 		// to empty would be a regression (#2516). It is only unusable as
 		// evidence that a *bounded, incomplete* read already contains the
 		// answer.
-		if salvaged := salvageProbeAnswer(runtimeCmd, "--version", recognised, err); salvaged {
+		if salvageProbeAnswer(runtimeCmd, strings.Join(args, " "), recognised, err) {
 			return version, nil
 		}
-		// One provider-agnostic boundary for probes: DetectVersion routes every
-		// provider through here, so an ENOEXEC diagnosis added at this point
-		// reaches the reason the daemon reports for a skipped runtime
-		// (MUL-6164).
-		return "", fmt.Errorf("detect version for %s: %w", runtimeCmd, ExplainExecError(err))
+		return "", err
 	}
 	return version, nil
 }

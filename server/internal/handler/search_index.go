@@ -287,6 +287,10 @@ func (h *Handler) GetSearchIndexManifest(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
+	hidden, ok := h.requestHiddenProjects(w, r, uuidToString(wsUUID))
+	if !ok {
+		return
+	}
 	release, ok := acquireSearchIndexBootstrapSlot(r.Context())
 	if !ok {
 		if writeRequestCancellation(w, r, r.Context().Err()) {
@@ -299,7 +303,10 @@ func (h *Handler) GetSearchIndexManifest(w http.ResponseWriter, r *http.Request)
 	var row db.GetSearchIndexManifestRow
 	err := h.runSearchIndexRead(r.Context(), func(q *db.Queries) error {
 		var err error
-		row, err = q.GetSearchIndexManifest(r.Context(), wsUUID)
+		row, err = q.GetSearchIndexManifest(r.Context(), db.GetSearchIndexManifestParams{
+			WorkspaceID:      wsUUID,
+			HiddenProjectIds: hidden.Param(),
+		})
 		return err
 	})
 	if err != nil {

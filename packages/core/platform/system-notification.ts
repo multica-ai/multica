@@ -6,9 +6,8 @@ import { paths } from "../paths/paths";
 //
 // The desktop app renders OS banners through its Electron main process
 // (`window.desktopAPI.showNotification`); the web app has no such bridge, so it
-// uses the browser Notification API here. Realtime sync checks focus and the
-// source workspace's preferences for inbox and direct-chat events before
-// calling `showSystemNotification`.
+// uses the browser Notification API here. Realtime sync checks source-workspace
+// preferences and browser focus; native main owns desktop focus and dedupe.
 //
 // Lives in `packages/core` (not `packages/views`) because the caller
 // (`handleInboxNew`) lives in core and `views` cannot be imported from core
@@ -40,10 +39,20 @@ export function systemNotificationPath(
   return issueKey ? `${paths.workspace(slug).inbox()}?issue=${encodeURIComponent(issueKey)}` : null;
 }
 
-export function showSystemNotification(payload: SystemNotificationPayload): void {
-  const desktopAPI = (globalThis as unknown as {
+function getNativeNotificationAPI() {
+  return (globalThis as unknown as {
     desktopAPI?: { showNotification?: (value: SystemNotificationPayload) => void };
   }).desktopAPI;
+}
+
+/** Native main owns app-wide focus; Electron's DOM focus can remain stale. */
+export function systemNotificationSuppressedByFocus(): boolean {
+  return !getNativeNotificationAPI()?.showNotification &&
+    typeof document !== "undefined" && document.hasFocus();
+}
+
+export function showSystemNotification(payload: SystemNotificationPayload): void {
+  const desktopAPI = getNativeNotificationAPI();
   if (desktopAPI?.showNotification) desktopAPI.showNotification(payload);
   else showWebNotification(payload);
 }

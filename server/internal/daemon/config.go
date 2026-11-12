@@ -72,8 +72,7 @@ const (
 	DefaultMaxConcurrentTasks             = 20
 	DefaultGCInterval                     = 2 * time.Hour
 	DefaultGCTTL                          = 24 * time.Hour      // 1 day — AI-coding issues rarely stay open long
-	DefaultGCCompletedTaskTTLCloud        = 14 * 24 * time.Hour // 14 days — Multica Cloud bounds completed issue-task env retention by default; see defaultGCCompletedTaskTTL
-	DefaultGCCompletedTaskTTLSelfHost     = 0                   // disabled — self-host keeps every completed env until its issue goes terminal, unless an operator opts in
+	DefaultGCCompletedTaskTTL             = 14 * 24 * time.Hour // 14 days — bound completed issue-task env retention on every server; see the MULTICA_GC_COMPLETED_TASK_TTL comment in LoadConfig
 	DefaultGCOrphanTTL                    = 72 * time.Hour      // 3 days — orphans with no meta (crashes, pre-GC leftovers)
 	DefaultGCArtifactTTL                  = 12 * time.Hour      // 12h — drop regenerable artifacts once a task has been completed this long
 	DefaultGCCodexSessionTTL              = 14 * 24 * time.Hour // 14 days — reclaim per-issue Codex session stores untouched this long
@@ -111,14 +110,14 @@ type Config struct {
 	CLICommit                      string                // full build revision embedded in the running CLI; empty/unknown if unavailable
 	LaunchedBy                     string                // "desktop" when spawned by the Electron app, empty for standalone
 	Profile                        string                // profile name (empty = default)
-	Agents                         map[string]AgentEntry // keyed by provider: claude, codebuddy, codex, copilot, opencode, codearts, deveco, openclaw, hermes, pi, cursor, kimi, reasonix, dsh, kiro, antigravity, qoder, qoderclicn, traecli, grok, qwen, qwenpaw, mcode, muse, devin, dim, zeroclaw, museapp (plus built-in runtime identities from agent.BuiltinRuntimes, e.g. omp)
+	Agents                         map[string]AgentEntry // keyed by provider: claude, codebuddy, codex, copilot, opencode, codearts, deveco, openclaw, hermes, pi, cursor, kimi, reasonix, dsh, kiro, antigravity, qoder, qoderclicn, traecli, grok, qwen, qwenpaw, droid, amp, mcode, muse, devin, dim, zeroclaw, museapp (plus built-in runtime identities from agent.BuiltinRuntimes, e.g. omp)
 	WorkspacesRoot                 string                // base path for execution envs (default: ~/multica_workspaces)
 	HealthPort                     int                   // local HTTP port for health checks (default: 19514)
 	MaxConcurrentTasks             int                   // max tasks running in parallel (default: 20)
 	GCEnabled                      bool                  // enable periodic workspace garbage collection (default: true)
 	GCInterval                     time.Duration         // how often the GC loop runs (default: 2h)
 	GCTTL                          time.Duration         // clean dirs whose issue is done/cancelled and updated_at < now()-TTL (default: 24h)
-	GCCompletedTaskTTL             time.Duration         // fully clean inactive issue-task envs completed at least this long ago, regardless of parent issue status (default: 14d on Multica Cloud, 0/disabled elsewhere; local_directory envs are never fully removed)
+	GCCompletedTaskTTL             time.Duration         // fully clean inactive issue-task envs completed at least this long ago, regardless of parent issue status (default: 14d; 0 disables; local_directory envs are never fully removed)
 	GCOrphanTTL                    time.Duration         // clean orphan dirs with no meta, or dirs whose issue gc-check returns 404, once they exceed this age (default: 72h). The 404 path uses the same TTL — a scoped-down token can't instantly wipe live workspaces.
 	GCArtifactTTL                  time.Duration         // once a task has been completed for at least this long, drop regenerable artifacts: pattern-matched build outputs when the parent record keeps the directory (an open issue), and the exact daemon-managed Codex cache for every task kind (default: 12h, set 0 to disable both)
 	GCArtifactPatterns             []string              // basename patterns whose subtrees are removed during artifact cleanup (default: node_modules, .next, .turbo)
@@ -156,6 +155,8 @@ type Config struct {
 	CodexArgs                   []string
 	CodebuddyArgs               []string
 	QwenArgs                    []string
+	DroidArgs                   []string
+	AmpArgs                     []string
 	QwenpawArgs                 []string
 
 	// ProfileCommandOverrides maps a custom runtime profile_id -> the absolute
@@ -267,7 +268,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// can re-run the same discovery on a live daemon (MUL-5439).
 	agents := probeAgentCLIs()
 	if len(agents) == 0 && !overrides.AllowNoAgents {
-		return Config{}, fmt.Errorf("no agent CLI found: install claude, codebuddy, codearts, codex, copilot, opencode, deveco, openclaw, hermes, pi, omp, cursor-agent, kimi, reasonix, dsh, kiro-cli, agy, qodercli, qoderclicn, traecli, grok, qwen, qwenpaw, mcode, muse, devin, dim, zeroclaw, or zcode and ensure it is on PATH")
+		return Config{}, fmt.Errorf("no agent CLI found: install claude, codebuddy, codearts, codex, copilot, opencode, deveco, openclaw, hermes, pi, omp, cursor-agent, kimi, reasonix, dsh, kiro-cli, agy, qodercli, qoderclicn, traecli, grok, qwen, qwenpaw, droid, amp, mcode, muse, devin, dim, zeroclaw, or zcode and ensure it is on PATH")
 	}
 
 	claudeArgs, err := shellArgsFromEnv("MULTICA_CLAUDE_ARGS")
@@ -283,6 +284,14 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		return Config{}, err
 	}
 	qwenArgs, err := shellArgsFromEnv("MULTICA_QWEN_ARGS")
+	if err != nil {
+		return Config{}, err
+	}
+	ampArgs, err := shellArgsFromEnv("MULTICA_AMP_ARGS")
+	if err != nil {
+		return Config{}, err
+	}
+	droidArgs, err := shellArgsFromEnv("MULTICA_DROID_ARGS")
 	if err != nil {
 		return Config{}, err
 	}
@@ -560,7 +569,16 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	gcCompletedTaskTTL, err := durationFromEnv("MULTICA_GC_COMPLETED_TASK_TTL", defaultGCCompletedTaskTTL(serverBaseURL))
+	// Full removal of a completed task environment is irreversible: it takes
+	// the checkout, .git (including work an agent left uncommitted), output/
+	// and logs/ with it. The default is bounded on every server, self-host
+	// included, because unbounded retention fills the disk of any long-lived
+	// daemon whose issues sit open (in review, awaiting response, backlog) and
+	// nobody is watching it. 14d is deliberately generous: past that much idle
+	// time main has usually moved far enough that a fresh checkout beats a
+	// stale worktree. Operators who want the old keep-until-terminal behavior
+	// set MULTICA_GC_COMPLETED_TASK_TTL=0.
+	gcCompletedTaskTTL, err := durationFromEnv("MULTICA_GC_COMPLETED_TASK_TTL", DefaultGCCompletedTaskTTL)
 	if err != nil {
 		return Config{}, err
 	}
@@ -670,6 +688,8 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		CodexArgs:                       codexArgs,
 		CodebuddyArgs:                   codebuddyArgs,
 		QwenArgs:                        qwenArgs,
+		DroidArgs:                       droidArgs,
+		AmpArgs:                         ampArgs,
 		QwenpawArgs:                     qwenpawArgs,
 		ProfileCommandOverrides:         profileCommandOverrides,
 	}, nil
@@ -686,38 +706,14 @@ const officialCloudHost = "api.multica.ai"
 // infrastructure we operate but not on someone else's: auto-update (cloud
 // users run a server that publishes the matching CLI release, so opt-in
 // self-update is safe, while self-host users may run a fork or pin to an
-// older server) and the completed-task retention TTL (see
-// defaultGCCompletedTaskTTL). Matching is host-only and case-insensitive —
-// port and path are ignored.
+// older server). Matching is host-only and case-insensitive — port and path
+// are ignored.
 func isOfficialCloudServer(baseURL string) bool {
 	u, err := url.Parse(strings.TrimSpace(baseURL))
 	if err != nil {
 		return false
 	}
 	return strings.EqualFold(u.Hostname(), officialCloudHost)
-}
-
-// defaultGCCompletedTaskTTL picks the completed-task retention default from the
-// deployment kind, the same way the auto-update default is picked.
-//
-// Full removal of a completed task environment is irreversible: it takes the
-// checkout, .git (including work an agent left uncommitted), output/ and logs/
-// with it. On Multica Cloud that trade is ours to make — we operate the nodes,
-// a full disk is our incident rather than a user's, and unbounded retention has
-// no operator watching it. On self-host the same default would turn a routine
-// daemon upgrade into a silent deletion of data the operator never agreed to
-// give up, so it stays disabled until they set MULTICA_GC_COMPLETED_TASK_TTL
-// themselves. Either side can override in either direction; cloud disables it
-// again with an explicit 0.
-//
-// Non-production cloud origins (staging, previews) fall to the self-host value
-// along with everything else officialCloudHost excludes, and opt in explicitly
-// if they want the bound.
-func defaultGCCompletedTaskTTL(serverBaseURL string) time.Duration {
-	if isOfficialCloudServer(serverBaseURL) {
-		return DefaultGCCompletedTaskTTLCloud
-	}
-	return DefaultGCCompletedTaskTTLSelfHost
 }
 
 // NormalizeServerBaseURL converts a WebSocket or HTTP URL to a base HTTP URL.
@@ -977,11 +973,14 @@ func isExecutableFile(path string) bool {
 // doesn't require editing this list by hand.
 var defaultAgentCommandNames = append([]string{
 	"claude", "codex", "opencode", "codearts", "deveco", "openclaw", "hermes",
-	"pi", "cursor-agent", "copilot", "kimi", "reasonix", "dsh", "kiro-cli", "codebuddy", "agy", "qodercli", "qoderclicn", "traecli", "grok", "qwen", "qwenpaw", "mcode", "muse", "devin", "dim", "zeroclaw", "zcode",
+	"pi", "cursor-agent", "copilot", "kimi", "reasonix", "dsh", "kiro-cli", "codebuddy", "agy", "qodercli", "qoderclicn", "traecli", "grok", "qwen", "qwenpaw", "droid", "amp", "mcode", "muse", "devin", "dim", "zeroclaw", "zcode",
 }, agent.BuiltinRuntimeCommands()...)
 
 // zcodeDesktopAppBundlePaths discovers the CLI in default Desktop installs.
 var zcodeDesktopAppBundlePaths = func() []string {
+	if runtime.GOOS == "linux" {
+		return []string{"/opt/ZCode/zcode"}
+	}
 	if runtime.GOOS != "darwin" {
 		return nil
 	}

@@ -4533,21 +4533,6 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 	}
 }
 
-// shouldEnqueueAgentTask returns true when an issue creation or assignment
-// should trigger the assigned agent. Backlog issues are skipped — backlog
-// acts as a parking lot where issues can be pre-assigned without immediately
-// triggering execution. Moving out of backlog is handled separately in
-// UpdateIssue.
-func (h *Handler) shouldEnqueueAgentTask(ctx context.Context, issue db.Issue) bool {
-	// Only the fixed backlog key parks work; custom unstarted statuses do not.
-	// An issue in Triage is not parked but refused: it produces no run from any
-	// entry point until it is accepted (MUL-7189 §2.3).
-	if issue.TriageState.Valid || issuestatus.Effective(ctx, h.Queries, issue.WorkspaceID, issue.Status) == "backlog" {
-		return false
-	}
-	return h.isAgentAssigneeReady(ctx, issue)
-}
-
 // shouldEnqueueAssigneeFallback returns true when comment routing can fall back
 // to the issue's assigned agent. Fires for any status — comments are
 // conversational and can happen at any stage, including after completion
@@ -4620,34 +4605,6 @@ func (h *Handler) isAgentRunningOnIssue(r *http.Request, actorType string, issue
 	return uuidToString(task.IssueID) == uuidToString(issue.ID)
 }
 
-// isAgentAssigneeReady checks if an issue is assigned to an active agent
-// with a valid runtime.
-func (h *Handler) isAgentAssigneeReady(ctx context.Context, issue db.Issue) bool {
-	if !issue.AssigneeType.Valid || issue.AssigneeType.String != "agent" || !issue.AssigneeID.Valid {
-		return false
-	}
-
-	agent, err := h.Queries.GetAgent(ctx, issue.AssigneeID)
-	if err != nil {
-		return false
-	}
-	// The shared verdict, not a local re-check (service.AgentReadiness). Only a
-	// BLOCKED verdict stops the enqueue: an offline machine still queues,
-	// because that work runs when the machine comes back.
-	verdict, err := service.AgentReadiness(ctx, h.runtimeLookup(obsmetrics.RuntimeLookupSourceIssue), agent)
-	if err != nil || !verdict.Blocked() {
-		return err == nil
-	}
-	// Assignment has no response the assigner reads for this outcome, so a
-	// refusal that needs human repair leaves the explanation on the issue
-	// (MUL-6164). An unbound agent keeps its silent skip: the agent list
-	// already shows it has no runtime, and nothing about it is new here.
-	if service.RuntimeBlockedNeedsNotice(verdict.Reason) {
-		h.noteRuntimeUnusable(ctx, issue, agent, verdict)
-	}
-	return false
-}
-
 func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 	r = h.withWakeupActor(r)
 	id := chi.URLParam(r, "id")
@@ -4676,7 +4633,9 @@ func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 	// identifier-style payload ("MUL-123") would leave stale entries on
 	// other clients after an identifier-path delete.
 	resolvedID := uuidToString(issue.ID)
-	h.publish(protocol.EventIssueDeleted, uuidToString(issue.WorkspaceID), actorType, actorID, map[string]any{"issue_id": resolvedID})
+	// project_id lets the realtime audience narrow the event: the row is gone
+	// by the time it is resolved.
+	h.publish(protocol.EventIssueDeleted, uuidToString(issue.WorkspaceID), actorType, actorID, map[string]any{"issue_id": resolvedID, "project_id": uuidToPtr(issue.ProjectID)})
 	h.publishIssueSnapshots(r.Context(), deleteResult.DetachedChildren, actorType, actorID)
 	h.publishClearedDuplicates(r.Context(), deleteResult.ClearedDuplicates, actorType, actorID)
 	slog.Info("issue deleted", append(logger.RequestAttrs(r), "issue_id", resolvedID, "workspace_id", uuidToString(issue.WorkspaceID))...)
@@ -5292,7 +5251,7 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 	h.deleteS3Objects(r.Context(), deleteResult.AttachmentURLs)
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	for _, issue := range issues {
-		h.publish(protocol.EventIssueDeleted, workspaceID, actorType, actorID, map[string]any{"issue_id": uuidToString(issue.ID)})
+		h.publish(protocol.EventIssueDeleted, workspaceID, actorType, actorID, map[string]any{"issue_id": uuidToString(issue.ID), "project_id": uuidToPtr(issue.ProjectID)})
 	}
 	h.publishIssueSnapshots(r.Context(), deleteResult.DetachedChildren, actorType, actorID)
 	h.publishClearedDuplicates(r.Context(), deleteResult.ClearedDuplicates, actorType, actorID)

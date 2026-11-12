@@ -13,6 +13,7 @@ export {
   requestWebNotificationPermission,
   showWebNotification,
   showSystemNotification,
+  systemNotificationSuppressedByFocus,
   systemNotificationPath,
   type SystemNotificationPayload,
   type WebNotificationPermission,

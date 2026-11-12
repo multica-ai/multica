@@ -196,6 +196,7 @@
     "relation_subscribed": "내가 구독 중",
     "section_agent_status": "에이전트 상태",
     "agent_status_running": "실행 중",
+    "agent_status_idle": "유휴",
     "section_read_state": "읽음 상태",
     "read_state_unread": "읽지 않음",
     "operator_label": "조건",
@@ -315,6 +316,7 @@
     "card_project": "프로젝트",
     "card_labels": "라벨",
     "card_child_progress": "하위 태스크 진행률",
+    "card_pull_requests": "Pull requests",
     "show_sub_issues": "하위 태스크 표시",
     "layout_options": "{{layout}} 옵션"
   },
@@ -386,6 +388,7 @@
       "created_at": "생성일",
       "updated_at": "수정일",
       "child_progress": "하위 태스크 진행률",
+      "pull_requests": "Pull requests",
       "creator": "작성자"
     },
     "calculation": {
@@ -510,6 +513,7 @@
     "quick_action_blocked_body": "“{{name}}”은(는) 트리거 권한이 없는 에이전트로 실행됩니다. 워크스페이스 관리자에게 해당 에이전트를 팀에 공개하거나 공유 에이전트로 변경해 달라고 요청하세요.",
     "quick_action_blocked_ok": "확인",
     "pull_requests_loading": "불러오는 중...",
+    "pull_request_state_open": "열림",
     "pull_request_state_draft": "초안",
     "pull_request_state_merged": "병합됨",
     "pull_request_state_closed": "닫힘",

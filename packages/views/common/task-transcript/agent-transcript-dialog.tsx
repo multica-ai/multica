@@ -80,6 +80,7 @@ import {
 } from "./build-steps";
 import { buildRunOutcome } from "./run-outcome";
 import { RunTimeline } from "./run-timeline";
+import { ContextReceiptButton } from "./context-receipt";
 import {
   base64ByteLength,
   readImageResult,
@@ -945,6 +946,9 @@ export function AgentTranscriptDialog({
             )}
 
             <div className="flex shrink-0 items-center gap-0.5">
+              {/* What the agent was handed (MUL-9013). Renders nothing for
+                  runs whose daemon predates the receipt. */}
+              <ContextReceiptButton taskId={task.id} open={open} />
               {hasRunDetails && (
                 <Popover>
                   <PopoverTrigger

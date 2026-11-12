@@ -41,7 +41,9 @@ import (
 // failures/daily) carry no agent dimension and need workspace membership only —
 // token spend / run time / failure volume are workspace-level operational
 // metrics. The three per-AGENT rollups additionally apply per-agent visibility:
-// see foldRestrictedAgents.
+// see foldRestrictedAgents. Runs in private projects (MUL-8472) stay in all six
+// workspace totals, which never shrink for a viewer; only the project_id filter
+// refuses a project the viewer cannot see (dashboardProjectVisible).
 
 // restrictedAgentsRowID is the synthetic agent_id that every row this response
 // refuses to name is folded onto. Deliberately not a UUID, so it can never
@@ -145,6 +147,21 @@ func parseProjectIDParam(w http.ResponseWriter, r *http.Request) (pgtype.UUID, b
 	return u, true
 }
 
+// dashboardProjectVisible guards the project_id filter: a private project
+// (MUL-8472) the request may not see is answered like one that does not exist,
+// with an empty rollup, and false.
+func (h *Handler) dashboardProjectVisible(w http.ResponseWriter, r *http.Request, workspaceID string, projectID pgtype.UUID) bool {
+	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+	if !ok {
+		return false
+	}
+	if !hidden.CanSeeProject(projectID) {
+		writeJSON(w, http.StatusOK, []struct{}{})
+		return false
+	}
+	return true
+}
+
 // DashboardUsageDailyResponse is one (date, provider, model) bucket. Cost-side
 // math happens on the client from a per-model pricing table; provider + model
 // stay on the wire so the client can disambiguate bare model ids that collide
@@ -180,6 +197,9 @@ func (h *Handler) GetDashboardUsageDaily(w http.ResponseWriter, r *http.Request)
 	}
 	projectID, ok := parseProjectIDParam(w, r)
 	if !ok {
+		return
+	}
+	if !h.dashboardProjectVisible(w, r, workspaceID, projectID) {
 		return
 	}
 	tz := h.resolveViewingTZ(r)
@@ -265,6 +285,9 @@ func (h *Handler) GetDashboardUsageByAgent(w http.ResponseWriter, r *http.Reques
 	}
 	projectID, ok := parseProjectIDParam(w, r)
 	if !ok {
+		return
+	}
+	if !h.dashboardProjectVisible(w, r, workspaceID, projectID) {
 		return
 	}
 	restricted, ok := h.dashboardRestrictedAgents(w, r, workspaceID, member.Role)
@@ -389,6 +412,9 @@ func (h *Handler) GetDashboardAgentRunTime(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
+	if !h.dashboardProjectVisible(w, r, workspaceID, projectID) {
+		return
+	}
 	restricted, ok := h.dashboardRestrictedAgents(w, r, workspaceID, member.Role)
 	if !ok {
 		return
@@ -478,6 +504,9 @@ func (h *Handler) GetDashboardRunTimeDaily(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
+	if !h.dashboardProjectVisible(w, r, workspaceID, projectID) {
+		return
+	}
 	// Slice day buckets in the viewer's tz so the Time / Tasks charts cut
 	// their calendar day identically to the Cost / Tokens charts.
 	tz := h.resolveViewingTZ(r)
@@ -543,6 +572,9 @@ func (h *Handler) GetDashboardFailuresDaily(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
+	if !h.dashboardProjectVisible(w, r, workspaceID, projectID) {
+		return
+	}
 	// Same viewer-tz day boundary as every other daily series so the Errors
 	// tab lines up with Cost / Tokens / Time / Tasks.
 	tz := h.resolveViewingTZ(r)
@@ -589,6 +621,9 @@ func (h *Handler) GetDashboardFailuresByAgent(w http.ResponseWriter, r *http.Req
 	}
 	projectID, ok := parseProjectIDParam(w, r)
 	if !ok {
+		return
+	}
+	if !h.dashboardProjectVisible(w, r, workspaceID, projectID) {
 		return
 	}
 	restricted, ok := h.dashboardRestrictedAgents(w, r, workspaceID, member.Role)
