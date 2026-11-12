@@ -5,16 +5,15 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 )
 
 func TestACPDiscoveryRejectsAgentRequests(t *testing.T) {
-	t.Parallel()
 	for _, tc := range []struct {
 		name, requestID, method, params string
 		wantDenial                      bool
@@ -84,36 +83,56 @@ done
 }
 
 func TestACPDiscoveryKeepsCatalogAfterEffortTimeout(t *testing.T) {
-	t.Parallel()
 	for _, callerCancels := range []bool{false, true} {
 		t.Run(fmt.Sprintf("caller_cancels=%t", callerCancels), func(t *testing.T) {
 			bin := filepath.Join(t.TempDir(), "hermes")
-			writeTestExecutable(t, bin, []byte(`#!/bin/sh
+			probing := filepath.Join(t.TempDir(), "probing")
+			writeTestExecutable(t, bin, []byte(fmt.Sprintf(`#!/bin/sh
 while IFS= read -r line; do
- id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+ id=$(printf '%%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
  case "$line" in
-  *'"method":"session/new"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"s","models":{"currentModelId":"a","availableModels":[{"modelId":"a"},{"modelId":"b"},{"modelId":"c"}]},"configOptions":[{"id":"effort","currentValue":"low","options":[{"value":"low"}]}]}}\n' "$id" ;;
-  *'"modelId":"b"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"configOptions":[{"id":"effort","currentValue":"high","options":[{"value":"high"}]}]}}\n' "$id" ;;
-  *'"modelId":"c"'*) while IFS= read -r _; do :; done ;;
-  *) printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id" ;;
+  *'"method":"session/new"'*) printf '{"jsonrpc":"2.0","id":%%s,"result":{"sessionId":"s","models":{"currentModelId":"a","availableModels":[{"modelId":"a"},{"modelId":"b"},{"modelId":"c"}]},"configOptions":[{"id":"effort","currentValue":"low","options":[{"value":"low"}]}]}}\n' "$id" ;;
+  *'"modelId":"b"'*) printf '{"jsonrpc":"2.0","id":%%s,"result":{"configOptions":[{"id":"effort","currentValue":"high","options":[{"value":"high"}]}]}}\n' "$id" ;;
+  *'"modelId":"c"'*) : > '%s'; while IFS= read -r _; do :; done ;;
+  *) printf '{"jsonrpc":"2.0","id":%%s,"result":{}}\n' "$id" ;;
  esac
 done
-`))
+`, probing)))
 			ctx := context.Background()
-			timeout := 2 * time.Second
+			timeout := 3 * time.Second
 			if callerCancels {
-				var cancel context.CancelFunc
-				ctx, cancel = context.WithTimeout(ctx, timeout)
-				defer cancel()
-				timeout = 5 * time.Second
+				cancelCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+				ctx = cancelCtx
+				done := make(chan struct{})
+				go func() {
+					defer close(done)
+					ticker := time.NewTicker(5 * time.Millisecond)
+					defer ticker.Stop()
+					for {
+						select {
+						case <-cancelCtx.Done():
+							return
+						case <-ticker.C:
+							if _, err := os.Stat(probing); err == nil {
+								cancel()
+								return
+							}
+						}
+					}
+				}()
+				defer func() { cancel(); <-done }()
+				timeout = 15 * time.Second
 			}
 			catalog, err := discovered(discoverACPModels(ctx, Command{Path: bin}, acpDiscoveryProvider{
 				strictErrors: true, probeModelEffort: true, timeout: timeout,
 				annotate: annotateACPThinkingForSessionModel,
 			}))
+			if _, err := os.Stat(probing); err != nil {
+				t.Fatalf("discovery did not reach the hanging model probe: %v", err)
+			}
 			models := catalog.Models
 			if callerCancels {
-				if err == nil || !strings.Contains(err.Error(), "context deadline exceeded") {
+				if !errors.Is(err, context.Canceled) {
 					t.Fatalf("caller cancellation must still fail discovery: models=%+v, err=%v", models, err)
 				}
 				return
