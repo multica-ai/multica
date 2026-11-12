@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS uq_attachment_upload_session_staging_key;

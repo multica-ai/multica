@@ -1428,6 +1428,10 @@ func TestAgentAvatarHappyPath(t *testing.T) {
 			} else {
 				t.Errorf("unexpected method: %s", r.Method)
 			}
+		case "/api/attachments/presign-upload":
+			// This fake models a server from before the presigned-upload
+			// endpoint, so the avatar upload takes the documented fallback.
+			http.NotFound(w, r)
 		case "/api/upload-file":
 			if r.Method != http.MethodPost {
 				t.Errorf("expected POST, got %s", r.Method)
@@ -1458,8 +1462,21 @@ func TestAgentAvatarHappyPath(t *testing.T) {
 		t.Fatalf("runAgentAvatar: %v", err)
 	}
 
-	if len(gotPaths) != 3 {
-		t.Fatalf("expected 3 API calls, got %d: %v", len(gotPaths), gotPaths)
+	// get agent, probe the direct-upload capability (404 here), upload via the
+	// legacy path, then patch the agent — the fallback costs one extra probe.
+	wantPaths := []string{
+		"/api/agents/agent-123",
+		"/api/attachments/presign-upload",
+		"/api/upload-file",
+		"/api/agents/agent-123",
+	}
+	if len(gotPaths) != len(wantPaths) {
+		t.Fatalf("expected %d API calls, got %d: %v", len(wantPaths), len(gotPaths), gotPaths)
+	}
+	for i, want := range wantPaths {
+		if gotPaths[i] != want {
+			t.Fatalf("call %d = %q, want %q (all: %v)", i, gotPaths[i], want, gotPaths)
+		}
 	}
 }
 

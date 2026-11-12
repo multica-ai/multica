@@ -337,6 +337,14 @@ type Handler struct {
 	// delivering events, to flush debounced run triggers and join in-flight
 	// reply goroutines. Built unconditionally (even without Lark).
 	ChannelRouter *engine.Router
+	// AttachmentUploadReconciler reclaims object-storage bytes owned by
+	// presigned upload sessions: the staging object of a published upload, and
+	// both objects of a session that never completed. Built in
+	// cmd/server/router.go where the storage backend exists; main.go starts it
+	// as an independent worker. Nil when the backend cannot presign, which is
+	// also when the presigned-upload endpoints answer 501 and no session rows
+	// are written.
+	AttachmentUploadReconciler *service.AttachmentUploadReconciler
 	// ChannelMediaReconciler settles the channel-media intent ledger
 	// (uploaded-but-unbound object reclaim). Built in cmd/server/router.go
 	// where the storage backend exists; main.go starts it as an independent
