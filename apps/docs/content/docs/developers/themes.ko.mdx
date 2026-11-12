@@ -179,7 +179,6 @@ paper/
 - `.theme-light`와 `.theme-dark`가 아닌 곳에 하위 선택자 없이 변수를 설정한 경우. 테마 선택기가 테마의 색을 읽어 올 수 없게 됩니다.
 - 글꼴 스택에 일반 글꼴 계열(`sans-serif`, `serif`, …)이나 `ui-*` 키워드를 쓴 경우. 사용자가 고른 CJK 글꼴이 적용되지 않게 됩니다.
 - 어느 한 모드에서 WCAG AA 대비를 충족하지 못하는 경우: `--foreground`와 `--muted-foreground`는 모든 표면에서 4.5:1, `--brand`는 읽기 표면에서 4.5:1, 기본 버튼 라벨은 버튼 위에서 4.5:1, `--faint-foreground`는 3:1이 필요합니다. 툴팁 글자는 `--tooltip` 위에서 4.5:1, 눌린 표시 설정 칩의 글자는 칩 배경 위에서 4.5:1이 필요합니다. 툴팁은 항상 다크 모드 글자색을 쓰므로 바꾸려면 `--tooltip-foreground`를 설정하세요. 눌린 칩은 `--display-chip-pressed-background`를 설정하지 않으면 `--input`으로 채워집니다.
-- 스위치의 켜짐과 꺼짐 트랙 색 차이가 3:1 미만인 경우. 이는 WCAG 요구 사항이 아니라 Multica 자체 규칙이므로 위의 대비와 따로 집계합니다. 트랙은 `--switch-checked-background`와 `--switch-unchecked-background`를 설정하지 않으면 `--primary`와 `--input`으로 채워집니다.
 
 ## 검사와 미리보기
 

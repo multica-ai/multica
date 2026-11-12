@@ -179,7 +179,6 @@ paper/
 - 在 `.theme-light` 和 `.theme-dark` 以外的地方設定變數而沒有後代選擇器，主題選擇器就讀不出主題的顏色；
 - 在字型棧裡寫了通用字型族（`sans-serif`、`serif` …）或 `ui-*` 關鍵字，這會蓋掉使用者選的中文字型；
 - 任一模式下沒達到 WCAG AA 對比度：`--foreground` 和 `--muted-foreground` 在每個表面上需要 4.5:1，`--brand` 在閱讀表面上需要 4.5:1，主按鈕文字在按鈕上需要 4.5:1，`--faint-foreground` 需要 3:1。提示框文字在 `--tooltip` 上需要 4.5:1，按下狀態的顯示設定標籤，文字在其底色上需要 4.5:1。提示框始終使用深色模式的文字顏色，要修改請設定 `--tooltip-foreground`；按下的標籤預設用 `--input` 作底色，可以用 `--display-chip-pressed-background` 單獨設定。
-- 開關「開」和「關」兩種軌道顏色之間不到 3:1。這是 Multica 自己的規則，不是 WCAG 的要求，所以和上面的對比度分開統計。開關預設用 `--primary` 和 `--input` 作軌道顏色，可以用 `--switch-checked-background` 和 `--switch-unchecked-background` 單獨設定。
 
 ## 檢查與預覽
 

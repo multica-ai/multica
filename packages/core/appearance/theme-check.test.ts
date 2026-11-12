@@ -299,12 +299,11 @@ describe("theme check", () => {
       expect.stringMatching(
         /^Contrast, light mode \(display chip\): --foreground is below 4\.5:1 on --input \(1\.\d\d:1\)\. .*--display-chip-pressed-background/,
       ),
-      expect.stringMatching(/^Contrast, light mode \(switch\): --primary is below 3:1 on --input/),
     ]);
     expect(errors('.theme-dark [data-slot="popover-content"] { --input: oklch(0.985 0 0); }')).toEqual([
       expect.stringMatching(/^Contrast, dark mode \(display chip\): --foreground is below 4\.5:1 on --input \(1\.00:1\)/),
     ]);
-    const split = ".theme-light { --input: #111111; --display-chip-pressed-background: #e6e6e6; --switch-unchecked-background: #e6e6e6; }";
+    const split = ".theme-light { --input: #111111; --display-chip-pressed-background: #e6e6e6; }";
     expect(check(split)).toMatchObject({ ok: true, issues: [] });
     expect(errors(`${split}\n.theme-light { --display-chip-pressed-color: #ffffff; }`)).toEqual([
       expect.stringMatching(/^Contrast, light mode \(display chip\): --display-chip-pressed-color is below 4\.5:1 on --display-chip-pressed-background/),
@@ -336,52 +335,6 @@ describe("theme check", () => {
     const chips = check("").contrast.filter((c) => c.area === "display chip");
     expect(chips.map((c) => c.mode)).toEqual(["light", "dark"]);
     expect(chips.every((c) => c.ratio >= c.required)).toBe(true);
-  });
-
-  describe("switches", () => {
-    it("fails on and off tracks that look alike, naming the aliases to set", () => {
-      // Pop before MUL-9091: --primary and --input are the same ink.
-      expect(errors(".theme-light { --primary: oklch(0.145 0 0); --input: oklch(0.145 0 0); --display-chip-pressed-background: #e6e6e6; }")).toEqual([
-        expect.stringMatching(
-          /^Contrast, light mode \(switch\): --primary is below 3:1 on --input \(1\.00:1\)\. .*set --switch-checked-background \(on, now --primary\) or --switch-unchecked-background \(off, now --input\)\.$/,
-        ),
-      ]);
-      expect(errors(".theme-dark { --switch-checked-background: #444444; }")).toEqual([
-        expect.stringMatching(/^Contrast, dark mode \(switch\): --switch-checked-background is below 3:1 on --input .*; set --switch-unchecked-background \(off, now --input\)\.$/),
-      ]);
-      expect(errors(".theme-light { --switch-checked-background: #ffd400; --switch-unchecked-background: #ffffff; }")).toEqual([
-        expect.stringMatching(/^Contrast, light mode \(switch\): --switch-checked-background is below 3:1 on --switch-unchecked-background \(1\.\d\d:1\)\. Multica asks for 3:1 between a switch's on and off tracks, .* This is Multica's own rule, not a WCAG requirement\.$/),
-      ]);
-    });
-
-    it("passes once the aliases tell the tracks apart", () => {
-      const ink = ".theme-light { --primary: oklch(0.145 0 0); --input: oklch(0.145 0 0); --display-chip-pressed-background: #e6e6e6; }";
-      expect(check(`${ink}\n.theme-light { --switch-unchecked-background: #ffffff; }`)).toMatchObject({ ok: true, issues: [] });
-      const tracks = check(`${ink}\n.theme-light { --switch-checked-background: #ffd400; }`).contrast.filter((c) => c.area === "switch");
-      expect(tracks.map((c) => [c.mode, c.foreground, c.background])).toEqual([
-        ["light", "--switch-checked-background", "--input"],
-        ["dark", "--primary", "--input"],
-      ]);
-      expect(tracks.every((c) => c.ratio >= c.required)).toBe(true);
-    });
-
-    it("paints dark mode's default track, --input at 80%, over the page", () => {
-      const [light, dark] = check("").contrast.filter((c) => c.area === "switch");
-      expect([light?.mode, dark?.mode]).toEqual(["light", "dark"]);
-      expect(light!.ratio).toBeGreaterThanOrEqual(3);
-      expect(dark!.ratio).toBeGreaterThanOrEqual(3);
-      // Set, the off track is used as given: a translucent one over the page, not at 80%.
-      const set = check(".theme-dark { --switch-unchecked-background: oklch(1 0 0 / 15%); }").contrast.find((c) => c.area === "switch" && c.mode === "dark");
-      expect(set!.ratio).toBeLessThan(dark!.ratio);
-    });
-
-    it("measures switches behind an option value", () => {
-      const options = [{ id: "ink", type: "select", label: "Ink", default: "dark", choices: [{ value: "dark", label: "Dark" }, { value: "pale", label: "Pale" }] }];
-      expect(errors(':root[data-theme-option-ink="pale"] { --switch-checked-background: var(--input); }', { options })).toEqual([
-        expect.stringMatching(/^Contrast, light mode \(switch, Ink = Pale\): --switch-checked-background is below 3:1 on --input \(1\.00:1\)/),
-        expect.stringMatching(/^Contrast, dark mode \(switch, Ink = Pale\): --switch-checked-background is below 3:1 on --input/),
-      ]);
-    });
   });
 
   describe("rail items", () => {

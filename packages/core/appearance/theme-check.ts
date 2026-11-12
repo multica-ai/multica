@@ -40,12 +40,9 @@ export interface ContrastCheck {
   mode: "light" | "dark";
   /**
    * Where the pair is painted: the page, the frame (rail, toolbar, tabs),
-   * a tooltip, a pressed chip in a display popover, or a switch, whose
-   * track when on is measured against its track when off. Switch pairs are
-   * Multica's own rule, not WCAG, which asks nothing of two states that are
-   * never side by side.
+   * a tooltip, or a pressed chip in a display popover.
    */
-  area: "page" | "frame" | "tooltip" | "display chip" | "switch";
+  area: "page" | "frame" | "tooltip" | "display chip";
   foreground: string;
   background: string;
   ratio: number;
@@ -111,13 +108,6 @@ function contrastHint({ area, foreground, background }: ContrastCheck): string {
   }
   if (area === "display chip" && background === "--input") {
     return " Pressed chips fill with --input, the input border colour; set --display-chip-pressed-background to colour them on their own.";
-  }
-  if (area === "switch") {
-    const unset = [
-      ...(foreground === "--primary" ? ["--switch-checked-background (on, now --primary)"] : []),
-      ...(background === "--input" ? ["--switch-unchecked-background (off, now --input)"] : []),
-    ];
-    return ` Multica asks for 3:1 between a switch's on and off tracks, so the two are not told apart by the thumb alone. This is Multica's own rule, not a WCAG requirement${unset.length > 0 ? `; set ${unset.join(" or ")}` : ""}.`;
   }
   return "";
 }
@@ -593,23 +583,6 @@ function measureContrast(
     const chipText = popover.has("--display-chip-pressed-color") ? "--display-chip-pressed-color" : "--foreground";
     const chipFill = popover.has("--display-chip-pressed-background") ? "--display-chip-pressed-background" : "--input";
     measure("display chip", popover, chipText, [chipFill], TEXT, { under: "--surface-raised" });
-
-    // Switches: the track when on against the track when off, on the page.
-    // Unset, they are --primary and --input, and dark mode paints --input at
-    // 80%. A translucent track is painted over --background first.
-    const switches = new ReadTracker(read, palette);
-    const on = switches.has("--switch-checked-background") ? "--switch-checked-background" : "--primary";
-    const off = switches.has("--switch-unchecked-background") ? "--switch-unchecked-background" : "--input";
-    const page = resolveColor(switches, "--background");
-    for (const track of [on, off]) {
-      const fill = resolveColor(switches, track);
-      if (!("color" in fill)) continue;
-      const alpha = track === "--input" && m === "dark" ? fill.color.a * 0.8 : fill.color.a;
-      if (alpha === 1 || !("color" in page) || page.color.a < 1) continue;
-      const { r, g, b } = paintOver({ ...fill.color, a: alpha }, page.color);
-      switches.set(track, `rgb(${r} ${g} ${b})`);
-    }
-    measure("switch", switches, on, [off], NON_TEXT);
   }
 
   for (const [name, where] of unmodelled) {

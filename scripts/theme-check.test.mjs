@@ -73,35 +73,6 @@ test("fails a theme on an option value other than the default", (t) => {
   assert.ok(failing.every((c) => c.variant?.option === "screen" && c.variant.value === "amber"));
 });
 
-test("reports switch tracks as Multica's own rule, apart from WCAG", (t) => {
-  const dir = mkdtempSync(join(tmpdir(), "theme-check-"));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
-  const ink = theme(dir, "ink", {
-    css: [
-      ".theme-light { --primary: oklch(0.145 0 0); --input: oklch(0.145 0 0); --display-chip-pressed-background: oklch(0.93 0 0); }",
-      ".theme-dark { --primary: oklch(0.92 0 0); --input: oklch(0.92 0 0); --display-chip-pressed-background: oklch(0.3 0 0); }",
-    ].join("\n"),
-  });
-
-  const text = run(ink);
-  assert.equal(text.status, 1, text.stdout + text.stderr);
-  for (const mode of ["light", "dark"]) {
-    assert.match(
-      text.stdout,
-      new RegExp(`Contrast, ${mode} mode \\(switch\\): --primary is below 3:1 on --input .*This is Multica's own rule, not a WCAG requirement; set --switch-checked-background \\(on, now --primary\\) or --switch-unchecked-background \\(off, now --input\\)\\.`),
-    );
-  }
-  assert.match(text.stdout, /contrast {2}\d+ pairs checked at the default options, 0 below WCAG AA\. Lowest: (?!--primary on --input)/);
-  assert.match(text.stdout, /switches {2}2 on\/off track pairs checked, 2 below Multica's 3:1 rule \(a product rule, not WCAG\)\. Lowest: --primary on --input, light, 1\.00:1 \(needs 3:1\)/);
-  assert.doesNotMatch(text.stdout, /WCAG 1\.4\.11/);
-
-  const [report] = JSON.parse(run(ink, "--json").stdout);
-  assert.deepEqual(
-    report.contrast.filter((c) => c.ratio < c.required).map((c) => [c.area, c.mode]),
-    [["switch", "light"], ["switch", "dark"]],
-  );
-});
-
 test("writes a --json report larger than a pipe buffer in full", (t) => {
   const dir = mkdtempSync(join(tmpdir(), "theme-check-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));

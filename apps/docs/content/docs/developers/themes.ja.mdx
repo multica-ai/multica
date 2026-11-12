@@ -179,7 +179,6 @@ paper/
 - `.theme-light` と `.theme-dark` 以外の場所で、子孫セレクタなしに変数を設定している。テーマピッカーがテーマの色を読み取れなくなります。
 - フォントスタックに汎用ファミリー（`sans-serif`、`serif` …）や `ui-*` キーワードがある。本人が選んだ CJK フォントが効かなくなります。
 - どちらかのモードで WCAG AA のコントラストを満たさない：`--foreground` と `--muted-foreground` はすべてのサーフェスで 4.5:1、`--brand` は読むためのサーフェスで 4.5:1、プライマリボタンのラベルはボタン上で 4.5:1、`--faint-foreground` は 3:1 が必要です。ツールチップの文字は `--tooltip` 上で 4.5:1、押された表示設定チップの文字はその塗りの上で 4.5:1 が必要です。ツールチップは常にダークモードの文字色を使うため、変えるには `--tooltip-foreground` を設定します。押されたチップは `--display-chip-pressed-background` を設定しない限り `--input` で塗られます。
-- スイッチのオンとオフのトラックの色の差が 3:1 未満。これは WCAG の要件ではなく Multica 独自のルールなので、上のコントラストとは別に数えます。トラックは `--switch-checked-background` と `--switch-unchecked-background` を設定しない限り `--primary` と `--input` で塗られます。
 
 ## チェックとプレビュー
 

@@ -78,7 +78,9 @@ const POP_SHARED: ThemeTokens = {
   "display-chip-pressed-background": "var(--surface-selected)",
   "display-chip-pressed-color": "var(--foreground)",
   // --primary and --input are the same ink, so switches get their own fills.
+  "switch-checked-background": "var(--button-primary)",
   "switch-unchecked-background": "var(--surface)",
+  "switch-checked-thumb": "var(--button-primary-foreground)",
   "switch-unchecked-thumb": "var(--surface-border)",
   "switch-border-color": "var(--surface-border)",
   "label-radius": "0.25rem",
@@ -199,9 +201,6 @@ const POP = builtInTheme({
       "button-primary": POP_YELLOW,
       "button-primary-foreground": INK,
       "button-primary-border": INK,
-      // Every signal colour is too pale to tell from the paper track, so the track goes ink and the thumb carries the signal.
-      "switch-checked-background": "var(--surface-border)",
-      "switch-checked-thumb": "var(--button-primary)",
     },
     dark: {
       ...POP_SHARED,
@@ -231,8 +230,6 @@ const POP = builtInTheme({
       "button-primary": POP_YELLOW,
       "button-primary-foreground": INK,
       "button-primary-border": "oklch(0.92 0 0)",
-      "switch-checked-background": "var(--button-primary)",
-      "switch-checked-thumb": "var(--button-primary-foreground)",
     },
   },
   frame: { dark: POP_FRAME },

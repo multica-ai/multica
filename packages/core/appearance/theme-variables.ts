@@ -211,7 +211,7 @@ const CONTROLS: Entry[] = [
   ["menu-item-hover-color", "Text of the highlighted menu item.", "var(--accent-foreground)"],
   ["display-chip-pressed-background", "Fill of a pressed on/off chip in the Display and sidebar settings popovers.", "var(--input)"],
   ["display-chip-pressed-color", "Text of a pressed display chip.", "var(--foreground)"],
-  ["switch-checked-background", "Track of a switch that is on. Needs 3:1 against `switch-unchecked-background`.", "var(--primary)"],
+  ["switch-checked-background", "Track of a switch that is on.", "var(--primary)"],
   ["switch-unchecked-background", "Track of a switch that is off.", "var(--input)", "color-mix(in oklab, var(--input) 80%, transparent)"],
   ["switch-checked-thumb", "Thumb of a switch that is on.", "var(--background)", "var(--primary-foreground)"],
   ["switch-unchecked-thumb", "Thumb of a switch that is off.", "var(--background)", "var(--foreground)"],
