@@ -101,6 +101,7 @@ describe("viewSidebarRequest", () => {
       }),
     ).toMatchObject({ advanced: { match: "any", children: [{ field: "priorities", values: ["urgent"] }] } });
     expect(filters({ agentRunningFilter: true })).toMatchObject({ working_only: true });
+    expect(filters({ agentIdleFilter: true })).toMatchObject({ idle_only: true });
     expect(filters({ unreadFilter: true })).toMatchObject({ unread_issue_ids: [] });
     expect(
       viewSidebarRequest({ ...workspace, query: { unreadFilter: true } }, TODAY, ["b", "a"])?.table.filters,

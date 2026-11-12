@@ -221,6 +221,8 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 				qwenHome = filepath.Join(home, ".qwen")
 			}
 			providerRoot = filepath.Join(qwenHome, "skills")
+		case "droid":
+			providerRoot = filepath.Join(home, ".factory", "skills")
 		case "qwenpaw":
 			// QWENPAW_WORKING_DIR (or legacy COPAW_WORKING_DIR) overrides
 			// QwenPaw's global ~/.qwenpaw directory, which owns settings,

@@ -198,6 +198,7 @@
     "relation_subscribed": "Subscribed by me",
     "section_agent_status": "Agent status",
     "agent_status_running": "Running",
+    "agent_status_idle": "Idle",
     "section_read_state": "Read state",
     "read_state_unread": "Unread",
     "operator_label": "Match",
@@ -321,6 +322,7 @@
     "card_project": "Project",
     "card_labels": "Labels",
     "card_child_progress": "Sub-issue progress",
+    "card_pull_requests": "Pull requests",
     "show_sub_issues": "Show sub-issues",
     "layout_options": "{{layout}} options"
   },
@@ -392,6 +394,7 @@
       "created_at": "Created",
       "updated_at": "Updated",
       "child_progress": "Sub-issue progress",
+      "pull_requests": "Pull requests",
       "creator": "Created by"
     },
     "calculation": {
@@ -517,6 +520,7 @@
     "quick_action_blocked_body": "“{{name}}” runs as an agent you’re not allowed to trigger. Ask a workspace admin to make that agent available to the team, or to point this action at a shared one.",
     "quick_action_blocked_ok": "Got it",
     "pull_requests_loading": "Loading…",
+    "pull_request_state_open": "Open",
     "pull_request_state_draft": "Draft",
     "pull_request_state_merged": "Merged",
     "pull_request_state_closed": "Closed",

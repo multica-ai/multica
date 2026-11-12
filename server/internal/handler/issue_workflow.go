@@ -18,6 +18,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/issueworkflow"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/projectaccess"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -151,7 +152,8 @@ func issueWorkflowToResponse(row db.IssueWorkflow, def issueworkflow.Definition,
 // projectIDsByWorkflow groups the workspace's projects by the workflow row
 // they use, so a list response can say where each workflow applies. Projects
 // without a workflow, or pointing at a deleted one, count for Default.
-func (h *Handler) projectIDsByWorkflow(ctx context.Context, wsUUID pgtype.UUID, rows []db.IssueWorkflow) (map[string][]string, error) {
+// Projects the caller may not see (visible returns false) are left out.
+func (h *Handler) projectIDsByWorkflow(ctx context.Context, wsUUID pgtype.UUID, rows []db.IssueWorkflow, visible func(db.Project) bool) (map[string][]string, error) {
 	projects, err := h.Queries.ListProjects(ctx, db.ListProjectsParams{WorkspaceID: wsUUID})
 	if err != nil {
 		return nil, err
@@ -167,6 +169,9 @@ func (h *Handler) projectIDsByWorkflow(ctx context.Context, wsUUID pgtype.UUID, 
 	}
 	out := map[string][]string{}
 	for _, p := range projects {
+		if !visible(p) {
+			continue
+		}
 		key := uuidToString(p.WorkflowID)
 		if !p.WorkflowID.Valid || !known[key] {
 			key = defaultID
@@ -224,7 +229,11 @@ func (h *Handler) ListIssueWorkflows(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list workflows")
 		return
 	}
-	byWorkflow, err := h.projectIDsByWorkflow(r.Context(), wsUUID, rows)
+	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+	if !ok {
+		return
+	}
+	byWorkflow, err := h.projectIDsByWorkflow(r.Context(), wsUUID, rows, func(p db.Project) bool { return hidden.CanSeeProject(p.ID) })
 	if err != nil {
 		slog.Warn("ListIssueWorkflows projects failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to list workflows")
@@ -264,10 +273,16 @@ func (h *Handler) GetIssueWorkflow(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) writeIssueWorkflow(w http.ResponseWriter, r *http.Request, status int, row db.IssueWorkflow) {
-	writeJSON(w, status, h.issueWorkflowResponse(r.Context(), row))
+	// Writes reach here after committing, so a failed access lookup lists no
+	// private project rather than failing the response.
+	visible := func(p db.Project) bool { return p.Visibility != projectaccess.VisibilityPrivate }
+	if hidden, err := h.hiddenProjects(r, uuidToString(row.WorkspaceID)); err == nil {
+		visible = func(p db.Project) bool { return hidden.CanSeeProject(p.ID) }
+	}
+	writeJSON(w, status, h.issueWorkflowResponse(r.Context(), row, visible))
 }
 
-func (h *Handler) issueWorkflowResponse(ctx context.Context, row db.IssueWorkflow) IssueWorkflowResponse {
+func (h *Handler) issueWorkflowResponse(ctx context.Context, row db.IssueWorkflow, visible func(db.Project) bool) IssueWorkflowResponse {
 	def, err := issueworkflow.Decode(row)
 	if err != nil {
 		def = issueworkflow.Definition{}
@@ -276,7 +291,7 @@ func (h *Handler) issueWorkflowResponse(ctx context.Context, row db.IssueWorkflo
 	if err != nil {
 		rows = []db.IssueWorkflow{row}
 	}
-	byWorkflow, err := h.projectIDsByWorkflow(ctx, row.WorkspaceID, rows)
+	byWorkflow, err := h.projectIDsByWorkflow(ctx, row.WorkspaceID, rows, visible)
 	if err != nil {
 		byWorkflow = map[string][]string{}
 	}
@@ -1296,7 +1311,12 @@ func (h *Handler) PreviewIssueWorkflowBrief(w http.ResponseWriter, r *http.Reque
 	projectName := ""
 	if req.ProjectID != "" {
 		if id, err := parseUUIDString(req.ProjectID); err == nil {
-			if p, err := h.Queries.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{ID: id, WorkspaceID: wsUUID}); err == nil {
+			hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+			if !ok {
+				return
+			}
+			// A project the caller may not see is previewed like an unknown one.
+			if p, err := h.Queries.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{ID: id, WorkspaceID: wsUUID}); err == nil && hidden.CanSeeProject(p.ID) {
 				projectName = p.Title
 			}
 		}

@@ -214,6 +214,7 @@
     "relation_subscribed": "Suscrito por mí",
     "section_agent_status": "Estado del agente",
     "agent_status_running": "En ejecución",
+    "agent_status_idle": "Inactivo",
     "section_read_state": "Estado de lectura",
     "read_state_unread": "Sin leer",
     "operator_label": "Coincidencia",
@@ -308,6 +309,7 @@
     "card_project": "Proyecto",
     "card_labels": "Etiquetas",
     "card_child_progress": "Progreso de subtareas",
+    "card_pull_requests": "Pull requests",
     "show_sub_issues": "Mostrar subtareas",
     "columns_section": "Columnas",
     "columns_locked_by_filter": "Quita el filtro de estado para mostrar u ocultar columnas.",
@@ -382,6 +384,7 @@
       "created_at": "Creada",
       "updated_at": "Actualizada",
       "child_progress": "Progreso de subtareas",
+      "pull_requests": "Pull requests",
       "creator": "Creada por"
     },
     "calculation": {
@@ -489,6 +492,7 @@
     "quick_action_blocked_body": "\"{{name}}\" se ejecuta como un agente que no tienes permiso para activar. Pide a un administrador del espacio de trabajo que ponga ese agente a disposición del equipo o que dirija esta acción a uno compartido.",
     "quick_action_blocked_ok": "Entendido",
     "pull_requests_loading": "Cargando…",
+    "pull_request_state_open": "Abierto",
     "pull_request_state_draft": "Borrador",
     "pull_request_state_merged": "Fusionado",
     "pull_request_state_closed": "Cerrado",

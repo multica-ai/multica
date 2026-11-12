@@ -8,6 +8,7 @@ func TestPriceForModelAliasGemini(t *testing.T) {
 		price ModelPrice
 	}{
 		{"gemini-4-argon", ModelPrice{Provider: "google", Model: "gemini-4-argon", InputPerM: 2, CacheReadPerM: 0.1, CacheWritePerM: 2, OutputPerM: 10}},
+		{"gemini-4-carbon", ModelPrice{Provider: "google", Model: "gemini-4-carbon", InputPerM: 2, CacheReadPerM: 0.1, CacheWritePerM: 2, OutputPerM: 10}},
 		{"gemini-3.8-flash", ModelPrice{Provider: "google", Model: "gemini-3.8-flash", InputPerM: 0.75, CacheReadPerM: 0.075, CacheWritePerM: 0.75, OutputPerM: 3.75}},
 		{"gemini-3.7-flash", ModelPrice{Provider: "google", Model: "gemini-3.7-flash", InputPerM: 0.75, CacheReadPerM: 0.075, CacheWritePerM: 0.75, OutputPerM: 3.75}},
 		{"gemini-3.6-flash", ModelPrice{Provider: "google", Model: "gemini-3.6-flash", InputPerM: 0.75, CacheReadPerM: 0.075, CacheWritePerM: 0.75, OutputPerM: 3.75}},
@@ -48,6 +49,7 @@ func TestPriceForModelAliasGemini(t *testing.T) {
 		{"Gemini 3.5 Flash-Lite", "gemini-3.5-flash-lite"},
 		{"Gemini 3.1 Pro", "gemini-3.1-pro"},
 		{"Gemini 4 Argon", "gemini-4-argon"},
+		{"Gemini 4 Carbon", "gemini-4-carbon"},
 	} {
 		want, ok := PriceForModelAlias(tc.id)
 		if !ok {
@@ -86,6 +88,8 @@ func TestPriceForModelAliasGemini(t *testing.T) {
 		"gemini-embedding-2",
 		"gemini-4-argon-fast",
 		"gemini-4-argon[1m][2m]",
+		"gemini-4-carbon-fast",
+		"gemini-4-carbon[1m][2m]",
 	} {
 		if got, ok := PriceForModelAlias(alias); ok {
 			t.Errorf("unknown or multimodal alias %q borrowed a rate: %+v", alias, got)

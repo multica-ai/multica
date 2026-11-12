@@ -95,6 +95,38 @@ func TestCommentInvocationDeniedNoticePersistsWithoutDisclosure(t *testing.T) {
 	t.Fatal("saved notice is absent from the timeline")
 }
 
+func TestCommentTargetUnavailableNoticeCoversUnresolvedIds(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	allowedID := createHandlerTestAgent(t, "Unresolved notice control", nil)
+	issueID := dbfx.Issue(t, "Unresolved mention notice")
+	dbfx.Cleanup(t, `DELETE FROM comment WHERE issue_id = $1`, issueID)
+	dbfx.Cleanup(t, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+	// A malformed id (7-char first group) fails util.ParseUUID and a missing
+	// squad id resolves to no squad — both block with target_unavailable, not
+	// invocation_not_allowed, yet the author still deserves a saved receipt.
+	content := fmt.Sprintf("[@Typo alias](mention://agent/e3e3e4c-79f7-4e77-8c0d-7d0a6d462005) [@Gone team](mention://squad/%s) [@Fine](mention://agent/%s) go", uuid.NewString(), allowedID)
+	var posted CommentResponse
+	testutil.Call(t, testHandler.CreateComment, withURLParam(newRequest(http.MethodPost, "/api/issues/"+issueID+"/comments", map[string]any{"content": content}), "id", issueID)).Want(http.StatusCreated).JSON(&posted)
+	if findCommentOutcome(t, posted.TriggerOutcomes, "e3e3e4c-79f7-4e77-8c0d-7d0a6d462005").ReasonCode != ReasonTargetUnavailable {
+		t.Fatalf("malformed mention is not target_unavailable: %+v", posted.TriggerOutcomes)
+	}
+	var notice string
+	dbfx.QueryRow(t, `SELECT content FROM comment WHERE parent_id = $1 AND author_type = 'system'`, posted.ID).Scan(&notice)
+	for _, alias := range []string{"Typo alias", "Gone team"} {
+		if !strings.Contains(notice, alias) {
+			t.Errorf("notice omitted unresolved target %q: %q", alias, notice)
+		}
+	}
+	if strings.Contains(notice, "Fine") || strings.Count(notice, "Target not found or permission not granted") != 2 {
+		t.Errorf("notice miscounts targets: %q", notice)
+	}
+	if len(util.ParseMentions(notice)) != 0 {
+		t.Fatalf("notice contains actionable mentions: %s", notice)
+	}
+}
+
 func TestCommentInvocationDeniedNoticeForAgentEditsKeepsHistory(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")

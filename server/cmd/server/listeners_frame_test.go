@@ -20,6 +20,18 @@ func TestRegisterListeners_FrameContainsActorType(t *testing.T) {
 		userID    string
 	}{
 		{
+			name: "inbox deletion is recipient-only",
+			event: events.Event{
+				Type:        protocol.EventInboxDeleted,
+				WorkspaceID: "ws-1",
+				ActorID:     "user-1",
+				ActorType:   "member",
+				Payload:     map[string]any{"item_id": "inbox-1", "recipient_id": "user-1", "count": int64(1)},
+			},
+			checkUser: true,
+			userID:    "user-1",
+		},
+		{
 			name: "workspace broadcast carries actor_type",
 			event: events.Event{
 				Type:        protocol.EventIssueCreated,
@@ -55,10 +67,16 @@ func TestRegisterListeners_FrameContainsActorType(t *testing.T) {
 
 			var raw []byte
 			if tc.checkUser {
+				if len(fb.workspaceCalls) != 0 {
+					t.Fatal("personal event broadcast to workspace")
+				}
 				if len(fb.userCalls) == 0 {
 					t.Fatal("expected SendToUser call, got none")
 				}
 				raw = fb.userCalls[0].msg
+				if fb.userCalls[0].userID != tc.userID {
+					t.Fatalf("recipient = %q, want %q", fb.userCalls[0].userID, tc.userID)
+				}
 			} else {
 				if len(fb.workspaceCalls) == 0 {
 					t.Fatal("expected BroadcastToWorkspace call, got none")

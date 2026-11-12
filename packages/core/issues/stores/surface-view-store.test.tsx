@@ -242,6 +242,22 @@ describe("issue surface view store registry", () => {
     expect(view.getState().agentRunningFilter).toBe(true);
   });
 
+  it("persists Idle per workspace and resets it with the other filters", async () => {
+    setCurrentWorkspace("acme", "ws_a");
+    await flush();
+    seedIssueSurfaceViewState("view:idle", { agentIdleFilter: true });
+    const view = getIssueSurfaceViewStore("view:idle");
+    expect(view.getState().agentIdleFilter).toBe(true);
+    setCurrentWorkspace("beta", "ws_b");
+    await flush();
+    expect(view.getState().agentIdleFilter).toBe(false);
+    setCurrentWorkspace("acme", "ws_a");
+    await flush();
+    expect(view.getState().agentIdleFilter).toBe(true);
+    view.getState().clearFilters();
+    expect(view.getState().agentIdleFilter).toBe(false);
+  });
+
   it("clears one surface without touching sibling surfaces", async () => {
     setCurrentWorkspace("acme", "ws_a");
     await flush();

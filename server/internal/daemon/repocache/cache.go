@@ -188,6 +188,11 @@ type Cache struct {
 // transport deadline expires.
 var ErrRepoBusy = errors.New("repository is busy")
 
+// ErrCheckoutPathTaken means the checkout's target path already holds a
+// Multica checkout of a different repository with the same directory name.
+// CreateWorktree reports it before touching that checkout.
+var ErrCheckoutPathTaken = errors.New("checkout path holds another repository")
+
 // Activity is the path-free repository coordination state exposed through the
 // daemon health endpoint. It is diagnostic only.
 type Activity struct {
@@ -898,6 +903,14 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 		)
 	}
 
+	// Two repositories with the same basename map to the same path. Every
+	// branch below rewrites what it finds there — origin, reset, clean — so
+	// another repository's checkout must be refused before any of them runs.
+	if other := otherRepoCheckout(ctx, barePath, worktreePath); other != "" {
+		return nil, fmt.Errorf("%w: %s already holds %s, not %s; run the checkout from a different directory",
+			ErrCheckoutPathTaken, worktreePath, other, redact.Text(params.RepoURL))
+	}
+
 	// Once a workdir has moved to isolated metadata, keep using that safer
 	// shape even if a later task comes from an older CLI or a different runtime
 	// that omits the mode hint. This also makes provider transitions on a reused
@@ -1107,14 +1120,73 @@ func (c *Cache) createOrUpdateIsolatedCheckoutContext(ctx context.Context, bareP
 	return &WorktreeResult{Path: checkoutPath, BranchName: actualBranch}, nil
 }
 
-func removeLinkedWorktreeContext(ctx context.Context, barePath, checkoutPath string) error {
+// CheckoutBelongsTo reports whether path holds a Multica checkout of the
+// repository cached at barePath: a linked worktree of that cache, or an
+// isolated checkout whose origin is cached there.
+func CheckoutBelongsTo(ctx context.Context, barePath, path string) bool {
+	if isGitWorktree(path) {
+		commonDir, err := linkedWorktreeCommonDirContext(ctx, path)
+		return err == nil && sameResolvedPath(commonDir, barePath)
+	}
+	if isIsolatedCheckoutContext(ctx, path) {
+		origin, err := isolatedCheckoutOriginContext(ctx, path)
+		return err == nil && isolatedOriginCachedAt(origin, barePath)
+	}
+	return false
+}
+
+// otherRepoCheckout describes the repository a Multica checkout at path
+// belongs to when that is not the one cached at barePath. It returns "" when
+// the checkout is this repository's, when path holds no Multica checkout, or
+// when its owner cannot be read — the update path then fails on its own.
+func otherRepoCheckout(ctx context.Context, barePath, path string) string {
+	if isGitWorktree(path) {
+		commonDir, err := linkedWorktreeCommonDirContext(ctx, path)
+		if err == nil && !sameResolvedPath(commonDir, barePath) {
+			return "a worktree of the cache at " + commonDir
+		}
+		return ""
+	}
+	if isIsolatedCheckoutContext(ctx, path) {
+		origin, err := isolatedCheckoutOriginContext(ctx, path)
+		if err == nil && !isolatedOriginCachedAt(origin, barePath) {
+			return "a checkout of " + redact.Text(origin)
+		}
+	}
+	return ""
+}
+
+func isolatedCheckoutOriginContext(ctx context.Context, path string) (string, error) {
+	out, err := runGitOutputContext(ctx, "-C", path, "config", "--get", "remote.origin.url")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// isolatedOriginCachedAt reports whether origin is a URL whose bare cache is
+// barePath. Caches are keyed by bareDirName, so URL spellings that share a
+// cache count as the same repository.
+func isolatedOriginCachedAt(origin, barePath string) bool {
+	return origin != "" && bareDirName(origin) == filepath.Base(barePath)
+}
+
+func linkedWorktreeCommonDirContext(ctx context.Context, checkoutPath string) (string, error) {
 	out, err := runGitOutputContext(ctx, "-C", checkoutPath, "rev-parse", "--git-common-dir")
 	if err != nil {
-		return fmt.Errorf("resolve linked worktree common dir: %w", err)
+		return "", err
 	}
 	commonDir := strings.TrimSpace(string(out))
 	if !filepath.IsAbs(commonDir) {
 		commonDir = filepath.Join(checkoutPath, commonDir)
+	}
+	return commonDir, nil
+}
+
+func removeLinkedWorktreeContext(ctx context.Context, barePath, checkoutPath string) error {
+	commonDir, err := linkedWorktreeCommonDirContext(ctx, checkoutPath)
+	if err != nil {
+		return fmt.Errorf("resolve linked worktree common dir: %w", err)
 	}
 	if !sameResolvedPath(commonDir, barePath) {
 		return fmt.Errorf("linked worktree common dir %s does not match cache %s", commonDir, barePath)

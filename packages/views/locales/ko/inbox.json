@@ -39,7 +39,8 @@
     "mark_unread": "읽지 않음으로 표시",
     "archive": "보관",
     "unarchive": "보관 해제",
-    "open_in_new_tab": "새 탭에서 열기"
+    "open_in_new_tab": "새 탭에서 열기",
+    "delete": "삭제"
   },
   "list": {
     "loading_selection": "알림을 불러오는 중…",
@@ -118,7 +119,8 @@
   "toasts": {
     "source_context_retry_started": "원본 컨텍스트로 재시도를 시작했습니다",
     "archived": "알림을 보관했습니다",
-    "unarchived": "알림을 복원했습니다"
+    "unarchived": "알림을 복원했습니다",
+    "deleted": "알림이 삭제되었습니다"
   },
   "errors": {
     "archived_lookup_failed": "링크된 알림을 불러오지 못했습니다",
@@ -134,6 +136,14 @@
     "archive_completed_failed": "완료된 항목을 보관하지 못했습니다",
     "unarchive_failed": "보관 해제에 실패했습니다",
     "archived_load_failed": "보관된 알림을 불러오지 못했습니다",
-    "filters_load_failed": "필터를 불러올 수 없습니다"
+    "filters_load_failed": "필터를 불러올 수 없습니다",
+    "delete_failed": "알림을 삭제하지 못했습니다. 다시 시도해 주세요."
+  },
+  "delete_dialog": {
+    "title": "알림을 삭제할까요?",
+    "description": "이 알림은 영구적으로 삭제됩니다. 관련 작업과 실행 기록은 유지됩니다.",
+    "issue_description": "이 보기에서 해당 작업의 알림이 영구적으로 삭제됩니다. 작업과 실행 기록은 유지됩니다.",
+    "cancel": "취소",
+    "active_issue_description": "이 작업의 받은편지함 알림은 영구적으로 삭제됩니다. 이전에 보관한 알림은 유지되며 보관함에 다시 표시됩니다. 작업과 실행 기록은 유지됩니다."
   }
 }

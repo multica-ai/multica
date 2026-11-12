@@ -59,6 +59,7 @@ import type {
   GitHubConnectResponse,
   IssuePullRequestsResponse,
   IssueEnvironmentsResponse,
+  IssuePullRequestSummariesResponse,
   InboxItem,
   InboxWorkspaceUnread,
   IssueUnread,
@@ -567,6 +568,28 @@ export const EMPTY_ISSUE_ENVIRONMENTS_RESPONSE: IssueEnvironmentsResponse = {
   configs: [],
   pending_starts: [],
   failed_starts: [],
+};
+
+// A malformed row is dropped rather than failing the whole workspace read, so
+// one bad link never blanks the PR chips on every card.
+const IssuePullRequestSummarySchema = z.object({
+  issue_id: z.string(),
+  id: z.string(),
+  provider: z.string().optional().default("github"),
+  repo_owner: z.string(),
+  repo_name: z.string(),
+  number: z.number(),
+  title: z.string().optional().default(""),
+  state: z.string(),
+  html_url: z.string(),
+}).loose();
+
+export const IssuePullRequestSummariesResponseSchema = z.object({
+  pull_requests: lenientArray(IssuePullRequestSummarySchema),
+}).loose();
+
+export const EMPTY_ISSUE_PULL_REQUEST_SUMMARIES_RESPONSE: IssuePullRequestSummariesResponse = {
+  pull_requests: [],
 };
 
 // Label responses are consumed by settings tables and resource pickers. Keep
@@ -3093,6 +3116,11 @@ export const IssueInboxReadSchema = z
   .object({
     count: z.number().int().nonnegative(),
   })
+  .loose();
+
+// Deletion returns the number of notifications removed from the selected view.
+export const InboxDeleteSchema = z
+  .object({ count: z.number().int().nonnegative() })
   .loose();
 
 // The viewer's subscribed issue ids (`/api/issues/subscribed` GET), behind the
