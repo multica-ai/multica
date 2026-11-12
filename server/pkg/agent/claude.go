@@ -1589,9 +1589,10 @@ func detectCLIVersion(ctx context.Context, runtimeCmd Command) (string, error) {
 	//
 	// Built through runtimeCmd.exec so a custom runtime's fixed_args prefix is
 	// still applied (MUL-6260). Desktop ZCode ships as a Node .cjs/.mjs bundle;
-	// those must go through chooseZcodeInvocation (node + script) the same way
-	// Execute does, with a clear error when node is missing from PATH.
-	if isNodeScriptPath(runtimeCmd.Path) {
+	// those and Linux Electron entries use the same headless invocation as
+	// Execute, with a clear error when the required runtime or script is missing.
+	_, zcodeDesktop := zcodeDesktopScript(runtimeCmd.Path)
+	if isNodeScriptPath(runtimeCmd.Path) || zcodeDesktop {
 		if err := requireNodeForZcodeScript(runtimeCmd.Path); err != nil {
 			return "", err
 		}
@@ -1645,8 +1646,12 @@ func versionProbeRejectedArgs(ctx context.Context, err error) bool {
 // command and the exec diagnosis.
 func runVersionProbe(ctx context.Context, runtimeCmd Command, args []string) (string, error) {
 	var cmd *exec.Cmd
-	if isNodeScriptPath(runtimeCmd.Path) {
+	_, zcodeDesktop := zcodeDesktopScript(runtimeCmd.Path)
+	if isNodeScriptPath(runtimeCmd.Path) || zcodeDesktop {
 		cmd, _, _ = runtimeCmd.execVia(ctx, chooseZcodeInvocation, runtimeCmd.Path, args, runtimeCmd.logger)
+		if zcodeDesktop {
+			cmd.Env = zcodeRuntimeEnv(runtimeCmd.Path, os.Environ())
+		}
 	} else {
 		cmd = runtimeCmd.exec(ctx, args...)
 	}
