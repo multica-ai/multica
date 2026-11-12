@@ -227,7 +227,7 @@ export function DevToolbar({ build, apiUrl, route, onNavigate }: DevToolbarProps
               data-testid="dev-toolbar-cache-fetching"
               className={cn(
                 "inline-block min-w-[3ch] tabular-nums",
-                fetching > 0 ? "text-brand" : "text-muted-foreground/40",
+                fetching > 0 ? "text-brand" : "text-faint-foreground",
               )}
             >
               {`↻${fetching}`}
