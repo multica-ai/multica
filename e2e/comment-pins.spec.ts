@@ -86,6 +86,22 @@ test("pins navigate without duplicating visible originals and persist across cli
     await expect.poll(async () => (await second.getByTestId("comment-pins").allTextContents()).join(" ")).not.toContain("Decision:");
     // Pins stack in pin order: the reply pinned later sits below.
     await expect(second.locator("[data-pin-row]")).toHaveCount(1);
+    // Unpin from the UI: jump to the pinned reply through the bar, then use
+    // the comment menu. Both clients drop the bar once the last pin is gone.
+    await second.locator(`[data-pin-row="${reply.id}"]`).click();
+    const replyBody = second.locator(`[data-comment-pin-body="${reply.id}"]`);
+    await expect(replyBody).toBeInViewport({ timeout: 15_000 });
+    await expect(async () => {
+      await second.keyboard.press("Escape");
+      await replyBody.click({ button: "right" });
+      await second.getByRole("menuitem", { name: "Unpin comment", exact: true }).click({ timeout: 5_000 });
+    }).toPass({ timeout: 60_000 });
+    await expect(second.getByTestId("comment-pins")).toHaveCount(0, { timeout: 15_000 });
+    await expect(page.getByTestId("comment-pins")).toHaveCount(0, { timeout: 15_000 });
+    await expect.poll(async () => {
+      const res = await page.request.get(`${process.env.NEXT_PUBLIC_API_URL}/api/issues/${issue.id}/timeline`, { headers });
+      return (await res.json()).filter((e: { pinned_at?: string | null }) => e.pinned_at).length;
+    }).toBe(0);
     await second.close();
     await testInfo.attach("pin navigation video path", { body: await page.video()!.path(), contentType: "text/plain" });
   } finally { await api.cleanup(); }
