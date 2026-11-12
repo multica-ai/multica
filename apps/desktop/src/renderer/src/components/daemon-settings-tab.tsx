@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, type ReactNode } from "react";
-import { AlertCircle, Info, LogIn } from "@multica/ui/icons";
+import { AlertCircle, Info, Loader2, LogIn } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { cn } from "@multica/ui/lib/utils";
@@ -55,6 +55,7 @@ export function DaemonSettingsTab() {
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<DaemonStatus>({ state: "stopped" });
   const [reauthLoading, setReauthLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     window.daemonAPI.getPrefs().then(setPrefs);
@@ -68,6 +69,20 @@ export function DaemonSettingsTab() {
     await reauthenticateDaemon(t);
     setReauthLoading(false);
   }, [t]);
+
+  const exportDiagnostics = async () => {
+    setExporting(true);
+    try {
+      const result = await window.daemonAPI.exportDiagnostics();
+      if (result.status === "saved") toast.success(t(($) => $.desktop.daemon.export_saved));
+      if (result.status === "error") toast.error(t(($) => $.desktop.daemon.export_failed));
+      if (result.status === "busy") toast.error(t(($) => $.desktop.daemon.export_busy));
+    } catch {
+      toast.error(t(($) => $.desktop.daemon.export_failed));
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const updatePref = useCallback(
     async (key: keyof DaemonPrefs, value: boolean) => {
@@ -245,6 +260,15 @@ export function DaemonSettingsTab() {
             }
           />
           </div>
+          <SettingsRow
+            label={t(($) => $.desktop.daemon.export_title)}
+            description={t(($) => $.desktop.daemon.export_description)}
+          >
+            <Button type="button" variant="outline" size="sm" disabled={exporting} aria-busy={exporting} onClick={exportDiagnostics}>
+              {exporting && <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden="true" />}
+              {t(($) => $.desktop.daemon.export_action)}
+            </Button>
+          </SettingsRow>
         </SettingsCard>
       </SettingsSection>
     </SettingsTab>

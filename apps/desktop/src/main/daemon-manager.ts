@@ -60,6 +60,7 @@ import {
 } from "./daemon-auth-probe";
 import { daemonSpawnEnv } from "./daemon-spawn-env";
 import { focusEnvironmentAt, type FocusEnvironmentResult } from "./environment-focus";
+import { setupDiagnosticsExport } from "./diagnostics-export";
 
 const POLL_INTERVAL_MS = 5_000;
 const PREFS_PATH = join(homedir(), ".multica", "desktop_prefs.json");
@@ -94,6 +95,7 @@ let statusPollTimer: ReturnType<typeof setInterval> | null = null;
 let logTailWatcher: { path: string; listener: StatsListener } | null = null;
 let logTailOwner: Electron.WebContents | null = null;
 let currentState: DaemonStatus["state"] = "installing_cli";
+let lastObservedState: DaemonStatus["state"] = "installing_cli";
 let getMainWindow: () => BrowserWindow | null = () => null;
 let getStatusWindows: () => readonly BrowserWindow[] = () => [];
 let statusPollInProgress = false;
@@ -180,6 +182,7 @@ function urlsMatch(a: string, b: string): boolean {
 }
 
 function sendStatus(status: DaemonStatus): void {
+  lastObservedState = status.state;
   // One daemon serves every main window, and each shows its status.
   for (const win of getStatusWindows()) {
     if (!win.isDestroyed()) win.webContents.send("daemon:status", status);
@@ -1469,6 +1472,11 @@ export function setupDaemonManager(
 ): void {
   getMainWindow = windowGetter;
   getStatusWindows = statusWindowsGetter;
+  setupDiagnosticsExport(() => ({
+    profile: activeProfile?.name ?? null,
+    state: lastObservedState,
+    cliVersion: cachedCliBinaryVersion ?? null,
+  }));
 
   ipcMain.handle("daemon:set-target-api-url", async (_e, url: string) => {
     const normalized = url || null;
@@ -1500,7 +1508,11 @@ export function setupDaemonManager(
     setDesiredDaemonRunning(true, true);
     return lifecycleOperations.runForeground(() => restartDaemon());
   });
-  ipcMain.handle("daemon:get-status", () => fetchHealth());
+  ipcMain.handle("daemon:get-status", async () => {
+    const status = await fetchHealth();
+    lastObservedState = status.state;
+    return status;
+  });
   ipcMain.handle("daemon:probe-runtimes", () => probeLocalRuntimes());
   ipcMain.handle("daemon:focus-environment", (_e, key: unknown) => focusEnvironment(key));
   // The host's OS name, available regardless of daemon state. The Runtimes

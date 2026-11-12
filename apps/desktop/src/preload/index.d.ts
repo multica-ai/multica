@@ -179,6 +179,7 @@ type FocusEnvironmentResult =
   | { ok: false; reason: "gone" | "unsupported" | "unavailable" | "failed"; error?: string };
 
 interface DaemonAPI {
+  exportDiagnostics: () => Promise<import("../shared/diagnostics").DiagnosticsExportResult>;
   start: () => Promise<{ success: boolean; error?: string }>;
   stop: () => Promise<{ success: boolean; error?: string }>;
   restart: () => Promise<{ success: boolean; error?: string }>;
