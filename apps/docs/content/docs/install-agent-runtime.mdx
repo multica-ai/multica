@@ -236,4 +236,4 @@ If the tool shows as online but runs still fail, open the issue's run record to 
 - [Daemon and runtimes](/daemon-runtimes) — online status, concurrency, and custom runtimes.
 - [AI coding tools comparison](/providers) — compare what each tool can do in Multica.
 
-ZCode Desktop on macOS is discovered from its application bundle. Install Node.js and enable a working API connection in the desktop app. Model and reasoning choices are supplied by ZCode itself; see [the runtime comparison](/providers#zcode).
+ZCode Desktop on macOS is discovered from its application bundle and requires Node.js. On Linux, the daemon discovers ZCode Desktop through `zcode` on PATH or `/opt/ZCode/zcode` and runs its bundled CLI without opening a desktop window. No separate Node.js installation or manual environment configuration is needed on Linux. Enable a working API connection in the desktop app. Model and reasoning choices are supplied by ZCode itself; see [the runtime comparison](/providers#zcode).
