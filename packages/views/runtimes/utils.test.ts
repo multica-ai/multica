@@ -1619,9 +1619,10 @@ describe("sliceWindow (timezone-aware)", () => {
       makeUsage("2026-05-19"),
       makeUsage("2026-05-20"),
     ];
+    // The Shanghai window is 05-14..05-20, so 05-13 falls out; a cutoff read
+    // from the host clock (today 05-19) would have kept it.
     const { filtered } = sliceWindow(usage, 7, "Asia/Shanghai");
     expect(filtered.map((u) => u.date)).toEqual([
-      "2026-05-13",
       "2026-05-19",
       "2026-05-20",
     ]);
@@ -1638,6 +1639,20 @@ describe("sliceWindow (timezone-aware)", () => {
     const { filtered, prevFiltered } = sliceWindow(usage, 7, "UTC");
     expect(filtered.map((u) => u.date)).toEqual(["2026-05-15", "2026-05-19"]);
     expect(prevFiltered.map((u) => u.date)).toEqual(["2026-05-08"]);
+  });
+
+  it("covers exactly `days` calendar days, today included, in both windows", () => {
+    vi.setSystemTime(new Date("2026-05-19T12:00:00Z"));
+    const usage = [
+      makeUsage("2026-05-05"),
+      makeUsage("2026-05-06"),
+      makeUsage("2026-05-12"),
+      makeUsage("2026-05-13"),
+      makeUsage("2026-05-19"),
+    ];
+    const { filtered, prevFiltered } = sliceWindow(usage, 7, "UTC");
+    expect(filtered.map((u) => u.date)).toEqual(["2026-05-13", "2026-05-19"]);
+    expect(prevFiltered.map((u) => u.date)).toEqual(["2026-05-06", "2026-05-12"]);
   });
 });
 
