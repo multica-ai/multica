@@ -45,6 +45,7 @@ Multica currently detects these commands:
 | Qoder CN CLI | `qoderclicn` | [Qoder CN CLI quickstart](https://help.aliyun.com/en/lingma/qodercli-cn/user-guide/qoder-cli-cn-get-started-quickly) |
 | Qwen Code | `qwen` | [Qwen Code](https://github.com/QwenLM/qwen-code) |
 | QwenPaw | `qwenpaw` | [QwenPaw](https://github.com/agentscope-ai/QwenPaw) |
+| Amp | `amp` | [Amp CLI](https://ampcode.com/docs/cli) |
 | Factory Droid | `droid` | [Factory Droid](https://docs.factory.com/droid-exec/overview) |
 | Reasonix | `reasonix` | [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) |
 | TRAE CLI | `traecli` | [TRAE official site](https://www.trae.cn/) |
@@ -85,6 +86,17 @@ Below the minimum version, the daemon does not register the corresponding runtim
 A few tools need extra setup beyond signing in:
 
 <Accordions type="multiple">
+<Accordion title="Amp" id="amp">
+
+Install the latest [Amp CLI](https://ampcode.com/docs/cli) on the daemon machine. Amp supports macOS, Linux and Windows through WSL; run the daemon inside WSL when using Windows. Set an Amp access token in `AMP_API_KEY` in the daemon or agent environment, following the official non-interactive setup. Interactive login and saved login sessions alone are not supported by this adapter. Do not put credentials in prompts or custom arguments.
+
+After discovery, select the Amp runtime when creating an agent and assign a task. `MULTICA_AMP_PATH` overrides the executable. Leave the model field empty for Amp's default, or enter an Amp **mode** such as `high`; `MULTICA_AMP_MODEL` sets the daemon default. Amp manages the underlying models. `MULTICA_AMP_ARGS` and agent custom arguments accept `--settings-file`, `--features`, `--fast`, `--plugin-ready-timeout <seconds>`, `--timings`, `--visibility`, `--label`, and `--no-archive-after-execute`.
+
+Multica runs `amp --execute --stream-json --executor local`, sends the prompt through stdin, and resumes only the saved thread ID. Amp reads `AGENTS.md` and project skills from `.agents/skills/`. Configure MCP in Amp itself. Managed MCP, live message supplements, `max_turns`, orbs and remote runners are unsupported. Use the task timeout to bound execution. Transport, mode and executor overrides are filtered; extra prompts, subcommands and unverified options fail before launch.
+
+Missing installations and startup errors appear as failures. Missing `AMP_API_KEY` fails before startup. For authentication errors, replace the access token in the execution environment. Only a successful terminal `result` can publish a final answer; a clean exit or assistant `end_turn` alone cannot. Amp gets up to ten seconds to finish cleanup after its terminal result. If Multica then has to stop the process, it keeps the final answer and logs a warning; a native nonzero exit observed during the grace still fails. Amp-reported permission denials appear as transcript warnings. Check `amp.permissions` in the execution machine's Amp settings if approved commands are denied in unattended runs. Cancellation and timeout terminate the owned local process tree and retain the observed thread ID. [Amp background subagents](https://ampcode.com/docs/cli/streaming-json) may survive CLI exit on Amp's service; their remote cancellation is not available through this adapter. Avoid asynchronous subagents when strict cancellation is required, and inspect any remaining work in the saved Amp thread.
+
+</Accordion>
 <Accordion title="Factory Droid" id="droid">
 
 Install the native Droid CLI using the [official instructions](https://docs.factory.com/droid-exec/overview). Multica supports Droid 1.8.0 or later on macOS, Windows, and glibc-based Linux; Alpine is unsupported. Sign in with `droid`, or set `FACTORY_API_KEY` in the daemon environment or the agent's custom environment. Keep credentials out of prompts and custom arguments.
