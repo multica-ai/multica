@@ -269,5 +269,27 @@
     "unarchive": "Desarchivar chat",
     "delete": "Eliminar chat",
     "agent_settings": "Ajustes del agente"
+  },
+  "commit_changes": {
+    "heading": "Cambios de archivos de esta ejecución",
+    "files": "Archivos modificados",
+    "incomplete": "Se omitieron algunos cambios por los límites de registro.",
+    "unavailable": "No se pudo registrar el diff completo de este archivo. Revísalo en el repositorio.",
+    "no_text": "No hay un diff de texto disponible.",
+    "loading": "Cargando cambios…",
+    "retry": "Volver a cargar los cambios",
+    "empty": "No se registraron cambios para esta ejecución.",
+    "worktree": "Árbol de trabajo: inicio y fin",
+    "commits": "Commits",
+    "draft": "Borrador guardado",
+    "recorded_files_one": "{{count}} archivo",
+    "recorded_files_other": "{{count}} archivos",
+    "incomplete_record": "Registro incompleto",
+    "repositories_omitted": "Algunos repositorios no se registraron porque se alcanzó el límite de repositorios.",
+    "worktree_unavailable": "No se pudieron registrar los cambios del árbol de trabajo.",
+    "commits_unavailable": "No se pudieron registrar los cambios de los commits.",
+    "draft_unavailable": "No se pudieron registrar los cambios del borrador guardado.",
+    "worktree_unchanged": "No hay cambios netos en el árbol de trabajo.",
+    "comparison_unchanged": "No hay cambios de archivos en esta comparación."
   }
 }

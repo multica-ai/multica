@@ -124,6 +124,7 @@ type repoCheckoutRequest struct {
 }
 
 type activeRepoCheckoutTask struct {
+	CommitDiff  *commitDiffRecorder
 	WorkspaceID string
 	TaskID      string
 	IssueID     string
@@ -554,6 +555,10 @@ func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
 			d.logger.Error("repo checkout failed", "url", req.URL, "error", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
+		}
+
+		if activeTask.CommitDiff != nil {
+			activeTask.CommitDiff.recordBaseline(result.Path, result.Kept == "")
 		}
 
 		w.Header().Set("Content-Type", "application/json")

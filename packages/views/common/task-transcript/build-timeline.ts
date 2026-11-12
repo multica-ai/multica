@@ -1,3 +1,4 @@
+import { COMMIT_DIFF_TOOL } from "@multica/core/chat/commit-diff";
 import type { TaskMessagePayload } from "@multica/core/types/events";
 import { redactSecrets } from "./redact";
 
@@ -138,6 +139,8 @@ export function buildTimeline(msgs: TaskMessagePayload[]): TimelineItem[] {
   let run: TaskMessagePayload[] = [];
 
   for (const msg of sorted) {
+    // Diff records are rendered by the run changes viewer.
+    if (msg.type === "tool_use" && msg.tool === COMMIT_DIFF_TOOL) continue;
     const previous = run[run.length - 1];
     // Same rule as `canMergeStreamingText`, read off the messages: a run's type
     // is its first message's, and every member shares it.

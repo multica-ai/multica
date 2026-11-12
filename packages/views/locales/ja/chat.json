@@ -264,5 +264,26 @@
     "delete": "チャットを削除",
     "archive": "チャットをアーカイブ",
     "unarchive": "アーカイブを解除"
+  },
+  "commit_changes": {
+    "heading": "この実行のファイル変更",
+    "files": "変更されたファイル",
+    "incomplete": "記録の上限により、一部の変更は省略されています。",
+    "unavailable": "このファイルの差分を完全に記録できませんでした。リポジトリで確認してください。",
+    "no_text": "表示できるテキスト差分はありません。",
+    "loading": "ファイルの変更を読み込み中…",
+    "retry": "変更を再読み込み",
+    "empty": "この実行で記録された変更はありません。",
+    "worktree": "作業ツリー：実行の前後",
+    "commits": "コミット範囲",
+    "draft": "保存した下書き",
+    "recorded_files_other": "{{count}} ファイル",
+    "incomplete_record": "記録が不完全",
+    "repositories_omitted": "リポジトリの記録上限に達したため、一部のリポジトリを記録できませんでした。",
+    "worktree_unavailable": "作業ツリーの変更を記録できませんでした。",
+    "commits_unavailable": "コミット範囲の差分を記録できませんでした。",
+    "draft_unavailable": "保存した下書きの差分を記録できませんでした。",
+    "worktree_unchanged": "実行前後の作業ツリーに差分はありません。",
+    "comparison_unchanged": "この比較範囲にファイルの変更はありません。"
   }
 }

@@ -264,5 +264,26 @@
     "delete": "删除会话",
     "archive": "归档会话",
     "unarchive": "取消归档"
+  },
+  "commit_changes": {
+    "heading": "本轮文件变化",
+    "files": "变化文件",
+    "incomplete": "受记录上限限制，仅显示部分差异。",
+    "unavailable": "此文件的差异未能完整记录，请在仓库中查看。",
+    "no_text": "没有可显示的文本差异。",
+    "loading": "正在加载文件变化...",
+    "retry": "重新加载差异",
+    "empty": "此轮没有记录到文件变化。",
+    "worktree": "工作树：运行前后",
+    "commits": "提交范围",
+    "draft": "已保存草稿",
+    "recorded_files_other": "{{count}} 个文件",
+    "incomplete_record": "记录不完整",
+    "repositories_omitted": "达到仓库记录上限，部分仓库未采集。",
+    "worktree_unavailable": "未能采集工作树差异。",
+    "commits_unavailable": "未能采集提交范围的差异。",
+    "draft_unavailable": "未能采集已保存草稿的差异。",
+    "worktree_unchanged": "本轮工作树无净变化。",
+    "comparison_unchanged": "此对比范围内没有文件变化。"
   }
 }

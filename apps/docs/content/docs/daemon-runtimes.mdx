@@ -22,6 +22,8 @@ The AI coding tools a local runtime invokes, those tools' own login credentials,
 
 So the team can collaborate, the server stores issues, comments, agent configuration, run context, run records, and the results agents write back. That content can include code snippets or other project context an agent chose to read and include in its replies.
 
+[Run changes](/tasks#run-changes) also automatically uploads captured file paths and patches from registered repositories, including captured uncommitted changes. The daemon masks credential patterns it recognizes before sending. This masking cannot guarantee removal of every secret; the records are visible to people who can access the run.
+
 <Callout type="warning">
 "Local execution" does not mean every secret exists only on this machine. An agent's custom environment variables and MCP configuration are stored on the server, and their display is limited by the sensitive-value rules; custom environment variables are sent to the runtime at execution time.
 </Callout>
