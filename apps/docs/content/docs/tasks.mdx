@@ -201,6 +201,8 @@ A repository can have several comparisons:
 
 The runtime covers configured local repositories and repositories registered through `multica repo checkout`. Each run has its own records, including any partial results successfully captured after a failure. The viewer distinguishes an empty comparison, a failed capture, and a truncated record. Older runs may have no recorded diff. Records follow task-message access and retention.
 
+For an in-place run bound to a subdirectory, both working-tree snapshots and commit comparisons are restricted to that configured directory. Sibling directories are excluded. File paths in the viewer remain relative to the repository root. Concurrent edits inside the configured directory can still appear in the comparison.
+
 If worktree finalization fails and preserves the checkout, the working-tree comparison is unavailable because its starting commit may use a different representation from the files on disk, such as Git LFS or clean/smudge filters. Valid commit ranges remain reviewable. Inspect uncommitted changes in the preserved checkout.
 
 The daemon automatically sends the captured file paths and textual patches to the Multica server, including captured uncommitted changes. It masks credentials recognized by the existing redaction rules before sending; these rules cannot detect every secret. Review who can access the run before using it with sensitive repositories.

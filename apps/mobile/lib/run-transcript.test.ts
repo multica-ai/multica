@@ -8,6 +8,7 @@ import {
   getRunDiagnostics,
   isCancellableRunStatus,
   isRunTranscriptTaskId,
+  isInternalRunMessage,
   RUN_TRANSCRIPT_PATHNAME,
   runTranscriptRoute,
   runToolContext,
@@ -40,6 +41,20 @@ function message(seq: number, type: TaskMessagePayload["type"], content?: string
 }
 
 describe("historical run transcript", () => {
+  it("hides captured diffs from transcript entries and chat process steps", () => {
+    const call = { ...message(1, "tool_use"), tool: "Bash", call_id: "A" };
+    const internal = { ...message(2, "tool_use"), tool: "multica_commit_diff", input: { repository: "private-repository" } };
+    const result = { ...message(3, "tool_result"), tool: "multica_commit_diff" };
+    const source = [call, internal, result];
+
+    expect(source.filter((item) => !isInternalRunMessage(item))).toEqual([call]);
+    expect(buildRunTranscript(source)).toEqual([call]);
+    expect(buildRunTranscriptEntries(source)).toEqual([
+      { kind: "tool", task_id: "task-1", seq: 1, call },
+    ]);
+    expect(source).toHaveLength(3);
+  });
+
   it("pairs parallel same-name calls by ID when results finish in reverse order", () => {
     const callA = { ...message(1, "tool_use"), tool: "Bash", call_id: "A", input: { command: "test A" } };
     const callB = { ...message(2, "tool_use"), tool: "Bash", call_id: "B", input: { command: "test B" } };

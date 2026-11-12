@@ -92,6 +92,71 @@ func TestCommitDiffCapturesOnlyThisRunsFileChanges(t *testing.T) {
 		}
 	}
 }
+func TestCommitDiffScopesInPlaceCaptureToConfiguredDirectory(t *testing.T) {
+	for _, scope := range []string{"apps/web", "apps/[web]*"} {
+		t.Run(scope, func(t *testing.T) {
+			dir := commitTestRepo(t)
+			if err := os.MkdirAll(filepath.Join(dir, scope), 0700); err != nil {
+				t.Fatal(err)
+			}
+			inside := scope + "/file.txt"
+			commitTestWrite(t, dir, inside, "initial\n")
+			commitTestCommit(t, dir)
+			commitTestWrite(t, dir, "outside-new.txt", "outside baseline secret\n")
+			commitTestWrite(t, dir, "file.txt", "outside existing secret\n")
+			r := newCommitDiffRecorder()
+			t.Cleanup(r.close)
+			r.record(filepath.Join(dir, scope))
+			var repo commitRepo
+			for _, value := range r.repos {
+				repo = value
+			}
+			if repo.baseTree == "" {
+				t.Fatal("missing scoped baseline")
+			}
+			baseline, err, _ := runDiffGit(context.Background(), repo.root, repo.snapshotEnv(), true, 4096, "ls-tree", "-r", "--name-only", repo.baseTree)
+			if err != nil || strings.Contains(string(baseline), "outside-new.txt") {
+				t.Fatalf("snapshot captured outside untracked file: %s, %v", baseline, err)
+			}
+			outside, err, _ := runDiffGit(context.Background(), repo.root, repo.snapshotEnv(), true, 4096, "show", repo.baseTree+":file.txt")
+			if err != nil || string(outside) != "original\n" {
+				t.Fatalf("snapshot captured outside working content: %s, %v", outside, err)
+			}
+			commitTestWrite(t, dir, inside, "inside committed\n")
+			commitTestCommit(t, dir)
+			commitTestWrite(t, dir, inside, "inside working\n")
+			commitTestWrite(t, dir, scope+"/new.txt", "inside new\n")
+			commitTestWrite(t, dir, "file.txt", "outside working secret\n")
+			commitTestWrite(t, dir, "another-outside.txt", "outside new secret\n")
+			before := commitTestGit(t, dir, "status", "--porcelain")
+			diffs := collectRunDiffs(context.Background(), []commitRepo{repo}, true)
+			if len(diffs) != 2 {
+				t.Fatalf("expected commit and working-tree comparisons, got %v", diffs)
+			}
+			commits, _ := json.Marshal(diffs[0])
+			worktree, _ := json.Marshal(diffs[1])
+			if !strings.Contains(string(commits), "+inside committed") ||
+				!strings.Contains(string(worktree), "+inside working") || !strings.Contains(string(worktree), "+inside new") {
+				t.Fatalf("missing in-scope patches: %s / %s", commits, worktree)
+			}
+			for _, diff := range diffs {
+				changes, ok := diff["changes"].([]map[string]any)
+				if !ok || len(changes) == 0 || diff["unavailable"] == true {
+					t.Fatalf("missing in-scope changes: %v", diff)
+				}
+				for _, change := range changes {
+					if !strings.HasPrefix(change["path"].(string), scope+"/") || strings.Contains(fmt.Sprint(change["diff"]), "outside") {
+						t.Fatalf("out-of-scope content captured: %v", change)
+					}
+				}
+			}
+			if after := commitTestGit(t, dir, "status", "--porcelain"); after != before {
+				t.Fatalf("collector mutated repository: %q -> %q", before, after)
+			}
+		})
+	}
+}
+
 func TestCommitDiffUsesFinalizationReceiptAfterWorktreeRemoval(t *testing.T) {
 	dir := commitTestRepo(t)
 	base := commitTestGit(t, dir, "rev-parse", "HEAD")

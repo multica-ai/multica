@@ -31,6 +31,7 @@ const commitDiffMaxRepos = 8
 type commitRepo struct {
 	root, base, head, leftoverRef  string
 	snapshotDir, baseTree, objects string
+	scope                          string
 }
 
 // commitDiffRecorder observes only configured directories and authenticated
@@ -137,6 +138,18 @@ func (r *commitDiffRecorder) recordBaseline(dir string, replace bool) {
 		return
 	}
 	path := strings.TrimSpace(string(root))
+	canonicalDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return
+	}
+	canonicalDir, err = filepath.Abs(canonicalDir)
+	if err != nil {
+		return
+	}
+	scope, err := filepath.Rel(path, canonicalDir)
+	if err != nil || !filepath.IsLocal(scope) {
+		return
+	}
 	if r.workDir != "" {
 		relative, err := filepath.Rel(r.workDir, path)
 		if err != nil || !filepath.IsLocal(relative) {
@@ -159,7 +172,7 @@ func (r *commitDiffRecorder) recordBaseline(dir string, replace bool) {
 		r.repositoriesOmitted = true
 		return
 	}
-	repo := commitRepo{root: path}
+	repo := commitRepo{root: path, scope: filepath.ToSlash(scope)}
 	head, err, _ := commitGit(ctx, path, 128, "rev-parse", "--verify", "HEAD^{commit}")
 	// Keep confirmed repositories even when HEAD cannot supply a baseline.
 	if err == nil {
@@ -238,7 +251,11 @@ func (repo commitRepo) snapshot(ctx context.Context, head string) (string, error
 		}
 		args = append(args, "-c", key+"="+value)
 	}
-	args = append(args, "add", "-A", "--", ".", ":(exclude,glob)**/.agent_context/**", ":(exclude,glob)**/.multica/**")
+	scope := "."
+	if repo.scope != "" && repo.scope != "." {
+		scope = ":(top,literal)" + repo.scope
+	}
+	args = append(args, "add", "-A", "--", scope, ":(exclude,glob)**/.agent_context/**", ":(exclude,glob)**/.multica/**")
 	if _, err, _ := runDiffGit(ctx, repo.root, env, false, 128, args...); err != nil {
 		return "", err
 	}
@@ -355,7 +372,11 @@ func collectDiff(ctx context.Context, repo commitRepo, kind, from, to string, en
 		return repositoryDiff(repo, kind)
 	}
 
-	raw, err, overflow := runDiffGit(ctx, repo.root, env, true, 64<<10, "diff", "--name-status", "-z", "--no-renames", from, to, "--")
+	scope := repo.scope
+	if scope == "" {
+		scope = "."
+	}
+	raw, err, overflow := runDiffGit(ctx, repo.root, env, true, 64<<10, "diff", "--name-status", "-z", "--no-renames", from, to, "--", scope)
 	if err != nil && !overflow {
 		return unavailableDiff(repo, kind)
 	}
