@@ -20,5 +20,6 @@ func (r CreateAttachmentRow) Attachment() Attachment {
 		TaskID:        r.TaskID,
 		Width:         r.Width,
 		Height:        r.Height,
+		ContentSha256: r.ContentSha256,
 	}
 }

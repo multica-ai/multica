@@ -3,12 +3,12 @@ WITH inserted AS (
   INSERT INTO attachment (
     id, workspace_id, issue_id, comment_id, chat_session_id, task_id, source_context_id,
     uploader_type, uploader_id, filename, url, content_type, size_bytes,
-    width, height
+    width, height, content_sha256
   )
   VALUES (
     $1, $2, sqlc.narg(issue_id), sqlc.narg(comment_id), sqlc.narg(chat_session_id), sqlc.narg(task_id), sqlc.narg(source_context_id),
     $3, $4, $5, $6, $7, $8,
-    sqlc.narg(width), sqlc.narg(height)
+    sqlc.narg(width), sqlc.narg(height), sqlc.narg(content_sha256)
   )
   RETURNING *
 ), bumped_issue AS (

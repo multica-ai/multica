@@ -1,0 +1,1 @@
+ALTER TABLE attachment DROP COLUMN IF EXISTS content_sha256;

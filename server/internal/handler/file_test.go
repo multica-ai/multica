@@ -5,8 +5,10 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
@@ -2002,5 +2004,57 @@ func TestIsDurablePublicURL(t *testing.T) {
 				t.Errorf("isDurablePublicURL(%q) = %v, want %v", tc.url, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestUploadFileRecordsContentSHA256(t *testing.T) {
+	origStorage := testHandler.Storage
+	testHandler.Storage = &mockStorage{}
+	defer func() { testHandler.Storage = origStorage }()
+
+	content := []byte("deliverable bytes")
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "sha-upload.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	part.Write(content)
+	writer.Close()
+
+	req := httptest.NewRequest("POST", "/api/upload-file", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	w := httptest.NewRecorder()
+	testHandler.UploadFile(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UploadFile: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var uploaded AttachmentResponse
+	if err := json.NewDecoder(w.Body).Decode(&uploaded); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM attachment WHERE id = $1`, uploaded.ID)
+	})
+	sum := sha256.Sum256(content)
+	want := hex.EncodeToString(sum[:])
+	if uploaded.ContentSHA256 != want {
+		t.Fatalf("upload content_sha256 = %q, want %q", uploaded.ContentSHA256, want)
+	}
+
+	get := withURLParam(newRequest("GET", "/api/attachments/"+uploaded.ID, nil), "id", uploaded.ID)
+	gw := httptest.NewRecorder()
+	testHandler.GetAttachmentByID(gw, get)
+	if gw.Code != http.StatusOK {
+		t.Fatalf("GetAttachmentByID: expected 200, got %d: %s", gw.Code, gw.Body.String())
+	}
+	var fetched AttachmentResponse
+	if err := json.NewDecoder(gw.Body).Decode(&fetched); err != nil {
+		t.Fatal(err)
+	}
+	if fetched.ContentSHA256 != want {
+		t.Fatalf("get content_sha256 = %q, want %q", fetched.ContentSHA256, want)
 	}
 }

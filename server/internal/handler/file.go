@@ -2,6 +2,8 @@ package handler
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -96,6 +98,10 @@ type AttachmentResponse struct {
 	// previous site-relative `/api/attachments/<id>/download` link only
 	// resolved when the document origin proxied /api to the API host.
 	MarkdownURL string `json:"markdown_url"`
+	// ContentSHA256 is the hex SHA-256 of the stored bytes, absent for rows
+	// that predate it or were written without the bytes in hand. A client
+	// may read a local copy instead of downloading only when its hash matches.
+	ContentSHA256 string `json:"content_sha256,omitempty"`
 	// Comment origin, set only by the issue attachment list: who posted the
 	// comment this file belongs to, and when. Absent for description files and
 	// for a comment that is gone. Lets the issue's file inventory label every
@@ -174,6 +180,9 @@ func (h *Handler) attachmentToResponse(a db.Attachment, mode attachmentURLMode) 
 		ContentType:  a.ContentType,
 		SizeBytes:    a.SizeBytes,
 		CreatedAt:    a.CreatedAt.Time.Format("2006-01-02T15:04:05Z07:00"),
+	}
+	if a.ContentSha256.Valid {
+		resp.ContentSHA256 = a.ContentSha256.String
 	}
 	// Installed clients recognize this API shape and fetch private image bytes
 	// with credentials. Keep unbound upload URLs intact for avatar setters.
@@ -476,6 +485,9 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			Filename:     header.Filename,
 			ContentType:  contentType,
 			SizeBytes:    int64(len(data)),
+			// Lets a client that still holds these bytes locally use its copy
+			// after the API has authorized the read.
+			ContentSha256: pgtype.Text{String: contentSHA256(data), Valid: true},
 		}
 
 		if issueID := r.FormValue("issue_id"); issueID != "" {
@@ -1656,4 +1668,10 @@ func (h *Handler) deleteS3Objects(ctx context.Context, urls []string) {
 		keys[i] = h.Storage.KeyFromURL(u)
 	}
 	h.Storage.DeleteKeys(ctx, keys)
+}
+
+// contentSHA256 is the hex SHA-256 recorded as attachment.content_sha256.
+func contentSHA256(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }
