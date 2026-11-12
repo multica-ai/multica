@@ -48,6 +48,12 @@ describe("concrete status columns", () => {
   it("'status is not' keeps the everyday board minus the excluded keys", () => {
     expect(visibleStatusKeys(["done", "cancelled"], ["backlog"], catalog, true)).toEqual([
       "todo", "in_progress", "in_review", "blocked", "awaiting_response",
+      // Fork note: "archived" (M-11) is a built-in column like any other
+      // terminal status — statusColumnKeys contributes it from
+      // BUILT_IN_STATUS_ORDER (it has no catalog row to filter on), so it
+      // stays on the board until the caller excludes it, same as done and
+      // cancelled are only gone because the caller named them above.
+      "archived",
     ]);
     // Excluding a key never brings back an archived column.
     expect(visibleStatusKeys(["done"], [], catalog, true)).not.toContain("old_review");
