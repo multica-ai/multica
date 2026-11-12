@@ -1423,6 +1423,57 @@ func TestLinkIssuePullRequest_ByURL(t *testing.T) {
 	}
 }
 
+// TestListIssuePullRequestSummaries: the workspace-wide read behind the issue
+// views' "Pull requests" display option returns each linked PR under its
+// issue, and drops a PR once it is unlinked.
+func TestListIssuePullRequestSummaries(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	secret := "pr-summaries-secret"
+	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
+	const installationID int64 = 30264009
+	created := prAutoCompleteTestIssue(t, "pr summaries", installationID)
+
+	firePRWebhook(t, secret, installationID, 61, created.Identifier+": first", "", "fix/first", "opened")
+	firePRWebhook(t, secret, installationID, 62, created.Identifier+": second", "", "fix/second", "merged")
+
+	summaries := func() map[int32]IssuePullRequestSummaryResponse {
+		t.Helper()
+		req := newRequest("GET", "/api/issues/pull-requests?workspace_id="+testWorkspaceID, nil)
+		w := testutil.Call(t, testHandler.ListIssuePullRequestSummaries, req).Want(http.StatusOK)
+		var body struct {
+			PullRequests []IssuePullRequestSummaryResponse `json:"pull_requests"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+			t.Fatalf("decode summaries: %v", err)
+		}
+		out := map[int32]IssuePullRequestSummaryResponse{}
+		for _, pr := range body.PullRequests {
+			if pr.IssueID == created.ID {
+				out[pr.Number] = pr
+			}
+		}
+		return out
+	}
+
+	got := summaries()
+	if len(got) != 2 {
+		t.Fatalf("summaries for issue = %+v, want #61 and #62", got)
+	}
+	if pr := got[61]; pr.State != "open" || pr.Provider != "github" || pr.RepoName != "widget" || pr.HtmlURL == "" {
+		t.Errorf("#61 = %+v, want an open github PR on widget with a URL", pr)
+	}
+	if pr := got[62]; pr.State != "merged" {
+		t.Errorf("#62 state = %q, want merged", pr.State)
+	}
+
+	unlinkPRForTest(t, created.ID, githubPRIDForTest(t, "widget", 61))
+	if got := summaries(); len(got) != 1 || got[62].Number != 62 {
+		t.Errorf("after unlinking #61: summaries = %+v, want only #62", got)
+	}
+}
+
 // setWorkspacePRMergeStatusForTest pins settings.pr_merge_status for the test
 // workspace and restores the previous settings afterwards. An empty value
 // removes the key (the Done default).
