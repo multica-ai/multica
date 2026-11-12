@@ -164,6 +164,7 @@ vi.mock("../../../common/actor-avatar", () => ({
 
 // Import after mocks.
 import { IssueActionsDropdown } from "../issue-actions-dropdown";
+import { shouldOpenRowMenu, useRowMenu } from "../../../common/point-menu";
 import {
   IssueActionsContextMenu,
   IssueContextMenuProvider,
@@ -705,6 +706,46 @@ describe("Quick actions (MUL-9093)", () => {
     await waitFor(() =>
       expect(toastErrorMock).toHaveBeenCalledWith(expect.stringContaining("“Review” runs as an agent")),
     );
+  });
+
+  function IssuePageHarness() {
+    const pageMenu = useRowMenu();
+    return (
+      <div>
+        <IssueActionsDropdown
+          issue={mockIssue}
+          rowMenu={pageMenu}
+          trigger={<button data-testid="trigger">Menu</button>}
+        />
+        <div
+          data-testid="page-body"
+          onContextMenu={(e) => {
+            if (!shouldOpenRowMenu(e, { deferToContent: true })) return;
+            pageMenu.openAtPointer(e);
+          }}
+        >
+          <p data-testid="blank">Body</p>
+          <a href="https://example.com" data-testid="link">Link</a>
+        </div>
+      </div>
+    );
+  }
+
+  it("opens the issue menu, quick actions included, on a right-click in the issue page body", async () => {
+    render(wrap(<IssuePageHarness />));
+    fireEvent.contextMenu(screen.getByTestId("blank"));
+
+    expect(await screen.findByText("Rename issue")).toBeInTheDocument();
+    fireEvent.click(await screen.findByText("Quick actions"));
+    expect(await screen.findByText("Review")).toBeInTheDocument();
+  });
+
+  it("leaves a right-click on a link in the issue page body to the link's own menu", async () => {
+    render(wrap(<IssuePageHarness />));
+    fireEvent.contextMenu(screen.getByTestId("link"));
+
+    await waitFor(() => expect(apiMocks.listQuickActions).not.toHaveBeenCalled());
+    expect(screen.queryByText("Rename issue")).not.toBeInTheDocument();
   });
 
   it("is absent when the workspace has no active quick actions", async () => {

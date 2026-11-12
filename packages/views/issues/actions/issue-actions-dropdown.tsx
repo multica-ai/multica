@@ -7,6 +7,7 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
 } from "@multica/ui/components/ui/dropdown-menu";
+import type { useRowMenu } from "../../common/point-menu";
 import { useIssueActions } from "./use-issue-actions";
 import {
   IssueActionsMenuItems,
@@ -25,6 +26,9 @@ interface IssueActionsDropdownProps {
   archivedInboxItemId?: string;
   /** Adds "Show in sidebar". */
   onShowInSidebar?: () => void;
+  /** Open state shared with a right-click surface, which opens this same
+   *  menu at the cursor via `openAtPointer`. */
+  rowMenu?: ReturnType<typeof useRowMenu>;
 }
 
 export function IssueActionsDropdown({
@@ -34,19 +38,30 @@ export function IssueActionsDropdown({
   onDeletedFallbackPath,
   archivedInboxItemId,
   onShowInSidebar,
+  rowMenu,
 }: IssueActionsDropdownProps) {
   const actions = useIssueActions(issue);
-  const [open, setOpen] = useState(false);
+  const [ownOpen, setOwnOpen] = useState(false);
+  const open = rowMenu ? rowMenu.menu.open : ownOpen;
+  const atPoint = !!rowMenu?.menu.point;
+  const close = () => {
+    if (rowMenu) rowMenu.setMenu((menu) => ({ ...menu, open: false }));
+    else setOwnOpen(false);
+  };
 
   return (
-    <DropdownMenu open={open} onOpenChange={setOpen}>
+    <DropdownMenu open={open} onOpenChange={rowMenu ? rowMenu.onOpenChange : setOwnOpen}>
       <DropdownMenuTrigger render={trigger} />
-      <DropdownMenuContent align={align} className="w-auto">
+      <DropdownMenuContent
+        align={atPoint ? "start" : align}
+        anchor={rowMenu?.anchor}
+        className="w-auto"
+      >
         <IssueActionsMenuItems
           issue={issue}
           actions={actions}
           primitives={dropdownPrimitives}
-          onClose={() => setOpen(false)}
+          onClose={close}
           onDeletedFallbackPath={onDeletedFallbackPath}
           archivedInboxItemId={archivedInboxItemId}
           onShowInSidebar={onShowInSidebar}
