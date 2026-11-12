@@ -108,7 +108,6 @@ class LogCollector {
   private quote: '"' | "'" | null = null;
   private escaped = false;
   private pem = false;
-  private pemSuffix = "";
   private previous = "";
   private chunkSuffix = "";
   private record = "";
@@ -175,38 +174,51 @@ class LogCollector {
         (match) => match.index + "-----BEGIN".length - 1 - prefixLength,
       ),
     );
-    this.chunkSuffix = joined.slice(-10);
+    this.chunkSuffix = joined.slice(-128);
     let start = 0;
-    for (let index = 0; index < text.length; index++) {
-      const character = text[index]!;
+    let previousIndex = -1;
+    // Ordinary text cannot change lexical state. Visit delimiters and the
+    // final N of BEGIN while retaining physical adjacency across chunks.
+    for (const match of text.matchAll(/["'\\\nN-]/g)) {
+      const index = match.index;
+      const character = match[0];
       if (this.quote) {
-        if (this.escaped) this.escaped = false;
+        if (this.escaped && index === previousIndex + 1) this.escaped = false;
         else if (character === "\\") this.escaped = true;
-        else if (character === this.quote) this.quote = null;
+        else {
+          this.escaped = false;
+          if (character === this.quote) this.quote = null;
+        }
       } else if (this.pem) {
-        this.pemSuffix = (this.pemSuffix + character).slice(-128);
         if (
           character === "-" &&
-          /-----END[A-Z\s]*PRIVATE KEY-----$/.test(this.pemSuffix)
+          /-----END[A-Z\s]*PRIVATE KEY-----$/.test(
+            joined.slice(
+              Math.max(0, prefixLength + index + 1 - 128),
+              prefixLength + index + 1,
+            ),
+          )
         ) {
           this.pem = false;
-          this.pemSuffix = "";
         }
       } else if (
         character === '"' ||
-        (character === "'" && /[\s=:]/.test(this.previous))
+        (character === "'" &&
+          /[\s=:]/.test(index === 0 ? this.previous : text[index - 1]!))
       ) {
         this.quote = character;
       } else if (begins.has(index)) {
         this.pem = true;
       }
-      this.previous = character;
+      previousIndex = index;
       if (character === "\n" && !this.quote && !this.pem) {
         this.append(text.slice(start, index + 1));
         this.collect();
         start = index + 1;
       }
     }
+    this.escaped = this.escaped && previousIndex === text.length - 1;
+    if (text.length) this.previous = text[text.length - 1]!;
     this.append(text.slice(start));
   }
 

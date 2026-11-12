@@ -725,6 +725,24 @@ describe("local diagnostic archive through its registered IPC handler", () => {
     expect(result.metadata.log.truncated).toBe(true);
   });
 
+  it("finishes a quoted credential after an escaped chunk boundary and a plain chunk", async () => {
+    const prefix = '12:00:00.000 INF token="';
+    const chunkBytes = 64 * 1024;
+    const continuation = "n" + "x".repeat(chunkBytes - 1);
+    await real.writeFile(
+      logPath,
+      prefix +
+        "x".repeat(chunkBytes - prefix.length - 1) +
+        "\\" +
+        continuation +
+        'chunkSecretCanary42"\n12:00:01.000 INF complete-marker\n',
+    );
+    const result = await exportArchive();
+    expect(result.log).toContain("12:00:01.000 INF complete-marker\n");
+    expect(result.archive.toString()).not.toContain("chunkSecretCanary42");
+    expect(result.metadata.log.status).toBe("available");
+  });
+
   it("marks an incomplete final record as truncated even in a small log", async () => {
     await real.appendFile(logPath, "12:00:01.000 INF unfinished");
     const result = await exportArchive();

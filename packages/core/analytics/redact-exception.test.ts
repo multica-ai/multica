@@ -8,6 +8,18 @@ describe("redactText", () => {
     );
   });
 
+  it("redacts complete email local parts with punctuation", () => {
+    expect(redactText("Contact .alice+tag%test-name_42@example.co.uk!")).toBe(
+      "Contact [redacted]!",
+    );
+  });
+
+  it("redacts long non-email words alongside email addresses", () => {
+    expect(
+      redactText(`alice@example.com ${"x".repeat(256 * 1024)} bob@example.com`),
+    ).toBe("[redacted] [redacted] [redacted]");
+  });
+
   it("strips URL query strings that may carry tokens, keeping host + path", () => {
     expect(
       redactText("fetch failed https://api.multica.ai/issues?token=abc123secret"),

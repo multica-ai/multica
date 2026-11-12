@@ -130,6 +130,8 @@ vi.mock("fs/promises", async (original) => {
 });
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
+let appRoutes: typeof import("../routes").appRoutes;
+
 beforeAll(async () => {
   Object.defineProperty(process, "contextIsolated", {
     configurable: true,
@@ -196,6 +198,7 @@ beforeAll(async () => {
     "https://diagnostics.invalid",
   );
   await import("../../../preload/index");
+  ({ appRoutes } = await import("../routes"));
 });
 afterEach(() => {
   cleanup();
@@ -293,7 +296,6 @@ describe("Desktop diagnostics through production preload and registered IPC", ()
   });
 
   it("registers the daemon diagnostics in the actual Desktop Settings route", async () => {
-    const { appRoutes } = await import("../routes");
     const settingsRoute = appRoutes[0]?.children
       ?.find((route) => route.path === ":workspaceSlug")
       ?.children?.find((route) => route.path === "settings");
