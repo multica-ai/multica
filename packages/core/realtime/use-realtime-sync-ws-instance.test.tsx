@@ -686,7 +686,7 @@ describe("useRealtimeSync — Table server membership invalidation", () => {
     const affected: QueryKey[] = [workingFacet(), workspaceWorkingAgentsKeys.list("ws-1", "issue")];
     // Test both server membership forms, including an explicit empty id set,
     // across rows, descriptors and ordinary facets such as status counts.
-    const filterCases: IssueTableQuerySpec["filters"][] = [{}, { working_only: false }, { working_only: true }, { working_issue_ids: [] }, { working_issue_ids: ["i1"] }];
+    const filterCases: IssueTableQuerySpec["filters"][] = [{}, { working_only: false }, { idle_only: false }, { idle_only: true }, { working_only: true }, { working_issue_ids: [] }, { working_issue_ids: ["i1"] }];
     for (const filters of filterCases) {
       const query = { ...spec, filters };
       const keys = [
@@ -694,10 +694,11 @@ describe("useRealtimeSync — Table server membership invalidation", () => {
         issueKeys.tableGroups("ws-1", query, { kind: "status" }),
         issueKeys.tableFacets("ws-1", { query, facets: [{ kind: "status" }] }),
       ];
-      (filters.working_only || filters.working_issue_ids ? affected : untouched).push(...keys);
+      (filters.working_only || filters.idle_only || filters.working_issue_ids ? affected : untouched).push(...keys);
     }
     // A saved view's sidebar preview filters on working_only server-side.
     affected.push(issueKeys.sidebar("ws-1", "view:v1", { table: { ...spec, filters: { working_only: true } } }, 5));
+    affected.push(issueKeys.sidebar("ws-1", "view:idle", { table: { ...spec, filters: { idle_only: true } } }, 5));
     untouched.push(issueKeys.sidebar("ws-1", "view:v2", { table: spec }, 5));
     untouched.push(issueKeys.sidebar("ws-1", "project:p1", { table: { ...spec, scope: { kind: "project", project_id: "p1" } } }, 5));
     for (const key of [...untouched, ...affected]) qc.setQueryData(key, []);

@@ -62,6 +62,29 @@ afterEach(() => {
 });
 
 describe("IssueFilterMenu agent status", () => {
+  it("switches between Idle and Running and clears the selection", async () => {
+    const store = renderFilterMenu();
+    const running = await openAgentStatus();
+    const idle = screen.getByRole("menuitemcheckbox", { name: "Idle" });
+    fireEvent.click(idle);
+    await waitFor(() => expect(store.getState()).toMatchObject({ agentIdleFilter: true, agentRunningFilter: false }));
+    expect(agentStatusRow().textContent).toBe("Agent statusisIdle");
+    fireEvent.click(running);
+    await waitFor(() => expect(store.getState()).toMatchObject({ agentIdleFilter: false, agentRunningFilter: true }));
+    fireEvent.click(idle);
+    fireEvent.click(idle);
+    await waitFor(() => expect(store.getState()).toMatchObject({ agentIdleFilter: false, agentRunningFilter: false }));
+  });
+
+  it("keeps both choices fixed when the saved view requires Idle", async () => {
+    const baseline = baselineFromQuery({ agentIdleFilter: true });
+    renderFilterMenu({ agentIdleFilter: true }, baseline);
+    const running = await openAgentStatus();
+    expect(running).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("menuitemcheckbox", { name: "Idle" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("menuitemcheckbox", { name: "Idle" })).toHaveAttribute("aria-disabled", "true");
+  });
+
   it("is a field like the others, right below Status", async () => {
     renderFilterMenu();
     fireEvent.click(screen.getByRole("button", { name: "Filter" }));

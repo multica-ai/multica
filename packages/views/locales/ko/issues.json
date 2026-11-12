@@ -196,6 +196,7 @@
     "relation_subscribed": "내가 구독 중",
     "section_agent_status": "에이전트 상태",
     "agent_status_running": "실행 중",
+    "agent_status_idle": "유휴",
     "section_read_state": "읽음 상태",
     "read_state_unread": "읽지 않음",
     "operator_label": "조건",

@@ -214,6 +214,7 @@
     "relation_subscribed": "Suscrito por mí",
     "section_agent_status": "Estado del agente",
     "agent_status_running": "En ejecución",
+    "agent_status_idle": "Inactivo",
     "section_read_state": "Estado de lectura",
     "read_state_unread": "Sin leer",
     "operator_label": "Coincidencia",
