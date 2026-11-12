@@ -8722,6 +8722,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Build the runtime brief and inject it into the provider-specific
 	// instruction file when supported.
 	runtimeBrief, err := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx)
+	runtimeBriefWritten := err == nil
 	if err != nil {
 		d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", err)
 	}
@@ -8923,6 +8924,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			return TaskResult{}, fmt.Errorf("prepare fresh OpenCode session after clock check: %w", briefErr)
 		} else {
 			runtimeBrief = freshBrief
+			runtimeBriefWritten = true
 		}
 		prompt = BuildPrompt(task, provider, promptOptions...)
 	}
@@ -9109,6 +9111,26 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"idle_watchdog", execOpts.IdleWatchdogTimeout,
 	)
 
+	// MUL-9013: record what this run is being handed, before it starts, so a
+	// run that dies early still has a receipt. Rebuilt for the cold retry.
+	receiptInput := contextReceiptInput{
+		Provider:             provider,
+		RuntimeVersion:       resolvedVersion,
+		CustomRuntime:        usesCustomProfileCommand,
+		Model:                model,
+		WorkDir:              env.WorkDir,
+		Prompt:               prompt,
+		RuntimeBrief:         runtimeBrief,
+		InlineBrief:          execOpts.SystemPrompt != "",
+		BriefWritten:         runtimeBriefWritten,
+		ResumedSession:       execOpts.ResumeSessionID != "",
+		MCPConfig:            mcpConfig,
+		TaskCtx:              taskCtx,
+		Skills:               env.SkillReceipts(provider, taskCtx.AgentSkills),
+		ExistingInstructions: execenv.ExistingRuntimeConfigContent(env.WorkDir, provider),
+	}
+	d.reportContextReceipt(ctx, task.ID, buildContextReceipt(receiptInput), taskLog)
+
 	// Shared across the resume-retry below so the retry's transcript rows
 	// keep ascending seq values for the same task.
 	var msgSeq atomic.Int32
@@ -9170,15 +9192,33 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		task.PriorSessionResumeUnavailable = true
 		execOpts.ResumeContinuityNotice = ""
 		taskCtx.PriorSessionResumed = false
-		if freshBrief, briefErr := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx); briefErr != nil {
+		runtimeBriefWritten = false
+		freshBrief, briefErr := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx)
+		if briefErr != nil {
 			taskLog.Warn("execenv: re-inject cold runtime config for fresh retry failed (non-fatal)", "error", briefErr)
 		} else {
 			runtimeBrief = freshBrief
+			runtimeBriefWritten = true
 			if providerNeedsInlineSystemPrompt(provider) {
 				execOpts.SystemPrompt = runtimeBrief
 			}
 		}
 		freshPrompt := BuildPrompt(task, provider, promptOptions...)
+
+		receiptInput.Prompt = freshPrompt
+		receiptInput.RuntimeBrief = freshBrief
+		receiptInput.InlineBrief = execOpts.SystemPrompt != ""
+		if receiptInput.InlineBrief {
+			// A failed file rewrite leaves the prior inline payload in use.
+			receiptInput.RuntimeBrief = execOpts.SystemPrompt
+		}
+		receiptInput.BriefWritten = runtimeBriefWritten
+		receiptInput.ResumedSession = false
+		receiptInput.FreshRetry = true
+		receiptInput.TaskCtx = taskCtx
+		receiptInput.Skills = env.SkillReceipts(provider, taskCtx.AgentSkills)
+		receiptInput.ExistingInstructions = execenv.ExistingRuntimeConfigContent(env.WorkDir, provider)
+		d.reportContextReceipt(ctx, task.ID, buildContextReceipt(receiptInput), taskLog)
 
 		retryResult, retryTools, retryErr := d.executeAndDrain(ctx, backend, freshPrompt, withPriorTaskUsage(execOpts, firstUsage), taskLog, task.ID, env.CodexHome, &msgSeq)
 		if retryErr != nil {

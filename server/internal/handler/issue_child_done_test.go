@@ -119,11 +119,6 @@ func countPendingTasksForAgent(t *testing.T, issueID, agentID string) int {
 		WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued', 'dispatched', 'running')`, issueID, agentID)
 }
 
-func countInboxItems(t *testing.T, recipientUserID, issueID string) int {
-	t.Helper()
-	return dbfx.Count(t, `SELECT count(*) FROM inbox_item WHERE recipient_id = $1 AND issue_id = $2`, recipientUserID, issueID)
-}
-
 // childDoneEntry is one timeline entry the rule wrote on the parent.
 type childDoneEntry struct {
 	Stage      *int32 `json:"stage"`

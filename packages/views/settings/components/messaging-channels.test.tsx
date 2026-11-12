@@ -388,6 +388,13 @@ describe("agent messaging channels", () => {
   );
 });
 
+const platformName = {
+  slack: "Slack",
+  dingtalk: "DingTalk",
+  wecom: "WeCom",
+  telegram: "Telegram",
+} as const;
+
 describe("shared connection dialog", () => {
   it("starts and cancels a WeChat QR login for the selected agent", async () => {
     const login = {
@@ -429,15 +436,13 @@ describe("shared connection dialog", () => {
         onOpenChange={vi.fn()}
       />,
     );
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled(),
-    );
-    expect(screen.getByRole("button", { name: "Feishu" })).toBeEnabled();
+    const feishu = await screen.findByRole("button", { name: "Feishu" });
+    await waitFor(() => expect(feishu).toBeEnabled());
     expect(screen.queryByRole("button", { name: "Lark" })).toBeNull();
     expect(
       screen.queryByRole("option", { name: "Lark (International)" }),
     ).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.click(feishu);
     await waitFor(() =>
       expect(api.beginLarkInstall).toHaveBeenCalledWith(
         "ws-1",
@@ -468,18 +473,40 @@ describe("shared connection dialog", () => {
         onOpenChange={vi.fn()}
       />,
     );
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled(),
-    );
-    expect(screen.getByLabelText("Connection method")).toHaveValue("scan");
-    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(screen.queryByLabelText("Connection method")).toBeNull();
+    const wecom = await screen.findByRole("button", { name: "WeCom" });
+    await waitFor(() => expect(wecom).toBeEnabled());
+    fireEvent.click(wecom);
     await screen.findByTestId("wecom-scan-starting");
+    expect(screen.getByLabelText("Connection method")).toHaveValue("scan");
     expect(api.beginWecomInstall).toHaveBeenCalledWith(
       "ws-1",
       "agent-1",
       expect.any(String),
     );
+    fireEvent.change(screen.getByLabelText("Connection method"), {
+      target: { value: "credentials" },
+    });
+    expect(screen.queryByTestId("wecom-scan-starting")).toBeNull();
+    expect(screen.getByLabelText("Bot ID")).toBeInTheDocument();
     expect(api.registerWecomBYO).not.toHaveBeenCalled();
+  });
+
+  it("starts the connection as soon as a platform is clicked", async () => {
+    show(
+      <ChannelConnectDialog
+        agents={[agent]}
+        initialAgent={agent}
+        open
+        onOpenChange={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
+    const telegram = await screen.findByRole("button", { name: "Telegram" });
+    await waitFor(() => expect(telegram).toBeEnabled());
+    fireEvent.click(telegram);
+    expect(screen.getByLabelText("Bot token")).toBeInTheDocument();
+    expect(screen.getByText("Connect Mika to Telegram.")).toBeInTheDocument();
   });
 
   it.each([
@@ -516,9 +543,11 @@ describe("shared connection dialog", () => {
           onOpenChange={close}
         />,
       );
-      const next = screen.getByRole("button", { name: "Continue" });
-      await waitFor(() => expect(next).toBeEnabled());
-      fireEvent.click(next);
+      const row = await screen.findByRole("button", {
+        name: new RegExp(`^${platformName[channel]}$`),
+      });
+      await waitFor(() => expect(row).toBeEnabled());
+      fireEvent.click(row);
       labels.forEach((label, index) =>
         fireEvent.change(screen.getByLabelText(label), {
           target: { value: index === 0 ? " first " : " second " },
@@ -551,10 +580,9 @@ describe("shared connection dialog", () => {
         onOpenChange={vi.fn()}
       />,
     );
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled(),
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    const wecom = await screen.findByRole("button", { name: "WeCom" });
+    await waitFor(() => expect(wecom).toBeEnabled());
+    fireEvent.click(wecom);
     fireEvent.change(screen.getByLabelText("Bot ID"), {
       target: { value: "bot" },
     });
@@ -579,13 +607,14 @@ describe("shared connection dialog", () => {
         onOpenChange={vi.fn()}
       />,
     );
-    expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
+    const telegram = await screen.findByRole("button", { name: "Telegram" });
+    expect(telegram).toBeDisabled();
     fireEvent.change(screen.getByLabelText("Agent"), {
       target: { value: "agent-2" },
     });
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled(),
-    );
+    await waitFor(() => expect(telegram).toBeEnabled());
+    fireEvent.click(telegram);
+    expect(screen.getByLabelText("Bot token")).toBeInTheDocument();
   });
 });
 

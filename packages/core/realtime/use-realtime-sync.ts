@@ -64,7 +64,8 @@ import {
 import { workspaceKeys, workspaceListOptions } from "../workspace/queries";
 import { isWorkspaceDeletePending } from "../workspace/pending-delete";
 import {
-  showWebNotification,
+  showSystemNotification,
+  systemNotificationSuppressedByFocus,
   type SystemNotificationPayload,
 } from "../platform/system-notification";
 import type { Workspace } from "../types/workspace";
@@ -123,6 +124,7 @@ import type {
   TaskFailedPayload,
   TaskCancelledPayload,
   ChatDonePayload,
+  ChatReplyNotificationPayload,
   ChatQuickActionsPayload,
   ChatQuickActionsPendingState,
   ChatQuickActionsFailureState,
@@ -587,7 +589,7 @@ export async function handleInboxNew(
   // the user is already looking at Multica, the inbox sidebar's unread
   // styling is enough — no need to interrupt with a banner. `desktopAPI`
   // is injected by the preload script; its absence (web app) skips silently.
-  if (typeof document !== "undefined" && document.hasFocus()) return;
+  if (systemNotificationSuppressedByFocus()) return;
   // Resolve the source workspace's slug once: it pins BOTH the mute check
   // and the deep link to the workspace the inbox item BELONGS to, never the
   // currently active one. Reading `getCurrentSlug()` here was the source of
@@ -632,21 +634,39 @@ export async function handleInboxNew(
     title: item.title,
     body: item.body ?? "",
   };
-  const desktopAPI = (
-    globalThis as unknown as {
-      desktopAPI?: {
-        showNotification?: (payload: SystemNotificationPayload) => void;
-      };
+  showSystemNotification(payload);
+}
+
+export function createChatReplyNotifier(
+  qc: QueryClient,
+  getUserId: () => string | undefined,
+): (payload: ChatReplyNotificationPayload) => Promise<void> {
+  const seen = new Set<string>();
+  return async (payload) => {
+    const messageId = payload.message_id;
+    const userId = getUserId();
+    if (!payload.workspace_id || !messageId || !payload.chat_session_id || !userId || seen.has(messageId)) return;
+    seen.add(messageId);
+    if (seen.size > 1_000) seen.delete(seen.values().next().value!);
+    if (systemNotificationSuppressedByFocus()) return;
+
+    const slug = await resolveInboxSourceSlug(qc, payload.workspace_id);
+    if (!slug) return;
+    try {
+      const { preferences } = await qc.ensureQueryData(notificationPreferenceOptions(payload.workspace_id, slug));
+      if (preferences.system_notifications === "muted" || preferences.chat_replies === "muted") return;
+    } catch {
+      // Match the existing default-on system-notification behavior.
     }
-  ).desktopAPI;
-  if (desktopAPI?.showNotification) {
-    // Desktop: native OS banner rendered by the Electron main process.
-    desktopAPI.showNotification(payload);
-    return;
-  }
-  // Web: the browser Notification API. No-op without granted permission or on
-  // SSR — the in-app inbox + unread badge still reflect the new item.
-  showWebNotification(payload);
+    if (getUserId() !== userId || systemNotificationSuppressedByFocus()) return;
+    showSystemNotification({
+      slug,
+      itemId: `chat:${messageId}`,
+      chatSessionId: payload.chat_session_id,
+      title: payload.title,
+      body: payload.body,
+    });
+  };
 }
 
 /**
@@ -1110,7 +1130,7 @@ export function useRealtimeSync(
       "subscriber:added", "subscriber:removed",
       "daemon:heartbeat",
       // Chat events are handled explicitly below; do not double-invalidate.
-      "chat:message", "chat:done", "chat:quick_actions", "chat:cancel_finalized", "chat:session_read",
+      "chat:message", "chat:done", "chat:reply_notification", "chat:quick_actions", "chat:cancel_finalized", "chat:session_read",
       "chat:session_created", "chat:session_deleted", "chat:session_updated",
       // task:message stays out of the prefix path because it fires per
       // streamed message during a long run — invalidating the snapshot on
@@ -1686,6 +1706,10 @@ export function useRealtimeSync(
       // by the task lifecycle handlers below (MUL-4159).
     });
 
+    const notifyChatReply = createChatReplyNotifier(qc, () => authStore.getState().user?.id);
+    const unsubChatReplyNotification = ws.on("chat:reply_notification", (p) => {
+      void notifyChatReply(p as ChatReplyNotificationPayload);
+    });
     const unsubChatDone = ws.on("chat:done", (p) => {
       const payload = p as ChatDonePayload;
       chatWsLogger.info("chat:done (global)", {
@@ -1969,6 +1993,7 @@ export function useRealtimeSync(
       unsubTaskMessage();
       unsubChatMessage();
       unsubChatDone();
+      unsubChatReplyNotification();
       unsubChatQuickActions();
       unsubChatCancelFinalized();
       unsubTaskQueued();

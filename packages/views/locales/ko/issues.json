@@ -992,6 +992,7 @@
     "stop_agent_run": "{{name}} 실행 중지",
     "relations": "관계",
     "create_sub_issue": "하위 태스크 만들기",
+    "quick_actions": "퀵 액션",
     "set_parent_issue": "상위 태스크 설정...",
     "remove_parent_issue": "상위 태스크 제거",
     "remove_parent_issue_success": "상위 태스크를 제거했습니다",

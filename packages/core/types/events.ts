@@ -60,6 +60,7 @@ export type WSEventType =
   | "issue_reaction:removed"
   | "chat:message"
   | "chat:done"
+  | "chat:reply_notification"
   | "chat:quick_actions"
   | "chat:cancel_finalized"
   | "chat:session_created"
@@ -478,9 +479,20 @@ export interface ChatMessageEventPayload {
   created_at: string;
 }
 
+/** Owner-only system alert, also received while connected to another workspace. */
+export interface ChatReplyNotificationPayload {
+  workspace_id: string;
+  chat_session_id: string;
+  message_id: string;
+  title: string;
+  body: string;
+}
+
 export interface ChatDonePayload {
   chat_session_id: string;
   task_id: string;
+  /** Optional OS-alert context for completed direct-chat replies. */
+  notification?: { workspace_id: string; title: string };
   /**
    * Server populates these from the freshly-persisted assistant ChatMessage
    * row so the WS handler can write it into the messages cache inline. Older
@@ -681,6 +693,7 @@ export interface WSEventPayloadMap {
   "activity:created": ActivityCreatedPayload;
   "chat:message": ChatMessageEventPayload;
   "chat:done": ChatDonePayload;
+  "chat:reply_notification": ChatReplyNotificationPayload;
   "chat:quick_actions": ChatQuickActionsPayload;
   "chat:cancel_finalized": ChatCancelFinalizedPayload;
   "chat:session_created": ChatSessionCreatedPayload;

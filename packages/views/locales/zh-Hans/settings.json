@@ -847,6 +847,9 @@
       "agent_activity": {
         "label": "智能体活动",
         "description": "智能体运行失败时"
+      },
+      "chat_replies": {
+        "label": "包含聊天回复"
       }
     },
     "system": {
@@ -855,7 +858,7 @@
     },
     "browser": {
       "label": "浏览器通知",
-      "hint": "允许当前浏览器为新的收件箱条目弹出通知横幅。",
+      "hint": "允许此浏览器为收件箱通知和聊天回复显示横幅。",
       "enable": "启用",
       "granted": "当前浏览器可以弹出通知横幅。",
       "denied": "已被浏览器拦截。请在浏览器设置中为本站点开启通知权限。",
@@ -1616,7 +1619,6 @@
     "last_message": "最近消息：{{time}}",
     "ask_admin": "找管理员",
     "unavailable": "暂不可连接",
-    "server_unavailable": "服务器尚未启用：{{platforms}}",
     "permissions_title": "谁可以连接",
     "owner_or_admin": "智能体所有者或工作区管理员",
     "admin_only": "仅工作区管理员",
@@ -1628,7 +1630,6 @@
     "platform_label": "平台",
     "region_label": "区域",
     "method_label": "连接方式",
-    "continue": "继续",
     "feishu": "飞书（中国）",
     "lark": "Lark（国际）",
     "setup_guide": "配置指南",

@@ -1631,18 +1631,6 @@ func pinNonCodexAgentsToMissingPaths(t *testing.T) {
 // CLI config Backends.OpenClaw overrides (issue #3875)
 // =============================================================================
 
-// writeCLIConfigForProfile is a minimal helper for the override tests:
-// stages a HOME, writes a config.json under the given profile (empty profile
-// = default), and returns the resolved path so tests can assert against it.
-func writeCLIConfigForProfile(t *testing.T, profile string, cfg cli.CLIConfig) {
-	t.Helper()
-	tmp := t.TempDir()
-	redirectTestHome(t, tmp)
-	if err := cli.SaveCLIConfigForProfile(cfg, profile); err != nil {
-		t.Fatalf("write cli config: %v", err)
-	}
-}
-
 // TestApplyOpenclawOverride_DoesNothingWhenNil verifies the early-return
 // path. A daemon started with no override should not Setenv anything; the
 // existing probe / spawn flow remains undisturbed.
