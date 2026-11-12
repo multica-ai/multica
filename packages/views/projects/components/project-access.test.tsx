@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
-import type { Project, MemberWithUser } from "@multica/core/types";
+import type { Agent, Project, MemberWithUser } from "@multica/core/types";
 import { EMPTY_PROJECT } from "@multica/core/api/schemas";
 import { renderWithI18n } from "../../test/i18n";
 import { ProjectAccessControl, ProjectAccessDraftPicker } from "./project-access";
@@ -47,6 +47,81 @@ beforeEach(() => {
   setApiInstance(api as unknown as ApiClient);
 });
 afterEach(() => { qc.clear(); });
+
+function agent(name: string, ownerId: string | null, overrides: Partial<Agent> = {}) {
+  return { id: name, name, owner_id: ownerId, archived_at: null, permission_mode: "public_to", invocation_targets: [{ target_type: "workspace", target_id: null }], ...overrides };
+}
+
+it("shows a read-only list of agents whose owners have project access, including implicit owner/admin access", async () => {
+  ids = ["lead"];
+  api.listMembers.mockResolvedValue([...members, { ...members[0], id: "5", user_id: "admin", name: "Admin", role: "admin" }]);
+  api.listAgents.mockResolvedValue([
+    agent("Owner agent", "owner"), agent("Admin agent", "admin"), agent("Lead agent", "lead"),
+    agent("Outside agent", "outsider"), agent("Ownerless agent", null), agent("Former member agent", "former"),
+    agent("Archived agent", "lead", { archived_at: "2026-11-12" }),
+    agent("Personal agent", "lead", { permission_mode: "private", invocation_targets: [] }),
+  ]);
+  const user = userEvent.setup();
+  renderControl();
+  await user.click(screen.getByRole("button", { name: "Access" }));
+  const trigger = await screen.findByRole("button", { name: "View available agents · 3" });
+  expect(screen.getByText("Agent access follows its owner.")).toBeVisible();
+  expect(screen.queryByText("Owner agent")).not.toBeInTheDocument();
+  await user.click(trigger);
+  const list = screen.getByRole("list");
+  expect(within(list).getAllByRole("listitem")).toHaveLength(3);
+  expect(within(list).getByText("Owner · owner")).toBeVisible();
+  expect(within(list).getByText("Admin · admin")).toBeVisible();
+  expect(within(list).getByText("Lead agent")).toBeVisible();
+  expect(within(list).queryByRole("button")).not.toBeInTheDocument();
+  expect(screen.getByText("3 other agents' owners don't have project access.")).toBeVisible();
+  for (const name of ["Outside agent", "Ownerless agent", "Former member agent", "Archived agent", "Personal agent"]) {
+    expect(screen.queryByText(name)).not.toBeInTheDocument();
+  }
+  expect(api.addProjectMembers).not.toHaveBeenCalled();
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(screen.queryByRole("list")).not.toBeInTheDocument());
+  expect(screen.getByRole("dialog", { name: "Access to Secret Plan" })).toBeVisible();
+  expect(trigger).toHaveFocus();
+});
+
+it("updates agent availability after the owner's membership is added and removed", async () => {
+  api.listAgents.mockResolvedValue([agent("Outside agent", "outsider")]);
+  const user = userEvent.setup();
+  renderControl();
+  await user.click(screen.getByRole("button", { name: "Access" }));
+  await screen.findByRole("button", { name: "View available agents · 0" });
+  await user.click(screen.getByRole("button", { name: "Add workspace member" }));
+  await user.click(screen.getByRole("option", { name: /Outside Person/ }));
+  await screen.findByRole("button", { name: "View available agents · 1" });
+  await user.click(screen.getByRole("button", { name: "Remove Outside Person" }));
+  await screen.findByRole("button", { name: "View available agents · 0" });
+});
+
+it("keeps access controls usable while agents load, and supports retry and an empty list", async () => {
+  let rejectAgents!: (reason: Error) => void;
+  api.listAgents.mockReturnValueOnce(new Promise((_resolve, reject) => { rejectAgents = reject; }));
+  const user = userEvent.setup();
+  renderControl();
+  await user.click(screen.getByRole("button", { name: "Access" }));
+  await user.click(await screen.findByRole("button", { name: "View available agents" }));
+  expect(screen.getByRole("status")).toHaveTextContent("Loading...");
+  expect(screen.getByRole("button", { name: "Add workspace member" })).toBeEnabled();
+  rejectAgents(new Error("Agent list unavailable"));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Could not load agents.");
+  await user.click(screen.getByRole("button", { name: "Retry" }));
+  expect(await screen.findByText("No agents available.")).toBeVisible();
+  expect(screen.getByRole("button", { name: "View available agents · 0" })).toBeVisible();
+});
+
+it("does not show the agent hint or load agents for workspace-visible projects", async () => {
+  const user = userEvent.setup();
+  renderControl({ ...project, visibility: "workspace" });
+  await user.click(screen.getByRole("button", { name: "Access" }));
+  await screen.findByText(/owners and admins always have access/);
+  expect(screen.queryByText("Agent access follows its owner.")).not.toBeInTheDocument();
+  expect(api.listAgents).not.toHaveBeenCalled();
+});
 
 it("loads the member list, finds people by email, and adds and removes only after success", async () => {
   const user = userEvent.setup();

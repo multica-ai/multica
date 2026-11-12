@@ -204,6 +204,13 @@
     }
   },
   "access": {
+    "agent_notice": "Agent access follows its owner.",
+    "view_agents": "View available agents",
+    "agents_title": "Agents available in this project",
+    "agents_load_failed": "Could not load agents.",
+    "no_agents": "No agents available.",
+    "unavailable_agents_one": "{{count}} other agent's owner doesn't have project access.",
+    "unavailable_agents_other": "{{count}} other agents' owners don't have project access.",
     "label": "Access",
     "title": "Access to {{title}}",
     "description": "Controls who can see this project and its issues, comments, and attachments.",
