@@ -185,6 +185,12 @@
     "export_svg": "Скачать SVG",
     "export_source": "Скачать .mmd"
   },
+  "details_block": {
+    "summary_default": "Подробнее",
+    "summary_aria_label": "Заголовок",
+    "body_placeholder": "Содержимое (Markdown)",
+    "body_aria_label": "Содержимое раздела (Markdown)"
+  },
   "table": {
     "reset_widths": "Сбросить ширину столбцов",
     "expand": "Развернуть таблицу",

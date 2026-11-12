@@ -145,6 +145,14 @@
     "long_offline": {
       "label": "長期離線",
       "description": "已斷線超過 6 天。如果此機器不會再恢復上線，請將其 AI 代理改綁到其他執行時，或刪除此執行時。"
+    },
+    "on_hold": {
+      "label": "暫停中",
+      "resumes_in": "{{time}}恢復",
+      "tooltip": "此執行環境已暫停 — 任務已排隊，將在恢復後自動執行。",
+      "resume_button": "恢復",
+      "resume_toast": "執行環境已恢復",
+      "resume_failed": "恢復執行環境失敗"
     }
   },
   "detail": {

@@ -137,7 +137,8 @@
     "in_review": "En revisión",
     "done": "Hecho",
     "blocked": "Bloqueado",
-    "cancelled": "Cancelado"
+    "cancelled": "Cancelado",
+    "archived": "Archivado"
   },
   "status_category": {
     "unstarted": "Sin empezar",
