@@ -1,5 +1,4 @@
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { expect, test, type Response } from "@playwright/test";
 import { SUPPORTED_LOCALES } from "../packages/core/i18n/types";
 
@@ -13,7 +12,10 @@ function stringsIn(value: unknown): string[] {
 // each dictionary identifies its downloaded JS even when chunk names change.
 const markers = SUPPORTED_LOCALES.map((locale) => {
   const namespace: unknown = JSON.parse(
-    readFileSync(resolve("packages/views/locales", locale, "runtimes.json"), "utf8"),
+    readFileSync(
+      new URL(`../packages/views/locales/${locale}/runtimes.json`, import.meta.url),
+      "utf8",
+    ),
   );
   const marker = stringsIn(namespace)
     .filter((text) => text.length > 30 && !/["'\\\n\r]/.test(text))
