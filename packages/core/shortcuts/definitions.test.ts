@@ -115,6 +115,12 @@ describe("keyboard shortcut definitions", () => {
     expect(shortcutMatchesEvent(chord, keyEvent("j", { metaKey: true }), "macos")).toBe(false);
   });
 
+  it("ships the chat expand shortcut unbound but usable from the chat composer", () => {
+    const action = SHORTCUT_ACTION_BY_ID.toggleChatExpand;
+    expect(action.defaultShortcut).toBeNull();
+    expect(action.allowInEditable).toBe(true);
+  });
+
   it("keeps the plain inbox archive key out of editable controls", () => {
     expect(SHORTCUT_ACTION_BY_ID.archiveInboxItem.allowInEditable).toBe(false);
   });
