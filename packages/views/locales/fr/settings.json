@@ -1403,7 +1403,8 @@
   },
   "desktop": {
     "tabs": {
-      "updates": "Mises à jour"
+      "updates": "Mises à jour",
+      "network": "Réseau"
     },
     "tab_bar": {
       "pin": "Épingler l'onglet",
@@ -1504,6 +1505,24 @@
       "reconnect_failed": "Impossible de reconnecter le démon",
       "try_again_moment": "Veuillez réessayer dans un instant.",
       "try_again": "Veuillez réessayer."
+    },
+    "network": {
+      "title": "Réseau",
+      "proxy_title": "Proxy HTTP",
+      "proxy_description": "Acheminer tout le trafic réseau via un proxy HTTP. Nécessaire dans certains réseaux d'entreprise qui bloquent les méthodes non-GET.",
+      "proxy_placeholder": "http://proxy.example.com:8080",
+      "no_proxy_title": "Sans proxy",
+      "no_proxy_description": "Liste d'hôtes ou de domaines séparés par des virgules qui contournent le proxy (ex : internal.corp, .local). localhost est toujours exclu.",
+      "no_proxy_placeholder": "internal.corp, .corp.local, myhost",
+      "proxy_saved": "Paramètres de proxy enregistrés",
+      "proxy_save_failed": "Échec de l'enregistrement des paramètres de proxy",
+      "test_button": "Tester la connexion",
+      "testing": "Test en cours…",
+      "test_success": "Connexion proxy réussie",
+      "test_failed": "Échec de la connexion proxy",
+      "save_button": "Enregistrer",
+      "restart_notice_title": "Application des modifications",
+      "restart_notice": "L’enregistrement demande confirmation dans une boîte de dialogue native, puis redémarre le daemon local en cours. Les connexions WebSocket existantes peuvent nécessiter un redémarrage de l’application. Les exécutions actives peuvent être interrompues. Les daemons distants ne sont pas affectés."
     }
   },
   "members": {

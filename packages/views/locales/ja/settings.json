@@ -1392,7 +1392,8 @@
   },
   "desktop": {
     "tabs": {
-      "updates": "アップデート"
+      "updates": "アップデート",
+      "network": "ネットワーク"
     },
     "tab_bar": {
       "pin": "タブをピン留め",
@@ -1489,6 +1490,24 @@
       "reconnect_failed": "デーモンに再接続できませんでした",
       "try_again_moment": "しばらくしてからもう一度お試しください。",
       "try_again": "もう一度お試しください。"
+    },
+    "network": {
+      "title": "ネットワーク",
+      "proxy_title": "HTTP プロキシ",
+      "proxy_description": "すべてのネットワークトラフィックを HTTP プロキシ経由でルーティングします。GET 以外のメソッドをブロックする企業ネットワークで必要です。",
+      "proxy_placeholder": "http://proxy.example.com:8080",
+      "no_proxy_title": "プロキシ除外",
+      "no_proxy_description": "プロキシを経由しないホストまたはドメインをカンマ区切りで入力（例: internal.corp, .local）。localhost は常に除外されます。",
+      "no_proxy_placeholder": "internal.corp, .corp.local, myhost",
+      "proxy_saved": "プロキシ設定を保存しました",
+      "proxy_save_failed": "プロキシ設定の保存に失敗しました",
+      "test_button": "接続テスト",
+      "testing": "テスト中…",
+      "test_success": "プロキシ接続成功",
+      "test_failed": "プロキシ接続失敗",
+      "save_button": "保存",
+      "restart_notice_title": "変更の適用",
+      "restart_notice": "保存時にネイティブダイアログで確認を求めた後、稼働中のローカルデーモンを再起動します。既存の WebSocket 接続にはアプリの再起動が必要な場合があります。進行中の実行が中断される場合があります。リモートデーモンには影響しません。"
     }
   },
   "members": {

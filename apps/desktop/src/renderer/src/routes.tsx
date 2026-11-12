@@ -30,9 +30,10 @@ import { InboxPage } from "@multica/views/inbox";
 import { ChatPage } from "@multica/views/chat";
 import { SettingsPage } from "@multica/views/settings";
 import { useT } from "@multica/views/i18n";
-import { Download, Server } from "@multica/ui/icons";
+import { Download, Globe, Server } from "@multica/ui/icons";
 import { DaemonSettingsTab } from "./components/daemon-settings-tab";
 import { UpdatesSettingsTab } from "./components/updates-settings-tab";
+import { NetworkSettingsTab } from "./components/network-settings-tab";
 import { WorkspaceRouteLayout } from "./components/workspace-route-layout";
 import { DesktopRouteErrorPage } from "./components/route-error-page";
 import { IssueViewUrlSync } from "./platform/issue-view-tabs";
@@ -56,6 +57,12 @@ function DesktopSettingsRoute() {
           label: t(($) => $.desktop.daemon.title),
           icon: Server,
           content: <DaemonSettingsTab />,
+        },
+        {
+          value: "network",
+          label: t(($) => $.desktop.tabs.network),
+          icon: Globe,
+          content: <NetworkSettingsTab />,
         },
         {
           value: "updates",

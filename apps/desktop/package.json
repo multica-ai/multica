@@ -78,6 +78,7 @@
     "jsdom": "catalog:",
     "tailwindcss": "catalog:",
     "typescript": "catalog:",
+    "undici": "^7.24.5",
     "vitest": "catalog:"
   }
 }

@@ -167,6 +167,15 @@ interface DesktopAPI {
   /** Listen for Cmd/Ctrl+Shift+N new-window requests. Returns an
    *  unsubscribe function. */
   onNewWindowShortcut: (callback: () => void) => () => void;
+  /** Read / write / test the HTTP proxy URL stored in desktop.json. */
+  proxy: {
+    get: () => Promise<{ proxyUrl: string | null; noProxy: string | null }>;
+    set: (
+      url: string | null,
+      noProxy: string | null,
+    ) => Promise<{ ok: boolean; error?: string; cancelled?: boolean }>;
+    test: (url: string) => Promise<{ ok: boolean; error?: string }>;
+  };
 }
 
 type DaemonReauthResult =

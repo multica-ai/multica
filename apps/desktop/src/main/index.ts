@@ -7,6 +7,7 @@ import {
   nativeImage,
   Notification,
   screen,
+  session,
 } from "electron";
 import { homedir } from "os";
 import { join } from "path";
@@ -18,6 +19,7 @@ import {
   prepareDaemonForUpdateInstall,
   resumeDaemonAfterAbortedUpdateInstall,
   setupDaemonManager,
+  restartDaemonForProxyChange,
 } from "./daemon-manager";
 import { setupLocalDirectory } from "./local-directory";
 import { setupThemeFolder } from "./theme-folder";
@@ -30,7 +32,10 @@ import { installNavigationGuard } from "./navigation-guard";
 import { installWindowForegroundEvents, windowForeground } from "./window-foreground";
 import { createRendererWebPreferences } from "./renderer-web-preferences";
 import { getAppVersion } from "./app-version";
-import { loadRuntimeConfig } from "./runtime-config-loader";
+import { loadRuntimeConfig, updateDesktopConfig } from "./runtime-config-loader";
+import { setProxyUrl, getProxyUrl, getNoProxy } from "./proxy-fetch";
+import { apiHealthUrl } from "../shared/runtime-config";
+import { changeProxySettings, createProxyEnvironment, maskProxyUrl, resolveProxyUrl } from "./proxy-settings";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
 import {
   RENDERER_ROUTE_CONTEXT_CHANNEL,
@@ -153,7 +158,24 @@ if (process.platform !== "win32") {
 }
 
 const PROTOCOL = "multica";
+const proxyEnvironment = createProxyEnvironment(process.env);
 const devLog = is.dev ? createBestEffortDevLog() : undefined;
+
+// Build Chromium proxyBypassRules from user-configured noProxy.
+// Always includes localhost variants and <local> (intranet wildcard).
+function buildChromiumBypassRules(noProxy: string | null): string {
+  const base = "localhost,127.0.0.1,::1,<local>";
+  if (!noProxy) return base;
+  const extra = noProxy
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .join(",");
+  return extra ? `${base},${extra}` : base;
+}
+
+// Build NO_PROXY env var for Go daemon / Node.js child processes.
+// Always includes localhost variants; appends user-configured hosts.
 
 // Where the main process parks a freeze/crash breadcrumb until the next
 // renderer boot flushes it to telemetry. Lives in userData so it survives a
@@ -791,6 +813,20 @@ if (!gotTheLock) {
       },
     });
 
+    // Apply proxy from runtime config (desktop.json `proxyUrl`).
+    // session.setProxy must be called after app.whenReady() — we are
+    // inside the ready handler so that constraint is satisfied.
+    const config = runtimeConfigResult.ok ? runtimeConfigResult.config : null;
+    const proxy = config?.proxyUrl ?? null;
+    const noProxy = config?.noProxy ?? null;
+    setProxyUrl(proxy, noProxy);
+    if (proxy) {
+      const bypassRules = buildChromiumBypassRules(noProxy);
+      await session.defaultSession.setProxy({ proxyRules: proxy, proxyBypassRules: bypassRules });
+      // Propagate to Go daemon process via environment.
+      proxyEnvironment.set(proxy, noProxy);
+    }
+
     electronApp.setAppUserModelId(
       is.dev ? "ai.multica.desktop.dev" : "ai.multica.desktop",
     );
@@ -874,7 +910,83 @@ if (!gotTheLock) {
     // boot. If desktop.json exists but is invalid, renderer receives the
     // blocking error and must not silently fall back to the cloud defaults.
     ipcMain.on("runtime-config:get", (event) => {
-      event.returnValue = runtimeConfigResult;
+      if (!BrowserWindow.fromWebContents(event.sender)) return;
+      event.returnValue = runtimeConfigResult.ok
+        ? { ok: true, config: { ...runtimeConfigResult.config,
+          proxyUrl: maskProxyUrl(runtimeConfigResult.config.proxyUrl ?? null) ?? undefined } }
+        : runtimeConfigResult;
+    });
+
+    // Proxy IPC — read/write/test the desktop.json `proxyUrl` field.
+    ipcMain.handle("proxy:get", (event) => {
+      if (!BrowserWindow.fromWebContents(event.sender)) throw new Error("Invalid sender");
+      return { proxyUrl: maskProxyUrl(getProxyUrl()), noProxy: getNoProxy() };
+    });
+
+    ipcMain.handle("proxy:set", async (event, url: unknown, noProxy: unknown) => {
+      const source = BrowserWindow.fromWebContents(event.sender);
+      if (!source) return { ok: false, error: "Invalid sender" };
+      if (noProxy !== null && typeof noProxy !== "string") return { ok: false, error: "Invalid bypass list" };
+      try {
+        return await changeProxySettings({
+          proxyUrl: resolveProxyUrl(url, getProxyUrl()),
+          noProxy: typeof noProxy === "string" ? noProxy.trim() || null : null,
+        }, {
+          current: { proxyUrl: getProxyUrl(), noProxy: getNoProxy() },
+          confirm: async (target) => {
+            const result = await dialog.showMessageBox(source, {
+              type: "warning", title: "Change network proxy?",
+              message: `Apply network proxy: ${target}?`,
+              detail: "This redirects application traffic and restarts the running local daemon. Active runs may be interrupted. Remote daemons are not changed.",
+              buttons: ["Cancel", "Apply and restart"], defaultId: 0, cancelId: 0,
+            });
+            return result.response === 1;
+          },
+          persist: async (next) => {
+            const result = await updateDesktopConfig({ proxyUrl: next.proxyUrl ?? undefined, noProxy: next.noProxy ?? undefined });
+            if (!result.ok) return { ok: false, error: "Unable to save proxy configuration" };
+            if (runtimeConfigResult.ok) {
+              runtimeConfigResult = { ok: true, config: { ...runtimeConfigResult.config,
+                proxyUrl: next.proxyUrl ?? undefined, noProxy: next.noProxy ?? undefined } };
+            }
+            return { ok: true };
+          },
+          apply: async (next) => {
+            await session.defaultSession.setProxy(next.proxyUrl
+              ? { proxyRules: next.proxyUrl, proxyBypassRules: buildChromiumBypassRules(next.noProxy) }
+              : { mode: "system" });
+            await session.defaultSession.closeAllConnections();
+            setProxyUrl(next.proxyUrl, next.noProxy);
+            proxyEnvironment.set(next.proxyUrl, next.noProxy);
+          },
+          restart: restartDaemonForProxyChange,
+        });
+      } catch {
+        return { ok: false, error: "Unable to apply proxy settings" };
+      }
+    });
+
+    ipcMain.handle("proxy:test", async (event, url: unknown) => {
+      if (!BrowserWindow.fromWebContents(event.sender)) return { ok: false, error: "Invalid sender" };
+      let agent: import("undici").ProxyAgent | undefined;
+      try {
+        const { ProxyAgent, fetch: undiciFetch } = await import("undici");
+        const proxyUrl = resolveProxyUrl(url, getProxyUrl());
+        if (!proxyUrl) return { ok: false, error: "A proxy URL is required" };
+        agent = new ProxyAgent(proxyUrl);
+        const healthUrl = apiHealthUrl(
+          runtimeConfigResult.ok ? runtimeConfigResult.config.apiUrl : "https://api.multica.ai",
+        );
+        const res = await undiciFetch(healthUrl, {
+          dispatcher: agent,
+          signal: AbortSignal.timeout(10_000),
+        } as Parameters<typeof undiciFetch>[1]);
+        return { ok: res.ok };
+      } catch {
+        return { ok: false, error: "Proxy connection failed" };
+      } finally {
+        await agent?.close();
+      }
     });
 
     ipcMain.on(RENDERER_ROUTE_CONTEXT_CHANNEL, (event, context: unknown) => {

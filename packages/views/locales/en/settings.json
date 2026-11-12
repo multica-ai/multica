@@ -1403,7 +1403,8 @@
   },
   "desktop": {
     "tabs": {
-      "updates": "Updates"
+      "updates": "Updates",
+      "network": "Network"
     },
     "tab_bar": {
       "pin": "Pin tab",
@@ -1504,6 +1505,24 @@
       "reconnect_failed": "Couldn't reconnect the daemon",
       "try_again_moment": "Please try again in a moment.",
       "try_again": "Please try again."
+    },
+    "network": {
+      "title": "Network",
+      "proxy_title": "HTTP Proxy",
+      "proxy_description": "Route all network traffic through an HTTP proxy. Required in some corporate networks that block non-GET methods.",
+      "proxy_placeholder": "http://proxy.example.com:8080",
+      "no_proxy_title": "No Proxy",
+      "no_proxy_description": "Comma-separated list of hosts or domains that bypass the proxy (e.g. internal.corp, .local). localhost is always excluded.",
+      "no_proxy_placeholder": "internal.corp, .corp.local, myhost",
+      "proxy_saved": "Proxy settings saved",
+      "proxy_save_failed": "Failed to save proxy settings",
+      "test_button": "Test Connection",
+      "testing": "Testing…",
+      "test_success": "Proxy connection successful",
+      "test_failed": "Proxy connection failed",
+      "save_button": "Save",
+      "restart_notice_title": "Applying changes",
+      "restart_notice": "Saving asks for confirmation in a native dialog, then restarts the running local daemon. Existing WebSocket connections may require an app restart. Active runs may be interrupted. Remote daemons are not affected."
     }
   },
   "members": {

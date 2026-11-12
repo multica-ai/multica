@@ -1,10 +1,12 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import {
+  apiHealthUrl,
   deriveWsUrl,
   parseRuntimeConfig,
   runtimeConfigFromDevEnv,
 } from "./runtime-config";
+import { setProxyUrl, shouldBypassProxy } from "../main/proxy-fetch";
 
 describe("runtime config", () => {
   it("derives https/wss compatible URLs from apiUrl", () => {
@@ -138,5 +140,23 @@ describe("runtime config", () => {
       wsUrl: "wss://api.test.multica.ai/ws",
       appUrl: "https://staging.multica.ai",
     });
+  });
+
+  it("builds a health-check URL from the configured apiUrl", () => {
+    expect(apiHealthUrl("https://api.test.multica.ai")).toBe(
+      "https://api.test.multica.ai/health",
+    );
+    expect(apiHealthUrl("http://localhost:8080")).toBe(
+      "http://localhost:8080/health",
+    );
+  });
+
+  it("bypasses the proxy for configured noProxy hosts and domains", () => {
+    setProxyUrl("http://proxy.example.com:8080", "localhost,.corp.local,myservice.local");
+    expect(shouldBypassProxy("http://localhost:3000")).toBe(true);
+    expect(shouldBypassProxy("https://api.corp.local")).toBe(true);
+    expect(shouldBypassProxy("https://myservice.local")).toBe(true);
+    expect(shouldBypassProxy("https://example.com")).toBe(false);
+    setProxyUrl(null, null);
   });
 });

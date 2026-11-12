@@ -3,6 +3,21 @@ export interface RuntimeConfig {
   apiUrl: string;
   wsUrl: string;
   appUrl: string;
+  /**
+   * Optional HTTP proxy URL (e.g. "http://proxy.example.com:8080").
+   * When set, both the main-process Node.js fetch (via proxyFetch) and the
+   * renderer Chromium network stack (via session.setProxy) route traffic
+   * through this proxy. Required in corporate networks that block non-GET
+   * methods. See MUL-PROXY.
+   */
+  proxyUrl?: string;
+  /**
+   * Optional comma-separated list of hosts/domains that bypass the proxy
+   * (e.g. "internal.corp,.corp.local,myhost"). Maps to NO_PROXY env var
+   * for the Go daemon and Chromium proxyBypassRules. localhost/127.0.0.1
+   * are always appended automatically.
+   */
+  noProxy?: string;
 }
 
 export interface RuntimeConfigError {
@@ -31,6 +46,8 @@ export interface RuntimeConfigEnv {
   apiUrl?: string;
   wsUrl?: string;
   appUrl?: string;
+  proxyUrl?: string;
+  noProxy?: string;
 }
 
 export function runtimeConfigFromDevEnv(env: RuntimeConfigEnv): RuntimeConfig {
@@ -47,6 +64,8 @@ export function runtimeConfigFromDevEnv(env: RuntimeConfigEnv): RuntimeConfig {
     appUrl: env.appUrl
       ? normalizeHttpUrl(env.appUrl, "VITE_APP_URL")
       : deriveDevAppUrl(apiUrl),
+    ...(env.proxyUrl ? { proxyUrl: normalizeProxyUrl(env.proxyUrl) } : {}),
+    ...(env.noProxy ? { noProxy: env.noProxy } : {}),
   };
 }
 
@@ -72,6 +91,8 @@ export function parseRuntimeConfig(raw: string): RuntimeConfig {
   const apiUrl = requiredString(obj.apiUrl, "apiUrl");
   const appUrl = optionalString(obj.appUrl, "appUrl");
   const wsUrl = optionalString(obj.wsUrl, "wsUrl");
+  const proxyUrl = optionalString(obj.proxyUrl, "proxyUrl");
+  const noProxy = optionalString(obj.noProxy, "noProxy");
 
   const normalizedApiUrl = normalizeHttpUrl(apiUrl, "apiUrl");
   return {
@@ -79,6 +100,8 @@ export function parseRuntimeConfig(raw: string): RuntimeConfig {
     apiUrl: normalizedApiUrl,
     wsUrl: wsUrl ? normalizeWsUrl(wsUrl, "wsUrl") : deriveWsUrl(normalizedApiUrl),
     appUrl: appUrl ? normalizeHttpUrl(appUrl, "appUrl") : deriveAppUrl(normalizedApiUrl),
+    ...(proxyUrl ? { proxyUrl: normalizeProxyUrl(proxyUrl) } : {}),
+    ...(noProxy ? { noProxy } : {}),
   };
 }
 
@@ -88,6 +111,14 @@ export function deriveWsUrl(apiUrl: string): string {
   else if (url.protocol === "http:") url.protocol = "ws:";
   else throw new Error("apiUrl must use http or https");
   url.pathname = joinPath(url.pathname, "/ws");
+  url.search = "";
+  url.hash = "";
+  return trimTrailingSlash(url.toString());
+}
+
+export function apiHealthUrl(apiUrl: string): string {
+  const url = new URL(apiUrl);
+  url.pathname = joinPath(url.pathname, "/health");
   url.search = "";
   url.hash = "";
   return trimTrailingSlash(url.toString());
@@ -137,6 +168,14 @@ function optionalString(value: unknown, field: string): string | undefined {
     throw new Error(`Invalid desktop runtime config: ${field} must be a non-empty string when set`);
   }
   return value;
+}
+
+/**
+ * Validate and normalize a proxy URL. Accepts http:// or https:// schemes;
+ * strips search/hash and trailing slashes. Throws on invalid input.
+ */
+export function normalizeProxyUrl(value: string): string {
+  return normalizeHttpUrl(value, "proxyUrl");
 }
 
 function normalizeHttpUrl(value: string, field: string): string {
