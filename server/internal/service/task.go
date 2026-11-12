@@ -6964,6 +6964,13 @@ func (s *TaskService) dispatchDelegatedFailureRecovery(ctx context.Context, targ
 		if !ruleVersionID.Valid {
 			ruleVersionID = target.source.RuleVersionID
 		}
+		// The signal stays pending, so a later sweep recovers once access is back.
+		if err := s.guardRunProjectAccess(ctx, target.issue, target.agent, originator, accountable); err != nil {
+			if errors.Is(err, ErrProjectAccessDenied) {
+				return delegatedFailureRecoveryCovered, nil
+			}
+			return delegatedFailureRecoveryCovered, err
+		}
 		overlay := s.buildRuntimeMCPOverlay(ctx, originator, target.agent)
 		task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
 			ID:                   dbid.NewV7(),
