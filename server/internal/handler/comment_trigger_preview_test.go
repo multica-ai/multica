@@ -126,19 +126,6 @@ func countQueuedCommentTriggerTasks(t *testing.T, issueID, agentID string) int {
 	return n
 }
 
-func countCommentTriggerTasksWithStatus(t *testing.T, issueID, agentID, status string) int {
-	t.Helper()
-
-	var n int
-	if err := testPool.QueryRow(context.Background(), `
-		SELECT count(*) FROM agent_task_queue
-		WHERE issue_id = $1 AND agent_id = $2 AND status = $3
-	`, issueID, agentID, status).Scan(&n); err != nil {
-		t.Fatalf("count %s tasks: %v", status, err)
-	}
-	return n
-}
-
 func createCommentTriggerPreviewSquad(t *testing.T, name, leaderID string) string {
 	t.Helper()
 
