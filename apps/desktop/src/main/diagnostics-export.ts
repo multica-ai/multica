@@ -38,7 +38,29 @@ interface LogTail {
   text: string;
 }
 
-function redactLog(text: string): string {
+function redactLog(text: string, depth = 0): string {
+  // tint quotes string/error attributes with strconv.AppendQuote. Decode each
+  // quoted span before redaction, then re-encode it to preserve record boundaries.
+  // Nested JSON strings have a fixed depth budget. Unsupported Go escapes and
+  // incomplete strings are withheld instead of exporting their undecoded bytes.
+  // Mask raw multiline credentials first, while their quote boundaries exist.
+  const decoded = redactLogPatterns(text).replace(
+    /"(?:[^"\\\r\n]|\\[^\r\n])*(?:"|\\?(?=\r?$))/gm,
+    (quoted) => {
+      if (depth >= 4) return '"[REDACTED ENCODED VALUE]"';
+      try {
+        return JSON.stringify(
+          redactLog(JSON.parse(quoted) as string, depth + 1),
+        );
+      } catch {
+        return '"[REDACTED ENCODED VALUE]"';
+      }
+    },
+  );
+  return redactLogPatterns(decoded);
+}
+
+function redactLogPatterns(text: string): string {
   // Quoted values may span lines. Redact before selecting individual records.
   let safe = text
     .replace(

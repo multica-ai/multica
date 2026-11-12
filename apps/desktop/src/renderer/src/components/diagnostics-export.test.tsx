@@ -378,3 +378,48 @@ describe("Desktop diagnostics through production preload and registered IPC", ()
     await waitFor(() => expect(button).toBeEnabled());
   });
 });
+
+describe("structured-log credentials through the settings export action", () => {
+  it.each([
+    ["token", "escapedCanary42"],
+    ["password", "quotedCanary42"],
+    ["Authorization", "Negotiate authCanary42"],
+    ["Proxy-Authorization", "Digest proxyCanary42"],
+  ])(
+    "redacts escaped JSON %s inside structured logger errors",
+    async (key, secret) => {
+      const fs =
+        await vi.importActual<typeof import("fs/promises")>("fs/promises");
+      const actualLine =
+        "12:00:00.000 ERR provider request failed error=" +
+        JSON.stringify("HTTP 401 " + JSON.stringify({ [key]: secret })) +
+        " component=daemon" +
+        String.fromCharCode(10);
+      await fs.writeFile(
+        fixture.root + "/desktop-diagnostics.invalid/daemon.log",
+        actualLine,
+      );
+      fixture.save.mockResolvedValue({
+        canceled: false,
+        filePath: fixture.root + "/review-security.zip",
+      });
+      settings();
+      await screen.findByText("fixture-daemon");
+      fireEvent.click(
+        screen.getByRole("button", { name: "Export diagnostics" }),
+      );
+      await waitFor(() =>
+        expect(toast.success).toHaveBeenCalledWith("Diagnostics saved"),
+      );
+      const archive = await fs.readFile(fixture.root + "/review-security.zip");
+      const extracted = await readZip(new Uint8Array(archive), 64 * 1024);
+      expect(extracted.ok).toBe(true);
+      if (!extracted.ok) throw new Error(extracted.error);
+      const log = new TextDecoder().decode(
+        extracted.files.find((file) => file.path === "daemon.log")!.data,
+      );
+      expect(log).toContain("provider request failed");
+      expect(log).not.toContain(secret);
+    },
+  );
+});

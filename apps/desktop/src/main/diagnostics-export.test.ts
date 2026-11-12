@@ -156,6 +156,125 @@ describe("local diagnostic archive through its registered IPC handler", () => {
     expect(result.log).not.toContain("fixture@example.invalid");
   });
 
+  it.each([
+    ["raw JSON", '{"token":"canary42","context":"kept"}'],
+    ["quoted JSON", JSON.stringify('{"token":"canary42","context":"kept"}')],
+    [
+      "mixed case",
+      JSON.stringify('{"ToKeN":"canary42","PaSsWoRd":"canary42"}'),
+    ],
+    [
+      "repeated fields",
+      JSON.stringify('{"token":"canary42","token":"canary42"}'),
+    ],
+    ["nested fields", JSON.stringify('{"response":{"password":"canary42"}}')],
+    ["nested string", JSON.stringify(JSON.stringify('{"token":"canary42"}'))],
+    ["escaped key", String.raw`{"to\u006ben":"canary42"}`],
+    [
+      "escaped quotes",
+      JSON.stringify(String.raw`{"password":"first\"canary42\\last"}`),
+    ],
+    [
+      "authorization scheme",
+      JSON.stringify("aUtHoRiZaTiOn: Negotiate canary42"),
+    ],
+    [
+      "proxy scheme",
+      JSON.stringify('{"pRoXy-AuThOrIzAtIoN":"Digest canary42"}'),
+    ],
+    [
+      "URL",
+      JSON.stringify(
+        "https://user:canary42@example.invalid/?token=canary42#canary42",
+      ),
+    ],
+    ["escaped URL", String.raw`"https:\/\/user:canary42@example.invalid/"`],
+    [
+      "multiline value",
+      JSON.stringify('{"password":"first\\ncanary42\\nlast"}'),
+    ],
+    [
+      "unsupported Go escape",
+      String.raw`"HTTP 401 {\"token\":\"canary42\"}\x00"`,
+    ],
+    ["malformed escape", String.raw`"HTTP 401 {\"token\":\"canary42\"}\q"`],
+    ["unterminated string", String.raw`"HTTP 401 {\"token\":\"canary42`],
+    ["trailing escape", String.raw`"HTTP 401 {\"token\":\"canary42` + "\\"],
+    [
+      "depth limit",
+      JSON.stringify(
+        JSON.stringify(
+          JSON.stringify(
+            JSON.stringify(JSON.stringify('{"token":"canary42"}')),
+          ),
+        ),
+      ),
+    ],
+  ])(
+    "redacts %s in extracted structured log records",
+    async (_name, attribute) => {
+      await real.writeFile(
+        logPath,
+        `12:00:00.000 ERR provider request failed error=${attribute} component=daemon\n` +
+          "12:00:01.000 INF next-record component=daemon\n",
+      );
+      const result = await exportArchive();
+      expect(result.archive.toString()).not.toContain("canary42");
+      expect(result.log).toContain("provider request failed");
+      expect(result.log).toContain("next-record component=daemon");
+    },
+  );
+
+  it("preserves non-secret quoted diagnostic context and escaped record boundaries", async () => {
+    const error = JSON.stringify(
+      'upstream unavailable {"context":"retry later"}',
+    );
+    await real.writeFile(
+      logPath,
+      `12:00:00.000 ERR provider request failed error=${error} component=daemon\n` +
+        `12:00:01.000 INF message=${JSON.stringify("line one\nline two")}\n`,
+    );
+    const result = await exportArchive();
+    expect(result.log).toContain(
+      'upstream unavailable {\\"context\\":\\"retry later\\"}',
+    );
+    expect(result.log.split("\n").filter(Boolean)).toHaveLength(2);
+    expect(result.log).toContain('message="line one\\nline two"');
+  });
+
+  it("redacts multiline quoted credentials before selecting timestamped records", async () => {
+    await real.writeFile(
+      logPath,
+      '12:00:00.000 ERR provider request failed password="first\n' +
+        '12:00:01.000 INF multilineCanary42\nlast"\n' +
+        "12:00:02.000 INF safe-final-marker\n",
+    );
+    const result = await exportArchive();
+    expect(result.archive.toString()).not.toContain("multilineCanary42");
+    expect(result.log).toContain("provider request failed");
+    expect(result.log).toContain("safe-final-marker");
+  });
+
+  it("bounds encoded redaction expansion and omits incomplete tail records", async () => {
+    const record = `12:00:00.000 INF error=${JSON.stringify('{"token":"x"}'.repeat(24))}\n`;
+    await real.writeFile(
+      logPath,
+      record.repeat(90) + "12:00:02.000 INF partial-token=tailCanary42",
+    );
+    const result = await exportArchive();
+    expect(Buffer.byteLength(result.log)).toBeLessThanOrEqual(32 * 1024);
+    expect(result.metadata.log.truncated).toBe(true);
+    expect(result.log).not.toContain("tailCanary42");
+    expect(result.log).not.toContain('\\"token\\":\\"x\\"');
+    expect(result.log).toContain("12:00:00.000 INF error=");
+    expect(
+      result.log
+        .split("\n")
+        .filter(Boolean)
+        .every((line) => line.startsWith("12:00:00.000 INF")),
+    ).toBe(true);
+  });
+
   it.each(["stopped", "cli_not_found"] as const)(
     "exports available diagnostics while %s",
     async (state) => {
