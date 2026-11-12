@@ -190,6 +190,13 @@ export function RuntimePicker({
                   {t(($) => $.create_dialog.runtime_cloud_badge)}
                 </span>
               )}
+              {selectedRuntime && (
+                <span className="shrink-0 rounded-xs bg-muted px-1.5 py-0.5 text-caption font-medium text-muted-foreground">
+                  {selectedRuntime.visibility === "public"
+                    ? t(($) => $.create_dialog.runtime_public_badge)
+                    : t(($) => $.create_dialog.runtime_private_badge)}
+                </span>
+              )}
             </div>
             {selectedRuntime && (
               <div className="truncate text-caption text-muted-foreground">
@@ -287,6 +294,11 @@ export function RuntimePicker({
                                 <span className="shrink-0 inline-flex items-center gap-1 rounded-xs bg-muted px-1.5 py-0.5 text-micro font-medium text-muted-foreground">
                                   <Lock className="h-3 w-3" />
                                   {t(($) => $.create_dialog.runtime_private_badge)}
+                                </span>
+                              )}
+                              {device.visibility === "public" && (
+                                <span className="shrink-0 rounded-xs bg-muted px-1.5 py-0.5 text-caption font-medium text-muted-foreground">
+                                  {t(($) => $.create_dialog.runtime_public_badge)}
                                 </span>
                               )}
                             </div>

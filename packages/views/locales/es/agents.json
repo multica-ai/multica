@@ -441,6 +441,7 @@
     "runtime_none": "No hay runtimes disponibles",
     "runtime_cloud_badge": "Nube",
     "runtime_private_badge": "Privado",
+    "runtime_public_badge": "Público · compartido",
     "runtime_private_locked_tooltip": "Runtime privado: solo su propietario puede crear agentes en él. Pide al propietario que lo cambie a Público para compartirlo.",
     "runtime_search_placeholder": "Buscar máquinas…",
     "runtime_no_results": "No hay máquinas coincidentes",

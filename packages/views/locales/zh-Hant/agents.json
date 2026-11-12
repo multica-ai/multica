@@ -445,6 +445,7 @@
     "runtime_none": "暫無可用執行時",
     "runtime_cloud_badge": "雲端",
     "runtime_private_badge": "私有",
+    "runtime_public_badge": "公開共用",
     "runtime_private_locked_tooltip": "私有執行時——只有執行時所有者可在其上建立 AI 代理。如果需要共享，請聯絡所有者切換為\"公開\"。",
     "runtime_search_placeholder": "搜尋機器…",
     "runtime_no_results": "沒有匹配的機器",

@@ -81,6 +81,32 @@ describe("RuntimePicker (creation studio)", () => {
   beforeEach(() => cleanup());
   afterEach(() => cleanup());
 
+  it("identifies an inherited public runtime without changing the selection", () => {
+    const shared = makeRuntime({ id: "rt-shared", owner_id: "user-other", visibility: "public" });
+    const { container, onSelect } = renderPicker({
+      runtimes: [...RUNTIMES, shared],
+      selectedRuntimeId: shared.id,
+    });
+    expect(trigger(container).textContent).toContain("Public · shared");
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("shows the selected owner's private runtime visibility", () => {
+    const { container, onSelect } = renderPicker();
+    expect(trigger(container).textContent).toContain("Private");
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("labels a public candidate and still selects it through the normal picker", () => {
+    const shared = makeRuntime({ id: "rt-shared", name: "Shared runtime", visibility: "public" });
+    const { container, getByRole, onSelect } = renderPicker({ runtimes: [...RUNTIMES, shared] });
+    fireEvent.click(trigger(container));
+    const candidate = getByRole("button", { name: /Shared runtime.*Public · shared/ });
+    expect(candidate).not.toBeDisabled();
+    fireEvent.click(candidate);
+    expect(onSelect).toHaveBeenCalledWith(shared.id);
+  });
+
   it("keeps an overlong runtime name ellipsized inside the trigger instead of overflowing", () => {
     // Same flex-row truncation contract as ModelDropdown: the label needs
     // min-w-0 or it overflows the picker when names grow long.

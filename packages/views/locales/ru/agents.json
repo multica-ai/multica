@@ -487,6 +487,7 @@
     "runtime_none": "Нет доступной среды выполнения",
     "runtime_cloud_badge": "Облако",
     "runtime_private_badge": "Приватная",
+    "runtime_public_badge": "Публичная · общая",
     "runtime_private_locked_tooltip": "Приватная среда выполнения — создавать агентов на ней может только её владелец. Попросите владельца сделать её публичной, чтобы предоставить доступ.",
     "runtime_search_placeholder": "Поиск машин…",
     "runtime_no_results": "Совпадающих машин не найдено",
