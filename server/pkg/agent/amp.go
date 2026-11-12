@@ -446,9 +446,9 @@ func handleAmpEvent(e ampStreamEvent, ch chan<- Message, s *ampStreamState) {
 		s.sawCompletion = true
 		s.finalText = e.Result
 		if len(e.PermissionDenials) > 0 {
-			trySend(ch, Message{Type: MessageText, SessionID: s.sessionID, Content: "\n\n" + sanitizeAgentDiagnostic(
-				"Warning: Amp denied tool permissions: "+strings.Join(e.PermissionDenials, "; ")+
-					". Check amp.permissions in the execution machine's Amp settings for unattended commands.") + "\n"})
+			trySend(ch, Message{Type: MessageError, SessionID: s.sessionID, Content: sanitizeAgentDiagnostic(
+				"Warning: Amp denied tool permissions: " + strings.Join(e.PermissionDenials, "; ") +
+					". Check amp.permissions in the execution machine's Amp settings for unattended commands.")})
 		}
 		if e.IsError || e.Subtype != "success" {
 			s.failed = true

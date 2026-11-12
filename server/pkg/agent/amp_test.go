@@ -278,7 +278,7 @@ func TestAmpPermissionDenials(t *testing.T) {
 	}
 	var warning string
 	for _, message := range messages {
-		if message.Type == MessageText && strings.Contains(message.Content, "Warning: Amp denied tool permissions") {
+		if message.Type == MessageError && strings.Contains(message.Content, "Warning: Amp denied tool permissions") {
 			warning += message.Content
 		}
 	}
