@@ -675,10 +675,13 @@ func TestReview8545PostgresSlowCallIsCutOffInsideTheLease(t *testing.T) {
 				budget      time.Duration
 				err         error
 			}
+			// Only the initial worker accesses calls until done closes. After that,
+			// assertions and the second instance's sends run on the test goroutine.
 			var calls []observedCall
 			stop := make(chan struct{})
-			// The transport never answers. Keeping it in memory exercises the
-			// real Bot API context wiring without a socket racing a short deadline.
+			// The transport never answers. Keeping it in memory exercises Bot API
+			// context propagation without a socket racing a short deadline; connection
+			// teardown by net/http's standard transport is outside this test's scope.
 			o.client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 				deadline, ok := r.Context().Deadline()
 				call := observedCall{hasDeadline: ok, budget: time.Until(deadline)}
