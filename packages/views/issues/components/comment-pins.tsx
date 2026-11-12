@@ -38,7 +38,7 @@ export function CommentPins({ entries, container, onJump }: { entries: readonly 
         return <div key={pin.id} role="listitem">
           <button type="button" data-pin-row={pin.id} data-on-screen={onScreen || undefined}
             className={cn("flex w-full min-w-0 items-center gap-2 px-3 py-1 text-left text-body hover:bg-accent focus-visible:bg-accent focus-visible:outline-none", onScreen && "opacity-50")}
-            aria-label={t(($) => $.comment.pins.jump, { author })} onClick={() => onJump(pin.id)}>
+            aria-label={`${t(($) => $.comment.pins.jump, { author })}: ${(pin.content ?? "").slice(0, 80)}`} onClick={() => onJump(pin.id)}>
             <Pin className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
             <span className="shrink-0 font-medium">{author}</span>
             <span className="truncate text-muted-foreground">{pin.content}</span>
