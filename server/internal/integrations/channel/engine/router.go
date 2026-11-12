@@ -645,6 +645,16 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 		}
 		res.IssueID = issueRes.Issue.ID
 		mediaIssue = issueRes.Issue
+		// The issue exists either way: a failed registration only means its
+		// later events are not reported back to this chat.
+		if set.IssueCallbacks != nil {
+			if cb, ok := issueCallbackFor(inst, msg, issueRes.Issue.ID, identity.UserID); ok {
+				if err := set.IssueCallbacks.RegisterIssueCallback(ctx, cb); err != nil {
+					r.logger.Warn("channel engine: register issue callback failed",
+						"issue_id", util.UUIDToString(issueRes.Issue.ID), "error", err)
+				}
+			}
+		}
 		deferredIssueTaskID = issueRes.AssignedTaskID
 		res.IssueNumber = issueRes.Issue.Number
 		res.IssueTitle = issueRes.Issue.Title

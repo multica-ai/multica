@@ -89,6 +89,8 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"issue_source_context_object_intent": workspaceDeleteSettle,
 	"issue_status":                       workspaceDelete,
 	"issue_workflow":                     workspaceDelete,
+	"issue_channel_callback":             workspaceDelete,
+	"issue_channel_callback_delivery":    workspaceDelete,
 	"issue_subscriber":                   workspaceDelete,
 	"issue_to_label":                     workspaceDelete,
 	"issue_unread":                       workspaceDelete,

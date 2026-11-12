@@ -367,6 +367,13 @@ deleted_issue_subscribers AS (
     DELETE FROM issue_subscriber
     WHERE issue_id IN (SELECT id FROM ws_issues)
 ),
+deleted_issue_channel_callback_deliveries AS (
+    DELETE FROM issue_channel_callback_delivery
+    WHERE callback_id IN (SELECT id FROM issue_channel_callback WHERE workspace_id = $1)
+),
+deleted_issue_channel_callbacks AS (
+    DELETE FROM issue_channel_callback WHERE workspace_id = $1
+),
 deleted_issue_labels AS (
     DELETE FROM issue_to_label
     WHERE issue_id IN (SELECT id FROM ws_issues)
