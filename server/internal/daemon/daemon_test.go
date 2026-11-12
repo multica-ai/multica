@@ -799,6 +799,9 @@ func TestProviderNeedsInlineSystemPrompt(t *testing.T) {
 		{provider: "qwen", want: false},
 		{provider: "codex", want: false},
 		{provider: "claude", want: false},
+		// Droid uses the task AGENTS.md; TestDroidRealAgentsMDCanary verifies
+		// native discovery independently of the optional adapter SystemPrompt.
+		{provider: "droid", want: false},
 	}
 
 	for _, tc := range cases {
