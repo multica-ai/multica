@@ -162,9 +162,14 @@ vi.mock("../../../common/actor-avatar", () => ({
   ActorAvatar: ({ actorId }: any) => <span data-testid="actor">{actorId}</span>,
 }));
 
+const platform = vi.hoisted(() => ({ desktop: false }));
+vi.mock("../../../platform/local-directory", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../platform/local-directory")>()),
+  isDesktopShell: () => platform.desktop,
+}));
+
 // Import after mocks.
-import { IssueActionsDropdown } from "../issue-actions-dropdown";
-import { shouldOpenRowMenu, useRowMenu } from "../../../common/point-menu";
+import { IssueActionsDropdown, useIssuePageMenu } from "../issue-actions-dropdown";
 import {
   IssueActionsContextMenu,
   IssueContextMenuProvider,
@@ -205,6 +210,7 @@ function wrap(ui: React.ReactNode) {
 }
 
 beforeEach(() => {
+  platform.desktop = false;
   deletionPolicy.allowed = true;
   mockOpenModal.mockReset();
   openInNewTabMock.mockReset();
@@ -709,21 +715,15 @@ describe("Quick actions (MUL-9093)", () => {
   });
 
   function IssuePageHarness() {
-    const pageMenu = useRowMenu();
+    const pageMenu = useIssuePageMenu();
     return (
       <div>
         <IssueActionsDropdown
           issue={mockIssue}
-          rowMenu={pageMenu}
+          rowMenu={pageMenu.rowMenu}
           trigger={<button data-testid="trigger">Menu</button>}
         />
-        <div
-          data-testid="page-body"
-          onContextMenu={(e) => {
-            if (!shouldOpenRowMenu(e, { deferToContent: true })) return;
-            pageMenu.openAtPointer(e);
-          }}
-        >
+        <div data-testid="page-body" onContextMenu={pageMenu.onContextMenu}>
           <p data-testid="blank">Body</p>
           <a href="https://example.com" data-testid="link">Link</a>
         </div>
@@ -731,21 +731,37 @@ describe("Quick actions (MUL-9093)", () => {
     );
   }
 
-  it("opens the issue menu, quick actions included, on a right-click in the issue page body", async () => {
-    render(wrap(<IssuePageHarness />));
-    fireEvent.contextMenu(screen.getByTestId("blank"));
+  describe("right-click in the issue page body", () => {
+    it("opens the issue menu, quick actions included, on Desktop", async () => {
+      platform.desktop = true;
+      render(wrap(<IssuePageHarness />));
+      // fireEvent returns false once a handler called preventDefault.
+      expect(fireEvent.contextMenu(screen.getByTestId("blank"))).toBe(false);
 
-    expect(await screen.findByText("Rename issue")).toBeInTheDocument();
-    fireEvent.click(await screen.findByText("Quick actions"));
-    expect(await screen.findByText("Review")).toBeInTheDocument();
-  });
+      expect(await screen.findByText("Rename issue")).toBeInTheDocument();
+      fireEvent.click(await screen.findByText("Quick actions"));
+      expect(await screen.findByText("Review")).toBeInTheDocument();
+    });
 
-  it("leaves a right-click on a link in the issue page body to the link's own menu", async () => {
-    render(wrap(<IssuePageHarness />));
-    fireEvent.contextMenu(screen.getByTestId("link"));
+    it("leaves a link's right-click to the link's own menu on Desktop", async () => {
+      platform.desktop = true;
+      render(wrap(<IssuePageHarness />));
+      expect(fireEvent.contextMenu(screen.getByTestId("link"))).toBe(true);
 
-    await waitFor(() => expect(apiMocks.listQuickActions).not.toHaveBeenCalled());
-    expect(screen.queryByText("Rename issue")).not.toBeInTheDocument();
+      await waitFor(() => expect(apiMocks.listQuickActions).not.toHaveBeenCalled());
+      expect(screen.queryByText("Rename issue")).not.toBeInTheDocument();
+    });
+
+    it("keeps the browser's own menu on web, with Quick actions still under the ⋯ button", async () => {
+      render(wrap(<IssuePageHarness />));
+      expect(fireEvent.contextMenu(screen.getByTestId("blank"))).toBe(true);
+      await waitFor(() => expect(apiMocks.listQuickActions).not.toHaveBeenCalled());
+      expect(screen.queryByText("Rename issue")).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByTestId("trigger"));
+      fireEvent.click(await screen.findByText("Quick actions"));
+      expect(await screen.findByText("Review")).toBeInTheDocument();
+    });
   });
 
   it("is absent when the workspace has no active quick actions", async () => {
