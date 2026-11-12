@@ -127,7 +127,7 @@ thread_resolutions AS (
 )
 SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
        c.created_at, c.updated_at, c.parent_id, c.workspace_id,
-       c.resolved_at, c.resolved_by_type, c.resolved_by_id,
+       c.resolved_at, c.resolved_by_type, c.resolved_by_id, c.pinned_at, c.pinned_by_type, c.pinned_by_id,
        c.source_task_id, c.quick_action_id, c.revision, c.deleted_at,
        ts.reply_count AS reply_count,
        ts.last_activity_at AS last_activity_at,
@@ -187,7 +187,7 @@ thread_resolutions AS (
 )
 SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
        c.created_at, c.updated_at, c.parent_id, c.workspace_id,
-       c.resolved_at, c.resolved_by_type, c.resolved_by_id,
+       c.resolved_at, c.resolved_by_type, c.resolved_by_id, c.pinned_at, c.pinned_by_type, c.pinned_by_id,
        c.source_task_id, c.quick_action_id, c.revision, c.deleted_at,
        ts.reply_count AS reply_count,
        ts.last_activity_at AS last_activity_at,
@@ -231,14 +231,14 @@ thread_root AS (
 descendants AS (
     SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
            c.created_at, c.updated_at, c.parent_id, c.workspace_id,
-           c.resolved_at, c.resolved_by_type, c.resolved_by_id,
+           c.resolved_at, c.resolved_by_type, c.resolved_by_id, c.pinned_at, c.pinned_by_type, c.pinned_by_id,
            c.source_task_id, c.quick_action_id, c.revision, c.deleted_at
     FROM comment c
     JOIN thread_root tr ON c.id = tr.id
     UNION
     SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
            c.created_at, c.updated_at, c.parent_id, c.workspace_id,
-           c.resolved_at, c.resolved_by_type, c.resolved_by_id,
+           c.resolved_at, c.resolved_by_type, c.resolved_by_id, c.pinned_at, c.pinned_by_type, c.pinned_by_id,
            c.source_task_id, c.quick_action_id, c.revision, c.deleted_at
     FROM comment c
     JOIN descendants d ON c.parent_id = d.id
@@ -247,7 +247,7 @@ descendants AS (
 reply_page AS (
     SELECT d.id, d.issue_id, d.author_type, d.author_id, d.content, d.type,
            d.created_at, d.updated_at, d.parent_id, d.workspace_id,
-           d.resolved_at, d.resolved_by_type, d.resolved_by_id,
+           d.resolved_at, d.resolved_by_type, d.resolved_by_id, d.pinned_at, d.pinned_by_type, d.pinned_by_id,
            d.source_task_id, d.quick_action_id, d.revision, d.deleted_at
     FROM descendants d
     WHERE d.id NOT IN (SELECT id FROM thread_root)
@@ -260,19 +260,19 @@ reply_page AS (
 )
 SELECT id, issue_id, author_type, author_id, content, type,
        created_at, updated_at, parent_id, workspace_id,
-       resolved_at, resolved_by_type, resolved_by_id,
+       resolved_at, resolved_by_type, resolved_by_id, pinned_at, pinned_by_type, pinned_by_id,
        source_task_id, quick_action_id, revision, deleted_at
 FROM (
     SELECT d.id, d.issue_id, d.author_type, d.author_id, d.content, d.type,
            d.created_at, d.updated_at, d.parent_id, d.workspace_id,
-           d.resolved_at, d.resolved_by_type, d.resolved_by_id,
+           d.resolved_at, d.resolved_by_type, d.resolved_by_id, d.pinned_at, d.pinned_by_type, d.pinned_by_id,
            d.source_task_id, d.quick_action_id, d.revision, d.deleted_at
     FROM descendants d
     JOIN thread_root tr ON d.id = tr.id
     UNION ALL
     SELECT id, issue_id, author_type, author_id, content, type,
            created_at, updated_at, parent_id, workspace_id,
-           resolved_at, resolved_by_type, resolved_by_id,
+           resolved_at, resolved_by_type, resolved_by_id, pinned_at, pinned_by_type, pinned_by_id,
            source_task_id, quick_action_id, revision, deleted_at
     FROM reply_page
 ) combined
@@ -337,7 +337,7 @@ picked AS (
 )
 SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
        c.created_at, c.updated_at, c.parent_id, c.workspace_id,
-       c.resolved_at, c.resolved_by_type, c.resolved_by_id,
+       c.resolved_at, c.resolved_by_type, c.resolved_by_id, c.pinned_at, c.pinned_by_type, c.pinned_by_id,
        c.source_task_id, c.quick_action_id, c.revision, c.deleted_at,
        p.root_id AS thread_root_id,
        p.last_activity_at AS thread_last_activity_at
@@ -611,7 +611,7 @@ WITH locked_issue AS MATERIALIZED (
     RETURNING comment.id, comment.issue_id, comment.author_type, comment.author_id,
               comment.content, comment.type, comment.created_at, comment.updated_at,
               comment.parent_id, comment.workspace_id, comment.resolved_at,
-              comment.resolved_by_type, comment.resolved_by_id, comment.source_task_id,
+              comment.resolved_by_type, comment.resolved_by_id, comment.pinned_at, comment.pinned_by_type, comment.pinned_by_id, comment.source_task_id,
               comment.quick_action_id, comment.via_plugin_id, comment.revision,
               comment.deleted_at, target.did_change
 ), touched_issue AS (
@@ -628,7 +628,7 @@ SELECT updated_comment.id, updated_comment.issue_id, updated_comment.author_type
        updated_comment.author_id, updated_comment.content, updated_comment.type,
        updated_comment.created_at, updated_comment.updated_at, updated_comment.parent_id,
        updated_comment.workspace_id, updated_comment.resolved_at,
-       updated_comment.resolved_by_type, updated_comment.resolved_by_id,
+       updated_comment.resolved_by_type, updated_comment.resolved_by_id, updated_comment.pinned_at, updated_comment.pinned_by_type, updated_comment.pinned_by_id,
        updated_comment.source_task_id, updated_comment.quick_action_id,
        updated_comment.via_plugin_id, updated_comment.revision,
        updated_comment.deleted_at,
@@ -734,6 +734,9 @@ SELECT EXISTS (
 UPDATE comment SET
     content = '',
     deleted_at = now(),
+    pinned_at = NULL,
+    pinned_by_type = NULL,
+    pinned_by_id = NULL,
     resolved_at = NULL,
     resolved_by_type = NULL,
     resolved_by_id = NULL,
@@ -771,6 +774,25 @@ SET revision = revision + 1,
     last_activity_at = GREATEST(COALESCE(last_activity_at, updated_at), now())
 WHERE id = @issue_id AND workspace_id = @workspace_id
 RETURNING revision;
+
+-- Pins are navigation metadata: never change the content edit timestamp.
+-- name: PinComment :one
+UPDATE comment SET
+    pinned_at = COALESCE(pinned_at, now()),
+    pinned_by_type = COALESCE(pinned_by_type, $2),
+    pinned_by_id = COALESCE(pinned_by_id, $3),
+    revision = revision + CASE WHEN pinned_at IS NULL THEN 1 ELSE 0 END
+WHERE id = $1 AND deleted_at IS NULL
+RETURNING *;
+
+-- name: UnpinComment :one
+UPDATE comment SET
+    pinned_at = NULL,
+    pinned_by_type = NULL,
+    pinned_by_id = NULL,
+    revision = revision + CASE WHEN pinned_at IS NOT NULL THEN 1 ELSE 0 END
+WHERE id = $1 AND deleted_at IS NULL
+RETURNING *;
 
 -- name: ResolveComment :one
 -- Idempotent: re-resolving keeps the original resolved_at + resolver. Always
@@ -866,7 +888,7 @@ WITH RECURSIVE ancestor_path AS (
 )
 SELECT id, issue_id, author_type, author_id, content, type, created_at,
        updated_at, workspace_id, parent_id, resolved_at, resolved_by_type,
-       resolved_by_id, source_task_id, revision, quick_action_id, via_plugin_id,
+       resolved_by_id, pinned_at, pinned_by_type, pinned_by_id, source_task_id, revision, quick_action_id, via_plugin_id,
        deleted_at, depth, cycle
 FROM ancestor_path
 ORDER BY depth DESC;

@@ -45,6 +45,9 @@ type TimelineEntry struct {
 	ResolvedAt     *string              `json:"resolved_at,omitempty"`
 	ResolvedByType *string              `json:"resolved_by_type,omitempty"`
 	ResolvedByID   *string              `json:"resolved_by_id,omitempty"`
+	PinnedAt       *string              `json:"pinned_at,omitempty"`
+	PinnedByType   *string              `json:"pinned_by_type,omitempty"`
+	PinnedByID     *string              `json:"pinned_by_id,omitempty"`
 	SourceTaskID   *string              `json:"source_task_id,omitempty"`
 	// Set only on a tombstone: a comment deleted while it still had replies.
 	DeletedAt *string `json:"deleted_at,omitempty"`
@@ -315,6 +318,9 @@ func (h *Handler) commentsToEntries(r *http.Request, comments []db.Comment) []Ti
 			ResolvedAt:     timestampToPtr(c.ResolvedAt),
 			ResolvedByType: textToPtr(c.ResolvedByType),
 			ResolvedByID:   uuidToPtr(c.ResolvedByID),
+			PinnedAt:       timestampToPtr(c.PinnedAt),
+			PinnedByType:   textToPtr(c.PinnedByType),
+			PinnedByID:     uuidToPtr(c.PinnedByID),
 			SourceTaskID:   uuidToPtr(c.SourceTaskID),
 			DeletedAt:      timestampToPtr(c.DeletedAt),
 		}
