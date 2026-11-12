@@ -695,9 +695,18 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					Logger:      slog.Default(),
 				})
 				mediaResolver := lark.NewFeishuMediaResolver(larkClient, installSvc, store, engine.NewDBMediaIntentLedger(queries), slog.Default())
-				channelRouter.Register(channel.TypeFeishu, lark.NewFeishuResolverSet(
+				feishuSet := lark.NewFeishuResolverSet(
 					cs, feishuSession, auditLogger, resolverReplier, typingIndicator, mediaResolver,
-				))
+				)
+				// /issue registers a callback only where it can be answered:
+				// the notifier needs the same configured client as replies.
+				if larkClient.IsConfigured() {
+					feishuSet.IssueCallbacks = engine.NewDBIssueCallbackRegistrar(queries)
+					registerIssueCallbackListener(bus,
+						lark.NewIssueCallbackNotifier(cs, installSvc, larkClient, appURLFromEnv(), slog.Default()),
+						func(f func()) { go f() })
+				}
+				channelRouter.Register(channel.TypeFeishu, feishuSet)
 				slog.Info("lark inbound pipeline wired", "connector", connectorLabel)
 
 				// One-shot union_id backfill for installations created
@@ -2158,6 +2167,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/timeline", h.ListTimeline)
 					r.Get("/workflow-handoff", h.PreviewWorkflowHandoff)
 					r.Get("/subscribers", h.ListIssueSubscribers)
+					r.Get("/channel-callbacks", h.ListIssueChannelCallbacks)
+					r.Delete("/channel-callbacks/{callbackID}", h.RevokeIssueChannelCallback)
 					r.Post("/subscribe", h.SubscribeToIssue)
 					r.Post("/unsubscribe", h.UnsubscribeFromIssue)
 					r.Post("/unsubscribe/subtree", h.UnsubscribeFromIssueSubtree)

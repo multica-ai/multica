@@ -76,6 +76,8 @@ Safari stays on the login page after a successful sign-in.
 
 The first line becomes the title and the rest becomes the description. Sending `/issue` alone creates nothing; the Bot replies with the required format instead.
 
+When the issue later moves to In review, Done, Blocked or Cancelled, the Bot replies in the thread under your `/issue` message, so the result comes back to the conversation that asked for it. If the chat does not allow threads, the notice goes to the chat itself. To stop these notices for an issue, revoke its callback with `DELETE /api/issues/{id}/channel-callbacks/{callback_id}`; `GET /api/issues/{id}/channel-callbacks` lists them with each notice's delivery status.
+
 ## Images and files from the agent
 
 When file delivery is enabled, text and supported images attached to an agent’s reply appear together in one Feishu message. Images update that message as they finish uploading; files arrive separately in the same conversation. An image-only reply can use an image message. Supported images are limited to 10 MB; unsupported, larger, or explicitly rejected images are sent as files, up to 30 MB. This requires object storage and the application’s resource upload permission. If delivery fails or cannot be confirmed, the attachments remain available on the reply in Multica. Check the conversation before requesting a resend.

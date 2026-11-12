@@ -534,6 +534,13 @@ cleared_environment_configs AS (
 ),
 cleared_task_context_receipts AS (
     DELETE FROM task_context_receipt WHERE issue_id IN (SELECT target.id FROM target)
+),
+cleared_channel_callback_deliveries AS (
+    DELETE FROM issue_channel_callback_delivery
+    WHERE callback_id IN (SELECT id FROM issue_channel_callback WHERE issue_id IN (SELECT target.id FROM target))
+),
+cleared_channel_callbacks AS (
+    DELETE FROM issue_channel_callback WHERE issue_id IN (SELECT target.id FROM target)
 )
 DELETE FROM issue WHERE issue.id IN (SELECT target.id FROM target)
 `

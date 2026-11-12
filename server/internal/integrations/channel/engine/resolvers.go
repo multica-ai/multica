@@ -461,7 +461,11 @@ type ResolverSet struct {
 	Audit        Auditor
 	Replier      OutboundReplier
 	Typing       TypingNotifier
-	OriginType   string
+	// IssueCallbacks, when set, records the /issue message as the place later
+	// issue events are delivered to. Nil for adapters that cannot deliver them
+	// yet, so no callback is registered that nothing would ever answer.
+	IssueCallbacks IssueCallbackRegistrar
+	OriginType     string
 }
 
 // IssueCreator is the narrow subset of service.IssueService the Router needs

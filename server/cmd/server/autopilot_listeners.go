@@ -42,7 +42,7 @@ func registerAutopilotListeners(bus *events.Bus, svc *service.AutopilotService) 
 		// HTTP UpdateIssue sends handler.IssueResponse. Background writers
 		// (broadcastIssueUpdated) send the IssueToMap map. The id and status
 		// are the only fields this gate needs; the stored row decides the run.
-		issueID, status, ok := autopilotIssueIDAndStatus(payload["issue"])
+		issueID, status, ok := issueIDAndStatusFromPayload(payload["issue"])
 		if !ok {
 			return
 		}
@@ -72,10 +72,10 @@ func registerAutopilotListeners(bus *events.Bus, svc *service.AutopilotService) 
 	})
 }
 
-// autopilotIssueIDAndStatus reads the issue id and status from either payload
-// shape. A missing id or a non-string status is not an issue update this
+// issueIDAndStatusFromPayload reads the issue id and status from either payload
+// shape. A missing id or a non-string status is not an issue update a
 // listener can act on.
-func autopilotIssueIDAndStatus(v any) (string, string, bool) {
+func issueIDAndStatusFromPayload(v any) (string, string, bool) {
 	if issue, ok := v.(handler.IssueResponse); ok {
 		return issue.ID, issue.Status, issue.ID != ""
 	}

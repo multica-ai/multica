@@ -950,6 +950,32 @@ type Issue struct {
 	RequesterUserID    pgtype.UUID        `json:"requester_user_id"`
 }
 
+type IssueChannelCallback struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	IssueID         pgtype.UUID        `json:"issue_id"`
+	InstallationID  pgtype.UUID        `json:"installation_id"`
+	ChannelType     string             `json:"channel_type"`
+	ChatID          string             `json:"chat_id"`
+	ChatType        string             `json:"chat_type"`
+	ThreadID        string             `json:"thread_id"`
+	AnchorMessageID string             `json:"anchor_message_id"`
+	RegisteredBy    pgtype.UUID        `json:"registered_by"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	RevokedAt       pgtype.Timestamptz `json:"revoked_at"`
+}
+
+type IssueChannelCallbackDelivery struct {
+	CallbackID        pgtype.UUID        `json:"callback_id"`
+	DedupKey          string             `json:"dedup_key"`
+	Event             string             `json:"event"`
+	Status            string             `json:"status"`
+	ProviderMessageID string             `json:"provider_message_id"`
+	Error             string             `json:"error"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
 type IssueChildEvent struct {
 	ID           pgtype.UUID        `json:"id"`
 	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
