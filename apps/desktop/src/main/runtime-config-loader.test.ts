@@ -93,6 +93,19 @@ describe("loadRuntimeConfig", () => {
       expect(result.error.message).toContain("Invalid desktop runtime config JSON");
     }
   });
+
+  it("rejects typoed runtime keys instead of silently falling back to cloud defaults", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "multica-desktop-config-"));
+    const configPath = join(dir, "desktop.json");
+    await writeFile(configPath, JSON.stringify({ apiURL: "https://multica.example.com" }));
+
+    const result = await loadRuntimeConfig({ isDev: false, configPath, env: {} });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toContain("apiUrl");
+    }
+  });
 });
 
 describe("updateDesktopConfig", () => {

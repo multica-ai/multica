@@ -28,11 +28,12 @@ describe("proxy environment", () => {
 });
 
 describe("proxy credential boundary", () => {
-  it("redacts the password and resolves the unchanged masked value only in main", () => {
+  it("redacts the password and preserves the real password when the masked placeholder is kept while editing", () => {
     const original = "http://user:secret@proxy.local:8080/";
     const masked = maskProxyUrl(original)!;
     expect(masked).not.toContain("secret");
     expect(resolveProxyUrl(masked, original)).toBe(original);
+    expect(resolveProxyUrl("http://user:********@proxy.local:9090", original)).toBe("http://user:secret@proxy.local:9090");
     expect(resolveProxyUrl("http://other:8080", original)).toBe("http://other:8080");
     expect(resolveProxyUrl(null, original)).toBeNull();
     expect(() => resolveProxyUrl({}, original)).toThrow("Invalid proxy URL");

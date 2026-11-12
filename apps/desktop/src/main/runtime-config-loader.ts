@@ -73,10 +73,15 @@ function parseStoredRuntimeConfig(value: unknown): RuntimeConfig {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("Invalid desktop runtime config JSON: expected an object");
   }
+
+  const entries = value as Record<string, unknown>;
+  const keys = Object.keys(entries);
+  const proxyOnly = keys.length === 0 || keys.every((key) => key === "proxyUrl" || key === "noProxy");
+
   return parseRuntimeConfig(JSON.stringify({
     schemaVersion: DEFAULT_RUNTIME_CONFIG.schemaVersion,
-    apiUrl: DEFAULT_RUNTIME_CONFIG.apiUrl,
-    ...value,
+    ...(proxyOnly ? { apiUrl: DEFAULT_RUNTIME_CONFIG.apiUrl } : {}),
+    ...entries,
   }));
 }
 

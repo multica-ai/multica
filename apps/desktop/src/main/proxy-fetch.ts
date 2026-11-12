@@ -15,6 +15,24 @@
  */
 import { ProxyAgent, fetch as undiciFetch } from "undici";
 
+export function parseNoProxy(value: string | null): string[] {
+  const entries = (value ?? "")
+    .split(",")
+    .map((entry) => entry.trim().toLowerCase())
+    .filter(Boolean);
+
+  const normalized = entries
+    .map((entry) => entry.replace(/^\./, ""))
+    .filter((entry) => entry && entry !== "*");
+
+  return [...new Set([
+    "localhost",
+    "127.0.0.1",
+    "::1",
+    ...normalized,
+  ])];
+}
+
 let currentProxy: string | null = null;
 let currentNoProxy: string[] = [];
 
@@ -74,13 +92,6 @@ export function shouldBypassProxy(url: string | URL): boolean {
   } catch {
     return false;
   }
-}
-
-function parseNoProxy(value: string | null): string[] {
-  return (value ?? "")
-    .split(",")
-    .map((entry) => entry.trim().toLowerCase())
-    .filter(Boolean);
 }
 
 function isLoopbackHost(host: string): boolean {

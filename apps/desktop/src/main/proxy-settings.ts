@@ -1,4 +1,5 @@
 import { normalizeProxyUrl } from "../shared/runtime-config";
+import { parseNoProxy } from "./proxy-fetch";
 
 const PROXY_ENV_KEYS = ["HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy"] as const;
 
@@ -14,9 +15,7 @@ export function createProxyEnvironment(env: NodeJS.ProcessEnv) {
         return;
       }
       const bypass = [...new Set([
-        "localhost", "127.0.0.1", "::1",
-        ...[original.NO_PROXY, original.no_proxy, noProxy].flatMap((value) =>
-          (value ?? "").split(",").map((entry) => entry.trim()).filter(Boolean)),
+        ...parseNoProxy([original.NO_PROXY, original.no_proxy, noProxy].join(",")),
       ])].join(",");
       env.HTTP_PROXY = env.HTTPS_PROXY = env.http_proxy = env.https_proxy = proxyUrl;
       env.NO_PROXY = env.no_proxy = bypass;
@@ -34,8 +33,26 @@ export function maskProxyUrl(value: string | null): string | null {
 export function resolveProxyUrl(value: unknown, current: string | null): string | null {
   if (value === null || value === "") return null;
   if (typeof value !== "string") throw new Error("Invalid proxy URL");
-  // The renderer only receives this exact redacted value, never the password.
-  if (current && value === maskProxyUrl(current)) return current;
+
+  const maskedCurrent = current ? maskProxyUrl(current) : null;
+  // The renderer only receives the redacted form and may keep the password
+  // untouched by submitting the placeholder text. Preserve the stored password
+  // instead of saving the literal mask as the real password.
+  if (current && value === maskedCurrent) return current;
+
+  try {
+    const candidate = new URL(value);
+    if (current && candidate.password === "********") {
+      const stored = new URL(current);
+      if (stored.username === candidate.username) {
+        candidate.password = stored.password;
+        return normalizeProxyUrl(candidate.toString());
+      }
+    }
+  } catch {
+    // Fall through to strict URL validation below for non-URL input.
+  }
+
   return normalizeProxyUrl(value);
 }
 

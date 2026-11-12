@@ -12,9 +12,50 @@ type TestState =
   | { status: "success" }
   | { status: "error"; message: string };
 
+function getProxyParts(value: string | null): {
+  host: string;
+  username: string;
+  password: string;
+  hasStoredPassword: boolean;
+} {
+  if (!value) {
+    return { host: "", username: "", password: "", hasStoredPassword: false };
+  }
+
+  try {
+    const url = new URL(value);
+    const hasStoredPassword = Boolean(url.password);
+    return {
+      host: `${url.protocol}//${url.host}`,
+      username: url.username,
+      password: url.password === "********" ? "" : url.password,
+      hasStoredPassword,
+    };
+  } catch {
+    return { host: value, username: "", password: "", hasStoredPassword: false };
+  }
+}
+
+function buildProxyUrl(host: string, username: string, password: string, keepExistingPassword: boolean): string {
+  const trimmedHost = host.trim();
+  if (!trimmedHost) return "";
+  const url = new URL(trimmedHost);
+  if (username.trim()) {
+    url.username = username.trim();
+    url.password = keepExistingPassword ? "********" : password.trim();
+  } else {
+    url.username = "";
+    url.password = "";
+  }
+  return url.toString();
+}
+
 export function NetworkSettingsTab() {
   const { t } = useT("settings");
   const [proxyUrl, setProxyUrl] = useState("");
+  const [proxyUsername, setProxyUsername] = useState("");
+  const [proxyPassword, setProxyPassword] = useState("");
+  const [keepExistingPassword, setKeepExistingPassword] = useState(false);
   const [noProxy, setNoProxy] = useState("");
   const [saving, setSaving] = useState(false);
   const [testState, setTestState] = useState<TestState>({ status: "idle" });
@@ -24,7 +65,11 @@ export function NetworkSettingsTab() {
     let mounted = true;
     void window.desktopAPI.proxy.get().then((cfg) => {
       if (mounted) {
-        setProxyUrl(cfg.proxyUrl ?? "");
+        const parts = getProxyParts(cfg.proxyUrl ?? null);
+        setProxyUrl(parts.host);
+        setProxyUsername(parts.username);
+        setProxyPassword(parts.password);
+        setKeepExistingPassword(parts.hasStoredPassword && !parts.password);
         setNoProxy(cfg.noProxy ?? "");
       }
     });
@@ -36,10 +81,10 @@ export function NetworkSettingsTab() {
   const handleSave = useCallback(async () => {
     setSaving(true);
     try {
-      const trimmedUrl = proxyUrl.trim();
       const trimmedNoProxy = noProxy.trim();
+      const nextProxyUrl = buildProxyUrl(proxyUrl, proxyUsername, proxyPassword, keepExistingPassword);
       const result = await window.desktopAPI.proxy.set(
-        trimmedUrl || null,
+        nextProxyUrl || null,
         trimmedNoProxy || null,
       );
       if (!result.ok) {
@@ -48,7 +93,11 @@ export function NetworkSettingsTab() {
         return;
       }
       const saved = await window.desktopAPI.proxy.get();
-      setProxyUrl(saved.proxyUrl ?? "");
+      const parts = getProxyParts(saved.proxyUrl ?? null);
+      setProxyUrl(parts.host);
+      setProxyUsername(parts.username);
+      setProxyPassword(parts.password);
+      setKeepExistingPassword(parts.hasStoredPassword && !parts.password);
       setNoProxy(saved.noProxy ?? "");
       toast.success(t(($) => $.desktop.network.proxy_saved), {
         id: "proxy-saved",
@@ -58,10 +107,10 @@ export function NetworkSettingsTab() {
     } finally {
       setSaving(false);
     }
-  }, [proxyUrl, noProxy, t]);
+  }, [keepExistingPassword, noProxy, proxyPassword, proxyUrl, proxyUsername, t]);
 
   const handleTest = useCallback(async () => {
-    const trimmed = proxyUrl.trim();
+    const trimmed = buildProxyUrl(proxyUrl, proxyUsername, proxyPassword, keepExistingPassword).trim();
     if (!trimmed) return;
     setTestState({ status: "testing" });
     try {
@@ -77,7 +126,7 @@ export function NetworkSettingsTab() {
     } catch {
       setTestState({ status: "error", message: "Unexpected error" });
     }
-  }, [proxyUrl]);
+  }, [keepExistingPassword, proxyPassword, proxyUrl, proxyUsername]);
 
   return (
     <SettingsTab title={t(($) => $.desktop.network.title)}>
@@ -86,15 +135,40 @@ export function NetworkSettingsTab() {
           label={t(($) => $.desktop.network.proxy_title)}
           description={t(($) => $.desktop.network.proxy_description)}
         >
-          <Input
-            type="password"
-            autoComplete="off"
-            aria-label={t(($) => $.desktop.network.proxy_title)}
-            value={proxyUrl}
-            onChange={(e) => setProxyUrl(e.target.value)}
-            placeholder={t(($) => $.desktop.network.proxy_placeholder)}
-            disabled={saving}
-          />
+          <div className="flex w-full flex-col gap-2">
+            <Input
+              type="text"
+              autoComplete="off"
+              aria-label={t(($) => $.desktop.network.proxy_title)}
+              value={proxyUrl}
+              onChange={(e) => setProxyUrl(e.target.value)}
+              placeholder={t(($) => $.desktop.network.proxy_placeholder)}
+              disabled={saving}
+            />
+            <div className="flex gap-2">
+              <Input
+                type="text"
+                autoComplete="username"
+                aria-label="Proxy username"
+                value={proxyUsername}
+                onChange={(e) => setProxyUsername(e.target.value)}
+                placeholder="Username"
+                disabled={saving}
+              />
+              <Input
+                type="password"
+                autoComplete="current-password"
+                aria-label="Proxy password"
+                value={proxyPassword}
+                onChange={(e) => {
+                  setProxyPassword(e.target.value);
+                  setKeepExistingPassword(false);
+                }}
+                placeholder="Password"
+                disabled={saving}
+              />
+            </div>
+          </div>
         </SettingsRow>
 
         <SettingsRow
@@ -132,7 +206,7 @@ export function NetworkSettingsTab() {
             variant="outline"
             size="sm"
             onClick={handleTest}
-            disabled={!proxyUrl.trim() || testState.status === "testing"}
+            disabled={!buildProxyUrl(proxyUrl, proxyUsername, proxyPassword, keepExistingPassword).trim() || testState.status === "testing"}
           >
             {testState.status === "testing" ? (
               <>
