@@ -22,6 +22,7 @@ Install steps are in [Install AI coding tools](/install-agent-runtime).
 | Tool | Detected command | Session resumption | Multica-managed MCP | Model picked in Multica | Skill injection path |
 |---|---|---:|---:|---:|---|
 | Antigravity | `agy` | ✓ | — | ✓ | `.agents/skills/` |
+| [BB](https://github.com/multica-ai/multica/tree/main/integrations/bb) | `bb` + Multica plugin | ✓ | — | ✓ | `.agents/skills/` |
 | Claude Code | `claude` | ✓ | ✓ | ✓ | `.claude/skills/` |
 | CodeBuddy | `codebuddy` | ✓ | ✓ | ✓ | `.codebuddy/skills/` |
 | CodeArts | `codearts` | ✓ | ✓ | ✓ | `.codeartsdoer/skills/` |
@@ -52,6 +53,8 @@ Install steps are in [Install AI coding tools](/install-agent-runtime).
 | ZCode | `zcode` / ZCode Desktop | ✓ | ✓ | ✓ | `.zcode/skills/` |
 
 "Multica-managed MCP" means you can define MCP servers in the agent configuration and Multica passes them to the tool before a run. The column only says whether Multica can configure it for you, not whether the tool has other ways to configure MCP.
+
+BB runs issues in visible Codex threads through its companion Multica plugin. The plugin injects each run's task credentials into the provider environment without including them in prompts or credential files. Configure MCP in BB; the initial integration returns final output rather than streaming tool events. See the [BB setup instructions](https://github.com/multica-ai/multica/tree/main/integrations/bb).
 
 Tools with — under "Model picked in Multica" take their model from their own configuration; see [Model sources](#model-sources).
 

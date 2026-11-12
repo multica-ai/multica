@@ -176,6 +176,9 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	}
 
 	agents := map[string]AgentEntry{}
+	if e, ok := probe("MULTICA_BB_PATH", "bb", "MULTICA_BB_MODEL"); ok {
+		agents["bb"] = e
+	}
 	if e, ok := probe("MULTICA_CLAUDE_PATH", "claude", "MULTICA_CLAUDE_MODEL"); ok {
 		agents["claude"] = e
 	}
