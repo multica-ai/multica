@@ -827,19 +827,6 @@ func (h *Handler) NotifyRuntimeRecovered(_ context.Context, workspaceID string) 
 	h.PublishRuntimeRefresh(workspaceID, "system", "", "heartbeat_recovery")
 }
 
-// publishTask is publish() plus a TaskID hint so the realtime layer can route
-// the event to the per-task scope rather than the whole workspace.
-func (h *Handler) publishTask(eventType, workspaceID, actorType, actorID, taskID string, payload any) {
-	h.Bus.Publish(events.Event{
-		Type:        eventType,
-		WorkspaceID: workspaceID,
-		ActorType:   actorType,
-		ActorID:     actorID,
-		TaskID:      taskID,
-		Payload:     payload,
-	})
-}
-
 // publishChat is publish() plus the chat session routing hints. actorID must
 // be the session's creator: every chat endpoint gates on creator ownership
 // before publishing, and the realtime layer delivers the event to that user

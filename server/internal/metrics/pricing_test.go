@@ -295,7 +295,7 @@ func TestGrokPricingMatchesRecordedTurn(t *testing.T) {
 	// Captured payload: inputTokens 12929, cachedReadTokens 10880,
 	// outputTokens 29, totalTokens 12958, costUsdTicks 75360000. Grok counts
 	// the cached prefix inside inputTokens, so the uncached remainder is
-	// 12929 - 10880 = 2049 (see excludeACPCachedInput in pkg/agent/hermes.go).
+	// 12929 - 10880 = 2049 (see normalizeACPTokenUsage in pkg/agent/acp_usage.go).
 	const (
 		uncachedInput = int64(2049)
 		cacheRead     = int64(10880)

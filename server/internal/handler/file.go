@@ -1557,18 +1557,6 @@ func (h *Handler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 
 // Attachment linking
 
-// linkAttachmentsByIssueIDs links unbound attachments to an issue. A caller
-// that did not already advance the issue revision can ask this visible change
-// to advance it exactly once.
-func (h *Handler) linkAttachmentsByIssueIDs(ctx context.Context, issueID, workspaceID pgtype.UUID, ids []pgtype.UUID, bumpRevision bool) (db.LinkAttachmentsToIssueRow, error) {
-	return h.Queries.LinkAttachmentsToIssue(ctx, db.LinkAttachmentsToIssueParams{
-		IssueID:       issueID,
-		WorkspaceID:   workspaceID,
-		AttachmentIds: ids,
-		BumpRevision:  bumpRevision,
-	})
-}
-
 // attachmentOwnerLockAttempts bounds the re-read below. An attachment gains an
 // owner once, when the issue or comment it was uploaded for links it, so one
 // retry is enough in practice; the bound is what keeps a pathological

@@ -981,9 +981,6 @@ func (s *IssueService) maybeEnqueueOnAssign(ctx context.Context, issue db.Issue,
 // path does the same test through agentAssigneeVerdict, which also tells it
 // WHY a refusal happened; this one runs inside the create transaction, where
 // there is nothing to tell anyone yet.
-//
-// Mirrors handler.shouldEnqueueAgentTask; kept here to make the service
-// self-contained, since both code paths must move together.
 func (s *IssueService) shouldEnqueueAgentTaskWithQueries(ctx context.Context, q *db.Queries, issue db.Issue) bool {
 	// Resolved through q, not s.Queries: this runs inside the create
 	// transaction and must see the same snapshot as the rest of it. (MUL-6243)
