@@ -291,14 +291,6 @@ func propertyOptionIDs(cfg PropertyConfig) map[string]int {
 	return ids
 }
 
-func selectOptionsHint(cfg PropertyConfig) string {
-	parts := make([]string, len(cfg.Options))
-	for i, opt := range cfg.Options {
-		parts[i] = fmt.Sprintf("%s (%s)", opt.ID, opt.Name)
-	}
-	return strings.Join(parts, ", ")
-}
-
 // Actor values (MUL-6286)
 
 // Compatibility aliases keep the focused handler tests on the same helper
@@ -306,7 +298,6 @@ func selectOptionsHint(cfg PropertyConfig) string {
 type actorRef = issueproperty.ActorRef
 
 func propertyTypeIsActor(t string) bool { return issueproperty.IsActor(t) }
-func actorKindsHint() string            { return issueproperty.ActorKindsHint() }
 func parseActorRef(s string) (actorRef, error) {
 	return issueproperty.ParseActorRef(s)
 }

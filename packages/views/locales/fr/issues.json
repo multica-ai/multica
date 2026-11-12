@@ -198,6 +198,7 @@
     "relation_subscribed": "Auxquels je suis abonné",
     "section_agent_status": "Statut de l'agent",
     "agent_status_running": "En cours d'exécution",
+    "agent_status_idle": "Inactif",
     "section_read_state": "État de lecture",
     "read_state_unread": "Non lu",
     "operator_label": "Condition",
@@ -321,6 +322,7 @@
     "card_project": "Projet",
     "card_labels": "Étiquettes",
     "card_child_progress": "Avancement des sous-tâches",
+    "card_pull_requests": "Pull requests",
     "show_sub_issues": "Afficher les sous-tâches",
     "layout_options": "Options de la vue {{layout}}"
   },
@@ -392,6 +394,7 @@
       "created_at": "Création",
       "updated_at": "Mise à jour",
       "child_progress": "Avancement des sous-tâches",
+      "pull_requests": "Pull requests",
       "creator": "Créé par"
     },
     "calculation": {
@@ -522,6 +525,7 @@
     "quick_action_blocked_body": "« {{name}} » s'exécute sous un agent que vous n'êtes pas autorisé à déclencher. Demandez à un administrateur de l'espace de travail de rendre cet agent accessible à l'équipe, ou de rattacher cette action à un agent partagé.",
     "quick_action_blocked_ok": "Compris",
     "pull_requests_loading": "Chargement…",
+    "pull_request_state_open": "Ouverte",
     "pull_request_state_draft": "Brouillon",
     "pull_request_state_merged": "Fusionnée",
     "pull_request_state_closed": "Fermée",
@@ -777,7 +781,10 @@
     "recipient_count_other": "{{count}} agents recevront ce message",
     "steer_attachment_notice": "Seul du texte peut rejoindre une exécution en cours : un message avec des fichiers sera traité après.",
     "restart_send": "Arrêter et envoyer",
-    "restart_failed": "Impossible d'arrêter l'exécution en cours. Votre message n'a pas été envoyé."
+    "restart_failed": "Impossible d'arrêter l'exécution en cours. Votre message n'a pas été envoyé.",
+    "reply_action": "Répondre",
+    "actions_label": "Actions du commentaire",
+    "create_issue_from_selection": "Créer une sous-tâche à partir de la sélection"
   },
   "reply": {
     "recipients_changed": "La cible de la réponse a changé. Vérifiez les destinataires avant de réessayer.",
@@ -1001,7 +1008,12 @@
     "delete_dialog_title_other": "Supprimer {{count}} tâches ?",
     "delete_dialog_desc_one": "Cette action est irréversible. La tâche sélectionnée et toutes ses données associées seront définitivement supprimées.",
     "delete_dialog_desc_other": "Cette action est irréversible. Les tâches sélectionnées et toutes leurs données associées seront définitivement supprimées.",
-    "cancel": "Annuler"
+    "cancel": "Annuler",
+    "copy_links": "Copier les liens",
+    "links_copied_one": "{{count}} lien copié",
+    "links_copied_other": "{{count}} liens copiés",
+    "delete_count_one": "Supprimer {{count}} tâche",
+    "delete_count_other": "Supprimer {{count}} tâches"
   },
   "card": {
     "update_failed": "Échec de la mise à jour de la tâche",
@@ -1038,12 +1050,14 @@
     "stop_agent_run": "Arrêter l’exécution de {{name}}",
     "relations": "Relations",
     "create_sub_issue": "Créer une sous-tâche",
+    "quick_actions": "Actions rapides",
     "set_parent_issue": "Définir la tâche parente...",
     "remove_parent_issue": "Retirer la tâche parente",
     "remove_parent_issue_success": "Tâche parente retirée",
     "add_sub_issue": "Ajouter une sous-tâche...",
     "delete_issue": "Supprimer la tâche",
-    "mark_duplicate": "Marquer comme doublon..."
+    "mark_duplicate": "Marquer comme doublon...",
+    "open_in_new_window": "Ouvrir dans une nouvelle fenêtre"
   },
   "pickers": {
     "custom_property": {

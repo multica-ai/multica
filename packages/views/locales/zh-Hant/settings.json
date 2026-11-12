@@ -413,6 +413,10 @@
         "label": "顯示或隱藏聊天窗",
         "description": "開啟或關閉懸浮聊天窗，開啟時自動聚焦輸入框。"
       },
+      "newChat": {
+        "label": "問 Multica",
+        "description": "在懸浮聊天窗裡開始新對話。"
+      },
       "findInIssue": {
         "label": "在任務中查詢",
         "description": "搜尋當前開啟的任務詳情。"
@@ -843,6 +847,9 @@
       "agent_activity": {
         "label": "AI 代理活動",
         "description": "AI 代理執行失敗時"
+      },
+      "chat_replies": {
+        "label": "包含聊天回覆"
       }
     },
     "system": {
@@ -851,7 +858,7 @@
     },
     "browser": {
       "label": "瀏覽器通知",
-      "hint": "允許當前瀏覽器為新的收件箱條目彈出通知橫幅。",
+      "hint": "允許此瀏覽器為收件匣通知和聊天回覆顯示橫幅。",
       "enable": "啟用",
       "granted": "當前瀏覽器可以彈出通知橫幅。",
       "denied": "已被瀏覽器攔截。請在瀏覽器設定中為本站點開啟通知權限。",
@@ -1360,7 +1367,8 @@
     "github_load_more": "載入更多",
     "github_selected_count": "已選擇 {{count}} 個",
     "github_cancel": "取消",
-    "github_import": "新增倉庫",
+    "github_import": "新增 {{count}} 個倉庫",
+    "github_import_other": "新增 {{count}} 個倉庫",
     "save": "儲存",
     "saving": "儲存中...",
     "saved_hint": "所有改動已儲存",
@@ -1393,7 +1401,10 @@
       "close_others": "關閉其他標籤頁",
       "open_window": "在新視窗開啟",
       "new": "新建標籤頁",
-      "pinned_name": "{{title}}（已固定）"
+      "pinned_name": "{{title}}（已固定）",
+      "copy_link": "複製連結",
+      "link_copied": "已複製連結",
+      "close_right": "關閉右側標籤頁"
     },
     "updates": {
       "title": "更新",
@@ -1595,7 +1606,40 @@
     "github_actions": "GitHub 操作"
   },
   "channels": {
-    "breadcrumb": "路徑"
+    "breadcrumb": "路徑",
+    "add": "新增訊息管道",
+    "connect": "連接",
+    "disconnect": "中斷連接",
+    "open": "開啟",
+    "normal": "正常",
+    "waiting_message": "等待第一則訊息",
+    "disconnected": "已中斷",
+    "find_me": "在 {{platform}} 中找我",
+    "manage": "管理 {{platform}}",
+    "last_message": "最近訊息：{{time}}",
+    "ask_admin": "請找管理員",
+    "unavailable": "暫時無法連接",
+    "permissions_title": "誰可以連接",
+    "owner_or_admin": "AI 代理擁有者或工作區管理員",
+    "admin_only": "僅工作區管理員",
+    "connect_title": "連接訊息管道",
+    "choose_description": "選擇 AI 代理和平台。",
+    "authorize_description": "將 {{agent}} 連接到 {{platform}}。",
+    "agent_label": "AI 代理",
+    "choose_agent": "選擇 AI 代理",
+    "platform_label": "平台",
+    "region_label": "地區",
+    "method_label": "連接方式",
+    "feishu": "飛書（中國）",
+    "lark": "Lark（國際）",
+    "setup_guide": "設定指南",
+    "connection_changed": "此連接已無法使用。請關閉後重試。",
+    "connect_failed": "無法連接機器人。",
+    "connect_success": "訊息管道已連接。",
+    "disconnect_failed": "無法中斷機器人連接。",
+    "disconnect_title": "中斷訊息管道？",
+    "disconnect_description": "此 AI 代理將不再接收來自 {{platform}} 的訊息。",
+    "agent_unavailable": "AI 代理已無法使用"
   },
   "mcp_usage": {
     "agent_count_other": "已分配給 {{count}} 個 AI 代理",

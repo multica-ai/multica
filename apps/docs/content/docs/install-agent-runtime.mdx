@@ -45,6 +45,7 @@ Multica currently detects these commands:
 | Qoder CN CLI | `qoderclicn` | [Qoder CN CLI quickstart](https://help.aliyun.com/en/lingma/qodercli-cn/user-guide/qoder-cli-cn-get-started-quickly) |
 | Qwen Code | `qwen` | [Qwen Code](https://github.com/QwenLM/qwen-code) |
 | QwenPaw | `qwenpaw` | [QwenPaw](https://github.com/agentscope-ai/QwenPaw) |
+| Factory Droid | `droid` | [Factory Droid](https://docs.factory.com/droid-exec/overview) |
 | Reasonix | `reasonix` | [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) |
 | TRAE CLI | `traecli` | [TRAE official site](https://www.trae.cn/) |
 | Dim | `dim` | [DimCode](https://dimagent.cn/en/docs/cli) |
@@ -72,6 +73,7 @@ Below the minimum version, the daemon does not register the corresponding runtim
 | Copilot | 1.0.0 |
 | Grok | 0.2.89 |
 | Qwen Code | 0.20.0 |
+| Factory Droid | 1.8.0 |
 | MiniMax Code | 0.1.2 |
 | Muse Code | 1.4.10 |
 | OpenCode | 1.1.54 |
@@ -83,6 +85,21 @@ Below the minimum version, the daemon does not register the corresponding runtim
 A few tools need extra setup beyond signing in:
 
 <Accordions type="multiple">
+<Accordion title="Factory Droid" id="droid">
+
+Install the native Droid CLI using the [official instructions](https://docs.factory.com/droid-exec/overview). Multica supports Droid 1.8.0 or later on macOS, Windows, and glibc-based Linux; Alpine is unsupported. Sign in with `droid`, or set `FACTORY_API_KEY` in the daemon environment or the agent's custom environment. Keep credentials out of prompts and custom arguments.
+
+After the daemon discovers `droid`, select the Droid runtime when creating an agent and assign it an issue. The run streams assistant and tool messages, then publishes the final response. Models use Droid's default unless you enter a model ID in Multica. Optional daemon overrides are `MULTICA_DROID_PATH`, `MULTICA_DROID_MODEL`, and `MULTICA_DROID_ARGS`. Reasoning effort can be set through custom arguments, such as `--reasoning-effort high`.
+
+Runs use `droid exec --output-format stream-json --auto high`, read `AGENTS.md`, and discover skills in `.factory/skills/`. Multica forwards a saved session ID for continuation in the same working directory. If continuation fails before Droid confirms a session or uses a tool, Multica may retry once with a fresh session; authentication and network failures keep the existing session without retrying.
+
+Custom arguments also accept Droid's tool filters, spec-mode settings, `--settings`, session tags, and `--disable-builtin-skills`. Configure MCP, hooks, plugins, custom Droids, and BYOK models in Droid itself. Multica does not manage that configuration or implement Mission orchestration, live message supplements, or `max_turns`; use the task timeout to bound execution. Transport, working-directory, model, session, and Mission overrides are filtered from custom arguments. Unknown options and extra positional prompts are rejected before startup. Native `stream-json` output is supported; the deprecated `stream-json` input mode is not used.
+
+Droid's command policy can still reject a task under `--auto high`; completed edits remain in the working tree after a failure. Use the [official permission-rule commands](https://docs.factory.com/autonomy-and-safety/permission-rules) to check your execution machine's policy before assigning unattended tasks.
+
+If Droid is missing, install it on the daemon machine or set `MULTICA_DROID_PATH` to its native executable. If authentication fails, sign in or replace the API key in the execution environment. Permission, provider, and protocol failures appear as failed runs; cancellation and timeout stop the owned process tree and report their respective final states. A clean exit without a completion event is a failure, and intermediate narration is never published as the final result.
+
+</Accordion>
 <Accordion title="CodeArts" id="codearts">
 
 Verify the non-interactive path with `codearts run --model provider/model "Reply OK"`, not only the TUI. The current CodeArts CLI can let a custom provider work in the TUI while `run`, `models`, and `serve` still require [`CODEARTS_CLI_AK` / `CODEARTS_CLI_SK`](https://support.huaweicloud.com/usermanual-cli/codeartsagent_cli_0026.html). Multica can discover custom models from `~/.codeartsdoer/codearts_cli.json` or `.jsonc`, but agent runs use `codearts run` and therefore follow its authorization requirements.
@@ -219,4 +236,4 @@ If the tool shows as online but runs still fail, open the issue's run record to 
 - [Daemon and runtimes](/daemon-runtimes) — online status, concurrency, and custom runtimes.
 - [AI coding tools comparison](/providers) — compare what each tool can do in Multica.
 
-ZCode Desktop on macOS is discovered from its application bundle. Install Node.js and enable a working API connection in the desktop app. Model and reasoning choices are supplied by ZCode itself; see [the runtime comparison](/providers#zcode).
+ZCode Desktop on macOS is discovered from its application bundle and requires Node.js. On Linux, the daemon discovers ZCode Desktop through `zcode` on PATH or `/opt/ZCode/zcode` and runs its bundled CLI without opening a desktop window. No separate Node.js installation or manual environment configuration is needed on Linux. Enable a working API connection in the desktop app. Model and reasoning choices are supplied by ZCode itself; see [the runtime comparison](/providers#zcode).

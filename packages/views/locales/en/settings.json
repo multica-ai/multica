@@ -419,6 +419,10 @@
         "label": "Toggle chat window",
         "description": "Open or close the floating chat window. Opening it focuses the message input."
       },
+      "newChat": {
+        "label": "Ask Multica",
+        "description": "Start a new chat in the floating chat window."
+      },
       "findInIssue": {
         "label": "Find in issue",
         "description": "Search within the open issue detail."
@@ -852,6 +856,9 @@
       "agent_activity": {
         "label": "Agent activity",
         "description": "When an agent run fails"
+      },
+      "chat_replies": {
+        "label": "Include chat replies"
       }
     },
     "system": {
@@ -860,7 +867,7 @@
     },
     "browser": {
       "label": "Browser notifications",
-      "hint": "Allow this browser to show notification banners for new inbox items.",
+      "hint": "Allow this browser to show banners for Inbox notifications and chat replies.",
       "enable": "Enable",
       "granted": "This browser can show notification banners.",
       "denied": "Blocked by your browser. Enable notifications for this site in your browser settings.",
@@ -1370,7 +1377,9 @@
     "github_load_more": "Load more",
     "github_selected_count": "{{count}} selected",
     "github_cancel": "Cancel",
-    "github_import": "Add repositories",
+    "github_import": "Add {{count}} repositories",
+    "github_import_one": "Add {{count}} repository",
+    "github_import_other": "Add {{count}} repositories",
     "save": "Save",
     "saving": "Saving...",
     "saved_hint": "All changes saved",
@@ -1403,7 +1412,10 @@
       "close_others": "Close other tabs",
       "open_window": "Open as new window",
       "new": "New tab",
-      "pinned_name": "{{title}} (pinned)"
+      "pinned_name": "{{title}} (pinned)",
+      "copy_link": "Copy link",
+      "link_copied": "Link copied",
+      "close_right": "Close tabs to the right"
     },
     "updates": {
       "title": "Updates",
@@ -1609,7 +1621,40 @@
     "github_actions": "GitHub actions"
   },
   "channels": {
-    "breadcrumb": "Breadcrumb"
+    "breadcrumb": "Breadcrumb",
+    "add": "Add messaging channel",
+    "connect": "Connect",
+    "disconnect": "Disconnect",
+    "open": "Open",
+    "normal": "Connected",
+    "waiting_message": "Waiting for first message",
+    "disconnected": "Disconnected",
+    "find_me": "Find me on {{platform}}",
+    "manage": "Manage {{platform}}",
+    "last_message": "Last message {{time}}",
+    "ask_admin": "Ask an admin",
+    "unavailable": "Connection unavailable",
+    "permissions_title": "Who can connect",
+    "owner_or_admin": "Agent owner or workspace admin",
+    "admin_only": "Workspace admins only",
+    "connect_title": "Connect messaging channel",
+    "choose_description": "Choose an agent and a platform.",
+    "authorize_description": "Connect {{agent}} to {{platform}}.",
+    "agent_label": "Agent",
+    "choose_agent": "Choose an agent",
+    "platform_label": "Platform",
+    "region_label": "Region",
+    "method_label": "Connection method",
+    "feishu": "Feishu (China)",
+    "lark": "Lark (International)",
+    "setup_guide": "Setup guide",
+    "connection_changed": "This connection is no longer available. Close this dialog and try again.",
+    "connect_failed": "Could not connect the bot.",
+    "connect_success": "Messaging channel connected.",
+    "disconnect_failed": "Could not disconnect the bot.",
+    "disconnect_title": "Disconnect messaging channel?",
+    "disconnect_description": "This agent will stop receiving messages from {{platform}}.",
+    "agent_unavailable": "Agent unavailable"
   },
   "mcp_usage": {
     "agent_count_one": "Used by {{count}} agent",

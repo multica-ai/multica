@@ -1,0 +1,6 @@
+{"type":"system","subtype":"init","session_id":"session-example","model":"actual-model"}
+{"type":"message","role":"assistant","id":"message-1","text":"Interim narration","session_id":"session-example"}
+{"type":"tool_call","id":"call-1","messageId":"message-1","toolId":"Read","toolName":"Read","parameters":{"file_path":"README.md"},"session_id":"session-example"}
+{"type":"tool_result","id":"call-1","messageId":"message-2","toolId":"Read","value":"File contents","isError":false,"session_id":"session-example"}
+{"type":"message","role":"assistant","id":"message-3","text":"Final answer","session_id":"session-example"}
+{"type":"completion","finalText":"Final answer","numTurns":2,"durationMs":100,"session_id":"session-example","usage":{"input_tokens":42,"output_tokens":9,"cache_read_input_tokens":4,"cache_creation_input_tokens":3}}

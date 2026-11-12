@@ -7,7 +7,7 @@ import enCommon from "../../locales/en/common.json";
 import enSettings from "../../locales/en/settings.json";
 
 const mockUpdateWorkspace = vi.hoisted(() => vi.fn());
-const mockGetGitHubConnectURL = vi.hoisted(() => vi.fn());
+const mockConnectGitHub = vi.hoisted(() => vi.fn());
 const mockNavReplace = vi.hoisted(() => vi.fn());
 const mockToastError = vi.hoisted(() => vi.fn());
 const workspaceRef = vi.hoisted(() => ({
@@ -44,6 +44,7 @@ const githubRepositoriesRef = vi.hoisted(() => ({
     default_branch: string;
   }[],
 }));
+const repositorySelectionRef = vi.hoisted(() => ({ current: "unknown" }));
 const searchParamsRef = vi.hoisted(() => ({
   current: new URLSearchParams("tab=code"),
 }));
@@ -54,6 +55,7 @@ vi.mock("@tanstack/react-query", () => ({
     data: {
       pages: [
         {
+          repository_selection: repositorySelectionRef.current,
           repositories: githubRepositoriesRef.current,
           total_count: githubRepositoriesRef.current.length,
           next_page: null,
@@ -84,7 +86,6 @@ vi.mock("@multica/core/workspace/queries", () => ({
 vi.mock("@multica/core/api", () => ({
   api: {
     updateWorkspace: mockUpdateWorkspace,
-    getGitHubConnectURL: mockGetGitHubConnectURL,
   },
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: mockToastError } }));
@@ -98,6 +99,13 @@ vi.mock("../../navigation", () => ({
 }));
 
 import { RepositoriesSection, repositoryIdentity } from "./repositories-section";
+
+const connection = {
+  connecting: false,
+  connect: mockConnectGitHub,
+  connectedInstallationID: "",
+  reset: vi.fn(),
+};
 
 const TEST_RESOURCES = { en: { common: enCommon, settings: enSettings } };
 
@@ -126,7 +134,9 @@ beforeEach(() => {
   };
   githubQueryStateRef.current = { isPending: false, isFetching: false };
   githubRepositoriesRef.current = [];
+  repositorySelectionRef.current = "unknown";
   searchParamsRef.current = new URLSearchParams("tab=code");
+  connection.connectedInstallationID = "";
   mockUpdateWorkspace.mockImplementation(async (_id: string, payload: object) => ({
     ...workspaceRef.current,
     ...payload,
@@ -139,7 +149,7 @@ async function openAddMenu(user: ReturnType<typeof userEvent.setup>) {
 
 describe("RepositoriesSection", () => {
   it("lists repositories as read-only rows with their description", () => {
-    render(<RepositoriesSection />, { wrapper: Wrapper });
+    render(<RepositoriesSection connection={connection} />, { wrapper: Wrapper });
 
     expect(screen.getByText("https://github.com/multica-ai/multica")).toBeInTheDocument();
     expect(screen.getByText("Main app")).toBeInTheDocument();
@@ -148,7 +158,7 @@ describe("RepositoriesSection", () => {
 
   it("adds a repository from the dialog in one request", async () => {
     const user = userEvent.setup();
-    render(<RepositoriesSection />, { wrapper: Wrapper });
+    render(<RepositoriesSection connection={connection} />, { wrapper: Wrapper });
 
     await openAddMenu(user);
     await user.click(await screen.findByRole("menuitem", { name: "Enter a URL..." }));
@@ -179,7 +189,7 @@ describe("RepositoriesSection", () => {
 
   it("refuses a repository that is already listed under another URL form", async () => {
     const user = userEvent.setup();
-    render(<RepositoriesSection />, { wrapper: Wrapper });
+    render(<RepositoriesSection connection={connection} />, { wrapper: Wrapper });
 
     await openAddMenu(user);
     await user.click(await screen.findByRole("menuitem", { name: "Enter a URL..." }));
@@ -196,7 +206,7 @@ describe("RepositoriesSection", () => {
   it("keeps the dialog open with the input when saving fails", async () => {
     mockUpdateWorkspace.mockRejectedValueOnce(new Error("boom"));
     const user = userEvent.setup();
-    render(<RepositoriesSection />, { wrapper: Wrapper });
+    render(<RepositoriesSection connection={connection} />, { wrapper: Wrapper });
 
     await user.click(screen.getByRole("button", { name: /Actions for https:\/\/github.com\/multica-ai\/multica/ }));
     await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
@@ -213,7 +223,7 @@ describe("RepositoriesSection", () => {
 
   it("removes a repository only after confirmation", async () => {
     const user = userEvent.setup();
-    render(<RepositoriesSection />, { wrapper: Wrapper });
+    render(<RepositoriesSection connection={connection} />, { wrapper: Wrapper });
 
     await user.click(screen.getByRole("button", { name: /Actions for https:\/\/github.com\/multica-ai\/multica/ }));
     await user.click(await screen.findByRole("menuitem", { name: "Delete repository" }));
@@ -231,39 +241,24 @@ describe("RepositoriesSection", () => {
 
   it("hides every write affordance from members", () => {
     roleRef.current = "member";
-    render(<RepositoriesSection />, { wrapper: Wrapper });
+    render(<RepositoriesSection connection={connection} />, { wrapper: Wrapper });
 
     expect(screen.queryByRole("button", { name: /Add repository/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /Actions for/ })).toBeNull();
   });
 
-  it("starts GitHub connection with the signed repository return target", async () => {
-    mockGetGitHubConnectURL.mockResolvedValue({
-      configured: true,
-      url: "https://github.com/apps/multica/installations/new",
-    });
-    const open = vi.spyOn(window, "open").mockImplementation(() => null);
+  it("starts GitHub connection through the shared handler", async () => {
     const user = userEvent.setup();
-    render(<RepositoriesSection />, { wrapper: Wrapper });
-
+    render(<RepositoriesSection connection={connection} />, { wrapper: Wrapper });
     await openAddMenu(user);
     await user.click(await screen.findByRole("menuitem", { name: /Connect GitHub/ }));
-
-    await waitFor(() => {
-      expect(mockGetGitHubConnectURL).toHaveBeenCalledWith("workspace-1", "repositories");
-      expect(open).toHaveBeenCalledWith(
-        "https://github.com/apps/multica/installations/new",
-        "_blank",
-        "noopener",
-      );
-    });
-    open.mockRestore();
+    expect(mockConnectGitHub).toHaveBeenCalledOnce();
   });
 
   it("explains why GitHub import is unavailable when browsing is not configured", async () => {
     githubRef.current = { ...githubRef.current, repository_browse_configured: false };
     const user = userEvent.setup();
-    render(<RepositoriesSection />, { wrapper: Wrapper });
+    render(<RepositoriesSection connection={connection} />, { wrapper: Wrapper });
 
     await openAddMenu(user);
     const item = await screen.findByRole("menuitem", { name: /Connect GitHub/ });
@@ -303,7 +298,7 @@ describe("RepositoriesSection", () => {
       },
     ];
     const user = userEvent.setup();
-    render(<RepositoriesSection />, { wrapper: Wrapper });
+    render(<RepositoriesSection connection={connection} />, { wrapper: Wrapper });
 
     await openAddMenu(user);
     await user.click(await screen.findByRole("menuitem", { name: /Choose from GitHub/ }));
@@ -315,7 +310,7 @@ describe("RepositoriesSection", () => {
     ).toBe(true);
 
     await user.click(checkboxes[1]!);
-    await user.click(screen.getByRole("button", { name: "Add repositories" }));
+    await user.click(screen.getByRole("button", { name: "Add 1 repository" }));
 
     await waitFor(() => {
       expect(mockUpdateWorkspace).toHaveBeenCalledWith("workspace-1", {
@@ -334,7 +329,7 @@ describe("RepositoriesSection", () => {
     };
     searchParamsRef.current = new URLSearchParams("tab=repositories&github_connected=1");
 
-    render(<RepositoriesSection />, { wrapper: Wrapper });
+    render(<RepositoriesSection connection={connection} />, { wrapper: Wrapper });
 
     expect(
       await screen.findByRole("heading", { name: "Choose GitHub repositories" }),
@@ -342,10 +337,46 @@ describe("RepositoriesSection", () => {
     expect(mockNavReplace).toHaveBeenCalledWith("/acme/settings?tab=repositories");
   });
 
+  it.each(["selected", "all", "unknown"])("preselects only explicitly selected authorizations (%s) for the returned installation", async (selection) => {
+    const user = userEvent.setup();
+    githubRef.current.installations = [
+      { id: "old-install", account_login: "old-org" },
+      { id: "new-install", account_login: "new-org" },
+    ];
+    repositorySelectionRef.current = selection;
+    githubRepositoriesRef.current = [
+      { id: 1, full_name: "new-org/api", clone_url: "https://github.com/new-org/api.git", html_url: "https://github.com/new-org/api", description: null, private: true, archived: false, default_branch: "main" },
+      { id: 2, full_name: "new-org/archived", clone_url: "https://github.com/new-org/archived.git", html_url: "https://github.com/new-org/archived", description: null, private: true, archived: true, default_branch: "main" },
+    ];
+    searchParamsRef.current = new URLSearchParams("tab=code&github_connected=1&github_installation=new-install");
+    render(<RepositoriesSection connection={connection} />, { wrapper: Wrapper });
+    const checkbox = await screen.findByRole("checkbox", { name: /new-org\/api/ });
+    if (selection === "selected") {
+      await waitFor(() => expect(checkbox).toBeChecked());
+      expect(mockUpdateWorkspace).not.toHaveBeenCalled();
+      await user.click(checkbox);
+      expect(checkbox).not.toBeChecked();
+      expect(screen.getByRole("button", { name: "Add 0 repositories" })).toBeDisabled();
+    } else {
+      expect(checkbox).not.toBeChecked();
+    }
+    expect(screen.getByRole("checkbox", { name: /new-org\/archived/ })).not.toBeChecked();
+    expect(mockNavReplace).toHaveBeenCalledWith("/acme/settings?tab=code");
+  });
+
+  it("opens the picker for the installation completed in the desktop window", async () => {
+    githubRef.current.installations = [{ id: "new-install", account_login: "new-org" }];
+    connection.connectedInstallationID = "new-install";
+    render(<RepositoriesSection connection={connection} />, { wrapper: Wrapper });
+    expect(await screen.findByRole("heading", { name: "Choose GitHub repositories" })).toBeInTheDocument();
+    expect(connection.reset).toHaveBeenCalled();
+    expect(mockUpdateWorkspace).not.toHaveBeenCalled();
+  });
+
   it("clears the GitHub callback query after an empty installation result", async () => {
     searchParamsRef.current = new URLSearchParams("tab=repositories&github_connected=1");
 
-    render(<RepositoriesSection />, { wrapper: Wrapper });
+    render(<RepositoriesSection connection={connection} />, { wrapper: Wrapper });
 
     await waitFor(() => {
       expect(mockNavReplace).toHaveBeenCalledWith("/acme/settings?tab=repositories");

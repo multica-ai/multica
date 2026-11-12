@@ -77,6 +77,12 @@ const POP_SHARED: ThemeTokens = {
   "menu-item-hover-color": "var(--foreground)",
   "display-chip-pressed-background": "var(--surface-selected)",
   "display-chip-pressed-color": "var(--foreground)",
+  // --primary and --input are the same ink, so switches get their own fills.
+  "switch-checked-background": "var(--button-primary)",
+  "switch-unchecked-background": "var(--surface)",
+  "switch-checked-thumb": "var(--button-primary-foreground)",
+  "switch-unchecked-thumb": "var(--surface-border)",
+  "switch-border-color": "var(--surface-border)",
   "label-radius": "0.25rem",
   "board-column-radius": "0.25rem",
   "board-card-radius": "0.25rem",

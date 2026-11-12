@@ -138,8 +138,25 @@ const EXPECTED = [
     source: "packages/views/issues/components/issue-peek.tsx",
   },
   {
+    what: "the switches",
+    find: (els) => els.filter((el) => el.attrs["data-slot"] === "switch"),
+    classes: ["border-switch-border", "data-checked:bg-switch-checked", "data-unchecked:bg-switch-unchecked", "dark:data-unchecked:bg-switch-unchecked-dark"],
+    source: "packages/ui/components/ui/switch.tsx",
+  },
+  {
+    what: "the switch thumbs",
+    find: (els) => els.filter((el) => el.attrs["data-slot"] === "switch-thumb"),
+    classes: [
+      "data-checked:bg-switch-checked-thumb",
+      "dark:data-checked:bg-switch-checked-thumb-dark",
+      "data-unchecked:bg-switch-unchecked-thumb",
+      "dark:data-unchecked:bg-switch-unchecked-thumb-dark",
+    ],
+    source: "packages/ui/components/ui/switch.tsx",
+  },
+  {
     what: "the small buttons",
-    find: (els) => els.filter((el) => ["sm", "icon-sm", "icon-xs"].includes(el.attrs["data-size"])),
+    find: (els) => els.filter((el) => "data-variant" in el.attrs && ["sm", "icon-sm", "icon-xs"].includes(el.attrs["data-size"])),
     classes: ["rounded-button-sm"],
     source: "packages/ui/components/ui/button.tsx",
   },
@@ -220,6 +237,21 @@ test("status and priority glyphs use the colour of their status and priority", (
     const cls = `text-priority-${row.attrs["data-priority"]}`;
     assert.ok(prioritySource.includes(`"${cls}"`), `priority.ts does not use ${cls}`);
     assert.ok(icons[0].classes.has(cls), `the ${row.attrs["data-priority"]} priority icon lacks ${cls}`);
+  }
+});
+
+test("switches are drawn on and off, with thumbs in the same state", () => {
+  const elements = parseFixture();
+  const switches = elements.filter((el) => el.attrs["data-slot"] === "switch");
+  for (const state of ["data-checked", "data-unchecked"]) {
+    assert.ok(switches.some((el) => state in el.attrs), `fixture.html draws no switch with ${state}`);
+  }
+  for (const el of switches) {
+    const state = "data-checked" in el.attrs ? "data-checked" : "data-unchecked";
+    assert.equal(el.attrs["aria-checked"], String(state === "data-checked"), `a switch with ${state} has the wrong aria-checked`);
+    const thumbs = descendants(elements, el).filter((child) => child.attrs["data-slot"] === "switch-thumb");
+    assert.equal(thumbs.length, 1, "each switch has one thumb");
+    assert.ok(state in thumbs[0].attrs, `the thumb of a switch with ${state} lacks it`);
   }
 });
 

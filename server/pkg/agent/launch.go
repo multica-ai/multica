@@ -85,6 +85,29 @@ type Command struct {
 	// probeDir isolates discovery from the daemon's inherited directory.
 	// Task commands leave it empty and keep their execution directory.
 	probeDir string
+	// versionArgs replaces `--version` in detectCLIVersion for a provider
+	// whose plain `--version` is not a cheap local read. Empty means
+	// `--version`. Set only through ForVersionProbe.
+	versionArgs []string
+}
+
+// ForVersionProbe returns c set up to probe provider's version the way that
+// provider can answer it without side effects. Most CLIs answer `--version`
+// locally; for them this returns c unchanged.
+//
+// Hermes is the exception. `hermes --version` runs a synchronous update check
+// that talks to GitHub (`git ls-remote`, and a `git fetch` on older installs).
+// On a slow network that outlasts detectVersionTimeout, the kill leaves a
+// partial `tmp_pack_*` in the Hermes checkout on every registration round, and
+// because Hermes caches the update result only after the check finishes, the
+// next round fetches again (MUL-9132). `hermes acp --version` prints the same
+// version from the local install stamp or `git rev-parse` and never checks for
+// updates. It is also the entry point the backend launches.
+func (c Command) ForVersionProbe(provider string) Command {
+	if provider == "hermes" {
+		c.versionArgs = hermesVersionProbeArgs
+	}
+	return c
 }
 
 // NewCommand builds a Command from a resolved executable path and a launch
@@ -496,6 +519,7 @@ var launchPrefixBlockedArgs = map[string]map[string]blockedArgMode{
 	"qoderclicn":  qoderBlockedArgs,
 	"qwen":        qwenBlockedArgs,
 	"qwenpaw":     qwenpawBlockedArgs,
+	"droid":       droidBlockedArgs,
 	"reasonix":    reasonixBlockedArgs,
 	"traecli":     traecliBlockedArgs,
 	"dim":         dimBlockedArgs,

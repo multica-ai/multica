@@ -605,11 +605,17 @@ func (h *Handler) InitiateListLocalSkills(w http.ResponseWriter, r *http.Request
 
 	req, err := h.LocalSkillListStore.Create(r.Context(), rt.runtimeID)
 	if err != nil {
+		if writeRequestCancellation(w, r, err) {
+			return
+		}
 		slog.Warn("enqueue local skills request failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to enqueue local skills request")
 		return
 	}
 	h.requestDaemonPendingWork(rt.runtimeID, protocol.PendingWorkKindLocalSkills)
+	if writeRequestCancellation(w, r, r.Context().Err()) {
+		return
+	}
 	writeJSON(w, http.StatusOK, req)
 }
 
@@ -623,6 +629,9 @@ func (h *Handler) GetLocalSkillListRequest(w http.ResponseWriter, r *http.Reques
 	requestID := chi.URLParam(r, "requestId")
 	req, err := h.LocalSkillListStore.Get(r.Context(), requestID)
 	if err != nil {
+		if writeRequestCancellation(w, r, err) {
+			return
+		}
 		slog.Warn("load request failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to load request")
 		return
@@ -632,6 +641,9 @@ func (h *Handler) GetLocalSkillListRequest(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	if writeRequestCancellation(w, r, r.Context().Err()) {
+		return
+	}
 	writeJSON(w, http.StatusOK, req)
 }
 

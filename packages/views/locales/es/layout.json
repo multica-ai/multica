@@ -104,7 +104,16 @@
     "open_in_new_window_click": "Clic",
     "open_in_other_window": "Ya está abierto en otra ventana",
     "in_other_window": "Otra ventana",
-    "all_workspaces_open": "Todos los espacios de trabajo ya están abiertos en una ventana"
+    "all_workspaces_open": "Todos los espacios de trabajo ya están abiertos en una ventana",
+    "copy_link": "Copiar enlace",
+    "link_copied": "Enlace copiado",
+    "workspace_settings": "Ajustes del espacio de trabajo",
+    "mark_all_read": "Marcar todo como leído",
+    "mark_all_read_failed": "No se pudo marcar todo como leído",
+    "reset_order": "Restablecer el orden predeterminado",
+    "copy_workspace_link": "Copiar enlace del espacio de trabajo",
+    "workspace_meta_one": "{{slug}} · {{count}} miembro",
+    "workspace_meta_other": "{{slug}} · {{count}} miembros"
   },
   "bottom_bar": {
     "label": "Barra de estado",
@@ -153,7 +162,8 @@
       "view_edit": "Editar vista",
       "view_rename": "Renombrar",
       "view_duplicate": "Duplicar",
-      "view_delete": "Eliminar vista"
+      "view_delete": "Eliminar vista",
+      "new_issue_here": "Nueva tarea en este proyecto"
     },
     "team": {
       "new_agent": "Nuevo agente",
@@ -173,7 +183,8 @@
       "resources": "Recursos",
       "runtimes_online_one": "{{count}} en línea",
       "runtimes_online_other": "{{count}} en línea",
-      "invite_member": "Invitar miembro"
+      "invite_member": "Invitar miembro",
+      "open_issue": "Abrir {{identifier}}"
     },
     "autopilots": {
       "all": "Todas las automatizaciones",
@@ -229,5 +240,19 @@
     "go_to_slide": "Ir a la diapositiva {{index}}",
     "previous": "Anterior",
     "next": "Siguiente"
+  },
+  "context_menu": {
+    "cut": "Cortar",
+    "copy": "Copiar",
+    "paste": "Pegar",
+    "select_all": "Seleccionar todo",
+    "add_to_dictionary": "Añadir al diccionario",
+    "open_link": "Abrir enlace en el navegador",
+    "copy_link_address": "Copiar dirección del enlace",
+    "copy_image": "Copiar imagen",
+    "copy_code": "Copiar código",
+    "copy_table": "Copiar tabla",
+    "copied": "Copiado",
+    "copy_failed": "No se pudo copiar"
   }
 }

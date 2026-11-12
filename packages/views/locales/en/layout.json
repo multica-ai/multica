@@ -104,7 +104,16 @@
     "open_in_new_window_click": "Click",
     "open_in_other_window": "Already open in another window",
     "in_other_window": "Other window",
-    "all_workspaces_open": "Every workspace is already open in a window"
+    "all_workspaces_open": "Every workspace is already open in a window",
+    "copy_link": "Copy link",
+    "link_copied": "Link copied",
+    "workspace_settings": "Workspace settings",
+    "mark_all_read": "Mark all as read",
+    "mark_all_read_failed": "Couldn't mark all as read",
+    "reset_order": "Reset to default order",
+    "copy_workspace_link": "Copy workspace link",
+    "workspace_meta_one": "{{slug}} · {{count}} member",
+    "workspace_meta_other": "{{slug}} · {{count}} members"
   },
   "bottom_bar": {
     "label": "Status bar",
@@ -153,7 +162,8 @@
       "view_edit": "Edit view",
       "view_rename": "Rename",
       "view_duplicate": "Duplicate",
-      "view_delete": "Delete view"
+      "view_delete": "Delete view",
+      "new_issue_here": "New issue in this project"
     },
     "team": {
       "new_agent": "New agent",
@@ -173,7 +183,8 @@
       "resources": "Resources",
       "runtimes_online_one": "{{count}} online",
       "runtimes_online_other": "{{count}} online",
-      "invite_member": "Invite member"
+      "invite_member": "Invite member",
+      "open_issue": "Open {{identifier}}"
     },
     "autopilots": {
       "all": "All autopilots",
@@ -229,5 +240,19 @@
     "go_to_slide": "Go to slide {{index}}",
     "previous": "Previous",
     "next": "Next"
+  },
+  "context_menu": {
+    "cut": "Cut",
+    "copy": "Copy",
+    "paste": "Paste",
+    "select_all": "Select all",
+    "add_to_dictionary": "Add to dictionary",
+    "open_link": "Open link in browser",
+    "copy_link_address": "Copy link address",
+    "copy_image": "Copy image",
+    "copy_code": "Copy code",
+    "copy_table": "Copy table",
+    "copied": "Copied",
+    "copy_failed": "Couldn't copy"
   }
 }

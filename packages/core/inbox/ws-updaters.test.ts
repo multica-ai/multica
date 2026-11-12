@@ -5,6 +5,7 @@ import {
   cancelInboxLists,
   onInboxInvalidate,
   onInboxIssueDeleted,
+  onInboxIssuesDeleted,
   onInboxNew,
   onInboxIssueStatusChanged,
   onInboxSummaryInvalidate,
@@ -388,6 +389,112 @@ describe("inbox list refresh during the first load", () => {
       expect(queryFn.mock.calls.length).toBeGreaterThan(1);
     } finally {
       releaseFirst([]);
+      unsubscribe();
+      qc.clear();
+    }
+  });
+});
+
+// The delete mutations call onInboxIssuesDeleted directly — their WS echo is a
+// backstop, not the plan — so it owes the same discipline as the update
+// writes: cancel before pruning, and re-read a list whose request the cancel
+// interrupted (MUL-7286).
+describe("onInboxIssuesDeleted", () => {
+  it("removes all inbox items referencing any deleted issue, from both lists", async () => {
+    const qc = new QueryClient();
+    qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), [
+      makeItem("i1", "issue-a"),
+      makeItem("i2", "issue-a"),
+      makeItem("i3", "issue-b"),
+      makeItem("i4", null),
+    ]);
+    qc.setQueryData<InboxItem[]>(inboxKeys.archived(wsId), [
+      makeItem("a1", "issue-a", { archived: true }),
+      makeItem("a2", "issue-b", { archived: true }),
+    ]);
+
+    await onInboxIssuesDeleted(qc, wsId, ["issue-a", "issue-b"]);
+
+    expect(
+      qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId))?.map((i) => i.id),
+    ).toEqual(["i4"]);
+    expect(
+      qc.getQueryData<InboxItem[]>(inboxKeys.archived(wsId))?.map((i) => i.id),
+    ).toEqual([]);
+  });
+
+  it("is a no-op without ids", async () => {
+    const qc = new QueryClient();
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+
+    await onInboxIssuesDeleted(qc, wsId, []);
+
+    expect(invalidate).not.toHaveBeenCalled();
+  });
+
+  it("refreshes the unread summary, which the dropped rows can change", async () => {
+    const qc = new QueryClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), [
+      makeItem("i1", "issue-a", { read: false }),
+    ]);
+
+    await onInboxIssuesDeleted(qc, wsId, ["issue-a"]);
+
+    expect(spy).toHaveBeenCalledWith({ queryKey: inboxKeys.unreadSummary() });
+  });
+
+  it("re-reads a list whose request the prune interrupted", async () => {
+    // A pre-delete response landing after the prune would resurrect the
+    // deleted rows; the cancel drops it, and the interrupted list is owed a
+    // re-read whose response no longer contains them.
+    const qc = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
+    let releaseFirst!: (rows: InboxItem[]) => void;
+    const firstResponse = new Promise<InboxItem[]>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const server: InboxItem[] = [makeItem("n2", "issue-c", { read: false })];
+    const queryFn = vi
+      .fn<() => Promise<InboxItem[]>>()
+      .mockImplementationOnce(() => firstResponse)
+      .mockImplementation(async () => server);
+    const observer = new QueryObserver(qc, { queryKey: inboxKeys.list(wsId), queryFn });
+    const unsubscribe = observer.subscribe(() => {});
+
+    try {
+      expect(queryFn).toHaveBeenCalledTimes(1);
+      expect(qc.getQueryState(inboxKeys.list(wsId))?.fetchStatus).toBe("fetching");
+
+      await onInboxIssuesDeleted(qc, wsId, ["issue-a"]);
+      releaseFirst([makeItem("n1", "issue-a", { read: false })]);
+
+      await vi.waitFor(() =>
+        expect(qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId))?.map((i) => i.id)).toEqual(["n2"]),
+      );
+      expect(queryFn.mock.calls.length).toBeGreaterThan(1);
+    } finally {
+      releaseFirst([]);
+      unsubscribe();
+      qc.clear();
+    }
+  });
+
+  it("adds no list request when none was interrupted", async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
+    const queryFn = vi.fn(async () => [makeItem("i1", "issue-a")]);
+    const options = { queryKey: inboxKeys.list(wsId), queryFn };
+    await qc.fetchQuery(options);
+    const observer = new QueryObserver(qc, options);
+    const unsubscribe = observer.subscribe(() => {});
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+
+    try {
+      await onInboxIssuesDeleted(qc, wsId, ["issue-a"]);
+
+      expect(qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId))?.map((i) => i.id)).toEqual([]);
+      expect(queryFn).toHaveBeenCalledTimes(1);
+      expect(invalidate).not.toHaveBeenCalledWith({ queryKey: inboxKeys.all(wsId) });
+    } finally {
       unsubscribe();
       qc.clear();
     }

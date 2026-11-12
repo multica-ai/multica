@@ -14,13 +14,12 @@ const h = vi.hoisted(() => ({
     isOpen: false,
     activeSessionId: null as string | null,
     selectedAgentId: "agent-1" as string | null,
-    quickChatAgentId: null as string | null,
     chatBarKept: [] as string[],
     chatBarDismissed: {} as Record<string, string>,
     setOpen: vi.fn(),
     setActiveSession: vi.fn(),
     setSelectedAgentId: vi.fn(),
-    setSelectedProjectId: vi.fn(),
+    startNewChat: vi.fn(),
     keepChatInBar: vi.fn(),
     dismissChatFromBar: vi.fn(),
   },
@@ -95,7 +94,6 @@ beforeEach(() => {
   h.chat.isOpen = false;
   h.chat.activeSessionId = null;
   h.chat.selectedAgentId = "agent-1";
-  h.chat.quickChatAgentId = null;
   h.chat.chatBarKept = [];
   h.chat.chatBarDismissed = {};
 });
@@ -195,20 +193,8 @@ describe("ChatBar", () => {
     expect(ask).toHaveAttribute("aria-pressed", "false");
     fireEvent.click(ask);
 
-    expect(h.chat.setActiveSession).toHaveBeenCalledWith(null);
-    expect(h.chat.setSelectedProjectId).toHaveBeenCalledWith(null);
-    expect(h.chat.setOpen).toHaveBeenCalledWith(true);
-    expect(h.chat.setSelectedAgentId).not.toHaveBeenCalled();
-  });
-
-  it("starts the new chat with the agent set in Settings", () => {
-    h.chat.quickChatAgentId = "agent-9";
-    renderBar(SESSIONS);
-
-    fireEvent.click(screen.getByRole("button", { name: "Ask Multica" }));
-
-    expect(h.chat.setSelectedAgentId).toHaveBeenCalledWith("agent-9");
-    expect(h.chat.setActiveSession).toHaveBeenCalledWith(null);
+    expect(h.chat.startNewChat).toHaveBeenCalledTimes(1);
+    expect(h.chat.setOpen).not.toHaveBeenCalled();
   });
 
   it("closes the window from Ask Multica while it shows the new chat", () => {
@@ -221,7 +207,7 @@ describe("ChatBar", () => {
     fireEvent.click(ask);
 
     expect(h.chat.setOpen).toHaveBeenCalledWith(false);
-    expect(h.chat.setActiveSession).not.toHaveBeenCalled();
+    expect(h.chat.startNewChat).not.toHaveBeenCalled();
   });
 
   it("opens a chat from the history, grouped by when it last moved", async () => {

@@ -882,34 +882,6 @@ func (h *Handler) finaliseDeliveryTerminal(
 	h.Metrics.RecordWebhookDelivery(h.deliveryProvider(r.Context(), id), status)
 }
 
-// finaliseDeliveryWithRun records a delivery that produced (or was admission-
-// skipped to) an autopilot_run. Same response-capture as the terminal path.
-func (h *Handler) finaliseDeliveryWithRun(
-	r *http.Request,
-	id pgtype.UUID,
-	status string,
-	runID pgtype.UUID,
-	httpStatus int,
-	responseBody any,
-) {
-	bodyJSON, _ := json.Marshal(responseBody)
-	params := db.UpdateWebhookDeliveryDispatchedParams{
-		ID:             id,
-		Status:         status,
-		AutopilotRunID: runID,
-		ResponseStatus: pgtype.Int4{Int32: int32(httpStatus), Valid: true},
-		ResponseBody:   pgtype.Text{String: string(bodyJSON), Valid: true},
-	}
-	if _, err := h.Queries.UpdateWebhookDeliveryDispatched(r.Context(), params); err != nil {
-		slog.Warn("webhook: finalise with run failed",
-			"delivery_id", uuidToString(id),
-			"run_id", uuidToString(runID),
-			"error", err,
-		)
-	}
-	h.Metrics.RecordWebhookDelivery(h.deliveryProvider(r.Context(), id), status)
-}
-
 // deliveryProvider best-effort reads the provider for a delivery id so the
 // webhook delivery metric carries useful provenance. On lookup failure we
 // fall back to "generic" — the metric must always be incremented exactly

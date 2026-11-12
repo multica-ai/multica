@@ -272,7 +272,7 @@ API key 與 base URL 都為空時，這一層關閉，不會發出任何上游�
 | `MULTICA_GC_ENABLED` | `true` | 設為 `false` 或 `0` 關閉整個清理迴圈 |
 | `MULTICA_GC_INTERVAL` | `2h` | 兩輪清理之間的間隔；守護程序啟動約 30 秒後先清理一次 |
 | `MULTICA_GC_TTL` | `24h` | 任務進入 `done` 或 `closed` 分類、或聊天會話歸檔後，再過多久刪除對應執行目錄 |
-| `MULTICA_GC_COMPLETED_TASK_TTL` | Multica Cloud `14d`；自託管 `0` | 任務執行完成多久後刪除整個目錄，不論任務是否關閉；`0` 表示關閉。不作用於專案本地目錄上的執行 |
+| `MULTICA_GC_COMPLETED_TASK_TTL` | `14d` | 任務執行完成多久後刪除整個目錄，不論任務是否關閉；`0` 表示關閉。不作用於專案本地目錄上的執行 |
 | `MULTICA_GC_ORPHAN_TTL` | `72h` | 找不到歸屬的目錄多久沒有改動後刪除 |
 | `MULTICA_GC_ARTIFACT_TTL` | `12h` | 從執行結束到守護程序清理可重新生成內容的時間。下一行的目錄名稱規則適用於未關閉的任務，以及使用受管理工作目錄的未歸檔聊天。守護程序管理的 Codex 快取也適用相同時長。設為 `0` 可保留這些快取 |
 | `MULTICA_GC_ARTIFACT_PATTERNS` | `node_modules,.next,.turbo` | 按目錄名匹配的可再生成內容，逗號分隔。設定後**替換**預設列表，要保留預設項就一併寫上；含 `/` 或 `\` 的項會被忽略 |
