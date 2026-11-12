@@ -8815,11 +8815,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// preparer didn't run (non-openclaw provider, or write failure).
 	if env.OpenclawConfigPath != "" {
 		agentEnv["OPENCLAW_CONFIG_PATH"] = env.OpenclawConfigPath
-		if openclawMode == "isolated-local" {
-			agentEnv["OPENCLAW_STATE_DIR"] = filepath.Join(env.RootDir, "openclaw-state")
-			agentEnv["OPENCLAW_AGENT_DIR"] = ""
-			agentEnv["PI_CODING_AGENT_DIR"] = ""
-		}
 	}
 	// Grant the wrapper config permission to $include the user's active
 	// config across directories. OpenClaw's $include defaults to confining
@@ -8838,7 +8833,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.Agent != nil {
 		agentCustomEnv = task.Agent.CustomEnv
 	}
-	layerCustomEnvAndHermesHome(agentEnv, agentCustomEnv, env.HermesHome, d.logger)
+	layerTaskEnvironment(agentEnv, agentCustomEnv, env.HermesHome, provider, openclawMode, env.RootDir, d.logger)
 	if provider == "reasonix" {
 		reasonixStateHome, err := prepareReasonixTaskStateHome(d.cfg.Profile, task.RuntimeID, task.AgentID)
 		if err != nil {

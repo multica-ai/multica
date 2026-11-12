@@ -2,7 +2,6 @@ package execenv
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 )
@@ -15,17 +14,7 @@ func prepareOpenclawIsolation(cfg map[string]any, envRoot string, rows []any, so
 		return fmt.Errorf("isolated-local requires OpenClaw agents.entries config; registry-only and legacy storage are unsupported")
 	}
 	state := filepath.Join(envRoot, "openclaw-state")
-	if err := os.MkdirAll(state, 0o700); err != nil {
-		return err
-	}
-	info, err := os.Lstat(state)
-	if err != nil {
-		return err
-	}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("openclaw isolated state must be a private directory")
-	}
-	if err := os.Chmod(state, 0o700); err != nil {
+	if err := ensureOpenclawPrivateDirectory(envRoot, "openclaw-state"); err != nil {
 		return err
 	}
 	agents, ok := cfg["agents"].(map[string]any)
@@ -48,6 +37,9 @@ func prepareOpenclawIsolation(cfg map[string]any, envRoot string, rows []any, so
 		entry, ok := entries[id].(map[string]any)
 		if !ok {
 			return fmt.Errorf("missing isolated agent entry")
+		}
+		if err := ensureOpenclawPrivateDirectory(envRoot, filepath.Join("openclaw-state", "agents", id, "agent")); err != nil {
+			return err
 		}
 		entry["agentDir"] = filepath.Join(state, "agents", id, "agent")
 		// Assigned task skills must survive a host agent's explicit allowlist.

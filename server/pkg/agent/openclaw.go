@@ -614,6 +614,12 @@ func (b *openclawBackend) processOutput(r io.Reader, ch chan<- Message) openclaw
 			continue
 		}
 
+		// JSON-shaped output that failed both protocol parsers is not a reply.
+		// This also catches pretty-printed/truncated objects after log preambles.
+		if strings.HasPrefix(line, "{") {
+			return openclawEventResult{status: "failed", errMsg: "openclaw returned incomplete or unsupported JSON output"}
+		}
+
 		// Not JSON — treat as log line.
 		b.cfg.Logger.Debug("[openclaw:stdout] " + line)
 		rawLines = append(rawLines, line)
@@ -691,10 +697,12 @@ func tryParseOpenclawEvent(line string) (openclawEvent, bool) {
 	if err := json.Unmarshal([]byte(line), &event); err != nil {
 		return openclawEvent{}, false
 	}
-	if event.Type == "" {
+	switch event.Type {
+	case "text", "tool_use", "tool_result", "error", "lifecycle", "step_start", "step_finish":
+		return event, true
+	default:
 		return openclawEvent{}, false
 	}
-	return event, true
 }
 
 // tryParseOpenclawResult attempts to parse a line as a final result blob
@@ -740,7 +748,7 @@ func tryParseOpenclawResult(raw string) (openclawResult, bool) {
 			return openclawResult{}, false
 		}
 	}
-	if result.Payloads == nil && result.Meta.DurationMs == 0 {
+	if result.Payloads == nil && result.Meta.DurationMs == 0 && result.Meta.Error == nil && !result.Meta.Aborted && result.Meta.StopReason != "error" && result.Meta.StopReason != "timeout" {
 		return openclawResult{}, false
 	}
 	return result, true
@@ -751,7 +759,11 @@ func tryParseOpenclawResult(raw string) (openclawResult, bool) {
 func (b *openclawBackend) buildOpenclawEventResult(result openclawResult, ch chan<- Message, output *strings.Builder) openclawEventResult {
 	failure := result.failure
 	if result.Meta.Error != nil {
-		failure = result.Meta.Error.message()
+		if diagnostic := result.Meta.Error.message(); diagnostic != "" {
+			failure = diagnostic
+		} else if failure == "" {
+			failure = "openclaw run failed"
+		}
 	}
 	if failure == "" && (result.Meta.Aborted || result.Meta.StopReason == "error" || result.Meta.StopReason == "timeout") {
 		failure = "openclaw run failed"

@@ -329,7 +329,7 @@ func prepareOpenclawConfig(envRoot, workDir string, opts OpenclawConfigPrep) (Op
 	resetPath := ""
 	if hasManagedMcp && exists {
 		resetPath = filepath.Join(envRoot, openclawMcpResetFile)
-		if werr := os.WriteFile(resetPath, []byte(openclawMcpResetBody), 0o600); werr != nil {
+		if werr := writeOpenclawPrivateFile(envRoot, openclawMcpResetFile, []byte(openclawMcpResetBody)); werr != nil {
 			return OpenclawConfigResult{}, fmt.Errorf("write openclaw mcp reset: %w", werr)
 		}
 	}
@@ -346,10 +346,9 @@ func prepareOpenclawConfig(envRoot, workDir string, opts OpenclawConfigPrep) (Op
 		return OpenclawConfigResult{}, fmt.Errorf("marshal openclaw config: %w", err)
 	}
 	outPath := filepath.Join(envRoot, openclawConfigFile)
-	// 0o600 — defense in depth. The wrapper itself carries no secrets (the
-	// $include link is just a filesystem path), but the file lives next to
-	// task scratch and we keep the same posture as ~/.openclaw/openclaw.json.
-	if err := os.WriteFile(outPath, data, 0o600); err != nil {
+	// The wrapper may contain managed MCP credentials or a gateway token.
+	// Atomically replace it with a private file, including on workdir reuse.
+	if err := writeOpenclawPrivateFile(envRoot, openclawConfigFile, data); err != nil {
 		return OpenclawConfigResult{}, fmt.Errorf("write openclaw config: %w", err)
 	}
 	result := OpenclawConfigResult{ConfigPath: outPath}
