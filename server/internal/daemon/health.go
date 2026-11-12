@@ -315,24 +315,30 @@ func resolveRepoCheckoutWorkDir(activeRoot, requested string) (root, workdir str
 	return root, workdir, nil
 }
 
-// checkoutWorkDirOutsideCheckouts returns the directory a checkout requested
-// from workdir belongs in: the parent of the outermost Git checkout between
-// root (exclusive) and workdir (inclusive), or workdir itself when it is not
-// inside one. The CLI sends the agent's shell directory, which persists across
+// checkoutWorkDirOutsideOwnCheckout returns the directory a checkout of the
+// repository cached at barePath, requested from workdir, belongs in: the
+// parent of the outermost checkout of that same repository between root
+// (exclusive) and workdir (inclusive), or workdir itself when it is not inside
+// one. The CLI sends the agent's shell directory, which persists across
 // commands, so re-running checkout from inside an existing checkout would
 // otherwise create a second worktree nested in it — one a later `git add -A`
 // in the outer checkout commits as an embedded repository (MUL-9099).
 // Climbing out makes the re-run land on the existing checkout and reuse it.
+// Checkouts of other repositories are not climbed out of, so checking one
+// repository out inside another still places it there.
 // Both paths must already be resolved, with workdir inside root.
-func checkoutWorkDirOutsideCheckouts(root, workdir string) string {
+func checkoutWorkDirOutsideOwnCheckout(ctx context.Context, root, workdir, barePath string) string {
 	rel, err := filepath.Rel(root, workdir)
-	if err != nil || rel == "." {
+	if err != nil || rel == "." || barePath == "" {
 		return workdir
 	}
 	dir := root
 	for _, part := range strings.Split(rel, string(filepath.Separator)) {
 		dir = filepath.Join(dir, part)
-		if _, err := os.Lstat(filepath.Join(dir, ".git")); err == nil {
+		if _, err := os.Lstat(filepath.Join(dir, ".git")); err != nil {
+			continue
+		}
+		if repocache.CheckoutBelongsTo(ctx, barePath, dir) {
 			return filepath.Dir(dir)
 		}
 	}
@@ -522,14 +528,6 @@ func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
 		req.WorkspaceID = activeTask.WorkspaceID
 		req.TaskID = activeTask.TaskID
 		req.AgentName = activeTask.AgentName
-		req.WorkDir = checkoutWorkDirOutsideCheckouts(taskRoot, authorizedWorkDir)
-		if req.WorkDir != authorizedWorkDir {
-			d.logger.Info("repo checkout: requested workdir is inside a checkout, using its parent",
-				"task_id", activeTask.TaskID,
-				"requested", authorizedWorkDir,
-				"workdir", req.WorkDir,
-			)
-		}
 
 		if d.repoCache == nil {
 			http.Error(w, "repo cache not initialized", http.StatusInternalServerError)
@@ -548,6 +546,15 @@ func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
 			d.logger.Error("repo checkout readiness failed", "workspace_id", req.WorkspaceID, "url", req.URL, "error", err)
 			http.Error(w, err.Error(), statusCode)
 			return
+		}
+
+		req.WorkDir = checkoutWorkDirOutsideOwnCheckout(r.Context(), taskRoot, authorizedWorkDir, d.repoCache.Lookup(req.WorkspaceID, req.URL))
+		if req.WorkDir != authorizedWorkDir {
+			d.logger.Info("repo checkout: requested workdir is inside a checkout of this repository, using its parent",
+				"task_id", activeTask.TaskID,
+				"requested", authorizedWorkDir,
+				"workdir", req.WorkDir,
+			)
 		}
 
 		checkoutRef := strings.TrimSpace(req.Ref)
@@ -587,6 +594,11 @@ func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
 			}
 			if r.Context().Err() != nil {
 				d.logger.Debug("repo checkout cancelled", "url", req.URL, "error", err)
+				return
+			}
+			if errors.Is(err, repocache.ErrCheckoutPathTaken) {
+				d.logger.Warn("repo checkout rejected", "reason", "path_taken", "url", req.URL, "error", err)
+				http.Error(w, err.Error(), http.StatusConflict)
 				return
 			}
 			d.logger.Error("repo checkout failed", "url", req.URL, "error", err)
