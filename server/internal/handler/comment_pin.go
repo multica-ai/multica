@@ -10,6 +10,9 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
+// MaxPinnedCommentsPerIssue bounds the pinned bar, which shows every pin.
+const MaxPinnedCommentsPerIssue = 5
+
 func (h *Handler) PinComment(w http.ResponseWriter, r *http.Request)   { h.setCommentPin(w, r, true) }
 func (h *Handler) UnpinComment(w http.ResponseWriter, r *http.Request) { h.setCommentPin(w, r, false) }
 
@@ -42,6 +45,17 @@ func (h *Handler) setCommentPin(w http.ResponseWriter, r *http.Request, pinned b
 	}
 	updated := locked
 	changed := locked.PinnedAt.Valid != pinned
+	if changed && pinned {
+		count, err := q.CountIssuePinnedComments(r.Context(), db.CountIssuePinnedCommentsParams{IssueID: locked.IssueID, WorkspaceID: locked.WorkspaceID})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to count pins")
+			return
+		}
+		if count >= MaxPinnedCommentsPerIssue {
+			writeErrorCode(w, http.StatusConflict, "pin_limit_reached", "an issue can have at most 5 pinned comments")
+			return
+		}
+	}
 	if changed {
 		if pinned {
 			updated, err = q.PinComment(r.Context(), db.PinCommentParams{ID: comment.ID, PinnedByType: pgtype.Text{String: actorType, Valid: true}, PinnedByID: actorUUID})

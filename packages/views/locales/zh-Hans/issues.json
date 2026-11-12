@@ -661,10 +661,9 @@
     "pins": {
       "pin": "置顶评论",
       "unpin": "取消置顶",
-      "expand": "展开置顶评论",
-      "collapse": "收起置顶评论",
-      "count": "置顶评论：{{count}} 条",
       "jump": "跳转到 {{author}} 的评论",
+      "bar_label": "置顶评论",
+      "limit": "每个任务最多置顶 {{count}} 条评论，请先取消一条",
       "error": "无法更新置顶状态"
     },
     "add_reaction": "添加表情回应",

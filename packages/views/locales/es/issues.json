@@ -661,10 +661,9 @@
     "pins": {
       "pin": "Fijar comentario",
       "unpin": "Desfijar comentario",
-      "expand": "Mostrar comentarios fijados",
-      "collapse": "Contraer comentarios fijados",
-      "count": "Comentarios fijados: {{count}}",
       "jump": "Ir al comentario de {{author}}",
+      "bar_label": "Comentarios fijados",
+      "limit": "Una incidencia admite como máximo {{count}} comentarios fijados. Desfija uno primero.",
       "error": "No se pudo actualizar el comentario fijado"
     },
     "add_reaction": "Añadir reacción",

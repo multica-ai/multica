@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { PIN_OCCLUSION, pinBodyVisible, sameIds } from "./comment-pins";
+import { pinBodyVisible, sameIds } from "./comment-pins";
 
-export function useVisiblePinBodies(container: HTMLElement | null) {
+export function useVisiblePinBodies(container: HTMLElement | null, topInset = 0) {
   const [visible, setVisible] = useState<ReadonlySet<string>>(() => new Set());
   useEffect(() => {
     if (!container) return;
@@ -15,12 +15,15 @@ export function useVisiblePinBodies(container: HTMLElement | null) {
       const bottomInset = stickyBottomInset(container, viewport);
       const next = new Set<string>();
       for (const [node, id] of nodes) {
-        if (node.isConnected && pinBodyVisible(node.getBoundingClientRect(), viewport, bottomInset)) next.add(id);
+        if (node.isConnected && pinBodyVisible(node.getBoundingClientRect(), viewport, bottomInset, topInset)) next.add(id);
       }
       setVisible(old => sameIds(old, next) ? old : next);
     };
     const schedule = () => { if (!frame) frame = requestAnimationFrame(update); };
-    const observer = new IntersectionObserver(schedule, { root: container, rootMargin: `-${PIN_OCCLUSION}px 0px 0px 0px`, threshold: [0, 0.01, 0.1, 1] });
+    // Scroll and mutation listeners still drive updates where
+    // IntersectionObserver is unavailable (older embedded webviews, jsdom).
+    const observer = typeof IntersectionObserver === "undefined" ? null
+      : new IntersectionObserver(schedule, { root: container, rootMargin: `-${topInset}px 0px 0px 0px`, threshold: [0, 0.01, 0.1, 1] });
     const resize = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(schedule);
     const overlays = new Set<Element>();
     const bind = () => {
@@ -29,8 +32,8 @@ export function useVisiblePinBodies(container: HTMLElement | null) {
         const id = node.dataset.commentPinBody;
         if (id) mounted.set(node, id);
       });
-      for (const node of nodes.keys()) if (!mounted.has(node)) observer.unobserve(node);
-      for (const node of mounted.keys()) if (!nodes.has(node)) observer.observe(node);
+      for (const node of nodes.keys()) if (!mounted.has(node)) observer?.unobserve(node);
+      for (const node of mounted.keys()) if (!nodes.has(node)) observer?.observe(node);
       nodes.clear();
       mounted.forEach((id, node) => nodes.set(node, id));
       const liveOverlays = new Set(container.querySelectorAll("[data-comment-pins-bottom-overlay]"));
@@ -46,10 +49,10 @@ export function useVisiblePinBodies(container: HTMLElement | null) {
     window.addEventListener("resize", schedule);
     bind();
     return () => {
-      observer.disconnect(); mutations.disconnect(); resize?.disconnect(); cancelAnimationFrame(frame);
+      observer?.disconnect(); mutations.disconnect(); resize?.disconnect(); cancelAnimationFrame(frame);
       container.removeEventListener("scroll", schedule); window.removeEventListener("resize", schedule);
     };
-  }, [container]);
+  }, [container, topInset]);
   return visible;
 }
 

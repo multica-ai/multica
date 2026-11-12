@@ -59,14 +59,16 @@ test("pins navigate without duplicating visible originals and persist across cli
     await expect(bar).toBeVisible();
     const evidence = process.env.PIN_EVIDENCE_DIR;
     if (evidence) { await mkdir(evidence, { recursive: true }); await page.screenshot({ path: `${evidence}/collapsed.png`, animations: "disabled" }); }
-    await scroll("bottom");
-    await bar.getByRole("button", { name: "Show pinned comments" }).click();
-    if (evidence) await page.screenshot({ path: `${evidence}/expanded.png`, animations: "disabled" });
-    await bar.getByRole("button", { name: /Jump to comment by/ }).last().click();
+    const rootRow = bar.locator(`[data-pin-row="${root.id}"]`);
+    await expect(rootRow).not.toHaveAttribute("data-on-screen");
+    await rootRow.click();
     await expect(body).toBeInViewport();
-    await expect(bar).toBeHidden();
-    await scroll("bottom");
+    // The original is on screen: its row stays in place, dimmed, so the bar
+    // never changes height while reading.
+    await expect(rootRow).toHaveAttribute("data-on-screen", "true");
     await expect(bar).toBeVisible();
+    await scroll("bottom");
+    await expect(rootRow).not.toHaveAttribute("data-on-screen");
     await page.reload();
     await scroll("bottom");
     await expect(bar).toBeVisible({ timeout: 30_000 });
@@ -82,6 +84,8 @@ test("pins navigate without duplicating visible originals and persist across cli
     const unpin = await page.request.delete(`${process.env.NEXT_PUBLIC_API_URL}/api/comments/${root.id}/pin`, { headers });
     expect(unpin.ok()).toBe(true);
     await expect.poll(async () => (await second.getByTestId("comment-pins").allTextContents()).join(" ")).not.toContain("Decision:");
+    // Pins stack in pin order: the reply pinned later sits below.
+    await expect(second.locator("[data-pin-row]")).toHaveCount(1);
     await second.close();
     await testInfo.attach("pin navigation video path", { body: await page.video()!.path(), contentType: "text/plain" });
   } finally { await api.cleanup(); }

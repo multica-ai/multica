@@ -190,6 +190,26 @@ func (q *Queries) CountComments(ctx context.Context, arg CountCommentsParams) (i
 	return count, err
 }
 
+const countIssuePinnedComments = `-- name: CountIssuePinnedComments :one
+SELECT count(*) FROM comment
+WHERE issue_id = $1 AND workspace_id = $2
+  AND pinned_at IS NOT NULL AND deleted_at IS NULL
+`
+
+type CountIssuePinnedCommentsParams struct {
+	IssueID     pgtype.UUID `json:"issue_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Callers hold the issue row lock (LockLiveComment), so the count cannot race
+// a concurrent pin on the same issue.
+func (q *Queries) CountIssuePinnedComments(ctx context.Context, arg CountIssuePinnedCommentsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countIssuePinnedComments, arg.IssueID, arg.WorkspaceID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countNewCommentsSince = `-- name: CountNewCommentsSince :one
 SELECT count(*) FROM comment
 WHERE issue_id = $1

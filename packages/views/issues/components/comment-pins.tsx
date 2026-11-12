@@ -1,39 +1,50 @@
 "use client";
 
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import type { TimelineEntry } from "@multica/core/types";
 import { useActorName } from "@multica/core/workspace/hooks";
-import { Button } from "@multica/ui/components/ui/button";
-import { ChevronDown, ChevronUp, Pin } from "@multica/ui/icons";
+import { cn } from "@multica/ui/lib/utils";
+import { Pin } from "@multica/ui/icons";
 import { useT } from "../../i18n";
-import { offscreenPins } from "../hooks/comment-pins";
+import { orderedPins } from "../hooks/comment-pins";
 import { useVisiblePinBodies } from "../hooks/use-visible-pin-bodies";
 
+// Every pin is stacked in pin order and stays put while reading: the bar only
+// changes height when someone pins or unpins. A row whose original is on
+// screen is dimmed rather than removed, so scrolling never reshuffles it.
 export function CommentPins({ entries, container, onJump }: { entries: readonly TimelineEntry[]; container: HTMLElement | null; onJump: (id: string) => void }) {
   const { t } = useT("issues");
   const { getActorName: actorName } = useActorName();
-  const [expanded, setExpanded] = useState(false);
-  const visible = useVisiblePinBodies(container);
-  const pins = offscreenPins(entries, visible);
-  const latest = pins[0];
-  return <div className="sticky top-0 z-[25] h-0" data-comment-pins-overlay>
-    {latest && <div className="absolute inset-x-0 top-2 rounded-lg border border-border bg-background shadow-sm" data-testid="comment-pins">
-      <div className="flex items-center gap-2 px-3 py-2">
-        <Pin className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-        <Button variant="ghost" size="sm" className="min-w-0 flex-1 justify-start" aria-label={t(($) => $.comment.pins.jump, { author: actorName(latest.actor_type, latest.actor_id) })} onClick={() => { setExpanded(false); onJump(latest.id); }}>
-          <span className="shrink-0 font-medium">{actorName(latest.actor_type, latest.actor_id)}</span>
-          <span className="truncate text-muted-foreground">{latest.content}</span>
-        </Button>
-        <Button variant="ghost" size="sm" aria-expanded={expanded} aria-label={expanded ? t(($) => $.comment.pins.collapse) : t(($) => $.comment.pins.expand)} onClick={() => setExpanded(value => !value)}>
-          <span aria-label={t(($) => $.comment.pins.count, { count: pins.length })}>{pins.length}</span>
-          {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-        </Button>
-      </div>
-      {expanded && <div className="max-h-56 overflow-y-auto border-t border-border p-2">
-        {pins.map(pin => <Button key={pin.id} variant="ghost" size="sm" className="w-full justify-start" aria-label={t(($) => $.comment.pins.jump, { author: actorName(pin.actor_type, pin.actor_id) })} onClick={() => { setExpanded(false); onJump(pin.id); }}>
-          <span className="shrink-0 font-medium">{actorName(pin.actor_type, pin.actor_id)}</span><span className="truncate text-muted-foreground">{pin.content}</span>
-        </Button>)}
-      </div>}
-    </div>}
+  const pins = orderedPins(entries);
+  const barRef = useRef<HTMLDivElement>(null);
+  const [height, setHeight] = useState(0);
+  useLayoutEffect(() => {
+    const node = barRef.current;
+    if (!node) { setHeight(0); return; }
+    const measure = () => setHeight(node.offsetHeight);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [pins.length]);
+  const visible = useVisiblePinBodies(container, height);
+  if (pins.length === 0) return null;
+  return <div ref={barRef} className="sticky top-0 z-[25] pt-2" data-comment-pins-overlay>
+    <div className="rounded-lg border border-border bg-background py-1 shadow-sm" data-testid="comment-pins" role="list" aria-label={t(($) => $.comment.pins.bar_label)}>
+      {pins.map(pin => {
+        const onScreen = visible.has(pin.id);
+        const author = actorName(pin.actor_type, pin.actor_id);
+        return <div key={pin.id} role="listitem">
+          <button type="button" data-pin-row={pin.id} data-on-screen={onScreen || undefined}
+            className={cn("flex w-full min-w-0 items-center gap-2 px-3 py-1 text-left text-body hover:bg-accent focus-visible:bg-accent focus-visible:outline-none", onScreen && "opacity-50")}
+            aria-label={t(($) => $.comment.pins.jump, { author })} onClick={() => onJump(pin.id)}>
+            <Pin className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+            <span className="shrink-0 font-medium">{author}</span>
+            <span className="truncate text-muted-foreground">{pin.content}</span>
+          </button>
+        </div>;
+      })}
+    </div>
   </div>;
 }

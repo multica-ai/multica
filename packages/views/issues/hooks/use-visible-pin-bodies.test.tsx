@@ -53,3 +53,14 @@ it("treats content under a sticky composer as hidden, including composers mounte
  await waitFor(() => expect(result.current.size).toBe(0));
  expect(observeSize).toHaveBeenCalledWith(composer);
 });
+
+it("keeps working without IntersectionObserver", async () => {
+ vi.stubGlobal("IntersectionObserver", undefined);
+ const container = document.createElement("div");
+ container.getBoundingClientRect = () => rect(0, 500);
+ document.body.append(container);
+ const body = document.createElement("div"); body.dataset.commentPinBody = "c";
+ body.getBoundingClientRect = () => rect(100, 200); container.append(body);
+ const { result } = renderHook(() => useVisiblePinBodies(container));
+ await waitFor(() => expect([...result.current]).toEqual(["c"]));
+});

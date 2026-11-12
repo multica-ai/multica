@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 
@@ -101,7 +102,7 @@ func TestPinCommentAgentActor(t *testing.T) {
 	}
 	issue := dbfx.Issue(t, "agent pin")
 	id := dbfx.Comment(t, issue, "root")
-	agent := dbfx.Agent(t, "pin actor")
+	agent := dbfx.Agent(t, "pin actor", dbfx.Runtime(t, "pin actor runtime"))
 	task := createHandlerTestTaskForAgentOnIssue(t, agent, issue)
 	req := withURLParam(newRequest(http.MethodPost, "/api/comments/"+id+"/pin", nil), "commentId", id)
 	req.Header.Set("X-Agent-ID", agent)
@@ -167,5 +168,66 @@ func TestPinCommentRootAndReply(t *testing.T) {
 				t.Fatal("unpin no-op bumped revision")
 			}
 		})
+	}
+}
+
+func TestPinCommentLimitPerIssue(t *testing.T) {
+	if testPool == nil {
+		t.Fatal("database required")
+	}
+	issue := dbfx.Issue(t, "pin limit")
+	ids := make([]string, MaxPinnedCommentsPerIssue+2)
+	for i := range ids {
+		ids[i] = dbfx.Comment(t, issue, "comment")
+	}
+	for _, id := range ids[:MaxPinnedCommentsPerIssue] {
+		pinRequest(t, testHandler, id, true)
+	}
+	over := ids[MaxPinnedCommentsPerIssue]
+	req := withURLParam(newRequest(http.MethodPost, "/api/comments/"+over+"/pin", nil), "commentId", over)
+	var body map[string]string
+	testutil.Call(t, testHandler.PinComment, req).Want(http.StatusConflict).JSON(&body)
+	if body["code"] != "pin_limit_reached" {
+		t.Fatalf("limit code = %q", body["code"])
+	}
+	// Re-pinning an already pinned comment at the limit stays a no-op success.
+	pinRequest(t, testHandler, ids[0], true)
+	// Freeing a slot lets the next pin through.
+	pinRequest(t, testHandler, ids[0], false)
+	if got := pinRequest(t, testHandler, over, true); got.PinnedAt == nil {
+		t.Fatal("pin after freeing a slot was not applied")
+	}
+	// A different issue has its own budget.
+	other := dbfx.Comment(t, dbfx.Issue(t, "other pins"), "comment")
+	if got := pinRequest(t, testHandler, other, true); got.PinnedAt == nil {
+		t.Fatal("limit leaked across issues")
+	}
+}
+
+func TestPinCommentLimitUnderConcurrency(t *testing.T) {
+	if testPool == nil {
+		t.Fatal("database required")
+	}
+	issue := dbfx.Issue(t, "concurrent pin limit")
+	ids := make([]string, MaxPinnedCommentsPerIssue*2)
+	for i := range ids {
+		ids[i] = dbfx.Comment(t, issue, "comment")
+	}
+	var wg sync.WaitGroup
+	for _, id := range ids {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			req := withURLParam(newRequest(http.MethodPost, "/api/comments/"+id+"/pin", nil), "commentId", id)
+			testHandler.PinComment(httptest.NewRecorder(), req)
+		}()
+	}
+	wg.Wait()
+	var n int
+	if err := testPool.QueryRow(context.Background(), "SELECT count(*) FROM comment WHERE issue_id = $1 AND pinned_at IS NOT NULL", issue).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != MaxPinnedCommentsPerIssue {
+		t.Fatalf("concurrent pins left %d pinned, want %d", n, MaxPinnedCommentsPerIssue)
 	}
 }

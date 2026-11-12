@@ -785,6 +785,13 @@ UPDATE comment SET
 WHERE id = $1 AND deleted_at IS NULL
 RETURNING *;
 
+-- name: CountIssuePinnedComments :one
+-- Callers hold the issue row lock (LockLiveComment), so the count cannot race
+-- a concurrent pin on the same issue.
+SELECT count(*) FROM comment
+WHERE issue_id = @issue_id AND workspace_id = @workspace_id
+  AND pinned_at IS NOT NULL AND deleted_at IS NULL;
+
 -- name: UnpinComment :one
 UPDATE comment SET
     pinned_at = NULL,
