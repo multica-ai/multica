@@ -1371,7 +1371,7 @@ func (q *Queries) ListIssueGCStatuses(ctx context.Context, arg ListIssueGCStatus
 }
 
 const listIssueRefsInWorkspace = `-- name: ListIssueRefsInWorkspace :many
-SELECT id, number, title, status FROM issue
+SELECT id, number, title, status, project_id FROM issue
 WHERE workspace_id = $1
   AND id = ANY($2::uuid[])
 `
@@ -1382,10 +1382,11 @@ type ListIssueRefsInWorkspaceParams struct {
 }
 
 type ListIssueRefsInWorkspaceRow struct {
-	ID     pgtype.UUID `json:"id"`
-	Number int32       `json:"number"`
-	Title  string      `json:"title"`
-	Status string      `json:"status"`
+	ID        pgtype.UUID `json:"id"`
+	Number    int32       `json:"number"`
+	Title     string      `json:"title"`
+	Status    string      `json:"status"`
+	ProjectID pgtype.UUID `json:"project_id"`
 }
 
 // GetIssueRefInWorkspace for a page: every original the page's duplicates
@@ -1404,6 +1405,7 @@ func (q *Queries) ListIssueRefsInWorkspace(ctx context.Context, arg ListIssueRef
 			&i.Number,
 			&i.Title,
 			&i.Status,
+			&i.ProjectID,
 		); err != nil {
 			return nil, err
 		}

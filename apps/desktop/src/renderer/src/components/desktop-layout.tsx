@@ -26,13 +26,13 @@ import {
 import { SearchCommand } from "@multica/views/search";
 import { FloatingChat } from "@multica/views/chat";
 import { StarPrompt } from "@multica/views/star-prompt";
-import { WorkspaceSlugProvider, paths, useCurrentWorkspace } from "@multica/core/paths";
+import { WorkspaceSlugProvider, useCurrentWorkspace } from "@multica/core/paths";
 import { workspaceListOptions } from "@multica/core/workspace";
 import {
   useNavigation,
   type LinkClickIntent,
 } from "@multica/views/navigation";
-import { getCurrentSlug, subscribeToCurrentSlug } from "@multica/core/platform";
+import { getCurrentSlug, subscribeToCurrentSlug, systemNotificationPath } from "@multica/core/platform";
 import { useDesktopUnreadBadge } from "@multica/views/platform";
 import { useT } from "@multica/views/i18n";
 import {
@@ -185,26 +185,10 @@ function useInternalLinkHandler() {
 }
 
 /**
- * Bridge between the renderer and the Electron main process for inbox-level
- * OS integration. Mounted inside WorkspaceSlugProvider so it can resolve the
- * current workspace's id for the badge hook.
- *
- * Two responsibilities:
- *   1. Mirror the unread inbox count onto the dock/taskbar badge.
- *   2. When the user clicks an OS notification, open the notified
- *      workspace's inbox focused on that item. The route uses the `slug`
- *      that the notification was *emitted* with — not the currently active
- *      workspace — so a notification from workspace A always opens A's
- *      inbox even if the user has since switched to workspace B. Marking
- *      the row read is handled by InboxPage's selected-item effect, which
- *      covers both click-to-select and URL-param-select paths.
- *
- * The click routes through `useNavigation().push` — NOT the
- * `multica:navigate` event, whose handler `openTab`s into the ACTIVE
- * workspace's tab group. The navigation adapter detects a cross-workspace
- * path and translates it into `switchWorkspace(slug, path)`, so clicking a
- * workspace-A notification while B is active performs a real workspace
- * switch instead of mounting A's inbox inside B's tab group (#3766).
+ * Mirrors the inbox badge and routes native notification clicks. Chat alerts
+ * open Chat directly; inbox alerts retain their row selector. The shared path
+ * resolver uses the source workspace, and the navigation adapter performs a
+ * workspace switch when needed. Each destination owns its mark-read behavior.
  */
 function DesktopInboxBridge() {
   const workspace = useCurrentWorkspace();
@@ -218,10 +202,9 @@ function DesktopInboxBridge() {
   }, [push]);
 
   useEffect(() => {
-    return window.desktopAPI.onInboxOpen(({ slug, issueKey }) => {
-      if (!slug) return;
-      const inboxPath = `${paths.workspace(slug).inbox()}?issue=${encodeURIComponent(issueKey)}`;
-      pushRef.current(inboxPath);
+    return window.desktopAPI.onInboxOpen((payload) => {
+      const path = systemNotificationPath(payload);
+      if (path) pushRef.current(path);
     });
   }, []);
 

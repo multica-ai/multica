@@ -44,7 +44,7 @@ import type {
 } from "@multica/core/types";
 import type { ChatTimelineItem } from "@multica/core/chat";
 import { buildTimeline } from "../../common/task-transcript";
-import { traceToolArgSummary } from "../../common/task-transcript/trace-event-presenter";
+import { readCommandInput, traceToolArgSummary } from "../../common/task-transcript/trace-event-presenter";
 import { OnboardingStarterCards } from "./onboarding-starter-cards";
 import { TaskStatusPill } from "./task-status-pill";
 import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
@@ -1330,6 +1330,7 @@ function ToolCallRow({ item }: { item: ChatTimelineItem }) {
       t(($) => $.transcript.patch_summary_more, { path, extra: extraCount }),
   });
   const hasInput = item.input && Object.keys(item.input).length > 0;
+  const command = useMemo(() => readCommandInput(item.input), [item.input]);
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
@@ -1346,9 +1347,19 @@ function ToolCallRow({ item }: { item: ChatTimelineItem }) {
       </CollapsibleTrigger>
       {hasInput && (
         <CollapsibleContent>
-          <pre className="ml-[18px] mt-0.5 max-h-32 overflow-auto rounded-xs bg-muted/50 p-2 text-caption text-muted-foreground whitespace-pre-wrap break-all">
-            {JSON.stringify(item.input, null, 2)}
-          </pre>
+          {command ? (
+            // Same capped box as every other input and result in the panel, so a
+            // long script scrolls in place instead of stretching the chat. The
+            // command reads in the foreground colour, its arguments stay muted.
+            <pre className="ml-[18px] mt-0.5 max-h-32 overflow-auto rounded-xs bg-muted/50 p-2 text-caption text-muted-foreground whitespace-pre-wrap wrap-anywhere">
+              <div className="text-foreground">{command.command}</div>
+              {command.params && <div className="mt-1.5">{command.params}</div>}
+            </pre>
+          ) : (
+            <pre className="ml-[18px] mt-0.5 max-h-32 overflow-auto rounded-xs bg-muted/50 p-2 text-caption text-muted-foreground whitespace-pre-wrap break-all">
+              {JSON.stringify(item.input, null, 2)}
+            </pre>
+          )}
         </CollapsibleContent>
       )}
     </Collapsible>
