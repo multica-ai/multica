@@ -667,6 +667,122 @@ func TestRepoCheckoutRejectsUnresolvableWorkdirWithTheReason(t *testing.T) {
 	}
 }
 
+func TestCheckoutWorkDirOutsideCheckouts(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	mkdir := func(rel string) string {
+		t.Helper()
+		dir := filepath.Join(root, rel)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", rel, err)
+		}
+		return dir
+	}
+	// The task root itself being a repository must not push the checkout
+	// above it.
+	mkdir(".git")
+	// A linked worktree marks itself with a .git file, a clone with a .git
+	// directory; repo/repo is a worktree already nested inside another.
+	for _, rel := range []string{"repo", "repo/repo", "plain/clone"} {
+		mkdir(rel + "/server")
+	}
+	for _, rel := range []string{"repo", "repo/repo"} {
+		if err := os.WriteFile(filepath.Join(root, rel, ".git"), []byte("gitdir: /cache/worktrees/repo\n"), 0o644); err != nil {
+			t.Fatalf("write %s/.git: %v", rel, err)
+		}
+	}
+	mkdir("plain/clone/.git")
+	mkdir("plain/sub")
+
+	for _, tc := range []struct {
+		workdir string
+		want    string
+	}{
+		{workdir: ".", want: "."},
+		{workdir: "plain", want: "plain"},
+		{workdir: "plain/sub", want: "plain/sub"},
+		{workdir: "repo", want: "."},
+		{workdir: "repo/server", want: "."},
+		{workdir: "repo/repo/server", want: "."},
+		{workdir: "plain/clone/server", want: "plain"},
+	} {
+		got := checkoutWorkDirOutsideCheckouts(root, filepath.Join(root, tc.workdir))
+		if want := filepath.Join(root, tc.want); got != want {
+			t.Errorf("checkout from %s: workdir = %s, want %s", tc.workdir, got, want)
+		}
+	}
+}
+
+// Re-running checkout from inside the checkout it created, as an agent whose
+// shell stayed there does, reuses that checkout instead of nesting a new
+// worktree on a new branch inside it (MUL-9099).
+func TestRepoCheckoutFromInsideExistingCheckoutReusesIt(t *testing.T) {
+	t.Parallel()
+
+	const workspaceID = "ws-1"
+	sourceRepo := createDaemonTestRepo(t)
+	d := newRepoReadyTestDaemon(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/daemon/workspaces/"+workspaceID+"/repos" {
+			http.NotFound(w, r)
+			return
+		}
+		json.NewEncoder(w).Encode(WorkspaceReposResponse{
+			WorkspaceID:  workspaceID,
+			Repos:        []RepoData{{URL: sourceRepo}},
+			ReposVersion: "v1",
+		})
+	})
+	if err := d.repoCache.Sync(workspaceID, []repocache.RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("seed repo cache: %v", err)
+	}
+	d.workspaces[workspaceID] = newWorkspaceState(workspaceID, nil, "v1", []RepoData{{URL: sourceRepo}}, nil)
+	workDir := t.TempDir()
+	d.registerActiveRepoCheckoutTask("mat_repo_checkout_test", activeRepoCheckoutTask{
+		WorkspaceID: workspaceID,
+		TaskID:      "task-1",
+		AgentName:   "Test Agent",
+		WorkDir:     workDir,
+	})
+
+	checkout := func(from string) repocache.WorktreeResult {
+		t.Helper()
+		body, err := json.Marshal(repoCheckoutRequest{URL: sourceRepo, WorkspaceID: workspaceID, WorkDir: from, TaskID: "task-1"})
+		if err != nil {
+			t.Fatalf("encode request: %v", err)
+		}
+		rec := httptest.NewRecorder()
+		d.repoCheckoutHandler().ServeHTTP(rec, authorizedRepoCheckoutRequest(bytes.NewReader(body)))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("checkout from %s: expected 200, got %d: %s", from, rec.Code, rec.Body.String())
+		}
+		var result repocache.WorktreeResult
+		if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+			t.Fatalf("decode checkout result: %v", err)
+		}
+		return result
+	}
+
+	first := checkout(workDir)
+	subdir := filepath.Join(first.Path, "server")
+	if err := os.Mkdir(subdir, 0o755); err != nil {
+		t.Fatalf("mkdir inside checkout: %v", err)
+	}
+
+	for _, from := range []string{first.Path, subdir} {
+		again := checkout(from)
+		if again.Path != first.Path || again.BranchName != first.BranchName {
+			t.Fatalf("checkout from %s = %s on %s, want the existing %s on %s", from, again.Path, again.BranchName, first.Path, first.BranchName)
+		}
+		if again.Kept != repocache.KeptTaskBranch {
+			t.Fatalf("checkout from %s: Kept = %q, want %q", from, again.Kept, repocache.KeptTaskBranch)
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(first.Path, filepath.Base(first.Path))); !os.IsNotExist(err) {
+		t.Fatalf("a checkout was nested inside the existing one (lstat err = %v)", err)
+	}
+}
+
 func TestRepoCheckoutExplicitRefOverridesProjectDefault(t *testing.T) {
 	t.Parallel()
 

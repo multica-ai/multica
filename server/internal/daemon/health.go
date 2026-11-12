@@ -287,25 +287,56 @@ func (d *Daemon) writeRepoCheckoutAuthError(w http.ResponseWriter, result repoCh
 // resolved is refused; the error says which side and why, because the caller
 // surfaces it instead of a bare "not owned".
 func authorizeRepoCheckoutWorkDir(activeRoot, requested string) (string, error) {
-	root, err := filepath.Abs(activeRoot)
+	_, workdir, err := resolveRepoCheckoutWorkDir(activeRoot, requested)
+	return workdir, err
+}
+
+// resolveRepoCheckoutWorkDir is authorizeRepoCheckoutWorkDir that also returns
+// the resolved task root.
+func resolveRepoCheckoutWorkDir(activeRoot, requested string) (root, workdir string, err error) {
+	root, err = filepath.Abs(activeRoot)
 	if err == nil {
 		root, err = util.ResolveSymlinks(root)
 	}
 	if err != nil {
-		return "", fmt.Errorf("resolve active task workdir: %w", err)
+		return "", "", fmt.Errorf("resolve active task workdir: %w", err)
 	}
-	workdir, err := filepath.Abs(requested)
+	workdir, err = filepath.Abs(requested)
 	if err == nil {
 		workdir, err = util.ResolveSymlinks(workdir)
 	}
 	if err != nil {
-		return "", fmt.Errorf("resolve requested workdir: %w", err)
+		return "", "", fmt.Errorf("resolve requested workdir: %w", err)
 	}
 	rel, err := filepath.Rel(root, workdir)
 	if err != nil || !filepath.IsLocal(rel) {
-		return "", fmt.Errorf("%s is outside the active task workdir %s", workdir, root)
+		return "", "", fmt.Errorf("%s is outside the active task workdir %s", workdir, root)
 	}
-	return workdir, nil
+	return root, workdir, nil
+}
+
+// checkoutWorkDirOutsideCheckouts returns the directory a checkout requested
+// from workdir belongs in: the parent of the outermost Git checkout between
+// root (exclusive) and workdir (inclusive), or workdir itself when it is not
+// inside one. The CLI sends the agent's shell directory, which persists across
+// commands, so re-running checkout from inside an existing checkout would
+// otherwise create a second worktree nested in it — one a later `git add -A`
+// in the outer checkout commits as an embedded repository (MUL-9099).
+// Climbing out makes the re-run land on the existing checkout and reuse it.
+// Both paths must already be resolved, with workdir inside root.
+func checkoutWorkDirOutsideCheckouts(root, workdir string) string {
+	rel, err := filepath.Rel(root, workdir)
+	if err != nil || rel == "." {
+		return workdir
+	}
+	dir := root
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		dir = filepath.Join(dir, part)
+		if _, err := os.Lstat(filepath.Join(dir, ".git")); err == nil {
+			return filepath.Dir(dir)
+		}
+	}
+	return workdir
 }
 
 const (
@@ -470,7 +501,7 @@ func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
 			http.Error(w, "repo checkout task context does not match the active task", http.StatusForbidden)
 			return
 		}
-		authorizedWorkDir, authErr := authorizeRepoCheckoutWorkDir(activeTask.WorkDir, req.WorkDir)
+		taskRoot, authorizedWorkDir, authErr := resolveRepoCheckoutWorkDir(activeTask.WorkDir, req.WorkDir)
 		if authErr != nil {
 			// The reason goes to both the agent and daemon.log: a refusal that
 			// says only "not owned" sent #8946 looking at ownership when the
@@ -491,7 +522,14 @@ func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
 		req.WorkspaceID = activeTask.WorkspaceID
 		req.TaskID = activeTask.TaskID
 		req.AgentName = activeTask.AgentName
-		req.WorkDir = authorizedWorkDir
+		req.WorkDir = checkoutWorkDirOutsideCheckouts(taskRoot, authorizedWorkDir)
+		if req.WorkDir != authorizedWorkDir {
+			d.logger.Info("repo checkout: requested workdir is inside a checkout, using its parent",
+				"task_id", activeTask.TaskID,
+				"requested", authorizedWorkDir,
+				"workdir", req.WorkDir,
+			)
+		}
 
 		if d.repoCache == nil {
 			http.Error(w, "repo cache not initialized", http.StatusInternalServerError)
