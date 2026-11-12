@@ -10,6 +10,7 @@
   },
   "exports": {
     "./navigation": "./navigation/index.ts",
+    "./dev-toolbar": "./dev-toolbar/index.ts",
     "./common/actor-avatar": "./common/actor-avatar.tsx",
     "./common/appearance-sync": "./common/appearance-sync.tsx",
     "./common/cli-install-command": "./common/cli-install-command.tsx",

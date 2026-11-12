@@ -12,6 +12,7 @@ import { SITE_TITLE, TITLE_TEMPLATE } from "@/platform/document-title";
 import {
   resolveBrowserApiBaseUrl,
   resolveBrowserWsUrl,
+  resolveDevRemoteApiUrl,
 } from "@/config/runtime-urls";
 import { resolveGoogleAnalyticsId } from "@/config/google-analytics";
 import { GoogleAnalytics } from "@/components/google-analytics";
@@ -140,6 +141,15 @@ export default async function RootLayout({
   const wsUrl = resolveBrowserWsUrl(process.env);
   // Opt-in Google Analytics: omitted entirely unless GOOGLE_ANALYTICS_ID is set.
   const googleAnalyticsId = resolveGoogleAnalyticsId(process.env);
+  // Dev toolbar: a status bar pinned to the bottom of the window. Opt-in per
+  // developer with VITE_DEV_TOOLBAR=1, the same convention and var prefix as
+  // react-grab below, so one variable enables it on web and desktop. Without
+  // an explicit API URL the browser goes through the dev proxy, so the
+  // toolbar reports the proxy's upstream.
+  const devToolbarApiUrl =
+    process.env.NODE_ENV === "development" && process.env.VITE_DEV_TOOLBAR
+      ? apiBaseUrl || resolveDevRemoteApiUrl(process.env)
+      : undefined;
 
   return (
     <html
@@ -172,6 +182,7 @@ export default async function RootLayout({
             resources={resources}
             apiBaseUrl={apiBaseUrl}
             wsUrl={wsUrl}
+            devToolbarApiUrl={devToolbarApiUrl}
           >
             {children}
           </WebProviders>
