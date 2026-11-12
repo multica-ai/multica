@@ -11,7 +11,7 @@ import { defaultStorage } from "../platform/storage";
 import { issueKeys } from "../issues/queries";
 import { chatKeys } from "../chat/queries";
 import { runtimeKeys } from "../runtimes/queries";
-import { agentTasksKeys, workspaceWorkingAgentsKeys } from "../agents/queries";
+import { agentTaskSnapshotKeys, agentTaskSnapshotOptions, agentTasksKeys, workspaceWorkingAgentsKeys } from "../agents/queries";
 import { myInvitationListOptions, workspaceKeys } from "../workspace/queries";
 import { issueStatusKeys } from "../issue-statuses/queries";
 import { issueWorkflowKeys } from "../issue-workflows/queries";
@@ -682,8 +682,8 @@ describe("useRealtimeSync — Table server membership invalidation", () => {
 
   it("only invalidates working facets and queries whose membership depends on working state", async () => {
     const { emit } = mountRealtime();
-    const untouched: QueryKey[] = [workingFacet("ws-2")];
-    const affected: QueryKey[] = [workingFacet(), workspaceWorkingAgentsKeys.list("ws-1", "issue")];
+    const untouched: QueryKey[] = [workingFacet("ws-2"), agentTaskSnapshotKeys.list("ws-2")];
+    const affected: QueryKey[] = [workingFacet(), workspaceWorkingAgentsKeys.list("ws-1", "issue"), agentTaskSnapshotKeys.list("ws-1")];
     // Test both server membership forms, including an explicit empty id set,
     // across rows, descriptors and ordinary facets such as status counts.
     const filterCases: IssueTableQuerySpec["filters"][] = [{}, { working_only: false }, { idle_only: false }, { idle_only: true }, { working_only: true }, { working_issue_ids: [] }, { working_issue_ids: ["i1"] }];
@@ -708,12 +708,13 @@ describe("useRealtimeSync — Table server membership invalidation", () => {
     for (const key of untouched) expect(qc.getQueryState(key)?.isInvalidated).toBe(false);
   });
 
-  it("coalesces a continuous lifecycle stream and eventually clears the final completed run", async () => {
+  it.each(["facet", "snapshot"])("coalesces a continuous lifecycle stream for the %s and clears the final completed run", async (kind) => {
     const { emit } = mountRealtime();
+    const queryKey = kind === "facet" ? workingFacet() : agentTaskSnapshotKeys.list("ws-1");
     let count = 1;
     const queryFn = vi.fn(async () => count);
-    qc.setQueryData(workingFacet(), count);
-    const observer = new QueryObserver(qc, { queryKey: workingFacet(), queryFn });
+    qc.setQueryData(queryKey, count);
+    const observer = new QueryObserver(qc, { queryKey, queryFn });
     const unsubscribe = observer.subscribe(() => {});
     for (let i = 0; i < 20; i++) {
       emit(i % 2 ? "agent:updated" : "task:started");
@@ -745,12 +746,34 @@ describe("useRealtimeSync — Table server membership invalidation", () => {
     unsubscribe();
   });
 
-  it("lets slow refreshes finish and performs a trailing refresh for events received in flight", async () => {
+  it.each(["task:started", "task:completed"])("preserves %s received while the first Idle activity snapshot is loading", async (event) => {
     const { emit } = mountRealtime();
+    const task = { id: "t1", issue_id: "i1", agent_id: "a1", status: "running" } as AgentTask;
+    const before = event === "task:started" ? [] : [task];
+    const after = event === "task:started" ? [task] : [];
+    let finishFirst!: (tasks: AgentTask[]) => void;
+    const queryFn = vi.fn(async () => after).mockImplementationOnce(() => new Promise((resolve) => { finishFirst = resolve; }));
+    const observer = new QueryObserver(qc, { ...agentTaskSnapshotOptions("ws-1"), queryFn });
+    const unsubscribe = observer.subscribe(() => {});
+    try {
+      emit(event);
+      await vi.advanceTimersByTimeAsync(1_000);
+      finishFirst(before);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(observer.getCurrentResult().data).toEqual(after);
+      expect(queryFn).toHaveBeenCalledTimes(2);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it.each(["facet", "snapshot"])("lets slow %s refreshes finish and performs a trailing refresh for events received in flight", async (kind) => {
+    const { emit } = mountRealtime();
+    const queryKey = kind === "facet" ? workingFacet() : agentTaskSnapshotKeys.list("ws-1");
     let finishSlow!: (value: number) => void;
     const queryFn = vi.fn(async () => 0).mockImplementationOnce(() => new Promise<number>((resolve) => { finishSlow = resolve; }));
-    qc.setQueryData(workingFacet(), 1);
-    const observer = new QueryObserver(qc, { queryKey: workingFacet(), queryFn });
+    qc.setQueryData(queryKey, 1);
+    const observer = new QueryObserver(qc, { queryKey, queryFn });
     const unsubscribe = observer.subscribe(() => {});
     emit("task:started");
     await vi.advanceTimersByTimeAsync(1_000);
