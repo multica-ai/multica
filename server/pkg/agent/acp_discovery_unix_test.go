@@ -43,11 +43,14 @@ while IFS= read -r line; do
 done
 `, tc.requestID, tc.method, tc.params, record)
 			writeTestExecutable(t, bin, []byte(script))
-			models, err := discoverACPModels(context.Background(), Command{Path: bin}, acpDiscoveryProvider{
+			catalog, err := discovered(discoverACPModels(context.Background(), Command{Path: bin}, acpDiscoveryProvider{
 				strictErrors: true, probeModelEffort: true, timeout: 5 * time.Second,
-			})
-			if err != nil || len(models) != 2 {
-				t.Fatalf("agent request lost the catalog: models=%+v, err=%v", models, err)
+			}))
+			if err != nil || len(catalog.Models) != 2 {
+				t.Fatalf("agent request lost the catalog: models=%+v, err=%v", catalog.Models, err)
+			}
+			if !catalog.Fallback || catalog.Verified() {
+				t.Fatal("a rejected model switch must not claim its effort capabilities are verified")
 			}
 			raw, err := os.ReadFile(record)
 			if err != nil {

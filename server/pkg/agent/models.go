@@ -166,7 +166,7 @@ func discovered(models []Model, err error) (Catalog, error) {
 	return Catalog{Models: models}, err
 }
 
-var errACPEffortDiscoveryIncomplete = errors.New("ACP per-model effort discovery timed out")
+var errACPEffortDiscoveryIncomplete = errors.New("ACP per-model effort discovery incomplete")
 
 // modelCache memoizes dynamic discovery calls so repeated UI loads
 // don't re-shell the agent CLI. Entries expire after cacheTTL.
@@ -2351,16 +2351,21 @@ func discoverACPModels(ctx context.Context, runtimeCmd Command, p acpDiscoveryPr
 		}, models, sessionResult)
 	}
 	if p.probeModelEffort {
+		probeIncomplete := false
 		probeACPModelEffort(runCtx, func(_ context.Context, method string, params any) (json.RawMessage, error) {
-			return requestACP(method, params)
+			result, err := requestACP(method, params)
+			if err != nil {
+				probeIncomplete = true
+			}
+			return result, err
 		}, sessionResult, models)
 		if err := ctx.Err(); err != nil {
 			return fail("per-model effort discovery", err)
 		}
-		// Effort metadata is optional: a slow model must not discard the
-		// catalog already returned by session/new. Unprobed models keep nil
-		// Thinking, and only confirmed metadata from earlier probes survives.
-		if runCtx.Err() != nil {
+		// Effort metadata is optional: a rejected or slow model switch must
+		// not discard the catalog or claim unknown capabilities are absent.
+		// Unprobed models keep nil Thinking; confirmed metadata survives.
+		if probeIncomplete || runCtx.Err() != nil {
 			return models, errACPEffortDiscoveryIncomplete
 		}
 	}
