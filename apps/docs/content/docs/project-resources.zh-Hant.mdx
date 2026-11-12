@@ -16,7 +16,7 @@ import { LocalDirModeDemo } from "@/components/demos/local-dir-mode-demo";
 | 資源 | 適用場景 | 執行位置 |
 |---|---|---|
 | **GitHub 倉庫** | 團隊共享的程式碼庫，希望由執行時管理 checkout | 執行時管理的工作目錄 |
-| **本地目錄** | 已經存在的 checkout、很大的倉庫，或需要直接檢視本地改動 | 指定電腦上的原目錄 |
+| **本地目錄** | 已經存在的 checkout、很大的倉庫，或需要直接檢視本地改動 | 指定電腦上的原資料夾或獨立 worktree |
 
 ## 資源進入執行的方式
 
@@ -24,11 +24,11 @@ import { LocalDirModeDemo } from "@/components/demos/local-dir-mode-demo";
 
 工作區關聯的倉庫列表始終包含在執行上下文中。專案關聯的倉庫在此基礎上指明這組工作使用的程式碼和預設 ref。
 
-本地目錄只對繫結它的守護程序有效。本次執行所在的守護程序有匹配的本地目錄時，AI 代理直接進入該目錄工作；其他電腦仍使用專案中的 GitHub 倉庫或工作區倉庫。
+本地目錄只對繫結它的守護程序有效。執行所在的守護程序有匹配的本地目錄時，AI 代理按 `in_place` 模式在原目錄工作，或按 `worktree` 模式在其獨立 worktree 中工作；其他電腦仍使用專案中的 GitHub 倉庫或工作區倉庫。
 
 ## 新增 GitHub 倉庫
 
-開啟專案，在 **資源** 中選擇"新增資源"。可以選擇已關聯到工作區的倉庫，也可以貼上 Git URL。工作區倉庫在 **設定 → 程式碼** 中維護；連線 GitHub 後，可在同一頁面透過 **從 GitHub 選擇** 匯入 App 已授權的倉庫。
+開啟專案，在 **資源 → 倉庫** 中點選 **新增倉庫**。搜尋已關聯到工作區的倉庫，或貼上 Git URL。工作區倉庫在 **設定 → 程式碼** 中維護；連線 GitHub 後，可在同一頁面透過 **從 GitHub 選擇** 匯入 App 已授權的倉庫。
 
 倉庫不限於 GitHub：任何執行時能訪問的 Git URL 都可以作為倉庫資源。自部署的 Multica 還可以在 **設定 → 程式碼** 連線自託管的 Forgejo、Gitea 或 GitLab，見[自託管 Git 程式碼託管](/vcs-integration)。
 
@@ -54,17 +54,17 @@ import { LocalDirModeDemo } from "@/components/demos/local-dir-mode-demo";
 </Step>
 <Step>
 
-開啟專案的 **資源**，或者建立專案對話方塊裡的 **本地目錄** 標籤頁。專案還沒建出來時，也能在這裡做同樣的選擇。
+已有專案開啟 **資源 → 本地資料夾**，按下方步驟新增。建立專案時則使用 **本地資料夾** 標籤頁；所選資料夾和模式會隨專案一起儲存。
 
 </Step>
 <Step>
 
-選擇"新增本地目錄"，再選擇要使用的資料夾。
+在你的電腦下點選 **選擇資料夾...**，再選擇要使用的資料夾。
 
 </Step>
 <Step>
 
-選擇執行如何使用它：**原地** 還是 **並行**，區別見[執行如何共享這個目錄](#執行如何共享這個目錄)。如果這個資料夾是 git 倉庫、並且那臺機器上的執行時能做隔離，Desktop 會預選 **並行**，否則預選 **原地**。當場可以改，之後也可以在 **資源** 裡點目錄旁邊的鉛筆圖示改。
+選擇 **直接修改** 或 **並行執行**，區別見 [執行如何共享這個目錄](#執行如何共享這個目錄)，然後點選 **新增資料夾**。如果資料夾是 git 倉庫，且該電腦的執行時支援隔離，Desktop 會預選 **並行執行**，否則預選 **直接修改**。之後可在 **資源** 中點選資料夾的模式標籤，選擇新模式後立即儲存。
 
 </Step>
 </Steps>
@@ -84,12 +84,12 @@ import { LocalDirModeDemo } from "@/components/demos/local-dir-mode-demo";
 
 ## 執行如何共享這個目錄
 
-本地目錄有兩種執行模式，按資源逐個設定。在資源面板裡可以直接切換，CLI 用 `--execution-mode`。Desktop 裡這兩種模式顯示為 **原地** 和 **並行**；API、CLI 和本頁其餘部分都使用識別符號。
+本地目錄有兩種執行模式，按資源逐個設定。在資源面板裡可以直接切換，CLI 用 `--execution-mode`。Desktop 裡這兩種模式顯示為 **直接修改** 和 **並行執行**；API、CLI 和本頁其餘部分都使用識別符號。
 
 <LocalDirModeDemo />
 
-<Tabs items={["in_place（原地，預設）", "worktree（並行）"]}>
-<Tab value="in_place（原地，預設）" id="in-place">
+<Tabs items={["in_place（直接修改，預設）", "worktree（並行執行）"]}>
+<Tab value="in_place（直接修改，預設）" id="in-place">
 
 AI 代理直接在你的目錄裡工作，同一時間只進行一次執行。兩次執行使用同一個真實目錄時，後到的執行進入 `waiting_local_directory`，等前一次釋放目錄後繼續。兩個路徑經不同符號連結指向同一目錄時，同樣序列。
 
@@ -98,7 +98,7 @@ AI 代理直接在你的目錄裡工作，同一時間只進行一次執行。�
 普通的非 git 目錄只能用這種模式：worktree 模式只面向 git 倉庫。
 
 </Tab>
-<Tab value="worktree（並行）" id="worktree">
+<Tab value="worktree（並行執行）" id="worktree">
 
 每次執行拿到你倉庫的一個獨立 [git worktree](https://git-scm.com/docs/git-worktree)，建在執行時自己的工作區目錄裡。同一目錄上的執行併發執行，誰都不用排隊，也都不會寫你的工作副本。
 

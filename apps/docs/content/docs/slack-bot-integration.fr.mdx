@@ -111,11 +111,11 @@ Le bot se connecte à Slack en sortie via Socket Mode : aucune Request URL publi
 ### Le connecter à un agent [#3-le-connecter-à-un-agent]
 
 1. Dans Multica, ouvrez **Agents** et sélectionnez l'agent à connecter à Slack.
-2. Accédez à **Intégrations** et cliquez sur **Connecter Slack**.
+2. Dans **Messagerie**, cliquez sur **Ajouter un canal de messagerie**, puis choisissez **Slack**.
 3. Collez le jeton du bot et le jeton d'application.
 4. Cliquez sur **Connecter**.
 
-Multica vérifie que les deux jetons proviennent de la même application. Une fois la connexion établie, la page affiche **Connecté à Slack**.
+Multica vérifie que les deux jetons proviennent de la même application. Une fois la connexion établie, la page affiche **Connecté**.
 
 <Callout type="warning">
 Les deux jetons sont stockés chiffrés sur le serveur Multica. Les jetons sont des identifiants : ne les placez pas dans des tâches, des commentaires ou des dépôts de code. Une application déjà connectée à un autre agent ou espace de travail ne peut pas être réutilisée directement ; supprimez d'abord la connexion d'origine.
@@ -176,7 +176,7 @@ Dans un canal ou un fil, envoyez `@Multica /clear [message]` dans le fil cible a
 
 ## Gérer les connexions
 
-Ouvrez **Paramètres → Messagerie → Slack** pour voir tous les bots Slack connectés. Les propriétaires et administrateurs de l'espace de travail peuvent les déconnecter.
+Ouvrez **Paramètres → Messagerie** pour voir les agents connectés, regroupés par plateforme. Sélectionnez un agent pour ouvrir sa section **Messagerie**. Les propriétaires et administrateurs de l'espace de travail peuvent y déconnecter le bot depuis son menu de gestion.
 
 Après la déconnexion, la connexion Socket Mode s'arrête et le bot ne reçoit plus de nouveaux messages. Les conversations et enregistrements d'audit existants ne sont pas supprimés.
 

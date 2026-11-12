@@ -13,10 +13,10 @@ func canonicalPath(path string) (string, error) {
 
 // discoveredExecutablePath canonicalizes ordinary executable symlinks but
 // preserves entrypoints backed by a known name-dispatching shim. Volta's
-// volta-shim and Vite Plus's vp select the managed package from the invoked
-// name; spawning the final target directly turns `claude --version` into
-// `volta-shim --version` or `vp --version`, so the daemon reads the manager's
-// version instead of the agent's and drops the runtime (#6183, #6702).
+// volta-shim, Vite Plus's vp, and mise select the managed command from the
+// invoked name. Spawning the final target directly probes the manager's
+// version instead of the agent's; `mise app-server` also treats app-server
+// as a mise task instead of starting Codex (#6183, #6702, #10451).
 //
 // The entrypoint's parent is still canonicalized. This keeps paths stable when
 // their containing directory is a symlink or an ephemeral version-manager
@@ -47,7 +47,7 @@ func isNameDispatchingAgentShim(path string) bool {
 	// extensions: these managers use wrappers or trampolines rather than
 	// name-dispatching symlinks, and that is a Windows shape this file never
 	// compiles for.
-	return base == "volta-shim" || base == "vp"
+	return base == "volta-shim" || base == "vp" || base == "mise"
 }
 
 var executablePathForLaunch = executablePathForLaunchDefault

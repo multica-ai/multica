@@ -11,10 +11,12 @@ import { configStore } from "../config";
 import type { ApiClient } from "../api/client";
 import { createQueryClient } from "../query-client";
 import {
+  useBatchDeleteIssues,
   useBatchUpdateIssues,
   useCreateComment,
   useCreateCommentSubIssue,
   useDeleteComment,
+  useDeleteIssue,
   useResolveComment,
   useUpdateComment,
   useUpdateIssue,
@@ -826,6 +828,124 @@ describe("useBatchUpdateIssues — optimistic patch covers filtered boards too",
 // request was carrying — here a new notification — must be re-read once the
 // write settles, or the unread badge counts a row the list never shows. The
 // cancel primitive itself is covered in inbox/ws-updaters.test.ts.
+describe("deleting issues prunes the deleting client's Inbox list", () => {
+  // Regression: an inbox loaded before the delete kept rows whose issue no
+  // longer existed once the delete committed. The WS echo (`issue:deleted` →
+  // `onInboxIssueDeleted`) is the backstop, not the plan — a proxied
+  // deployment can drop the socket silently, and clicking a leftover row
+  // routed to a 404. The delete mutations now prune the inbox caches
+  // themselves, with no WS event involved in these tests.
+  const kept = makeInboxItem("n1", "issue-3");
+  const doomed = makeInboxItem("n2", "issue-1");
+  const doomedArchived = makeInboxItem("n3", "issue-2", { archived: true });
+
+  let qc: QueryClient;
+  const unmounts: Array<() => void> = [];
+
+  function renderDeleteHooks() {
+    const hooks = renderHook(
+      () => ({ single: useDeleteIssue(), batch: useBatchDeleteIssues() }),
+      { wrapper: createWrapper(qc) },
+    );
+    unmounts.push(hooks.unmount);
+    return hooks.result;
+  }
+  type DeleteHooks = ReturnType<typeof renderDeleteHooks>["current"];
+
+  function seedInbox() {
+    qc.setQueryData<InboxItem[]>(inboxKeys.list(WS_ID), [kept, doomed]);
+    qc.setQueryData<InboxItem[]>(inboxKeys.archived(WS_ID), [doomedArchived]);
+  }
+
+  function mockDeleteApi({
+    fail = false,
+    deleted = 2,
+  }: { fail?: boolean; deleted?: number } = {}) {
+    const settle = <T,>(value: T) =>
+      fail ? Promise.reject(new Error("boom")) : Promise.resolve(value);
+    setApiInstance({
+      listInbox: () => Promise.resolve([kept]),
+      deleteIssue: () => settle(undefined),
+      batchDeleteIssues: () => settle({ deleted }),
+    } as unknown as ApiClient);
+  }
+
+  beforeEach(() => {
+    qc = createQueryClient();
+  });
+
+  afterEach(() => {
+    unmounts.splice(0).forEach((unmount) => unmount());
+    qc.clear();
+  });
+
+  it.each([
+    {
+      name: "useDeleteIssue",
+      del: (hooks: DeleteHooks) => hooks.single.mutateAsync("issue-1"),
+      // Only issue-1 went: the archived row for issue-2 survives it.
+      archivedAfter: ["n3"],
+    },
+    {
+      name: "useBatchDeleteIssues",
+      del: (hooks: DeleteHooks) =>
+        hooks.batch.mutateAsync(["issue-1", "issue-2"]),
+      archivedAfter: [],
+    },
+  ])("$name removes the deleted issues' inbox rows without any WS event", async ({ del, archivedAfter }) => {
+    mockDeleteApi();
+    seedInbox();
+    const hooks = renderDeleteHooks();
+
+    await act(async () => {
+      await del(hooks.current);
+    });
+
+    expect(
+      qc.getQueryData<InboxItem[]>(inboxKeys.list(WS_ID))?.map((i) => i.id),
+    ).toEqual(["n1"]);
+    expect(
+      qc.getQueryData<InboxItem[]>(inboxKeys.archived(WS_ID))?.map((i) => i.id),
+    ).toEqual(archivedAfter);
+  });
+
+  it("useBatchDeleteIssues re-reads the whole inbox when the server skipped part of the batch", async () => {
+    mockDeleteApi({ deleted: 1 });
+    seedInbox();
+    const hooks = renderDeleteHooks();
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+
+    await act(async () => {
+      await hooks.current.batch.mutateAsync(["issue-1", "issue-2"]);
+    });
+
+    // Which rows survived is unknowable client-side (the server reports only
+    // the count), so nothing is pruned by id — the lists and the unread
+    // summary are simply re-read.
+    await waitFor(() =>
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: inboxKeys.all(WS_ID) }),
+    );
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: inboxKeys.unreadSummary() });
+  });
+
+  it("a failed delete leaves the inbox rows untouched", async () => {
+    mockDeleteApi({ fail: true });
+    seedInbox();
+    const hooks = renderDeleteHooks();
+
+    await act(async () => {
+      await hooks.current.single.mutateAsync("issue-1").catch(() => {});
+    });
+
+    expect(
+      qc.getQueryData<InboxItem[]>(inboxKeys.list(WS_ID))?.map((i) => i.id),
+    ).toEqual(["n1", "n2"]);
+    expect(
+      qc.getQueryData<InboxItem[]>(inboxKeys.archived(WS_ID))?.map((i) => i.id),
+    ).toEqual(["n3"]);
+  });
+});
+
 describe("status / priority writes re-read an Inbox list they left behind", () => {
   const readItem = makeInboxItem("n1", "issue-1", {
     read: true,

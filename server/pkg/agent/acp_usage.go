@@ -235,10 +235,6 @@ func parseACPTokenUsageSnapshotFromMeta(meta json.RawMessage) acpUsageSnapshot {
 	return preferred.withFallback(parseACPTokenUsageSnapshot(meta))
 }
 
-func parseACPTokenUsageFromMeta(meta json.RawMessage) TokenUsage {
-	return parseACPTokenUsageSnapshotFromMeta(meta).TokenUsage
-}
-
 // normalizeACPTokenUsage re-buckets a usage record whose inputTokens already
 // contains cachedReadTokens, so the persisted buckets stay mutually exclusive
 // and dashboard cost math does not charge the cached prefix twice.
@@ -256,11 +252,6 @@ func normalizeACPTokenUsage(usage TokenUsage, totalTokens int64) (TokenUsage, bo
 	}
 	usage.InputTokens -= usage.CacheReadTokens
 	return usage, true
-}
-
-func excludeACPCachedInput(usage TokenUsage, totalTokens int64) TokenUsage {
-	normalized, _ := normalizeACPTokenUsage(usage, totalTokens)
-	return normalized
 }
 
 func acpUsageInt64(fields map[string]json.RawMessage, names ...string) (int64, bool) {

@@ -91,6 +91,10 @@ func zcodeDataBaseDir(env []string) (string, error) {
 // crash leftovers do not linger.
 func prepareZcodeRuntimeEnv(executable string, env []string) ([]string, func(), error) {
 	noop := func() {}
+	env = zcodeRuntimeEnv(executable, env)
+	if script, desktop := zcodeDesktopScript(executable); desktop {
+		executable = script
+	}
 	script := resolveZcodeScript(executable)
 	if zcodeEnvValue(env, zcodePersonalConfigEnv) != "" {
 		return zcodeRuntimeEnv(script, env), noop, nil

@@ -1756,7 +1756,7 @@ func TestEnsureRemoteTrackingLayoutMigratesLegacyCache(t *testing.T) {
 
 // TestCreateWorktreePathCollisionDoesNotLeakBranch verifies the secondary bug
 // fix: when the worktree path already exists as a non-worktree (e.g. a plain
-// directory), createWorktree must fail cleanly without leaking a branch into
+// directory), createWorktreeContext must fail cleanly without leaking a branch into
 // the bare repo. Previously the "already exists" retry logic would
 // misclassify path collisions as branch collisions and create a second
 // timestamp-suffixed branch before hitting the same path error.

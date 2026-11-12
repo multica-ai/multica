@@ -16,15 +16,35 @@ import (
 // to spawn a ZCode run.
 //
 // ZCode ships as a Node bundle (zcode.cjs) inside the desktop app rather than
-// as a native binary, so a resolved .cjs/.mjs path runs under `node`. Callers
-// (Execute, model discovery, --version probes) must ensure `node` is on PATH
-// before spawning — see requireNodeForZcodeScript. Shims and native builds
-// pass through unchanged.
+// as a native binary. A .cjs/.mjs path runs under `node`; the Linux desktop
+// entry runs its companion script under Electron's bundled Node runtime.
+// Callers must validate the entry with requireNodeForZcodeScript and apply
+// zcodeRuntimeEnv for Electron. Shims and native builds pass through.
 func chooseZcodeInvocation(execName, lookedUp string, args []string, _ *slog.Logger) (string, []string) {
+	if script, desktop := zcodeDesktopScript(lookedUp); desktop {
+		return lookedUp, append([]string{script}, args...)
+	}
 	if isNodeScriptPath(lookedUp) {
 		return "node", append([]string{lookedUp}, args...)
 	}
 	return execName, args
+}
+
+// zcodeDesktopScript recognizes the Linux desktop layout, including PATH
+// symlinks to its Electron entry point. Keep recognizing an incomplete bundle
+// so a missing CLI produces an error instead of launching the GUI.
+func zcodeDesktopScript(executable string) (string, bool) {
+	if real, err := filepath.EvalSymlinks(executable); err == nil {
+		executable = real
+	}
+	if filepath.Base(executable) != "zcode" {
+		return "", false
+	}
+	resources := filepath.Join(filepath.Dir(executable), "resources")
+	if info, err := os.Stat(resources); err != nil || !info.IsDir() {
+		return "", false
+	}
+	return filepath.Join(resources, "glm", "zcode.cjs"), true
 }
 
 func isNodeScriptPath(path string) bool {
@@ -32,8 +52,15 @@ func isNodeScriptPath(path string) bool {
 }
 
 // requireNodeForZcodeScript reports a clear error when a Desktop .cjs/.mjs
-// entry needs Node.js on PATH and none is resolvable. Native/shim paths pass.
+// entry needs Node.js on PATH and none is resolvable, or a Linux Desktop entry
+// has no companion CLI. Linux Desktop uses Electron's own Node runtime.
 func requireNodeForZcodeScript(lookedUp string) error {
+	if script, desktop := zcodeDesktopScript(lookedUp); desktop {
+		if info, err := os.Stat(script); err != nil || !info.Mode().IsRegular() {
+			return fmt.Errorf("ZCode Desktop CLI is missing at %s; set MULTICA_ZCODE_PATH to a headless ZCode CLI or wrapper", script)
+		}
+		return nil
+	}
 	if !isNodeScriptPath(lookedUp) {
 		return nil
 	}
@@ -123,15 +150,20 @@ func zcodeBuiltinProviderConfig(script string) string {
 
 // zcodeRuntimeEnv supplies the companion config shipped with the Node entry
 // script (see resolveZcodeScript). The bundled CLI's relative lookup does not
-// cover Resources/glm in 0.17. Explicit environment configuration always wins.
-func zcodeRuntimeEnv(script string, env []string) []string {
+// cover Resources/glm in 0.17. Explicit provider configuration always wins.
+func zcodeRuntimeEnv(executable string, env []string) []string {
+	if script, desktop := zcodeDesktopScript(executable); desktop {
+		// This must override an inherited 0: Electron otherwise starts its GUI.
+		env = append(append([]string(nil), env...), "ELECTRON_RUN_AS_NODE=1")
+		executable = script
+	}
 	const key = "ZCODE_BUILTIN_PROVIDER_CONFIG_FILE"
 	for _, entry := range env {
 		if strings.HasPrefix(entry, key+"=") {
 			return env
 		}
 	}
-	if config := zcodeBuiltinProviderConfig(script); config != "" {
+	if config := zcodeBuiltinProviderConfig(executable); config != "" {
 		return append(append([]string(nil), env...), key+"="+config)
 	}
 	return env

@@ -196,6 +196,7 @@
     "relation_subscribed": "我订阅的",
     "section_agent_status": "智能体状态",
     "agent_status_running": "运行中",
+    "agent_status_idle": "空闲",
     "section_read_state": "阅读状态",
     "read_state_unread": "未读",
     "operator_label": "关系",
@@ -315,6 +316,7 @@
     "card_project": "项目",
     "card_labels": "标签",
     "card_child_progress": "子任务进度",
+    "card_pull_requests": "Pull Request",
     "show_sub_issues": "显示子任务",
     "layout_options": "{{layout}}选项"
   },
@@ -386,6 +388,7 @@
       "created_at": "创建时间",
       "updated_at": "更新时间",
       "child_progress": "子任务进度",
+      "pull_requests": "Pull Request",
       "creator": "创建者"
     },
     "calculation": {
@@ -510,6 +513,7 @@
     "quick_action_blocked_body": "\"{{name}}\"由一个你无权触发的智能体执行。可以请工作区管理员把该智能体开放给团队，或把这条操作改绑一个共享的智能体。",
     "quick_action_blocked_ok": "知道了",
     "pull_requests_loading": "加载中...",
+    "pull_request_state_open": "Open",
     "pull_request_state_draft": "Draft",
     "pull_request_state_merged": "Merged",
     "pull_request_state_closed": "Closed",

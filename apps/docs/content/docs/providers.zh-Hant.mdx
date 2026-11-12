@@ -45,6 +45,8 @@ Multica 不替代你在用的 AI 程式設計工具：執行時呼叫電腦上�
 | Qoder CN CLI | `qoderclicn` | ✓ | ✓ | ✓ | `.qoder/skills/` |
 | Qwen Code | `qwen` | ✓ | ✓ | ✓ | `.qwen/skills/` |
 | QwenPaw | `qwenpaw` | ✓ | ✓ | — | 單次執行的工作區 `skills/` |
+| Amp | `amp` | ✓ | — | ✓ | `.agents/skills/` |
+| Factory Droid | `droid` | ✓ | — | ✓ | `.factory/skills/` |
 | Reasonix | `reasonix` | ✓ | ✓ | ✓ | `.reasonix/skills/` |
 | Trae CLI | `traecli` | ✓ | ✓ | ✓ | `.traecli/skills/` |
 | Dim | `dim` | ✓ | ✓ | ✓ | — |
@@ -121,4 +123,4 @@ Codex、Hermes 和 OpenClaw 的處理稍有不同：
 
 ZCode 使用原生 NDJSON `app-server` 協定，支援會話建立、續接、取消、模型發現、思考強度和 MCP。任務透過 yolo 模式執行，無需等待互動式工具審批。每個模型的思考檔位來自執行時目錄，建立 AI 代理時會保留對應預設值。
 
-macOS 可自動發現 ZCode Desktop 內建的 Node 入口；需要本機已安裝 Node.js。執行時讀取桌面端已啟用的 API-key/Coding Plan 連線，為當前程序生成獨佔臨時配置，退出後刪除，原配置不變。Start Plan 登入身分令牌不作為 API key 匯入，目前不支援這條帳號鑑權路徑。若模型列表為空，請先在桌面端配置一個可用的 API 連線。
+macOS 可自動發現 ZCode Desktop 內建的 CLI；需要本機已安裝 Node.js。Linux 也可自動發現 ZCode Desktop，在背景執行內建 CLI，不開啟桌面視窗，無需額外安裝 Node.js 或手動設定環境變數。執行時讀取桌面端已啟用的 API-key/Coding Plan 連線，為當前程序生成獨佔臨時配置，退出後刪除，原配置不變。Start Plan 登入身分令牌不作為 API key 匯入，目前不支援這條帳號鑑權路徑。若模型列表為空，請先在桌面端配置一個可用的 API 連線。

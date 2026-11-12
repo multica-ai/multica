@@ -196,6 +196,7 @@
     "relation_subscribed": "自分が購読中",
     "section_agent_status": "エージェントの状態",
     "agent_status_running": "実行中",
+    "agent_status_idle": "待機中",
     "section_read_state": "既読状態",
     "read_state_unread": "未読",
     "operator_label": "条件",
@@ -315,6 +316,7 @@
     "card_project": "プロジェクト",
     "card_labels": "ラベル",
     "card_child_progress": "サブタスクの進捗",
+    "card_pull_requests": "Pull requests",
     "show_sub_issues": "サブタスクを表示",
     "layout_options": "{{layout}}のオプション"
   },
@@ -386,6 +388,7 @@
       "created_at": "作成日",
       "updated_at": "更新日",
       "child_progress": "サブタスクの進捗",
+      "pull_requests": "Pull requests",
       "creator": "作成者"
     },
     "calculation": {
@@ -510,6 +513,7 @@
     "quick_action_blocked_body": "「{{name}}」は、あなたが実行を許可されていないエージェントで動作します。ワークスペース管理者にそのエージェントをチームへ公開してもらうか、共有エージェントへの変更を依頼してください。",
     "quick_action_blocked_ok": "了解",
     "pull_requests_loading": "読み込み中...",
+    "pull_request_state_open": "オープン",
     "pull_request_state_draft": "ドラフト",
     "pull_request_state_merged": "マージ済み",
     "pull_request_state_closed": "クローズ",

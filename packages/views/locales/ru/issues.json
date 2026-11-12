@@ -194,6 +194,7 @@
     "relation_my_agents": "Работа моих агентов",
     "section_agent_status": "Статус агента",
     "agent_status_running": "Выполняется",
+    "agent_status_idle": "Простаивает",
     "operator_label": "Условие",
     "operator_is": "равно",
     "operator_is_not": "не равно",
@@ -332,6 +333,7 @@
     "card_project": "Проект",
     "card_labels": "Метки",
     "card_child_progress": "Прогресс подзадач",
+    "card_pull_requests": "Pull request'ы",
     "show_sub_issues": "Показывать подзадачи",
     "layout_options": "Настройки вида «{{layout}}»"
   },
@@ -403,6 +405,7 @@
       "created_at": "Создано",
       "updated_at": "Обновлено",
       "child_progress": "Прогресс подзадач",
+      "pull_requests": "Pull request'ы",
       "creator": "Автор"
     },
     "calculation": {
@@ -527,6 +530,7 @@
     "quick_action_blocked_body": "«{{name}}» выполняется от имени агента, которого вам не разрешено запускать. Попросите администратора рабочего пространства сделать этого агента доступным команде или направить это действие на общего агента.",
     "quick_action_blocked_ok": "Понятно",
     "pull_requests_loading": "Загрузка…",
+    "pull_request_state_open": "Открыт",
     "pull_request_state_draft": "Черновик",
     "pull_request_state_merged": "Смёрджен",
     "pull_request_state_closed": "Закрыт",

@@ -590,7 +590,7 @@ func (b *Bridge) createSession(ctx context.Context, r *run, resources []map[stri
 	if err := b.persist(); err != nil {
 		return err
 	}
-	metadata := map[string]string{"multica_task_id": r.TaskID, "multica_workspace_id": b.cfg.WorkspaceID, resourcesMetadataKey: fingerprint}
+	metadata := map[string]string{"source": "multica", "multica_task_id": r.TaskID, "multica_workspace_id": b.cfg.WorkspaceID, resourcesMetadataKey: fingerprint}
 	if err := b.qoder.call(ctx, http.MethodPost, "/sessions", map[string]any{"agent": r.AgentID, "environment_id": b.cfg.EnvironmentID, "title": "Multica run " + r.TaskID, "metadata": metadata, "resources": resources}, &session); err != nil {
 		if rateLimited(err) {
 			r.Phase = "prepared"

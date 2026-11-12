@@ -190,6 +190,22 @@ UPDATE inbox_item SET archived = true
 WHERE id = $1
 RETURNING *;
 
+-- name: DeleteInboxGroup :execrows
+-- A visible inbox row groups notifications on an issue. Remove that group
+-- only in the selected view, so older siblings cannot bring the row back and
+-- deleting an active row does not erase its archived history.
+WITH target AS (
+    SELECT selected.* FROM inbox_item selected
+    WHERE selected.id = $1 AND selected.workspace_id = $2
+      AND selected.recipient_type = 'member' AND selected.recipient_id = $3
+)
+DELETE FROM inbox_item item USING target
+WHERE item.workspace_id = target.workspace_id
+  AND item.recipient_type = target.recipient_type
+  AND item.recipient_id = target.recipient_id
+  AND item.archived = target.archived
+  AND (item.id = target.id OR item.issue_id = target.issue_id);
+
 -- name: ArchiveInboxByIssue :execrows
 UPDATE inbox_item SET archived = true
 WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND issue_id = $4 AND archived = false;

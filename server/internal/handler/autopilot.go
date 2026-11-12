@@ -30,6 +30,14 @@ func computeNextRun(cronExpr, timezone string) (time.Time, error) {
 	return service.ComputeNextRun(cronExpr, timezone)
 }
 
+// nextRunTimestamp maps a computed next run onto the nullable next_run_at
+// column. A cron that parses but never fires ("0 0 30 2 *") is saveable, and
+// the cron library reports "no next occurrence" as the zero time: that is
+// stored as NULL, not as a next run in year 0001.
+func nextRunTimestamp(t time.Time) pgtype.Timestamptz {
+	return pgtype.Timestamptz{Time: t, Valid: !t.IsZero()}
+}
+
 // ── Response types ──────────────────────────────────────────────────────────
 
 type AutopilotResponse struct {
@@ -452,6 +460,21 @@ func (h *Handler) ListAutopilots(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list autopilots")
 		return
 	}
+	// Autopilots on private projects the caller cannot see are left out
+	// (MUL-8472), as loadAutopilotInWorkspace answers them like missing ones.
+	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+	if !ok {
+		return
+	}
+	if !hidden.Empty() {
+		visible := autopilots[:0:0]
+		for _, row := range autopilots {
+			if hidden.CanSeeProject(row.Autopilot.ProjectID) {
+				visible = append(visible, row)
+			}
+		}
+		autopilots = visible
+	}
 
 	// Resolve the acting caller's write access for per-row can_write. The
 	// collaborator grants are fetched once as a set (keyed by autopilot id) so the
@@ -609,6 +632,12 @@ func (h *Handler) loadAutopilotInWorkspace(w http.ResponseWriter, r *http.Reques
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "autopilot not found")
+		return db.Autopilot{}, false
+	}
+	// An autopilot on a private project (MUL-8472) is part of that project:
+	// its prompt, runs and triggers answer like a missing autopilot to anyone
+	// who cannot see the project.
+	if !h.requireProjectVisible(w, r, workspaceID, autopilot.ProjectID, http.StatusNotFound, "autopilot not found") {
 		return db.Autopilot{}, false
 	}
 	return autopilot, true
@@ -1362,6 +1391,9 @@ func (h *Handler) DeleteAutopilot(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "autopilot not found")
 		return
 	}
+	if !h.requireProjectVisible(w, r, workspaceID, ap.ProjectID, http.StatusNotFound, "autopilot not found") {
+		return
+	}
 	actor, ok := h.requireAutopilotWrite(w, r, ap, workspaceID)
 	if !ok {
 		return
@@ -1627,7 +1659,7 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		nextRunAt = pgtype.Timestamptz{Time: t, Valid: true}
+		nextRunAt = nextRunTimestamp(t)
 	case "webhook":
 		// Mint the token BEFORE the INSERT so the row never exists in a
 		// half-written kind=webhook + webhook_token=NULL state. If the
@@ -1990,7 +2022,7 @@ func (h *Handler) UpdateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		params.NextRunAt = pgtype.Timestamptz{Time: t, Valid: true}
+		params.NextRunAt = nextRunTimestamp(t)
 	}
 
 	userID := uuidToString(actor.UserID)
@@ -2074,6 +2106,9 @@ func (h *Handler) DeleteAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "autopilot not found")
+		return
+	}
+	if !h.requireProjectVisible(w, r, workspaceID, ap.ProjectID, http.StatusNotFound, "autopilot not found") {
 		return
 	}
 	actor, ok := h.requireAutopilotWrite(w, r, ap, workspaceID)

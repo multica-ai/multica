@@ -39,6 +39,7 @@ type audienceQuerier interface {
 	GetIssueProjectID(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error)
 	GetCommentIssueProjectID(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error)
 	GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error)
+	GetAutopilot(ctx context.Context, id pgtype.UUID) (db.Autopilot, error)
 	projectaccess.TaskQuerier
 }
 
@@ -131,7 +132,8 @@ func (a *dbPrivateProjectAudience) Audience(ctx context.Context, e events.Event)
 		return nil, false, err
 	}
 	// A run can read more than one project (a quick-create into one project
-	// under a parent in another); only members of every private one may see it.
+	// under a parent in another), and a pull request can be linked to issues in
+	// several; only members of every private one may see it.
 	var members []string
 	private := false
 	for _, projectID := range projectIDs {
@@ -217,7 +219,8 @@ func (a *dbPrivateProjectAudience) workspace(ctx context.Context, workspaceID st
 
 // eventProjectIDs resolves the projects an event is about, or none. It reads
 // the payload's own references first and only falls back to the database for
-// a bare issue, comment or task id.
+// a bare issue, comment, autopilot or task id, or the issues a pull request is
+// linked to.
 func (a *dbPrivateProjectAudience) eventProjectIDs(ctx context.Context, e events.Event) ([]string, error) {
 	refs := extractEventRefs(e.Type, e.Payload)
 	if refs.projectKnown {
@@ -242,6 +245,23 @@ func (a *dbPrivateProjectAudience) eventProjectIDs(ctx context.Context, e events
 	}
 	if refs.commentID != "" {
 		return lookup(refs.commentID, a.q.GetCommentIssueProjectID)
+	}
+	if len(refs.linkedIssueIDs) > 0 {
+		var out []string
+		for _, id := range refs.linkedIssueIDs {
+			projects, err := lookup(id, a.q.GetIssueProjectID)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, projects...)
+		}
+		return out, nil
+	}
+	if refs.autopilotID != "" {
+		return lookup(refs.autopilotID, func(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
+			ap, err := a.q.GetAutopilot(ctx, id)
+			return ap.ProjectID, err
+		})
 	}
 	if e.TaskID != "" && e.ChatSessionID == "" {
 		return a.taskProjectIDs(ctx, e)
@@ -314,6 +334,9 @@ type eventRefs struct {
 	projectID    string
 	issueID      string
 	commentID    string
+	autopilotID  string
+	// linkedIssueIDs are the issues a pull_request:updated event names.
+	linkedIssueIDs []string
 }
 
 // extractEventRefs reads project / issue / comment references from an event
@@ -358,8 +381,20 @@ func extractEventRefs(eventType string, payload any) eventRefs {
 			}
 		}
 	}
-	if id, ok := str(top, "project_id"); ok && id != "" && (isProjectEvent || eventType == protocol.EventProjectMembersChanged) {
+	// A deleted issue states its project, since its row is gone by now.
+	if id, ok := str(top, "project_id"); ok && id != "" && (isProjectEvent || eventType == protocol.EventProjectMembersChanged || eventType == protocol.EventIssueDeleted) {
 		return eventRefs{projectKnown: true, projectID: id}
+	}
+	// An autopilot bound to a private project carries its prompt and runs.
+	if strings.HasPrefix(eventType, "autopilot:") {
+		if ap := object("autopilot"); ap != nil {
+			if pid, ok := str(ap, "project_id"); ok {
+				return eventRefs{projectKnown: true, projectID: pid}
+			}
+		}
+		if id, ok := str(top, "autopilot_id"); ok && id != "" {
+			return eventRefs{autopilotID: id}
+		}
 	}
 	if issue := object("issue"); issue != nil {
 		if pid, ok := str(issue, "project_id"); ok {
@@ -386,6 +421,11 @@ func extractEventRefs(eventType string, payload any) eventRefs {
 	if refs.issueID == "" && refs.commentID == "" {
 		if id, ok := str(top, "comment_id"); ok {
 			refs.commentID = id
+		}
+	}
+	if refs.issueID == "" && refs.commentID == "" {
+		if v, ok := top["linked_issue_ids"]; ok {
+			_ = json.Unmarshal(v, &refs.linkedIssueIDs)
 		}
 	}
 	return refs

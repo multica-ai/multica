@@ -1704,31 +1704,6 @@ func (s *chatSchedule) backoffSnapshot() time.Time {
 	return time.Unix(0, nanos)
 }
 
-// runScheduled waits for the chat's edit interval and any Telegram 429
-// retry_after window. Terminal delivery retries 429 responses until the event
-// context expires; other errors remain non-retriable to avoid duplicates.
-func (o *Outbound) runScheduled(ctx context.Context, schedule *chatSchedule, operation func() error) error {
-	for {
-		now := o.now()
-		available := o.terminalAvailableAt(schedule, schedule.key.botKey, now)
-		if delay := available.Sub(now); delay > 0 {
-			if err := o.wait(ctx, delay); err != nil {
-				return err
-			}
-		}
-		err := operation()
-		if retry, ok := retryAfter(err); ok {
-			schedule.setBackoffTill(o.now().Add(retry))
-			continue
-		}
-		if err == nil {
-			schedule.lastEdit = o.now()
-			schedule.setBackoffTill(time.Time{})
-		}
-		return err
-	}
-}
-
 func waitForOutbound(ctx context.Context, delay time.Duration) error {
 	if sleepCtx(ctx, delay) {
 		return nil

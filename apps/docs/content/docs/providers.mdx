@@ -45,6 +45,8 @@ Install steps are in [Install AI coding tools](/install-agent-runtime).
 | Qoder CN CLI | `qoderclicn` | ✓ | ✓ | ✓ | `.qoder/skills/` |
 | Qwen Code | `qwen` | ✓ | ✓ | ✓ | `.qwen/skills/` |
 | QwenPaw | `qwenpaw` | ✓ | ✓ | — | per-run workspace `skills/` |
+| Amp | `amp` | ✓ | — | ✓ | `.agents/skills/` |
+| Factory Droid | `droid` | ✓ | — | ✓ | `.factory/skills/` |
 | Reasonix | `reasonix` | ✓ | ✓ | ✓ | `.reasonix/skills/` |
 | Trae CLI | `traecli` | ✓ | ✓ | ✓ | `.traecli/skills/` |
 | Dim | `dim` | ✓ | ✓ | ✓ | — |
@@ -121,5 +123,5 @@ For creating and binding skills, see [Skills](/skills).
 
 ZCode uses its native NDJSON `app-server` protocol for session creation, resumption, cancellation, model discovery, thinking levels, and MCP. Tasks run in yolo mode without interactive tool approval. Reasoning choices come from the runtime model catalog; creating an agent preserves the selected model's default level.
 
-On macOS the daemon also discovers ZCode Desktop's bundled Node entry point; Node.js must be installed. Enabled desktop API-key/Coding Plan connections are imported into a process-private temporary provider configuration, which is removed on exit without changing the original files. Start Plan identity tokens are not API keys and this account-authentication path is not supported. Configure a working API connection in ZCode Desktop if discovery returns no models.
+On macOS the daemon also discovers ZCode Desktop's bundled CLI; Node.js must be installed. On Linux it discovers ZCode Desktop and runs the bundled CLI without opening a desktop window; no separate Node.js installation or manual environment configuration is needed. Enabled desktop API-key/Coding Plan connections are imported into a process-private temporary provider configuration, which is removed on exit without changing the original files. Start Plan identity tokens are not API keys and this account-authentication path is not supported. Configure a working API connection in ZCode Desktop if discovery returns no models.
 
