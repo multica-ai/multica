@@ -8,6 +8,7 @@ import {
 } from "./tab-store-storage";
 import { createSafeId } from "@multica/core/utils";
 import { workspaceSlugForPath } from "@multica/core/paths";
+import { isIssueUuid } from "@multica/core/issues/canonical-id";
 
 // Tab sessions hold serializable URLs, identity, virtual history, and view
 // mementos. The coordinator projects the active session onto the single router;
@@ -136,6 +137,14 @@ export interface WorkspaceTabGroup {
    * far away from it.
    */
   recentTabIds: string[];
+  /**
+   * Issue UUID → identifier (`MUL-123`), learned when a tab's issue page
+   * rewrote its UUID URL to the identifier URL. In-app links still carry the
+   * UUID, so without this an open of an issue that already has a tab would
+   * miss it and add a second one. Bounded, and persisted so that dedupe
+   * still works after a restart.
+   */
+  issueAliases?: Record<string, string>;
 }
 
 interface TabStore {
@@ -357,6 +366,84 @@ function inboxSelectionKeyForUrl(url: string): string | null {
   if (!selectedKey) return null;
 
   return `${pathname}?issue=${encodeURIComponent(selectedKey)}`;
+}
+
+/** Most issue aliases a group keeps; the oldest-learned are dropped first. */
+const MAX_ISSUE_ALIASES = 200;
+
+/** The `{segment}` of a `/{ws}/issues/{segment}[/...]` URL, else null. */
+function issueRouteSegment(url: string): string | null {
+  const segments = splitTabUrl(url).pathname.split("/");
+  return segments[2] === "issues" && segments[3] ? segments[3] : null;
+}
+
+/**
+ * `key` with a learned issue UUID written as the issue's identifier, so
+ * `/ws/issues/{uuid}` and `/ws/issues/MUL-123` dedupe to the same tab.
+ */
+function canonicalResourceKey(
+  key: string,
+  aliases: Record<string, string> | undefined,
+): string {
+  const segment = issueRouteSegment(key);
+  if (!segment || !aliases || !isIssueUuid(segment)) return key;
+  const identifier = aliases[segment];
+  if (!identifier) return key;
+  const { pathname, suffix } = splitTabUrl(key);
+  const segments = pathname.split("/");
+  segments[3] = identifier;
+  return `${segments.join("/")}${suffix}`;
+}
+
+/** The tab in `group` showing the resource `url` opens, if any. */
+function findTabForUrl(
+  group: WorkspaceTabGroup,
+  url: string,
+): TabSession | undefined {
+  const aliases = group.issueAliases;
+  const key = canonicalResourceKey(resourceKeyForUrl(url), aliases);
+  return group.tabs.find(
+    (t) => canonicalResourceKey(t.resourceKey, aliases) === key,
+  );
+}
+
+/**
+ * Remember the identifier of an issue when its route replaces the UUID URL
+ * with the identifier URL (see `useCanonicalIssueUrl`). Only a replace counts:
+ * it keeps the same page, while a push from one issue to another does not.
+ */
+function withIssueAlias(
+  group: WorkspaceTabGroup,
+  fromUrl: string,
+  toUrl: string,
+): WorkspaceTabGroup {
+  const uuid = issueRouteSegment(fromUrl);
+  const identifier = issueRouteSegment(toUrl);
+  if (!uuid || !identifier) return group;
+  if (!isIssueUuid(uuid) || isIssueUuid(identifier)) return group;
+  if (group.issueAliases?.[uuid] === identifier) return group;
+  const entries = Object.entries(group.issueAliases ?? {}).filter(
+    ([key]) => key !== uuid,
+  );
+  entries.push([uuid, identifier]);
+  return {
+    ...group,
+    issueAliases: Object.fromEntries(entries.slice(-MAX_ISSUE_ALIASES)),
+  };
+}
+
+/** Persisted aliases are untrusted: keep UUID → identifier string pairs only. */
+function normalizeIssueAliases(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const entries = Object.entries(value).filter(
+    (entry): entry is [string, string] =>
+      isIssueUuid(entry[0]) &&
+      typeof entry[1] === "string" &&
+      entry[1] !== "" &&
+      !entry[1].includes("/") &&
+      !isIssueUuid(entry[1]),
+  );
+  return Object.fromEntries(entries.slice(-MAX_ISSUE_ALIASES));
 }
 
 /**
@@ -649,6 +736,7 @@ function reconcileGroup(
     browsingHistory: prev?.browsingHistory ?? [],
     browsingHistoryTitles: prev?.browsingHistoryTitles ?? {},
     recentTabIds,
+    issueAliases: prev?.issueAliases ?? {},
   };
 }
 
@@ -766,8 +854,7 @@ export const useTabStore = create<TabStore>()(
         if (desiredPath) {
           const clean = sanitizeTabPath(desiredPath);
           if (clean) {
-            const key = resourceKeyForUrl(clean);
-            const match = existing.tabs.find((t) => t.resourceKey === key);
+            const match = findTabForUrl(existing, clean);
             if (match) {
               const nextGroup = withBrowsingVisit(
                 reconcileGroup(existing, existing.tabs, match.id),
@@ -823,8 +910,7 @@ export const useTabStore = create<TabStore>()(
 
         // Dedup by resourceKey: the existing tab keeps its own url (its
         // filters/anchor are its view state); we only focus it.
-        const key = resourceKeyForUrl(clean);
-        const existing = group.tabs.find((t) => t.resourceKey === key);
+        const existing = findTabForUrl(group, clean);
         if (existing) {
           const historyBase = withActiveSessionVisit(
             group,
@@ -1047,7 +1133,9 @@ export const useTabStore = create<TabStore>()(
         const nextTabs = [...group.tabs];
         nextTabs[index] = next;
         const nextGroup = withBrowsingNavigation(
-          { ...group, tabs: nextTabs },
+          replace
+            ? withIssueAlias({ ...group, tabs: nextTabs }, current.url, clean)
+            : { ...group, tabs: nextTabs },
           activeWorkspaceSlug,
           current,
           clean,
@@ -1347,6 +1435,7 @@ function partializeTabs(state: PersistedTabState) {
           recentTabIds: group.recentTabIds,
           browsingHistory: group.browsingHistory,
           browsingHistoryTitles: group.browsingHistoryTitles,
+          issueAliases: group.issueAliases,
           tabs: group.tabs.map((t) => ({
             id: t.id,
             url: t.url,
@@ -1480,6 +1569,7 @@ export function mergePersistedTabs<T extends PersistedTabState>(
           browsingHistory,
           tabs,
         ),
+        issueAliases: normalizeIssueAliases(pGroup.issueAliases),
       },
       tabs,
       activeTabId,
@@ -1636,6 +1726,7 @@ interface V4Persisted {
 interface V5PersistedGroup extends V4PersistedGroup {
   browsingHistory: string[];
   browsingHistoryTitles?: Record<string, string>;
+  issueAliases?: unknown;
 }
 
 interface V5Persisted {
