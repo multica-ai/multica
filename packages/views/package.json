@@ -74,6 +74,14 @@
     "./i18n": "./i18n/index.ts",
     "./attachments": "./attachments/index.ts",
     "./locales": "./locales/index.ts",
+    "./locales/en": "./locales/en.ts",
+    "./locales/zh-Hans": "./locales/zh-Hans.ts",
+    "./locales/zh-Hant": "./locales/zh-Hant.ts",
+    "./locales/ko": "./locales/ko.ts",
+    "./locales/ja": "./locales/ja.ts",
+    "./locales/fr": "./locales/fr.ts",
+    "./locales/es": "./locales/es.ts",
+    "./locales/ru": "./locales/ru.ts",
     "./locales/*": "./locales/*"
   },
   "dependencies": {

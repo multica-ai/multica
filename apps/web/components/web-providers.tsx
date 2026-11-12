@@ -5,8 +5,9 @@ import dynamic from "next/dynamic";
 import { CoreProvider } from "@multica/core/platform";
 import { installUserTimingCap } from "@multica/core/diagnostics";
 import { createBrowserCookieLocaleAdapter } from "@multica/core/i18n/browser";
-import type { LocaleResources, SupportedLocale } from "@multica/core/i18n";
+import type { SupportedLocale } from "@multica/core/i18n";
 import packageJson from "../package.json";
+import { LocaleBundle } from "@/components/i18n/locale-bundle";
 import { WebNavigationProvider } from "@/platform/navigation";
 import { WebScrollRestorationProvider } from "@/platform/scroll-restoration";
 import {
@@ -56,14 +57,12 @@ const WEB_VERSION =
 export function WebProviders({
   children,
   locale,
-  resources,
   apiBaseUrl,
   wsUrl,
   devToolbarApiUrl,
 }: {
   children: React.ReactNode;
   locale: SupportedLocale;
-  resources: Record<string, LocaleResources>;
   apiBaseUrl?: string;
   wsUrl?: string;
   /** Set only when the dev toolbar is enabled; the backend it reports. */
@@ -84,24 +83,28 @@ export function WebProviders({
     if (process.env.NODE_ENV === "development") installUserTimingCap();
   }, []);
   return (
-    <CoreProvider
-      apiBaseUrl={apiBaseUrl}
-      wsUrl={wsUrl || deriveWsUrl()}
-      cookieAuth={cookieAuth}
-      onLogin={setLoggedInCookie}
-      onLogout={clearLoggedInCookie}
-      identity={identity}
-      locale={locale}
-      resources={resources}
-      localeAdapter={localeAdapter}
-      syncUserLocale={syncUserLocale}
-    >
-      <WebNavigationProvider>
-        <WebScrollRestorationProvider>{children}</WebScrollRestorationProvider>
-        {process.env.NODE_ENV === "development" && devToolbarApiUrl && (
-          <WebDevToolbar apiUrl={devToolbarApiUrl} />
-        )}
-      </WebNavigationProvider>
-    </CoreProvider>
+    <LocaleBundle locale={locale}>
+      {(resources) => (
+        <CoreProvider
+          apiBaseUrl={apiBaseUrl}
+          wsUrl={wsUrl || deriveWsUrl()}
+          cookieAuth={cookieAuth}
+          onLogin={setLoggedInCookie}
+          onLogout={clearLoggedInCookie}
+          identity={identity}
+          locale={locale}
+          resources={resources}
+          localeAdapter={localeAdapter}
+          syncUserLocale={syncUserLocale}
+        >
+          <WebNavigationProvider>
+            <WebScrollRestorationProvider>{children}</WebScrollRestorationProvider>
+            {process.env.NODE_ENV === "development" && devToolbarApiUrl && (
+              <WebDevToolbar apiUrl={devToolbarApiUrl} />
+            )}
+          </WebNavigationProvider>
+        </CoreProvider>
+      )}
+    </LocaleBundle>
   );
 }
