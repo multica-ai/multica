@@ -21,6 +21,10 @@ import {
 } from "../shared/issue-window";
 import { AUTH_SESSION_STATE_CHANNEL } from "../shared/auth-session";
 import {
+  DEV_TOOLBAR_VISIBLE_CHANGED_CHANNEL,
+  DEV_TOOLBAR_VISIBLE_GET_CHANNEL,
+} from "../shared/dev-toolbar";
+import {
   CONTEXT_MENU_COMMAND_CHANNEL,
   CONTEXT_MENU_REQUEST_CHANNEL,
   isContextMenuRequest,
@@ -356,6 +360,25 @@ const desktopAPI = {
   /** Listen for Cmd/Ctrl+Shift+N new-window requests. */
   onNewWindowShortcut: (callback: () => void) =>
     subscribeToMainRendererChannel(NEW_WINDOW_SHORTCUT_CHANNEL, () => callback()),
+  /** Whether View → Show Dev Toolbar is checked. Always false unless the
+   *  dev build was started with VITE_DEV_TOOLBAR. */
+  getDevToolbarVisible: (): boolean => {
+    try {
+      return ipcRenderer.sendSync(DEV_TOOLBAR_VISIBLE_GET_CHANNEL) === true;
+    } catch {
+      return false;
+    }
+  },
+  /** Listen for View → Show Dev Toolbar being toggled. Returns an unsubscribe fn. */
+  onDevToolbarVisibleChange: (callback: (visible: boolean) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, visible: unknown) => {
+      if (typeof visible === "boolean") callback(visible);
+    };
+    ipcRenderer.on(DEV_TOOLBAR_VISIBLE_CHANGED_CHANNEL, handler);
+    return () => {
+      ipcRenderer.removeListener(DEV_TOOLBAR_VISIBLE_CHANGED_CHANNEL, handler);
+    };
+  },
 };
 
 type DaemonReauthResult =

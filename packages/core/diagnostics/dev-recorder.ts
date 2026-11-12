@@ -503,11 +503,14 @@ function refuseReplayWrite({ method, readOnly }: { method: string; readOnly: boo
 }
 
 /**
- * Start recording. Idempotent, and a no-op outside the browser. With a query
- * client, realtime events are tagged with the cache changes they caused.
+ * Start recording. With a query client, realtime events are tagged with the
+ * cache changes they caused. Returns a function that removes every hook the
+ * recorder installed and drops what it recorded, so the next start is fresh.
+ * A no-op outside the browser, or while a recording is already running (the
+ * returned function then leaves that recording alone).
  */
-export function installDevRecorder(queryClient?: QueryClient): void {
-  if (teardown || typeof window === "undefined") return;
+export function installDevRecorder(queryClient?: QueryClient): () => void {
+  if (teardown || typeof window === "undefined") return () => {};
   const cleanups: (() => void)[] = [];
 
   setRealtimeObserver({ onEvent: recordFrame, onReconnect: recordReconnect });
@@ -598,7 +601,25 @@ export function installDevRecorder(queryClient?: QueryClient): void {
     clearInterval(pruneTimer);
   });
 
-  teardown = () => cleanups.forEach((cleanup) => cleanup());
+  const stop = () => cleanups.forEach((cleanup) => cleanup());
+  teardown = stop;
+  return () => {
+    if (teardown === stop) stopDevRecorder();
+  };
+}
+
+function stopDevRecorder(): void {
+  teardown?.();
+  teardown = null;
+  if (notifyTimer) clearTimeout(notifyTimer);
+  notifyTimer = null;
+  recording = EMPTY;
+  currentRoute = null;
+  nextEventId = 1;
+  eventMessages.clear();
+  replayIds.clear();
+  cacheEffects.clear();
+  dirtyEffects.clear();
 }
 
 /** The current route, so later entries say where they happened. */
@@ -671,16 +692,6 @@ export function getDevRecording(): DevRecording {
 
 /** Test seam: stop recording and drop everything recorded. */
 export function resetDevRecorder(): void {
-  teardown?.();
-  teardown = null;
-  if (notifyTimer) clearTimeout(notifyTimer);
-  notifyTimer = null;
-  recording = EMPTY;
-  currentRoute = null;
+  stopDevRecorder();
   listeners.clear();
-  nextEventId = 1;
-  eventMessages.clear();
-  replayIds.clear();
-  cacheEffects.clear();
-  dirtyEffects.clear();
 }
