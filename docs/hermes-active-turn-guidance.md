@@ -5,12 +5,13 @@ is not supported for active-turn guidance by this contract.** Ordinary Hermes
 prompts continue to work without it; unsupported peers never expose Add to current
 run. Guidance is never enabled from an executable name or version string.
 
-The reviewed companion is based on gateway-backed Hermes source
-[`79658be93ba36dc0ff5878b07b6a4c5df29dd79d`](https://github.com/NousResearch/hermes-agent/tree/79658be93ba36dc0ff5878b07b6a4c5df29dd79d),
-with the local companion patch at `63ccaa4458e465231bfec850489b9a8a6ffb0788`.
-That patch changes Hermes' ACP gateway, execution authority and iteration inbox;
-it is not an upstream release. Its contract must be agreed upstream before this
-adapter can be enabled for ordinary Hermes installations. Native steering of queued
+The companion proposal is
+[NousResearch/hermes-agent#154368](https://github.com/NousResearch/hermes-agent/pull/154368),
+validated at `ad5cfe51dab0ec90db995adbf060fa83675be461` on Hermes main
+`097e69c7316102dbb47cda49cbfe9a00750cbe6a`.
+It changes Hermes' ACP gateway, execution authority and iteration inbox and is
+not yet an upstream release. Its contract must be agreed and merged upstream
+before this adapter can be enabled for ordinary Hermes installations. Native steering of queued
 Hermes admissions is not interchangeable with this active-only delivery contract.
 
 ## Negotiation and primary-turn identity
