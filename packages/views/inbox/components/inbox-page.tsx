@@ -97,6 +97,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { CollapsedNavTrigger, PAGE_GUTTER, PageHeader } from "../../layout/page-header";
 import { PanelHeader } from "../../layout/panel-nav";
 import { useListColumnCollapsed } from "../../layout/app-shell-context";
+import { InboxDeleteDialog } from "./inbox-delete-dialog";
 import { ListColumn } from "../../layout/list-column";
 import { useTimeAgo } from "./inbox-list-item";
 import { InboxList } from "./inbox-list";
@@ -377,6 +378,7 @@ export function InboxPage() {
   const unreadCount = useInboxUnreadCount(wsId);
 
   const markReadMutation = useMarkInboxRead();
+  const [deleteTarget, setDeleteTarget] = useState<InboxItem | null>(null);
   const markUnreadMutation = useMarkInboxUnread();
   const archiveMutation = useArchiveInbox();
   const unarchiveMutation = useUnarchiveInbox();
@@ -779,6 +781,7 @@ export function InboxPage() {
         onMarkRead: handleMarkRead,
         onMarkUnread: handleMarkUnread,
         onAction: isArchivedView ? handleUnarchive : handleArchive,
+        onDelete: (id) => setDeleteTarget(selectionItems.find((item) => item.id === id) ?? null),
       }}
     >
       <InboxList
@@ -807,6 +810,18 @@ export function InboxPage() {
           ) : undefined
         }
       />
+      {deleteTarget && (
+        <InboxDeleteDialog
+          key={deleteTarget.id}
+          item={deleteTarget}
+          view={view}
+          onClose={() => setDeleteTarget(null)}
+          onDeleted={(id) => {
+            advanceSelectionPast(id, selectionItems);
+            toast.success(t(($) => $.toasts.deleted));
+          }}
+        />
+      )}
     </InboxContextMenuProvider>
   );
 
