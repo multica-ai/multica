@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { AgentRuntime } from "../types";
-import { isRuntimeUsableForUser } from "./access";
+import { isRuntimeUsableForUser, runtimeAccessScope } from "./access";
 
 const OWNER = "user-owner";
 const OTHER = "user-other";
@@ -27,6 +27,18 @@ function makeRuntime(overrides: Partial<AgentRuntime> = {}): AgentRuntime {
     ...overrides,
   };
 }
+
+describe("runtimeAccessScope", () => {
+  it.each([
+    { visibility: "private" as const, shared_with: undefined, scope: "private" },
+    { visibility: "private" as const, shared_with: [], scope: "private" },
+    { visibility: "private" as const, shared_with: [OTHER], scope: "members" },
+    { visibility: "public" as const, shared_with: [], scope: "public" },
+    { visibility: "public" as const, shared_with: [OTHER], scope: "public" },
+  ])("classifies $visibility with shared_with=$shared_with as $scope", ({ scope, ...runtime }) => {
+    expect(runtimeAccessScope(makeRuntime(runtime))).toBe(scope);
+  });
+});
 
 // This truth table is the client half of a contract the server enforces with
 // the identical predicate (canUseRuntimeForAgent in

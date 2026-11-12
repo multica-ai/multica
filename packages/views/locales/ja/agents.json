@@ -304,7 +304,6 @@
     "runtime_none": "利用可能なランタイムがありません",
     "runtime_cloud_badge": "クラウド",
     "runtime_private_badge": "非公開",
-    "runtime_public_badge": "公開・共有",
     "runtime_private_locked_tooltip": "非公開ランタイムです。オーナーのみがこのランタイム上にエージェントを作成できます。共有するには、オーナーに公開へ切り替えるよう依頼してください。",
     "runtime_search_placeholder": "マシンを検索…",
     "runtime_no_results": "一致するマシンがありません",

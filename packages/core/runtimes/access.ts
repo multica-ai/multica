@@ -1,4 +1,11 @@
-import type { RuntimeDevice } from "../types";
+import type { AgentRuntime, RuntimeDevice } from "../types";
+
+export type RuntimeAccessScope = "private" | "public" | "members";
+
+export function runtimeAccessScope(runtime: AgentRuntime): RuntimeAccessScope {
+  if (runtime.visibility === "public") return "public";
+  return (runtime.shared_with?.length ?? 0) > 0 ? "members" : "private";
+}
 
 /**
  * Whether this member may run an agent on `runtime`.

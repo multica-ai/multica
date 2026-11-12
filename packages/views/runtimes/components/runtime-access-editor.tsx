@@ -8,6 +8,7 @@ import type { AgentRuntime } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { useUpdateRuntime } from "@multica/core/runtimes/mutations";
+import { runtimeAccessScope, type RuntimeAccessScope } from "@multica/core/runtimes";
 import { Button } from "@multica/ui/components/ui/button";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Input } from "@multica/ui/components/ui/input";
@@ -29,18 +30,11 @@ import {
   type RuntimeAccessRevocationPlan,
 } from "./revoke-runtime-access-dialog";
 
-type RuntimeAccessScope = "private" | "public" | "members";
-
 // Below this size the member list fits without scrolling, so a search field
 // would only add noise.
 const MEMBER_SEARCH_THRESHOLD = 7;
 
 const SCOPE_ICON = { private: Lock, public: Globe, members: Users } as const;
-
-export function runtimeAccessScope(runtime: AgentRuntime): RuntimeAccessScope {
-  if (runtime.visibility === "public") return "public";
-  return (runtime.shared_with?.length ?? 0) > 0 ? "members" : "private";
-}
 
 export function RuntimeAccessReadout({ runtime }: { runtime: AgentRuntime }) {
   const { t } = useT("runtimes");

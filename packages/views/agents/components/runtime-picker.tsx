@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, Cloud, Loader2, Lock, Search } from "@multica/ui/icons";
+import { ChevronDown, Cloud, Globe, Loader2, Lock, Search, Users } from "@multica/ui/icons";
 import { ProviderLogo } from "../../runtimes/components/provider-logo";
 import { ActorAvatar } from "../../common/actor-avatar";
 import {
   isRuntimeUsableForUser,
+  runtimeAccessScope,
   runtimeDisplayName,
 } from "@multica/core/runtimes";
 import type { MemberWithUser, RuntimeDevice } from "@multica/core/types";
@@ -29,6 +30,20 @@ export type RuntimeFilter = "mine" | "all";
 // a search box. Machine grouping kicks in independently whenever more than one
 // machine is present.
 const SEARCH_THRESHOLD = 6;
+
+const SCOPE_ICON = { private: Lock, public: Globe, members: Users } as const;
+
+function RuntimeVisibilityBadge({ runtime }: { runtime: RuntimeDevice }) {
+  const { t } = useT("runtimes");
+  const scope = runtimeAccessScope(runtime);
+  const Icon = SCOPE_ICON[scope];
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1 rounded-xs bg-muted px-1.5 py-0.5 text-caption font-medium text-muted-foreground">
+      <Icon className="h-3 w-3" />
+      {t(($) => $.detail.visibility_label[scope])}
+    </span>
+  );
+}
 
 export function RuntimePicker({
   runtimes,
@@ -191,11 +206,7 @@ export function RuntimePicker({
                 </span>
               )}
               {selectedRuntime && (
-                <span className="shrink-0 rounded-xs bg-muted px-1.5 py-0.5 text-caption font-medium text-muted-foreground">
-                  {selectedRuntime.visibility === "public"
-                    ? t(($) => $.create_dialog.runtime_public_badge)
-                    : t(($) => $.create_dialog.runtime_private_badge)}
-                </span>
+                <RuntimeVisibilityBadge runtime={selectedRuntime} />
               )}
             </div>
             {selectedRuntime && (
@@ -290,16 +301,13 @@ export function RuntimePicker({
                                   {t(($) => $.create_dialog.runtime_cloud_badge)}
                                 </span>
                               )}
-                              {disabled && (
+                              {disabled ? (
                                 <span className="shrink-0 inline-flex items-center gap-1 rounded-xs bg-muted px-1.5 py-0.5 text-micro font-medium text-muted-foreground">
                                   <Lock className="h-3 w-3" />
                                   {t(($) => $.create_dialog.runtime_private_badge)}
                                 </span>
-                              )}
-                              {device.visibility === "public" && (
-                                <span className="shrink-0 rounded-xs bg-muted px-1.5 py-0.5 text-caption font-medium text-muted-foreground">
-                                  {t(($) => $.create_dialog.runtime_public_badge)}
-                                </span>
+                              ) : (
+                                <RuntimeVisibilityBadge runtime={device} />
                               )}
                             </div>
                             <div className="mt-0.5 flex items-center gap-1 text-caption text-muted-foreground">

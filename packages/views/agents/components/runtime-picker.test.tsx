@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, fireEvent, cleanup } from "@testing-library/react";
+import { render, fireEvent, cleanup, within } from "@testing-library/react";
 import type { MemberWithUser, RuntimeDevice } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enAgents from "../../locales/en/agents.json";
 import enIssues from "../../locales/en/issues.json";
+import enRuntimes from "../../locales/en/runtimes.json";
 
 // ActorAvatar pulls workspace context this unit test doesn't provide.
 vi.mock("../../common/actor-avatar", () => ({
@@ -21,7 +22,7 @@ vi.mock("../../runtimes/components/provider-logo", () => ({
 import { RuntimePicker } from "./runtime-picker";
 
 const TEST_RESOURCES = {
-  en: { common: enCommon, agents: enAgents, issues: enIssues },
+  en: { common: enCommon, agents: enAgents, issues: enIssues, runtimes: enRuntimes },
 };
 
 const ME = "user-me";
@@ -77,6 +78,12 @@ function trigger(container: HTMLElement): HTMLButtonElement {
   return element;
 }
 
+function candidates() {
+  const popup = document.querySelector<HTMLElement>('[data-slot="popover-content"]');
+  if (!popup) throw new Error("runtime picker list not rendered");
+  return within(popup);
+}
+
 describe("RuntimePicker (creation studio)", () => {
   beforeEach(() => cleanup());
   afterEach(() => cleanup());
@@ -87,7 +94,7 @@ describe("RuntimePicker (creation studio)", () => {
       runtimes: [...RUNTIMES, shared],
       selectedRuntimeId: shared.id,
     });
-    expect(trigger(container).textContent).toContain("Public · shared");
+    expect(trigger(container).textContent).toContain("Public");
     expect(onSelect).not.toHaveBeenCalled();
   });
 
@@ -99,12 +106,58 @@ describe("RuntimePicker (creation studio)", () => {
 
   it("labels a public candidate and still selects it through the normal picker", () => {
     const shared = makeRuntime({ id: "rt-shared", name: "Shared runtime", visibility: "public" });
-    const { container, getByRole, onSelect } = renderPicker({ runtimes: [...RUNTIMES, shared] });
+    const { container, onSelect } = renderPicker({ runtimes: [...RUNTIMES, shared] });
     fireEvent.click(trigger(container));
-    const candidate = getByRole("button", { name: /Shared runtime.*Public · shared/ });
+    const candidate = candidates().getByRole("button", { name: /Shared runtime.*Public/ });
     expect(candidate).not.toBeDisabled();
     fireEvent.click(candidate);
     expect(onSelect).toHaveBeenCalledWith(shared.id);
+  });
+
+  it("identifies an inherited runtime shared with me and allows selecting it", () => {
+    const shared = makeRuntime({
+      id: "rt-members",
+      name: "Alice shared runtime",
+      owner_id: "user-other",
+      shared_with: [ME],
+    });
+    const { container, getByRole, onSelect } = renderPicker({
+      runtimes: [...RUNTIMES, shared],
+      selectedRuntimeId: shared.id,
+    });
+    expect(trigger(container).textContent).toContain("Specific members");
+    expect(onSelect).not.toHaveBeenCalled();
+
+    fireEvent.click(getByRole("button", { name: "All" }));
+    onSelect.mockClear();
+    fireEvent.click(trigger(container));
+    const candidate = candidates().getByRole("button", { name: /Alice shared runtime.*Specific members/ });
+    expect(candidate).not.toHaveAttribute("aria-disabled");
+    fireEvent.click(candidate);
+    expect(onSelect).toHaveBeenCalledWith(shared.id);
+  });
+
+  it("labels usable private candidates and keeps ungranted runtimes locked", () => {
+    const locked = makeRuntime({
+      id: "rt-locked",
+      name: "Alice locked runtime",
+      owner_id: "user-other",
+      shared_with: ["someone-else"],
+    });
+    const { container, getByRole, onSelect } = renderPicker({
+      runtimes: [...RUNTIMES, locked],
+    });
+    fireEvent.click(getByRole("button", { name: "All" }));
+    onSelect.mockClear();
+    fireEvent.click(trigger(container));
+    for (const candidate of candidates().getAllByRole("button", { name: /Claude.*Private/ })) {
+      expect(candidate).not.toHaveAttribute("aria-disabled");
+    }
+    const candidate = candidates().getByRole("button", { name: /Alice locked runtime.*Private/ });
+    expect(candidate).toHaveAttribute("aria-disabled", "true");
+    expect(candidate.textContent).not.toContain("Specific members");
+    fireEvent.click(candidate);
+    expect(onSelect).not.toHaveBeenCalled();
   });
 
   it("keeps an overlong runtime name ellipsized inside the trigger instead of overflowing", () => {
