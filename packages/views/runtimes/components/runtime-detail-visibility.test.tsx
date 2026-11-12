@@ -77,15 +77,10 @@ vi.mock("@multica/core/auth", () => ({
     sel({ user: { id: "user-me" } }),
 }));
 
-// isRuntimeUsableForUser is the shared owner/public rule the component reads
-// runtime access from, so the real implementation is kept rather than stubbed —
-// a stub here would just re-derive the rule this test is meant to pin down.
-vi.mock("@multica/core/runtimes", async () => ({
-  isRuntimeUsableForUser: (
-    await vi.importActual<typeof import("@multica/core/runtimes")>(
-      "@multica/core/runtimes",
-    )
-  ).isRuntimeUsableForUser,
+// Keep access helpers real so scope and permission assertions exercise the
+// same rules as the runtime detail page and picker.
+vi.mock("@multica/core/runtimes", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@multica/core/runtimes")>(),
   deriveRuntimeHealth: () => "online",
   runtimeDisplayName: (rt: { name: string; custom_name?: string | null }) =>
     rt.custom_name?.trim() || rt.name,
