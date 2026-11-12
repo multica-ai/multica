@@ -1230,7 +1230,7 @@ func (d *Daemon) adoptAgentPath(ctx context.Context, provider, command, newPath,
 	// older or broken install must not be launched under the daemon's stale
 	// version policy, and must not slip past the minimum-version gate that the
 	// registration path applies (MUL-4486 review).
-	version, err := detectAgentVersion(ctx, agent.Command{Path: newPath})
+	version, err := detectAgentVersion(ctx, agent.Command{Path: newPath}.ForVersionProbe(provider))
 	if err != nil {
 		d.logger.Warn("re-resolved agent executable failed version detection; keeping pinned path",
 			"provider", provider, "command", command, "new_path", newPath, "error", err)
@@ -2619,7 +2619,7 @@ probeLoop:
 				"name", name, "version", heal.rejected.Detected, "error", heal.rejected.Error())
 			return heal.rejected.Detected, heal.rejected.Error(), builtinProbeBelowMinimum
 		}
-		version, err := detectAgentVersion(ctx, agent.Command{Path: resolved.Path})
+		version, err := detectAgentVersion(ctx, agent.Command{Path: resolved.Path}.ForVersionProbe(name))
 		if err != nil {
 			lastErr = err
 			if time.Since(startedAt) >= runtimeVersionProbeRetryWindow {
@@ -3193,7 +3193,7 @@ func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, 
 		// wrapper's, and only the former means anything to the min-version
 		// gate (GH #7046).
 		version, verErr := detectAgentVersion(ctx, agent.NewCommand(resolved,
-			agent.FilterLaunchPrefix(runtimeType, profile.FixedArgs, d.logger)))
+			agent.FilterLaunchPrefix(runtimeType, profile.FixedArgs, d.logger)).ForVersionProbe(runtimeType))
 		if verErr != nil {
 			d.logger.Debug("custom runtime profile: version probe failed (registering with empty version)",
 				"workspace_id", workspaceID, "profile_id", profile.ID, "path", resolved, "error", verErr)
