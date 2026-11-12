@@ -1688,6 +1688,7 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 		if uploadErr != nil {
 			return fmt.Errorf("upload attachment %s (no issue created): %w", att.path, uploadErr)
 		}
+		cacheUploadedAttachment(cmd, result, att.data)
 		uploaded = append(uploaded, result)
 		attachmentIDs = appendUniqueStrings(attachmentIDs, result.ID)
 		fmt.Fprintf(os.Stderr, "Uploaded %s\n", att.path)
@@ -1942,6 +1943,7 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		if uploadErr != nil {
 			return fmt.Errorf("upload attachment %s: %w; already uploaded IDs: %v", att.path, uploadErr, attachmentIDs)
 		}
+		cacheUploadedAttachment(cmd, uploaded, att.data)
 		attachmentIDs = append(attachmentIDs, uploaded.ID)
 		attachmentRefs = append(attachmentRefs, uploaded)
 		fmt.Fprintf(os.Stderr, "Uploaded %s\n", att.path)
@@ -2713,6 +2715,7 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 		if uploadErr != nil {
 			return fmt.Errorf("upload attachment %s: %w", att.path, uploadErr)
 		}
+		cacheUploadedAttachment(cmd, result, att.data)
 		attachmentIDs = append(attachmentIDs, result.ID)
 		uploaded = append(uploaded, result)
 		fmt.Fprintf(os.Stderr, "Uploaded %s\n", att.path)

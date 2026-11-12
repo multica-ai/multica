@@ -90,6 +90,7 @@ func runAttachmentUpload(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("upload attachment: %w", err)
 	}
+	cacheUploadedAttachment(cmd, att, data)
 
 	filename := filepath.Base(path)
 	markdown := attachmentMarkdown(filename, att.ContentType, att.MarkdownURL)
@@ -141,15 +142,12 @@ func runAttachmentDownload(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), cli.AtLeastAPITimeout(60*time.Second))
 	defer cancel()
 
-	// Fetch attachment metadata (includes signed download_url).
+	// Fetch attachment metadata (includes signed download_url). This call is
+	// also the access check: a local copy is only ever read after the server
+	// has authorized this caller for the attachment.
 	var att map[string]any
 	if err := client.GetJSON(ctx, "/api/attachments/"+args[0], &att); err != nil {
 		return fmt.Errorf("get attachment: %w", err)
-	}
-
-	downloadURL := strVal(att, "download_url")
-	if downloadURL == "" {
-		return fmt.Errorf("attachment has no download URL")
 	}
 
 	filename := filepath.Base(strVal(att, "filename"))
@@ -157,10 +155,9 @@ func runAttachmentDownload(cmd *cobra.Command, args []string) error {
 		filename = args[0]
 	}
 
-	// Download the file content.
-	data, err := client.DownloadFile(ctx, downloadURL)
+	data, source, err := readAttachmentBytes(ctx, client, attachmentCacheFor(cmd), att)
 	if err != nil {
-		return fmt.Errorf("download file: %w", err)
+		return err
 	}
 
 	// Write to the output directory, creating it if needed so `-o` works
@@ -183,7 +180,7 @@ func runAttachmentDownload(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		abs = destPath
 	}
-	fmt.Fprintln(os.Stderr, "Downloaded:", abs)
+	fmt.Fprintf(os.Stderr, "Downloaded: %s (%s)\n", abs, source)
 
 	// Also print as JSON for --output json compatibility.
 	return cli.PrintJSON(os.Stdout, map[string]any{
@@ -191,5 +188,43 @@ func runAttachmentDownload(cmd *cobra.Command, args []string) error {
 		"filename": filename,
 		"path":     abs,
 		"size":     strVal(att, "size_bytes"),
+		"source":   source,
 	})
+}
+
+// Where `attachment download` got the bytes from.
+const (
+	attachmentSourceLocal  = "local"
+	attachmentSourceRemote = "remote"
+)
+
+// attachmentDownloader is the slice of the API client the download needs.
+type attachmentDownloader interface {
+	DownloadFile(ctx context.Context, downloadURL string) ([]byte, error)
+}
+
+// readAttachmentBytes reads an authorized attachment from the local cache when
+// a copy there matches the server's content hash, and downloads it otherwise.
+// A download whose bytes match the hash is cached for the next reader.
+// Attachments without a recorded hash always download and are never cached.
+func readAttachmentBytes(ctx context.Context, client attachmentDownloader, cache *attachmentCache, att map[string]any) ([]byte, string, error) {
+	sum := strVal(att, "content_sha256")
+	if data, ok := cache.read(sum); ok {
+		return data, attachmentSourceLocal, nil
+	}
+
+	downloadURL := strVal(att, "download_url")
+	if downloadURL == "" {
+		return nil, "", fmt.Errorf("attachment has no download URL")
+	}
+	data, err := client.DownloadFile(ctx, downloadURL)
+	if err != nil {
+		return nil, "", fmt.Errorf("download file: %w", err)
+	}
+	if sum != "" && contentSHA256(data) == sum {
+		if err := cache.write(sum, data); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not cache attachment %s locally: %v\n", strVal(att, "id"), err)
+		}
+	}
+	return data, attachmentSourceRemote, nil
 }

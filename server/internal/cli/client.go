@@ -473,6 +473,9 @@ type AttachmentResponse struct {
 	ContentType string `json:"content_type"`
 	SizeBytes   int64  `json:"size_bytes"`
 	CreatedAt   string `json:"created_at"`
+	// ContentSHA256 is the server-recorded hash of the stored bytes; empty
+	// from servers that predate it.
+	ContentSHA256 string `json:"content_sha256,omitempty"`
 }
 
 // UploadFile uploads a file via multipart form to /api/upload-file.
