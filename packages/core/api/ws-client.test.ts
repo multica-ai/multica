@@ -266,7 +266,7 @@ describe("WSClient", () => {
 
       simulateAuthAck();
       expect(ws.getStatus()).toBe("connected");
-      expect(listener).toHaveBeenCalledTimes(4);
+      expect(listener).toHaveBeenCalledTimes(5);
     });
 
     it("uses ~1000ms base delay for the first reconnect attempt", () => {
