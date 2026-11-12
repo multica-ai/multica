@@ -41,8 +41,9 @@ import (
 // failures/daily) carry no agent dimension and need workspace membership only —
 // token spend / run time / failure volume are workspace-level operational
 // metrics. The three per-AGENT rollups additionally apply per-agent visibility:
-// see foldRestrictedAgents. All six leave out runs on issues in private
-// projects the viewer cannot see, as the issue lists do (dashboardHiddenProjects).
+// see foldRestrictedAgents. Runs in private projects (MUL-8472) stay in all six
+// workspace totals, which never shrink for a viewer; only the project_id filter
+// refuses a project the viewer cannot see (dashboardProjectVisible).
 
 // restrictedAgentsRowID is the synthetic agent_id that every row this response
 // refuses to name is folded onto. Deliberately not a UUID, so it can never
@@ -146,19 +147,19 @@ func parseProjectIDParam(w http.ResponseWriter, r *http.Request) (pgtype.UUID, b
 	return u, true
 }
 
-// dashboardHiddenProjects returns the private projects (MUL-8472) the rollup
-// must leave out. A project_id the request may not see is answered like one
-// that does not exist, with an empty rollup, and ok=false.
-func (h *Handler) dashboardHiddenProjects(w http.ResponseWriter, r *http.Request, workspaceID string, projectID pgtype.UUID) ([]pgtype.UUID, bool) {
+// dashboardProjectVisible guards the project_id filter: a private project
+// (MUL-8472) the request may not see is answered like one that does not exist,
+// with an empty rollup, and false.
+func (h *Handler) dashboardProjectVisible(w http.ResponseWriter, r *http.Request, workspaceID string, projectID pgtype.UUID) bool {
 	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
 	if !ok {
-		return nil, false
+		return false
 	}
 	if !hidden.CanSeeProject(projectID) {
 		writeJSON(w, http.StatusOK, []struct{}{})
-		return nil, false
+		return false
 	}
-	return hidden.Param(), true
+	return true
 }
 
 // DashboardUsageDailyResponse is one (date, provider, model) bucket. Cost-side
@@ -198,14 +199,13 @@ func (h *Handler) GetDashboardUsageDaily(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	hiddenProjectIDs, ok := h.dashboardHiddenProjects(w, r, workspaceID, projectID)
-	if !ok {
+	if !h.dashboardProjectVisible(w, r, workspaceID, projectID) {
 		return
 	}
 	tz := h.resolveViewingTZ(r)
 	since := parseSinceParamInTZ(r, 30, tz)
 
-	resp, err := h.listDashboardUsageDaily(r.Context(), parseUUID(workspaceID), tz, since, projectID, hiddenProjectIDs)
+	resp, err := h.listDashboardUsageDaily(r.Context(), parseUUID(workspaceID), tz, since, projectID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list usage")
 		return
@@ -219,14 +219,12 @@ func (h *Handler) listDashboardUsageDaily(
 	tz string,
 	since pgtype.Timestamptz,
 	projectID pgtype.UUID,
-	hiddenProjectIDs []pgtype.UUID,
 ) ([]DashboardUsageDailyResponse, error) {
 	rows, err := h.Queries.ListDashboardUsageDaily(ctx, db.ListDashboardUsageDailyParams{
-		WorkspaceID:      workspaceID,
-		Tz:               tz,
-		Since:            since,
-		ProjectID:        projectID,
-		HiddenProjectIds: hiddenProjectIDs,
+		WorkspaceID: workspaceID,
+		Tz:          tz,
+		Since:       since,
+		ProjectID:   projectID,
 	})
 	if err != nil {
 		return nil, err
@@ -289,8 +287,7 @@ func (h *Handler) GetDashboardUsageByAgent(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	hiddenProjectIDs, ok := h.dashboardHiddenProjects(w, r, workspaceID, projectID)
-	if !ok {
+	if !h.dashboardProjectVisible(w, r, workspaceID, projectID) {
 		return
 	}
 	restricted, ok := h.dashboardRestrictedAgents(w, r, workspaceID, member.Role)
@@ -308,7 +305,7 @@ func (h *Handler) GetDashboardUsageByAgent(w http.ResponseWriter, r *http.Reques
 	tz := h.resolveViewingTZ(r)
 	since := parseExactSinceParamInTZ(r, 30, tz)
 
-	resp, err := h.listDashboardUsageByAgent(r.Context(), parseUUID(workspaceID), since, projectID, hiddenProjectIDs)
+	resp, err := h.listDashboardUsageByAgent(r.Context(), parseUUID(workspaceID), since, projectID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list usage by agent")
 		return
@@ -356,13 +353,11 @@ func (h *Handler) listDashboardUsageByAgent(
 	workspaceID pgtype.UUID,
 	since pgtype.Timestamptz,
 	projectID pgtype.UUID,
-	hiddenProjectIDs []pgtype.UUID,
 ) ([]DashboardUsageByAgentResponse, error) {
 	rows, err := h.Queries.ListDashboardUsageByAgent(ctx, db.ListDashboardUsageByAgentParams{
-		WorkspaceID:      workspaceID,
-		Since:            since,
-		ProjectID:        projectID,
-		HiddenProjectIds: hiddenProjectIDs,
+		WorkspaceID: workspaceID,
+		Since:       since,
+		ProjectID:   projectID,
 	})
 	if err != nil {
 		return nil, err
@@ -417,8 +412,7 @@ func (h *Handler) GetDashboardAgentRunTime(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	hiddenProjectIDs, ok := h.dashboardHiddenProjects(w, r, workspaceID, projectID)
-	if !ok {
+	if !h.dashboardProjectVisible(w, r, workspaceID, projectID) {
 		return
 	}
 	restricted, ok := h.dashboardRestrictedAgents(w, r, workspaceID, member.Role)
@@ -436,10 +430,9 @@ func (h *Handler) GetDashboardAgentRunTime(w http.ResponseWriter, r *http.Reques
 	since := parseExactSinceParamInTZ(r, 30, tz)
 
 	rows, err := h.Queries.ListDashboardAgentRunTime(r.Context(), db.ListDashboardAgentRunTimeParams{
-		WorkspaceID:      parseUUID(workspaceID),
-		Since:            since,
-		ProjectID:        projectID,
-		HiddenProjectIds: hiddenProjectIDs,
+		WorkspaceID: parseUUID(workspaceID),
+		Since:       since,
+		ProjectID:   projectID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list agent runtime")
@@ -511,8 +504,7 @@ func (h *Handler) GetDashboardRunTimeDaily(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	hiddenProjectIDs, ok := h.dashboardHiddenProjects(w, r, workspaceID, projectID)
-	if !ok {
+	if !h.dashboardProjectVisible(w, r, workspaceID, projectID) {
 		return
 	}
 	// Slice day buckets in the viewer's tz so the Time / Tasks charts cut
@@ -521,11 +513,10 @@ func (h *Handler) GetDashboardRunTimeDaily(w http.ResponseWriter, r *http.Reques
 	since := parseSinceParamInTZ(r, 30, tz)
 
 	rows, err := h.Queries.ListDashboardRunTimeDaily(r.Context(), db.ListDashboardRunTimeDailyParams{
-		WorkspaceID:      parseUUID(workspaceID),
-		Tz:               tz,
-		Since:            since,
-		ProjectID:        projectID,
-		HiddenProjectIds: hiddenProjectIDs,
+		WorkspaceID: parseUUID(workspaceID),
+		Tz:          tz,
+		Since:       since,
+		ProjectID:   projectID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list daily runtime")
@@ -581,8 +572,7 @@ func (h *Handler) GetDashboardFailuresDaily(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
-	hiddenProjectIDs, ok := h.dashboardHiddenProjects(w, r, workspaceID, projectID)
-	if !ok {
+	if !h.dashboardProjectVisible(w, r, workspaceID, projectID) {
 		return
 	}
 	// Same viewer-tz day boundary as every other daily series so the Errors
@@ -591,11 +581,10 @@ func (h *Handler) GetDashboardFailuresDaily(w http.ResponseWriter, r *http.Reque
 	since := parseSinceParamInTZ(r, 30, tz)
 
 	rows, err := h.Queries.ListDashboardFailuresDaily(r.Context(), db.ListDashboardFailuresDailyParams{
-		WorkspaceID:      parseUUID(workspaceID),
-		Tz:               tz,
-		Since:            since,
-		ProjectID:        projectID,
-		HiddenProjectIds: hiddenProjectIDs,
+		WorkspaceID: parseUUID(workspaceID),
+		Tz:          tz,
+		Since:       since,
+		ProjectID:   projectID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list daily failures")
@@ -634,8 +623,7 @@ func (h *Handler) GetDashboardFailuresByAgent(w http.ResponseWriter, r *http.Req
 	if !ok {
 		return
 	}
-	hiddenProjectIDs, ok := h.dashboardHiddenProjects(w, r, workspaceID, projectID)
-	if !ok {
+	if !h.dashboardProjectVisible(w, r, workspaceID, projectID) {
 		return
 	}
 	restricted, ok := h.dashboardRestrictedAgents(w, r, workspaceID, member.Role)
@@ -652,10 +640,9 @@ func (h *Handler) GetDashboardFailuresByAgent(w http.ResponseWriter, r *http.Req
 	since := parseExactSinceParamInTZ(r, 30, tz)
 
 	rows, err := h.Queries.ListDashboardFailuresByAgent(r.Context(), db.ListDashboardFailuresByAgentParams{
-		WorkspaceID:      parseUUID(workspaceID),
-		Since:            since,
-		ProjectID:        projectID,
-		HiddenProjectIds: hiddenProjectIDs,
+		WorkspaceID: parseUUID(workspaceID),
+		Since:       since,
+		ProjectID:   projectID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list failures by agent")

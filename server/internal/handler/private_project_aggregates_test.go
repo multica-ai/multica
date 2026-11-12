@@ -12,9 +12,12 @@ import (
 
 // Aggregates over many issues (MUL-8472) must count a private project only for
 // viewers who can see it, and must answer a hidden project_id exactly like a
-// project that does not exist.
+// project that does not exist. Dashboard totals are the exception: they are
+// the workspace's spend and failure volume, so they stay complete for every
+// member, as they do for restricted agents (foldRestrictedAgents), and only
+// the project_id filter refuses a hidden project.
 
-func TestPrivateProjectDashboardsHideProjectRows(t *testing.T) {
+func TestPrivateProjectDashboardsKeepWorkspaceTotals(t *testing.T) {
 	f := newPrivateProjectFixture(t)
 	agentID := createHandlerTestAgent(t, f.marker+"-dash", []byte("[]"))
 	runtimeID := handlerTestRuntimeID(t)
@@ -70,32 +73,28 @@ func TestPrivateProjectDashboardsHideProjectRows(t *testing.T) {
 		count   string
 	}{
 		{"/api/dashboard/usage/daily", testHandler.GetDashboardUsageDaily, false, "input_tokens"},
-		{"/api/dashboard/usage/by-agent", testHandler.GetDashboardUsageByAgent, true, ""},
-		{"/api/dashboard/agent-runtime", testHandler.GetDashboardAgentRunTime, true, ""},
+		{"/api/dashboard/usage/by-agent", testHandler.GetDashboardUsageByAgent, true, "input_tokens"},
+		{"/api/dashboard/agent-runtime", testHandler.GetDashboardAgentRunTime, true, "task_count"},
 		{"/api/dashboard/runtime/daily", testHandler.GetDashboardRunTimeDaily, false, "task_count"},
 		{"/api/dashboard/failures/daily", testHandler.GetDashboardFailuresDaily, false, "task_count"},
-		{"/api/dashboard/failures/by-agent", testHandler.GetDashboardFailuresByAgent, true, ""},
+		{"/api/dashboard/failures/by-agent", testHandler.GetDashboardFailuresByAgent, true, "task_count"},
 	} {
 		t.Run(ep.path, func(t *testing.T) {
-			if rows := get(ep.h, ep.path, f.insider, secret); len(rows) == 0 {
+			share := sum(get(ep.h, ep.path, f.insider, secret), ep.count)
+			if share == 0 {
 				t.Fatal("project member: the project rollup is empty")
 			}
 			if rows := get(ep.h, ep.path, f.outsider, secret); len(rows) != len(get(ep.h, ep.path, f.outsider, missing)) || len(rows) != 0 {
 				t.Fatalf("outsider: hidden project_id returned %d rows, want the missing-project answer (0)", len(rows))
 			}
-			inside, outside := get(ep.h, ep.path, f.insider, ""), get(ep.h, ep.path, f.outsider, "")
-			if ep.byAgent {
-				if !hasAgent(inside) || hasAgent(outside) {
-					t.Fatalf("workspace rollup names the agent: member=%t outsider=%t, want true/false", hasAgent(inside), hasAgent(outside))
+			outside := get(ep.h, ep.path, f.outsider, "")
+			for name, userID := range map[string]string{"project member": f.insider, "workspace owner": testUserID} {
+				if got, want := sum(outside, ep.count), sum(get(ep.h, ep.path, userID, ""), ep.count); got != want || got < share {
+					t.Fatalf("workspace %s: outsider = %v, %s = %v, want equal totals that include the private project's %v", ep.count, got, name, want, share)
 				}
-				return
 			}
-			want := 2.0
-			if ep.count == "input_tokens" {
-				want = 10
-			}
-			if d := sum(inside, ep.count) - sum(outside, ep.count); d != want {
-				t.Fatalf("workspace %s: member - outsider = %v, want %v (the private project's share)", ep.count, d, want)
+			if ep.byAgent && !hasAgent(outside) {
+				t.Fatal("outsider: the agent's row is missing from the workspace rollup")
 			}
 		})
 	}

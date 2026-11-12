@@ -219,16 +219,14 @@ WHERE a.workspace_id = $1
   AND atq.completed_at IS NOT NULL
   AND atq.completed_at >= $2::timestamptz
   AND ($3::uuid IS NULL OR i.project_id = $3)
-  AND ($4::uuid[] IS NULL OR i.project_id IS NULL OR NOT (i.project_id = ANY($4::uuid[])))
 GROUP BY atq.agent_id
 ORDER BY total_seconds DESC
 `
 
 type ListDashboardAgentRunTimeParams struct {
-	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
-	Since            pgtype.Timestamptz `json:"since"`
-	ProjectID        pgtype.UUID        `json:"project_id"`
-	HiddenProjectIds []pgtype.UUID      `json:"hidden_project_ids"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Since       pgtype.Timestamptz `json:"since"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
 }
 
 type ListDashboardAgentRunTimeRow struct {
@@ -257,12 +255,7 @@ type ListDashboardAgentRunTimeRow struct {
 // charts the client trims to the same span; passed straight through without
 // re-truncation.
 func (q *Queries) ListDashboardAgentRunTime(ctx context.Context, arg ListDashboardAgentRunTimeParams) ([]ListDashboardAgentRunTimeRow, error) {
-	rows, err := q.db.Query(ctx, listDashboardAgentRunTime,
-		arg.WorkspaceID,
-		arg.Since,
-		arg.ProjectID,
-		arg.HiddenProjectIds,
-	)
+	rows, err := q.db.Query(ctx, listDashboardAgentRunTime, arg.WorkspaceID, arg.Since, arg.ProjectID)
 	if err != nil {
 		return nil, err
 	}
@@ -305,16 +298,14 @@ WHERE a.workspace_id = $1
   AND atq.completed_at IS NOT NULL
   AND atq.completed_at >= $2::timestamptz
   AND ($3::uuid IS NULL OR i.project_id = $3)
-  AND ($4::uuid[] IS NULL OR i.project_id IS NULL OR NOT (i.project_id = ANY($4::uuid[])))
 GROUP BY atq.agent_id, 2
 ORDER BY atq.agent_id, 2
 `
 
 type ListDashboardFailuresByAgentParams struct {
-	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
-	Since            pgtype.Timestamptz `json:"since"`
-	ProjectID        pgtype.UUID        `json:"project_id"`
-	HiddenProjectIds []pgtype.UUID      `json:"hidden_project_ids"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Since       pgtype.Timestamptz `json:"since"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
 }
 
 type ListDashboardFailuresByAgentRow struct {
@@ -331,12 +322,7 @@ type ListDashboardFailuresByAgentRow struct {
 // No date bucketing, so no @tz — @since is the viewer's local
 // start-of-day-(N) so the window lines up with the per-agent run-time card.
 func (q *Queries) ListDashboardFailuresByAgent(ctx context.Context, arg ListDashboardFailuresByAgentParams) ([]ListDashboardFailuresByAgentRow, error) {
-	rows, err := q.db.Query(ctx, listDashboardFailuresByAgent,
-		arg.WorkspaceID,
-		arg.Since,
-		arg.ProjectID,
-		arg.HiddenProjectIds,
-	)
+	rows, err := q.db.Query(ctx, listDashboardFailuresByAgent, arg.WorkspaceID, arg.Since, arg.ProjectID)
 	if err != nil {
 		return nil, err
 	}
@@ -372,17 +358,15 @@ WHERE a.workspace_id = $1
   AND atq.completed_at IS NOT NULL
   AND atq.completed_at >= $3::timestamptz
   AND ($4::uuid IS NULL OR i.project_id = $4)
-  AND ($5::uuid[] IS NULL OR i.project_id IS NULL OR NOT (i.project_id = ANY($5::uuid[])))
 GROUP BY 1, 2
 ORDER BY 1 DESC, 2
 `
 
 type ListDashboardFailuresDailyParams struct {
-	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
-	Tz               string             `json:"tz"`
-	Since            pgtype.Timestamptz `json:"since"`
-	ProjectID        pgtype.UUID        `json:"project_id"`
-	HiddenProjectIds []pgtype.UUID      `json:"hidden_project_ids"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Tz          string             `json:"tz"`
+	Since       pgtype.Timestamptz `json:"since"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
 }
 
 type ListDashboardFailuresDailyRow struct {
@@ -418,7 +402,6 @@ func (q *Queries) ListDashboardFailuresDaily(ctx context.Context, arg ListDashbo
 		arg.Tz,
 		arg.Since,
 		arg.ProjectID,
-		arg.HiddenProjectIds,
 	)
 	if err != nil {
 		return nil, err
@@ -457,17 +440,15 @@ WHERE a.workspace_id = $1
   AND atq.completed_at IS NOT NULL
   AND atq.completed_at >= $3::timestamptz
   AND ($4::uuid IS NULL OR i.project_id = $4)
-  AND ($5::uuid[] IS NULL OR i.project_id IS NULL OR NOT (i.project_id = ANY($5::uuid[])))
 GROUP BY DATE(atq.completed_at AT TIME ZONE $2::text)
 ORDER BY DATE(atq.completed_at AT TIME ZONE $2::text) DESC
 `
 
 type ListDashboardRunTimeDailyParams struct {
-	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
-	Tz               string             `json:"tz"`
-	Since            pgtype.Timestamptz `json:"since"`
-	ProjectID        pgtype.UUID        `json:"project_id"`
-	HiddenProjectIds []pgtype.UUID      `json:"hidden_project_ids"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Tz          string             `json:"tz"`
+	Since       pgtype.Timestamptz `json:"since"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
 }
 
 type ListDashboardRunTimeDailyRow struct {
@@ -504,7 +485,6 @@ func (q *Queries) ListDashboardRunTimeDaily(ctx context.Context, arg ListDashboa
 		arg.Tz,
 		arg.Since,
 		arg.ProjectID,
-		arg.HiddenProjectIds,
 	)
 	if err != nil {
 		return nil, err
@@ -549,16 +529,14 @@ FROM task_usage_hourly
 WHERE workspace_id = $1
   AND bucket_hour >= $2::timestamptz
   AND ($3::uuid IS NULL OR project_id = $3)
-  AND ($4::uuid[] IS NULL OR project_id IS NULL OR NOT (project_id = ANY($4::uuid[])))
 GROUP BY agent_id, LOWER(provider), model
 ORDER BY agent_id, LOWER(provider), model
 `
 
 type ListDashboardUsageByAgentParams struct {
-	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
-	Since            pgtype.Timestamptz `json:"since"`
-	ProjectID        pgtype.UUID        `json:"project_id"`
-	HiddenProjectIds []pgtype.UUID      `json:"hidden_project_ids"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Since       pgtype.Timestamptz `json:"since"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
 }
 
 type ListDashboardUsageByAgentRow struct {
@@ -592,12 +570,7 @@ type ListDashboardUsageByAgentRow struct {
 // provider is LOWER()-normalized so mixed-case historical rows merge with
 // new rows (see ListDashboardUsageDaily).
 func (q *Queries) ListDashboardUsageByAgent(ctx context.Context, arg ListDashboardUsageByAgentParams) ([]ListDashboardUsageByAgentRow, error) {
-	rows, err := q.db.Query(ctx, listDashboardUsageByAgent,
-		arg.WorkspaceID,
-		arg.Since,
-		arg.ProjectID,
-		arg.HiddenProjectIds,
-	)
+	rows, err := q.db.Query(ctx, listDashboardUsageByAgent, arg.WorkspaceID, arg.Since, arg.ProjectID)
 	if err != nil {
 		return nil, err
 	}
@@ -649,17 +622,15 @@ FROM task_usage_hourly
 WHERE workspace_id = $1
   AND bucket_hour >= $3::timestamptz
   AND ($4::uuid IS NULL OR project_id = $4)
-  AND ($5::uuid[] IS NULL OR project_id IS NULL OR NOT (project_id = ANY($5::uuid[])))
 GROUP BY DATE(bucket_hour AT TIME ZONE $2::text), LOWER(provider), model
 ORDER BY DATE(bucket_hour AT TIME ZONE $2::text) DESC, LOWER(provider), model
 `
 
 type ListDashboardUsageDailyParams struct {
-	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
-	Tz               string             `json:"tz"`
-	Since            pgtype.Timestamptz `json:"since"`
-	ProjectID        pgtype.UUID        `json:"project_id"`
-	HiddenProjectIds []pgtype.UUID      `json:"hidden_project_ids"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Tz          string             `json:"tz"`
+	Since       pgtype.Timestamptz `json:"since"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
 }
 
 type ListDashboardUsageDailyRow struct {
@@ -701,7 +672,6 @@ func (q *Queries) ListDashboardUsageDaily(ctx context.Context, arg ListDashboard
 		arg.Tz,
 		arg.Since,
 		arg.ProjectID,
-		arg.HiddenProjectIds,
 	)
 	if err != nil {
 		return nil, err
