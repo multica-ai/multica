@@ -895,14 +895,14 @@ describe("InboxPage", () => {
     const mainView = render(<InboxPage />);
     expect(screen.getByTestId("inbox-sort-trigger")).toBeInTheDocument();
     expect(screen.getByTestId("inbox-sort-direction")).toBeInTheDocument();
-    expect(mainView.container.querySelector('[aria-haspopup="menu"]')).not.toBeNull();
+    expect(mainView.container.querySelector(':not(h1) > [aria-haspopup="menu"]')).not.toBeNull();
     mainView.unmount();
 
     searchParams = new URLSearchParams("view=archived");
     const archivedView = render(<InboxPage />);
     expect(screen.queryByTestId("inbox-sort-trigger")).toBeNull();
     expect(screen.queryByTestId("inbox-sort-direction")).toBeNull();
-    expect(archivedView.container.querySelector('[aria-haspopup="menu"]')).toBeNull();
+    expect(archivedView.container.querySelector(':not(h1) > [aria-haspopup="menu"]')).toBeNull();
   });
 
   it("ignores a carried-over idle selection in the archive", () => {

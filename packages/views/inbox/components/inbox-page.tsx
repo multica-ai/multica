@@ -275,10 +275,16 @@ export function InboxPage() {
     [agentFilterIssueIds, pinnedUnreadKey, pinnedAgentKey],
   );
   const filterRows = isArchivedView ? archivedItems : activeRows;
-  const filteredItems = useMemo(
-    () => filterInboxItems(filterRows, effectiveFilters, filterContext),
-    [filterRows, effectiveFilters, filterContext],
-  );  const hasActiveFilters = inboxFilterCount(effectiveFilters) > 0;
+  // Main view only: the archived list is cursor-paginated, so ordering it
+  // client-side would rank the pages loaded far out of order (the items memo
+  // short-circuits for the same reason). Sorting the filtered rows keeps the
+  // filter dimensions reading every notification while the rows the user sees
+  // honour the persisted preference.
+  const filteredItems = useMemo(() => {
+    const rows = filterInboxItems(filterRows, effectiveFilters, filterContext);
+    return isArchivedView ? rows : sortInboxItems(rows, effectiveSortField, sortDirection);
+  }, [filterRows, effectiveFilters, filterContext, isArchivedView, effectiveSortField, sortDirection]);
+  const hasActiveFilters = inboxFilterCount(effectiveFilters) > 0;
   const selectedOnPage = viewItems.find((i) => (i.issue_id ?? i.id) === selectedKey);
   // A deep link can point beyond every loaded page. Resolve its group directly
   // without adding it to the cursor chain or mistaking a page miss for a 404.
