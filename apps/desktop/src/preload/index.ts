@@ -198,6 +198,14 @@ const desktopAPI = {
     title: string;
     body: string;
   }) => ipcRenderer.send("notification:show", payload),
+  getWindowForeground: (): Promise<boolean> => ipcRenderer.invoke("window:foreground"),
+  onWindowForegroundChanged: (callback: (foreground: boolean) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, foreground: unknown) => {
+      if (typeof foreground === "boolean") callback(foreground);
+    };
+    ipcRenderer.on("window:foreground-changed", handler);
+    return () => ipcRenderer.removeListener("window:foreground-changed", handler);
+  },
   /**
    * Update the OS dock / taskbar unread badge. Pass 0 to clear. Values
    * above 99 render as "99+" (capping is handled in the main process).
