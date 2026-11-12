@@ -107,6 +107,9 @@ func (c Command) ForVersionProbe(provider string) Command {
 	if provider == "hermes" {
 		c.versionArgs = hermesVersionProbeArgs
 	}
+	if provider == "amp" {
+		c.versionArgs = []string{"version"}
+	}
 	return c
 }
 
@@ -520,6 +523,7 @@ var launchPrefixBlockedArgs = map[string]map[string]blockedArgMode{
 	"qwen":        qwenBlockedArgs,
 	"qwenpaw":     qwenpawBlockedArgs,
 	"droid":       droidBlockedArgs,
+	"amp":         ampBlockedArgs,
 	"reasonix":    reasonixBlockedArgs,
 	"traecli":     traecliBlockedArgs,
 	"dim":         dimBlockedArgs,
@@ -559,6 +563,9 @@ func ValidateCustomArgs(agentType string, args []string) error {
 func FilterLaunchPrefix(agentType string, prefix []string, logger *slog.Logger) []string {
 	if family, ok := RuntimeProtocolFamily(agentType); ok {
 		agentType = family
+	}
+	if agentType == "amp" {
+		prefix = normalizeAmpArgs(prefix)
 	}
 	return filterLaunchPrefix(prefix, agentType, logger)
 }

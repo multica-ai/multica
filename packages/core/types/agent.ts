@@ -136,6 +136,7 @@ export const RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
   "qwen",
   "qwenpaw",
   "droid",
+  "amp",
   "mcode",
   "muse",
   "devin",
