@@ -196,6 +196,7 @@
     "relation_subscribed": "我订阅的",
     "section_agent_status": "智能体状态",
     "agent_status_running": "运行中",
+    "agent_status_idle": "空闲",
     "section_read_state": "阅读状态",
     "read_state_unread": "未读",
     "operator_label": "关系",

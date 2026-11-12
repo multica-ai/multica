@@ -198,6 +198,7 @@
     "relation_subscribed": "Subscribed by me",
     "section_agent_status": "Agent status",
     "agent_status_running": "Running",
+    "agent_status_idle": "Idle",
     "section_read_state": "Read state",
     "read_state_unread": "Unread",
     "operator_label": "Match",

@@ -198,6 +198,7 @@
     "relation_subscribed": "Auxquels je suis abonné",
     "section_agent_status": "Statut de l'agent",
     "agent_status_running": "En cours d'exécution",
+    "agent_status_idle": "Inactif",
     "section_read_state": "État de lecture",
     "read_state_unread": "Non lu",
     "operator_label": "Condition",

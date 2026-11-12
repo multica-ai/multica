@@ -196,6 +196,7 @@
     "relation_subscribed": "自分が購読中",
     "section_agent_status": "エージェントの状態",
     "agent_status_running": "実行中",
+    "agent_status_idle": "待機中",
     "section_read_state": "既読状態",
     "read_state_unread": "未読",
     "operator_label": "条件",

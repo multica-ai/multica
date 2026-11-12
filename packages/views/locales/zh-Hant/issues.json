@@ -196,6 +196,7 @@
     "relation_subscribed": "我訂閱的",
     "section_agent_status": "AI 代理狀態",
     "agent_status_running": "執行中",
+    "agent_status_idle": "閒置",
     "section_read_state": "閱讀狀態",
     "read_state_unread": "未讀",
     "operator_label": "關係",

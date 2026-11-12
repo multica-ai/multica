@@ -194,6 +194,7 @@
     "relation_my_agents": "Работа моих агентов",
     "section_agent_status": "Статус агента",
     "agent_status_running": "Выполняется",
+    "agent_status_idle": "Простаивает",
     "operator_label": "Условие",
     "operator_is": "равно",
     "operator_is_not": "не равно",
