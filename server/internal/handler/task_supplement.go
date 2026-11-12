@@ -471,7 +471,16 @@ func (h *Handler) ClaimTaskSupplement(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	var activation struct {
+		ActiveTurnGuidance string `json:"active_turn_guidance"`
+	}
 	if task.ChatSessionID.Valid && !task.IssueID.Valid {
+		// Activation shares this authenticated endpoint but must never claim input.
+		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&activation)
+		if activation.ActiveTurnGuidance != "" {
+			h.activateHermesChatSupplement(w, r, task, activation.ActiveTurnGuidance)
+			return
+		}
 		h.claimChatSupplement(w, r, task)
 		return
 	}

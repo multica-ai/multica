@@ -1538,3 +1538,20 @@ func (c *Client) InvokeAgentPluginHook(ctx context.Context, daemonToken, taskID,
 	}
 	return response.Output, nil
 }
+
+// ActivateHermesChatSupplement completes the deferred server handshake, without
+// claiming input. Older servers ignore the extension and fail closed here.
+func (c *Client) ActivateHermesChatSupplement(ctx context.Context, taskID string) error {
+	var response struct {
+		Capability string `json:"supplement_capability"`
+	}
+	if err := c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/supplements/claim", taskID), map[string]any{
+		"active_turn_guidance": "hermes-active-turn-guidance-v1",
+	}, &response); err != nil {
+		return err
+	}
+	if response.Capability != protocol.DaemonCapabilityTaskSupplementV1 {
+		return fmt.Errorf("%w: Hermes chat guidance not negotiated", errInvalidResponseBody)
+	}
+	return nil
+}

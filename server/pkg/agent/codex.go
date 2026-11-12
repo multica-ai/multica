@@ -2626,8 +2626,10 @@ func (c *codexClient) activeTurnID() string {
 }
 
 type pendingRPC struct {
-	ch     chan rpcResult
-	method string
+	// ACP primary result observer runs on the reader before transport shutdown.
+	observeResult func(json.RawMessage)
+	ch            chan rpcResult
+	method        string
 }
 
 type rpcResult struct {

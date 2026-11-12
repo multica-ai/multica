@@ -9000,7 +9000,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		idleWatchdogTimeout = d.cfg.OpenCodeIdleWatchdog
 	}
 	execOpts := agent.ExecOptions{
-		EnableTaskSupplement:       taskSupplementNegotiated,
+		EnableTaskSupplement:       taskSupplementNegotiated || (provider == "hermes" && task.ChatSessionID != "" && task.IssueID == ""),
 		CursorHookCommand:          cursorHookCommand,
 		Cwd:                        env.WorkDir,
 		PiSkillPaths:               env.PiSkillPaths,

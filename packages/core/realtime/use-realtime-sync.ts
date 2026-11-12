@@ -1685,6 +1685,7 @@ export function useRealtimeSync(
     const unsubChatSupplement = ws.on("chat:supplement", (payload) => {
       if (!payload || typeof payload !== "object" || !("chat_session_id" in payload) || typeof payload.chat_session_id !== "string") return;
       const { chat_session_id } = payload;
+      qc.invalidateQueries({ queryKey: chatKeys.pendingTask(chat_session_id) });
       const wsId = getCurrentWsId();
       if (wsId) qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
       qc.invalidateQueries({ queryKey: chatKeys.messages(chat_session_id) });

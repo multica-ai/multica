@@ -99,6 +99,15 @@ describe("useRealtimeSync — task:message fanout guards (MUL-6396)", () => {
     return handler;
   }
 
+  it("refreshes the active chat capability after deferred provider negotiation", () => {
+    qc.setQueryData(chatKeys.pendingTask("chat-1"), { can_supplement: false });
+    qc.setQueryData(chatKeys.pendingTask("chat-2"), { can_supplement: false });
+    mount();
+    handlers.get("chat:supplement")?.({ chat_session_id: "chat-1" });
+    expect(qc.getQueryState(chatKeys.pendingTask("chat-1"))?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(chatKeys.pendingTask("chat-2"))?.isInvalidated).toBe(false);
+  });
+
   /** Simulates a mounted view rendering this task's timeline. */
   function holdTimeline(taskId: string) {
     const observer = new QueryObserver(qc, taskMessagesOptions(taskId));

@@ -74,3 +74,21 @@ WHERE t.id = s.task_id AND t.id = ANY(@task_ids::uuid[])
 
 -- name: DeleteChatSupplementsBySession :exec
 DELETE FROM chat_supplement WHERE chat_session_id = $1;
+
+-- name: ActivateHermesChatSupplement :one
+-- Activation follows the live provider handshake. Locking the task serializes
+-- it with completion; no executable-name/version opt-in can create this row.
+WITH candidate AS MATERIALIZED (
+    SELECT t.id, r.workspace_id
+    FROM agent_task_queue t
+    JOIN agent_runtime r ON r.id=t.runtime_id
+    JOIN chat_session cs ON cs.id=t.chat_session_id AND cs.workspace_id=r.workspace_id
+    WHERE t.id = @task_id AND t.status='running' AND t.issue_id IS NULL
+      AND r.provider='hermes'
+      AND NOT EXISTS (SELECT 1 FROM channel_chat_session_binding b WHERE b.chat_session_id=cs.id)
+    FOR UPDATE OF t
+)
+INSERT INTO task_supplement_capability (task_id, workspace_id, capability)
+SELECT id, workspace_id, 'task-supplement-v1' FROM candidate
+ON CONFLICT (task_id) DO UPDATE SET capability=EXCLUDED.capability
+RETURNING *;

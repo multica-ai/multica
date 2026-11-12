@@ -173,3 +173,25 @@ func (h *Handler) ackChatSupplement(w http.ResponseWriter, r *http.Request, task
 	}
 	writeJSON(w, http.StatusOK, ChatSupplementReceipt{uuidToString(row.TaskID), row.Status, textToPtr(row.FailureReason)})
 }
+
+// The daemon calls this only after the running process negotiated the complete
+// active-only contract and published the primary turn's correlated identity.
+func (h *Handler) activateHermesChatSupplement(w http.ResponseWriter, r *http.Request, task db.AgentTaskQueue, contract string) {
+	if contract != "hermes-active-turn-guidance-v1" {
+		writeError(w, http.StatusBadRequest, "unsupported guidance contract")
+		return
+	}
+	_, err := h.Queries.ActivateHermesChatSupplement(r.Context(), task.ID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusConflict, "chat execution is not eligible")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not activate chat guidance")
+		return
+	}
+	if session, loadErr := h.Queries.GetChatSession(r.Context(), task.ChatSessionID); loadErr == nil {
+		h.publishChat(protocol.EventChatSupplement, uuidToString(session.WorkspaceID), "member", uuidToString(session.CreatorID), uuidToString(session.ID), map[string]string{"chat_session_id": uuidToString(session.ID)})
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"supplement_capability": protocol.DaemonCapabilityTaskSupplementV1})
+}

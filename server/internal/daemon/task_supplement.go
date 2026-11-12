@@ -151,6 +151,7 @@ func (d *Daemon) runTaskSupplementLoop(ctx context.Context, session *agent.Sessi
 	if session == nil || session.Supplement == nil || session.SupplementReady == nil {
 		return
 	}
+	activated := !session.SupplementRequiresNegotiation
 	for {
 		if ctx.Err() != nil {
 			return
@@ -160,6 +161,20 @@ func (d *Daemon) runTaskSupplementLoop(ctx context.Context, session *agent.Sessi
 				return
 			}
 			continue
+		}
+
+		if !activated {
+			activationCtx, cancelActivation := context.WithTimeout(ctx, 3*time.Second)
+			err := d.client.ActivateHermesChatSupplement(activationCtx, taskID)
+			cancelActivation()
+			if err != nil {
+				taskLog.Debug("Hermes chat guidance not negotiated", "error", err)
+				if !isTransientError(err) || !waitTaskSupplement(ctx, wakeup, d.effectiveTaskSupplementPollInterval()) {
+					return
+				}
+				continue
+			}
+			activated = true
 		}
 
 		claimCtx, cancelClaim := context.WithTimeout(ctx, 3*time.Second)
@@ -181,7 +196,13 @@ func (d *Daemon) runTaskSupplementLoop(ctx context.Context, session *agent.Sessi
 		// The adapter owns transport deadlines. Hook-based providers wait for a
 		// safe boundary, which can follow a long-running tool; run cancellation
 		// still aborts that wait and prevents late delivery.
-		injectErr := session.Supplement(ctx, formatTaskSupplementInstruction(supplement.AuthorType, supplement.AuthorName, supplement.Content))
+		instruction := formatTaskSupplementInstruction(supplement.AuthorType, supplement.AuthorName, supplement.Content)
+		var injectErr error
+		if session.SupplementWithID != nil {
+			injectErr = session.SupplementWithID(ctx, supplement.CommentID, instruction)
+		} else {
+			injectErr = session.Supplement(ctx, instruction)
+		}
 		reason := taskSupplementFailureReason(ctx, injectErr)
 		if injectErr != nil {
 			// Raw provider/Go diagnostics remain local. Workspace-visible state is
