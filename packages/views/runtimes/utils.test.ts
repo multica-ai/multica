@@ -959,15 +959,6 @@ describe("estimateCost", () => {
   });
 
   it("prices Cursor Fast variants only where a Fast rate is published", () => {
-    const cost = (model: string) =>
-      estimateCost({
-        ...zeroUsage,
-        provider: "cursor",
-        model,
-        input_tokens: 1_000_000,
-        output_tokens: 1_000_000,
-      });
-
     // Fork note: models.dev carries Fast rows only for the Composer family
     // today, so none of these models has a Fast row in the generated
     // snapshot. Every one stays unmapped — never the cheaper standard rate,
