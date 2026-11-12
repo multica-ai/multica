@@ -20,7 +20,12 @@ import { profileDir, profileLogPath } from "./daemon-profile";
 
 const MAX_LOG_BYTES = 32 * 1024;
 const MAX_LOG_LINES = 200;
-const MAX_LOG_SOURCE_BYTES = 256 * 1024;
+// The daemon rotates at 20 MiB. Scan a bounded snapshot from its lexical start,
+// keeping only one bounded logical record and the redacted output in memory.
+const MAX_LOG_SOURCE_BYTES = 24 * 1024 * 1024;
+const LOG_READ_CHUNK_BYTES = 64 * 1024;
+const MAX_LOG_RECORD_BYTES = 256 * 1024;
+const MAX_LOG_READ_MS = 10_000;
 const MAX_METADATA_BYTES = 16 * 1024;
 const MAX_ARCHIVE_BYTES = 64 * 1024;
 const LOG_RECORD =
@@ -36,7 +41,7 @@ interface LogTail {
   status: "available" | "unresolved" | "unavailable";
   truncated: boolean;
   omittedRecords: number;
-  omissionReason?: "source_limit" | "incomplete_value";
+  omissionReason?: "source_limit" | "incomplete_value" | "record_limit" | "read_limit";
   text: string;
 }
 
@@ -80,7 +85,7 @@ function redactLog(
       "Authorization=[REDACTED]",
     )
     .replace(
-      /\b[\w.-]*(?:token|password|passwd|secret|credential|api[_-]?key|private[_-]?key)[\w.-]*["']?\s*[:=]\s*(?:"(?:[^"\\]|\\.)*(?:"|$)|'(?:[^'\\]|\\.)*(?:'|$)|[^\s,;]+)/gi,
+      /\b[\w.-]*(?:token|password|passwd|secret|credential|api[_-]?key|private[_-]?key)[\w.-]*["']?\s*[:=]\s*(?:"(?:[^"\\]|\\.)*(?:"|$)|'(?:[^'\\]|\\[\s\S])*(?:'|$)|[^\s,;]+)/gi,
       "credential=[REDACTED]",
     )
     .replace(
@@ -94,6 +99,132 @@ function redactLog(
     );
   safe = redactSecrets(safe);
   return { text: String(redactText(safe)), incompleteValue };
+}
+
+// A physical timestamp is insufficient to establish a new record while inside
+// a quoted value or PEM block. Keep that state even after dropping an oversized
+// record, so a credential continuation cannot become a false standalone record.
+class LogCollector {
+  private quote: '"' | "'" | null = null;
+  private escaped = false;
+  private pem = false;
+  private pemSuffix = "";
+  private previous = "";
+  private chunkSuffix = "";
+  private record = "";
+  private recordBytes = 0;
+  private oversized = false;
+  private selected: string[] = [];
+  private selectedBytes = 0;
+  omittedRecords = 0;
+  omissionReason: LogTail["omissionReason"];
+  truncated = false;
+
+  private append(fragment: string): void {
+    if (this.oversized) return;
+    this.recordBytes += Buffer.byteLength(fragment);
+    if (this.recordBytes > MAX_LOG_RECORD_BYTES) {
+      this.oversized = true;
+      this.record = "";
+      this.truncated = true;
+      this.omissionReason = "record_limit";
+      return;
+    }
+    this.record += fragment;
+  }
+
+  private collect(): void {
+    if (this.oversized) {
+      this.omittedRecords++;
+    } else {
+      const sanitized = redactLog(this.record);
+      if (sanitized.incompleteValue) {
+        this.omissionReason = "incomplete_value";
+        this.truncated = true;
+      }
+      for (const line of sanitized.text.split("\n").filter(Boolean)) {
+        const size = Buffer.byteLength(line + "\n");
+        if (!LOG_RECORD.test(line) || size > MAX_LOG_BYTES) {
+          this.omittedRecords++;
+          this.truncated = true;
+          continue;
+        }
+        this.selected.push(line + "\n");
+        this.selectedBytes += size;
+        while (
+          this.selected.length > MAX_LOG_LINES ||
+          this.selectedBytes > MAX_LOG_BYTES
+        ) {
+          this.selectedBytes -= Buffer.byteLength(this.selected.shift()!);
+          this.omittedRecords++;
+          this.truncated = true;
+        }
+      }
+    }
+    this.record = "";
+    this.recordBytes = 0;
+    this.oversized = false;
+  }
+
+  consume(text: string): void {
+    const joined = this.chunkSuffix + text;
+    const prefixLength = this.chunkSuffix.length;
+    const begins = new Set(
+      Array.from(
+        joined.matchAll(/-----BEGIN/g),
+        (match) => match.index + "-----BEGIN".length - 1 - prefixLength,
+      ),
+    );
+    this.chunkSuffix = joined.slice(-10);
+    let start = 0;
+    for (let index = 0; index < text.length; index++) {
+      const character = text[index]!;
+      if (this.quote) {
+        if (this.escaped) this.escaped = false;
+        else if (character === "\\") this.escaped = true;
+        else if (character === this.quote) this.quote = null;
+      } else if (this.pem) {
+        this.pemSuffix = (this.pemSuffix + character).slice(-128);
+        if (
+          character === "-" &&
+          /-----END[A-Z\s]*PRIVATE KEY-----$/.test(this.pemSuffix)
+        ) {
+          this.pem = false;
+          this.pemSuffix = "";
+        }
+      } else if (
+        character === '"' ||
+        (character === "'" && /[\s=:]/.test(this.previous))
+      ) {
+        this.quote = character;
+      } else if (begins.has(index)) {
+        this.pem = true;
+      }
+      this.previous = character;
+      if (character === "\n" && !this.quote && !this.pem) {
+        this.append(text.slice(start, index + 1));
+        this.collect();
+        start = index + 1;
+      }
+    }
+    this.append(text.slice(start));
+  }
+
+  finish(): string {
+    if (this.recordBytes || this.oversized) {
+      this.truncated = true;
+      if (this.quote || this.pem) {
+        this.omissionReason = "incomplete_value";
+        // Retain only complete physical lines before redacting the ambiguous
+        // suffix. The redactor withholds it through the snapshot's end.
+        this.record = this.record.slice(0, this.record.lastIndexOf("\n") + 1);
+        this.collect();
+      } else {
+        this.omittedRecords++;
+      }
+    }
+    return this.selected.join("");
+  }
 }
 
 async function readLogTail(profile: string | null): Promise<LogTail> {
@@ -124,53 +255,54 @@ async function readLogTail(profile: string | null): Promise<LogTail> {
         (await realpath(directory)) !== resolve(directory)
       )
         return empty;
-      // Begin at a known lexical boundary. A tail-only read can start inside a
-      // quoted credential whose continuation resembles a standalone log record.
-      // Withhold logs exceeding this fixed source budget and still export metadata.
-      if (opened.size > MAX_LOG_SOURCE_BYTES)
-        return { ...empty, truncated: true, omissionReason: "source_limit" };
-      const buffer = Buffer.alloc(opened.size);
-      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+      const collector = new LogCollector();
+      const decoder = new TextDecoder("utf-8", { fatal: true });
+      const buffer = Buffer.alloc(LOG_READ_CHUNK_BYTES);
+      const sourceBytes = Math.min(opened.size, MAX_LOG_SOURCE_BYTES);
+      const deadline = performance.now() + MAX_LOG_READ_MS;
+      let position = 0;
+      while (position < sourceBytes && performance.now() < deadline) {
+        const { bytesRead } = await handle.read(
+          buffer,
+          0,
+          Math.min(buffer.length, sourceBytes - position),
+          position,
+        );
+        if (!bytesRead) break;
+        collector.consume(
+          decoder.decode(buffer.subarray(0, bytesRead), { stream: true }),
+        );
+        position += bytesRead;
+      }
+      try {
+        collector.consume(decoder.decode());
+      } catch {
+        // An append may stop halfway through a UTF-8 character. Keep earlier
+        // complete records and withhold the undecodable trailing fragment.
+        collector.truncated = true;
+        collector.omissionReason = "incomplete_value";
+      }
       const after = await lstat(path);
       if (
         !after.isFile() ||
         after.ino !== opened.ino ||
         after.dev !== opened.dev ||
-        after.size < opened.size
+        after.size < opened.size ||
+        (await realpath(directory)) !== resolve(directory)
       )
         return empty;
-      // Drop an incomplete final physical line, including a concurrent append.
-      const partialLastLine = bytesRead > 0 && buffer[bytesRead - 1] !== 0x0a;
-      let text = buffer.subarray(0, bytesRead).toString("utf8");
-      text = text.slice(0, text.lastIndexOf("\n") + 1);
-      const sanitized = redactLog(text);
-      const redacted = sanitized.text.split("\n").filter(Boolean);
-      const records = redacted.filter((line) => LOG_RECORD.test(line));
-      const selected: string[] = [];
-      let bytes = 0;
-      for (const line of records.slice(-MAX_LOG_LINES).reverse()) {
-        const size = Buffer.byteLength(line + "\n");
-        if (bytes + size > MAX_LOG_BYTES) break;
-        selected.push(line);
-        bytes += size;
-      }
+      const text = collector.finish();
+      const limited = position < opened.size;
       return {
         status: "available",
-        truncated:
-          opened.size > MAX_LOG_BYTES ||
-          sanitized.incompleteValue ||
-          partialLastLine ||
-          after.size > opened.size ||
-          bytesRead < buffer.length ||
-          selected.length < records.length,
-        omittedRecords: redacted.length - selected.length,
-        omissionReason: sanitized.incompleteValue
-          ? "incomplete_value"
-          : undefined,
-        text: selected
-          .reverse()
-          .map((line) => line + "\n")
-          .join(""),
+        truncated: collector.truncated || limited || after.size > opened.size,
+        omittedRecords: collector.omittedRecords,
+        omissionReason: limited
+          ? position >= MAX_LOG_SOURCE_BYTES
+            ? "source_limit"
+            : "read_limit"
+          : collector.omissionReason,
+        text,
       };
     } finally {
       await handle.close();
@@ -227,13 +359,15 @@ export function setupDiagnosticsExport(
         const log = await readLogTail(captured.profile);
         if (snapshot().profile !== captured.profile)
           return { status: "error", reason: "profile_changed" };
+        const appVersion = safeVersion(app.getVersion());
+        const cliVersion = safeVersion(captured.cliVersion);
         const metadata = Buffer.from(
           JSON.stringify(
             {
               schemaVersion: 1,
               createdAt: new Date().toISOString(),
-              appVersion: safeVersion(app.getVersion()),
-              cliVersion: safeVersion(captured.cliVersion),
+              appVersion,
+              cliVersion,
               profile: { resolved: captured.profile !== null },
               daemon: { lastObservedState: captured.state },
               log: {
@@ -275,7 +409,14 @@ export function setupDiagnosticsExport(
         )
           return { status: "error", reason: "save_failed" };
         await rename(temporaryFile, destination.filePath);
-        return { status: "saved" };
+        return {
+          status: "saved",
+          partial:
+            log.status !== "available" ||
+            log.truncated ||
+            cliVersion === null ||
+            appVersion === null,
+        };
       } catch {
         return { status: "error", reason: "save_failed" };
       } finally {

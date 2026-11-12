@@ -76,7 +76,8 @@ afterEach(async () => {
 });
 
 async function exportArchive() {
-  expect(await fixture.handler!()).toEqual({ status: "saved" });
+  const outcome = await fixture.handler!();
+  expect(outcome).toMatchObject({ status: "saved", partial: expect.any(Boolean) });
   const archive = await real.readFile(destination);
   expect(archive.byteLength).toBeLessThanOrEqual(64 * 1024);
   const result = await readZip(new Uint8Array(archive), 64 * 1024);
@@ -92,6 +93,7 @@ async function exportArchive() {
   expect(log.split("\n").filter(Boolean).length).toBeLessThanOrEqual(200);
   return {
     archive,
+    outcome,
     metadata: JSON.parse(Buffer.from(metadataFile).toString("utf8")),
     log,
   };
@@ -108,6 +110,7 @@ async function expectNoTemporaryFiles() {
 describe("local diagnostic archive through its registered IPC handler", () => {
   it("exports only bounded whitelisted metadata and log files", async () => {
     const result = await exportArchive();
+    expect(result.outcome).toEqual({ status: "saved", partial: false });
     expect(result.metadata.appVersion).toBe("0.8.2");
     expect(result.metadata.cliVersion).toBe("0.8.2");
     expect(result.metadata.profile).toEqual({ resolved: true });
@@ -266,14 +269,16 @@ describe("local diagnostic archive through its registered IPC handler", () => {
       return handle;
     });
     const result = await exportArchive();
-    expect(reads).toEqual([{ length: 256 * 1024, position: 0 }]);
+    expect(reads).toEqual(Array.from({ length: 4 }, (_, index) => ({
+      length: 64 * 1024, position: index * 64 * 1024,
+    })));
     expect(result.archive.toString()).not.toContain("budgetCanary42");
     expect(result.log).toContain("provider request failed");
     expect(result.log).toContain("safe-final-marker component=daemon");
     expect(result.metadata.log.omissionReason).toBeNull();
   });
 
-  it("withholds oversized source logs without reading an ambiguous tail", async () => {
+  it("scans oversized quoted records from their lexical start and recovers safe following records", async () => {
     await real.writeFile(
       logPath,
       '12:00:00.000 ERR password="' +
@@ -296,17 +301,189 @@ describe("local diagnostic archive through its registered IPC handler", () => {
       return handle;
     });
     const result = await exportArchive();
-    expect(sourceReads).toBe(0);
-    expect(result.log).toBe("");
+    expect(sourceReads).toBeGreaterThan(4);
+    expect(result.log).toContain("safe-final-marker");
+    expect(result.outcome).toEqual({ status: "saved", partial: true });
     expect(result.metadata.log).toMatchObject({
-      status: "unavailable",
+      status: "available",
       truncated: true,
-      omissionReason: "source_limit",
-      sourceBytesLimit: 256 * 1024,
-      bytes: 0,
+      omissionReason: "record_limit",
+      sourceBytesLimit: 24 * 1024 * 1024,
     });
     expect(result.metadata.daemon.lastObservedState).toBe("running");
     expect(result.archive.toString()).not.toContain("outsideContextCanary42");
+  });
+
+
+
+  it.each(["password", "encoded", "single-quoted", "PEM", "UTF-8"] as const)(
+    "keeps lexical context across read chunks for %s",
+    async (kind) => {
+      const canary = "chunkCanary42";
+      const head = "12:00:00.000 ERR provider request failed ";
+      let value: string;
+      if (kind === "encoded") {
+        value = "error=" + JSON.stringify(JSON.stringify({ token: canary }));
+      } else if (kind === "single-quoted") {
+        value =
+          "password='first" +
+          String.fromCharCode(92, 10) +
+          "12:00:01.000 INF " +
+          canary +
+          "\nlast'";
+      } else if (kind === "PEM") {
+        value =
+          "-----BEGIN PRIVATE KEY-----\n12:00:01.000 INF " +
+          canary +
+          "\n-----END PRIVATE KEY-----";
+      } else if (kind === "UTF-8") {
+        value = 'message="诊断" password="' + canary + '"';
+      } else {
+        value = 'password="first\n12:00:01.000 INF ' + canary + '\nlast"';
+      }
+      // Split a lexical delimiter or UTF-8 character over the 64 KiB boundary.
+      const split =
+        kind === "UTF-8"
+          ? value.indexOf("诊") + 1
+          : kind === "PEM"
+            ? 8
+            : value.indexOf(kind === "single-quoted" ? "'" : '"') + 1;
+      const padding = " ".repeat(64 * 1024 - Buffer.byteLength(head) - split);
+      await real.writeFile(
+        logPath,
+        head +
+          padding +
+          value +
+          "\n" +
+          "12:00:02.000 INF safe-final-marker component=daemon\n",
+      );
+      const result = await exportArchive();
+      expect(result.archive.toString()).not.toContain(canary);
+      expect(result.log).toContain("safe-final-marker component=daemon");
+      expect(result.log).not.toContain("\uFFFD");
+    },
+  );
+
+  it("keeps private-key context through unrelated END markers", async () => {
+    await real.writeFile(
+      logPath,
+      [
+        "12:00:00.000 ERR -----BEGIN PRIVATE KEY-----",
+        "-----END CERTIFICATE-----",
+        "12:00:01.000 INF pemContextCanary42",
+        "-----END PRIVATE KEY-----",
+        "12:00:02.000 INF safe-final-marker",
+        "",
+      ].join(String.fromCharCode(10)),
+    );
+    const result = await exportArchive();
+    expect(result.archive.toString()).not.toContain("pemContextCanary42");
+    expect(result.log).toContain("safe-final-marker");
+  });
+
+  it("keeps earlier complete records when the snapshot ends inside UTF-8", async () => {
+    await real.writeFile(
+      logPath,
+      Buffer.concat([
+        Buffer.from("12:00:00.000 INF safe-final-marker\n12:00:01.000 INF "),
+        Buffer.from("诊").subarray(0, 2),
+      ]),
+    );
+    const result = await exportArchive();
+    expect(result.log).toBe("12:00:00.000 INF safe-final-marker\n");
+    expect(result.outcome).toEqual({ status: "saved", partial: true });
+    expect(result.log).not.toContain("\uFFFD");
+  });
+
+  it("caps source reads and reports the partial snapshot beyond the rotation range", async () => {
+    const record = "12:00:00.000 INF ordinary-event component=daemon\n";
+    const input = record.repeat(Math.ceil((25 * 1024 * 1024) / record.length));
+    await real.writeFile(logPath, input);
+    const reads: { length: number; position: number }[] = [];
+    fixture.open.mockImplementation(async (path, ...args) => {
+      const handle = await real.open(path, ...args);
+      if (path === logPath) {
+        const read = handle.read.bind(handle);
+        vi.spyOn(handle, "read").mockImplementation(
+          async (...readArgs: Parameters<typeof handle.read>) => {
+            const args: readonly unknown[] = readArgs;
+            reads.push({ length: Number(args[2]), position: Number(args[3]) });
+            return read(...readArgs);
+          },
+        );
+      }
+      return handle;
+    });
+    const result = await exportArchive();
+    expect(reads[0]!.position).toBe(0);
+    expect(reads.every((read) => read.length <= 64 * 1024)).toBe(true);
+    expect(reads.reduce((sum, read) => sum + read.length, 0)).toBe(
+      24 * 1024 * 1024,
+    );
+    expect(result.log).toContain("ordinary-event");
+    expect(result.metadata.log.omissionReason).toBe("source_limit");
+    expect(result.outcome).toEqual({ status: "saved", partial: true });
+  });
+
+  it("stops scanning at its elapsed-time budget and preserves safe records", async () => {
+    const record =
+      "12:00:00.000 INF safe-before-limit" + String.fromCharCode(10);
+    await real.writeFile(logPath, record.repeat(3000));
+    const clock = vi.spyOn(performance, "now");
+    let reads = 0;
+    fixture.open.mockImplementation(async (path, ...args) => {
+      const handle = await real.open(path, ...args);
+      if (path === logPath) {
+        const read = handle.read.bind(handle);
+        vi.spyOn(handle, "read").mockImplementation(
+          async (...readArgs: Parameters<typeof handle.read>) => {
+            reads++;
+            const result = await read(...readArgs);
+            clock.mockReturnValue(Number.MAX_SAFE_INTEGER);
+            return result;
+          },
+        );
+      }
+      return handle;
+    });
+    try {
+      const result = await exportArchive();
+      expect(reads).toBe(1);
+      expect(result.log).toContain("safe-before-limit");
+      expect(result.metadata.log.omissionReason).toBe("read_limit");
+      expect(result.outcome).toEqual({ status: "saved", partial: true });
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it("returns bounded partial records after a short read", async () => {
+    await real.appendFile(logPath, "12:00:01.000 INF withheld-after-read\n");
+    fixture.open.mockImplementation(async (path, ...args) => {
+      const handle = await real.open(path, ...args);
+      if (path === logPath) {
+        const read = handle.read.bind(handle);
+        let calls = 0;
+        vi.spyOn(handle, "read").mockImplementation(
+          async (...readArgs: Parameters<typeof handle.read>) => {
+            const args: readonly unknown[] = readArgs;
+            const buffer = args[0] as Buffer;
+            if (calls++) return { bytesRead: 0, buffer };
+            return read(
+              buffer,
+              Number(args[1]),
+              Buffer.byteLength("12:00:00.000 INF fixture-control\n"),
+              Number(args[3]),
+            );
+          },
+        );
+      }
+      return handle;
+    });
+    const result = await exportArchive();
+    expect(result.log).toBe("12:00:00.000 INF fixture-control\n");
+    expect(result.metadata.log.omissionReason).toBe("read_limit");
+    expect(result.outcome).toEqual({ status: "saved", partial: true });
   });
 
   it("preserves non-secret quoted diagnostic context and escaped record boundaries", async () => {
@@ -382,6 +559,7 @@ describe("local diagnostic archive through its registered IPC handler", () => {
       fixture.cliVersion = "";
       const result = await exportArchive();
       expect(result.metadata.cliVersion).toBeNull();
+      expect(result.outcome).toEqual({ status: "saved", partial: true });
       expect(result.metadata.daemon.lastObservedState).toBe(state);
       expect(result.log).toContain("fixture-control");
     },
@@ -404,6 +582,7 @@ describe("local diagnostic archive through its registered IPC handler", () => {
     await real.unlink(logPath);
     const result = await exportArchive();
     expect(result.metadata.log.status).toBe("unavailable");
+    expect(result.outcome).toEqual({ status: "saved", partial: true });
     expect(result.log).toBe("");
   });
 
@@ -417,6 +596,7 @@ describe("local diagnostic archive through its registered IPC handler", () => {
     });
     const result = await exportArchive();
     expect(result.metadata.log.status).toBe("unavailable");
+    expect(result.outcome).toEqual({ status: "saved", partial: true });
     expect(result.archive.toString()).not.toContain("readErrorCanary42");
   });
 
@@ -425,6 +605,7 @@ describe("local diagnostic archive through its registered IPC handler", () => {
     try {
       const result = await exportArchive();
       expect(result.metadata.log.status).toBe("unavailable");
+    expect(result.outcome).toEqual({ status: "saved", partial: true });
       expect(result.log).toBe("");
     } finally {
       await real.chmod(logPath, 0o600);
@@ -462,6 +643,7 @@ describe("local diagnostic archive through its registered IPC handler", () => {
     await real.symlink(other, logPath);
     const result = await exportArchive();
     expect(result.metadata.log.status).toBe("unavailable");
+    expect(result.outcome).toEqual({ status: "saved", partial: true });
     expect(result.archive.toString()).not.toContain("unrelatedCanary42");
     expect(fixture.open.mock.calls.some(([path]) => path === logPath)).toBe(
       false,
@@ -475,6 +657,7 @@ describe("local diagnostic archive through its registered IPC handler", () => {
     await real.symlink(moved, original);
     const result = await exportArchive();
     expect(result.metadata.log.status).toBe("unavailable");
+    expect(result.outcome).toEqual({ status: "saved", partial: true });
     expect(result.log).toBe("");
   });
 
@@ -488,6 +671,7 @@ describe("local diagnostic archive through its registered IPC handler", () => {
     });
     const result = await exportArchive();
     expect(result.metadata.log.status).toBe("unavailable");
+    expect(result.outcome).toEqual({ status: "saved", partial: true });
     expect(result.archive.toString()).not.toContain("replacementCanary42");
   });
 
@@ -708,6 +892,7 @@ describe("local diagnostic archive through its registered IPC handler", () => {
     fixture.appVersion = "https://user:versionCanary42@example.invalid";
     const result = await exportArchive();
     expect(result.metadata.cliVersion).toBeNull();
+      expect(result.outcome).toEqual({ status: "saved", partial: true });
     expect(result.metadata.appVersion).toBeNull();
     expect(result.archive.toString()).not.toContain("versionCanary42");
   });

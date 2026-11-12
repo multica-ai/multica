@@ -10,7 +10,7 @@ Object.defineProperty(window, "daemonAPI", {
     isCliInstalled: async () => true,
     getStatus: async () => ({ state: "stopped", profile: "desktop-fixture" }),
     onStatusChange: () => () => {},
-    exportDiagnostics: async () => ({ status: "cancelled" }),
+    exportDiagnostics: async () => ({ status: "saved", partial: true }),
   },
 });
 
@@ -22,8 +22,8 @@ createRoot(document.getElementById("root")!).render(
   <I18nProvider locale={locale} resources={RESOURCES}>
     <main className="mx-auto max-w-4xl p-8">
       <p className="mb-6 text-caption text-muted-foreground">
-        Synthetic Desktop diagnostics fixture · Electron save dialog boundary
-        stubbed
+        Synthetic Desktop diagnostics fixture · Partial export result · Electron
+        save dialog boundary stubbed
       </p>
       <DaemonSettingsTab />
     </main>

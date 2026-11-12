@@ -337,7 +337,7 @@ describe("Desktop diagnostics through production preload and registered IPC", ()
     client.clear();
   });
 
-  it("keeps one pending save dialog and silently returns from cancellation", async () => {
+  it("keeps one pending save dialog and reports cancellation", async () => {
     let cancel!: (value: { canceled: boolean }) => void;
     fixture.save.mockClear().mockReturnValueOnce(
       new Promise((resolve) => {
@@ -359,6 +359,7 @@ describe("Desktop diagnostics through production preload and registered IPC", ()
     await waitFor(() => expect(button).toBeEnabled());
     expect(toast.success).not.toHaveBeenCalled();
     expect(toast.error).not.toHaveBeenCalled();
+    expect(screen.getByRole("status")).toHaveTextContent("Diagnostics export cancelled.");
   });
 
   it("reports save failures without raw error details and allows retry", async () => {
@@ -373,6 +374,9 @@ describe("Desktop diagnostics through production preload and registered IPC", ()
       ),
     );
     expect(button).toBeEnabled();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Could not save diagnostics. Choose a writable location and try again.",
+    );
     fixture.save.mockResolvedValueOnce({ canceled: true });
     fireEvent.click(button);
     await waitFor(() => expect(button).toBeEnabled());
@@ -476,7 +480,9 @@ describe("bounded credential context through the normal diagnostics action", () 
         screen.getByRole("button", { name: "Export diagnostics" }),
       );
       await waitFor(() =>
-        expect(toast.success).toHaveBeenCalledWith("Diagnostics saved"),
+        expect(toast.success).toHaveBeenCalledWith(
+          closed && !overBudget ? "Diagnostics saved" : "Diagnostics saved with limited information. Some log records or diagnostic details were omitted or unavailable.",
+        ),
       );
       const archive = await fs.readFile(fixture.root + "/boundary-review.zip");
       const result = await readZip(new Uint8Array(archive), 64 * 1024);
@@ -518,9 +524,15 @@ describe("bounded credential context through the normal diagnostics action", () 
       expect(archive.byteLength).toBeLessThanOrEqual(64 * 1024);
       expect(Buffer.byteLength(log)).toBeLessThanOrEqual(32 * 1024);
       if (overBudget) {
-        expect(log).toBe("");
-        expect(metadata.log.omissionReason).toBe("source_limit");
-        expect(metadata.log.status).toBe("unavailable");
+        expect(metadata.log.status).toBe("available");
+        expect(metadata.log.truncated).toBe(true);
+        if (closed) {
+          expect(log).toContain("safe-final-marker component=daemon");
+          expect(metadata.log.omissionReason).toBe("record_limit");
+        } else {
+          expect(log).toBe("");
+          expect(metadata.log.omissionReason).toBe("incomplete_value");
+        }
       } else {
         expect(log).toContain("provider request failed");
         if (closed) {
@@ -534,5 +546,115 @@ describe("bounded credential context through the normal diagnostics action", () 
       }
       expect(metadata.daemon.lastObservedState).toBe("running");
     },
+  );
+});
+
+describe("normal-source budgets and visible partial diagnostics", () => {
+  it.each([
+    ["plain-budget-minus-one", 262143, false],
+    ["plain-exact-budget", 262144, false],
+    ["plain-budget-plus-one", 262145, false],
+    ["plain-one-MiB", 1048576, false],
+    ["secret-budget-minus-one", 262143, true],
+    ["secret-exact-budget", 262144, true],
+    ["secret-budget-plus-one", 262145, true],
+    ["secret-one-MiB", 1048576, true],
+    ["plain-rotation-minus-one", 20 * 1024 * 1024 - 1, false],
+    ["plain-rotation", 20 * 1024 * 1024, false],
+    ["plain-rotation-plus-one", 20 * 1024 * 1024 + 1, false],
+    ["secret-rotation-minus-one", 20 * 1024 * 1024 - 1, true],
+    ["secret-rotation", 20 * 1024 * 1024, true],
+    ["secret-rotation-plus-one", 20 * 1024 * 1024 + 1, true],
+  ])(
+    "preserves the available recent safe record for %s",
+    async (name, size, sensitive) => {
+      const fs =
+        await vi.importActual<typeof import("fs/promises")>("fs/promises");
+      const marker = "12:00:59.000 ERR safe-final-marker component=daemon\n";
+      const canary = "reviewerSecretCanary42";
+      const record = sensitive
+        ? '12:00:00.000 INF ordinary-event password="' +
+          canary +
+          '" component=daemon\n'
+        : "12:00:00.000 INF ordinary-event component=daemon\n";
+      const count = Math.floor((size - marker.length) / record.length);
+      let input = record.repeat(count);
+      const padding = size - input.length - marker.length;
+      // The oldest complete record carries harmless padding to achieve exact byte sizes.
+      input =
+        input.replace(
+          " component=daemon\n",
+          " component=daemon" + "x".repeat(padding) + "\n",
+        ) + marker;
+      expect(Buffer.byteLength(input)).toBe(size);
+      const file = fixture.root + "/desktop-diagnostics.invalid/daemon.log";
+      await fs.writeFile(file, input);
+      const original = await fs.readFile(file);
+      fixture.save.mockResolvedValue({
+        canceled: false,
+        filePath: fixture.root + "/review.zip",
+      });
+      settings();
+      await screen.findByText("fixture-daemon");
+      const preview = screen.getByText(
+        /Application and available CLI versions/,
+      ).textContent;
+      const startedAt = performance.now();
+      fireEvent.click(
+        screen.getByRole("button", { name: "Export diagnostics" }),
+      );
+      await waitFor(
+        () =>
+          expect(toast.success).toHaveBeenCalledWith(
+            "Diagnostics saved with limited information. Some log records or diagnostic details were omitted or unavailable.",
+          ),
+        { timeout: 15000 },
+      );
+      const zip = await fs.readFile(fixture.root + "/review.zip");
+      const extracted = await readZip(new Uint8Array(zip), 64 * 1024);
+      if (!extracted.ok) throw new Error(extracted.error);
+      const text = (name: string) =>
+        new TextDecoder().decode(
+          extracted.files.find((f) => f.path === name)!.data,
+        );
+      const log = text("daemon.log");
+      const metadata = JSON.parse(text("diagnostics.json"));
+      const artifactRoot = process.env.DIAGNOSTICS_EXPORT_ARTIFACTS;
+      if (artifactRoot) {
+        await fs.mkdir(artifactRoot, { recursive: true });
+        await fs.writeFile(artifactRoot + "/" + name + "-input.log", input);
+        await fs.writeFile(artifactRoot + "/" + name + ".zip", zip);
+        await fs.writeFile(artifactRoot + "/" + name + "-extracted.log", log);
+      }
+      const result = {
+        name,
+        elapsedMs: performance.now() - startedAt,
+        workerPeakRssKB: process.resourceUsage().maxRSS,
+        inputBytes: size,
+        sourceRecords: count + 1,
+        metadata,
+        logBytes: Buffer.byteLength(log),
+        retainedRecentMarker: log.includes("safe-final-marker"),
+        secretAbsent: !zip.toString().includes(canary),
+        toastSuccess: vi.mocked(toast.success).mock.calls,
+        toastError: vi.mocked(toast.error).mock.calls,
+        preview,
+        originalUnchanged: original.equals(await fs.readFile(file)),
+      };
+      if (artifactRoot)
+        await fs.writeFile(
+          artifactRoot + "/" + name + ".json",
+          JSON.stringify(result, null, 2),
+        );
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "Diagnostics saved with limited information. Some log records or diagnostic details were omitted or unavailable.",
+      );
+      expect(result.originalUnchanged).toBe(true);
+      expect(result.secretAbsent).toBe(true);
+      expect(zip.length).toBeLessThanOrEqual(65536);
+      expect(Buffer.byteLength(log)).toBeLessThanOrEqual(32768);
+      expect(log).toContain("safe-final-marker");
+    },
+    20_000,
   );
 });

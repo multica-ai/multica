@@ -56,6 +56,7 @@ export function DaemonSettingsTab() {
   const [status, setStatus] = useState<DaemonStatus>({ state: "stopped" });
   const [reauthLoading, setReauthLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [exportFeedback, setExportFeedback] = useState<string | null>(null);
 
   useEffect(() => {
     window.daemonAPI.getPrefs().then(setPrefs);
@@ -72,13 +73,32 @@ export function DaemonSettingsTab() {
 
   const exportDiagnostics = async () => {
     setExporting(true);
+    setExportFeedback(null);
     try {
       const result = await window.daemonAPI.exportDiagnostics();
-      if (result.status === "saved") toast.success(t(($) => $.desktop.daemon.export_saved));
-      if (result.status === "error") toast.error(t(($) => $.desktop.daemon.export_failed));
-      if (result.status === "busy") toast.error(t(($) => $.desktop.daemon.export_busy));
+      if (result.status === "saved") {
+        const message = result.partial
+          ? t(($) => $.desktop.daemon.export_saved_partial)
+          : t(($) => $.desktop.daemon.export_saved);
+        toast.success(message);
+        setExportFeedback(message);
+      }
+      if (result.status === "cancelled")
+        setExportFeedback(t(($) => $.desktop.daemon.export_cancelled));
+      if (result.status === "error") {
+        const message = t(($) => $.desktop.daemon.export_failed);
+        toast.error(message);
+        setExportFeedback(message);
+      }
+      if (result.status === "busy") {
+        const message = t(($) => $.desktop.daemon.export_busy);
+        toast.error(message);
+        setExportFeedback(message);
+      }
     } catch {
-      toast.error(t(($) => $.desktop.daemon.export_failed));
+      const message = t(($) => $.desktop.daemon.export_failed);
+      toast.error(message);
+      setExportFeedback(message);
     } finally {
       setExporting(false);
     }
@@ -269,6 +289,11 @@ export function DaemonSettingsTab() {
               {t(($) => $.desktop.daemon.export_action)}
             </Button>
           </SettingsRow>
+          {exportFeedback && (
+            <p role="status" className="px-4 pb-3.5 text-caption text-muted-foreground">
+              {exportFeedback}
+            </p>
+          )}
         </SettingsCard>
       </SettingsSection>
     </SettingsTab>
