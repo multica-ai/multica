@@ -43,9 +43,10 @@ function redactLog(text: string, depth = 0): string {
   // quoted span before redaction, then re-encode it to preserve record boundaries.
   // Nested JSON strings have a fixed depth budget. Unsupported Go escapes and
   // incomplete strings are withheld instead of exporting their undecoded bytes.
-  // Mask raw multiline credentials first, while their quote boundaries exist.
-  const decoded = redactLogPatterns(text).replace(
-    /"(?:[^"\\\r\n]|\\[^\r\n])*(?:"|\\?(?=\r?$))/gm,
+  // Complete spans include raw newlines so malformed values cannot expose fake
+  // records. An unterminated span is withheld through the end of its line.
+  const decoded = text.replace(
+    /"(?:[^"\\]|\\[\s\S])*"|"(?:[^"\\\r\n]|\\[^\r\n])*\\?(?=\r?$)/gm,
     (quoted) => {
       if (depth >= 4) return '"[REDACTED ENCODED VALUE]"';
       try {
@@ -57,12 +58,8 @@ function redactLog(text: string, depth = 0): string {
       }
     },
   );
-  return redactLogPatterns(decoded);
-}
-
-function redactLogPatterns(text: string): string {
   // Quoted values may span lines. Redact before selecting individual records.
-  let safe = text
+  let safe = decoded
     .replace(
       /-----BEGIN[A-Z\s]*PRIVATE KEY-----[\s\S]*?(?:-----END[A-Z\s]*PRIVATE KEY-----|$)/g,
       "[REDACTED PRIVATE KEY]",

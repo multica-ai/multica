@@ -255,6 +255,22 @@ describe("local diagnostic archive through its registered IPC handler", () => {
     expect(result.log).toContain("safe-final-marker");
   });
 
+  it("withholds malformed encoded attributes containing raw record breaks", async () => {
+    const attribute =
+      String.raw`"HTTP 401 {\"token\":\"first` +
+      "\n12:00:01.000 INF breakCanary42\n" +
+      String.raw`last\"}"`;
+    await real.writeFile(
+      logPath,
+      `12:00:00.000 ERR provider request failed error=${attribute}\n` +
+        "12:00:02.000 INF safe-final-marker\n",
+    );
+    const result = await exportArchive();
+    expect(result.archive.toString()).not.toContain("breakCanary42");
+    expect(result.log).toContain("provider request failed");
+    expect(result.log).toContain("safe-final-marker");
+  });
+
   it("bounds encoded redaction expansion and omits incomplete tail records", async () => {
     const record = `12:00:00.000 INF error=${JSON.stringify('{"token":"x"}'.repeat(24))}\n`;
     await real.writeFile(
