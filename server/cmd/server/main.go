@@ -815,6 +815,14 @@ func main() {
 		go h.ChannelMediaReconciler.Run(sweepCtx)
 	}
 
+	// Presigned-upload session reconciler: reclaims the staging object of every
+	// completed upload, and both objects of a session that never completed. The
+	// file bytes never pass through this process, so this worker is the only
+	// thing that ever deletes them.
+	if h.AttachmentUploadReconciler != nil {
+		go h.AttachmentUploadReconciler.Run(sweepCtx)
+	}
+
 	// WeCom scan-code install worker: drives QR generate + poll out of band, so
 	// no HTTP request waits on WeCom. Started even when the scan flow is
 	// unconfigured, so any session already in flight reaches a terminal state

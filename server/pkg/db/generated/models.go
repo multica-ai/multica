@@ -288,6 +288,35 @@ type Attachment struct {
 	Height          pgtype.Int4        `json:"height"`
 }
 
+type AttachmentUploadSession struct {
+	ID                  pgtype.UUID        `json:"id"`
+	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
+	ActorType           string             `json:"actor_type"`
+	ActorID             pgtype.UUID        `json:"actor_id"`
+	ActorUserID         pgtype.UUID        `json:"actor_user_id"`
+	IssueID             pgtype.UUID        `json:"issue_id"`
+	CommentID           pgtype.UUID        `json:"comment_id"`
+	ChatSessionID       pgtype.UUID        `json:"chat_session_id"`
+	TaskID              pgtype.UUID        `json:"task_id"`
+	Filename            string             `json:"filename"`
+	DeclaredContentType string             `json:"declared_content_type"`
+	ExpectedSize        int64              `json:"expected_size"`
+	StagingKey          string             `json:"staging_key"`
+	FinalKey            string             `json:"final_key"`
+	PublishState        string             `json:"publish_state"`
+	CleanupState        string             `json:"cleanup_state"`
+	AttachmentID        pgtype.UUID        `json:"attachment_id"`
+	LeaseToken          pgtype.UUID        `json:"lease_token"`
+	LeaseExpiresAt      pgtype.Timestamptz `json:"lease_expires_at"`
+	Attempt             int32              `json:"attempt"`
+	NextAttemptAt       pgtype.Timestamptz `json:"next_attempt_at"`
+	LastError           pgtype.Text        `json:"last_error"`
+	TombstonePass       int32              `json:"tombstone_pass"`
+	ExpiresAt           pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	CompletedAt         pgtype.Timestamptz `json:"completed_at"`
+}
+
 type Autopilot struct {
 	ID                 pgtype.UUID        `json:"id"`
 	WorkspaceID        pgtype.UUID        `json:"workspace_id"`

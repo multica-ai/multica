@@ -581,6 +581,9 @@ func TestRunIssueCommentAddUploadsAttachmentWithoutIssueID(t *testing.T) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/"+issueRef:
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": "issue-1", "identifier": issueRef})
+		case isPresignUploadRequest(r):
+			// Models a server from before the presigned-upload endpoint.
+			http.NotFound(w, r)
 		case r.Method == http.MethodPost && r.URL.Path == "/api/upload-file":
 			if err := r.ParseMultipartForm(1 << 20); err != nil {
 				t.Fatalf("parse upload: %v", err)
@@ -911,6 +914,8 @@ func TestRunIssueCommentAddRejectsExternalAttachmentWithZeroUploads(t *testing.T
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/"+issueID:
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": issueID, "identifier": "TST-1"})
+		case isPresignUploadRequest(r):
+			http.NotFound(w, r)
 		case r.Method == http.MethodPost && r.URL.Path == "/api/upload-file":
 			uploads++
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": "att-1"})
@@ -1223,6 +1228,10 @@ func newIssueCreateAttachmentServer(t *testing.T) *issueCreateAttachmentServer {
 	s := &issueCreateAttachmentServer{uploadStatus: http.StatusOK}
 	s.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case isPresignUploadRequest(r):
+			// Models a server from before the presigned-upload endpoint: the
+			// client's documented fallback is what the rest of this fake covers.
+			http.NotFound(w, r)
 		case r.Method == http.MethodPost && r.URL.Path == "/api/upload-file":
 			s.calls = append(s.calls, "upload")
 			if s.uploadStatus != http.StatusOK {
@@ -3892,6 +3901,11 @@ func TestRunIssueUpdateAppendsLocalAttachmentToDescription(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls = append(calls, r.Method+" "+r.URL.Path)
 		switch r.URL.Path {
+		case "/api/attachments/presign-upload":
+			// This fake models a server from before the endpoint; the client's
+			// documented fallback to multipart is what the assertions cover.
+			http.NotFound(w, r)
+			return
 		case "/api/upload-file":
 			if err := r.ParseMultipartForm(1 << 20); err != nil {
 				t.Errorf("parse upload: %v", err)
@@ -3930,7 +3944,14 @@ func TestRunIssueUpdateAppendsLocalAttachmentToDescription(t *testing.T) {
 	if uploadIncludedIssueID {
 		t.Fatal("upload included issue_id; update must bind the unbound upload in the PUT")
 	}
-	if want := []string{"GET /api/issues/" + issueID, "POST /api/upload-file", "PUT /api/issues/" + issueID}; !slices.Equal(calls, want) {
+	// The presign probe comes first: the client asks for a direct credential and
+	// only falls back to multipart when the route is absent (404 here).
+	if want := []string{
+		"GET /api/issues/" + issueID,
+		"POST /api/attachments/presign-upload",
+		"POST /api/upload-file",
+		"PUT /api/issues/" + issueID,
+	}; !slices.Equal(calls, want) {
 		t.Fatalf("calls = %v, want %v", calls, want)
 	}
 }
@@ -3945,6 +3966,10 @@ func TestRunIssueUpdateAttachmentUsesProvidedDescriptionWithoutFetching(t *testi
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls = append(calls, r.Method+" "+r.URL.Path)
 		switch r.URL.Path {
+		case "/api/attachments/presign-upload":
+			// This fake models a server from before the endpoint.
+			http.NotFound(w, r)
+			return
 		case "/api/upload-file":
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"id": attachmentID, "filename": "revised.png", "content_type": "image/png",
@@ -3973,7 +3998,11 @@ func TestRunIssueUpdateAttachmentUsesProvidedDescriptionWithoutFetching(t *testi
 	if got := body["description"].(string); !strings.HasPrefix(got, "Replacement body\n\n") {
 		t.Fatalf("description = %q", got)
 	}
-	if want := []string{"POST /api/upload-file", "PUT /api/issues/" + issueID}; !slices.Equal(calls, want) {
+	if want := []string{
+		"POST /api/attachments/presign-upload",
+		"POST /api/upload-file",
+		"PUT /api/issues/" + issueID,
+	}; !slices.Equal(calls, want) {
 		t.Fatalf("calls = %v, want %v", calls, want)
 	}
 }
