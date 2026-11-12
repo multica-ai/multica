@@ -113,7 +113,6 @@ test("WeChat QR verification, connection listing, and disconnect", async ({
     await channels.getByRole("button", { name: "Add messaging channel" }).first().click();
     const connectDialog = page.getByRole("dialog", { name: "Connect messaging channel" });
     await connectDialog.getByRole("button", { name: "WeChat" }).click();
-    await connectDialog.getByRole("button", { name: "Continue" }).click();
     await expect(connectDialog.getByRole("button", { name: "Connect WeChat" })).toBeVisible();
     await page.screenshot({
       path: testInfo.outputPath("weixin-agent.png"),

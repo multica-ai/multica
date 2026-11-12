@@ -415,8 +415,9 @@ describe("shared connection dialog", () => {
         onOpenChange={vi.fn()}
       />,
     );
-    await waitFor(() => expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled());
-    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    const platform = await screen.findByRole("button", { name: "WeChat" });
+    await waitFor(() => expect(platform).toBeEnabled());
+    fireEvent.click(platform);
     fireEvent.click(await screen.findByRole("button", { name: "Connect WeChat" }));
     expect(await screen.findByTitle("WeChat connection QR code")).toBeInTheDocument();
     expect(api.beginWeixinLogin).toHaveBeenCalledWith("ws-1", agent.id);
