@@ -425,6 +425,7 @@ describe("estimateCost", () => {
   it("prices published Gemini token SKUs at standard rates in every bucket", () => {
     const cases = [
       { model: "gemini-4-argon", input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2 },
+      { model: "gemini-4-carbon", input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2 },
       { model: "gemini-3.8-flash", input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0.75 },
       { model: "gemini-3.7-flash", input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0.75 },
       { model: "gemini-3.6-flash", input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0.75 },
@@ -474,12 +475,61 @@ describe("estimateCost", () => {
       ["Gemini 3.5 Flash-Lite", "gemini-3.5-flash-lite", 0.3],
       ["Gemini 3.1 Pro", "gemini-3.1-pro", 2],
       ["Gemini 4 Argon", "gemini-4-argon", 2],
+      ["Gemini 4 Carbon", "gemini-4-carbon", 2],
     ] as const) {
       for (const model of [label, `${label} (High)`, `google/${label} (Low)`,
         `${id}-minimal`, `antigravity:${id}-high`, `custom:google/${id}-low[1m]`]) {
         expect(isModelPriced(model, "antigravity"), model).toBe(true);
         expect(estimateCost({ ...zeroUsage, provider: "antigravity", model, input_tokens: 1_000_000 }), model).toBeCloseTo(price, 5);
       }
+    }
+  });
+
+  it("resolves Antigravity Claude effort suffixes and display labels at the base tier", () => {
+    // Antigravity appends the reasoning effort to Claude ids
+    // (`claude-opus-5-5-high`) or reports the display label. Effort is a
+    // reasoning dial, not a different SKU, so both price at the base model's
+    // tier — but only under the antigravity provider (the scoping stays
+    // pinned by "keeps Cursor variant stripping scoped to Cursor rows"),
+    // mirroring priceForAntigravityModel in server/internal/metrics/pricing.go.
+    const cost = (model: string) =>
+      estimateCost({
+        ...zeroUsage, provider: "antigravity", model,
+        input_tokens: 1_000_000, output_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000, cache_write_tokens: 1_000_000,
+      });
+    const opus55 = 4 + 20 + 0.2 + 5;
+    for (const [model, want] of [
+      ["claude-opus-5-5-high", opus55],
+      ["claude-opus-5-5-medium", opus55],
+      ["claude-sonnet-5-5-low", 2 + 10 + 0.1 + 2.5],
+      ["claude-haiku-5-5-minimal", 0.1 + 0.5 + 0.01 + 0.125],
+      ["claude-opus-5-5-high[1m]", opus55],
+      ["claude-opus-5.5-high", opus55],
+      ["Claude-Opus-5.5-High", opus55],
+      ["antigravity:claude-opus-5-5-high", opus55],
+      ["Claude Opus 5.5 (High)", opus55],
+      ["Claude Opus 5.5", opus55],
+    ] as const) {
+      expect(isModelPriced(model, "antigravity"), model).toBe(true);
+      expect(cost(model), model).toBeCloseTo(want, 5);
+    }
+    expect(collectUnmappedModels([
+      { ...zeroUsage, provider: "antigravity", model: "claude-opus-5-5-high", input_tokens: 1 },
+      { ...zeroUsage, provider: "antigravity", model: "Claude Sonnet 5.5 (Medium)", input_tokens: 1 },
+    ])).toEqual([]);
+    // Only the four effort levels Antigravity supports are stripped, the
+    // version is a major or major.minor number, and one context tag at most;
+    // everything else stays unmapped.
+    for (const model of [
+      "claude-opus-5-5-fast", "claude-opus-5-5-max", "claude-opus-5-5-xhigh",
+      "claude-opus-5-5-thinking", "claude-opus-5-5-preview",
+      "claude-opus-5-5-99-high", "claude-opus-5-5-20261001-high",
+      "claude-opus-5-5-high-latest", "/claude-opus-5-5-high",
+      "claude-opus-5-5[]", "claude-opus-5-5-high[1m][2m]",
+    ]) {
+      expect(isModelPriced(model, "antigravity"), model).toBe(false);
+      expect(cost(model), model).toBe(0);
     }
   });
 
@@ -510,6 +560,8 @@ describe("estimateCost", () => {
       "gemini-omni-flash-preview",
       "gemini-embedding-2",
       "gemini-4-argon-fast",
+      "gemini-4-carbon-fast",
+      "gemini-4-carbon[1m][2m]",
       "gemini-4-argon[1m][2m]",
     ]) {
       expect(isModelPriced(model, "antigravity"), model).toBe(false);
@@ -1012,6 +1064,78 @@ describe("estimateCost", () => {
         output_tokens: 1_000_000,
       }),
     ).toBe(0);
+  });
+
+  it("prices GLM-5.3 and its paid Flash tier at the official z.ai rates", () => {
+    // docs.z.ai/guides/overview/pricing (2026-11-11): GLM-5.3 $1.4 / $4.4
+    // with $0.26 cached input; GLM-5.3-Flash is the PAID $0.15 / $0.50 tier,
+    // unlike the free 4.x flash tiers above.
+    for (const c of [
+      { model: "glm-5.3", input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 1.4 },
+      { model: "glm-5.3-flash", input: 0.15, output: 0.5, cacheRead: 0.03, cacheWrite: 0.15 },
+    ]) {
+      for (const model of [c.model, `zhipuai/${c.model}`]) {
+        const breakdown = estimateCostBreakdown({
+          ...zeroUsage, model,
+          input_tokens: 1_000_000, output_tokens: 1_000_000,
+          cache_read_tokens: 1_000_000, cache_write_tokens: 1_000_000,
+        });
+        expect(breakdown.input, model).toBeCloseTo(c.input, 5);
+        expect(breakdown.output, model).toBeCloseTo(c.output, 5);
+        expect(breakdown.cacheRead, model).toBeCloseTo(c.cacheRead, 5);
+        expect(breakdown.cacheWrite, model).toBeCloseTo(c.cacheWrite, 5);
+      }
+    }
+    // A Hermes custom provider carries a `custom:` routing prefix.
+    expect(collectUnmappedModels([
+      { ...zeroUsage, model: "glm-5.3", input_tokens: 1 },
+      { ...zeroUsage, provider: "hermes", model: "custom:glm-5.3", input_tokens: 1 },
+      { ...zeroUsage, provider: "claude", model: "glm-5.3-flash", input_tokens: 1 },
+    ])).toEqual([]);
+    // Unknown suffixed variants stay unmapped, matching the anchored
+    // backend rules in server/internal/metrics/pricing.go.
+    for (const model of ["glm-5.3-flashx", "glm-5.3-fast", "glm-5.3-extra"]) {
+      expect(isModelPriced(model), model).toBe(false);
+    }
+  });
+
+  it("prices Kimi K3.1 Pro under its vendor and provider-qualified keys", () => {
+    // platform.kimi.ai/docs/pricing/chat (2026-11-11): $2 / $10 / $0.20
+    // cached input, no separate cache write. `k3.1-pro` is a generic id, so
+    // it prices only under the provider-qualified `kimi/k3.1-pro` key — a
+    // bare `k3.1-pro` from an unknown provider stays unmapped like
+    // `cursor/auto`.
+    const k311 = 2 + 10 + 0.2 + 2;
+    for (const [model, provider] of [
+      ["kimi-code/k3.1-pro", "kimi"],
+      ["kimi-k3.1-pro", undefined],
+      ["kimi-k3.1-pro", "kimi"],
+    ] as const) {
+      expect(isModelPriced(model, provider), `${provider}/${model}`).toBe(true);
+      expect(
+        estimateCost({
+          ...zeroUsage, provider, model,
+          input_tokens: 1_000_000, output_tokens: 1_000_000,
+          cache_read_tokens: 1_000_000, cache_write_tokens: 1_000_000,
+        }),
+        `${provider}/${model}`,
+      ).toBeCloseTo(k311, 5);
+    }
+    // The subscription coding-route alias, the CodeBuddy SKU, the
+    // double-price highspeed variant, and the bare id under an unknown or
+    // absent provider all stay unmapped.
+    for (const [model, provider] of [
+      ["kimi-for-coding", "kimi"],
+      ["kimi-code/kimi-for-coding", "kimi"],
+      ["kimi-k3-1", undefined],
+      ["kimi-k3.1-pro-highspeed", undefined],
+      ["kimi-code/k3.1-pro-highspeed", "kimi"],
+      ["k3.1-pro-highspeed", "kimi"],
+      ["k3.1-pro", "acme"],
+      ["k3.1-pro", undefined],
+    ] as const) {
+      expect(isModelPriced(model, provider), `${provider ?? "no-provider"}/${model}`).toBe(false);
+    }
   });
 
   it("prices grok-4.5 at xAI's short-context $2.00 / $6.00 tier", () => {
@@ -1619,9 +1743,10 @@ describe("sliceWindow (timezone-aware)", () => {
       makeUsage("2026-05-19"),
       makeUsage("2026-05-20"),
     ];
+    // The Shanghai window is 05-14..05-20, so 05-13 falls out; a cutoff read
+    // from the host clock (today 05-19) would have kept it.
     const { filtered } = sliceWindow(usage, 7, "Asia/Shanghai");
     expect(filtered.map((u) => u.date)).toEqual([
-      "2026-05-13",
       "2026-05-19",
       "2026-05-20",
     ]);
@@ -1638,6 +1763,20 @@ describe("sliceWindow (timezone-aware)", () => {
     const { filtered, prevFiltered } = sliceWindow(usage, 7, "UTC");
     expect(filtered.map((u) => u.date)).toEqual(["2026-05-15", "2026-05-19"]);
     expect(prevFiltered.map((u) => u.date)).toEqual(["2026-05-08"]);
+  });
+
+  it("covers exactly `days` calendar days, today included, in both windows", () => {
+    vi.setSystemTime(new Date("2026-05-19T12:00:00Z"));
+    const usage = [
+      makeUsage("2026-05-05"),
+      makeUsage("2026-05-06"),
+      makeUsage("2026-05-12"),
+      makeUsage("2026-05-13"),
+      makeUsage("2026-05-19"),
+    ];
+    const { filtered, prevFiltered } = sliceWindow(usage, 7, "UTC");
+    expect(filtered.map((u) => u.date)).toEqual(["2026-05-13", "2026-05-19"]);
+    expect(prevFiltered.map((u) => u.date)).toEqual(["2026-05-06", "2026-05-12"]);
   });
 });
 

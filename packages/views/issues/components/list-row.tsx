@@ -25,6 +25,7 @@ import { LabelChip } from "../../labels/label-chip";
 import { CustomStatusChip } from "./custom-status-chip";
 import { IssueDuplicateOfMarker } from "./issue-duplicates";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
+import { IssuePullRequestChips, useIssuePullRequestSummaries } from "./pull-request-chips";
 import { useIssueSurfaceSelection } from "../surface/selection-context";
 import {
   PEEKED_ROW_CLASS,
@@ -84,6 +85,8 @@ function ListRowContent({
   const showStartDate = storeProperties.startDate && issue.start_date;
   const showDueDate = storeProperties.dueDate && issue.due_date;
   const showLabels = storeProperties.labels && labels.length > 0;
+  const pullRequests = useIssuePullRequestSummaries(issue.id, storeProperties.pullRequests);
+  const showPullRequests = storeProperties.pullRequests && pullRequests.length > 0;
 
   return (
     <IssueActionsContextMenu issue={issue}>
@@ -146,6 +149,14 @@ function ListRowContent({
                   {childProgress!.done}/{childProgress!.total}
                 </span>
               </span>
+            )}
+            {showPullRequests && (
+              // Capped so a long PR set never squeezes the title away.
+              <IssuePullRequestChips
+                pullRequests={pullRequests}
+                max={2}
+                className="max-w-[40%]"
+              />
             )}
             {showLabels && (
               <span className="ml-1.5 hidden md:inline-flex shrink-0 items-center gap-1 max-w-[260px] overflow-hidden">

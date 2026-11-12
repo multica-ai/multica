@@ -42,6 +42,9 @@ deleted_channel_task_deliveries AS (
 ),
 deleted_draft_restores AS (
     DELETE FROM chat_draft_restore WHERE task_id IN (SELECT id FROM batch)
+),
+deleted_task_context_receipts AS (
+    DELETE FROM task_context_receipt WHERE task_id IN (SELECT id FROM batch)
 )
 DELETE FROM agent_task_queue WHERE id IN (SELECT id FROM batch)
 `
@@ -315,6 +318,9 @@ deleted_orphan_task_supplements AS (
 ),
 deleted_orphan_task_supplement_capabilities AS (
     DELETE FROM task_supplement_capability WHERE workspace_id = $1
+),
+deleted_orphan_task_context_receipts AS (
+    DELETE FROM task_context_receipt WHERE workspace_id = $1
 ),
 deleted_hourly_dirty AS (
     DELETE FROM task_usage_hourly_dirty WHERE workspace_id = $1
@@ -644,6 +650,9 @@ deleted_profiles AS (
 ),
 deleted_project_members AS (
     DELETE FROM project_member WHERE project_member.workspace_id = $1
+),
+deleted_project_subscribers AS (
+    DELETE FROM project_subscriber WHERE project_subscriber.workspace_id = $1
 )
 DELETE FROM project WHERE project.workspace_id = $1
 `

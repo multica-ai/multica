@@ -36,6 +36,7 @@
   },
   "commands": {
     "current_theme_aria": "Текущая тема",
+    "current_mode_aria": "Текущий режим",
     "new_issue": "Новая задача",
     "new_project": "Новый проект",
     "new_autopilot": "Новый автопилот",
@@ -112,7 +113,6 @@
     "project": "Проект",
     "parent": "Родительская задача",
     "quick_actions": "Быстрые действия",
-    "theme": "Тема",
     "project_status": "Статус проекта",
     "no_project": "Без проекта",
     "current": "Текущий"

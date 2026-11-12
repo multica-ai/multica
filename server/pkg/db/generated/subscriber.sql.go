@@ -346,17 +346,20 @@ WHERE i.workspace_id = $1
   AND s.user_type = 'member'
   AND s.user_id = $2
   AND s.unsubscribed_at IS NULL
+  -- MUL-8472: private projects the caller cannot see.
+  AND ($3::uuid[] IS NULL OR i.project_id IS NULL OR NOT (i.project_id = ANY($3::uuid[])))
 `
 
 type ListSubscribedIssueIDsParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	UserID      pgtype.UUID `json:"user_id"`
+	WorkspaceID      pgtype.UUID   `json:"workspace_id"`
+	UserID           pgtype.UUID   `json:"user_id"`
+	HiddenProjectIds []pgtype.UUID `json:"hidden_project_ids"`
 }
 
 // Every issue in the workspace the member actively subscribes to; opt-out
 // tombstones do not count.
 func (q *Queries) ListSubscribedIssueIDs(ctx context.Context, arg ListSubscribedIssueIDsParams) ([]pgtype.UUID, error) {
-	rows, err := q.db.Query(ctx, listSubscribedIssueIDs, arg.WorkspaceID, arg.UserID)
+	rows, err := q.db.Query(ctx, listSubscribedIssueIDs, arg.WorkspaceID, arg.UserID, arg.HiddenProjectIds)
 	if err != nil {
 		return nil, err
 	}
@@ -450,9 +453,25 @@ func (q *Queries) LockSubscriberWrites(ctx context.Context, arg LockSubscriberWr
 }
 
 const removeIssueSubscriber = `-- name: RemoveIssueSubscriber :exec
-UPDATE issue_subscriber
-SET unsubscribed_at = now(), opt_out_scope = 'issue'
-WHERE issue_id = $1 AND user_type = $2 AND user_id = $3 AND unsubscribed_at IS NULL
+WITH retired AS (
+    UPDATE issue_subscriber
+    SET unsubscribed_at = now(), opt_out_scope = 'issue'
+    WHERE issue_subscriber.issue_id = $1
+      AND issue_subscriber.user_type = $2
+      AND issue_subscriber.user_id = $3
+      AND issue_subscriber.unsubscribed_at IS NULL
+    RETURNING issue_subscriber.issue_id
+)
+INSERT INTO issue_subscriber (issue_id, user_type, user_id, reason, unsubscribed_at, opt_out_scope)
+SELECT i.id, 'member', ps.user_id, 'manual', now(), 'issue'
+FROM issue i
+JOIN project_subscriber ps
+  ON ps.project_id = i.project_id AND ps.workspace_id = i.workspace_id
+WHERE i.id = $1
+  AND $2::text = 'member'
+  AND ps.user_id = $3
+  AND NOT EXISTS (SELECT 1 FROM retired)
+ON CONFLICT (issue_id, user_type, user_id) DO NOTHING
 `
 
 type RemoveIssueSubscriberParams struct {
@@ -465,6 +484,12 @@ type RemoveIssueSubscriberParams struct {
 // can tell "never subscribed" (no row) from "chose to leave" (row with
 // unsubscribed_at). scope='issue' keeps the opt-out from reaching descendants:
 // future children of this issue are still allowed to subscribe the user.
+//
+// A member watching the issue's project has no row to retire, yet still hears
+// about the issue, so the opt-out is inserted for them. An existing tombstone
+// is left as it is: a 'subtree' opt-out must not be narrowed to 'issue'.
+// Members with neither a row nor a project subscription get nothing, so
+// leaving an issue you never watched does not block later auto-subscribes.
 func (q *Queries) RemoveIssueSubscriber(ctx context.Context, arg RemoveIssueSubscriberParams) error {
 	_, err := q.db.Exec(ctx, removeIssueSubscriber, arg.IssueID, arg.UserType, arg.UserID)
 	return err

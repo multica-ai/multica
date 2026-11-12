@@ -34,6 +34,7 @@
   },
   "commands": {
     "current_theme_aria": "Current theme",
+    "current_mode_aria": "Current mode",
     "new_issue": "New issue",
     "new_project": "New project",
     "new_autopilot": "New autopilot",
@@ -106,7 +107,6 @@
     "project": "Project",
     "parent": "Parent issue",
     "quick_actions": "Quick actions",
-    "theme": "Theme",
     "project_status": "Project status",
     "no_project": "No project",
     "current": "Current"

@@ -169,6 +169,12 @@
       "after_run": "本轮结束后开始",
       "hint": "只决定默认选项，每条消息发送前仍可单独修改。"
     },
+    "comment_images": {
+      "title": "评论中的图片",
+      "thumbnails": "缩略图",
+      "full": "原尺寸",
+      "hint": "缩略图让长讨论更紧凑，点击图片可查看原图。"
+    },
     "comments_title": "评论与聊天",
     "region_title": "语言与地区",
     "issue_fields_title": "创建任务时显示的字段",
@@ -192,7 +198,7 @@
     },
     "theme": {
       "title": "主题",
-      "description": "全局的颜色、边框、阴影和圆角。可以导入主题文件添加更多主题。",
+      "description": "全局的颜色、边框、阴影和圆角。",
       "default": "默认",
       "pop": "波普",
       "built_in": "内置",
@@ -221,12 +227,53 @@
       "close": "关闭",
       "has_options_other": "{{count}} 个选项",
       "has_assets_other": "{{count}} 个字体和图片",
-      "menu_label": "自定义主题",
       "beta": "Beta",
       "beta_note": "自定义主题处于 Beta 阶段。主题用到的变量和清单可能会变，主题可能需要更新。"
     },
+    "store": {
+      "manage": "管理",
+      "title": "主题",
+      "description": "你安装的主题，以及社区制作的主题。",
+      "description_local": "你安装的主题。",
+      "search": "搜索主题",
+      "installed_only": "只看已安装",
+      "showing_other": "共 {{count}} 个主题",
+      "installed": "已安装",
+      "loading": "正在加载主题",
+      "error": "无法加载主题商店，请稍后重试。",
+      "retry": "重试",
+      "none_installed": "还没有安装任何主题。",
+      "no_results": "没有与“{{query}}”匹配的主题。",
+      "by": "作者：{{author}}",
+      "downloads_other": "{{downloads}} 次下载",
+      "source": "在 GitHub 上查看 {{repo}}",
+      "no_preview": "暂无预览",
+      "screenshot_alt": "{{name}}（{{mode}}模式）",
+      "install": "安装",
+      "installing": "正在安装…",
+      "use": "使用",
+      "in_use": "使用中",
+      "update": "更新到 {{version}}",
+      "remove": "移除",
+      "taken": "已安装同 ID 的主题",
+      "installed_toast": "已安装“{{name}}”。",
+      "updated": "已将“{{name}}”更新到 {{version}}。",
+      "install_failed": "无法安装“{{name}}”",
+      "warning": "主题可以改变每个页面的样式，包括对话框和警告。商店主题会经过自动检查，但均由社区制作。"
+    },
+    "updates": {
+      "title": "商店主题",
+      "description_other": "你从商店安装了 {{count}} 个主题。",
+      "check": "检查更新",
+      "checking": "正在检查…",
+      "up_to_date": "商店主题都是最新版本。",
+      "update_all": "全部更新（{{count}}）"
+    },
+    "own": {
+      "title": "制作自己的主题",
+      "description": "从 .zip 或文件夹导入主题，或从当前主题的副本开始。"
+    },
     "tools": {
-      "label": "更多主题操作",
       "duplicate": "复制「{{name}}」为新主题",
       "open_folder": "打开主题文件夹",
       "guide": "如何制作主题",
@@ -365,6 +412,10 @@
       "toggleChat": {
         "label": "显示或隐藏聊天窗",
         "description": "打开或关闭悬浮聊天窗，打开时自动聚焦输入框。"
+      },
+      "newChat": {
+        "label": "问 Multica",
+        "description": "在悬浮聊天窗里开始新对话。"
       },
       "findInIssue": {
         "label": "在任务中查找",
@@ -789,9 +840,16 @@
         "label": "优先级与截止日期",
         "description": "你订阅的任务优先级或截止日期变更时"
       },
+      "new_issues": {
+        "label": "新任务",
+        "description": "你订阅的项目中有新任务创建时"
+      },
       "agent_activity": {
         "label": "智能体活动",
         "description": "智能体运行失败时"
+      },
+      "chat_replies": {
+        "label": "包含聊天回复"
       }
     },
     "system": {
@@ -800,7 +858,7 @@
     },
     "browser": {
       "label": "浏览器通知",
-      "hint": "允许当前浏览器为新的收件箱条目弹出通知横幅。",
+      "hint": "允许此浏览器为收件箱通知和聊天回复显示横幅。",
       "enable": "启用",
       "granted": "当前浏览器可以弹出通知横幅。",
       "denied": "已被浏览器拦截。请在浏览器设置中为本站点开启通知权限。",
@@ -1309,7 +1367,8 @@
     "github_load_more": "加载更多",
     "github_selected_count": "已选择 {{count}} 个",
     "github_cancel": "取消",
-    "github_import": "添加仓库",
+    "github_import": "添加 {{count}} 个仓库",
+    "github_import_other": "添加 {{count}} 个仓库",
     "save": "保存",
     "saving": "保存中...",
     "saved_hint": "所有改动已保存",
@@ -1342,7 +1401,10 @@
       "close_others": "关闭其他标签页",
       "open_window": "在新窗口打开",
       "new": "新建标签页",
-      "pinned_name": "{{title}}（已固定）"
+      "pinned_name": "{{title}}（已固定）",
+      "copy_link": "复制链接",
+      "link_copied": "已复制链接",
+      "close_right": "关闭右侧标签页"
     },
     "updates": {
       "title": "更新",
@@ -1544,7 +1606,40 @@
     "github_actions": "GitHub 操作"
   },
   "channels": {
-    "breadcrumb": "路径"
+    "breadcrumb": "路径",
+    "add": "添加消息渠道",
+    "connect": "连接",
+    "disconnect": "断开连接",
+    "open": "打开",
+    "normal": "正常",
+    "waiting_message": "等待第一条消息",
+    "disconnected": "已断开",
+    "find_me": "在 {{platform}} 中找我",
+    "manage": "管理 {{platform}}",
+    "last_message": "最近消息：{{time}}",
+    "ask_admin": "找管理员",
+    "unavailable": "暂不可连接",
+    "permissions_title": "谁可以连接",
+    "owner_or_admin": "智能体所有者或工作区管理员",
+    "admin_only": "仅工作区管理员",
+    "connect_title": "连接消息渠道",
+    "choose_description": "选择智能体和平台。",
+    "authorize_description": "将 {{agent}} 连接到 {{platform}}。",
+    "agent_label": "智能体",
+    "choose_agent": "选择智能体",
+    "platform_label": "平台",
+    "region_label": "区域",
+    "method_label": "连接方式",
+    "feishu": "飞书（中国）",
+    "lark": "Lark（国际）",
+    "setup_guide": "配置指南",
+    "connection_changed": "此连接已不可用。关闭后重试。",
+    "connect_failed": "无法连接机器人。",
+    "connect_success": "消息渠道已连接。",
+    "disconnect_failed": "无法断开机器人连接。",
+    "disconnect_title": "断开消息渠道？",
+    "disconnect_description": "此智能体将不再接收来自 {{platform}} 的消息。",
+    "agent_unavailable": "智能体已不可用"
   },
   "mcp_usage": {
     "agent_count_other": "已分配给 {{count}} 个智能体",

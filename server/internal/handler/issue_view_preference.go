@@ -44,6 +44,9 @@ func (h *Handler) resolvePreferenceScope(
 			writeError(w, http.StatusNotFound, "project not found")
 			return pgtype.UUID{}, false
 		}
+		if !h.requireProjectVisible(w, r, uuidToString(wsUUID), projUUID, http.StatusNotFound, "project not found") {
+			return pgtype.UUID{}, false
+		}
 		return projUUID, true
 	default:
 		writeError(w, http.StatusBadRequest, "invalid scope_type")

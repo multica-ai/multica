@@ -14,7 +14,8 @@ import type {
   Project,
   WorkingAgentSummary,
 } from "@multica/core/types";
-import { workspaceWorkingAgentsOptions } from "@multica/core/agents";
+import { agentTaskSnapshotOptions, workspaceWorkingAgentsOptions } from "@multica/core/agents/queries";
+import { deriveIssueSurfaceActivity } from "./activity";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useColumnWorkflow, workflowColumns } from "../utils/workflow-columns";
@@ -268,6 +269,7 @@ export function useIssueSurfaceController({
   const negatedFilters = useViewStore(useShallow(effectiveNegatedFilters));
   const propertyFilters = useViewStore((s) => s.propertyFilters);
   const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
+  const agentIdleFilter = useViewStore((s) => s.agentIdleFilter);
   const unreadFilter = useViewStore((s) => s.unreadFilter);
   const showSubIssues = useViewStore((s) => s.showSubIssues);
   const ganttShowCompleted = useViewStore((s) => s.ganttShowCompleted);
@@ -537,6 +539,7 @@ export function useIssueSurfaceController({
     Object.keys(effectivePropertyFilters).length > 0 ||
     dateFilter != null ||
     agentRunningFilter === true ||
+    agentIdleFilter === true ||
     unreadFilter === true;
 
   const workingAgentMineRelation =
@@ -552,7 +555,21 @@ export function useIssueSurfaceController({
     enabled: usesGantt || agentRunningFilter,
   });
   const workspaceWorkingAgents = workingAgentsProjection.data ?? EMPTY_LIST;
-  const workingDependency = filterDependencyState(agentRunningFilter, [workingAgentsProjection]);
+  const idleTasksProjection = useQuery({
+    ...agentTaskSnapshotOptions(wsId),
+    enabled: agentIdleFilter,
+  });
+  const idleTasks = agentIdleFilter ? idleTasksProjection.data : undefined;
+  const activeIssueIDs = useMemo(
+    () => idleTasks === undefined
+      ? undefined
+      : new Set(deriveIssueSurfaceActivity(idleTasks).activityByIssueId.keys()),
+    [idleTasks],
+  );
+  const workingDependency = combineFilterDependencies(
+    filterDependencyState(agentRunningFilter, [workingAgentsProjection]),
+    filterDependencyState(agentIdleFilter, [idleTasksProjection]),
+  );
   const workingFilterUnresolved = workingDependency.unresolved;
   const workingIssueIDs = useMemo(() => {
     const issueIDs = new Set<string>();
@@ -666,6 +683,7 @@ export function useIssueSurfaceController({
         ...(agentRunningFilter && !workingFilterUnresolved
           ? { working_issue_ids: [...workingIssueIDs] }
           : {}),
+        ...(agentIdleFilter ? { idle_only: true } : {}),
         ...(unreadFilter && !unreadFilterUnresolved
           ? { unread_issue_ids: [...unreadIssueIDs].sort() }
           : {}),
@@ -680,6 +698,7 @@ export function useIssueSurfaceController({
   }, [
     advancedTableFilter,
     agentRunningFilter,
+    agentIdleFilter,
     assigneeFilters,
     creatorFilters,
     dateParams,
@@ -757,14 +776,14 @@ export function useIssueSurfaceController({
   // The header chip's count, kept on its own query rather than folded into the
   // submenu facet request above. Two reasons: that request is deliberately
   // lazy (an always-on facet would re-enable it for Table/grouped surfaces on
-  // mount), and this spec drops `working_issue_ids` so toggling the filter
+  // mount), and this spec drops both activity filters so toggling the filter
   // does not change the query identity — the number must not flicker when you
   // click the very chip it labels.
   const workingAgentsQuerySpec = useMemo<IssueTableQuerySpec>(() => {
-    if (!agentRunningFilter) return tableQuerySpec;
-    const { working_issue_ids: _working, ...filters } = tableQuerySpec.filters;
+    if (!agentRunningFilter && !agentIdleFilter) return tableQuerySpec;
+    const { working_issue_ids: _working, idle_only: _idle, ...filters } = tableQuerySpec.filters;
     return { ...tableQuerySpec, filters };
-  }, [agentRunningFilter, tableQuerySpec]);
+  }, [agentRunningFilter, agentIdleFilter, tableQuerySpec]);
   const workingAgentsFacetRequest = useMemo(
     () => ({
       query: workingAgentsQuerySpec,
@@ -890,6 +909,7 @@ export function useIssueSurfaceController({
         negatedFilters,
         effectivePropertyFilters,
         agentRunningFilter,
+        agentIdleFilter,
         unreadFilter,
         showSubIssues,
         dateParams,
@@ -898,6 +918,7 @@ export function useIssueSurfaceController({
     [
       advancedTableFilter,
       agentRunningFilter,
+      agentIdleFilter,
       unreadFilter,
       assigneeFilters,
       creatorFilters,
@@ -940,6 +961,8 @@ export function useIssueSurfaceController({
     includeNoAssignee,
     agentRunningFilter,
     unreadFilter,
+    agentIdleFilter,
+    activeIssueIDs,
     creatorFilters,
     projectFilters: viewProjectFilters,
     includeNoProject: viewIncludeNoProject,

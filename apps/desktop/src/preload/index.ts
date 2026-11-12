@@ -21,6 +21,13 @@ import {
 } from "../shared/issue-window";
 import { AUTH_SESSION_STATE_CHANNEL } from "../shared/auth-session";
 import {
+  CONTEXT_MENU_COMMAND_CHANNEL,
+  CONTEXT_MENU_REQUEST_CHANNEL,
+  isContextMenuRequest,
+  type ContextMenuCommand,
+  type ContextMenuRequest,
+} from "../shared/context-menu";
+import {
   THEME_FOLDER_CHANGED_CHANNEL,
   THEME_FOLDER_OPEN_CHANNEL,
   THEME_FOLDER_READ_CHANNEL,
@@ -179,21 +186,26 @@ const desktopAPI = {
   setImmersiveMode: (immersive: boolean) =>
     ipcRenderer.invoke("window:setImmersive", immersive),
   /**
-   * Show a native OS notification for a new inbox item. Fired from the
-   * renderer only when the app is unfocused — in-focus feedback is the
-   * inbox sidebar's unread styling. `slug`, `itemId`, and `issueKey` are
-   * all round-tripped on click: slug pins routing to the source workspace
-   * (the user may switch workspaces before clicking the banner), itemId
-   * lets the renderer mark the row read, issueKey maps to the inbox URL
-   * param.
+   * Show a native OS notification. The source workspace and either the inbox
+   * selector or chat session are round-tripped on click. Main owns focus
+   * gating and deduplication across windows.
    */
   showNotification: (payload: {
     slug: string;
     itemId: string;
-    issueKey: string;
+    issueKey?: string;
+    chatSessionId?: string;
     title: string;
     body: string;
   }) => ipcRenderer.send("notification:show", payload),
+  getWindowForeground: (): Promise<boolean> => ipcRenderer.invoke("window:foreground"),
+  onWindowForegroundChanged: (callback: (foreground: boolean) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, foreground: unknown) => {
+      if (typeof foreground === "boolean") callback(foreground);
+    };
+    ipcRenderer.on("window:foreground-changed", handler);
+    return () => ipcRenderer.removeListener("window:foreground-changed", handler);
+  },
   /**
    * Update the OS dock / taskbar unread badge. Pass 0 to clear. Values
    * above 99 render as "99+" (capping is handled in the main process).
@@ -201,16 +213,15 @@ const desktopAPI = {
   setUnreadBadge: (count: number) =>
     ipcRenderer.send("badge:set", Math.max(0, Math.floor(count))),
   /**
-   * Subscribe to "open this inbox row" requests sent by the main process
-   * when the user clicks an OS notification banner. Returns an unsubscribe
-   * function. The payload echoes the `slug`, `itemId`, and `issueKey` that
-   * were passed to `showNotification`.
+   * Subscribe to inbox/chat navigation from an OS notification click.
+   * The existing channel also carries direct chat targets.
    */
   onInboxOpen: (
     callback: (payload: {
       slug: string;
       itemId: string;
-      issueKey: string;
+      issueKey?: string;
+      chatSessionId?: string;
     }) => void,
   ) => subscribeToMainRendererChannel("inbox:open", callback),
   /** Listen for native macOS back/forward swipe gestures. */
@@ -223,6 +234,19 @@ const desktopAPI = {
       ipcRenderer.removeListener(NAVIGATION_GESTURE_CHANNEL, handler);
     };
   },
+  /** Listen for right-clicks the page left unhandled, to draw their menu. */
+  onContextMenu: (callback: (request: ContextMenuRequest) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, request: unknown) => {
+      if (isContextMenuRequest(request)) callback(request);
+    };
+    ipcRenderer.on(CONTEXT_MENU_REQUEST_CHANNEL, handler);
+    return () => {
+      ipcRenderer.removeListener(CONTEXT_MENU_REQUEST_CHANNEL, handler);
+    };
+  },
+  /** Run the item picked in that menu. */
+  runContextMenuCommand: (command: ContextMenuCommand) =>
+    ipcRenderer.send(CONTEXT_MENU_COMMAND_CHANNEL, command),
   /** Report the renderer's memory-router path for recovery diagnostics. */
   setRendererRouteContext: (context: RendererRouteContextInput) =>
     ipcRenderer.send(RENDERER_ROUTE_CONTEXT_CHANNEL, context),

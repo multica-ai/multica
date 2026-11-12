@@ -32,6 +32,7 @@ import {
   agentTasksKeys,
 } from "../agents/queries";
 import { githubKeys } from "../github/queries";
+import { useGitHubConnectionStore } from "../github/connection-store";
 import { larkKeys } from "../lark/queries";
 import { slackKeys } from "../slack/queries";
 import { dingtalkKeys } from "../dingtalk/queries";
@@ -60,7 +61,8 @@ import {
 import { workspaceKeys, workspaceListOptions } from "../workspace/queries";
 import { isWorkspaceDeletePending } from "../workspace/pending-delete";
 import {
-  showWebNotification,
+  showSystemNotification,
+  systemNotificationSuppressedByFocus,
   type SystemNotificationPayload,
 } from "../platform/system-notification";
 import type { Workspace } from "../types/workspace";
@@ -119,6 +121,7 @@ import type {
   TaskFailedPayload,
   TaskCancelledPayload,
   ChatDonePayload,
+  ChatReplyNotificationPayload,
   ChatQuickActionsPayload,
   ChatQuickActionsPendingState,
   ChatQuickActionsFailureState,
@@ -583,7 +586,7 @@ export async function handleInboxNew(
   // the user is already looking at Multica, the inbox sidebar's unread
   // styling is enough — no need to interrupt with a banner. `desktopAPI`
   // is injected by the preload script; its absence (web app) skips silently.
-  if (typeof document !== "undefined" && document.hasFocus()) return;
+  if (systemNotificationSuppressedByFocus()) return;
   // Resolve the source workspace's slug once: it pins BOTH the mute check
   // and the deep link to the workspace the inbox item BELONGS to, never the
   // currently active one. Reading `getCurrentSlug()` here was the source of
@@ -628,21 +631,39 @@ export async function handleInboxNew(
     title: item.title,
     body: item.body ?? "",
   };
-  const desktopAPI = (
-    globalThis as unknown as {
-      desktopAPI?: {
-        showNotification?: (payload: SystemNotificationPayload) => void;
-      };
+  showSystemNotification(payload);
+}
+
+export function createChatReplyNotifier(
+  qc: QueryClient,
+  getUserId: () => string | undefined,
+): (payload: ChatReplyNotificationPayload) => Promise<void> {
+  const seen = new Set<string>();
+  return async (payload) => {
+    const messageId = payload.message_id;
+    const userId = getUserId();
+    if (!payload.workspace_id || !messageId || !payload.chat_session_id || !userId || seen.has(messageId)) return;
+    seen.add(messageId);
+    if (seen.size > 1_000) seen.delete(seen.values().next().value!);
+    if (systemNotificationSuppressedByFocus()) return;
+
+    const slug = await resolveInboxSourceSlug(qc, payload.workspace_id);
+    if (!slug) return;
+    try {
+      const { preferences } = await qc.ensureQueryData(notificationPreferenceOptions(payload.workspace_id, slug));
+      if (preferences.system_notifications === "muted" || preferences.chat_replies === "muted") return;
+    } catch {
+      // Match the existing default-on system-notification behavior.
     }
-  ).desktopAPI;
-  if (desktopAPI?.showNotification) {
-    // Desktop: native OS banner rendered by the Electron main process.
-    desktopAPI.showNotification(payload);
-    return;
-  }
-  // Web: the browser Notification API. No-op without granted permission or on
-  // SSR — the in-app inbox + unread badge still reflect the new item.
-  showWebNotification(payload);
+    if (getUserId() !== userId || systemNotificationSuppressedByFocus()) return;
+    showSystemNotification({
+      slug,
+      itemId: `chat:${messageId}`,
+      chatSessionId: payload.chat_session_id,
+      title: payload.title,
+      body: payload.body,
+    });
+  };
 }
 
 /**
@@ -720,6 +741,7 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
 async function refreshWorkingAgentQueries(qc: QueryClient, wsId: string): Promise<void> {
   const filters: QueryFilters[] = [
     { queryKey: workspaceWorkingAgentsKeys.all(wsId) },
+    { queryKey: agentTaskSnapshotKeys.all(wsId) },
     {
       queryKey: issueKeys.tableAll(wsId),
       predicate: ({ queryKey }) => {
@@ -736,6 +758,7 @@ async function refreshWorkingAgentQueries(qc: QueryClient, wsId: string): Promis
         // projection may contain newly started work. Other facets also
         // depend on this membership, not only rows and group descriptors.
         return spec?.filters.working_only === true ||
+          spec?.filters.idle_only === true ||
           spec?.filters.working_issue_ids !== undefined;
       },
     },
@@ -743,7 +766,7 @@ async function refreshWorkingAgentQueries(qc: QueryClient, wsId: string): Promis
       queryKey: issueKeys.sidebarAll(wsId),
       predicate: ({ queryKey }) => {
         const request = queryKey[4] as SidebarIssuesRequest | undefined;
-        return request?.table.filters.working_only === true;
+        return request?.table.filters.working_only === true || request?.table.filters.idle_only === true;
       },
     },
   ];
@@ -1006,16 +1029,13 @@ export function useRealtimeSync(
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: issueKeys.environmentsAll(wsId) });
       },
-      // Powers the agent presence cache: any task lifecycle change
-      // (dispatch / completed / failed / cancelled) refreshes the
-      // workspace-wide agent-task-snapshot query so per-agent presence
-      // reflects the change. task:message is NOT in this prefix path — it
-      // stays in specificEvents to avoid an invalidate storm during long runs.
+      // Task history and aggregates follow lifecycle changes. Activity
+      // membership, including the presence snapshot, uses the bounded
+      // refresh below so it cancels a pre-event first load without repeatedly
+      // cancelling its own slow refreshes. task:message stays in specificEvents.
       task: () => {
         const wsId = getCurrentWsId();
         if (!wsId) return;
-        qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.list(wsId) });
-        // Working-agent projections have their own bounded refresh below.
         // 30d activity series shares the same lifecycle signal — any task
         // completion / failure shifts the histogram. (Dispatch alone
         // doesn't change a completed_at-anchored series, but invalidating
@@ -1102,18 +1122,16 @@ export function useRealtimeSync(
       "subscriber:added", "subscriber:removed",
       "daemon:heartbeat",
       // Chat events are handled explicitly below; do not double-invalidate.
-      "chat:message", "chat:done", "chat:quick_actions", "chat:cancel_finalized", "chat:session_read",
+      "chat:message", "chat:done", "chat:reply_notification", "chat:quick_actions", "chat:cancel_finalized", "chat:session_read",
       "chat:session_created", "chat:session_deleted", "chat:session_updated",
       // task:message stays out of the prefix path because it fires per
       // streamed message during a long run — invalidating the snapshot on
       // every message would flood the network. Specific chat handlers below
       // still receive it via ws.on() (a separate subscription channel).
       "task:message",
-      // task:completed / task:failed deliberately NOT here. They go through
-      // both the task-prefix invalidate (refreshes the agent-task-snapshot
-      // cache) AND the chat-specific ws.on() handlers below. The two
-      // channels are independent — onAny dispatch and ws.on are separate
-      // subscriptions.
+      // task:completed / task:failed deliberately NOT here. They reach both
+      // onAny (task-prefix invalidation and bounded activity refresh) and the
+      // chat-specific ws.on() handlers below through independent subscriptions.
     ]);
 
     const unsubAny = ws.onAny((msg) => {
@@ -1151,6 +1169,10 @@ export function useRealtimeSync(
     // No self-event filtering: actor_id identifies the USER, not the TAB.
     // Filtering by actor_id would block other tabs of the same user.
     // Instead, both mutations and WS handlers use dedup checks to be idempotent.
+
+    const unsubGitHubInstallationCreated = ws.on("github_installation:created", (payload) => {
+      useGitHubConnectionStore.getState().complete(payload);
+    });
 
     const unsubIssueUpdated = ws.on("issue:updated", (p) => {
       const payload = p as IssueUpdatedPayload;
@@ -1674,6 +1696,10 @@ export function useRealtimeSync(
       // by the task lifecycle handlers below (MUL-4159).
     });
 
+    const notifyChatReply = createChatReplyNotifier(qc, () => authStore.getState().user?.id);
+    const unsubChatReplyNotification = ws.on("chat:reply_notification", (p) => {
+      void notifyChatReply(p as ChatReplyNotificationPayload);
+    });
     const unsubChatDone = ws.on("chat:done", (p) => {
       const payload = p as ChatDonePayload;
       chatWsLogger.info("chat:done (global)", {
@@ -1923,6 +1949,7 @@ export function useRealtimeSync(
 
     return () => {
       unsubAny();
+      unsubGitHubInstallationCreated();
       unsubIssueUpdated();
       unsubIssueCreated();
       unsubIssueDeleted();
@@ -1956,6 +1983,7 @@ export function useRealtimeSync(
       unsubTaskMessage();
       unsubChatMessage();
       unsubChatDone();
+      unsubChatReplyNotification();
       unsubChatQuickActions();
       unsubChatCancelFinalized();
       unsubTaskQueued();

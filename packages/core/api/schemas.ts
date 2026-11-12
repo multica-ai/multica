@@ -59,6 +59,7 @@ import type {
   GitHubConnectResponse,
   IssuePullRequestsResponse,
   IssueEnvironmentsResponse,
+  IssuePullRequestSummariesResponse,
   InboxItem,
   InboxWorkspaceUnread,
   IssueUnread,
@@ -378,6 +379,7 @@ export const EMPTY_LIST_GITHUB_INSTALLATIONS_RESPONSE: ListGitHubInstallationsRe
 };
 
 export const GitHubConnectResponseSchema = z.object({
+  connection_id: z.string().optional().catch(undefined),
   url: z.string().optional(),
   configured: z.boolean().optional().default(false),
 }).loose();
@@ -398,6 +400,7 @@ export const GitHubRepositorySchema = z.object({
 }).loose();
 
 export const ListGitHubRepositoriesResponseSchema = z.object({
+  repository_selection: z.enum(["all", "selected", "unknown"]).catch("unknown").optional(),
   repositories: z.array(GitHubRepositorySchema).default([]),
   total_count: z.number().optional().default(0),
   next_page: z.number().nullable().optional().default(null),
@@ -565,6 +568,28 @@ export const EMPTY_ISSUE_ENVIRONMENTS_RESPONSE: IssueEnvironmentsResponse = {
   configs: [],
   pending_starts: [],
   failed_starts: [],
+};
+
+// A malformed row is dropped rather than failing the whole workspace read, so
+// one bad link never blanks the PR chips on every card.
+const IssuePullRequestSummarySchema = z.object({
+  issue_id: z.string(),
+  id: z.string(),
+  provider: z.string().optional().default("github"),
+  repo_owner: z.string(),
+  repo_name: z.string(),
+  number: z.number(),
+  title: z.string().optional().default(""),
+  state: z.string(),
+  html_url: z.string(),
+}).loose();
+
+export const IssuePullRequestSummariesResponseSchema = z.object({
+  pull_requests: lenientArray(IssuePullRequestSummarySchema),
+}).loose();
+
+export const EMPTY_ISSUE_PULL_REQUEST_SUMMARIES_RESPONSE: IssuePullRequestSummariesResponse = {
+  pull_requests: [],
 };
 
 // Label responses are consumed by settings tables and resource pickers. Keep
@@ -1043,6 +1068,10 @@ export interface AppConfigResponse {
    * DELETE /api/comments/{id}/keep-replies. Older servers deleted the replies
    * too, so absent must be treated as false (#8296). */
   comment_delete_keep_replies_supported?: boolean;
+  /** Whether this server serves the community theme store under
+   * /api/theme-store. Off when the operator turned it off, and absent on older
+   * servers, so the app shows no Browse entry and makes no store requests. */
+  theme_store_enabled?: boolean;
   server_version?: string;
 }
 
@@ -1331,6 +1360,7 @@ export const AppConfigSchema = z.object({
   agent_conversation_starters_supported: BooleanWithDefaultSchema(false),
   issue_create_properties_supported: BooleanWithDefaultSchema(false),
   comment_delete_keep_replies_supported: BooleanWithDefaultSchema(false),
+  theme_store_enabled: BooleanWithDefaultSchema(false),
   server_version: OptionalStringSchema,
 }).loose();
 
@@ -1354,8 +1384,70 @@ export const EMPTY_APP_CONFIG: AppConfigResponse = {
   issue_create_properties_supported: false,
   // Fail closed: old servers delete a comment's replies with it.
   comment_delete_keep_replies_supported: false,
+  theme_store_enabled: false,
   feature_flags: {},
 };
+
+export type StoreThemeMode = "light" | "dark";
+
+/** A theme of the community registry, as /api/theme-store lists it. */
+export interface StoreTheme {
+  id: string;
+  name: string;
+  author: string;
+  /** The author's GitHub repository, `owner/name`. */
+  repo: string;
+  description?: string;
+  modes: StoreThemeMode[];
+  /** The release the registry checked; installs always get this one. */
+  version: string;
+  size: number;
+  /** Modes the registry rendered a screenshot for. */
+  screenshots: StoreThemeMode[];
+  /**
+   * Each mode's current screenshot. The registry re-renders screenshots
+   * without a new release; absent from servers that predate this.
+   */
+  screenshot_revisions?: Partial<Record<StoreThemeMode, string>>;
+  updated_at?: string;
+  /** Installs and updates served by this server, all users together. */
+  downloads: number;
+}
+
+const StoreThemeModesSchema = z.preprocess(
+  (value) => (Array.isArray(value) ? value.filter((m) => m === "light" || m === "dark") : []),
+  z.array(z.enum(["light", "dark"])),
+);
+
+const StoreThemeSchema = z
+  .object({
+    id: z.string(),
+    name: z.string(),
+    author: z.string(),
+    repo: z.string(),
+    description: OptionalStringSchema,
+    modes: StoreThemeModesSchema,
+    version: z.string(),
+    size: z.number(),
+    screenshots: StoreThemeModesSchema,
+    screenshot_revisions: z
+      .object({ light: z.string().optional(), dark: z.string().optional() })
+      .optional()
+      .catch(undefined),
+    updated_at: OptionalStringSchema,
+    downloads: z.number().catch(0).default(0),
+  })
+  .loose();
+
+/** One malformed entry drops that theme, not the whole list. */
+export const StoreThemeListSchema = z.object({
+  themes: z.preprocess(
+    (value) => (Array.isArray(value) ? value.filter((item) => StoreThemeSchema.safeParse(item).success) : []),
+    z.array(StoreThemeSchema),
+  ),
+});
+
+export const EMPTY_STORE_THEME_LIST: { themes: StoreTheme[] } = { themes: [] };
 
 // Preference keys may grow over time, so keep both the key and value spaces
 // forward-compatible while still rejecting non-string persisted data.
@@ -1745,6 +1837,12 @@ export const ProjectMemberSchema = z.object({
 export const ListProjectMembersResponseSchema = z.object({
   members: z.array(ProjectMemberSchema),
   total: z.number(),
+}).loose();
+
+// The viewer's own project subscription (`/api/projects/:id/subscription`).
+// Anything but an explicit `true` reads as not subscribed.
+export const ProjectSubscriptionSchema = z.object({
+  subscribed: z.boolean().catch(false),
 }).loose();
 
 const SearchProjectResultSchema = ProjectSchema.extend({
@@ -2320,6 +2418,48 @@ export const TaskMessagePayloadSchema = z.object({
 }).loose();
 
 export const TaskMessageListSchema = z.array(TaskMessagePayloadSchema).default([]);
+
+// Context receipt (`GET /api/tasks/:id/context-receipt`, MUL-9013). Lenient:
+// unknown enum values pass through as strings, and a malformed row is dropped
+// rather than failing the whole receipt.
+const ContextReceiptSourceSchema = z.object({
+  kind: z.string(),
+  name: z.string().optional(),
+  bytes: z.number().catch(0),
+  sha256: z.string().optional(),
+  delivery: z.string().catch(""),
+  path: z.string().optional(),
+  load: z.string().catch("unverified"),
+  verified_version: z.string().optional(),
+  parent: z.string().optional(),
+}).loose();
+
+const ContextReceiptSchema = z.object({
+  schema_version: z.number().catch(1),
+  runtime: z.string().catch(""),
+  runtime_version: z.string().optional(),
+  model: z.string().optional(),
+  prompt_bytes: z.number().catch(0),
+  brief_bytes: z.number().catch(0),
+  brief_delivery: z.string().catch(""),
+  resumed_session: z.boolean().catch(false),
+  fresh_retry: z.boolean().optional().catch(undefined),
+  mcp_servers: z.array(z.string()).catch([]),
+  sources: z
+    .array(z.unknown())
+    .catch([])
+    .transform((rows) =>
+      rows.flatMap((row) => {
+        const parsed = ContextReceiptSourceSchema.safeParse(row);
+        return parsed.success ? [parsed.data] : [];
+      }),
+    ),
+}).loose();
+
+export const TaskContextReceiptResponseSchema = z.object({
+  receipt: ContextReceiptSchema.nullable().catch(null),
+  recorded_at: z.string().optional(),
+}).loose();
 
 // Task cancellation (`POST /api/tasks/:id/cancel`) is consumed directly by
 // chat recovery. Its optional message payload must be well-formed before the
@@ -2976,6 +3116,11 @@ export const IssueInboxReadSchema = z
   .object({
     count: z.number().int().nonnegative(),
   })
+  .loose();
+
+// Deletion returns the number of notifications removed from the selected view.
+export const InboxDeleteSchema = z
+  .object({ count: z.number().int().nonnegative() })
   .loose();
 
 // The viewer's subscribed issue ids (`/api/issues/subscribed` GET), behind the
@@ -3708,6 +3853,7 @@ export const WecomInstallationSchema = z.object({
   workspace_id: z.string().default(""),
   agent_id: z.string().default(""),
   bot_id: z.string().default(""),
+  bot_name: z.string().optional(),
   installer_user_id: z.string().default(""),
   status: z.string().default("revoked"),
 }).loose();

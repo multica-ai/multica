@@ -14,6 +14,8 @@ import {
   cancelInboxLists,
   isInboxListRequestInFlight,
   onInboxInvalidate,
+  onInboxIssuesDeleted,
+  onInboxSummaryInvalidate,
 } from "../inbox/ws-updaters";
 import {
   applyIssueChange,
@@ -504,6 +506,10 @@ export function useDeleteIssue() {
     onSuccess: (_data, id, ctx) => {
       useRecentContextStore.getState().forgetContext(wsId, { type: "issue", id });
       cleanupDeletedIssueCaches(qc, wsId, id, ctx?.metadata);
+      // The deleting client's own inbox rows go with the issue; the WS echo
+      // (`issue:deleted` → `onInboxIssueDeleted`) is the backstop, not the
+      // plan — a dropped socket would leave ghost rows that 404 on click.
+      void onInboxIssuesDeleted(qc, wsId, [id]);
     },
     onSettled: (_data, _err, _id, ctx) => {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
@@ -799,6 +805,9 @@ export function useBatchDeleteIssues() {
           forgetContext(wsId, { type: "issue", id });
           cleanupDeletedIssueCaches(qc, wsId, id, ctx?.metadataById.get(id));
         }
+        // Same inbox ownership as the single delete: prune this client's rows
+        // now instead of waiting for the `issue:deleted` echoes.
+        void onInboxIssuesDeleted(qc, wsId, ids);
         return;
       }
 
@@ -827,6 +836,11 @@ export function useBatchDeleteIssues() {
       }
       qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
       invalidateDeletedIssueDependentCaches(qc, wsId);
+      // The server skipped some of the batch and only reports the count, so
+      // which inbox rows survived is unknowable client-side — re-read the
+      // inbox instead of pruning by id.
+      void onInboxInvalidate(qc, wsId);
+      void onInboxSummaryInvalidate(qc);
     },
     onSettled: (_data, _err, _ids, ctx) => {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
