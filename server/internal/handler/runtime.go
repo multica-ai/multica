@@ -884,6 +884,9 @@ func (h *Handler) requireRuntimeReadAccess(w http.ResponseWriter, r *http.Reques
 
 	rt, err := h.getAgentRuntime(r.Context(), source, runtimeUUID)
 	if err != nil {
+		if writeQueryCancellation(w, r, err) {
+			return db.AgentRuntime{}, db.Member{}, false
+		}
 		writeError(w, http.StatusNotFound, "runtime not found")
 		return db.AgentRuntime{}, db.Member{}, false
 	}

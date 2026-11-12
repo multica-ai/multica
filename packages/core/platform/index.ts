@@ -12,6 +12,8 @@ export {
   getWebNotificationPermission,
   requestWebNotificationPermission,
   showWebNotification,
+  showSystemNotification,
+  systemNotificationPath,
   type SystemNotificationPayload,
   type WebNotificationPermission,
 } from "./system-notification";

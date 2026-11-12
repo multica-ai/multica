@@ -1026,7 +1026,9 @@ if (!gotTheLock) {
           {
             slug: payload.slug,
             itemId: payload.itemId,
-            issueKey: payload.issueKey,
+            ...(payload.chatSessionId
+              ? { chatSessionId: payload.chatSessionId }
+              : { issueKey: payload.issueKey }),
           },
           mainWindows.findByWorkspace(payload.slug),
         );

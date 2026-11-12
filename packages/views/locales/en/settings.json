@@ -856,6 +856,9 @@
       "agent_activity": {
         "label": "Agent activity",
         "description": "When an agent run fails"
+      },
+      "chat_replies": {
+        "label": "Include chat replies"
       }
     },
     "system": {
@@ -864,7 +867,7 @@
     },
     "browser": {
       "label": "Browser notifications",
-      "hint": "Allow this browser to show notification banners for new inbox items.",
+      "hint": "Allow this browser to show banners for Inbox notifications and chat replies.",
       "enable": "Enable",
       "granted": "This browser can show notification banners.",
       "denied": "Blocked by your browser. Enable notifications for this site in your browser settings.",
@@ -1669,7 +1672,6 @@
     "last_message": "Last message {{time}}",
     "ask_admin": "Ask an admin",
     "unavailable": "Connection unavailable",
-    "server_unavailable": "Not enabled on this server: {{platforms}}",
     "permissions_title": "Who can connect",
     "owner_or_admin": "Agent owner or workspace admin",
     "admin_only": "Workspace admins only",
@@ -1681,7 +1683,6 @@
     "platform_label": "Platform",
     "region_label": "Region",
     "method_label": "Connection method",
-    "continue": "Continue",
     "feishu": "Feishu (China)",
     "lark": "Lark (International)",
     "setup_guide": "Setup guide",
