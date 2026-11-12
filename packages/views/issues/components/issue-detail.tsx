@@ -632,7 +632,7 @@ function JumpToLatestButton({
       variant="outline"
       size="sm"
       onClick={onClick}
-      className="rounded-full bg-background shadow-md dark:bg-background dark:hover:bg-muted"
+      className="bg-background shadow-md dark:bg-background dark:hover:bg-muted"
     >
       {hasNew ? (
         <>
@@ -657,7 +657,7 @@ function BackToTopButton({ onClick, label }: { onClick: () => void; label: strin
       variant="outline"
       size="sm"
       onClick={onClick}
-      className="rounded-full bg-background shadow-md dark:bg-background dark:hover:bg-muted"
+      className="bg-background shadow-md dark:bg-background dark:hover:bg-muted"
     >
       <ArrowUp />
       {label}
@@ -665,12 +665,13 @@ function BackToTopButton({ onClick, label }: { onClick: () => void; label: strin
   );
 }
 
-// The centered stack of timeline-jump pills floating just above the
+// The centered stack of timeline-jump affordances floating just above the
 // composer's top edge (MUL-8324). "Back to top" and "Jump to latest" are the
-// two ends of the same gesture, so they share the slot: their visibility
-// zones are complementary — back to top appears a viewport deep, jump to
-// latest only while still near the top — and on pages longer than five
-// viewports the narrow band where both apply stacks them with a gap.
+// two ends of the same gesture, so they share the slot. Since MUL-8951 the
+// zones overlap mid-page on desktop (jump to latest shows whenever the newest
+// entry is a screen away), so the stack carries both there — back to top
+// above, its arrow pointing the way; on mobile the near-top rule keeps the
+// zones complementary.
 function TimelineJumpPills({ children }: { children: ReactNode }) {
   return (
     <div className="absolute bottom-full left-1/2 mb-6 flex -translate-x-1/2 flex-col items-center gap-2">
