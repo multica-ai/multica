@@ -972,6 +972,9 @@ var defaultAgentCommandNames = append([]string{
 
 // zcodeDesktopAppBundlePaths discovers the CLI in default Desktop installs.
 var zcodeDesktopAppBundlePaths = func() []string {
+	if runtime.GOOS == "linux" {
+		return []string{"/opt/ZCode/zcode"}
+	}
 	if runtime.GOOS != "darwin" {
 		return nil
 	}
