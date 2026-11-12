@@ -163,13 +163,21 @@ function SortableTabItem({
   const { getShareableUrl } = useNavigation();
   const togglePin = useTabStore((s) => s.togglePin);
   const updateTab = useTabStore((s) => s.updateTab);
+  const rememberIssueIdentity = useTabStore((s) => s.rememberIssueIdentity);
   const issueWindowPath = parseIssueWindowPath(tab.url);
 
   // The tab's leading visual and title are derived live from its URL and the
   // query cache — a resource's own icon/status/avatar and its real title,
   // updated as the cache updates. `tab.title` is only a persisted first-frame
   // fallback. See @multica/views useTabPresentation.
-  const { visual, title, titleResolved } = useTabPresentation(tab.url, tab.title, { fetch: true });
+  const { visual, title, titleResolved, issueIdentity } = useTabPresentation(tab.url, tab.title, { fetch: true });
+  const issueUuid = issueIdentity?.id;
+  const issueIdentifier = issueIdentity?.identifier;
+  useEffect(() => {
+    if (issueUuid && issueIdentifier) {
+      rememberIssueIdentity(tab.id, issueUuid, issueIdentifier);
+    }
+  }, [tab.id, issueUuid, issueIdentifier, rememberIssueIdentity]);
   const pinLabel = tab.pinned
     ? t(($) => $.desktop.tab_bar.unpin)
     : t(($) => $.desktop.tab_bar.pin);

@@ -39,6 +39,7 @@ const state = vi.hoisted(() => ({
   moveTab: vi.fn<(from: number, to: number) => void>(),
   addTab: vi.fn<(path: string, title: string) => string>(),
   updateTab: vi.fn<(tabId: string, patch: { title?: string }) => void>(),
+  rememberIssueIdentity: vi.fn<(tabId: string, uuid: string, identifier: string) => void>(),
   openIssueWindow: vi.fn(),
 }));
 
@@ -58,6 +59,7 @@ vi.mock("@/stores/tab-store", () => {
     moveTab: state.moveTab,
     addTab: state.addTab,
     updateTab: state.updateTab,
+    rememberIssueIdentity: state.rememberIssueIdentity,
   };
   const useTabStore = Object.assign(
     (selector?: (s: typeof store) => unknown) =>
@@ -91,12 +93,17 @@ vi.mock("@multica/core/paths", async (importOriginal) => ({
 // default `title` mirrors the persisted tab title (matching the real hook's
 // fallback); a test can set `pres.title` to simulate a resolved title that
 // differs, to exercise resolved-title persistence.
-const pres = vi.hoisted(() => ({ title: null as string | null, titleResolved: true }));
+const pres = vi.hoisted(() => ({
+  title: null as string | null,
+  titleResolved: true,
+  issueIdentity: undefined as { id: string; identifier: string } | undefined,
+}));
 vi.mock("@multica/views/layout", () => ({
-  useTabPresentation: vi.fn((_url: string, fallbackTitle?: string) => ({
+  useTabPresentation: vi.fn((url: string, fallbackTitle?: string) => ({
     visual: { kind: "icon", icon: "ListTodo" },
     title: pres.title ?? fallbackTitle ?? "",
     titleResolved: pres.titleResolved,
+    issueIdentity: url.includes("/issues/") ? pres.issueIdentity : undefined,
   })),
   ResourceLeadingVisual: ({ visual }: { visual: { kind: string; icon?: string } }) => (
     <span data-testid="tab-leading" data-visual-kind={visual.kind} data-icon={visual.icon} />
@@ -144,9 +151,11 @@ function reset() {
   state.moveTab.mockReset();
   state.addTab.mockReset();
   state.updateTab.mockReset();
+  state.rememberIssueIdentity.mockReset();
   state.openIssueWindow.mockReset();
   pres.title = null;
   pres.titleResolved = true;
+  pres.issueIdentity = undefined;
   vi.mocked(useTabPresentation).mockClear();
 }
 
@@ -259,6 +268,23 @@ describe("TabBar hover action buttons", () => {
 });
 
 describe("TabBar title persistence", () => {
+  it("remembers the identity of a restored background identifier tab", () => {
+    const uuid = "01a08a00-0000-7000-8000-000000000001";
+    pres.issueIdentity = { id: uuid, identifier: "ACM-1" };
+    state.byWorkspace.acme.tabs[0] = {
+      id: "tA", url: "/acme/issues/ACM-1", title: "ACM-1", pinned: false,
+    };
+    state.byWorkspace.acme.activeTabId = "tB";
+
+    const { rerender } = render(<TabBar />);
+    expect(state.rememberIssueIdentity).toHaveBeenCalledExactlyOnceWith("tA", uuid, "ACM-1");
+    // A new result object for the same identity does not repeat the store write.
+    pres.issueIdentity = { id: uuid, identifier: "ACM-1" };
+    rerender(englishTabBar());
+    expect(state.rememberIssueIdentity).toHaveBeenCalledTimes(1);
+    expect(state.setActiveTab).not.toHaveBeenCalled();
+  });
+
   it("loads tab identities and persists resolved titles for background tabs too", () => {
     pres.title = "MUL-1: Fixed";
     state.byWorkspace.acme.tabs = [
