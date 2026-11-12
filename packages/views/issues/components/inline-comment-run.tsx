@@ -178,7 +178,11 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   return (
     <section aria-label={t(($) => $.inline_run.label, { name })}
       className={cn("@container/run min-w-0 py-2", className)} data-run-id={task.id}>
-      <div ref={animationVisibility.ref} className="flex min-h-7 min-w-0 items-center gap-2" data-run-summary-row>
+      {/* When this run stands in for a failure-notice comment, its summary row
+          is that comment's visible content for pinned-comment tracking; the
+          expanded transcript below is deliberately outside the boundary. */}
+      <div ref={animationVisibility.ref} className="flex min-h-7 min-w-0 items-center gap-2" data-run-summary-row
+        data-comment-pin-body={replacesFailureNotice && presentation === "inline" ? run.commentId : undefined}>
         {showIdentity && <>
           <ActorAvatar actorType="agent" actorId={task.agent_id} size="md" enableHoverCard showStatusDot />
           <TruncatedTooltip content={name} focusable>

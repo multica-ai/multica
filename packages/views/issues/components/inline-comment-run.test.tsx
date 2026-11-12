@@ -437,6 +437,21 @@ describe("InlineCommentRun", () => {
     expect(screen.getByText("Invalid API key · Please run /login")).toBeInTheDocument();
   });
 
+  it("marks only the summary row of a failure-notice stand-in for pinned-comment tracking", () => {
+    const client = new QueryClient();
+    const failed = task({ status: "failed", failure_reason: "timeout", error: "run timed out" });
+    const view = (replacesFailureNotice: boolean) => <QueryClientProvider client={client}>
+      <InlineCommentRun run={{ task: failed, commentId: "comment", hasReply: true }} replacesFailureNotice={replacesFailureNotice} />
+    </QueryClientProvider>;
+    const rendered = renderWithI18n(view(true));
+    const marked = document.querySelectorAll("[data-comment-pin-body]");
+    expect(marked).toHaveLength(1);
+    expect(marked[0]).toHaveAttribute("data-comment-pin-body", "comment");
+    expect(marked[0]).toHaveAttribute("data-run-summary-row");
+    rendered.rerender(view(false));
+    expect(document.querySelector("[data-comment-pin-body]")).toBeNull();
+  });
+
   it("offers retry beside a reply only when that reply is the run's failure notice", () => {
     const client = new QueryClient();
     const failed = task({ status: "failed", failure_reason: "timeout", error: "run timed out" });

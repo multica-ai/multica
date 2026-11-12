@@ -658,6 +658,15 @@
     "environment_started": "환경 {{name}}을(를) 시작했습니다"
   },
   "comment": {
+    "pins": {
+      "pin": "댓글 고정",
+      "unpin": "댓글 고정 해제",
+      "expand": "고정된 댓글 표시",
+      "collapse": "고정된 댓글 접기",
+      "count": "고정된 댓글: {{count}}개",
+      "jump": "{{author}}님의 댓글로 이동",
+      "error": "댓글 고정 상태를 변경하지 못했습니다"
+    },
     "add_reaction": "반응 추가",
     "collapse_thread": "스레드 접기",
     "expand_thread": "스레드 펼치기",

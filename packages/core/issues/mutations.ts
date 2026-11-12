@@ -1068,6 +1068,15 @@ function collectThreadCommentIds(
   return ids;
 }
 
+export function usePinComment(issueId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ commentId, pinned }: { commentId: string; pinned: boolean }) =>
+      pinned ? api.pinComment(commentId) : api.unpinComment(commentId),
+    onSettled: () => { qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) }); },
+  });
+}
+
 export function useResolveComment(issueId: string) {
   const qc = useQueryClient();
   return useMutation({

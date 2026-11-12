@@ -77,7 +77,7 @@ function comment(
 function renderThread(
   root: TimelineEntry,
   replies: TimelineEntry[],
-  { resolvable = true }: { resolvable?: boolean } = {},
+  { resolvable = true, onPinToggle }: { resolvable?: boolean; onPinToggle?: (id: string, pinned: boolean) => void } = {},
 ) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return renderWithI18n(
@@ -94,6 +94,7 @@ function renderThread(
         onCopyLink={vi.fn()}
         onCreateSubIssue={vi.fn()}
         onResolveToggle={resolvable ? vi.fn() : undefined}
+        onPinToggle={onPinToggle}
       />
     </QueryClientProvider>,
   );
@@ -114,6 +115,20 @@ async function openMenuLayout(index: number): Promise<string[]> {
 const agentAuthor = { actor_type: "agent", actor_id: "agent-1" } as const;
 
 describe("CommentCard — actions menu layout", () => {
+  it.each([false, true])("pins a root from the existing action menu (pinned=%s)", async pinned => {
+    const onPinToggle = vi.fn();
+    renderThread({ ...comment("root", null), pinned_at: pinned ? "2026-11-12T08:00:00Z" : null }, [], { onPinToggle });
+    await openMenuLayout(0);
+    fireEvent.click(screen.getByRole("menuitem", { name: pinned ? "Unpin comment" : "Pin comment" }));
+    expect(onPinToggle).toHaveBeenCalledWith("root", !pinned);
+  });
+  it("pins a reply without invoking the root action", async () => {
+    const onPinToggle = vi.fn();
+    renderThread(comment("root", null), [comment("reply", "root")], { onPinToggle });
+    await openMenuLayout(1);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Pin comment" }));
+    expect(onPinToggle).toHaveBeenCalledWith("reply", true);
+  });
   it("groups the author's root menu as respond, act, share, delete", async () => {
     renderThread(comment("root", null), []);
 

@@ -86,6 +86,17 @@ describe("useRealtimeSync — comment activity cache coherence", () => {
     vi.clearAllMocks();
   });
 
+  it.each(["comment:pinned", "comment:unpinned"])("%s invalidates only the timeline and unregisters on unmount", event => {
+    qc.setQueryData(issueKeys.timeline("issue-1"), []);
+    qc.setQueryData<ListIssuesCache>(updatedBoardKey, bucketed());
+    const { ws, handlers } = createRecordingWs();
+    const { unmount } = renderHook(() => useRealtimeSync(ws, createStores()), { wrapper: createWrapper(qc) });
+    handlers[event]!({ comment: { id: "c1", issue_id: "issue-1" } });
+    expect(qc.getQueryState(issueKeys.timeline("issue-1"))?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(updatedBoardKey)?.isInvalidated).toBe(false);
+    unmount();
+  });
+
   it("invalidates the updated_at-sorted board but leaves the position board", () => {
     qc.setQueryData<ListIssuesCache>(updatedBoardKey, bucketed());
     qc.setQueryData<ListIssuesCache>(positionBoardKey, bucketed());

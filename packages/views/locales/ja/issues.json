@@ -658,6 +658,15 @@
     "environment_started": "環境 {{name}} を起動しました"
   },
   "comment": {
+    "pins": {
+      "pin": "コメントを固定",
+      "unpin": "コメントの固定を解除",
+      "expand": "固定したコメントを表示",
+      "collapse": "固定したコメントを折りたたむ",
+      "count": "固定したコメント：{{count}}件",
+      "jump": "{{author}}のコメントに移動",
+      "error": "固定状態を更新できませんでした"
+    },
     "add_reaction": "リアクションを追加",
     "collapse_thread": "スレッドを折りたたむ",
     "expand_thread": "スレッドを展開",

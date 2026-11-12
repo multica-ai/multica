@@ -105,6 +105,7 @@ import { IssuePropertyPills } from "./issue-property-pills";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
 import { useNewRunIds } from "./use-run-comment-motion";
 import { AgentRunComment, CommentCard } from "./comment-card";
+import { CommentPins } from "./comment-pins";
 import { EMPTY_COMMENT_RUNS, buildCommentRunView, orderTimelineWithRuns, type CommentRun } from "./comment-runs";
 import { issueTasksOptions } from "@multica/core/issues/queries";
 import { SourceContextBadge } from "./source-context-viewer";
@@ -1804,7 +1805,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const {
     timeline, loading: timelineLoading, dataUpdatedAt: timelineUpdatedAt,
     submitComment, submitReply,
-    editComment, deleteComment, toggleResolveComment, toggleReaction: handleToggleReaction,
+    editComment, deleteComment, toggleResolveComment, togglePinComment, toggleReaction: handleToggleReaction,
   } = useIssueTimeline(id, user?.id, activeDeliverableJump?.commentId);
   const newComments = useNewCommentsWhileAway(timeline, {
     ready: !timelineLoading,
@@ -1827,6 +1828,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // expand Set is keyed only on commentId, not on resolution state). Without
   // this wrapper, an expand → unresolve → resolve sequence keeps the thread
   // visually expanded after the second resolve.
+  const handlePinToggle = useCallback((commentId: string, pinned: boolean) => {
+    void togglePinComment({ commentId, pinned }).catch(() => toast.error(t(($) => $.comment.pins.error)));
+  }, [togglePinComment, t]);
   const handleResolveToggle = useCallback(
     (commentId: string, resolved: boolean) => {
       // Fold the thread back on any resolve change: clear the thread ROOT's
@@ -2202,7 +2206,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // resolution folding the whole thread into a bar, or a reply resolution
   // folding the other replies — then mount the thread and let the effect
   // below align the reply once its row lands.
-  const [pendingReplyJump, setPendingReplyJump] = useState<{ replyId: string; rootId: string } | null>(null);
+  const [pendingReplyJump, setPendingReplyJump] = useState<{ replyId: string; rootId: string; pin?: boolean } | null>(null);
   const jumpToReply = useCallback(
     (replyId: string) => {
       const rootId = replyToRoot.get(replyId);
@@ -2232,7 +2236,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   useEffect(() => {
     const container = scrollContainerEl;
     if (!pendingReplyJump || !container) return;
-    const { replyId, rootId } = pendingReplyJump;
+    const { replyId, rootId, pin } = pendingReplyJump;
     let rafId = 0;
     let frames = 0;
     let last = -1;
@@ -2250,9 +2254,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       const e = el.getBoundingClientRect();
       const target = Math.max(
         0,
-        container.scrollTop + (e.top - c.top) - 16 - (stickyBar?.offsetHeight ?? 0),
+        container.scrollTop + (e.top - c.top) - (pin ? 80 : 16) - (stickyBar?.offsetHeight ?? 0),
       );
       container.scrollTop = target;
+      if (pin && !container.querySelector(`[data-comment-pin-body="${replyId}"]`)) {
+        if (++frames < 120) rafId = requestAnimationFrame(align);
+        else setPendingReplyJump(null);
+        return;
+      }
       if (Math.abs(target - last) > 1 && ++frames < 90) {
         last = target;
         rafId = requestAnimationFrame(align);
@@ -2269,6 +2278,21 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       replyToRoot.has(commentId) ? jumpToReply(commentId) : jumpToThread(commentId),
     [replyToRoot, jumpToReply, jumpToThread],
   );
+  const jumpToPinnedComment = useCallback((commentId: string) => {
+    const rootId = replyToRoot.get(commentId) ?? commentId;
+    const collapse = useCommentCollapseStore.getState();
+    const byId = new Map(displayTimeline.map(entry => [entry.id, entry]));
+    let current = byId.get(commentId);
+    const seen = new Set<string>();
+    while (current && !seen.has(current.id)) {
+      seen.add(current.id);
+      if (collapse.isCollapsed(id, current.id)) collapse.toggle(id, current.id);
+      toggleResolvedExpand(current.id, true);
+      current = current.parent_id ? byId.get(current.parent_id) : undefined;
+    }
+    jumpToMinimapTarget(commentId);
+    setPendingReplyJump({ replyId: commentId, rootId, pin: true });
+  }, [displayTimeline, id, replyToRoot, toggleResolvedExpand, jumpToMinimapTarget]);
   // With comments that arrived while the reader was away, land on the first
   // of them so they read in order; otherwise go to the very end.
   const firstNewCommentId = newComments.ids[0];
@@ -3357,6 +3381,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             onReplyAccepted: scrollToTimelineBottom, onEdit: editComment, onDelete: deleteComment,
             onToggleReaction: handleToggleReaction, onCreateSubIssue: openCommentSubIssue,
             onResolveToggle: handleResolveToggle,
+            onPinToggle: handlePinToggle,
             onCopyLink: actions.copyCommentLink, onJumpToComment: jumpToComment,
             onCollapseResolved: reply.resolved_at ? () => toggleResolvedExpand(reply.id, false) : undefined,
             expandedResolvedIds: expandedResolved, onResolvedExpandChange: toggleResolvedExpand,
@@ -3396,6 +3421,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             onToggleReaction={handleToggleReaction}
             onCreateSubIssue={openCommentSubIssue}
             onResolveToggle={handleResolveToggle}
+            onPinToggle={handlePinToggle}
             onCopyLink={actions.copyCommentLink}
             onJumpToComment={jumpToComment}
             onCollapseResolved={isResolved ? () => toggleResolvedExpand(item.id, false) : undefined}
@@ -4115,6 +4141,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 The per-task timeline + past runs live in the right panel
                 via ExecutionLogSection. */}
 
+            <CommentPins key={id} entries={displayTimeline} container={scrollContainerEl} onJump={jumpToPinnedComment} />
+
             {/* Timeline entries — virtualized via react-virtuoso to keep
                 first-paint cost O(viewport) instead of O(N). On a 500-comment
                 issue the unvirtualized .map froze the page for several
@@ -4196,6 +4224,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           <IssueAppRequests issueId={id} highlightId={highlightAppRequestId} highlightToken={highlightRequestToken} />
           <div
             ref={composerRef}
+            data-comment-pins-bottom-overlay
             data-comment-images={commentImageLayout}
             className={cn(
               "mt-4",

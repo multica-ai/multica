@@ -19,6 +19,8 @@ export type WSEventType =
   | "comment:deleted"
   | "comment:resolved"
   | "comment:unresolved"
+  | "comment:pinned"
+  | "comment:unpinned"
   | "agent:status"
   | "agent:created"
   | "agent:archived"
@@ -284,6 +286,12 @@ export interface CommentDeletedPayload {
 }
 
 export interface CommentResolvedPayload {
+  comment: Comment;
+}
+export interface CommentPinnedPayload {
+  comment: Comment;
+}
+export interface CommentUnpinnedPayload {
   comment: Comment;
 }
 
@@ -660,6 +668,8 @@ export interface WSEventPayloadMap {
   "comment:deleted": CommentDeletedPayload;
   "comment:resolved": CommentResolvedPayload;
   "comment:unresolved": CommentUnresolvedPayload;
+  "comment:pinned": CommentPinnedPayload;
+  "comment:unpinned": CommentUnpinnedPayload;
   "reaction:added": ReactionAddedPayload;
   "reaction:removed": ReactionRemovedPayload;
   "agent:status": AgentStatusPayload;

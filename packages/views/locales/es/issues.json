@@ -658,6 +658,15 @@
     "environment_started": "inició el entorno {{name}}"
   },
   "comment": {
+    "pins": {
+      "pin": "Fijar comentario",
+      "unpin": "Desfijar comentario",
+      "expand": "Mostrar comentarios fijados",
+      "collapse": "Contraer comentarios fijados",
+      "count": "Comentarios fijados: {{count}}",
+      "jump": "Ir al comentario de {{author}}",
+      "error": "No se pudo actualizar el comentario fijado"
+    },
     "add_reaction": "Añadir reacción",
     "collapse_thread": "Plegar conversación",
     "expand_thread": "Desplegar conversación",

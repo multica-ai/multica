@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { CheckCircle2, ChevronRight, CornerUpLeft, ListChevronsDownUp, Copy, Link2, Loader2, MessageSquare, MessageSquarePlus, MoreHorizontal, Pencil, Plus, RotateCcw, SmilePlus, Trash2 } from "@multica/ui/icons";
+import { CheckCircle2, ChevronRight, CornerUpLeft, ListChevronsDownUp, Copy, Link2, Loader2, MessageSquare, MessageSquarePlus, MoreHorizontal, Pencil, Pin, Plus, RotateCcw, SmilePlus, Trash2 } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { Card } from "@multica/ui/components/ui/card";
 import { Button, buttonVariants } from "@multica/ui/components/ui/button";
@@ -146,6 +146,7 @@ interface CommentCardProps {
   onCreateSubIssue?: (commentId: string, prompt?: string) => void;
   /** Resolve/unresolve any comment in this thread (commentId = the target row). */
   onResolveToggle?: (commentId: string, resolved: boolean) => void;
+  onPinToggle?: (commentId: string, pinned: boolean) => void;
   /** Copy a deep link (`#comment-…`) to a single comment in this thread. */
   onCopyLink?: (commentId: string) => void;
   /** Scroll to and flash a comment in this thread. */
@@ -640,6 +641,7 @@ function useCommentMenuGroups({
   canEdit,
   canDelete,
   resolve,
+  onPinToggle,
   onStartEdit,
   onReply,
   onAddReaction,
@@ -652,6 +654,7 @@ function useCommentMenuGroups({
   canEdit: boolean;
   canDelete: boolean;
   resolve?: Pick<RowActionItem, "icon" | "label" | "onSelect">;
+  onPinToggle?: (commentId: string, pinned: boolean) => void;
   onStartEdit: () => void;
   onReply?: () => void;
   onAddReaction: () => void;
@@ -672,6 +675,7 @@ function useCommentMenuGroups({
   }
   const act: RowActionItem[] = [];
   if (resolve) act.push({ key: "resolve", ...resolve });
+  if (onPinToggle && !entry.deleted_at) act.push({ key: "pin", icon: <Pin className="h-3.5 w-3.5" />, label: entry.pinned_at ? t(($) => $.comment.pins.unpin) : t(($) => $.comment.pins.pin), onSelect: () => onPinToggle(entry.id, !entry.pinned_at) });
   if (onCreateSubIssue && entry.comment_type === "comment") {
     act.push({
       key: "sub-issue",
@@ -760,6 +764,7 @@ function CommentRow({
   onToggleReaction,
   onCreateSubIssue,
   onResolveToggle,
+  onPinToggle,
   onCopyLink,
   onFocusReply,
 }: {
@@ -781,6 +786,7 @@ function CommentRow({
   onToggleReaction: (commentId: string, emoji: string) => void;
   onCreateSubIssue?: (commentId: string, prompt?: string) => void;
   onResolveToggle?: (commentId: string, resolved: boolean) => void;
+  onPinToggle?: (commentId: string, pinned: boolean) => void;
   onCopyLink?: (commentId: string) => void;
   /** Moves the caret into the thread's reply box. */
   onFocusReply?: () => void;
@@ -809,6 +815,7 @@ function CommentRow({
     editing: edit.editing,
     canEdit: canEditEntry,
     canDelete: canDeleteEntry,
+    onPinToggle,
     resolve: onResolveToggle && (isResolution
       ? { icon: <RotateCcw className="h-3.5 w-3.5" />, label: t(($) => $.comment.resolve.unresolve_action), onSelect: () => onResolveToggle(entry.id, false) }
       : { icon: <CheckCircle2 className="h-3.5 w-3.5" />, label: t(($) => $.comment.resolve.resolve_with_comment_action), onSelect: () => onResolveToggle(entry.id, true) }),
@@ -834,6 +841,7 @@ function CommentRow({
     <div
       ref={scopeRef}
       data-comment-block
+
       className="pb-3"
       onContextMenu={(e) => {
         if (edit.editing || !shouldOpenRowMenu(e, { deferToContent: true })) return;
@@ -937,6 +945,7 @@ function CommentRow({
       {edit.editing ? (
         <div
           {...edit.dropZoneProps}
+          data-comment-pin-body={entry.deleted_at ? undefined : entry.id}
           className="relative pl-12 pr-4 max-md:pl-3 max-md:pr-3 pt-1"
           onKeyDown={(e) => { if (e.key === "Escape") edit.cancelEdit(); }}
         >
@@ -1014,12 +1023,14 @@ function CommentRow({
         </div>
       ) : (
         <>
+          <div data-comment-pin-body={entry.deleted_at ? undefined : entry.id}>
           <div tabIndex={currentUserId ? 0 : undefined} role="group"
             aria-label={t(($) => $.reply.annotations.source_label, { name: entry.actor_name || getActorName(entry.actor_type, entry.actor_id) })}
             data-comment-content={entry.id} className="pl-12 pr-4 max-md:pl-3 max-md:pr-3 text-body leading-relaxed text-foreground">
             <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
           </div>
           <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-12 pr-4 max-md:pl-3 max-md:pr-3" />
+          </div>
           <div className="pl-12 pr-4 max-md:pl-3 max-md:pr-3">
             <SteerReceipts issueId={issueId} entry={entry} />
             {entry.actor_type === "agent" && entry.source_task_id && (
@@ -1143,6 +1154,7 @@ function CommentCardImpl({
   onToggleReaction,
   onCreateSubIssue,
   onResolveToggle,
+  onPinToggle,
   onCopyLink,
   onJumpToComment,
   onCollapseResolved,
@@ -1206,6 +1218,7 @@ function CommentCardImpl({
     editing: edit.editing,
     canEdit: canEditEntry,
     canDelete: canDeleteEntry,
+    onPinToggle,
     resolve: onResolveToggle && (entry.resolved_at
       ? { icon: <RotateCcw className="h-3.5 w-3.5" />, label: t(($) => $.comment.resolve.unresolve_thread_action), onSelect: () => onResolveToggle(entry.id, false) }
       : { icon: <CheckCircle2 className="h-3.5 w-3.5" />, label: t(($) => $.comment.resolve.resolve_thread_action), onSelect: () => onResolveToggle(entry.id, true) }),
@@ -1256,7 +1269,8 @@ function CommentCardImpl({
       replyTo={row.replyTo && <ReplyToQuote entry={row.replyTo} onJump={onJumpToComment} />}
       commentProps={row.reply ? {
         issueId, entry: row.reply, replies: [], currentUserId, canModerate, onReply, onEdit, onDelete,
-        onToggleReaction, onCreateSubIssue, onResolveToggle, onCopyLink, highlightedCommentId, enteringRunIds,
+        onToggleReaction, onCreateSubIssue, onResolveToggle,
+  onPinToggle, onCopyLink, highlightedCommentId, enteringRunIds,
       } : undefined} />
   ) : renderReply(row, managedAnchor);
 
@@ -1289,6 +1303,7 @@ function CommentCardImpl({
             onToggleReaction={onToggleReaction}
             onCreateSubIssue={onCreateSubIssue}
             onResolveToggle={onResolveToggle}
+            onPinToggle={onPinToggle}
             onCopyLink={onCopyLink}
             onFocusReply={currentUserId ? focusReply : undefined}
           />
@@ -1379,6 +1394,7 @@ function CommentCardImpl({
         <div
           ref={rootScopeRef}
           data-comment-block
+
           className={cn("transition-colors duration-700", isHighlighted && highlightedCommentBackgroundClass)}
           // Same right-click as a reply's; only while the thread is open, since
           // the menu lives in the open header.
@@ -1519,6 +1535,7 @@ function CommentCardImpl({
             {edit.editing ? (
               <div
                 {...edit.dropZoneProps}
+                data-comment-pin-body={entry.id}
                 className="relative pl-8 max-md:pl-0"
                 onKeyDown={(e) => { if (e.key === "Escape") edit.cancelEdit(); }}
               >
@@ -1596,12 +1613,14 @@ function CommentCardImpl({
               </div>
             ) : !noticeRun && (
               <>
+                <div data-comment-pin-body={entry.id}>
                 <div tabIndex={currentUserId ? 0 : undefined} role="group"
             aria-label={t(($) => $.reply.annotations.source_label, { name: entry.actor_name || getActorName(entry.actor_type, entry.actor_id) })}
             data-comment-content={entry.id} className="pl-8 max-md:pl-0 text-body leading-relaxed text-foreground">
                   <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
                 </div>
                 <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-8 max-md:pl-0" />
+                </div>
                 <div className="pl-8 max-md:pl-0">
                   <SteerReceipts issueId={issueId} entry={entry} />
                   {entry.actor_type === "agent" && entry.source_task_id && (

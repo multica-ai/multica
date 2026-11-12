@@ -675,6 +675,15 @@
     "environment_started": "a démarré l'environnement {{name}}"
   },
   "comment": {
+    "pins": {
+      "pin": "Épingler le commentaire",
+      "unpin": "Désépingler le commentaire",
+      "expand": "Afficher les commentaires épinglés",
+      "collapse": "Replier les commentaires épinglés",
+      "count": "Commentaires épinglés : {{count}}",
+      "jump": "Aller au commentaire de {{author}}",
+      "error": "Impossible de modifier l’épingle"
+    },
     "add_reaction": "Ajouter une réaction",
     "collapse_thread": "Replier le fil",
     "expand_thread": "Développer le fil",

@@ -1116,6 +1116,7 @@ export function useRealtimeSync(
       "issue:updated", "issue:created", "issue:deleted", "issue_attachments:changed", "issue_labels:changed", "issue_unread:changed", "issue_metadata:changed", "issue_properties:changed", "property:created", "property:updated", "inbox:new",
       "comment:created", "comment:updated", "comment:deleted",
       "comment:resolved", "comment:unresolved",
+      "comment:pinned", "comment:unpinned",
       "activity:created",
       "reaction:added", "reaction:removed",
       "issue_reaction:added", "issue_reaction:removed",
@@ -1372,6 +1373,15 @@ export function useRealtimeSync(
           invalidateIssueOwnerProjections(qc, wsId, issue_id);
         }
       }
+    });
+
+    const unsubCommentPinned = ws.on("comment:pinned", (p) => {
+      const { comment } = p as CommentResolvedPayload;
+      if (comment?.issue_id) invalidateTimeline(comment.issue_id);
+    });
+    const unsubCommentUnpinned = ws.on("comment:unpinned", (p) => {
+      const { comment } = p as CommentResolvedPayload;
+      if (comment?.issue_id) invalidateTimeline(comment.issue_id);
     });
 
     const unsubCommentResolved = ws.on("comment:resolved", (p) => {
@@ -1964,6 +1974,8 @@ export function useRealtimeSync(
       unsubCommentUpdated();
       unsubCommentDeleted();
       unsubCommentResolved();
+      unsubCommentPinned();
+      unsubCommentUnpinned();
       unsubCommentUnresolved();
       unsubActivityCreated();
       unsubReactionAdded();

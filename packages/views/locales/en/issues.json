@@ -675,6 +675,15 @@
     "environment_started": "started the environment {{name}}"
   },
   "comment": {
+    "pins": {
+      "pin": "Pin comment",
+      "unpin": "Unpin comment",
+      "expand": "Show pinned comments",
+      "collapse": "Collapse pinned comments",
+      "count": "Pinned comments: {{count}}",
+      "jump": "Jump to comment by {{author}}",
+      "error": "Could not update the pin"
+    },
     "add_reaction": "Add reaction",
     "collapse_thread": "Collapse thread",
     "expand_thread": "Expand thread",

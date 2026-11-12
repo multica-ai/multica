@@ -34,6 +34,9 @@ export interface Comment {
   resolved_at: string | null;
   resolved_by_type: CommentAuthorType | null;
   resolved_by_id: string | null;
+  pinned_at?: string | null;
+  pinned_by_type?: CommentAuthorType | null;
+  pinned_by_id?: string | null;
   source_task_id?: string | null;
   // The quick action that produced this comment (MUL-5465). A quick action
   // posts an ORDINARY comment and marks it with this id; the collapsed card
