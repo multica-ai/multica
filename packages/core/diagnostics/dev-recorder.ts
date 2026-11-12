@@ -1,15 +1,19 @@
 // In-memory recording of what this client did recently: API requests, route
 // changes, long tasks, errors, WebSocket state and heap size. It backs the
-// development toolbar's panels and its bug reports, and is only installed by
-// that toolbar, so production builds never record anything.
+// development toolbar's panels and is only installed by that toolbar, so
+// production builds never record anything.
 
 import { setApiRequestObserver } from "../api/request-observer";
 
 export interface DevRequest {
   requestId: string;
   method: string;
+  /** Sensitive query parameters are redacted. */
   path: string;
+  /** JSON body with sensitive fields redacted; see `bodyNote` for what is missing. */
   body: string | null;
+  /** Why `body` is not the whole request body, so it cannot be replayed as is. */
+  bodyNote: string | null;
   /** Epoch ms. */
   startedAt: number;
   /** Null while in flight. */
@@ -78,6 +82,7 @@ const CAPS: Record<Exclude<keyof DevRecording, "heapLimit">, number> = {
 const BODY_MAX_CHARS = 2_000;
 const MESSAGE_MAX_CHARS = 1_000;
 const MEMORY_SAMPLE_MS = 2_000;
+const PRUNE_INTERVAL_MS = 5_000;
 // Panels re-render on every change; coalescing keeps a burst of requests, or
 // an error logged while rendering, from turning into a render per entry.
 const NOTIFY_DELAY_MS = 100;
@@ -109,6 +114,84 @@ function scheduleNotify() {
 function prune<T extends { at: number }>(items: readonly T[], cap: number, now: number): T[] {
   const fresh = items.filter((item) => now - item.at <= DEV_RECORDING_WINDOW_MS);
   return fresh.length > cap ? fresh.slice(fresh.length - cap) : fresh;
+}
+
+/** Requests still in flight stay however old they are: they have not ended yet. */
+function pruneRequests(requests: readonly DevRequest[], now: number): DevRequest[] {
+  const kept = requests.filter((r) => r.durationMs === null || now - r.startedAt <= DEV_RECORDING_WINDOW_MS);
+  return kept.length > CAPS.requests ? kept.slice(kept.length - CAPS.requests) : kept;
+}
+
+/** Drop what has aged out of the window, so idle time empties the panels too. */
+function pruneExpired(now: number) {
+  const next: DevRecording = {
+    ...recording,
+    requests: pruneRequests(recording.requests, now),
+    navigations: prune(recording.navigations, CAPS.navigations, now),
+    longTasks: prune(recording.longTasks, CAPS.longTasks, now),
+    errors: prune(recording.errors, CAPS.errors, now),
+    sync: prune(recording.sync, CAPS.sync, now),
+    memory: prune(recording.memory, CAPS.memory, now),
+  };
+  const changed = (Object.keys(CAPS) as (keyof typeof CAPS)[]).some(
+    (key) => next[key].length !== recording[key].length,
+  );
+  if (changed) update(next);
+}
+
+// Names of fields and query parameters that carry credentials: VCS and bot
+// tokens, webhook secrets and URLs, passwords, agent environment variables.
+// Numbers are never redacted, so usage counts such as `input_tokens` survive.
+const SENSITIVE_KEY =
+  /(token|secret|password|passphrase|credential|api_?key|private_?key|webhook_url|env)s?$/i;
+const REDACTED = "[redacted]";
+
+function redactValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redactValue);
+  if (value === null || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, field]) => [
+      key,
+      SENSITIVE_KEY.test(key) && field !== null && typeof field !== "number" && typeof field !== "boolean"
+        ? REDACTED
+        : redactValue(field),
+    ]),
+  );
+}
+
+/** The path with sensitive query parameters redacted. */
+export function redactPath(path: string): string {
+  const query = path.indexOf("?");
+  if (query < 0) return path;
+  const params = new URLSearchParams(path.slice(query + 1));
+  let redacted = false;
+  for (const key of [...params.keys()]) {
+    if (!SENSITIVE_KEY.test(key)) continue;
+    params.set(key, REDACTED);
+    redacted = true;
+  }
+  return redacted ? `${path.slice(0, query)}?${params.toString()}` : path;
+}
+
+/**
+ * What of a request body can be kept for display and replay: JSON with
+ * sensitive fields redacted, cut to a bounded size. Anything else is not kept,
+ * since there is no telling what in it is a secret.
+ */
+export function recordableBody(body: string | null): Pick<DevRequest, "body" | "bodyNote"> {
+  if (body === null) return { body: null, bodyNote: null };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return { body: null, bodyNote: `not JSON (${body.length} characters), so not recorded` };
+  }
+  const redacted = JSON.stringify(redactValue(parsed));
+  if (redacted.length <= BODY_MAX_CHARS) return { body: redacted, bodyNote: null };
+  return {
+    body: truncate(redacted, BODY_MAX_CHARS),
+    bodyNote: `truncated to ${BODY_MAX_CHARS} of ${redacted.length} characters`,
+  };
 }
 
 function update(patch: Partial<DevRecording>) {
@@ -187,22 +270,17 @@ export function installDevRecorder(): void {
 
   setApiRequestObserver({
     onStart: ({ requestId, method, path, body }) => {
-      const now = Date.now();
       const request: DevRequest = {
         requestId,
         method,
-        path,
-        body: body === null ? null : truncate(body, BODY_MAX_CHARS),
-        startedAt: now,
+        path: redactPath(path),
+        ...recordableBody(body),
+        startedAt: Date.now(),
         durationMs: null,
         status: null,
         error: null,
       };
-      const kept = recording.requests.filter(
-        (r) => r.durationMs === null || now - r.startedAt <= DEV_RECORDING_WINDOW_MS,
-      );
-      kept.push(request);
-      update({ requests: kept.length > CAPS.requests ? kept.slice(kept.length - CAPS.requests) : kept });
+      update({ requests: pruneRequests([...recording.requests, request], request.startedAt) });
     },
     onEnd: ({ requestId, status, error }) => {
       const now = Date.now();
@@ -267,7 +345,11 @@ export function installDevRecorder(): void {
   };
   sampleHeap();
   const heapTimer = setInterval(sampleHeap, MEMORY_SAMPLE_MS);
-  cleanups.push(() => clearInterval(heapTimer));
+  const pruneTimer = setInterval(() => pruneExpired(Date.now()), PRUNE_INTERVAL_MS);
+  cleanups.push(() => {
+    clearInterval(heapTimer);
+    clearInterval(pruneTimer);
+  });
 
   teardown = () => cleanups.forEach((cleanup) => cleanup());
 }

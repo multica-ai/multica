@@ -92,6 +92,7 @@ function request(overrides: Partial<DevRequest>): DevRequest {
     method: "GET",
     path: "/api/issues",
     body: null,
+    bodyNote: null,
     startedAt: 0,
     durationMs: 40,
     status: 200,
@@ -136,6 +137,13 @@ describe("curlCommand", () => {
         `--data '{"title":"it'\\''s"}'`,
       ].join(" \\\n  "),
     );
+  });
+});
+
+describe("curlCommand with an incomplete body", () => {
+  it("refuses to build a command that would send a different request", () => {
+    const truncated = request({ method: "POST", body: '{"content":"aaa…', bodyNote: "truncated to 2000 of 2113 characters" });
+    expect(curlCommand("http://localhost:18080", truncated, "acme")).toBeNull();
   });
 });
 

@@ -95,9 +95,11 @@ function shellQuote(value: string): string {
 
 /**
  * The request as a curl command. The token stays a shell variable so the
- * command can be pasted into an issue without leaking a credential.
+ * command can be pasted into an issue without leaking a credential. Null when
+ * the recorded body is incomplete: a cut body would replay as invalid JSON.
  */
-export function curlCommand(apiUrl: string, request: DevRequest, workspaceSlug: string | null): string {
+export function curlCommand(apiUrl: string, request: DevRequest, workspaceSlug: string | null): string | null {
+  if (request.bodyNote !== null) return null;
   const parts = [`curl -X ${request.method} ${shellQuote(`${apiUrl.replace(/\/$/, "")}${request.path}`)}`];
   parts.push(`-H "Authorization: Bearer $MULTICA_TOKEN"`);
   if (workspaceSlug) parts.push(`-H ${shellQuote(`X-Workspace-Slug: ${workspaceSlug}`)}`);

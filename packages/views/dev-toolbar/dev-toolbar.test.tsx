@@ -118,6 +118,17 @@ describe("DevToolbar", () => {
     expect(screen.getByText(/^X-Request-ID /)).toBeInTheDocument();
   });
 
+  it("will not copy a long request as curl, and says why", async () => {
+    renderToolbar();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status: 201 })));
+    await new ApiClient("http://localhost:18080").createComment("issue-1", "a".repeat(2100)).catch(() => {});
+
+    fireEvent.click(screen.getByTestId("dev-toolbar-net"));
+    fireEvent.click(await screen.findByText("/api/issues/issue-1/comments"));
+    expect(screen.getByText(/^Body truncated to 2000 of \d+ characters\. Copy as curl is off/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy as curl" })).toBeDisabled();
+  });
+
   it("counts console errors and lists them with the route they happened on", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     renderToolbar();

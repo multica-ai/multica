@@ -83,17 +83,20 @@ function SmallButton({
   onClick,
   children,
   active,
+  disabled,
 }: {
   onClick: () => void;
   children: ReactNode;
   active?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       className={cn(
-        "flex h-6 items-center gap-1 rounded-md px-1.5 text-micro text-muted-foreground hover:bg-accent hover:text-foreground",
+        "flex h-6 items-center gap-1 rounded-md px-1.5 text-micro text-muted-foreground hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-50",
         active && "bg-accent text-foreground",
       )}
     >
@@ -243,6 +246,7 @@ function RequestRow({
   onToggle: () => void;
 }) {
   const tone = statusTone(request);
+  const curl = expanded ? curlCommand(apiUrl, request, workspaceSlug) : null;
   const Chevron = expanded ? ChevronDown : ChevronRight;
   return (
     <div className={cn(requestFailed(request) && "bg-destructive/5")}>
@@ -281,8 +285,13 @@ function RequestRow({
               {request.body}
             </pre>
           )}
+          {request.bodyNote && (
+            <div className="text-muted-foreground">
+              {`Body ${request.bodyNote}. Copy as curl is off because the command would not send the same request.`}
+            </div>
+          )}
           <div className="flex gap-1">
-            <SmallButton onClick={() => void copy(curlCommand(apiUrl, request, workspaceSlug), "curl")}>
+            <SmallButton onClick={() => curl && void copy(curl, "curl")} disabled={curl === null}>
               <Copy className="size-3" />
               Copy as curl
             </SmallButton>
