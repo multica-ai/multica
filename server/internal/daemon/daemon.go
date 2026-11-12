@@ -7362,7 +7362,8 @@ func formatBytes(n int64) string {
 		return "unknown size"
 	case n < 1024:
 		return fmt.Sprintf("%d B", n)
-	case n < 1024*1024:
+	case n < 1024*1024-512:
+		// Sizes from 1023.5 KB up round to "1024 KB", so they print in MB.
 		return fmt.Sprintf("%.0f KB", float64(n)/1024)
 	default:
 		return fmt.Sprintf("%.2f MB", float64(n)/(1024*1024))
