@@ -86,6 +86,9 @@ func isChatPrivateEvent(e events.Event) bool {
 // MemberPrivateUserID is dropped instead of reaching the workspace.
 var memberPrivateEvents = map[string]bool{
 	protocol.EventIssueViewPreferenceChanged: true,
+	protocol.EventPinCreated:                 true,
+	protocol.EventPinDeleted:                 true,
+	protocol.EventPinReordered:               true,
 }
 
 // registerListeners wires up event bus listeners for WS broadcasting.

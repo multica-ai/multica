@@ -127,14 +127,6 @@ func (a *dbPrivateProjectAudience) Audience(ctx context.Context, e events.Event)
 	if len(ws.projects) == 0 {
 		return nil, false, nil
 	}
-	// A pin is one member's own, and only their sessions refetch on it; its
-	// item id may name a private project or issue.
-	if strings.HasPrefix(e.Type, "pin:") {
-		if e.ActorType != "member" || e.ActorID == "" {
-			return nil, true, nil
-		}
-		return []string{e.ActorID}, true, nil
-	}
 	projectIDs, err := a.eventProjectIDs(ctx, e)
 	if err != nil {
 		return nil, false, err

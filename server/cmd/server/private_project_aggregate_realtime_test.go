@@ -9,8 +9,6 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
-const ppOutsider = "00000000-0000-0000-0000-0000000000c3"
-
 func publishPrivateAudience(e events.Event) *fakeBroadcaster {
 	bus := events.New()
 	fb := &fakeBroadcaster{}
@@ -41,7 +39,7 @@ func sameScopes(a, b []string) bool {
 	return true
 }
 
-// Pins, deleted private issues and pull requests linked to private issues
+// Deleted private issues and pull requests linked to private issues
 // (MUL-8472) used to keep workspace fanout, handing their ids to members
 // outside the project.
 func TestRegisterListeners_PrivateProjectAggregateEvents(t *testing.T) {
@@ -50,12 +48,6 @@ func TestRegisterListeners_PrivateProjectAggregateEvents(t *testing.T) {
 		e    events.Event
 		want []string
 	}{
-		{"own pin of a private issue", events.Event{Type: protocol.EventPinCreated, ActorType: "member", ActorID: ppMember,
-			Payload: map[string]any{"pin": map[string]any{"item_type": "issue", "item_id": ppSecretIssue, "user_id": ppMember}}}, memberScopes(ppMember)},
-		{"pin delete", events.Event{Type: protocol.EventPinDeleted, ActorType: "member", ActorID: ppOutsider,
-			Payload: map[string]any{"item_type": "project", "item_id": ppPublic}}, memberScopes(ppOutsider)},
-		{"pin reorder", events.Event{Type: protocol.EventPinReordered, ActorType: "member", ActorID: ppMember,
-			Payload: map[string]any{"items": []map[string]any{{"id": "x", "position": 1}}}}, memberScopes(ppMember)},
 		{"deleted private issue", events.Event{Type: protocol.EventIssueDeleted,
 			Payload: map[string]any{"issue_id": "00000000-0000-0000-0000-00000000dead", "project_id": ppPrivate}}, memberScopes(ppMember, ppAdmin)},
 		{"pull request linked to a private and a public issue", events.Event{Type: protocol.EventPullRequestUpdated,
