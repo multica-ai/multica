@@ -295,6 +295,7 @@ The daemon auto-detects these AI CLIs on your PATH:
 | [Trae](https://docs.trae.cn/cli) | `traecli` | ByteDance TRAE CLI (ACP via `traecli acp serve`) |
 | [Grok Build CLI](https://docs.x.ai/) | `grok` | xAI Grok Build CLI (ACP via `grok agent stdio`) |
 | [Qwen Code](https://github.com/QwenLM/qwen-code) | `qwen` | Alibaba Qwen Code (`qwen -p` with stream-json) |
+| [Amp](https://ampcode.com/docs/cli) | `amp` | Local `amp --execute --stream-json`; requires an access token in `AMP_API_KEY` for unattended execution. Model configuration selects an Amp mode. Managed MCP and live supplements are unsupported. |
 | [Factory Droid](https://docs.factory.com/droid-exec/overview) | `droid` | Native CLI 1.8.0+, `droid exec` with stream-json; sign in or set `FACTORY_API_KEY`. Uses `--auto high`; Multica-managed MCP and live supplements are unsupported. |
 | [QwenPaw](https://github.com/agentscope-ai/QwenPaw) | `qwenpaw` | QwenPaw ACP coding agent (ACP via `qwenpaw acp`; model is fixed by its own configuration) |
 | [MiniMax Code](https://github.com/MiniMax-AI/minimax-code) | `mcode` | MiniMax Code ACP coding agent (ACP via `mcode acp`; model is managed by MCode) |
@@ -479,6 +480,9 @@ Agent-specific overrides:
 | `MULTICA_QWEN_PATH` | Custom path to the `qwen` binary |
 | `MULTICA_QWEN_MODEL` | Override the Qwen Code model used |
 | `MULTICA_QWEN_ARGS` | Daemon-wide extra Qwen arguments (POSIX shellword parsing; managed protocol flags are filtered) |
+| `MULTICA_AMP_PATH` | Custom path to the `amp` executable |
+| `MULTICA_AMP_MODEL` | Amp mode (such as `high`); empty uses Amp's default |
+| `MULTICA_AMP_ARGS` | Supported extra Amp options, e.g. `--features fast`; protocol, executor, prompt and mode overrides are filtered |
 | `MULTICA_DROID_PATH` | Custom path to the native `droid` executable |
 | `MULTICA_DROID_MODEL` | Droid model ID; defaults to Droid's own configuration |
 | `MULTICA_DROID_ARGS` | Daemon-wide Droid arguments, e.g. `--reasoning-effort high`; managed protocol, prompt, session, and working-directory flags are filtered |
