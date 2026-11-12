@@ -252,6 +252,10 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
 			return discovered(discoverReasonixModels(ctx, runtimeCmd))
 		})
+	case "bb":
+		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
+			return discoverBBModels(ctx, runtimeCmd)
+		})
 	case "dsh":
 		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
 			return discovered(discoverDshModels(ctx, runtimeCmd))

@@ -1,0 +1,21 @@
+{
+  "name": "bb-plugin-multica-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "bb": ">=0.48",
+    "bbPluginSdk": ">=0.6.132 <0.7"
+  },
+  "bb": {
+    "name": "Multica runtime",
+    "description": "Run Multica tasks in visible BB threads with task-scoped credentials.",
+    "server": "./server.js",
+    "branding": {
+      "icon": "Workflow"
+    }
+  },
+  "scripts": {
+    "test": "node --test server.test.js"
+  }
+}
