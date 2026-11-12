@@ -106,42 +106,6 @@ func TestPatternsFromEnv_DefaultsWhenUnset(t *testing.T) {
 	}
 }
 
-// A localhost server URL is not the official cloud host, so this exercises the
-// self-host branch of defaultGCCompletedTaskTTL: retention stays unbounded until
-// an operator opts in, and a daemon upgrade never starts deleting on its own.
-func TestLoadConfig_CompletedTaskTTLDefaultsDisabledOnSelfHostAndReadsEnv(t *testing.T) {
-	stageFakeAgent(t)
-	redirectTestHome(t, t.TempDir())
-	t.Setenv("SHELL", filepath.Join(t.TempDir(), "missing-shell"))
-	t.Setenv("MULTICA_GC_COMPLETED_TASK_TTL", "")
-
-	overrides := Overrides{
-		ServerURL:      "http://localhost:0",
-		WorkspacesRoot: t.TempDir(),
-	}
-	cfg, err := LoadConfig(overrides)
-	if err != nil {
-		t.Fatalf("LoadConfig with default completed-task TTL: %v", err)
-	}
-	if cfg.GCCompletedTaskTTL != 0 {
-		t.Fatalf("GCCompletedTaskTTL = %s, want disabled", cfg.GCCompletedTaskTTL)
-	}
-
-	t.Setenv("MULTICA_GC_COMPLETED_TASK_TTL", "36h")
-	cfg, err = LoadConfig(overrides)
-	if err != nil {
-		t.Fatalf("LoadConfig with completed-task TTL: %v", err)
-	}
-	if cfg.GCCompletedTaskTTL != 36*time.Hour {
-		t.Fatalf("GCCompletedTaskTTL = %s, want 36h", cfg.GCCompletedTaskTTL)
-	}
-
-	t.Setenv("MULTICA_GC_COMPLETED_TASK_TTL", "not-a-duration")
-	if _, err := LoadConfig(overrides); err == nil || !strings.Contains(err.Error(), "MULTICA_GC_COMPLETED_TASK_TTL") {
-		t.Fatalf("LoadConfig invalid completed-task TTL error = %v, want named validation error", err)
-	}
-}
-
 func TestLoadConfig_WSClaimPollIntervalPrecedence(t *testing.T) {
 	stageFakeAgent(t)
 	redirectTestHome(t, t.TempDir())
@@ -182,66 +146,57 @@ func TestLoadConfig_WSClaimPollIntervalPrecedence(t *testing.T) {
 	}
 }
 
-func TestLoadConfig_CompletedTaskTTLDefaultsBoundedOnOfficialCloud(t *testing.T) {
+// The completed-task retention bound is on by default for every server, not
+// just Multica Cloud: a self-hosted or team-hosted daemon whose issues sit open
+// fills its disk just as fast. The env var still overrides in both directions.
+func TestLoadConfig_CompletedTaskTTLDefaultsBoundedOnEveryServer(t *testing.T) {
 	stageFakeAgent(t)
 	redirectTestHome(t, t.TempDir())
 	t.Setenv("SHELL", filepath.Join(t.TempDir(), "missing-shell"))
-	t.Setenv("MULTICA_GC_COMPLETED_TASK_TTL", "")
 
-	overrides := Overrides{
-		ServerURL:      "https://" + officialCloudHost,
-		WorkspacesRoot: t.TempDir(),
-	}
-	cfg, err := LoadConfig(overrides)
-	if err != nil {
-		t.Fatalf("LoadConfig on official cloud: %v", err)
-	}
-	if cfg.GCCompletedTaskTTL != 14*24*time.Hour {
-		t.Fatalf("GCCompletedTaskTTL = %s, want 14d on official cloud", cfg.GCCompletedTaskTTL)
-	}
+	for _, serverURL := range []string{
+		"https://" + officialCloudHost,
+		"https://api-staging.multica.ai",
+		"https://multica.example.com",
+		"http://localhost:0",
+	} {
+		t.Run(serverURL, func(t *testing.T) {
+			overrides := Overrides{
+				ServerURL:      serverURL,
+				WorkspacesRoot: t.TempDir(),
+			}
 
-	// An explicit 0 has to win on cloud too — otherwise the only way back to the
-	// previous retention behavior would be downgrading the daemon.
-	t.Setenv("MULTICA_GC_COMPLETED_TASK_TTL", "0")
-	cfg, err = LoadConfig(overrides)
-	if err != nil {
-		t.Fatalf("LoadConfig with cloud opt-out: %v", err)
-	}
-	if cfg.GCCompletedTaskTTL != 0 {
-		t.Fatalf("GCCompletedTaskTTL = %s, want an explicit 0 to disable the cloud default", cfg.GCCompletedTaskTTL)
-	}
+			t.Setenv("MULTICA_GC_COMPLETED_TASK_TTL", "")
+			cfg, err := LoadConfig(overrides)
+			if err != nil {
+				t.Fatalf("LoadConfig with default completed-task TTL: %v", err)
+			}
+			if cfg.GCCompletedTaskTTL != 14*24*time.Hour {
+				t.Fatalf("GCCompletedTaskTTL = %s, want 14d", cfg.GCCompletedTaskTTL)
+			}
 
-	t.Setenv("MULTICA_GC_COMPLETED_TASK_TTL", "36h")
-	cfg, err = LoadConfig(overrides)
-	if err != nil {
-		t.Fatalf("LoadConfig with cloud override: %v", err)
-	}
-	if cfg.GCCompletedTaskTTL != 36*time.Hour {
-		t.Fatalf("GCCompletedTaskTTL = %s, want the env override to win on cloud", cfg.GCCompletedTaskTTL)
-	}
-}
+			// An explicit 0 restores keep-until-terminal retention.
+			t.Setenv("MULTICA_GC_COMPLETED_TASK_TTL", "0")
+			cfg, err = LoadConfig(overrides)
+			if err != nil {
+				t.Fatalf("LoadConfig with completed-task TTL opt-out: %v", err)
+			}
+			if cfg.GCCompletedTaskTTL != 0 {
+				t.Fatalf("GCCompletedTaskTTL = %s, want an explicit 0 to disable the default", cfg.GCCompletedTaskTTL)
+			}
 
-func TestDefaultGCCompletedTaskTTLOnlyBoundsOfficialCloudHost(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		name      string
-		serverURL string
-		want      time.Duration
-	}{
-		{"official cloud", "https://api.multica.ai", DefaultGCCompletedTaskTTLCloud},
-		{"official cloud with port and path", "https://API.Multica.AI:443/api", DefaultGCCompletedTaskTTLCloud},
-		// Staging and previews inherit the self-host value for the same reason
-		// officialCloudHost excludes them from the auto-update default.
-		{"staging", "https://api-staging.multica.ai", DefaultGCCompletedTaskTTLSelfHost},
-		{"self-host", "https://multica.example.com", DefaultGCCompletedTaskTTLSelfHost},
-		{"localhost", "http://localhost:8080", DefaultGCCompletedTaskTTLSelfHost},
-		{"unparseable", "://nope", DefaultGCCompletedTaskTTLSelfHost},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			if got := defaultGCCompletedTaskTTL(tc.serverURL); got != tc.want {
-				t.Fatalf("defaultGCCompletedTaskTTL(%q) = %s, want %s", tc.serverURL, got, tc.want)
+			t.Setenv("MULTICA_GC_COMPLETED_TASK_TTL", "36h")
+			cfg, err = LoadConfig(overrides)
+			if err != nil {
+				t.Fatalf("LoadConfig with completed-task TTL override: %v", err)
+			}
+			if cfg.GCCompletedTaskTTL != 36*time.Hour {
+				t.Fatalf("GCCompletedTaskTTL = %s, want 36h", cfg.GCCompletedTaskTTL)
+			}
+
+			t.Setenv("MULTICA_GC_COMPLETED_TASK_TTL", "not-a-duration")
+			if _, err := LoadConfig(overrides); err == nil || !strings.Contains(err.Error(), "MULTICA_GC_COMPLETED_TASK_TTL") {
+				t.Fatalf("LoadConfig invalid completed-task TTL error = %v, want named validation error", err)
 			}
 		})
 	}
