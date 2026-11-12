@@ -231,4 +231,4 @@ multica daemon restart
 - [守护进程与运行时](/daemon-runtimes) — 了解在线状态、并发和自定义运行时。
 - [AI 编程工具对照](/providers) — 比较各工具在 Multica 中的能力。
 
-ZCode Desktop 的 macOS 应用包可被自动发现；请同时安装 Node.js，并在桌面端启用可用的 API 连接。模型与思考强度由 ZCode 原生目录提供。详见[运行时对照](/providers#zcode)。
+ZCode Desktop 的 macOS 应用包可被自动发现，需要同时安装 Node.js。Linux 下，守护进程通过 PATH 中的 `zcode` 或 `/opt/ZCode/zcode` 自动发现 ZCode Desktop，在后台运行内置 CLI，不打开桌面窗口，无需额外安装 Node.js 或手动配置环境变量。请在桌面端启用可用的 API 连接。模型与思考强度由 ZCode 原生目录提供。详见[运行时对照](/providers#zcode)。
