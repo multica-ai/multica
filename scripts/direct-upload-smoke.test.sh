@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Safety regression for scripts/direct-upload-smoke.sh (MYS-2814 review, item 5).
+# Resource ownership regressions for scripts/direct-upload-smoke.sh.
 #
 # The smoke script creates and destroys a database and a container. A bug in HOW
 # it names and removes them can delete a parallel run's resources — or, with a

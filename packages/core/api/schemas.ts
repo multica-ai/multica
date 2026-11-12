@@ -1191,6 +1191,26 @@ export const AttachmentResponseSchema = z.object({
   ...AttachmentImageFields,
 }).loose();
 
+// The response of `POST /api/attachments/presign-upload`: the
+// credential for one direct PUT plus the id the completion names.
+//
+// Every field is required — none is defaulted. A response that names a
+// different method, or the wrong headers, makes the object store reject the
+// PUT with an opaque signature error, and a missing URL would otherwise become
+// a request to the empty string. Failing the parse lets the direct path report
+// a malformed response instead of sending a request that can only fail.
+export const AttachmentPresignUploadSchema = z.object({
+  attachment_id: z.string().min(1),
+  // Absolute: the presigned URL names the object store's own origin, which is
+  // never this API's. A relative value would silently target the API instead.
+  upload_url: z.string().url(),
+  method: z.string().min(1),
+  headers: z.record(z.string(), z.string()),
+  expires_in: z.number().optional(),
+}).loose();
+
+export type AttachmentPresignUpload = z.infer<typeof AttachmentPresignUploadSchema>;
+
 // The issue file inventory uses comment origins for grouping and sorting.
 // Malformed optional origins must not discard otherwise usable attachments.
 export const AttachmentListSchema = z.array(AttachmentResponseSchema.extend({

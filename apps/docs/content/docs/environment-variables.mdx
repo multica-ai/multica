@@ -144,21 +144,23 @@ When `AWS_ENDPOINT_URL` points to Google Cloud Storage, `Accept-Encoding` is aut
 
 Use `ATTACHMENT_DOWNLOAD_MODE=proxy` when the endpoint — an internal MinIO, for example — is not reachable from the browser.
 
-### Presigned direct upload
+### Presigned direct upload [#direct-upload]
 
-With an S3-compatible bucket configured, the CLI uploads attachments straight to the bucket instead of posting them through the API:
+With an S3-compatible bucket configured, clients upload attachments straight to the bucket instead of posting them through the API. The CLI and the web/desktop apps share one contract:
 
 ```
-CLI -> API      POST /api/attachments/presign-upload   (metadata only)
-CLI -> bucket   PUT  <presigned URL>                   (the file)
-CLI -> API      POST /api/attachments/{id}/complete-upload
+client -> API      POST /api/attachments/presign-upload   (metadata only)
+client -> bucket   PUT  <presigned URL>                   (the file)
+client -> API      POST /api/attachments/{id}/complete-upload
 ```
 
-File bytes therefore never pass through the API or any reverse proxy in front of it, so a proxy's `client_max_body_size` no longer limits attachment size.
+File bytes therefore never pass through the API or any reverse proxy in front of it, so a proxy's `client_max_body_size` no longer limits attachment size. An upload is capped at **100 MiB** regardless of path, and the API only ever receives the file's metadata — a few hundred bytes.
 
-The bucket must be reachable from wherever the CLI runs. If it is not, the upload fails: the CLI reports the storage error and does **not** fall back to the multipart path, because the file has already been sent and a silent second attempt would double the transfer. Fix reachability (a public or VPN-reachable endpoint, or a bucket CORS/allowed-origin configuration for browser callers) rather than expecting a fallback.
+The bucket must be reachable from wherever the client runs. If it is not, the upload fails: the client reports the storage error and does **not** fall back to the multipart path, because the file has already been sent and a silent second attempt would double the transfer. Fix reachability — a public or VPN-reachable endpoint, plus the CORS rule described below for browser callers — rather than expecting a fallback.
 
-The one automatic fallback is a capability one, decided before any bytes move: with `LOCAL_UPLOAD_DIR` (or any backend that cannot presign) the endpoint answers `501` with code `attachment_presign_unsupported`, and the CLI uses the older multipart path instead. The capability is determined from the configured backend's Go interface set — a storage type that cannot presign, inspect and conditionally copy — not from probing the bucket at runtime, so a bucket that accepts the credential but rejects the conditional copy surfaces as a failed upload rather than a fallback.
+The one automatic fallback is a capability one, decided before any bytes move: with `LOCAL_UPLOAD_DIR` (or any backend that cannot presign) the endpoint answers `501` with code `attachment_presign_unsupported`, and the client uses the older multipart path instead. A server that predates the endpoint answers `404`/`405` and falls back the same way. Nothing else does: a `401`/`403` is a credential problem and a `5xx` is a server fault, so both are reported instead of being retried through the API, where the file may be transferred twice.
+
+The capability is determined from the configured backend's Go interface set — a storage type that cannot presign, inspect and conditionally copy — not from probing the bucket at runtime, so a bucket that accepts the credential but rejects the conditional copy surfaces as a failed upload rather than a fallback.
 
 Nothing needs configuring beyond the bucket above. The bucket needs these permissions on top of what uploads already require:
 
@@ -171,11 +173,61 @@ Nothing needs configuring beyond the bucket above. The bucket needs these permis
 
 The final object is written by the server with a server-side copy, so `s3:PutObject` must also cover the server's own credentials (it already does for normal uploads).
 
-The bucket **must** implement `CopyObject` with a source precondition (`x-amz-copy-source-if-match`). That precondition is what prevents a client from changing a file after it is published, so a backend that ignores or rejects it breaks the guarantee. This is not validated when the credential is issued — presigning cannot test it — so verify it once against your provider before relying on direct upload. A bucket that does not support it will fail at completion. (Amazon S3, MinIO and Cloudflare R2 support it; Aliyun OSS compatibility is **not** verified by this project's tests, which run against a local S3-compatible server.)
+#### Bucket requirements the API cannot check for you [#bucket-requirements]
+
+Two storage behaviours are load-bearing and are not validated when the credential is issued, because presigning cannot test them:
+
+| Requirement | Why | Where it is used |
+|---|---|---|
+| `CopyObject` honouring `x-amz-copy-source-if-match` | The staged object is copied to its permanent key under a precondition. Without it a client could PUT different bytes into the still-valid staging key between the server's inspection and the copy, and have them published as the validated file. | `complete-upload` |
+| `GetObject` honouring `If-Match` | The server reads the first bytes to detect the content type and image dimensions. The condition binds that read to the exact object version the copy is pinned to; without it the published bytes and the published metadata can describe different objects. | `complete-upload` |
+
+A provider that rejects either condition causes completion to fail. A provider that silently ignores a condition can publish inconsistent content without an error. Verify that both conditions are enforced before relying on direct upload.
+
+Local integration tests exercise RustFS. **Aliyun OSS compatibility is not verified by this project's tests**; treat OSS as untested and check the two conditions above before relying on it.
+
+#### Browser CORS [#browser-cors]
+
+A browser will not send the PUT cross-origin unless the bucket's CORS configuration allows it. The presigned URL points at the storage endpoint, not at the API, so this is a bucket setting, not a Multica one. The rule must:
+
+- allow the **origin of the web app** (scheme, host and port — for example `https://multica.example.com`), one entry per origin you serve the app from;
+- allow the **`PUT` and `HEAD`/`GET` methods** — `PUT` for the upload, and reads for previews and downloads;
+- allow the **headers the issued credential covers**, which is what the presign response's `headers` object lists (`content-type`, and `content-length` where the store signs it);
+- expose `ETag` if you inspect uploads from JavaScript.
+
+Two browser-managed headers are deliberately never set by the client: `Content-Length` and `Host`. Browsers choose them, and asking for either fails the preflight. The client sends the `File`/`Blob` as the request body, so the browser frames it with the correct length.
+
+A minimal AWS-style rule for a bucket serving one app origin:
+
+```json
+[
+  {
+    "AllowedOrigins": ["https://multica.example.com"],
+    "AllowedMethods": ["PUT", "GET", "HEAD"],
+    "AllowedHeaders": ["content-type"],
+    "ExposeHeaders": ["ETag"],
+    "MaxAgeSeconds": 300
+  }
+]
+```
+
+Without a matching rule the browser blocks the PUT and the attachment never completes. The failure is a bare CORS error in the browser console — the API logs a successful presign and then never sees a completion, which is the signature to look for.
 
 <Callout type="warning">
-A presigned `PUT` URL is valid for 15 minutes and is only good for one object key. Treat it like a password: anyone holding it can upload to that key until it expires.
+A presigned `PUT` URL is valid for 15 minutes and is only good for one object key. Treat it like a password: anyone holding it can upload to that key until it expires. The URL is never written to client logs, and it is not sent to any origin but the bucket's.
 </Callout>
+
+#### Staged objects and cleanup [#staged-objects]
+
+An upload writes to a private staging key first. Only a successful `complete-upload` moves it to the permanent key that an attachment row points at; the staging object is then reclaimed by a background sweep, which also reaps uploads that were abandoned or never completed. Staging keys are never served by any read path, so an object that exists only there is unreachable through the app.
+
+No configuration is required. The sweep runs once a minute in the API process, tolerates object-storage failures with exponential backoff, and re-deletes on a widening schedule to catch a PUT that a client abandoned but that the store materialized late.
+
+#### Verifying a self-hosted bucket [#verify-direct-upload]
+
+Before rolling direct upload out, confirm the deployment actually uses it — a silent fallback to multipart looks identical to a working upload from the UI. Upload a file larger than your proxy's body limit; if it succeeds, the bytes went to the bucket.
+
+To confirm from the storage side, an uploaded attachment's `complete-upload` should be preceded in the API log by a presign for a staging key, and the published object should be under a permanent prefix (`workspaces/<workspace-id>/…`), not under `upload-staging/`.
 
 ### Local disk
 
