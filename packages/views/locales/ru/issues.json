@@ -562,6 +562,7 @@
     "prop_labels": "Метки",
     "add_property_action": "Добавить свойство",
     "prop_created_by": "Создано",
+    "prop_requested_by": "Запросил(а)",
     "prop_created": "Создано",
     "prop_updated": "Обновлено",
     "activity_section": "Активность",
@@ -630,6 +631,7 @@
   },
   "activity": {
     "created": "создал(а) эту задачу",
+    "created_on_behalf_of": "создал(а) эту задачу от имени {{name}}",
     "self_assigned": "назначил(а) эту задачу на себя",
     "assigned_to": "назначил(а) на {{name}}",
     "removed_assignee": "убрал(а) исполнителя",

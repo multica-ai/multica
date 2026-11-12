@@ -365,10 +365,16 @@ function formatActivity(
   locale: string,
   resolveActorName?: (type: string, id: string) => string,
   resolveStatusLabel?: (statusKey: string) => string,
+  requesterName?: string,
 ): string {
   const details = (entry.details ?? {}) as Record<string, string>;
   switch (entry.action) {
     case "created":
+      // An agent that created the issue for a member names that member, so
+      // the issue has a human to follow up with (#7995).
+      if (requesterName && entry.actor_type === "agent") {
+        return t(($) => $.activity.created_on_behalf_of, { name: requesterName });
+      }
       return t(($) => $.activity.created);
     case "status_changed":
       // PR auto-complete (MUL-7429) says why the status moved.
@@ -735,6 +741,7 @@ function ActivityBlock({
   t,
   timeAgo,
   locale,
+  requesterName,
 }: {
   entries: TimelineEntry[];
   expanded: boolean;
@@ -754,6 +761,8 @@ function ActivityBlock({
   t: ActivityT;
   timeAgo: (dateStr: string) => string;
   locale: string;
+  /** The member an agent created this issue for, if any. */
+  requesterName?: string;
 }) {
   const wakeupText = useWakeupText();
   if (!expanded) {
@@ -869,7 +878,7 @@ function ActivityBlock({
                     entry={entry}
                     text={isWakeup
                       ? formatWakeupActivity(entry, t, wakeupText, getActorName)
-                      : formatActivity(entry, t, locale, getActorName, resolveStatusLabel)}
+                      : formatActivity(entry, t, locale, getActorName, resolveStatusLabel, requesterName)}
                   />
                 </span>
                 {chip && (
@@ -2983,6 +2992,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     return <IssueNotFound showBackLink={!onDelete} leading={leadingAction} trailing={trailingActions} />;
   }
 
+  // The member an agent created this issue for (quick-create, Chat). The
+  // creator stays the agent; this names the human to follow up with.
+  const requesterName =
+    issue.creator_type === "agent" && issue.requester_id
+      ? getActorName("member", issue.requester_id)
+      : undefined;
+
   const persistDescriptionSave = (
     draft: { markdown: string; baseMarkdown: string; attachmentIds: string[] },
   ) => {
@@ -3316,6 +3332,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             <ActorAvatar actorType={issue.creator_type} actorId={issue.creator_id} size="sm" enableHoverCard />
             <span className="cursor-pointer truncate">{getActorName(issue.creator_type, issue.creator_id)}</span>
           </PropRow>
+          {requesterName && issue.requester_id && (
+            <PropRow interactive={false} label={t(($) => $.detail.prop_requested_by)}>
+              <ActorAvatar actorType="member" actorId={issue.requester_id} size="sm" enableHoverCard />
+              <span className="cursor-pointer truncate">{requesterName}</span>
+            </PropRow>
+          )}
           <PropRow interactive={false} label={t(($) => $.detail.prop_created)}>
             <span className="text-muted-foreground">{shortDate(issue.created_at, locale)}</span>
           </PropRow>
@@ -3430,6 +3452,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         t={t}
         timeAgo={timeAgo}
         locale={locale}
+        requesterName={requesterName}
       />
     );
   };

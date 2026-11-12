@@ -544,6 +544,7 @@
     "prop_labels": "ラベル",
     "add_property_action": "プロパティを追加",
     "prop_created_by": "作成者",
+    "prop_requested_by": "依頼者",
     "prop_created": "作成日",
     "prop_updated": "更新日",
     "activity_section": "アクティビティ",
@@ -601,6 +602,7 @@
   },
   "activity": {
     "created": "このタスクを作成しました",
+    "created_on_behalf_of": "{{name}} の代理としてこのタスクを作成しました",
     "self_assigned": "このタスクを自分に割り当てました",
     "assigned_to": "{{name}} に割り当てました",
     "removed_assignee": "担当者を削除しました",

@@ -544,6 +544,7 @@
     "prop_labels": "标签",
     "add_property_action": "添加字段",
     "prop_created_by": "创建者",
+    "prop_requested_by": "发起人",
     "prop_created": "创建时间",
     "prop_updated": "更新时间",
     "activity_section": "动态",
@@ -601,6 +602,7 @@
   },
   "activity": {
     "created": "创建了这个任务",
+    "created_on_behalf_of": "代表 {{name}} 创建了这个任务",
     "self_assigned": "把这个任务分配给了自己",
     "assigned_to": "分配给 {{name}}",
     "removed_assignee": "移除了负责人",

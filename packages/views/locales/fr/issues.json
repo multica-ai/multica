@@ -552,6 +552,7 @@
     "prop_labels": "Étiquettes",
     "add_property_action": "Ajouter une propriété",
     "prop_created_by": "Créé par",
+    "prop_requested_by": "Demandé par",
     "prop_created": "Création",
     "prop_updated": "Mise à jour",
     "activity_section": "Activité",
@@ -611,6 +612,7 @@
   },
   "activity": {
     "created": "a créé cette tâche",
+    "created_on_behalf_of": "a créé cette tâche au nom de {{name}}",
     "self_assigned": "s'est assigné cette tâche",
     "assigned_to": "a assigné à {{name}}",
     "removed_assignee": "a retiré l'assignation",
