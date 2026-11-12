@@ -134,3 +134,29 @@ func TestAmpTerminatesOwnedProcessTree(t *testing.T) {
 		})
 	}
 }
+
+func TestAmpPostResultCleanupReapsOwnedTree(t *testing.T) {
+	dir := t.TempDir()
+	pidFile := filepath.Join(dir, "pids")
+	path := filepath.Join(dir, "amp")
+	script := "#!/bin/sh\nsleep 300 &\nprintf '%s %s\\n' \"$$\" \"$!\" > \"$AMP_PIDS\"\nprintf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"session_id\":\"T-done\",\"result\":\"Done\"}'\nwait\n"
+	writeTestExecutable(t, path, []byte(script))
+	backend, err := New("amp", Config{ExecutablePath: path, Env: map[string]string{
+		"AMP_API_KEY": "sgamp_fixture-not-a-real-token", "AMP_PIDS": pidFile,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := backend.Execute(context.Background(), "task", ExecOptions{Timeout: 20 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pids := waitForPids(t, pidFile)
+	_, result := collectAmp(t, session)
+	for _, pid := range pids {
+		waitProcessGone(t, pid)
+	}
+	if result.Status != "completed" || result.Output != "Done" || result.SessionID != "T-done" || !session.TerminalObserved() {
+		t.Fatalf("successful run lost during process cleanup: %+v", result)
+	}
+}

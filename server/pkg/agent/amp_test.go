@@ -47,6 +47,9 @@ func TestAmpHelperProcess(t *testing.T) {
 		_, _ = os.Stdout.Write(stream)
 	}
 	fmt.Fprint(os.Stderr, os.Getenv("AMP_STDERR"))
+	if delay, err := time.ParseDuration(os.Getenv("AMP_EXIT_DELAY")); err == nil {
+		time.Sleep(delay)
+	}
 	if os.Getenv("AMP_HANG_AFTER_STREAM") == "1" {
 		fmt.Println(`{"type":"system","subtype":"init","session_id":"awaiting-exit"}`)
 		for {
@@ -136,25 +139,71 @@ func TestAmpArguments(t *testing.T) {
 }
 
 func TestAmpBrokenStreamsBounded(t *testing.T) {
-	for _, name := range []string{"oversized", "terminal without exit"} {
-		t.Run(name, func(t *testing.T) {
-			env := map[string]string{}
-			if name == "oversized" {
-				env["AMP_OVERSIZED"] = "1"
-			} else {
+	backend := newFakeAmp(t, map[string]string{"AMP_OVERSIZED": "1"}, io.Discard)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "task", ExecOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, result := collectAmp(t, session)
+	if result.Status != "failed" || result.Output != "" || result.Error == "" {
+		t.Fatalf("broken stream = %+v", result)
+	}
+}
+
+func TestAmpPostResultCleanup(t *testing.T) {
+	for _, tc := range []struct {
+		name, delay, want  string
+		hang, fail, cancel bool
+		timeout            time.Duration
+	}{
+		{name: "slow clean exit", delay: "3s", want: "completed"},
+		{name: "stuck after success", hang: true, want: "completed"},
+		{name: "cancel after success", hang: true, cancel: true, want: "completed"},
+		{name: "timeout after success", hang: true, timeout: 3 * time.Second, want: "completed"},
+		{name: "natural failure after success", delay: "3s", fail: true, want: "failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			env := map[string]string{"AMP_STREAM": "{\"type\":\"result\",\"subtype\":\"success\",\"session_id\":\"T-finished\",\"result\":\"Done\"}\n", "AMP_EXIT_DELAY": tc.delay}
+			if tc.hang {
 				env["AMP_HANG_AFTER_STREAM"] = "1"
-				env["AMP_STREAM"] = "{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"partial\"}\n"
 			}
-			backend := newFakeAmp(t, env, io.Discard)
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			if tc.fail {
+				env["AMP_FAIL"] = "1"
+			}
+			backend := newFakeAmp(t, env, &logs)
+			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			session, err := backend.Execute(ctx, "task", ExecOptions{})
+			session, err := backend.Execute(ctx, "task", ExecOptions{Timeout: tc.timeout})
 			if err != nil {
 				t.Fatal(err)
 			}
+			if tc.cancel {
+				deadline := time.NewTimer(5 * time.Second)
+				defer deadline.Stop()
+				for !session.TerminalObserved() {
+					select {
+					case <-deadline.C:
+						t.Fatal("terminal boundary was not published before cleanup")
+					case <-time.After(10 * time.Millisecond):
+					}
+				}
+				cancel()
+			}
 			_, result := collectAmp(t, session)
-			if result.Status != "failed" || result.Output != "" || result.Error == "" {
-				t.Fatalf("broken stream = %+v", result)
+			if result.Status != tc.want || result.SessionID != "T-finished" || !session.TerminalObserved() {
+				t.Fatalf("post-result cleanup = %+v", result)
+			}
+			if tc.want == "completed" && (result.Output != "Done" || result.Error != "") {
+				t.Fatalf("successful answer lost = %+v", result)
+			}
+			if tc.want == "failed" && (result.Output != "" || !strings.Contains(result.Error, "exited")) {
+				t.Fatalf("native failure hidden = %+v", result)
+			}
+			if tc.hang && !strings.Contains(logs.String(), "level=WARN") {
+				t.Fatalf("forced cleanup was not logged: %s", logs.String())
 			}
 		})
 	}
@@ -212,6 +261,29 @@ func TestAmpExecuteProtocol(t *testing.T) {
 	encoded, _ := json.Marshal(messages)
 	if strings.Contains(string(encoded)+logs.String(), key) || strings.Contains(logs.String(), "private task") || strings.Contains(strings.Join(got.Args, " "), "private task") {
 		t.Fatal("credentials or prompt leaked")
+	}
+}
+
+func TestAmpPermissionDenials(t *testing.T) {
+	backend := newFakeAmp(t, map[string]string{
+		"AMP_STREAM": `{"type":"result","subtype":"success","result":"Done","permission_denials":["Bash: git push","Bash: /path/to/multica api_key=sgamp_private-token"]}`,
+	}, io.Discard)
+	session, err := backend.Execute(context.Background(), "task", ExecOptions{Timeout: 10 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages, result := collectAmp(t, session)
+	if result.Status != "completed" || result.Output != "Done" {
+		t.Fatalf("permission warning replaced the provider result: %+v", result)
+	}
+	var warning string
+	for _, message := range messages {
+		if message.Type == MessageText && strings.Contains(message.Content, "Warning: Amp denied tool permissions") {
+			warning += message.Content
+		}
+	}
+	if !strings.Contains(warning, "git push") || !strings.Contains(warning, "amp.permissions") || strings.Contains(warning, "sgamp_private-token") {
+		t.Fatalf("permission warning = %q", warning)
 	}
 }
 

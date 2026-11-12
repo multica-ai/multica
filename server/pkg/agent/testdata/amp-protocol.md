@@ -20,8 +20,15 @@ is invented, and absent terminal usage is left unreported.
 `system/init` supplies the session ID. Assistant content contains text and tool
 calls; user content contains tool results. Assistant `end_turn` and
 `system/subagent_finished` are progress, not completion. Only `result` with
-`subtype:success` and no error establishes success, and process exit must agree.
+`subtype:success` and no error establishes success. The terminal boundary is
+published immediately, before waiting up to ten seconds for CLI exit. A native
+nonzero exit observed during that grace still fails; terminating a process that
+remains alive afterward is bounded cleanup and preserves the terminal answer,
+with a daemon warning. Cancellation or a deadline after the terminal boundary
+also preserves the result. Missing cleanup acknowledgement remains a failure.
 Failure clears the final output while retaining the transcript and observed ID.
+Permission denials reported by Amp are shown as a redacted transcript warning;
+the adapter does not override Amp's configured permission rules.
 
 The adapter requires the documented non-interactive `AMP_API_KEY` access token.
 An empty key fails before startup; interactive login is unsupported. A real CLI

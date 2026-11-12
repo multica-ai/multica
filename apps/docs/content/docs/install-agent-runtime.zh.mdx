@@ -94,7 +94,7 @@ Multica 当前会检测以下命令：
 
 Multica 使用 `amp --execute --stream-json --executor local`，通过标准输入传入提示词，仅使用已保存的线程 ID 继续会话。Amp 读取 `AGENTS.md`，从 `.agents/skills/` 发现项目技能。MCP 需在 Amp 中配置；暂不支持 Multica 托管 MCP、执行中追加消息、`max_turns`、orb 或远程 runner，执行时长使用任务超时限制。协议、模式和执行位置覆盖项会被过滤，额外提示词、子命令和未验证选项会在启动前报错。
 
-未安装、缺少 `AMP_API_KEY` 或启动异常会立即报错；认证失败时更新执行环境中的访问令牌。只有成功的终结 `result` 才会发布最终答复，正常退出或 assistant 的 `end_turn` 均不足以判定成功。取消和超时会终止所属本地进程树，并保留已观测的线程 ID。[Amp 后台子智能体](https://ampcode.com/docs/cli/streaming-json)可能在 CLI 退出后继续运行，本适配器无法远程取消它们。需要严格取消时避免异步子智能体，并通过保存的 Amp 线程检查剩余工作。
+未安装、缺少 `AMP_API_KEY` 或启动异常会立即报错；认证失败时更新执行环境中的访问令牌。只有成功的终结 `result` 才会发布最终答复，正常退出或 assistant 的 `end_turn` 均不足以判定成功。收到终结结果后，Amp 有最多十秒完成清理；之后若由 Multica 终止进程，仍保留最终答复并记录警告，宽限期内观测到的原生非零退出仍判为失败。Amp 返回的权限拒绝信息会显示为执行记录中的警告；若无人值守任务中的已授权命令被拒绝，请检查执行机器上 Amp 设置中的 `amp.permissions`。取消和超时会终止所属本地进程树，并保留已观测的线程 ID。[Amp 后台子智能体](https://ampcode.com/docs/cli/streaming-json)可能在 CLI 退出后继续运行，本适配器无法远程取消它们。需要严格取消时避免异步子智能体，并通过保存的 Amp 线程检查剩余工作。
 
 </Accordion>
 <Accordion title="Factory Droid" id="droid">

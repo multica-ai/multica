@@ -117,6 +117,9 @@ func (b *ampBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 	runtimeCmd.Prefix = FilterLaunchPrefix("amp", normalizeAmpArgs(runtimeCmd.Prefix), b.cfg.Logger)
 	cmd := runtimeCmd.exec(runCtx, args...)
 	hideAgentWindow(cmd)
+	// The reader owns cancellation so a late context cancellation cannot kill
+	// a completed run before cleanup records why the process was stopped.
+	cmd.Cancel = func() error { return nil }
 	cmd.Dir = opts.Cwd
 	cmd.Env = append(buildEnv(b.cfg.Env), "AMP_SKIP_UPDATE_CHECK=1")
 	// Stdin avoids OS command-line size/quoting limits and keeps prompts out of
@@ -205,30 +208,43 @@ func (b *ampBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 				drain.Stop()
 			}
 		}()
-		setDrainDeadline := func() {
+		setDrainDeadline := func(grace time.Duration) {
 			if drain == nil {
-				drain = time.NewTimer(ampStreamDrainGrace)
+				drain = time.NewTimer(grace)
 			} else {
-				drain.Reset(ampStreamDrainGrace)
+				drain.Reset(grace)
 			}
 			drainC = drain.C
 		}
 		cleaning := false
+		stoppedAfterTerminal := false
 		beginCleanup := func() {
 			if cleaning {
 				return
 			}
 			cleaning = true
-			// Preserve the outcome established before bounded cleanup. A later
-			// task deadline cannot erase a verified completion and process exit.
-			runErr = runCtx.Err()
+			if !terminalObserved.Load() {
+				runErr = runCtx.Err()
+			}
 			ctxDone = nil
+			// Preserve a native exit already available before we stop the tree.
+			if waitCh != nil {
+				select {
+				case exitErr = <-waitCh:
+					waitCh = nil
+				default:
+				}
+			}
 			if waitCh == nil && (state.sawCompletion || state.failed) && runErr == nil {
 				terminalObserved.Store(true)
 			}
+			if waitCh != nil && terminalObserved.Load() {
+				stoppedAfterTerminal = true
+				b.cfg.Logger.Warn("amp process still running after terminal result; stopping it during cleanup", "pid", cmd.Process.Pid)
+			}
 			signalProcessGroup(cmd, syscall.SIGKILL)
 			_ = stdin.Close()
-			setDrainDeadline()
+			setDrainDeadline(ampStreamDrainGrace)
 		}
 		for waitCh != nil || reads != nil || stderrDone != nil || inputCh != nil {
 			select {
@@ -243,16 +259,30 @@ func (b *ampBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 					}
 				} else {
 					handleAmpEvent(item.event, msgCh, &state)
-					if (state.sawCompletion || state.failed) && drain == nil {
-						setDrainDeadline()
+					if state.sawCompletion && !cleaning && runCtx.Err() == nil {
+						// Publish the protocol boundary before waiting for archival or
+						// other CLI cleanup. The daemon must not reclassify it as idle.
+						terminalObserved.Store(true)
+					}
+					if !cleaning && (state.sawCompletion || state.failed) && drain == nil {
+						grace := ampStreamDrainGrace
+						if state.sawCompletion {
+							grace = ampTerminalExitGrace
+						}
+						setDrainDeadline(grace)
 					}
 				}
 			case exitErr = <-waitCh:
 				waitCh = nil
+				if stoppedAfterTerminal {
+					// This exit acknowledges our cleanup, not an execution failure.
+					// A missing acknowledgement still fails at the drain deadline.
+					exitErr = nil
+				}
 				// A launch wrapper can exit before its descendant finishes the
 				// protocol. Allow trailing output, bounded even without a timeout.
 				if !cleaning {
-					setDrainDeadline()
+					setDrainDeadline(ampStreamDrainGrace)
 				}
 			case inputErr = <-inputCh:
 				inputCh = nil
@@ -294,6 +324,11 @@ func (b *ampBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 		if state.sawCompletion || state.failed {
 			inputErr = nil
 		}
+		// os/exec can return the context error when its no-op Cancel raced a
+		// clean exit. It is also cleanup after an already observed result.
+		if terminalObserved.Load() && (errors.Is(exitErr, context.Canceled) || errors.Is(exitErr, context.DeadlineExceeded)) {
+			exitErr = nil
+		}
 		status, output, errText := finalizeStreamResult("amp", opts.Timeout, runErr, inputErr, exitErr, state.sessionID, terminal, "")
 		if errText != "" {
 			errText = sanitizeAgentDiagnostic(scrub(withAgentStderr(errText, "amp", stderr.Tail())))
@@ -311,7 +346,10 @@ func (b *ampBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 	return &Session{CleanupRequired: true, Messages: msgCh, Result: resCh, TerminalObserved: terminalObserved.Load}, nil
 }
 
-const ampStreamDrainGrace = 2 * time.Second
+const (
+	ampStreamDrainGrace  = 2 * time.Second
+	ampTerminalExitGrace = 10 * time.Second
+)
 
 type ampStreamRead struct {
 	event ampStreamEvent
@@ -351,10 +389,11 @@ type ampStreamEvent struct {
 			Content                        json.RawMessage `json:"content"`
 		} `json:"content"`
 	} `json:"message"`
-	Result  string `json:"result"`
-	Error   string `json:"error"`
-	IsError bool   `json:"is_error"`
-	Usage   *struct {
+	Result            string   `json:"result"`
+	Error             string   `json:"error"`
+	IsError           bool     `json:"is_error"`
+	PermissionDenials []string `json:"permission_denials"`
+	Usage             *struct {
 		Input      int64 `json:"input_tokens"`
 		Output     int64 `json:"output_tokens"`
 		CacheRead  int64 `json:"cache_read_input_tokens"`
@@ -406,6 +445,11 @@ func handleAmpEvent(e ampStreamEvent, ch chan<- Message, s *ampStreamState) {
 	case "result":
 		s.sawCompletion = true
 		s.finalText = e.Result
+		if len(e.PermissionDenials) > 0 {
+			trySend(ch, Message{Type: MessageText, SessionID: s.sessionID, Content: "\n\n" + sanitizeAgentDiagnostic(
+				"Warning: Amp denied tool permissions: "+strings.Join(e.PermissionDenials, "; ")+
+					". Check amp.permissions in the execution machine's Amp settings for unattended commands.") + "\n"})
+		}
 		if e.IsError || e.Subtype != "success" {
 			s.failed = true
 			s.errorText = e.Error
