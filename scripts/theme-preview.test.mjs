@@ -154,6 +154,16 @@ const EXPECTED = [
     ],
     source: "packages/ui/components/ui/switch.tsx",
   },
+  ...[
+    ["open", "git-pull-request-arrow"],
+    ["merged", "git-merge"],
+    ["closed", "git-pull-request-closed"],
+  ].map(([state, icon]) => ({
+    what: `the ${state} pull request chip icons`,
+    find: (els) => els.filter((el) => el.tag === "svg" && el.classes.has(`icon-${icon}`)),
+    classes: [`text-pr-${state}`, `dark:text-pr-${state}-dark`],
+    source: "packages/views/issues/components/pull-request-chips.tsx",
+  })),
   {
     what: "the small buttons",
     find: (els) => els.filter((el) => "data-variant" in el.attrs && ["sm", "icon-sm", "icon-xs"].includes(el.attrs["data-size"])),
@@ -199,6 +209,7 @@ const NOT_DRAWN = {
     "status-blocked": "no blocked issue is listed",
     "status-cancelled": "no cancelled issue is listed",
     "priority-none": "every listed issue has a priority",
+    "pr-merged-text": "the issue's pull request list is not shown",
   },
 };
 
