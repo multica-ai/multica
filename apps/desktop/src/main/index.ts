@@ -991,15 +991,6 @@ if (!gotTheLock) {
       windowForeground(BrowserWindow.fromWebContents(event.sender)),
     );
 
-    // The dev toolbar's bug report attaches a picture of the window. Only dev
-    // builds register it, so a packaged renderer cannot read its own pixels.
-    if (is.dev) {
-      ipcMain.handle("dev:capture-window", async (event) => {
-        const image = await event.sender.capturePage();
-        return new Uint8Array(image.toPNG());
-      });
-    }
-
     // Main owns foreground detection and item-level dedupe. Every renderer
     // has its own WebSocket and `document.hasFocus()` only describes that one
     // window, so renderer-only gating can emit N duplicate system banners.

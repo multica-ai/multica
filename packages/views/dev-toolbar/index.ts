@@ -1,1 +1,1 @@
-export { DevToolbar, type DevToolbarProps, type ScreenshotCapture } from "./dev-toolbar";
+export { DevToolbar, type DevToolbarProps } from "./dev-toolbar";

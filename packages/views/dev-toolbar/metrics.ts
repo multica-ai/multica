@@ -120,16 +120,6 @@ export function formatClock(at: number): string {
   return new Date(at).toTimeString().slice(0, 8);
 }
 
-/** `2026-11-12 03:30:30 UTC+08:00`: local, like the trail, but unambiguous. */
-export function formatTimestamp(at: number): string {
-  const date = new Date(at);
-  const pad = (n: number) => String(Math.abs(n)).padStart(2, "0");
-  const offset = -date.getTimezoneOffset();
-  const day = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-  const zone = `UTC${offset < 0 ? "-" : "+"}${pad(Math.trunc(offset / 60))}:${pad(offset % 60)}`;
-  return `${day} ${formatClock(at)} ${zone}`;
-}
-
 export function formatDuration(ms: number): string {
   return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`;
 }

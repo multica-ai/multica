@@ -604,8 +604,6 @@ To keep it on, add the line to the env file `make` loads (`.env` / `.env.worktre
 
 Each reading opens the last five minutes behind it, kept in memory in that tab only: the heap curve and Query cache size (Mem), route changes and their timings (Nav), long tasks and the route they hit (Jank), every API request with its status, `X-Request-ID`, body and a copyable curl (Net), WebSocket state changes (Sync), and console errors, uncaught exceptions and unhandled rejections (Errors).
 
-**Report bug** files an issue in the current workspace on the backend you are connected to, with a screenshot, the route trail, errors and failed requests attached. **Copy as Markdown** takes the same report anywhere else. Desktop captures the window silently; Web asks the browser to share the tab when you press **Take**.
-
 ## How Database Creation Works
 
 Database creation is automatic.

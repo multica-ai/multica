@@ -185,8 +185,6 @@ const desktopAPI = {
   /** Toggle immersive mode — hide macOS traffic lights for full-screen modals */
   setImmersiveMode: (immersive: boolean) =>
     ipcRenderer.invoke("window:setImmersive", immersive),
-  /** PNG of this window. Dev builds only; rejects in packaged builds. */
-  captureWindowForDev: (): Promise<Uint8Array<ArrayBuffer>> => ipcRenderer.invoke("dev:capture-window"),
   /**
    * Show a native OS notification. The source workspace and either the inbox
    * selector or chat session are round-tripped on click. Main owns focus

@@ -31,10 +31,7 @@ import {
   SyncPanel,
   TONE_CLASS,
 } from "./panels";
-import { ReportBug, type ScreenshotCapture } from "./report-bug";
 import { useDevRecorder, useMainThreadBlocked, useNavDuration, useNow } from "./use-dev-metrics";
-
-export type { ScreenshotCapture } from "./report-bug";
 
 export interface DevToolbarProps {
   /** Which client this is, e.g. `web` or `desktop · staging`. */
@@ -43,10 +40,6 @@ export interface DevToolbarProps {
   apiUrl: string;
   /** Current route as the platform's router sees it. */
   route: string;
-  /** Opens an in-app path, such as a just-filed bug report. */
-  openPath: (path: string) => void;
-  /** How this platform takes a picture of the app for bug reports. */
-  screenshot?: ScreenshotCapture;
 }
 
 // App shells size themselves to the viewport (`h-svh`, `h-screen`), so a fixed
@@ -117,11 +110,10 @@ function Metric({
 /**
  * Development-only status bar pinned to the bottom of the window: which
  * client and backend this is, who you are in the current workspace, and live
- * client health. Each reading opens the recent history behind it, and a bug
- * report bundles that history with a screenshot. Platforms mount it only in
- * dev builds, behind an opt-in flag.
+ * client health. Each reading opens the recent history behind it. Platforms
+ * mount it only in dev builds, behind an opt-in flag.
  */
-export function DevToolbar({ build, apiUrl, route, openPath, screenshot }: DevToolbarProps) {
+export function DevToolbar({ build, apiUrl, route }: DevToolbarProps) {
   const [minimized, setMinimized] = useState(false);
   const sync = useWSStatus();
   const recording = useDevRecorder(route, sync);
@@ -212,17 +204,6 @@ export function DevToolbar({ build, apiUrl, route, openPath, screenshot }: DevTo
         <Metric label="Errors" value={String(errors)} tone={errors > 0 ? "bad" : "normal"}>
           <ErrorsPanel recording={recording} />
         </Metric>
-        <span className="mx-1 h-3 w-px bg-border" />
-        <ReportBug
-          recording={recording}
-          build={build}
-          apiUrl={apiUrl}
-          route={route}
-          workspaceSlug={slug}
-          role={role}
-          screenshot={screenshot}
-          openPath={openPath}
-        />
         <button
           type="button"
           onClick={() => setMinimized(true)}
