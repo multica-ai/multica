@@ -84,12 +84,12 @@ import { LocalDirModeDemo } from "@/components/demos/local-dir-mode-demo";
 
 ## 執行如何共享這個目錄
 
-本地目錄有兩種執行模式，按資源逐個設定。在資源面板裡可以直接切換，CLI 用 `--execution-mode`。Desktop 裡這兩種模式顯示為 **原地** 和 **並行**；API、CLI 和本頁其餘部分都使用識別符號。
+本地目錄有兩種執行模式，按資源逐個設定。在資源面板裡可以直接切換，CLI 用 `--execution-mode`。Desktop 裡這兩種模式顯示為 **直接修改** 和 **並行執行**；API、CLI 和本頁其餘部分都使用識別符號。
 
 <LocalDirModeDemo />
 
-<Tabs items={["in_place（原地，預設）", "worktree（並行）"]}>
-<Tab value="in_place（原地，預設）" id="in-place">
+<Tabs items={["in_place（直接修改，預設）", "worktree（並行執行）"]}>
+<Tab value="in_place（直接修改，預設）" id="in-place">
 
 AI 代理直接在你的目錄裡工作，同一時間只進行一次執行。兩次執行使用同一個真實目錄時，後到的執行進入 `waiting_local_directory`，等前一次釋放目錄後繼續。兩個路徑經不同符號連結指向同一目錄時，同樣序列。
 
@@ -98,7 +98,7 @@ AI 代理直接在你的目錄裡工作，同一時間只進行一次執行。�
 普通的非 git 目錄只能用這種模式：worktree 模式只面向 git 倉庫。
 
 </Tab>
-<Tab value="worktree（並行）" id="worktree">
+<Tab value="worktree（並行執行）" id="worktree">
 
 每次執行拿到你倉庫的一個獨立 [git worktree](https://git-scm.com/docs/git-worktree)，建在執行時自己的工作區目錄裡。同一目錄上的執行併發執行，誰都不用排隊，也都不會寫你的工作副本。
 

@@ -84,12 +84,12 @@ import { LocalDirModeDemo } from "@/components/demos/local-dir-mode-demo";
 
 ## 运行如何共享这个目录
 
-本地目录有两种执行模式，按资源逐个设置。在资源面板里可以直接切换，CLI 用 `--execution-mode`。Desktop 里这两种模式显示为 **原地** 和 **并行**；API、CLI 和本页其余部分都使用标识符。
+本地目录有两种执行模式，按资源逐个设置。在资源面板里可以直接切换，CLI 用 `--execution-mode`。Desktop 里这两种模式显示为 **直接修改** 和 **并行运行**；API、CLI 和本页其余部分都使用标识符。
 
 <LocalDirModeDemo />
 
-<Tabs items={["in_place（原地，默认）", "worktree（并行）"]}>
-<Tab value="in_place（原地，默认）" id="in-place">
+<Tabs items={["in_place（直接修改，默认）", "worktree（并行运行）"]}>
+<Tab value="in_place（直接修改，默认）" id="in-place">
 
 智能体直接在你的目录里工作，同一时间只进行一次运行。两次运行使用同一个真实目录时，后到的运行进入 `waiting_local_directory`，等前一次释放目录后继续。两个路径经不同符号链接指向同一目录时，同样串行。
 
@@ -98,7 +98,7 @@ import { LocalDirModeDemo } from "@/components/demos/local-dir-mode-demo";
 普通的非 git 目录只能用这种模式：worktree 模式只面向 git 仓库。
 
 </Tab>
-<Tab value="worktree（并行）" id="worktree">
+<Tab value="worktree（并行运行）" id="worktree">
 
 每次运行拿到你仓库的一个独立 [git worktree](https://git-scm.com/docs/git-worktree)，建在运行时自己的工作区目录里。同一目录上的运行并发执行，谁都不用排队，也都不会写你的工作副本。
 
