@@ -46,6 +46,9 @@ interface LogTail {
 }
 
 function redactCredentialAssignments(text: string): string {
+  const credentialKey =
+    /(?:token|password|passwd|secret|credential|api[_-]?key|private[_-]?key)/i;
+  if (!credentialKey.test(text)) return text;
   const value =
     /["']?\s*[:=]\s*(?:"(?:[^"\\]|\\.)*(?:"|$)|'(?:[^'\\]|\\[\s\S])*(?:'|$)|[^\s,;]+)/y;
   let end = 0;
@@ -53,13 +56,7 @@ function redactCredentialAssignments(text: string): string {
   // Consume each whole key once. Retrying a credential pattern at every word
   // boundary inside a dotted or hyphenated key rescans long suffixes.
   for (const key of text.matchAll(/\b[\w.-]+/g)) {
-    if (
-      key.index < end ||
-      !/(?:token|password|passwd|secret|credential|api[_-]?key|private[_-]?key)/i.test(
-        key[0],
-      )
-    )
-      continue;
+    if (key.index < end || !credentialKey.test(key[0])) continue;
     value.lastIndex = key.index + key[0].length;
     if (!value.test(text)) continue;
     safe += text.slice(end, key.index) + "credential=[REDACTED]";

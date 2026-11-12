@@ -25,6 +25,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { WorkspaceSlugProvider } from "@multica/core/paths";
 import { ApiClient } from "@multica/core/api";
 import { createAuthStore, registerAuthStore } from "@multica/core/auth";
+import { appRoutes } from "../routes";
 
 const fixture = vi.hoisted(() => ({
   root: "",
@@ -130,8 +131,6 @@ vi.mock("fs/promises", async (original) => {
 });
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
-let appRoutes: typeof import("../routes").appRoutes;
-
 beforeAll(async () => {
   Object.defineProperty(process, "contextIsolated", {
     configurable: true,
@@ -198,7 +197,6 @@ beforeAll(async () => {
     "https://diagnostics.invalid",
   );
   await import("../../../preload/index");
-  ({ appRoutes } = await import("../routes"));
 });
 afterEach(() => {
   cleanup();
