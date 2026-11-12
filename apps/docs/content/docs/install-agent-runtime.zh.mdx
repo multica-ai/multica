@@ -91,7 +91,11 @@ Multica 当前会检测以下命令：
 
 守护进程发现 `droid` 后，创建智能体时选择 Droid 运行时，再指派一个任务。执行过程显示文本和工具输出，完成后回传最终结果。模型默认沿用 Droid 配置，也可在 Multica 手动填写模型 ID。守护进程支持 `MULTICA_DROID_PATH`、`MULTICA_DROID_MODEL`、`MULTICA_DROID_ARGS`；推理强度可通过自定义参数 `--reasoning-effort high` 设置。
 
-任务使用 `droid exec --output-format stream-json --auto high`，读取 `AGENTS.md`，从 `.factory/skills/` 发现 skill。后续执行会在同一工作目录传入会话 ID。暂不支持恢复被拒绝后的自动重建会话、由 Multica 管理 MCP、执行中追加消息或 `max_turns`；MCP 需在 Droid 中配置，执行时长使用任务超时限制。Droid 的命令策略仍可能拒绝执行；失败前已完成的文件修改会保留。
+任务使用 `droid exec --output-format stream-json --auto high`，读取 `AGENTS.md`，从 `.factory/skills/` 发现 skill。后续执行会在同一工作目录传入会话 ID。若继续会话失败，且 Droid 尚未确认会话或调用工具，Multica 可尝试一次新会话；认证和网络错误会保留原会话，不会重试。
+
+自定义参数还支持 Droid 的工具过滤、规划模式配置、`--settings`、会话标签和 `--disable-builtin-skills`。MCP、hooks、plugins、自定义 Droid 和 BYOK 模型需在 Droid 中配置，Multica 不管理这些配置。暂不支持 Mission 编排、执行中追加消息或 `max_turns`；执行时长使用任务超时限制。自定义参数中的协议、工作目录、模型、会话和 Mission 覆盖项会被过滤；未知选项和额外的位置提示词会在启动前报错。使用的 `stream-json` 输出仍受支持，不涉及已弃用的 `stream-json` 输入模式。
+
+使用 `--auto high` 时，Droid 的命令策略仍可能拒绝执行；失败前已完成的文件修改会保留。指派无人值守任务前，可按[官方权限规则文档](https://docs.factory.com/autonomy-and-safety/permission-rules)检查执行机器上的策略。
 
 未发现运行时时，在守护进程所在机器安装 Droid，或用 `MULTICA_DROID_PATH` 指向原生可执行文件。认证失败时重新登录或更新执行环境中的 API key。权限、服务和协议错误会显示为失败；取消和超时会终止所属进程树并回传对应状态。没有完成事件的正常退出也会判为失败，中间说明文字不会作为最终结果发布。
 

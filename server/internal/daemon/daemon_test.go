@@ -3920,7 +3920,7 @@ func TestShouldRetryWithFreshSession_CompatPathIsBackendScoped(t *testing.T) {
 	// the compat path exists to catch.
 	result := agent.Result{Status: "failed", Error: "exit status 1"}
 
-	undetectable := []string{"antigravity", "codearts", "copilot", "cursor", "deveco", "opencode"}
+	undetectable := []string{"antigravity", "codearts", "copilot", "cursor", "deveco", "droid", "opencode"}
 	for _, provider := range undetectable {
 		t.Run(provider+" retries", func(t *testing.T) {
 			t.Parallel()

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -21,30 +22,36 @@ import (
 type droidBackend struct{ cfg Config }
 
 var droidBlockedArgs = map[string]blockedArgMode{
-	"exec":                        blockedStandalone,
-	"--":                          blockedStandalone,
-	"-o":                          blockedWithValue,
-	"--output-format":             blockedWithValue,
-	"--input-format":              blockedWithValue,
-	"-f":                          blockedWithValue,
-	"--file":                      blockedWithValue,
-	"--auto":                      blockedWithValue,
-	"--skip-permissions-unsafe":   blockedStandalone,
-	"--cwd":                       blockedWithValue,
-	"-m":                          blockedWithValue,
-	"--model":                     blockedWithValue,
-	"-s":                          blockedWithValue,
-	"--session-id":                blockedWithValue,
-	"--fork":                      blockedWithValue,
-	"--append-system-prompt":      blockedWithValue,
-	"--append-system-prompt-file": blockedWithValue,
-	"-w":                          blockedOptionalValue,
-	"--worktree":                  blockedOptionalValue,
-	"--worktree-dir":              blockedWithValue,
-	"--mission":                   blockedStandalone,
-	"--list-tools":                blockedStandalone,
-	"-h":                          blockedStandalone,
-	"--help":                      blockedStandalone,
+	"exec":                         blockedStandalone,
+	"--":                           blockedStandalone,
+	"-o":                           blockedWithValue,
+	"--output-format":              blockedWithValue,
+	"--input-format":               blockedWithValue,
+	"-f":                           blockedWithValue,
+	"--file":                       blockedWithValue,
+	"--auto":                       blockedWithValue,
+	"--skip-permissions-unsafe":    blockedStandalone,
+	"--cwd":                        blockedWithValue,
+	"-m":                           blockedWithValue,
+	"--model":                      blockedWithValue,
+	"-s":                           blockedWithValue,
+	"--session-id":                 blockedWithValue,
+	"--fork":                       blockedWithValue,
+	"--append-system-prompt":       blockedWithValue,
+	"--append-system-prompt-file":  blockedWithValue,
+	"-w":                           blockedOptionalValue,
+	"--worktree":                   blockedOptionalValue,
+	"--worktree-dir":               blockedWithValue,
+	"--mission":                    blockedStandalone,
+	"--worker-model":               blockedWithValue,
+	"--worker-reasoning-effort":    blockedWithValue,
+	"--validator-model":            blockedWithValue,
+	"--validator-reasoning-effort": blockedWithValue,
+	"--list-tools":                 blockedStandalone,
+	"-v":                           blockedStandalone,
+	"--version":                    blockedStandalone,
+	"-h":                           blockedStandalone,
+	"--help":                       blockedStandalone,
 }
 
 // Commander accepts attached short values (-otext, -fother.md). Normalize
@@ -61,7 +68,21 @@ func normalizeDroidArgs(args []string) []string {
 	return normalized
 }
 
-func buildDroidArgs(opts ExecOptions, logger *slog.Logger) []string {
+// The one-shot CLI treats an unclaimed positional argument as a replacement
+// prompt. Track native option arity so custom configuration cannot shadow stdin.
+// Unknown options fail closed until their one-shot semantics are checked.
+var droidNativeArgs = map[string]bool{
+	"-r": true, "--reasoning-effort": true,
+	"--spec-model": true, "--spec-reasoning-effort": true,
+	"--only-tools": true, "--add-tools": true, "--remove-tools": true,
+	"--settings": true, "--tag": true, "--log-group-id": true,
+	"--use-spec": false, "--disable-builtin-skills": false,
+}
+
+func buildDroidArgs(opts ExecOptions, logger *slog.Logger) ([]string, error) {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	args := []string{"exec", "--output-format", "stream-json", "--auto", "high"}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
@@ -69,8 +90,30 @@ func buildDroidArgs(opts ExecOptions, logger *slog.Logger) []string {
 	if opts.ResumeSessionID != "" {
 		args = append(args, "--session-id", opts.ResumeSessionID)
 	}
-	args = append(args, filterCustomArgs(normalizeDroidArgs(opts.ExtraArgs), droidBlockedArgs, logger)...)
-	return append(args, filterCustomArgs(normalizeDroidArgs(opts.CustomArgs), droidBlockedArgs, logger)...)
+	for _, custom := range [][]string{opts.ExtraArgs, opts.CustomArgs} {
+		filtered := filterCustomArgs(normalizeDroidArgs(custom), droidBlockedArgs, logger)
+		for i := 0; i < len(filtered); i++ {
+			arg := filtered[i]
+			flag, _, inline := strings.Cut(arg, "=")
+			// Commander also accepts -rhigh and -r=high.
+			if strings.HasPrefix(arg, "-r") && !strings.HasPrefix(arg, "--") && len(arg) > 2 {
+				flag, inline = "-r", true
+			}
+			takesValue, ok := droidNativeArgs[flag]
+			if !ok {
+				return nil, errors.New("droid custom arguments must use supported one-shot options; positional prompts and unknown options are not allowed")
+			}
+			args = append(args, arg)
+			if takesValue && !inline {
+				if i+1 == len(filtered) || strings.HasPrefix(filtered[i+1], "-") {
+					return nil, fmt.Errorf("droid custom option %s requires a value", flag)
+				}
+				i++
+				args = append(args, filtered[i])
+			}
+		}
+	}
+	return args, nil
 }
 
 func (b *droidBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
@@ -84,8 +127,38 @@ func (b *droidBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	if _, err := exec.LookPath(execPath); err != nil {
 		return nil, fmt.Errorf("droid executable not found at %q; install Factory Droid or set MULTICA_DROID_PATH: %w", execPath, err)
 	}
+	args, err := buildDroidArgs(opts, b.cfg.Logger)
+	if err != nil {
+		return nil, err
+	}
 	runCtx, cancel := runContext(ctx, opts.Timeout)
-	args := buildDroidArgs(opts, b.cfg.Logger)
+	var systemFile string
+	cleanupSystemPrompt := func() {
+		if systemFile != "" {
+			_ = os.Remove(systemFile)
+		}
+	}
+	startedProcess := false
+	defer func() {
+		if !startedProcess {
+			cleanupSystemPrompt()
+		}
+	}()
+	if opts.SystemPrompt != "" {
+		file, err := os.CreateTemp("", "multica-droid-system-*.md")
+		if err != nil {
+			cancel()
+			return nil, fmt.Errorf("create droid system prompt file: %w", err)
+		}
+		systemFile = file.Name()
+		_, writeErr := io.WriteString(file, opts.SystemPrompt)
+		closeErr := file.Close()
+		if writeErr != nil || closeErr != nil {
+			cancel()
+			return nil, fmt.Errorf("write droid system prompt file: %w", errors.Join(writeErr, closeErr))
+		}
+		args = append(args, "--append-system-prompt-file", systemFile)
+	}
 	runtimeCmd := b.cfg.commandAt(execPath)
 	runtimeCmd.Prefix = FilterLaunchPrefix("droid", normalizeDroidArgs(runtimeCmd.Prefix), b.cfg.Logger)
 	cmd := runtimeCmd.exec(runCtx, args...)
@@ -94,9 +167,6 @@ func (b *droidBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	cmd.Env = buildEnv(b.cfg.Env)
 	// Stdin avoids OS command-line size/quoting limits and keeps prompts out of
 	// process listings. Droid reads to EOF before executing the task.
-	if opts.SystemPrompt != "" {
-		prompt = opts.SystemPrompt + "\n\n---\n\n" + prompt
-	}
 	b.cfg.logAgentCommand(cmd, newAgentCommandLogArgs(args, trustAgentCommandPositional(0, "exec")))
 	// Keep raw stderr out of daemon logs. Publish only a scrubbed diagnostic
 	// after draining the private, bounded tail.
@@ -136,6 +206,7 @@ func (b *droidBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		_ = stdin.Close()
 		return nil, fmt.Errorf("start droid: %w", err)
 	}
+	startedProcess = true
 	_ = outW.Close()
 	_ = errW.Close()
 	_ = inR.Close()
@@ -166,6 +237,7 @@ func (b *droidBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		defer cancel()
 		defer close(msgCh)
 		defer close(resCh)
+		defer cleanupSystemPrompt()
 		started := time.Now()
 		state := droidStreamState{model: opts.Model}
 		var scanErr, exitErr, inputErr, runErr error
@@ -276,16 +348,13 @@ func (b *droidBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			usage = map[string]TokenUsage{model: *state.usage}
 		}
 		b.cfg.Logger.Info("droid finished", "pid", cmd.Process.Pid, "status", status)
-		sessionID := state.sessionID
-		if sessionID == "" {
-			sessionID = opts.ResumeSessionID
-		}
+		cleanupSystemPrompt()
 		resCh <- Result{
 			Status: status, Output: output, Error: errText,
 			DurationMs: time.Since(started).Milliseconds(), Usage: usage,
-			// Without a captured resume rejection, retain the requested pointer
-			// on failure and never trigger a fresh-session retry based on prose.
-			SessionID: sessionID,
+			// Only an observed ID proves a session loaded. An empty ID lets the
+			// daemon apply its bounded pre-tool fresh-session recovery policy.
+			SessionID: state.sessionID,
 		}
 	}()
 	return &Session{Messages: msgCh, Result: resCh, TerminalObserved: terminalObserved.Load}, nil

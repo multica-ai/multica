@@ -1,5 +1,7 @@
 Protocol evidence for the Droid adapter
 
+See the [capability audit](droid-capability-audit.md) for the full official-documentation checklist, native argument policy, configuration boundaries, and remaining acceptance checks.
+
 - Official native macOS arm64 Droid 1.8.0, downloaded from Factory's release endpoint. SHA-256: `c8dd0da4d01cc8c08f4f441c183a22bcf713bef17e82d8ba7a77ffd7899d06bc`, matched the vendor checksum.
 - `droid exec --help` verified stdin prompt input, stream-json output, model selection, session continuation, and autonomy flags.
 - An unauthenticated read-only invocation emitted `system/init`, then `error` with `source: "cli"` and `message: "Error: Authentication failed. Please log in using /login or set a valid FACTORY_API_KEY environment variable."`, and exited 1.
