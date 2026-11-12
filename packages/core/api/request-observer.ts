@@ -4,6 +4,8 @@
  * only observer.
  */
 export interface ApiRequestObserver {
+  /** A reason not to send the request at all; the call then rejects with it. */
+  refuse?(request: { method: string; path: string }): string | null;
   onStart(request: {
     requestId: string;
     method: string;
