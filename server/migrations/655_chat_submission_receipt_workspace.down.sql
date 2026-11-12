@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS idx_chat_submission_receipt_workspace;

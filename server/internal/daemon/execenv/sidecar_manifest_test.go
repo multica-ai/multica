@@ -165,6 +165,7 @@ var allFileBasedProviders = []string{
 	"qwen",
 	"qwenpaw",
 	"droid",
+	"amp",
 	"mcode",
 }
 

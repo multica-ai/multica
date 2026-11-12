@@ -409,6 +409,8 @@ func skillsDirPath(workDir, provider string) string {
 	case "qwen":
 		// Qwen Code discovers project-level skills from .qwen/skills/ in the workdir.
 		return filepath.Join(workDir, ".qwen", "skills")
+	case "amp":
+		return filepath.Join(workDir, ".agents", "skills")
 	case "droid":
 		return filepath.Join(workDir, ".factory", "skills")
 	case "qwenpaw":
