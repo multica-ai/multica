@@ -20,6 +20,7 @@ import { profileDir, profileLogPath } from "./daemon-profile";
 
 const MAX_LOG_BYTES = 32 * 1024;
 const MAX_LOG_LINES = 200;
+const MAX_LOG_SOURCE_BYTES = 256 * 1024;
 const MAX_METADATA_BYTES = 16 * 1024;
 const MAX_ARCHIVE_BYTES = 64 * 1024;
 const LOG_RECORD =
@@ -35,23 +36,33 @@ interface LogTail {
   status: "available" | "unresolved" | "unavailable";
   truncated: boolean;
   omittedRecords: number;
+  omissionReason?: "source_limit" | "incomplete_value";
   text: string;
 }
 
-function redactLog(text: string, depth = 0): string {
+function redactLog(
+  text: string,
+  depth = 0,
+): { text: string; incompleteValue: boolean } {
+  let incompleteValue = false;
   // tint quotes string/error attributes with strconv.AppendQuote. Decode each
   // quoted span before redaction, then re-encode it to preserve record boundaries.
   // Nested JSON strings have a fixed depth budget. Unsupported Go escapes and
   // incomplete strings are withheld instead of exporting their undecoded bytes.
   // Complete spans include raw newlines so malformed values cannot expose fake
-  // records. An unterminated span is withheld through the end of its line.
+  // records. An unterminated span is withheld through the end of the snapshot.
+  // A timestamp-shaped continuation cannot establish a safe record boundary.
   const decoded = text.replace(
-    /"(?:[^"\\]|\\[\s\S])*"|"(?:[^"\\\r\n]|\\[^\r\n])*\\?(?=\r?$)/gm,
-    (quoted) => {
+    /"(?:[^"\\]|\\[\s\S])*"|("(?:[^"\\]|\\[\s\S])*\\?$)/g,
+    (quoted, incomplete: string | undefined) => {
+      if (incomplete !== undefined) {
+        incompleteValue = true;
+        return '"[REDACTED INCOMPLETE VALUE]"';
+      }
       if (depth >= 4) return '"[REDACTED ENCODED VALUE]"';
       try {
         return JSON.stringify(
-          redactLog(JSON.parse(quoted) as string, depth + 1),
+          redactLog(JSON.parse(quoted) as string, depth + 1).text,
         );
       } catch {
         return '"[REDACTED ENCODED VALUE]"';
@@ -82,7 +93,7 @@ function redactLog(text: string, depth = 0): string {
       "[REDACTED PATH]",
     );
   safe = redactSecrets(safe);
-  return String(redactText(safe));
+  return { text: String(redactText(safe)), incompleteValue };
 }
 
 async function readLogTail(profile: string | null): Promise<LogTail> {
@@ -113,9 +124,13 @@ async function readLogTail(profile: string | null): Promise<LogTail> {
         (await realpath(directory)) !== resolve(directory)
       )
         return empty;
-      const start = Math.max(0, opened.size - MAX_LOG_BYTES);
-      const buffer = Buffer.alloc(Math.min(opened.size, MAX_LOG_BYTES));
-      const { bytesRead } = await handle.read(buffer, 0, buffer.length, start);
+      // Begin at a known lexical boundary. A tail-only read can start inside a
+      // quoted credential whose continuation resembles a standalone log record.
+      // Withhold logs exceeding this fixed source budget and still export metadata.
+      if (opened.size > MAX_LOG_SOURCE_BYTES)
+        return { ...empty, truncated: true, omissionReason: "source_limit" };
+      const buffer = Buffer.alloc(opened.size);
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
       const after = await lstat(path);
       if (
         !after.isFile() ||
@@ -124,12 +139,12 @@ async function readLogTail(profile: string | null): Promise<LogTail> {
         after.size < opened.size
       )
         return empty;
-      // Drop both boundary fragments, including a concurrent incomplete append.
+      // Drop an incomplete final physical line, including a concurrent append.
       const partialLastLine = bytesRead > 0 && buffer[bytesRead - 1] !== 0x0a;
       let text = buffer.subarray(0, bytesRead).toString("utf8");
-      if (start > 0) text = text.slice(text.indexOf("\n") + 1);
       text = text.slice(0, text.lastIndexOf("\n") + 1);
-      const redacted = redactLog(text).split("\n").filter(Boolean);
+      const sanitized = redactLog(text);
+      const redacted = sanitized.text.split("\n").filter(Boolean);
       const records = redacted.filter((line) => LOG_RECORD.test(line));
       const selected: string[] = [];
       let bytes = 0;
@@ -142,12 +157,16 @@ async function readLogTail(profile: string | null): Promise<LogTail> {
       return {
         status: "available",
         truncated:
-          start > 0 ||
+          opened.size > MAX_LOG_BYTES ||
+          sanitized.incompleteValue ||
           partialLastLine ||
           after.size > opened.size ||
           bytesRead < buffer.length ||
           selected.length < records.length,
         omittedRecords: redacted.length - selected.length,
+        omissionReason: sanitized.incompleteValue
+          ? "incomplete_value"
+          : undefined,
         text: selected
           .reverse()
           .map((line) => line + "\n")
@@ -221,6 +240,8 @@ export function setupDiagnosticsExport(
                 status: log.status,
                 truncated: log.truncated,
                 omittedRecords: log.omittedRecords,
+                omissionReason: log.omissionReason ?? null,
+                sourceBytesLimit: MAX_LOG_SOURCE_BYTES,
                 bytes: Buffer.byteLength(log.text),
               },
             },

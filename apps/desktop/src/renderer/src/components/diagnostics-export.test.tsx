@@ -423,3 +423,116 @@ describe("structured-log credentials through the settings export action", () => 
     },
   );
 });
+
+describe("bounded credential context through the normal diagnostics action", () => {
+  it.each([
+    ["complete short quoted password", false, false, true, false],
+    ["truncated quoted password", true, false, true, false],
+    ["complete malformed encoded token", false, true, true, false],
+    ["truncated malformed encoded token", true, true, true, false],
+    ["unclosed short password", false, false, false, false],
+    ["unclosed long password", true, false, false, false],
+    ["unclosed short encoded token", false, true, false, false],
+    ["unclosed long encoded token", true, true, false, false],
+    ["over-budget password", true, false, true, true],
+    ["over-budget encoded token", true, true, true, true],
+    ["over-budget unclosed password", true, false, false, true],
+    ["over-budget unclosed encoded token", true, true, false, true],
+  ])(
+    "redacts %s via normal Settings and extracted ZIP",
+    async (name, truncated, encoded, closed, overBudget) => {
+      const fs =
+        await vi.importActual<typeof import("fs/promises")>("fs/promises");
+      const canary = "cutCanary42";
+      const padding = overBudget
+        ? "padding".repeat(40000)
+        : truncated
+          ? "padding".repeat(6000)
+          : "short";
+      const prefix = encoded
+        ? "12:00:00.000 ERR provider request failed error=" +
+          String.raw`"HTTP 401 {\"token\":\"` +
+          padding
+        : '12:00:00.000 ERR provider request failed password="' + padding;
+      const suffix = encoded ? String.raw`last\"}"` : 'last"';
+      const input =
+        prefix +
+        "\n12:00:01.000 INF " +
+        canary +
+        "\n" +
+        (closed ? suffix : "") +
+        "\n12:00:02.000 INF safe-final-marker component=daemon\n";
+      await fs.writeFile(
+        fixture.root + "/desktop-diagnostics.invalid/daemon.log",
+        input,
+      );
+      fixture.save.mockResolvedValue({
+        canceled: false,
+        filePath: fixture.root + "/boundary-review.zip",
+      });
+      settings();
+      await screen.findByText("fixture-daemon");
+      fireEvent.click(
+        screen.getByRole("button", { name: "Export diagnostics" }),
+      );
+      await waitFor(() =>
+        expect(toast.success).toHaveBeenCalledWith("Diagnostics saved"),
+      );
+      const archive = await fs.readFile(fixture.root + "/boundary-review.zip");
+      const result = await readZip(new Uint8Array(archive), 64 * 1024);
+      if (!result.ok) throw new Error(result.error);
+      const log = new TextDecoder().decode(
+        result.files.find((f) => f.path === "daemon.log")!.data,
+      );
+      const metadata = JSON.parse(
+        new TextDecoder().decode(
+          result.files.find((f) => f.path === "diagnostics.json")!.data,
+        ),
+      );
+      const record = {
+        name,
+        inputBytes: Buffer.byteLength(input),
+        inputPrefix: input.slice(0, 150),
+        inputSuffix: input.slice(-250),
+        extracted: log,
+        metadata,
+        archiveBytes: archive.length,
+      };
+      const artifactRoot = process.env.BOYF788_BOUNDARY_ARTIFACTS;
+      if (artifactRoot) {
+        await fs.mkdir(artifactRoot, { recursive: true });
+        const basename = String(name).replaceAll(" ", "-");
+        await fs.writeFile(artifactRoot + "/" + basename + "-input.log", input);
+        await fs.writeFile(artifactRoot + "/" + basename + ".zip", archive);
+        await fs.writeFile(
+          artifactRoot + "/" + basename + "-extracted.log",
+          log,
+        );
+        console.log("BOUNDARY_REVIEW", JSON.stringify(record));
+        await fs.appendFile(
+          process.env.BOYF788_BOUNDARY_CAPTURE!,
+          JSON.stringify(record) + "\n",
+        );
+      }
+      expect(archive.toString()).not.toContain(canary);
+      expect(archive.byteLength).toBeLessThanOrEqual(64 * 1024);
+      expect(Buffer.byteLength(log)).toBeLessThanOrEqual(32 * 1024);
+      if (overBudget) {
+        expect(log).toBe("");
+        expect(metadata.log.omissionReason).toBe("source_limit");
+        expect(metadata.log.status).toBe("unavailable");
+      } else {
+        expect(log).toContain("provider request failed");
+        if (closed) {
+          expect(log).toContain("safe-final-marker component=daemon");
+          expect(metadata.log.omissionReason).toBeNull();
+        } else {
+          expect(log).not.toContain("safe-final-marker");
+          expect(metadata.log.omissionReason).toBe("incomplete_value");
+          expect(metadata.log.truncated).toBe(true);
+        }
+      }
+      expect(metadata.daemon.lastObservedState).toBe("running");
+    },
+  );
+});

@@ -198,8 +198,6 @@ describe("local diagnostic archive through its registered IPC handler", () => {
       String.raw`"HTTP 401 {\"token\":\"canary42\"}\x00"`,
     ],
     ["malformed escape", String.raw`"HTTP 401 {\"token\":\"canary42\"}\q"`],
-    ["unterminated string", String.raw`"HTTP 401 {\"token\":\"canary42`],
-    ["trailing escape", String.raw`"HTTP 401 {\"token\":\"canary42` + "\\"],
     [
       "depth limit",
       JSON.stringify(
@@ -224,6 +222,92 @@ describe("local diagnostic archive through its registered IPC handler", () => {
       expect(result.log).toContain("next-record component=daemon");
     },
   );
+
+  it.each([
+    ["unterminated string", String.raw`"HTTP 401 {\"token\":\"canary42`],
+    ["trailing escape", String.raw`"HTTP 401 {\"token\":\"canary42` + "\\"],
+  ])("withholds the ambiguous suffix after %s", async (_name, attribute) => {
+    await real.writeFile(
+      logPath,
+      `12:00:00.000 ERR provider request failed error=${attribute}\n` +
+        "12:00:01.000 INF next-record component=daemon\n",
+    );
+    const result = await exportArchive();
+    expect(result.archive.toString()).not.toContain("canary42");
+    expect(result.log).toContain("provider request failed");
+    expect(result.log).not.toContain("next-record component=daemon");
+    expect(result.metadata.log.omissionReason).toBe("incomplete_value");
+    expect(result.metadata.log.truncated).toBe(true);
+  });
+
+  it("reads the exact source budget from byte zero and retains a safe following record", async () => {
+    const prefix = '12:00:00.000 ERR provider request failed password="';
+    const suffix =
+      '\n12:00:01.000 INF budgetCanary42\nlast"\n' +
+      "12:00:02.000 INF safe-final-marker component=daemon\n";
+    const padding = "p".repeat(256 * 1024 - Buffer.byteLength(prefix + suffix));
+    await real.writeFile(logPath, prefix + padding + suffix);
+    const reads: { length: number; position: number }[] = [];
+    fixture.open.mockImplementation(async (path, ...args) => {
+      const handle = await real.open(path, ...args);
+      if (path === logPath) {
+        const read = handle.read.bind(handle);
+        vi.spyOn(handle, "read").mockImplementation(
+          async (...readArgs: Parameters<typeof handle.read>) => {
+            const args: readonly unknown[] = readArgs;
+            reads.push({
+              length: Number(args[2]),
+              position: Number(args[3]),
+            });
+            return read(...readArgs);
+          },
+        );
+      }
+      return handle;
+    });
+    const result = await exportArchive();
+    expect(reads).toEqual([{ length: 256 * 1024, position: 0 }]);
+    expect(result.archive.toString()).not.toContain("budgetCanary42");
+    expect(result.log).toContain("provider request failed");
+    expect(result.log).toContain("safe-final-marker component=daemon");
+    expect(result.metadata.log.omissionReason).toBeNull();
+  });
+
+  it("withholds oversized source logs without reading an ambiguous tail", async () => {
+    await real.writeFile(
+      logPath,
+      '12:00:00.000 ERR password="' +
+        "p".repeat(256 * 1024) +
+        '\n12:00:01.000 INF outsideContextCanary42\nlast"\n' +
+        "12:00:02.000 INF safe-final-marker component=daemon\n",
+    );
+    let sourceReads = 0;
+    fixture.open.mockImplementation(async (path, ...args) => {
+      const handle = await real.open(path, ...args);
+      if (path === logPath) {
+        const read = handle.read.bind(handle);
+        vi.spyOn(handle, "read").mockImplementation(
+          async (...readArgs: Parameters<typeof handle.read>) => {
+            sourceReads++;
+            return read(...readArgs);
+          },
+        );
+      }
+      return handle;
+    });
+    const result = await exportArchive();
+    expect(sourceReads).toBe(0);
+    expect(result.log).toBe("");
+    expect(result.metadata.log).toMatchObject({
+      status: "unavailable",
+      truncated: true,
+      omissionReason: "source_limit",
+      sourceBytesLimit: 256 * 1024,
+      bytes: 0,
+    });
+    expect(result.metadata.daemon.lastObservedState).toBe("running");
+    expect(result.archive.toString()).not.toContain("outsideContextCanary42");
+  });
 
   it("preserves non-secret quoted diagnostic context and escaped record boundaries", async () => {
     const error = JSON.stringify(
@@ -450,7 +534,10 @@ describe("local diagnostic archive through its registered IPC handler", () => {
         "\npartialSecretCanary42\n12:00:01.000 INF complete-marker\n12:00:02.000 INF unfinished",
     );
     const result = await exportArchive();
-    expect(result.log).toBe("12:00:01.000 INF complete-marker\n");
+    expect(result.log).toContain("12:00:01.000 INF complete-marker\n");
+    expect(result.log).not.toContain("partialSecretCanary42");
+    expect(result.log).not.toContain("unfinished");
+    expect(Buffer.byteLength(result.log)).toBeLessThanOrEqual(32 * 1024);
     expect(result.metadata.log.truncated).toBe(true);
   });
 
