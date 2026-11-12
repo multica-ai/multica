@@ -11,9 +11,11 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
@@ -3277,6 +3279,59 @@ func repoAllowlist(repos []RepoData) map[string]struct{} {
 	return allowed
 }
 
+// defaultGitPorts are the ports implied when a URL form omits one. A port
+// that differs from the scheme default can name a different server, so it
+// stays part of the identity.
+var defaultGitPorts = map[string]string{
+	"http:": "80", "https:": "443", "ssh:": "22", "git:": "9418",
+}
+
+// repoIdentity is the protocol-agnostic host+path identity of a clone URL,
+// so http, ssh, and scp-shorthand forms of the same repository compare
+// equal. Hosts are case-insensitive; repository paths are not guaranteed to
+// be, so path casing is preserved. It mirrors repositoryIdentity in
+// packages/views/settings/components/repositories-section.tsx — the two must
+// not drift, or a repo the UI refuses to add as a duplicate could still
+// bypass (or be rejected by) the daemon allowlist. An unparseable URL keeps
+// no identity and only ever matches by exact string.
+func repoIdentity(rawURL string) string {
+	value := strings.TrimSpace(rawURL)
+	if value == "" {
+		return ""
+	}
+
+	host := ""
+	path := ""
+	if !strings.Contains(value, "://") {
+		if m := scpLikeURL.FindStringSubmatch(value); m != nil {
+			host = m[1]
+			path = m[2]
+		}
+	}
+	if host == "" {
+		parsed, err := url.Parse(value)
+		if err != nil || parsed.Hostname() == "" {
+			return ""
+		}
+		host = parsed.Hostname()
+		if port := parsed.Port(); port != "" && port != defaultGitPorts[parsed.Scheme] {
+			host = host + ":" + port
+		}
+		path = parsed.Path
+	}
+
+	normalizedPath := strings.Trim(path, "/")
+	if len(normalizedPath) > 4 && strings.EqualFold(normalizedPath[len(normalizedPath)-4:], ".git") {
+		normalizedPath = normalizedPath[:len(normalizedPath)-4]
+	}
+	if normalizedPath == "" {
+		return ""
+	}
+	return strings.ToLower(host) + "/" + normalizedPath
+}
+
+var scpLikeURL = regexp.MustCompile(`^(?:[^@\s/]+@)?([^:\s/]+):(.+)$`)
+
 func (d *Daemon) workspaceRepoAllowed(workspaceID, repoURL string) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -3289,6 +3344,20 @@ func (d *Daemon) workspaceRepoAllowed(workspaceID, repoURL string) bool {
 	}
 	if _, allowed := ws.taskRepoURLs[repoURL]; allowed {
 		return true
+	}
+	identity := repoIdentity(repoURL)
+	if identity == "" {
+		return false
+	}
+	for url := range ws.allowedRepoURLs {
+		if repoIdentity(url) == identity {
+			return true
+		}
+	}
+	for url := range ws.taskRepoURLs {
+		if repoIdentity(url) == identity {
+			return true
+		}
 	}
 	return false
 }
