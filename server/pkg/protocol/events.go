@@ -78,8 +78,8 @@ const (
 
 	// Chat events
 	EventChatSupplement = "chat:supplement"
-	EventChatMessage = "chat:message"
-	EventChatDone    = "chat:done"
+	EventChatMessage    = "chat:message"
+	EventChatDone       = "chat:done"
 	// Bounded owner-only alert; unlike chat content, delivered across workspaces.
 	EventChatReplyNotification = "chat:reply_notification"
 	// EventChatQuickActions supplements a finished turn with follow-up
