@@ -11,6 +11,52 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
+func TestChatSubmissionWorkspaceDeletionIsScoped(t *testing.T) {
+	fx := workspaceFixture(t)
+	neighbourSession, _ := submissionSession(t)
+	body := map[string]any{"content": "workspace-scoped acceptance", "submission_id": uuid.NewString()}
+	neighbourAcceptance := submissionSend(t, neighbourSession, body)
+
+	workspace := fx.Workspace(t, "Submission cleanup", "submission-cleanup-"+uuid.NewString())
+	fx.Member(t, workspace, testUserID, "owner")
+	runtime := fx.Runtime(t, "Offline cleanup runtime", testutil.Cols{"workspace_id": workspace, "owner_id": testUserID})
+	agent := fx.Agent(t, "Submission cleanup agent", runtime, testutil.Cols{"workspace_id": workspace})
+	created := submissionStatus(t, testServer.URL, testToken, workspace, "POST", "/api/chat/sessions", map[string]any{"agent_id": agent}, http.StatusCreated)
+	sessionID := created["id"].(string)
+	cleanupSubmissionSession(t, testToken, workspace, sessionID)
+	path := "/api/chat/sessions/" + sessionID + "/messages"
+	submissionStatus(t, testServer.URL, testToken, workspace, "POST", path, body, http.StatusCreated)
+	submissionCounts(t, sessionID, 1, 1, 1)
+
+	// The FK-free workspace selector must also remove receipts whose session
+	// is already absent, without depending on the session ownership join.
+	fx.Cleanup(t, `DELETE FROM chat_submission_receipt WHERE workspace_id=$1`, workspace)
+	fx.Exec(t, `
+INSERT INTO chat_submission_receipt (
+    chat_session_id, workspace_id, initiator_user_id, actor_type, actor_id,
+    submission_id, request_fingerprint, response
+)
+SELECT $2, workspace_id, initiator_user_id, actor_type, actor_id,
+       submission_id, request_fingerprint, response
+FROM chat_submission_receipt WHERE chat_session_id=$1
+`, sessionID, uuid.NewString())
+	if count := fx.Count(t, `SELECT count(*) FROM chat_submission_receipt WHERE workspace_id=$1`, workspace); count != 2 {
+		t.Fatalf("workspace receipt fixture count=%d want=2", count)
+	}
+
+	submissionStatus(t, testServer.URL, testToken, workspace, "DELETE", "/api/workspaces/"+workspace, nil, http.StatusNoContent)
+	submissionCounts(t, sessionID, 0, 0, 0)
+	if count := fx.Count(t, `SELECT count(*) FROM chat_submission_receipt WHERE workspace_id=$1`, workspace); count != 0 {
+		t.Fatalf("deleted workspace retained %d receipts", count)
+	}
+	submissionStatus(t, testServer.URL, testToken, workspace, "POST", path, body, http.StatusNotFound)
+	submissionCounts(t, neighbourSession, 1, 1, 1)
+	if replay := submissionSend(t, neighbourSession, body); !reflect.DeepEqual(neighbourAcceptance, replay) {
+		t.Fatalf("workspace deletion changed neighbouring acceptance original=%v replay=%v", neighbourAcceptance, replay)
+	}
+	submissionCounts(t, neighbourSession, 1, 1, 1)
+}
+
 func TestChatSubmissionRuntimeUnbindKeepsUserReceipts(t *testing.T) {
 	fx := workspaceFixture(t)
 	runtimeID := fx.Runtime(t, "Submission runtime teardown", testutil.Cols{"owner_id": testUserID})
