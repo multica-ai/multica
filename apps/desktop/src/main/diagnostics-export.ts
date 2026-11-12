@@ -45,6 +45,29 @@ interface LogTail {
   text: string;
 }
 
+function redactCredentialAssignments(text: string): string {
+  const value =
+    /["']?\s*[:=]\s*(?:"(?:[^"\\]|\\.)*(?:"|$)|'(?:[^'\\]|\\[\s\S])*(?:'|$)|[^\s,;]+)/y;
+  let end = 0;
+  let safe = "";
+  // Consume each whole key once. Retrying a credential pattern at every word
+  // boundary inside a dotted or hyphenated key rescans long suffixes.
+  for (const key of text.matchAll(/\b[\w.-]+/g)) {
+    if (
+      key.index < end ||
+      !/(?:token|password|passwd|secret|credential|api[_-]?key|private[_-]?key)/i.test(
+        key[0],
+      )
+    )
+      continue;
+    value.lastIndex = key.index + key[0].length;
+    if (!value.test(text)) continue;
+    safe += text.slice(end, key.index) + "credential=[REDACTED]";
+    end = value.lastIndex;
+  }
+  return safe + text.slice(end);
+}
+
 function redactLog(
   text: string,
   depth = 0,
@@ -75,19 +98,17 @@ function redactLog(
     },
   );
   // Quoted values may span lines. Redact before selecting individual records.
-  let safe = decoded
-    .replace(
-      /-----BEGIN[A-Z\s]*PRIVATE KEY-----[\s\S]*?(?:-----END[A-Z\s]*PRIVATE KEY-----|$)/g,
-      "[REDACTED PRIVATE KEY]",
-    )
-    .replace(
-      /\b(?:proxy-)?authorization["']?\s*[:=][^\r\n]*/gi,
-      "Authorization=[REDACTED]",
-    )
-    .replace(
-      /\b[\w.-]*(?:token|password|passwd|secret|credential|api[_-]?key|private[_-]?key)[\w.-]*["']?\s*[:=]\s*(?:"(?:[^"\\]|\\.)*(?:"|$)|'(?:[^'\\]|\\[\s\S])*(?:'|$)|[^\s,;]+)/gi,
-      "credential=[REDACTED]",
-    )
+  let safe = redactCredentialAssignments(
+    decoded
+      .replace(
+        /-----BEGIN[A-Z\s]*PRIVATE KEY-----[\s\S]*?(?:-----END[A-Z\s]*PRIVATE KEY-----|$)/g,
+        "[REDACTED PRIVATE KEY]",
+      )
+      .replace(
+        /\b(?:proxy-)?authorization["']?\s*[:=][^\r\n]*/gi,
+        "Authorization=[REDACTED]",
+      ),
+  )
     .replace(
       /\b(?:https?|postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqps?|file):\/\/[^\s"'<>]+/gi,
       "[REDACTED URL]",

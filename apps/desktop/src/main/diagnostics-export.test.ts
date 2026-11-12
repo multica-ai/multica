@@ -160,6 +160,52 @@ describe("local diagnostic archive through its registered IPC handler", () => {
   });
 
   it.each([
+    "token",
+    "PRE.ToKeN-suffix",
+    "password",
+    "passwd",
+    "secret",
+    "credential",
+    "apiKey",
+    "api_key",
+    "api-key",
+    "privateKey",
+    "private_key",
+    "private-key",
+    "mysecretary",
+    "..token",
+    "--api-key",
+    "._credential-",
+  ])("redacts %s assignments and keeps ordinary context", async (key) => {
+    const input = [
+      `12:00:00.000 INF before ${key}=canary42 after ordinary=value`,
+      `12:00:01.000 INF before "${key}":"canary42" after ordinary=value`,
+      `12:00:02.000 INF before '${key}' : 'canary42' after ordinary=value`,
+      `12:00:03.000 INF before ${key}="" after ordinary=value`,
+      "",
+    ].join("\n");
+    await real.writeFile(logPath, input);
+    const result = await exportArchive();
+    expect(result.log).not.toContain("canary42");
+    expect(result.log.match(/before/g)).toHaveLength(4);
+    expect(result.log.match(/after ordinary=value/g)).toHaveLength(4);
+    expect(await real.readFile(logPath, "utf8")).toBe(input);
+  });
+
+  it("preserves punctuation and finds credentials inside ordinary attribute values", async () => {
+    await real.writeFile(
+      logPath,
+      "12:00:00.000 INF .-token=canary42 before ordinary=token:other42; context=kept\n" +
+        "12:00:01.000 INF token= , password='' secret=\"\" context=kept\n",
+    );
+    const result = await exportArchive();
+    expect(result.log).toBe(
+      "12:00:00.000 INF .-credential=[REDACTED] before ordinary=credential=[REDACTED]; context=kept\n" +
+        "12:00:01.000 INF [REDACTED CREDENTIAL] credential=[REDACTED] credential=[REDACTED] context=kept\n",
+    );
+  });
+
+  it.each([
     ["raw JSON", '{"token":"canary42","context":"kept"}'],
     ["quoted JSON", JSON.stringify('{"token":"canary42","context":"kept"}')],
     [

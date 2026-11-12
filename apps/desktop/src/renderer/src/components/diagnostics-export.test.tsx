@@ -385,6 +385,48 @@ describe("Desktop diagnostics through production preload and registered IPC", ()
   });
 });
 
+describe("supported long records through the settings export action", () => {
+  it.each([
+    ["punctuation-heavy", "a.", 65536],
+    ["near the record limit", "a.", 130000],
+    ["repeated credential names without an assignment", "token.", 40000],
+  ] as const)("exports %s within the normal UI wait", async (_name, unit, count) => {
+    const fs =
+      await vi.importActual<typeof import("fs/promises")>("fs/promises");
+    const logPath = `${fixture.root}/desktop-diagnostics.invalid/daemon.log`;
+    const input =
+      "12:00:00.000 INF diagnostic=" + unit.repeat(count) +
+      "\n12:00:01.000 INF safe-final-marker token=canary42 context=kept\n";
+    await fs.writeFile(logPath, input);
+    const destination = `${fixture.root}/long-record.zip`;
+    fixture.save.mockResolvedValue({ canceled: false, filePath: destination });
+    const originalExport = window.daemonAPI.exportDiagnostics;
+    let pendingExport: ReturnType<typeof originalExport> | undefined;
+    window.daemonAPI.exportDiagnostics = () => {
+      pendingExport = originalExport();
+      return pendingExport;
+    };
+    try {
+      settings();
+      await screen.findByText("fixture-daemon");
+      fireEvent.click(screen.getByRole("button", { name: "Export diagnostics" }));
+      await waitFor(() => expect(toast.success).toHaveBeenCalled());
+      const archive = await fs.readFile(destination);
+      const extracted = await readZip(new Uint8Array(archive), 64 * 1024);
+      if (!extracted.ok) throw new Error(extracted.error);
+      const log = new TextDecoder().decode(extracted.files[1]!.data);
+      expect(log).toContain("safe-final-marker");
+      expect(log).toContain("context=kept");
+      expect(archive.toString()).not.toContain("canary42");
+      expect(Buffer.byteLength(log)).toBeLessThanOrEqual(32 * 1024);
+      expect(await fs.readFile(logPath, "utf8")).toBe(input);
+    } finally {
+      await pendingExport;
+      window.daemonAPI.exportDiagnostics = originalExport;
+    }
+  });
+});
+
 describe("structured-log credentials through the settings export action", () => {
   it.each([
     ["token", "escapedCanary42"],
