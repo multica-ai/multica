@@ -610,6 +610,7 @@ func init() {
 	issueCmd.AddCommand(issueUpdateCmd)
 	issueCmd.AddCommand(issueAssignCmd)
 	issueCmd.AddCommand(issueStatusCmd)
+	issueCmd.AddCommand(issueDeleteCmd)
 	issueCmd.AddCommand(issueReorderCmd)
 	issueCmd.AddCommand(issueCommentCmd)
 	issueCmd.AddCommand(issueSubscriberCmd)
@@ -710,6 +711,10 @@ func init() {
 	issueStatusCmd.Flags().Bool("no-start", false, "Change status without starting an agent run")
 	issueStatusCmd.Flags().String("duplicate-of", "", "Mark the issue as a duplicate of this original issue (key like MUL-123, or full UUID); the status must be cancelled")
 	issueStatusCmd.Flags().String("output", "table", "Output format: table or json")
+
+	// issue delete
+	issueDeleteCmd.Flags().BoolP("yes", "y", false, "Skip the confirmation prompt")
+	issueDeleteCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// issue reorder
 	registerIssueReorderFlags(issueReorderCmd)
