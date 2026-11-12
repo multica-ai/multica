@@ -13,6 +13,7 @@
     "done": "Done",
     "download": "Download",
     "edit": "Edit",
+    "go_home": "Go home",
     "more": "More",
     "open": "Open",
     "remove": "Remove",
@@ -49,5 +50,16 @@
     "hours_ago_other": "{{count}}h ago",
     "days_ago_other": "{{count}}d ago",
     "weeks_ago_other": "{{count}}w ago"
+  },
+  "network": {
+    "offline": "No internet connection — showing saved data"
+  },
+  "errors": {
+    "unexpected_title": "Something went wrong",
+    "unexpected_body": "The app hit an unexpected error. Try again, or go back home.",
+    "error_id": "Error ID: {{id}}",
+    "unknown_message": "No error message was provided.",
+    "copy_details": "Copy details",
+    "copied": "Copied"
   }
 }

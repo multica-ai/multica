@@ -47,6 +47,7 @@ import { useCreatePin, useDeletePin } from "@/data/mutations/pins";
 import { useAuthStore } from "@/data/auth-store";
 import { useProjectRealtime } from "@/data/realtime/use-project-realtime";
 import { useWorkspaceStore } from "@/data/workspace-store";
+import { useRefreshWithHaptics } from "@/lib/use-refresh-with-haptics";
 import { useT } from "@/lib/i18n";
 
 export default function ProjectDetail() {
@@ -71,6 +72,7 @@ export default function ProjectDetail() {
       }),
     ]);
   }, [detail, qc, wsId, id]);
+  const onRefreshWithHaptics = useRefreshWithHaptics(onRefresh);
 
   const project = detail.data;
 
@@ -204,7 +206,7 @@ export default function ProjectDetail() {
           refreshControl={
             <RefreshControl
               refreshing={detail.isRefetching}
-              onRefresh={onRefresh}
+              onRefresh={onRefreshWithHaptics}
             />
           }
           keyboardDismissMode="on-drag"

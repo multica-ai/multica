@@ -13,6 +13,7 @@
     "done": "完成",
     "download": "下载",
     "edit": "编辑",
+    "go_home": "回到首页",
     "more": "更多",
     "open": "打开",
     "remove": "移除",
@@ -49,6 +50,17 @@
     "hours_ago_other": "{{count}} 小时前",
     "days_ago_other": "{{count}} 天前",
     "weeks_ago_other": "{{count}} 周前"
+  },
+  "network": {
+    "offline": "网络已断开 · 正在显示缓存内容"
+  },
+  "errors": {
+    "unexpected_title": "出了点问题",
+    "unexpected_body": "应用遇到了意外错误。可以重试，或回到首页。",
+    "error_id": "错误 ID：{{id}}",
+    "unknown_message": "没有可用的错误信息。",
+    "copy_details": "复制详情",
+    "copied": "已复制"
   },
   "states.empty": "暂无内容",
   "states.error": "出现错误"

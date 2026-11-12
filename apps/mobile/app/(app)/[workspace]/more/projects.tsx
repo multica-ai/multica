@@ -28,6 +28,7 @@ import { IconButton } from "@/components/ui/icon-button";
 import { ProjectRow } from "@/components/project/project-row";
 import { projectListOptions } from "@/data/queries/projects";
 import { useWorkspaceStore } from "@/data/workspace-store";
+import { useRefreshWithHaptics } from "@/lib/use-refresh-with-haptics";
 import { useT } from "@/lib/i18n";
 
 export default function ProjectsPage() {
@@ -38,6 +39,7 @@ export default function ProjectsPage() {
   const { data, isLoading, error, refetch, isRefetching } = useQuery(
     projectListOptions(wsId),
   );
+  const onRefresh = useRefreshWithHaptics(refetch);
 
   const sorted = useMemo(() => {
     if (!data) return [];
@@ -92,7 +94,7 @@ export default function ProjectsPage() {
             />
           )}
           refreshControl={
-            <RefreshControl refreshing={isRefetching} onRefresh={refetch} />
+            <RefreshControl refreshing={isRefetching} onRefresh={onRefresh} />
           }
           contentContainerClassName="pb-6"
         />

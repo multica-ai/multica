@@ -21,12 +21,14 @@
  */
 import { useEffect } from "react";
 import Animated, {
+  cancelAnimation,
   useAnimatedStyle,
   useSharedValue,
   withRepeat,
   withTiming,
 } from "react-native-reanimated";
 import { useColorScheme } from "@/lib/use-color-scheme";
+import { useReduceMotion } from "@/lib/use-reduce-motion";
 import { THEME } from "@/lib/theme";
 
 interface Props {
@@ -36,14 +38,21 @@ interface Props {
 
 export function PulseDot({ size = 8 }: Props) {
   const { colorScheme } = useColorScheme();
+  const reduceMotion = useReduceMotion();
   const opacity = useSharedValue(0.3);
   useEffect(() => {
+    if (reduceMotion) {
+      cancelAnimation(opacity);
+      opacity.value = 1;
+      return;
+    }
     opacity.value = withRepeat(
       withTiming(1, { duration: 1000 }),
       -1, // infinite
       true, // reverse — yields 0.3 ↔ 1.0 oscillation over 2s
     );
-  }, [opacity]);
+    return () => cancelAnimation(opacity);
+  }, [opacity, reduceMotion]);
 
   const style = useAnimatedStyle(() => ({ opacity: opacity.value }));
 

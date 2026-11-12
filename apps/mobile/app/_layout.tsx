@@ -1,11 +1,20 @@
 import "../global.css";
 
-import { useEffect, useRef } from "react";
-import { AppState, type AppStateStatus } from "react-native";
-import { Stack, ThemeProvider, router } from "expo-router";
+import { useEffect, useRef, useState } from "react";
+import { AppState, View, type AppStateStatus } from "react-native";
+import {
+  Stack,
+  ThemeProvider,
+  router,
+  type ErrorBoundaryProps,
+} from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
-import { SafeAreaProvider } from "react-native-safe-area-context";
+import {
+  SafeAreaInsetsContext,
+  SafeAreaProvider,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { PortalHost } from "@rn-primitives/portal";
@@ -15,6 +24,14 @@ import { queryClient } from "@/data/query-client";
 import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { SessionActivityBoundary } from "@/components/auth/session-activity-boundary";
+import { NetworkRefreshBridge } from "@/components/system/network-refresh-bridge";
+import { OfflineBanner } from "@/components/system/offline-banner";
+import {
+  RootErrorBoundary,
+  RouteErrorBoundary,
+} from "@/components/system/root-error-boundary";
+import { useConnectivity } from "@/components/system/use-connectivity";
+import { isOffline } from "@/data/network-transitions";
 import { LightboxProvider, prewarmHighlighter } from "@/lib/markdown";
 import { NAV_THEME } from "@/lib/theme";
 import { useColorScheme } from "@/lib/use-color-scheme";
@@ -75,6 +92,42 @@ function AuthInitializer({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+/**
+ * Global chrome above the navigator. The offline strip is in normal flow, so
+ * it never covers a header; while it is visible it consumes the top safe
+ * area, and the context below is zeroed so JS headers don't pad for the notch
+ * a second time. Native stack headers compute their inset from the shifted
+ * view frame and need no adjustment.
+ */
+function AppChrome({ children }: { children: React.ReactNode }) {
+  const insets = useSafeAreaInsets();
+  const connectivity = useConnectivity();
+  const connectivityLost = isOffline(connectivity);
+  const [showOffline, setShowOffline] = useState(false);
+
+  // A Wi-Fi ↔ cellular handoff can report a disconnected frame before the
+  // next network is ready. Only show the strip once the outage is real.
+  useEffect(() => {
+    if (!connectivityLost) {
+      const hideTimer = setTimeout(() => setShowOffline(false), 0);
+      return () => clearTimeout(hideTimer);
+    }
+    const timer = setTimeout(() => setShowOffline(true), 500);
+    return () => clearTimeout(timer);
+  }, [connectivityLost]);
+
+  return (
+    <View style={{ flex: 1 }}>
+      {showOffline ? <OfflineBanner topInset={insets.top} /> : null}
+      <SafeAreaInsetsContext.Provider
+        value={showOffline ? { ...insets, top: 0 } : insets}
+      >
+        <View style={{ flex: 1 }}>{children}</View>
+      </SafeAreaInsetsContext.Provider>
+    </View>
+  );
+}
+
 export default function RootLayout() {
   const { colorScheme, isDarkColorScheme } = useColorScheme();
   return (
@@ -88,12 +141,17 @@ export default function RootLayout() {
                   <SessionActivityBoundary>
                     <LightboxProvider>
                       <StatusBar style={isDarkColorScheme ? "light" : "dark"} />
-                      <Stack screenOptions={{ headerShown: false }}>
-                        <Stack.Screen name="index" />
-                        <Stack.Screen name="(auth)" />
-                        <Stack.Screen name="(app)" />
-                      </Stack>
-                      <PortalHost />
+                      <NetworkRefreshBridge />
+                      <AppChrome>
+                        <RootErrorBoundary>
+                          <Stack screenOptions={{ headerShown: false }}>
+                            <Stack.Screen name="index" />
+                            <Stack.Screen name="(auth)" />
+                            <Stack.Screen name="(app)" />
+                          </Stack>
+                        </RootErrorBoundary>
+                        <PortalHost />
+                      </AppChrome>
                     </LightboxProvider>
                   </SessionActivityBoundary>
                 </AuthInitializer>
@@ -104,4 +162,13 @@ export default function RootLayout() {
       </MobileI18nProvider>
     </GestureHandlerRootView>
   );
+}
+
+/**
+ * Expo Router's route-level boundary. A failure inside any route renders the
+ * same recoverable screen instead of a blank window; the id is stable and
+ * copyable for a bug report.
+ */
+export function ErrorBoundary(props: ErrorBoundaryProps) {
+  return <RouteErrorBoundary {...props} />;
 }

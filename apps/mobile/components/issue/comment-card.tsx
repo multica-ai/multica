@@ -54,6 +54,7 @@ import { useWorkspaceStore } from "@/data/workspace-store";
 import { issueAttachmentsOptions } from "@/data/queries/issues";
 import { useFailedCommentsStore } from "@/data/stores/failed-comments-store";
 import { useColorScheme } from "@/lib/use-color-scheme";
+import { useReduceMotion } from "@/lib/use-reduce-motion";
 import { THEME } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 import { continuousCorners } from "@/lib/radius";
@@ -354,16 +355,24 @@ function ResolvedIndicator({
  */
 function RootHighlightOverlay({ active }: { active: boolean }) {
   const progress = useSharedValue(0);
+  const reduceMotion = useReduceMotion();
 
   useEffect(() => {
     if (!active) return;
+    if (reduceMotion) {
+      progress.value = withSequence(
+        withTiming(1, { duration: 0 }),
+        withDelay(1800, withTiming(0, { duration: 0 })),
+      );
+      return;
+    }
     // 700ms fade-in → 1800ms hold → 700ms fade-out. Matches web's
     // `transition-colors duration-700` + `setTimeout(2500)` timing.
     progress.value = withSequence(
       withTiming(1, { duration: 700 }),
       withDelay(1800, withTiming(0, { duration: 700 })),
     );
-  }, [active, progress]);
+  }, [active, progress, reduceMotion]);
 
   const style = useAnimatedStyle(() => ({ opacity: progress.value }));
 
@@ -387,14 +396,22 @@ function RootHighlightOverlay({ active }: { active: boolean }) {
  */
 function ReplyHighlightOverlay({ active }: { active: boolean }) {
   const progress = useSharedValue(0);
+  const reduceMotion = useReduceMotion();
 
   useEffect(() => {
     if (!active) return;
+    if (reduceMotion) {
+      progress.value = withSequence(
+        withTiming(1, { duration: 0 }),
+        withDelay(1800, withTiming(0, { duration: 0 })),
+      );
+      return;
+    }
     progress.value = withSequence(
       withTiming(1, { duration: 700 }),
       withDelay(1800, withTiming(0, { duration: 700 })),
     );
-  }, [active, progress]);
+  }, [active, progress, reduceMotion]);
 
   const style = useAnimatedStyle(() => ({ opacity: progress.value }));
 

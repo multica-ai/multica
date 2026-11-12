@@ -13,6 +13,7 @@
  */
 import { useLocalSearchParams, router } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
+import * as Haptics from "expo-haptics";
 import { StatusPickerBody } from "@/components/issue/pickers/status-picker-body";
 import { issueDetailOptions } from "@/data/queries/issues";
 import { useUpdateIssue } from "@/data/mutations/issues";
@@ -28,6 +29,7 @@ export default function IssueStatusPickerRoute() {
     <StatusPickerBody
       value={issue?.status ?? "todo"}
       onChange={(next) => {
+        Haptics.selectionAsync().catch(() => {});
         updateIssue.mutate({ status: next });
         router.back();
       }}

@@ -46,6 +46,7 @@ import { projectDetailOptions } from "@/data/queries/projects";
 import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useColorScheme } from "@/lib/use-color-scheme";
+import { useRefreshWithHaptics } from "@/lib/use-refresh-with-haptics";
 import { THEME } from "@/lib/theme";
 import { useT } from "@/lib/i18n";
 
@@ -58,6 +59,7 @@ export default function PinsPage() {
   const { data, isLoading, error, refetch, isRefetching } = useQuery(
     pinListOptions(wsId, userId),
   );
+  const onRefresh = useRefreshWithHaptics(refetch);
 
   // Sort by `position` ascending so the order matches web's sidebar
   // (the reorder endpoint writes 1-based positions there too).
@@ -106,7 +108,7 @@ export default function PinsPage() {
       refreshControl={
         <RefreshControl
           refreshing={isRefetching}
-          onRefresh={() => refetch()}
+          onRefresh={onRefresh}
         />
       }
       showsVerticalScrollIndicator={false}

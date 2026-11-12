@@ -43,6 +43,7 @@ import { useIssueStatuses } from "@/lib/use-issue-statuses";
 import { groupIssuesByStatus } from "@/lib/group-issues-by-status";
 import { filterIssues } from "@/lib/filter-issues";
 import { useColorScheme } from "@/lib/use-color-scheme";
+import { useRefreshWithHaptics } from "@/lib/use-refresh-with-haptics";
 import { THEME } from "@/lib/theme";
 
 // Mobile pill row has tight width on SE3 (375pt). Three pills + Filter icon
@@ -87,6 +88,7 @@ export default function MyIssues() {
     ...myIssueListOptions(wsId, scope, filter),
     enabled: !!wsId && !!userId,
   });
+  const onRefresh = useRefreshWithHaptics(refetch);
 
   // Catalog labels and ordering enhance exact-key sections without blocking rows.
   const catalog = useIssueStatuses();
@@ -178,7 +180,7 @@ export default function MyIssues() {
             />
           )}
           refreshing={isFocused && isRefetching}
-          onRefresh={refetch}
+          onRefresh={onRefresh}
         />
       )}
 

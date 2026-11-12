@@ -5,6 +5,7 @@
  */
 import { useLocalSearchParams, router } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
+import * as Haptics from "expo-haptics";
 import { ProjectStatusPickerBody } from "@/components/project/pickers/project-status-picker-body";
 import { projectDetailOptions } from "@/data/queries/projects";
 import { useUpdateProject } from "@/data/mutations/projects";
@@ -20,6 +21,7 @@ export default function ProjectStatusPickerRoute() {
     <ProjectStatusPickerBody
       value={project?.status ?? "planned"}
       onChange={(next) => {
+        Haptics.selectionAsync().catch(() => {});
         updateProject.mutate({ status: next });
         router.back();
       }}

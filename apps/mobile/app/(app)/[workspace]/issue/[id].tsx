@@ -43,6 +43,7 @@ import { useWorkspaceStore } from "@/data/workspace-store";
 import { useViewedIssuesStore } from "@/data/viewed-issues-store";
 import { useCommentSelectStore } from "@/data/comment-select-store";
 import { useReplyTargetStore } from "@/data/stores/reply-target-store";
+import { useRefreshWithHaptics } from "@/lib/use-refresh-with-haptics";
 import { useT } from "@/lib/i18n";
 
 export default function IssueDetail() {
@@ -96,6 +97,7 @@ export default function IssueDetail() {
       qc.invalidateQueries({ queryKey: issueKeys.timeline(wsId, id) }),
     ]);
   }, [detail, qc, wsId, id]);
+  const onRefreshWithHaptics = useRefreshWithHaptics(onRefresh);
 
   const issue = detail.data;
   const deleteIssue = useDeleteIssue();
@@ -225,7 +227,7 @@ export default function IssueDetail() {
             entries={timeline.data}
             timelineLoading={timeline.isLoading}
             refreshing={detail.isRefetching || timeline.isRefetching}
-            onRefresh={onRefresh}
+            onRefresh={onRefreshWithHaptics}
             highlightCommentId={highlight}
             highlightNonce={h}
           />

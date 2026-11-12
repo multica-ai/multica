@@ -27,6 +27,7 @@ import {
 } from "@/data/mutations/inbox";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useColorScheme } from "@/lib/use-color-scheme";
+import { useRefreshWithHaptics } from "@/lib/use-refresh-with-haptics";
 import { THEME } from "@/lib/theme";
 import { useT } from "@/lib/i18n";
 import {
@@ -42,6 +43,7 @@ export default function Inbox() {
   const { data: rawItems, isLoading, error, refetch, isRefetching } = useQuery(
     inboxListOptions(wsId),
   );
+  const onRefresh = useRefreshWithHaptics(refetch);
   // Dedup + drop archived to match web/desktop. See CLAUDE.md
   // "Behavioral parity" → inbox dedup incident.
   const data = useMemo(
@@ -151,7 +153,7 @@ export default function Inbox() {
             />
           )}
           refreshing={isRefetching}
-          onRefresh={refetch}
+          onRefresh={onRefresh}
         />
       )}
     </View>

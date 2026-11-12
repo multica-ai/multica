@@ -13,6 +13,7 @@
     "done": "完成",
     "download": "下載",
     "edit": "編輯",
+    "go_home": "回到首頁",
     "more": "更多",
     "open": "開啟",
     "remove": "移除",
@@ -49,6 +50,17 @@
     "hours_ago_other": "{{count}} 小時前",
     "days_ago_other": "{{count}} 天前",
     "weeks_ago_other": "{{count}} 周前"
+  },
+  "network": {
+    "offline": "網路已中斷 · 正在顯示快取內容"
+  },
+  "errors": {
+    "unexpected_title": "出了點問題",
+    "unexpected_body": "應用程式遇到意外錯誤。可以重試，或回到首頁。",
+    "error_id": "錯誤 ID：{{id}}",
+    "unknown_message": "沒有可用的錯誤資訊。",
+    "copy_details": "複製詳情",
+    "copied": "已複製"
   },
   "states.empty": "暫無內容",
   "states.error": "出現錯誤"
