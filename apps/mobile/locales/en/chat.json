@@ -20,7 +20,8 @@
     "file_too_large_title": "File too large",
     "file_too_large_message": "Files must be smaller than 100 MB.",
     "working": "Agent is working…",
-    "message": "Message…"
+    "message": "Message…",
+    "send_failed": "Message not sent"
   },
   "empty": {
     "greeting": "Hi, I'm {{name}}",
@@ -101,8 +102,13 @@
   "sessions": {
     "title": "Chats",
     "empty": "No chats yet.",
+    "empty_hint": "Conversations you start will appear here.",
     "archived": "archived",
     "new_chat": "New chat"
+  },
+  "list": {
+    "new_messages_one": "{{count}} new message",
+    "new_messages_other": "{{count}} new messages"
   },
   "picker.title": "Choose an agent",
   "no_response": "The agent finished this turn without a text reply.",

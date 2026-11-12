@@ -35,6 +35,7 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  Pressable,
   View,
 } from "react-native";
 import { router, useFocusEffect, useIsFocused } from "expo-router";
@@ -74,6 +75,7 @@ import {
 } from "@/data/stores/chat-drafts-store";
 import { useChatSessionPickerStore } from "@/data/stores/chat-session-picker-store";
 import { useChatSessionRealtime } from "@/data/realtime/use-chat-session-realtime";
+import { useChatRefreshFallback } from "@/data/realtime/use-chat-refresh-fallback";
 import {
   invalidatePendingTask,
   seedAcceptedPendingTask,
@@ -85,6 +87,7 @@ import {
 import { useT } from "@/lib/i18n";
 import { useAgentPresence } from "@/lib/use-agent-presence";
 import { Header } from "@/components/ui/header";
+import { Text } from "@/components/ui/text";
 import { ChatTitleButton } from "@/components/chat/chat-title-button";
 import { ChatSessionActions } from "@/components/chat/chat-session-actions";
 import { ChatMessageList } from "@/components/chat/chat-message-list";
@@ -120,6 +123,18 @@ export default function ChatTab() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [agentPickerOpen, setAgentPickerOpen] = useState(false);
+  // A failed send restores the draft into the composer, but on a small screen
+  // the alert is easy to miss and the restored text looks like an unsent
+  // draft. Keep an explicit retry row until the user retries or dismisses.
+  const [failedSend, setFailedSend] = useState<{
+    sessionId: string | null;
+    content: string;
+    attachmentIds: string[];
+  } | null>(null);
+  // Scope the retry row to the session that failed; switching away from it
+  // must not show another conversation's error.
+  const visibleFailedSend =
+    failedSend?.sessionId === activeSessionId ? failedSend : null;
 
   // Bridge to the chat-sessions formSheet route. Mirror local
   // activeSessionId into the store so the picker can render the current
@@ -164,6 +179,13 @@ export default function ChatTab() {
   const { data: liveTaskMessages = [] } = useQuery(
     taskMessagesOptions(pendingTask?.task_id),
   );
+  // Socket-down fallback. `isFocused` also gates auto markRead below.
+  const isFocused = useIsFocused();
+  useChatRefreshFallback({
+    sessionId: activeSessionId,
+    focused: isFocused,
+    pendingTaskId: pendingTask?.task_id ?? null,
+  });
 
   // ── Derived ────────────────────────────────────────────────────────────
   const memberRole = useMemo(
@@ -248,7 +270,6 @@ export default function ChatTab() {
   );
 
   // ── Auto markRead while viewing a session with unread state ──────────
-  const isFocused = useIsFocused();
   const markRead = useMarkChatSessionRead();
   useEffect(() => {
     if (!isFocused) return;
@@ -314,6 +335,7 @@ export default function ChatTab() {
       }
 
       const isNewSession = !activeSessionId;
+      setFailedSend(null);
       let sessionId: string | null;
       try {
         sessionId = await ensureSession();
@@ -321,6 +343,7 @@ export default function ChatTab() {
         // Session create runs the same invoke gate as a send, so a permission
         // change refuses here too — and this is the only layer that sees the
         // reason code (MUL-6380).
+        setFailedSend({ sessionId: activeSessionId, content, attachmentIds });
         Alert.alert(t("alerts.not_sent"), sendFailureMessage(err));
         throw err;
       }
@@ -407,6 +430,7 @@ export default function ChatTab() {
         // The composer restores the draft on a thrown rejection but says nothing
         // about it, so a revoked-permission 403 used to read as a silent no-op
         // (MUL-6380). Name the cause here: only this layer sees the error body.
+        setFailedSend({ sessionId, content, attachmentIds });
         Alert.alert(t("alerts.not_sent"), sendFailureMessage(err));
         throw err;
       }
@@ -559,6 +583,37 @@ export default function ChatTab() {
           />
         ) : currentAgent ? (
           <RuntimeRequiredBanner agentName={currentAgent.name} />
+        ) : null}
+        {visibleFailedSend ? (
+          <View className="mx-3 mb-2 flex-row items-center gap-3 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2">
+            <Text className="flex-1 text-xs text-destructive">
+              {t("composer.send_failed")}
+            </Text>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => {
+                const retry = visibleFailedSend;
+                setFailedSend(null);
+                void handleSend(retry.content, retry.attachmentIds).catch(
+                  () => {},
+                );
+              }}
+              hitSlop={8}
+            >
+              <Text className="text-xs font-semibold text-primary">
+                {t("common:actions.retry")}
+              </Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setFailedSend(null)}
+              hitSlop={8}
+            >
+              <Text className="text-xs text-muted-foreground">
+                {t("common:actions.close")}
+              </Text>
+            </Pressable>
+          </View>
         ) : null}
         <ChatComposer
           value={draft}

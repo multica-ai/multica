@@ -20,7 +20,8 @@
     "file_too_large_title": "檔案過大",
     "file_too_large_message": "檔案必須小於 100 MB。",
     "working": "AI 代理正在處理...",
-    "message": "訊息..."
+    "message": "訊息...",
+    "send_failed": "訊息未傳送"
   },
   "empty": {
     "greeting": "你好，我是 {{name}}",
@@ -98,11 +99,15 @@
   "details": {
     "show": "顯示詳情"
   },
-  "sessions": {
+    "sessions": {
     "title": "聊天",
     "empty": "還沒有聊天。",
+    "empty_hint": "你發起的對話會顯示在這裡。",
     "archived": "已歸檔",
     "new_chat": "新建聊天"
+  },
+  "list": {
+    "new_messages_other": "{{count}} 則新訊息"
   },
   "picker.title": "選擇 AI 代理",
   "no_response": "本輪已結束，AI 代理沒有返回文字回覆。",

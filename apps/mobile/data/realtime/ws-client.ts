@@ -93,11 +93,14 @@ export class WSClient {
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private pongTimer: ReturnType<typeof setTimeout> | null = null;
   private awaitingPong = false;
+  private authenticated = false;
   private hasConnectedBefore = false;
 
   private readonly handlers = new Map<WSEventType, Set<EventHandler>>();
   private readonly anyHandlers = new Set<AnyHandler>();
   private readonly onReconnectCallbacks = new Set<() => void>();
+  private readonly connectionCallbacks = new Set<(connected: boolean) => void>();
+  private connectedSnapshot = false;
 
   private readonly opts: WSClientOptions;
   private readonly logger: Logger;
@@ -192,6 +195,27 @@ export class WSClient {
     };
   }
 
+  /** True only while the socket is open AND the server has acknowledged the
+   *  auth frame. `ws.readyState === OPEN` alone is misleading on iOS: a
+   *  half-open socket can stay OPEN forever, and before `auth_ack` the
+   *  server drops business events. Screens use this to decide whether the
+   *  realtime stream can be trusted or whether they need a polling fallback. */
+  isConnected(): boolean {
+    return this.state === "active" &&
+      this.authenticated &&
+      this.ws?.readyState === WebSocket.OPEN;
+  }
+
+  /** Fires when `isConnected()` flips. The callback also runs immediately so
+   *  subscribers never start from a stale assumption. */
+  onConnectionChange(cb: (connected: boolean) => void) {
+    this.connectionCallbacks.add(cb);
+    cb(this.isConnected());
+    return () => {
+      this.connectionCallbacks.delete(cb);
+    };
+  }
+
   send(message: WSMessage) {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(message));
@@ -201,6 +225,7 @@ export class WSClient {
   // ── internal ────────────────────────────────────────────────────────
 
   private openSocket() {
+    this.setAuthenticated(false);
     const url = new URL(this.opts.url);
     url.searchParams.set("workspace_slug", this.opts.workspaceSlug);
     url.searchParams.set("client_platform", "mobile");
@@ -271,7 +296,9 @@ export class WSClient {
       if (!wasOurs) return;
 
       this.ws = null;
+      this.setAuthenticated(false);
       this.clearHeartbeat();
+      this.notifyConnectionChange();
       this.logger.warn("[ws] socket closed");
       if (this.state === "active") this.scheduleReconnect();
     };
@@ -279,6 +306,8 @@ export class WSClient {
 
   private onAuthenticated() {
     this.reconnectAttempt = 0;
+    this.authenticated = true;
+    this.notifyConnectionChange();
     this.logger.info("[ws] authenticated");
     this.startHeartbeat();
     if (this.hasConnectedBefore) {
@@ -315,6 +344,25 @@ export class WSClient {
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
+    }
+  }
+
+  private setAuthenticated(next: boolean) {
+    if (this.authenticated === next) return;
+    this.authenticated = next;
+    this.notifyConnectionChange();
+  }
+
+  private notifyConnectionChange() {
+    const connected = this.isConnected();
+    if (connected === this.connectedSnapshot) return;
+    this.connectedSnapshot = connected;
+    for (const cb of this.connectionCallbacks) {
+      try {
+        cb(connected);
+      } catch (err) {
+        this.logger.warn("[ws] connection callback threw", err);
+      }
     }
   }
 
@@ -388,6 +436,7 @@ export class WSClient {
 
   private teardownSocket() {
     this.clearHeartbeat();
+    this.setAuthenticated(false);
     if (!this.ws) return;
     const ws = this.ws;
     // Detach BEFORE close — onclose firing after teardown would re-enter
@@ -403,5 +452,6 @@ export class WSClient {
       // harmless.
     }
     this.ws = null;
+    this.notifyConnectionChange();
   }
 }

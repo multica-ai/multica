@@ -176,6 +176,17 @@ const MAX_FILE_SIZE = 100 * 1024 * 1024;
  *  reasonable Multica payload size on cellular. */
 const FETCH_TIMEOUT_MS = 30_000;
 
+/** Auth endpoints sit in front of the whole signed-in app, so a stalled
+ *  request must not leave the button on its disabled "Sending…" state for
+ *  the full data-request budget. */
+const AUTH_FETCH_TIMEOUT_MS = 12_000;
+
+interface FetchOptions extends RequestInit {
+  signal?: AbortSignal;
+  /** Per-request override of FETCH_TIMEOUT_MS. */
+  timeoutMs?: number;
+}
+
 export class ApiError extends Error {
   readonly status: number;
   readonly body?: unknown;
@@ -215,11 +226,12 @@ class ApiClient {
 
   private async fetch<T>(
     path: string,
-    init: RequestInit & { signal?: AbortSignal } = {},
+    init: FetchOptions = {},
   ): Promise<T> {
+    const { timeoutMs = FETCH_TIMEOUT_MS, ...requestInit } = init;
     const rid = createRequestId();
     const start = Date.now();
-    const method = init.method ?? "GET";
+    const method = requestInit.method ?? "GET";
 
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
@@ -227,7 +239,7 @@ class ApiClient {
       "X-Client-OS": "ios",
       "X-Client-Version": "0.1.0",
       "X-Request-ID": rid,
-      ...((init.headers as Record<string, string>) ?? {}),
+      ...((requestInit.headers as Record<string, string>) ?? {}),
     };
     if (this.token) {
       headers["Authorization"] = `Bearer ${this.token}`;
@@ -252,9 +264,9 @@ class ApiClient {
     //       spinner stuck on the screen indefinitely.
     const controller = new AbortController();
     const timeoutId = setTimeout(() => {
-      controller.abort(new Error(`request timed out after ${FETCH_TIMEOUT_MS}ms`));
-    }, FETCH_TIMEOUT_MS);
-    const callerSignal = init.signal;
+      controller.abort(new Error(`request timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+    const callerSignal = requestInit.signal;
     const onCallerAbort = () => controller.abort(callerSignal?.reason);
     if (callerSignal) {
       if (callerSignal.aborted) controller.abort(callerSignal.reason);
@@ -266,7 +278,7 @@ class ApiClient {
     let res: Response;
     try {
       res = await fetch(`${API_URL}${path}`, {
-        ...init,
+        ...requestInit,
         signal: controller.signal,
         headers,
       });
@@ -285,7 +297,7 @@ class ApiClient {
           duration: `${duration}ms`,
         });
         throw new ApiError(
-          `Request timed out after ${FETCH_TIMEOUT_MS}ms`,
+          `Request timed out after ${timeoutMs}ms`,
           0,
           undefined,
         );
@@ -390,6 +402,7 @@ class ApiClient {
     await this.fetch<void>("/auth/send-code", {
       method: "POST",
       body: JSON.stringify({ email }),
+      timeoutMs: AUTH_FETCH_TIMEOUT_MS,
     });
   }
 
@@ -397,6 +410,7 @@ class ApiClient {
     return this.fetch<LoginResponse>("/auth/verify-code", {
       method: "POST",
       body: JSON.stringify({ email, code }),
+      timeoutMs: AUTH_FETCH_TIMEOUT_MS,
     });
   }
 

@@ -7,9 +7,15 @@
  * inline appear as standalone cards. Long-press actions highlight the target
  * without adding a border that would shift the layout.
  */
-import { useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, View } from "react-native";
-import { FlashList } from "@shopify/flash-list";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ActivityIndicator,
+  Pressable,
+  View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+} from "react-native";
+import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { Ionicons } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
 import type {
@@ -43,6 +49,8 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { useT } from "@/lib/i18n";
+
+const AT_BOTTOM_SLACK_PX = 80;
 
 interface Props {
   messages: ChatMessage[];
@@ -87,6 +95,7 @@ export function ChatMessageList({
   // Pressable below. When null, the Pressable stays disabled and every tap
   // passes through to the list cells / bubble long-press wrappers normally.
   const selectingId = useChatSelectStore((s) => s.selectingId);
+  const { t } = useT("chat");
 
   // Every image in this session, in message order (MUL-5752), so tapping one
   // opens the lightbox at its position and a swipe walks the rest.
@@ -106,6 +115,52 @@ export function ChatMessageList({
       })),
     [messages],
   );
+
+  // ── Follow new messages ────────────────────────────────────────────────
+  // FlashList's MVCP only follows while the reader is near the bottom. When
+  // they're scrolled up, count arrivals and offer a one-tap jump instead of
+  // silently shifting content or yanking the viewport. A session change
+  // resets the counter — switching conversations is not "new messages".
+  const listRef = useRef<FlashListRef<ChatMessage>>(null);
+  const [newCount, setNewCount] = useState(0);
+  const isAtBottomRef = useRef(true);
+  const lastLengthRef = useRef(messages.length);
+  const sessionKeyRef = useRef(messages[0]?.id ?? null);
+
+  useEffect(() => {
+    const sessionKey = messages[0]?.id ?? null;
+    if (sessionKey !== sessionKeyRef.current) {
+      sessionKeyRef.current = sessionKey;
+      lastLengthRef.current = messages.length;
+      setNewCount(0);
+      return;
+    }
+    const grew = messages.length > lastLengthRef.current;
+    const diff = messages.length - lastLengthRef.current;
+    lastLengthRef.current = messages.length;
+    if (!grew || isAtBottomRef.current) return;
+    setNewCount((prev) => prev + diff);
+  }, [messages]);
+
+  const handleScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const { contentOffset, contentSize, layoutMeasurement } =
+        event.nativeEvent;
+      const distanceFromBottom =
+        contentSize.height - (contentOffset.y + layoutMeasurement.height);
+      const wasAtBottom = isAtBottomRef.current;
+      isAtBottomRef.current = distanceFromBottom < AT_BOTTOM_SLACK_PX;
+      if (!wasAtBottom && isAtBottomRef.current && newCount > 0) {
+        setNewCount(0);
+      }
+    },
+    [newCount],
+  );
+
+  const jumpToBottom = useCallback(() => {
+    listRef.current?.scrollToEnd({ animated: true });
+    setNewCount(0);
+  }, []);
 
   if (loading && messages.length === 0) {
     return (
@@ -152,6 +207,7 @@ export function ChatMessageList({
     // also dismiss, matching iOS Notes / iMessage behaviour. Scroll
     // gestures are unaffected (Pressable only intercepts non-drag taps).
     <ImageSequenceProvider blocks={imageBlocks}>
+    <View style={{ flex: 1 }}>
     <Pressable
       onPress={
         selectingId
@@ -168,6 +224,7 @@ export function ChatMessageList({
         re-rendered every keystroke. */}
     <FlashList
       key={messages[0]?.id ?? "empty"}
+      ref={listRef}
       data={messages}
       keyExtractor={(m) => m.id}
       renderItem={({ item }) => (
@@ -215,6 +272,8 @@ export function ChatMessageList({
       // momentum kick after a flick so a fast scroll can't escape.
       onScrollBeginDrag={() => useChatSelectStore.getState().clear()}
       onMomentumScrollBegin={() => useChatSelectStore.getState().clear()}
+      onScroll={handleScroll}
+      scrollEventThrottle={16}
       // iMessage-style keyboard dismissal: dragging the list pulls the
       // keyboard down with the finger (iOS); tapping empty space between
       // bubbles dismisses it. `handled` keeps Pressables inside bubbles
@@ -223,6 +282,19 @@ export function ChatMessageList({
       keyboardShouldPersistTaps="handled"
     />
     </Pressable>
+    {newCount > 0 ? (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={t("list.new_messages", { count: newCount })}
+        onPress={jumpToBottom}
+        className="absolute bottom-3 self-center rounded-full bg-primary px-3.5 py-1.5 active:opacity-80"
+      >
+        <Text className="text-xs font-semibold text-primary-foreground">
+          ↓ {t("list.new_messages", { count: newCount })}
+        </Text>
+      </Pressable>
+    ) : null}
+    </View>
     </ImageSequenceProvider>
   );
 }

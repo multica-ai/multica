@@ -62,9 +62,12 @@ export default function ChatSessionsRoute() {
       </View>
       <ScrollView className="flex-1" showsVerticalScrollIndicator={false}>
         {sessions.length === 0 ? (
-          <View className="px-4 py-8">
+          <View className="gap-1 px-4 py-8">
             <Text className="text-sm text-muted-foreground text-center">
               {t("sessions.empty")}
+            </Text>
+            <Text className="text-xs text-muted-foreground/70 text-center">
+              {t("sessions.empty_hint")}
             </Text>
           </View>
         ) : (

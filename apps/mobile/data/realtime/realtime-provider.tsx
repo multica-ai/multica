@@ -62,6 +62,24 @@ export function useWSClient(): WSClient | null {
   return use(RealtimeContext);
 }
 
+/** Live socket health: true only after `auth_ack`, false while reconnecting,
+ *  paused, signed out, or before the first connect. Screens with
+ *  WS-only data freshness use this to fall back to polling. */
+export function useWSConnected(): boolean {
+  const ws = useWSClient();
+  const [connected, setConnected] = useState(() => ws?.isConnected() ?? false);
+
+  useEffect(() => {
+    if (!ws) {
+      setConnected(false);
+      return;
+    }
+    return ws.onConnectionChange(setConnected);
+  }, [ws]);
+
+  return ws ? connected : false;
+}
+
 export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   const userId = useAuthStore((s) => s.user?.id ?? null);
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);

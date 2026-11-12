@@ -258,3 +258,59 @@ describe("WSClient foreground recovery", () => {
     expect(MockWebSocket.instances).toHaveLength(1);
   });
 });
+
+// Chat screens use this to decide whether a polling fallback is needed.
+// An open socket before `auth_ack` is not a usable realtime stream: the
+// server has not accepted the token, so business events never arrive.
+describe("WSClient connection state", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.stubGlobal("WebSocket", MockWebSocket);
+    MockWebSocket.instances = [];
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("reports connected only after auth_ack and resets on close", () => {
+    const client = new WSClient({
+      url: "wss://example.test/ws",
+      token: "token",
+      workspaceSlug: "workspace",
+    });
+    const states: boolean[] = [];
+    const unsubscribe = client.onConnectionChange((connected) =>
+      states.push(connected),
+    );
+
+    expect(client.isConnected()).toBe(false);
+    client.connect();
+    const socket = MockWebSocket.instances[0];
+    socket.open();
+    expect(client.isConnected()).toBe(false);
+
+    socket.receive({ type: "auth_ack" });
+    expect(client.isConnected()).toBe(true);
+
+    socket.close();
+    expect(client.isConnected()).toBe(false);
+    expect(states).toEqual([false, true, false]);
+
+    unsubscribe();
+    client.disconnect();
+  });
+
+  it("does not emit duplicate connection changes", () => {
+    const { client, socket } = connectAuthenticatedClient();
+    const onConnectionChange = vi.fn();
+    client.onConnectionChange(onConnectionChange);
+    onConnectionChange.mockClear();
+
+    socket.receive({ type: "auth_ack" });
+    expect(onConnectionChange).not.toHaveBeenCalled();
+    client.disconnect();
+  });
+});

@@ -9,11 +9,8 @@
  *   - returning (at least one prior session exists) → lead with starter
  *     starters. Tapping prefills the draft so the user can edit before sending.
  *
- * Copy mirrors the web `chat.json` namespace 1:1. Mobile doesn't have
- * i18n yet so the strings are inlined in English — when mobile adopts
- * i18n the lookup keys (`empty_state.first_time_title` etc.) are already
- * established on the web side, so the migration is a literal
- * key-by-key swap.
+ * Copy mirrors the web `chat.json` namespace 1:1 and resolves through the
+ * mobile `chat` resources in every supported locale.
  */
 import { View } from "react-native";
 import type { Agent, AgentConversationStarter } from "@multica/core/types";

@@ -20,7 +20,8 @@
     "file_too_large_title": "文件过大",
     "file_too_large_message": "文件必须小于 100 MB。",
     "working": "智能体正在处理...",
-    "message": "消息..."
+    "message": "消息...",
+    "send_failed": "消息未发送"
   },
   "empty": {
     "greeting": "你好，我是 {{name}}",
@@ -101,8 +102,12 @@
   "sessions": {
     "title": "聊天",
     "empty": "还没有聊天。",
+    "empty_hint": "你发起的对话会显示在这里。",
     "archived": "已归档",
     "new_chat": "新建聊天"
+  },
+  "list": {
+    "new_messages_other": "{{count}} 条新消息"
   },
   "picker.title": "选择智能体",
   "no_response": "本轮已结束，智能体没有返回文字回复。",
