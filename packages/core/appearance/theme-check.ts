@@ -41,7 +41,9 @@ export interface ContrastCheck {
   /**
    * Where the pair is painted: the page, the frame (rail, toolbar, tabs),
    * a tooltip, a pressed chip in a display popover, or a switch, whose
-   * track when on is measured against its track when off.
+   * track when on is measured against its track when off. Switch pairs are
+   * Multica's own rule, not WCAG, which asks nothing of two states that are
+   * never side by side.
    */
   area: "page" | "frame" | "tooltip" | "display chip" | "switch";
   foreground: string;
@@ -115,7 +117,7 @@ function contrastHint({ area, foreground, background }: ContrastCheck): string {
       ...(foreground === "--primary" ? ["--switch-checked-background (on, now --primary)"] : []),
       ...(background === "--input" ? ["--switch-unchecked-background (off, now --input)"] : []),
     ];
-    return ` A switch shows on and off by its track colour, so the two tracks need 3:1 between them${unset.length > 0 ? `; set ${unset.join(" or ")}` : ""}.`;
+    return ` Multica asks for 3:1 between a switch's on and off tracks, so the two are not told apart by the thumb alone. This is Multica's own rule, not a WCAG requirement${unset.length > 0 ? `; set ${unset.join(" or ")}` : ""}.`;
   }
   return "";
 }

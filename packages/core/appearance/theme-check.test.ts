@@ -350,7 +350,7 @@ describe("theme check", () => {
         expect.stringMatching(/^Contrast, dark mode \(switch\): --switch-checked-background is below 3:1 on --input .*; set --switch-unchecked-background \(off, now --input\)\.$/),
       ]);
       expect(errors(".theme-light { --switch-checked-background: #ffd400; --switch-unchecked-background: #ffffff; }")).toEqual([
-        expect.stringMatching(/^Contrast, light mode \(switch\): --switch-checked-background is below 3:1 on --switch-unchecked-background \(1\.\d\d:1\)\. A switch shows on and off by its track colour, so the two tracks need 3:1 between them\.$/),
+        expect.stringMatching(/^Contrast, light mode \(switch\): --switch-checked-background is below 3:1 on --switch-unchecked-background \(1\.\d\d:1\)\. Multica asks for 3:1 between a switch's on and off tracks, .* This is Multica's own rule, not a WCAG requirement\.$/),
       ]);
     });
 

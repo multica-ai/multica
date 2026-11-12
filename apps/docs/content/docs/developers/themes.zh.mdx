@@ -178,7 +178,8 @@ paper/
 - 使用了非公开变量，除非它是选项 id，或者主题自己用 `var()` 读取它；
 - 在 `.theme-light` 和 `.theme-dark` 以外的地方设置变量而没有后代选择器，主题选择器就读不出主题的颜色；
 - 在字体栈里写了通用字体族（`sans-serif`、`serif` …）或 `ui-*` 关键字，这会盖掉用户选的中文字体；
-- 任一模式下没达到 WCAG AA 对比度：`--foreground` 和 `--muted-foreground` 在每个表面上需要 4.5:1，`--brand` 在阅读表面上需要 4.5:1，主按钮文字在按钮上需要 4.5:1，`--faint-foreground` 需要 3:1。提示框文字在 `--tooltip` 上需要 4.5:1，按下状态的显示设置标签，文字在其底色上需要 4.5:1。提示框始终使用深色模式的文字颜色，要修改请设置 `--tooltip-foreground`；按下的标签默认用 `--input` 作底色，可以用 `--display-chip-pressed-background` 单独设置。开关“开”和“关”两种轨道颜色之间需要 3:1；开关默认用 `--primary` 和 `--input` 作轨道颜色，可以用 `--switch-checked-background` 和 `--switch-unchecked-background` 单独设置。
+- 任一模式下没达到 WCAG AA 对比度：`--foreground` 和 `--muted-foreground` 在每个表面上需要 4.5:1，`--brand` 在阅读表面上需要 4.5:1，主按钮文字在按钮上需要 4.5:1，`--faint-foreground` 需要 3:1。提示框文字在 `--tooltip` 上需要 4.5:1，按下状态的显示设置标签，文字在其底色上需要 4.5:1。提示框始终使用深色模式的文字颜色，要修改请设置 `--tooltip-foreground`；按下的标签默认用 `--input` 作底色，可以用 `--display-chip-pressed-background` 单独设置。
+- 开关“开”和“关”两种轨道颜色之间不到 3:1。这是 Multica 自己的规则，不是 WCAG 的要求，所以和上面的对比度分开统计。开关默认用 `--primary` 和 `--input` 作轨道颜色，可以用 `--switch-checked-background` 和 `--switch-unchecked-background` 单独设置。
 
 ## 检查与预览
 

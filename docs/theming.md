@@ -304,8 +304,9 @@ pnpm theme:check paper.zip --json       # a zip, as JSON for CI
 ```
 
 It reports manifest errors, blocked CSS, non-public variables, generic
-families in font stacks and WCAG contrast in both modes, each with its line
-in `theme.css`, and exits with status 1 when there is an error. Warnings,
+families in font stacks, WCAG contrast in both modes, and switch tracks
+that are too alike (Multica's own rule, below), each with its line in
+`theme.css`, and exits with status 1 when there is an error. Warnings,
 such as a colour it cannot resolve, do not fail the check.
 
 Contrast is measured with every option at its default, then once for each
@@ -339,14 +340,17 @@ indirectly:
   theme sets on `[data-slot="popover-content"]`. Set
   `--display-chip-pressed-background` and `--display-chip-pressed-color` to
   colour them apart from input borders.
-- **Switches** show on and off by the colour of their track, so the track
-  of a switch that is on needs 3:1 against the track of one that is off
-  (WCAG 1.4.11). Unset, they fill with `--primary` and `--input`; dark mode
-  paints `--input` at 80%, and a translucent track is measured over
-  `--background`. A theme that sets `--primary` and `--input` close together
-  fails here: set `--switch-checked-background` and
-  `--switch-unchecked-background`. The thumbs and outline have their own
-  variables too (`--switch-checked-thumb`, `--switch-unchecked-thumb`,
+- **Switches**: the track of a switch that is on needs 3:1 against the
+  track of one that is off, so on and off are not told apart by the thumb's
+  position alone. This is Multica's own rule, not a WCAG requirement: WCAG
+  asks nothing of two states that are never shown side by side, and
+  `theme:check` counts switch pairs apart from its WCAG pairs. Unset, the
+  tracks are `--primary` and `--input`; dark mode paints `--input` at 80%,
+  and a translucent track is measured over `--background`. A theme that
+  sets `--primary` and `--input` close together fails here: set
+  `--switch-checked-background` and `--switch-unchecked-background`. The
+  thumbs and outline have their own variables too
+  (`--switch-checked-thumb`, `--switch-unchecked-thumb`,
   `--switch-border-color`).
 
 Rules on a slot are applied by specificity, then order, as the browser

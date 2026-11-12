@@ -3,6 +3,7 @@
  * Checks theme folders or .zip files the way the app and the theme store do:
  * the manifest, the CSS sanitizer, public variables, Latin font stacks and
  * WCAG contrast against the app's own palette (packages/ui/styles/tokens.css),
+ * and Multica's own rule that a switch's on and off tracks differ by 3:1,
  * at the default options and at each other `select` and `toggle` value.
  * The checks live in packages/core/appearance/theme-check.ts.
  *
@@ -55,13 +56,22 @@ if (json) {
     const title = theme ? `${theme.name} (${theme.id}${theme.version ? ` ${theme.version}` : ""})` : basename(path);
     console.log(`\n${ok ? "✓" : "✗"} ${title}  ${target}`);
     for (const issue of issues) console.log(`  ${issue.level === "error" ? "error  " : "warning"}  ${issue.message}`);
-    if (contrast.length > 0) {
-      const failing = contrast.filter((c) => c.ratio < c.required).length;
-      const lowest = [...contrast].sort((a, b) => a.ratio / a.required - b.ratio / b.required)[0];
-      const values = new Set(contrast.filter((c) => c.variant).map((c) => c.variant.label)).size;
-      const where = [lowest.mode, ...(lowest.area === "page" ? [] : [lowest.area])].join(" ");
+    // Switch pairs are Multica's own rule, so they are counted apart from WCAG.
+    const wcag = contrast.filter((c) => c.area !== "switch");
+    const switches = contrast.filter((c) => c.area === "switch");
+    const lowestOf = (checks) => [...checks].sort((a, b) => a.ratio / a.required - b.ratio / b.required)[0];
+    const label = (c) => `${c.foreground} on ${c.background}, ${[c.mode, ...(c.area === "page" || c.area === "switch" ? [] : [c.area])].join(" ")}${c.variant ? ` (${c.variant.label})` : ""}, ${c.ratio.toFixed(2)}:1 (needs ${c.required}:1)`;
+    if (wcag.length > 0) {
+      const failing = wcag.filter((c) => c.ratio < c.required).length;
+      const values = new Set(wcag.filter((c) => c.variant).map((c) => c.variant.label)).size;
       console.log(
-        `  contrast  ${contrast.length} pairs checked at the default options${values > 0 ? ` and ${values} other option value${values === 1 ? "" : "s"}` : ""}, ${failing} below WCAG AA. Lowest: ${lowest.foreground} on ${lowest.background}, ${where}${lowest.variant ? ` (${lowest.variant.label})` : ""}, ${lowest.ratio.toFixed(2)}:1 (needs ${lowest.required}:1)`,
+        `  contrast  ${wcag.length} pairs checked at the default options${values > 0 ? ` and ${values} other option value${values === 1 ? "" : "s"}` : ""}, ${failing} below WCAG AA. Lowest: ${label(lowestOf(wcag))}`,
+      );
+    }
+    if (switches.length > 0) {
+      const failing = switches.filter((c) => c.ratio < c.required).length;
+      console.log(
+        `  switches  ${switches.length} on/off track pairs checked, ${failing} below Multica's 3:1 rule (a product rule, not WCAG). Lowest: ${label(lowestOf(switches))}`,
       );
     }
   }
