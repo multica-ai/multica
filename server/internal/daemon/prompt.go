@@ -65,6 +65,7 @@ func backendResumeContinuityNotice(task Task) string {
 func perTurnContextBlocks(task Task, opts promptOpts) string {
 	var b strings.Builder
 	b.WriteString(buildSharedLocalDirectoryBlock(opts.sharedLocalDirectory))
+	b.WriteString(buildOnDemandLocalDirectoryBlock(opts.localReadPath, opts.localBranches))
 	b.WriteString(buildWorktreeReplayConflictBlock(opts.worktreeReplayConflicts))
 	b.WriteString(buildWorktreeBranchBlock(opts.worktreeBranch, opts.worktreeBase, opts.worktreeCommitsAllLeftovers))
 	if task.PriorSessionResumeUnavailable {
@@ -140,6 +141,8 @@ func buildJoinedWakeupsBlock(notes string) string {
 // daemon's own execution context can answer. Kept behind PromptOption so the
 // common BuildPrompt(task, provider) call sites stay unchanged.
 type promptOpts struct {
+	localReadPath               string
+	localBranches               []string
 	sharedLocalDirectory        bool
 	worktreeReplayConflicts     []string
 	worktreeBranch              string
@@ -149,6 +152,26 @@ type promptOpts struct {
 
 // PromptOption tunes per-turn prompt copy with run-scoped context.
 type PromptOption func(*promptOpts)
+
+func WithOnDemandLocalDirectory(path string, branches []string) PromptOption {
+	return func(o *promptOpts) { o.localReadPath, o.localBranches = path, branches }
+}
+
+func buildOnDemandLocalDirectoryBlock(path string, branches []string) string {
+	if path == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("## Local repository: checkout before writing\n\n")
+	fmt.Fprintf(&b, "The user's live directory is %q. Read it for context, but do not edit it, change branches, install dependencies, or run tests/builds that write there. This is an instruction, not an OS-enforced read-only mount; other runs and the user may be editing it.\n\n", path)
+	b.WriteString("Before any work that writes repository files, run `\"$MULTICA_CLI_PATH\" repo checkout --local`. It returns your private worktree path and delivery rules. Use that path for every edit and Git command; read its AGENTS.md / CLAUDE.md and other repository instructions. The command does not change this session's cwd. Repeating it returns the same worktree. Your snapshot includes the user's changes at checkout time, so recheck earlier observations.\n\n")
+	b.WriteString("A read-only run needs no checkout and creates no branch. Previous recorded branches for this conversation, if any, can be inspected without checkout using `git -C <user-directory> show <branch>:<file>` or `git -C <user-directory> diff <base>..<branch>`. Do not switch the user's branch.\n")
+	for _, branch := range branches {
+		fmt.Fprintf(&b, "- `%s`\n", branch)
+	}
+	b.WriteString("\n")
+	return b.String()
+}
 
 // WithSharedLocalDirectory marks a turn that runs inside the user's own
 // directory WITHOUT holding its path mutex — today, a chat turn on an in_place
@@ -224,8 +247,9 @@ func buildWorktreeBranchBlock(branch, base string, commitsAllLeftovers bool) str
 // the agent finished with its work somewhere Finalize would refuse to record.
 // It is self-contained — the backend may not be able to resume the session, so
 // nothing here may depend on the agent remembering the turn it just ran.
-func BuildWorktreeDeliveryRepairPrompt(problem *execenv.DeliveryProblem) string {
+func BuildWorktreeDeliveryRepairPrompt(problem *execenv.DeliveryProblem, workDir string) string {
 	var b strings.Builder
+	gitCommand := "git -C '" + strings.ReplaceAll(workDir, "'", `'\''`) + "'"
 	b.WriteString("Your previous turn in this git worktree finished, but its work cannot be delivered yet.\n\n")
 	fmt.Fprintf(&b, "Problem: %s.\n\n", problem.Reason)
 	fmt.Fprintf(&b, "The work has to end on branch `%s`, in commits on top of `%s` (the commit this turn started from), with HEAD on that branch. Your files are intact; only where they are committed is wrong.\n\n", problem.Branch, problem.BaseCommit)
@@ -235,7 +259,7 @@ func BuildWorktreeDeliveryRepairPrompt(problem *execenv.DeliveryProblem) string 
 		b.WriteString("Fix it in this worktree. This sequence keeps every file exactly as it is now and puts it on the branch as one commit:\n\n```sh\n")
 	}
 	for _, step := range problem.RepairSteps() {
-		b.WriteString("git")
+		b.WriteString(gitCommand)
 		for _, arg := range step {
 			if strings.ContainsAny(arg, " '\"") {
 				arg = "'" + strings.ReplaceAll(arg, "'", `'\''`) + "'"
@@ -245,7 +269,7 @@ func BuildWorktreeDeliveryRepairPrompt(problem *execenv.DeliveryProblem) string 
 		b.WriteString("\n")
 	}
 	b.WriteString("```\n\n")
-	fmt.Fprintf(&b, "Before the `git commit` line, check `git diff --cached %s`: it should show only the changes you meant to make. If it undoes something `%s` contains that you did not intend to remove, restore it first. You may keep separate commits instead (for example by rebasing them onto `%s`), as long as the end state is the same.\n\n", problem.BaseCommit, problem.BaseCommit, problem.BaseCommit)
+	fmt.Fprintf(&b, "Before the `git commit` line, check `%s diff --cached %s`: it should show only the changes you meant to make. If it undoes something `%s` contains that you did not intend to remove, restore it first. You may keep separate commits instead (for example by rebasing them onto `%s`), as long as the end state is the same.\n\n", gitCommand, problem.BaseCommit, problem.BaseCommit, problem.BaseCommit)
 	b.WriteString("Do only this — no other changes, no new comments or status updates. Reply with one line saying what you did.\n")
 	return b.String()
 }

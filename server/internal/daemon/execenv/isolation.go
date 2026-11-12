@@ -20,15 +20,17 @@ import (
 const PreparationHelperArg = "__multica_execenv_prepare"
 
 const (
-	preparationActionPrepare = "prepare"
-	preparationActionReuse   = "reuse"
-	preparationWaitDelay     = 2 * time.Second
+	preparationActionPrepare       = "prepare"
+	preparationActionReuse         = "reuse"
+	preparationActionLocalWorktree = "local-worktree"
+	preparationWaitDelay           = 2 * time.Second
 )
 
 type preparationRequest struct {
-	Action  string         `json:"action"`
-	Prepare *PrepareParams `json:"prepare,omitempty"`
-	Reuse   *ReuseParams   `json:"reuse,omitempty"`
+	Action        string               `json:"action"`
+	Prepare       *PrepareParams       `json:"prepare,omitempty"`
+	Reuse         *ReuseParams         `json:"reuse,omitempty"`
+	LocalWorktree *LocalWorktreeParams `json:"local_worktree,omitempty"`
 }
 
 // preparationOpenclawGatewayPin is the private helper-protocol view of an
@@ -48,9 +50,10 @@ type preparationReuseParams struct {
 }
 
 type preparationRequestPayload struct {
-	Action  string                    `json:"action"`
-	Prepare *preparationPrepareParams `json:"prepare,omitempty"`
-	Reuse   *preparationReuseParams   `json:"reuse,omitempty"`
+	Action        string                    `json:"action"`
+	Prepare       *preparationPrepareParams `json:"prepare,omitempty"`
+	Reuse         *preparationReuseParams   `json:"reuse,omitempty"`
+	LocalWorktree *LocalWorktreeParams      `json:"local_worktree,omitempty"`
 }
 
 type preparationResponse struct {
@@ -120,6 +123,21 @@ func ReuseIsolated(ctx context.Context, command []string, params ReuseParams, lo
 		Action: preparationActionReuse,
 		Reuse:  &params,
 	}, logger)
+}
+
+// PrepareLocalWorktreeIsolated keeps on-demand Git and filesystem operations
+// inside the same cancellable process-tree boundary as environment preparation.
+func PrepareLocalWorktreeIsolated(ctx context.Context, command []string, params LocalWorktreeParams, logger *slog.Logger) (*LocalWorktree, error) {
+	env, err := runPreparationProcess(ctx, command, preparationRequest{
+		Action: preparationActionLocalWorktree, LocalWorktree: &params,
+	}, logger)
+	if err != nil {
+		return nil, err
+	}
+	if env == nil || env.LocalWorktree == nil {
+		return nil, errors.New("execenv: preparation helper returned no local worktree; update the Multica runtime")
+	}
+	return env.LocalWorktree, nil
 }
 
 func runPreparationProcess(ctx context.Context, command []string, request preparationRequest, logger *slog.Logger) (*Environment, error) {
@@ -220,7 +238,7 @@ func runPreparationProcess(ctx context.Context, command []string, request prepar
 // this trusted local process boundary; ordinary json.Marshal calls on the
 // public type remain redacted.
 func marshalPreparationRequest(request preparationRequest) ([]byte, error) {
-	payload := preparationRequestPayload{Action: request.Action}
+	payload := preparationRequestPayload{Action: request.Action, LocalWorktree: request.LocalWorktree}
 	if request.Prepare != nil {
 		payload.Prepare = &preparationPrepareParams{
 			PrepareParams:   request.Prepare,
@@ -274,7 +292,7 @@ func RunPreparationHelper(in io.Reader, out io.Writer, logger *slog.Logger) erro
 	var response preparationResponse
 	switch request.Action {
 	case preparationActionPrepare:
-		if request.Prepare == nil || request.Reuse != nil {
+		if request.Prepare == nil || request.Reuse != nil || request.LocalWorktree != nil {
 			return errors.New("invalid prepare request")
 		}
 		env, err := Prepare(*request.Prepare, logger)
@@ -284,10 +302,20 @@ func RunPreparationHelper(in io.Reader, out io.Writer, logger *slog.Logger) erro
 			response.ErrorKind = preparationErrorKind(err)
 		}
 	case preparationActionReuse:
-		if request.Reuse == nil || request.Prepare != nil {
+		if request.Reuse == nil || request.Prepare != nil || request.LocalWorktree != nil {
 			return errors.New("invalid reuse request")
 		}
 		response.Environment = Reuse(*request.Reuse, logger)
+	case preparationActionLocalWorktree:
+		if request.LocalWorktree == nil || request.Prepare != nil || request.Reuse != nil {
+			return errors.New("invalid local worktree request")
+		}
+		wt, err := PrepareLocalWorktree(*request.LocalWorktree, logger)
+		if err != nil {
+			response.Error = err.Error()
+		} else {
+			response.Environment = &Environment{LocalWorktree: wt}
+		}
 	default:
 		return fmt.Errorf("unknown preparation action %q", request.Action)
 	}

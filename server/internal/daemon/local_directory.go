@@ -50,8 +50,8 @@ type localDirectoryAssignment struct {
 	RealPath string // canonical key for the path mutex
 }
 
-// UsesWorktree reports whether this assignment runs each task in its own git
-// worktree instead of in the user's directory. Worktree tasks skip the per-path
+// UsesWorktree reports whether this assignment uses a private worktree on demand
+// instead of writing in the user's directory. Worktree tasks skip the per-path
 // mutex entirely — that is the whole point of the mode — so every caller that
 // serialises, cleans up sidecars, or exempts the env root from GC must branch
 // on this rather than on "is there a local_directory assignment at all".

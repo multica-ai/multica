@@ -101,7 +101,7 @@ describe("LocalDirectoryHint", () => {
 
     expect(await screen.findByText("VueJS")).toBeInTheDocument();
     expect(screen.getByText(/\/repos\/vue/)).toBeInTheDocument();
-    expect(screen.getByText(/isolated worktree of/i)).toBeInTheDocument();
+    expect(screen.getByText(/Agent can read/i)).toBeInTheDocument();
     expect(screen.queryByText("Laravel")).not.toBeInTheDocument();
   });
 
@@ -161,10 +161,9 @@ describe("LocalDirectoryHint", () => {
   });
 
   // The banner used to say "in-place" for every local_directory resource.
-  // Under worktree mode that is simply false — the agent runs in an isolated
-  // worktree and the named directory does not change — and it points the user
-  // at the wrong place to look for the work.
-  it("describes worktree mode as isolated, never in-place", async () => {
+  // Parallel mode reads the named folder and creates a private copy on demand.
+  // The banner must describe both access and where written work is delivered.
+  it("describes on-demand checkout and instruction-based read-only use", async () => {
     mockDaemonStatus.daemonId = "daemon-A";
     mockDaemonStatus.running = true;
     mockListResources.mockResolvedValue({
@@ -180,7 +179,7 @@ describe("LocalDirectoryHint", () => {
     });
     renderHint("proj-1");
     await waitFor(() => {
-      expect(screen.getByText(/isolated worktree of/i)).toBeInTheDocument();
+      expect(screen.getByText(/Agent can read/i)).toBeInTheDocument();
     });
     expect(screen.queryByText(/in-place/i)).not.toBeInTheDocument();
     // The mode's whole point is that results arrive as a branch; a user who

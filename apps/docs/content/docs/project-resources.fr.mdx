@@ -99,7 +99,9 @@ Un simple répertoire non git ne peut utiliser que ce mode : le mode worktree es
 </Tab>
 <Tab value="worktree (Parallèle)" id="worktree">
 
-Chaque exécution obtient son propre [worktree git](https://git-scm.com/docs/git-worktree) de votre dépôt, créé dans le répertoire de travail propre au runtime. Les exécutions sur un même répertoire ont lieu simultanément, aucune n'attend, et aucune n'écrit dans votre copie de travail.
+Les exécutions démarrent dans un dossier de tâche ordinaire et lisent le dépôt local sans copie ni verrou Git. Avant de modifier des fichiers, d’installer des dépendances ou de lancer des compilations/tests qui écrivent, l’agent exécute `multica repo checkout --local`. Le runtime crée alors un [git worktree](https://git-scm.com/docs/git-worktree) privé, renvoie son chemin et ses règles de branche, et capture vos modifications non commitées **au moment du checkout**. Les appels répétés pendant une exécution renvoient la même copie.
+
+Une exécution sans checkout ne crée aucune branche et n’a aucun worktree à finaliser. Les exécutions avec copie suivent les règles de restitution et de nettoyage ci-dessous. La lecture seule repose sur les consignes données à l’agent, **pas sur une protection du système d’exploitation**. L’agent peut accéder au dossier d’origine et doit respecter la consigne d’écrire uniquement dans sa copie. Les anciens runtimes compatibles continuent à créer une copie au démarrage jusqu’à leur mise à jour. La valeur stockée `worktree` et les deux choix restent identiques.
 
 Le répertoire doit être un dépôt git contenant au moins un commit ; sinon, les exécutions échouent avec une erreur explicite au lieu de revenir silencieusement à une exécution en série.
 
@@ -183,7 +185,7 @@ Les refs cachées n'apparaissent jamais dans `git branch` ; listez-les avec `git
 </Accordions>
 
 <Callout type="warn">
-**Opérateurs d'instances auto-hébergées :** l'isolation de ce mode est appliquée par le serveur (à l'enregistrement, puis de nouveau lorsqu'un runtime prend en charge chaque exécution) ; un runtime rétrogradé à n'importe quel moment est donc détecté. La seule combinaison qui n'est *pas* détectée consiste à ramener le serveur à un build antérieur à cette fonctionnalité alors que des runtimes qui n'implémentent pas ce mode sont encore connectés : un ancien serveur n'effectue aucun contrôle, et un tel runtime ignore `execution_mode` et s'exécute directement dans le répertoire d'origine. Ne ramenez pas le serveur à une version antérieure à celle-ci tant que des ressources `worktree` existent, sauf si tous les runtimes de ces machines sont à jour.
+**Opérateurs d'instances auto-hébergées :** la prise en charge de ce mode est vérifiée par le serveur (à l'enregistrement, puis de nouveau lorsqu'un runtime prend en charge chaque exécution) ; un runtime rétrogradé à n'importe quel moment est donc détecté. La seule combinaison qui n'est *pas* détectée consiste à ramener le serveur à un build antérieur à cette fonctionnalité alors que des runtimes qui n'implémentent pas ce mode sont encore connectés : un ancien serveur n'effectue aucun contrôle, et un tel runtime ignore `execution_mode` et s'exécute directement dans le répertoire d'origine. Ne ramenez pas le serveur à une version antérieure à celle-ci tant que des ressources `worktree` existent, sauf si tous les runtimes de ces machines sont à jour.
 </Callout>
 
 </Tab>

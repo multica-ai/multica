@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -15,6 +16,41 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/pkg/agent"
 )
+
+func TestOnDemandRepairTargetsWorktreeFromManagedCwd(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell command fixture")
+	}
+	t.Parallel()
+	_, wt := squashedWorktree(t)
+	problem := wt.CheckDelivery()
+	if problem == nil {
+		t.Fatal("fixture has no delivery problem")
+	}
+	prompt := BuildWorktreeDeliveryRepairPrompt(problem, wt.WorkDir)
+	managedDir := t.TempDir()
+	commands := 0
+	for _, line := range strings.Split(prompt, "\n") {
+		if !strings.HasPrefix(line, "git ") {
+			continue
+		}
+		if !strings.HasPrefix(line, "git -C '") {
+			t.Fatalf("repair uses session cwd: %s", line)
+		}
+		cmd := exec.Command("sh", "-c", line)
+		cmd.Dir = managedDir
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("repair: %s: %s: %v", line, output, err)
+		}
+		commands++
+	}
+	if commands == 0 || wt.CheckDelivery() != nil {
+		t.Fatal("repair did not restore the delivery")
+	}
+	if _, err := wt.Finalize(slog.Default()); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // #9404: a worktree turn is told up front where its delivery has to end, so
 // the squash / feature-branch habits that the daemon cannot record are avoided
@@ -95,8 +131,11 @@ func TestBuildWorktreeDeliveryRepairPrompt(t *testing.T) {
 
 func checkWorktreeDeliveryRepairPrompt(t *testing.T, problem *execenv.DeliveryProblem, extra []string) {
 	t.Helper()
-	out := BuildWorktreeDeliveryRepairPrompt(problem)
+	const workDir = "/work/tree with 'apostrophe'"
+	const gitPrefix = `git -C '/work/tree with '\''apostrophe'\''' `
+	out := BuildWorktreeDeliveryRepairPrompt(problem, workDir)
 	for _, want := range append([]string{problem.Reason, "`agent/j/mul-9404`", "git diff --cached abc123def", "no new comments or status updates"}, extra...) {
+		want = strings.ReplaceAll(want, "git ", gitPrefix)
 		if !strings.Contains(out, want) {
 			t.Errorf("repair prompt missing %q:\n%s", want, out)
 		}
@@ -124,7 +163,7 @@ func checkWorktreeDeliveryRepairPrompt(t *testing.T, problem *execenv.DeliveryPr
 		if err != nil {
 			t.Fatalf("sh could not parse %q: %v", line, err)
 		}
-		if want := strings.Join(steps[i], "\n"); strings.TrimSuffix(string(got), "\n") != want {
+		if want := strings.Join(append([]string{"-C", workDir}, steps[i]...), "\n"); strings.TrimSuffix(string(got), "\n") != want {
 			t.Errorf("line %d parses to %q, want %q", i, got, want)
 		}
 	}

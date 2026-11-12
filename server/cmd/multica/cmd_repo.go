@@ -48,14 +48,24 @@ var repoRemoveCmd = &cobra.Command{
 }
 
 var repoCheckoutCmd = &cobra.Command{
-	Use:   "checkout <url>",
+	Use:   "checkout <url> | --local",
 	Short: "Check out a repository into the working directory",
 	Long: "Creates a git worktree from the daemon's bare clone cache. Used by agents to check out repos on demand.\n\n" +
+		"With --local and no URL, prepares the task's configured local directory as a private worktree, including the user's changes at checkout time. Repeated calls return the same path.\n\n" +
 		"Running it again where the repository is already checked out never silently discards work: a checkout " +
 		"that has uncommitted changes, untracked files, or unpushed commits, or is already on this task's branch, " +
 		"is kept as it is and only its remote refs are fetched. Pass --fresh to discard its uncommitted changes and " +
 		"untracked files and start over on a new branch; commits stay on the old branch, but push any you still need first.",
-	Args: exactArgs(1),
+	Args: func(cmd *cobra.Command, args []string) error {
+		local, _ := cmd.Flags().GetBool("local")
+		if local {
+			if len(args) != 0 || cmd.Flags().Changed("ref") || cmd.Flags().Changed("fresh") {
+				return fmt.Errorf("--local cannot be combined with a URL, --ref, or --fresh")
+			}
+			return nil
+		}
+		return exactArgs(1)(cmd, args)
+	},
 	RunE: runRepoCheckout,
 }
 
@@ -75,6 +85,7 @@ func init() {
 	repoRemoveCmd.Flags().String("output", "json", "Output format: table or json")
 
 	repoCheckoutCmd.Flags().StringVar(&repoCheckoutRef, "ref", "", "branch, tag, or commit to check out instead of the remote default branch")
+	repoCheckoutCmd.Flags().Bool("local", false, "prepare this task's configured local directory as a private worktree; prints its path")
 	repoCheckoutCmd.Flags().BoolVar(&repoCheckoutFresh, "fresh", false, "discard an existing checkout's uncommitted changes and untracked files and start over on a new branch from the latest default branch (or --ref); commits stay on the old branch")
 
 	repoCmd.AddCommand(repoListCmd)
@@ -341,7 +352,11 @@ func runRepoRemove(cmd *cobra.Command, args []string) error {
 }
 
 func runRepoCheckout(cmd *cobra.Command, args []string) error {
-	repoURL := args[0]
+	local, _ := cmd.Flags().GetBool("local")
+	repoURL := ""
+	if !local {
+		repoURL = args[0]
+	}
 
 	daemonPort := os.Getenv("MULTICA_DAEMON_PORT")
 	if daemonPort == "" {
@@ -387,6 +402,9 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 	defer cancel()
 	client := &http.Client{}
 	checkoutURL := fmt.Sprintf("http://127.0.0.1:%s/repo/checkout", daemonPort)
+	if local {
+		checkoutURL = fmt.Sprintf("http://127.0.0.1:%s/local-directory/checkout", daemonPort)
+	}
 	var body []byte
 	for {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, checkoutURL, bytes.NewReader(data))
@@ -419,6 +437,9 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 			}
 		}
 		if resp.StatusCode != http.StatusOK {
+			if local && resp.StatusCode == http.StatusNotFound {
+				return fmt.Errorf("this daemon does not support on-demand local checkout; update the Multica runtime on this machine")
+			}
 			return fmt.Errorf("checkout failed: %s", string(body))
 		}
 		break
@@ -430,6 +451,10 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Fprintf(os.Stdout, "%s\n", result.Path)
+	if local {
+		fmt.Fprintln(os.Stderr, result.Description)
+		return nil
+	}
 	fmt.Fprintln(os.Stderr, repoCheckoutSummary(repoURL, result))
 
 	return nil
@@ -439,6 +464,7 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 // than MUL-7284 never keep an existing checkout and omit Kept and the counts;
 // older daemons also omit FetchError and only log a failed fetch.
 type repoCheckoutResult struct {
+	Description      string `json:"description"`
 	Path             string `json:"path"`
 	BranchName       string `json:"branch_name"`
 	Kept             string `json:"kept"`

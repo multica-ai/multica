@@ -238,6 +238,57 @@ func TestRunRepoCheckoutForwardsManagedCheckoutMode(t *testing.T) {
 	}
 }
 
+func TestRepoCheckoutLocalArguments(t *testing.T) {
+	for _, tc := range []struct {
+		args       []string
+		ref, fresh bool
+		wantErr    bool
+	}{
+		{nil, false, false, false}, {[]string{"https://example.com/repo"}, false, false, true},
+		{nil, true, false, true}, {nil, false, true, true},
+	} {
+		cmd := &cobra.Command{}
+		cmd.Flags().Bool("local", true, "")
+		cmd.Flags().String("ref", "", "")
+		cmd.Flags().Bool("fresh", false, "")
+		if tc.ref {
+			cmd.Flags().Set("ref", "main")
+		}
+		if tc.fresh {
+			cmd.Flags().Set("fresh", "true")
+		}
+		if err := repoCheckoutCmd.Args(cmd, tc.args); (err != nil) != tc.wantErr {
+			t.Errorf("args %+v: %v", tc, err)
+		}
+	}
+}
+
+func TestRunRepoCheckoutLocalEndpointAndOldDaemon(t *testing.T) {
+	for _, status := range []int{http.StatusOK, http.StatusNotFound} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/local-directory/checkout" || r.Header.Get("Authorization") != "Bearer mat_local" {
+					t.Errorf("incorrect local checkout request: %s", r.URL)
+				}
+				w.WriteHeader(status)
+				json.NewEncoder(w).Encode(map[string]string{"path": "/private/worktree", "description": "local delivery rules"})
+			}))
+			defer srv.Close()
+			t.Setenv("MULTICA_DAEMON_PORT", strings.TrimPrefix(srv.URL, "http://127.0.0.1:"))
+			t.Setenv("MULTICA_TOKEN", "mat_local")
+			cmd := &cobra.Command{}
+			cmd.Flags().Bool("local", true, "")
+			err := runRepoCheckout(cmd, nil)
+			if status == http.StatusOK && err != nil {
+				t.Fatal(err)
+			}
+			if status == http.StatusNotFound && (err == nil || !strings.Contains(err.Error(), "update")) {
+				t.Fatalf("old daemon: %v", err)
+			}
+		})
+	}
+}
+
 func TestRepoCheckoutSummary(t *testing.T) {
 	t.Parallel()
 	const repoURL = "https://github.com/org/repo.git"

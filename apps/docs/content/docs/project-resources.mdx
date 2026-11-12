@@ -99,7 +99,9 @@ A plain non-git directory can only use this mode: worktree mode covers git repos
 </Tab>
 <Tab value="worktree (Parallel)" id="worktree">
 
-Each run gets its own [git worktree](https://git-scm.com/docs/git-worktree) of your repo, created inside the runtime's own workspace directory. Runs on the same directory run concurrently without waiting, and none of them write to your working copy.
+Runs start in a normal task directory and read your local repository without creating a copy or taking a Git lock. Before editing files, installing dependencies, or running builds/tests that write files, the agent runs `multica repo checkout --local`. The runtime then creates a private [git worktree](https://git-scm.com/docs/git-worktree), returns its path and branch rules, and captures your uncommitted changes **at checkout time**. Repeated calls in one run return the same copy.
+
+A run that never checks out a copy has no worktree to finalize and creates no branch. Runs that check out a copy keep the branch delivery and cleanup behavior below. Reading your working copy is governed by agent instructions, **not an OS-enforced read-only boundary**. The agent can access your directory and must follow the instruction to write only in its private copy. Older worktree-capable runtimes continue to create a copy at startup until upgraded; the stored `worktree` mode and the two choices remain the same.
 
 The directory must be a git repository with at least one commit; if it is not, runs fail with an explicit error rather than quietly falling back to serial execution.
 
@@ -110,9 +112,9 @@ What the agent sees, and what you get back:
 <Accordions type="multiple">
 <Accordion title="The agent starts from what you see, not from HEAD" id="starts-from-your-working-state">
 
-Your uncommitted edits and your untracked files are replayed into the worktree, so the agent is not reviewing code you no longer have. Your own working copy, index, and stash list are never touched.
+At checkout time, your uncommitted edits and your untracked files are replayed into the worktree, so the agent is not reviewing code you no longer have. Your own working copy, index, and stash list are never touched.
 
-If that state cannot be reproduced faithfully, including when there is more untracked content than the replay covers (2000 files / 200 MiB), the run fails instead of starting from a tree you would not recognise. The usual fix is to gitignore or clean up build output that is not already ignored.
+If that state cannot be reproduced faithfully, including when there is more untracked content than the replay covers (2000 files / 200 MiB), checkout fails instead of starting from a tree you would not recognise. The usual fix is to gitignore or clean up build output that is not already ignored.
 
 </Accordion>
 <Accordion title="The result is a branch in your repo" id="result-is-a-branch">
@@ -183,7 +185,7 @@ The hidden refs never appear in `git branch`; list them with `git for-each-ref r
 </Accordions>
 
 <Callout type="warn">
-**Self-hosted operators:** isolation for this mode is enforced by the server (at save time and again when a runtime claims each run), so a runtime downgraded at any point is caught. The combination that is *not* caught is rolling the server back to a build that predates this feature while runtimes that do not implement the mode are still connected: an old server has no gate, and such a runtime ignores `execution_mode` and would execute the run in place. Do not roll the server back past this release while `worktree` resources exist unless every runtime on those machines is up to date.
+**Self-hosted operators:** runtime support for this mode is checked by the server (at save time and again when a runtime claims each run), so a runtime downgraded at any point is caught. The combination that is *not* caught is rolling the server back to a build that predates this feature while runtimes that do not implement the mode are still connected: an old server has no gate, and such a runtime ignores `execution_mode` and would execute the run in place. Do not roll the server back past this release while `worktree` resources exist unless every runtime on those machines is up to date.
 </Callout>
 
 </Tab>
