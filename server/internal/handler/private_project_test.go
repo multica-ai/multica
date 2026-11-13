@@ -478,6 +478,12 @@ func TestPrivateProjectIssueUnreadRunReferencesAfterRevocation(t *testing.T) {
 INSERT INTO issue_unread (workspace_id, user_id, issue_id, outcome, agent_id, task_id)
 VALUES ($1, $2, $3, 'completed', $4, $5), ($1, $2, $6, 'completed', $4, $7)`,
 		testWorkspaceID, f.insider, f.secretIssue, agentID, secretTask, f.publicIssue, publicTask)
+	for _, issueID := range []string{f.secretIssue, f.publicIssue} {
+		dbfx.Insert(t, "inbox_item", testutil.Cols{
+			"workspace_id": testWorkspaceID, "recipient_type": "member", "recipient_id": f.insider,
+			"issue_id": issueID, "type": "new_comment", "severity": "info", "title": "Unread result",
+		})
+	}
 
 	before := listIssueUnreadAs(t, f.insider)
 	if len(before) != 2 {

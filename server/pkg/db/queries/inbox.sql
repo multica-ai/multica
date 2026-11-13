@@ -160,6 +160,11 @@ WITH target AS (
     SELECT t.workspace_id, t.recipient_type, t.recipient_id, t.issue_id
     FROM inbox_item t
     WHERE t.id = $1 AND t.issue_id IS NOT NULL
+), cleared_unread AS (
+    DELETE FROM issue_unread u USING target
+    WHERE target.recipient_type = 'member'
+      AND u.workspace_id = target.workspace_id AND u.user_id = target.recipient_id
+      AND u.issue_id = target.issue_id
 ), siblings AS (
     UPDATE inbox_item s SET read = true
     FROM target
@@ -186,9 +191,22 @@ WHERE id = $1
 RETURNING *;
 
 -- name: ArchiveInboxItem :one
-UPDATE inbox_item SET archived = true
-WHERE id = $1
-RETURNING *;
+WITH target AS (
+    SELECT t.workspace_id, t.recipient_type, t.recipient_id, t.issue_id FROM inbox_item t WHERE t.id = $1
+), cleared_unread AS (
+    DELETE FROM issue_unread u USING target
+    WHERE target.recipient_type = 'member'
+      AND u.workspace_id = target.workspace_id AND u.user_id = target.recipient_id
+      AND u.issue_id = target.issue_id
+), siblings AS (
+    UPDATE inbox_item i SET archived = true FROM target
+    WHERE i.workspace_id = target.workspace_id AND i.recipient_type = target.recipient_type
+      AND i.recipient_id = target.recipient_id AND i.issue_id = target.issue_id
+      AND i.archived = false AND i.id <> $1
+)
+UPDATE inbox_item item SET archived = true
+WHERE item.id = $1
+RETURNING item.*;
 
 -- name: DeleteInboxGroup :execrows
 -- A visible inbox row groups notifications on an issue. Remove that group
@@ -198,6 +216,11 @@ WITH target AS (
     SELECT selected.* FROM inbox_item selected
     WHERE selected.id = $1 AND selected.workspace_id = $2
       AND selected.recipient_type = 'member' AND selected.recipient_id = $3
+), cleared_unread AS (
+    DELETE FROM issue_unread u USING target
+    WHERE NOT target.archived
+      AND u.workspace_id = target.workspace_id AND u.user_id = target.recipient_id
+      AND u.issue_id = target.issue_id
 )
 DELETE FROM inbox_item item USING target
 WHERE item.workspace_id = target.workspace_id
@@ -283,10 +306,15 @@ WHERE newest.read = false
 GROUP BY newest.workspace_id;
 
 -- name: MarkAllInboxRead :execrows
-UPDATE inbox_item SET read = true
-WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2 AND archived = false AND read = false;
+-- Clear run results and manual marks too, including results that never created
+-- an inbox notification. Both surfaces acknowledge the same workspace snapshot.
+WITH cleared_unread AS (
+    DELETE FROM issue_unread u WHERE u.workspace_id = sqlc.arg(workspace_id) AND u.user_id = sqlc.arg(recipient_id)
+)
+UPDATE inbox_item i SET read = true
+WHERE i.workspace_id = sqlc.arg(workspace_id) AND i.recipient_type = 'member' AND i.recipient_id = sqlc.arg(recipient_id) AND i.archived = false AND i.read = false;
 
--- name: MarkInboxReadByIssue :execrows
+-- name: MarkInboxReadByIssue :one
 -- Reading an issue outside the inbox (its page, a side peek, the Unread view)
 -- reads its notifications too, so the inbox does not ask about the same issue
 -- again (MUL-8588). Every unread row in the issue's group, not just the newest,
@@ -296,13 +324,30 @@ WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2 AND 
 -- same through MarkInboxRead. Archived rows are left as they are, as in
 -- MarkAllInboxRead, which also keeps the lookup on the partial index
 -- idx_inbox_active_by_issue.
-UPDATE inbox_item SET read = true
-WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2
-  AND issue_id = $3 AND archived = false AND read = false;
+-- The issue page clears manual marks on opening itself; its background Inbox
+-- refreshes must preserve a reminder the user set while that page stayed open.
+WITH cleared_unread AS (
+    DELETE FROM issue_unread u WHERE u.workspace_id = sqlc.arg(workspace_id) AND u.user_id = sqlc.arg(recipient_id) AND u.issue_id = sqlc.arg(issue_id)
+      AND u.outcome <> 'manual'
+    RETURNING u.issue_id
+), read_items AS (
+    UPDATE inbox_item i SET read = true
+    WHERE i.workspace_id = sqlc.arg(workspace_id) AND i.recipient_type = 'member' AND i.recipient_id = sqlc.arg(recipient_id)
+      AND i.issue_id = sqlc.arg(issue_id) AND i.archived = false AND i.read = false
+    RETURNING i.id
+)
+SELECT (SELECT count(*) FROM read_items) AS count,
+       (SELECT count(*) FROM cleared_unread) AS unread_count;
 
 -- name: ArchiveAllInbox :execrows
-UPDATE inbox_item SET archived = true
-WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2 AND archived = false;
+WITH cleared_unread AS (
+    DELETE FROM issue_unread u USING inbox_item n
+    WHERE u.workspace_id = sqlc.arg(workspace_id) AND u.user_id = sqlc.arg(recipient_id)
+      AND n.workspace_id = u.workspace_id AND n.recipient_type = 'member' AND n.recipient_id = u.user_id
+      AND n.issue_id = u.issue_id AND n.archived = false
+)
+UPDATE inbox_item i SET archived = true
+WHERE i.workspace_id = sqlc.arg(workspace_id) AND i.recipient_type = 'member' AND i.recipient_id = sqlc.arg(recipient_id) AND i.archived = false;
 
 -- name: ArchiveAllReadInbox :execrows
 -- "Read" is the state of the one issue row the inbox renders: the newest
@@ -324,6 +369,9 @@ WITH newest_groups AS (
     SELECT group_id
     FROM newest_groups
     WHERE read = true
+), cleared_unread AS (
+    DELETE FROM issue_unread u USING read_groups selected
+    WHERE u.workspace_id = $1 AND u.user_id = $2 AND u.issue_id = selected.group_id
 )
 UPDATE inbox_item i SET archived = true
 FROM read_groups selected
@@ -334,10 +382,19 @@ WHERE i.workspace_id = $1
   AND COALESCE(i.issue_id, i.id) = selected.group_id;
 
 -- name: ArchiveCompletedInbox :execrows
+WITH completed_issues AS (
+    SELECT target.id FROM issue target
+    WHERE target.workspace_id = $1
+      AND target.status = ANY(sqlc.arg('terminal_status_keys')::text[])
+      AND EXISTS (
+          SELECT 1 FROM inbox_item n
+          WHERE n.workspace_id = $1 AND n.recipient_type = 'member' AND n.recipient_id = $2
+            AND n.issue_id = target.id AND n.archived = false
+      )
+), cleared_unread AS (
+    DELETE FROM issue_unread u USING completed_issues completed
+    WHERE u.workspace_id = $1 AND u.user_id = $2 AND u.issue_id = completed.id
+)
 UPDATE inbox_item i SET archived = true
 WHERE i.workspace_id = $1 AND i.recipient_type = 'member' AND i.recipient_id = $2 AND i.archived = false
-  AND i.issue_id IN (
-    SELECT id FROM issue
-    WHERE workspace_id = $1
-      AND status = ANY(sqlc.arg('terminal_status_keys')::text[])
-  );
+  AND i.issue_id IN (SELECT id FROM completed_issues);

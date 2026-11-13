@@ -87,6 +87,12 @@ func TestIssueUnreadPointsAtTheRunsLastComment(t *testing.T) {
 INSERT INTO issue_unread (workspace_id, user_id, issue_id, outcome, task_id)
 VALUES ($1, $2, $3, 'completed', $4), ($1, $2, $5, 'failed', $6)`,
 		testWorkspaceID, userID, withComments, runID, silent, silentRunID)
+	for _, issueID := range []string{withComments, silent} {
+		dbfx.Insert(t, "inbox_item", testutil.Cols{
+			"workspace_id": testWorkspaceID, "recipient_type": "member", "recipient_id": userID,
+			"issue_id": issueID, "type": "new_comment", "severity": "info", "title": "Run result",
+		})
+	}
 
 	byIssue := map[string]IssueUnreadResponse{}
 	for _, item := range listIssueUnreadAs(t, userID) {
@@ -138,6 +144,18 @@ func TestIssueUnreadPagesReachEveryRow(t *testing.T) {
 INSERT INTO issue_unread (workspace_id, user_id, issue_id, outcome, created_at)
 SELECT $1, $2, gen_random_uuid(), 'completed', now() - (n / 2) * interval '1 second'
 FROM generate_series(1, $3::int) AS n`, testWorkspaceID, userID, total)
+	dbfx.Cleanup(t, `DELETE FROM issue WHERE id IN (SELECT issue_id FROM issue_unread WHERE user_id = $1)`, userID)
+	dbfx.Exec(t, `
+INSERT INTO issue (id, workspace_id, number, title, status, priority, creator_type, creator_id, position)
+SELECT u.issue_id, u.workspace_id,
+       (SELECT COALESCE(MAX(i.number), 0) FROM issue i WHERE i.workspace_id = $1) + row_number() OVER (),
+       'Pagination unread result', 'todo', 'none', 'member', $2, 0
+FROM issue_unread u WHERE u.workspace_id = $1 AND u.user_id = $2`, testWorkspaceID, userID)
+	dbfx.Cleanup(t, `DELETE FROM inbox_item WHERE recipient_id = $1`, userID)
+	dbfx.Exec(t, `
+INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, issue_id, type, severity, title)
+SELECT workspace_id, 'member', user_id, issue_id, 'new_comment', 'info', 'Unread result'
+FROM issue_unread WHERE workspace_id = $1 AND user_id = $2`, testWorkspaceID, userID)
 
 	seen := map[string]bool{}
 	cursor, pages := "", 0

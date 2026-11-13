@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { hashKey, keepPreviousData, useQuery } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import type {
@@ -579,23 +579,16 @@ export function useIssueSurfaceController({
     return issueIDs;
   }, [workspaceWorkingAgents]);
 
-  // The unread filter matches the viewer's unread list. An issue read while
-  // the filter is on stays in the set, so it keeps its place on screen (and
-  // the query keeps its identity) until the filter turns off or the surface
-  // unmounts; a newly unread issue grows the set and refetches.
+  // Follow the current unread projection, including acknowledgements made in
+  // Inbox or another session while this surface stays open.
   const unreadProjection = useIssueUnreadIds(wsId, unreadFilter);
   const unreadIssueList = unreadProjection.data;
   const unreadDependency = filterDependencyState(unreadFilter, [unreadProjection]);
   const unreadFilterUnresolved = unreadDependency.unresolved;
-  const keptUnreadRef = useRef<Set<string>>(new Set());
-  const unreadIssueIDs = useMemo<ReadonlySet<string>>(() => {
-    if (!unreadFilter) {
-      keptUnreadRef.current = new Set();
-      return keptUnreadRef.current;
-    }
-    for (const issueID of unreadIssueList ?? EMPTY_LIST) keptUnreadRef.current.add(issueID);
-    return new Set(keptUnreadRef.current);
-  }, [unreadFilter, unreadIssueList]);
+  const unreadIssueIDs = useMemo<ReadonlySet<string>>(
+    () => new Set(unreadFilter ? unreadIssueList : EMPTY_LIST),
+    [unreadFilter, unreadIssueList],
+  );
   const membershipUnresolved = workingFilterUnresolved || unreadFilterUnresolved;
 
   const derivedTableQuerySpec = useMemo<IssueTableQuerySpec>(() => {

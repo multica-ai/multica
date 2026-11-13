@@ -16,6 +16,33 @@ import (
 func registerIssueUnreadListeners(bus *events.Bus, queries *db.Queries) {
 	ctx := context.Background()
 
+	// Inbox writes acknowledge the Work mark in the same SQL statement. Notify
+	// installed clients through their existing personal unread subscription too.
+	for _, eventType := range []string{
+		protocol.EventInboxRead, protocol.EventInboxArchived, protocol.EventInboxDeleted,
+		protocol.EventInboxBatchRead, protocol.EventInboxBatchArchived,
+	} {
+		bus.Subscribe(eventType, func(e events.Event) {
+			payload, ok := e.Payload.(map[string]any)
+			if !ok {
+				return
+			}
+			recipientID, _ := payload["recipient_id"].(string)
+			if recipientID == "" {
+				return
+			}
+			issueID, _ := payload["issue_id"].(string)
+			bus.Publish(events.Event{
+				Type: protocol.EventIssueUnreadChanged, WorkspaceID: e.WorkspaceID,
+				ActorType: e.ActorType, ActorID: e.ActorID,
+				Payload: map[string]any{
+					"workspace_id": e.WorkspaceID, "recipient_id": recipientID,
+					"issue_id": issueID, "unread": false,
+				},
+			})
+		})
+	}
+
 	bus.Subscribe(protocol.EventTaskCompleted, func(e events.Event) {
 		markIssueUnreadForRun(ctx, bus, queries, e, "completed")
 	})

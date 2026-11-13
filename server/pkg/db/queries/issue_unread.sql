@@ -13,6 +13,15 @@ JOIN issue_subscriber s
  AND s.reason <> 'delegated'
 JOIN member m ON m.workspace_id = i.workspace_id AND m.user_id = s.user_id
 WHERE i.id = sqlc.arg(issue_id)
+  -- A run ending after its result was acknowledged must not make it unread
+  -- again. Use the same newest-active-notification rule as the Inbox badge.
+  AND COALESCE((
+    SELECT NOT n.read FROM inbox_item n
+    WHERE n.workspace_id = i.workspace_id AND n.recipient_type = 'member'
+      AND n.recipient_id = s.user_id AND n.issue_id = i.id AND n.archived = false
+    ORDER BY n.created_at DESC, n.id DESC
+    LIMIT 1
+  ), false)
 ON CONFLICT (workspace_id, user_id, issue_id) DO UPDATE
 SET outcome = EXCLUDED.outcome,
     agent_id = EXCLUDED.agent_id,
@@ -40,6 +49,15 @@ LEFT JOIN LATERAL (
 ) run_comment ON true
 WHERE u.workspace_id = sqlc.arg(workspace_id)
   AND u.user_id = sqlc.arg(user_id)
+  -- Hide automatic marks left by older servers after their notifications were
+  -- acknowledged. A deliberate manual reminder does not need a notification.
+  AND (u.outcome = 'manual' OR COALESCE((
+    SELECT NOT n.read FROM inbox_item n
+    WHERE n.workspace_id = u.workspace_id AND n.recipient_type = 'member'
+      AND n.recipient_id = u.user_id AND n.issue_id = u.issue_id AND n.archived = false
+    ORDER BY n.created_at DESC, n.id DESC
+    LIMIT 1
+  ), false))
   -- MUL-8472: private projects the caller cannot see.
   AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR NOT EXISTS (
     SELECT 1 FROM issue hidden_issue
