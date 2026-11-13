@@ -7,12 +7,10 @@
  * (Tiptap @tiptap/markdown, react-markdown) only need to handle one syntax.
  *
  * SYNCED COPY — KEEP IDENTICAL TO packages/core/markdown/mention-shortcodes.ts.
- * Mobile imports the core copy because packages/ui/ cannot be imported from
- * mobile (Sharing Principles in apps/mobile/CLAUDE.md), and packages/ui/
- * cannot import from packages/core/ (Package Boundary Rules in root
- * CLAUDE.md). If you change the regex / behavior here, change core's copy
- * too — otherwise web and mobile will render legacy mentions differently
- * and the "Counts must agree" parity rule breaks.
+ * Mobile imports the core copy because packages/ui/ renders DOM, and
+ * packages/ui/ cannot import from packages/core/ (Package Boundary Rules in
+ * root AGENTS.md). If you change the regex / behavior here, change core's
+ * copy too — otherwise web and mobile will render legacy mentions differently.
  */
 export function preprocessMentionShortcodes(text: string): string {
   if (!text.includes("[@ ")) return text;

@@ -58,8 +58,7 @@ const (
 	//
 	// Every client floor must be at or below this value, or the client would
 	// silently override a cadence the server chose for correctness. See
-	// packages/core/platform/session-renewal.ts and
-	// apps/mobile/data/session-renewal.ts.
+	// packages/core/platform/session-renewal.ts.
 	minSessionRenewCheckInterval = 5 * time.Second
 
 	// maxSessionRenewCheckInterval bounds the other end: a client that has

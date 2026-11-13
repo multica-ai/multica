@@ -2,9 +2,8 @@ import { describe, expect, it } from "vitest";
 import { isMentionBoundaryAfter } from "./mention-boundary";
 
 // The character-level matrix for the shared mention boundary rule. The wiring —
-// that the editor and the mobile composer actually consult it — is covered
-// where each of them lives (mention-boundary.test.ts under packages/views and
-// mention-serialize.test.ts under apps/mobile).
+// that the editor actually consults it — is covered where the editor lives
+// (mention-boundary.test.ts under packages/views).
 
 /** The `@` is placed directly after this text, so its last code point decides. */
 const OPENS: Array<[string, string]> = [

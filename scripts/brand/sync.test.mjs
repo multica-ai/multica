@@ -26,7 +26,7 @@ for (const { name, from, to, drift, stay } of [
     name: "a wordmark coordinate",
     from: "const gap = 12;",
     to: "const gap = 13;",
-    drift: ["apps/mobile/components/brand/multica-logo.tsx", "server/cmd/multica/cmd_auth.go", "docs/assets/logo-light.svg"],
+    drift: ["server/cmd/multica/cmd_auth.go", "docs/assets/logo-light.svg"],
     stay: ["apps/web/public/favicon.svg"],
   },
   {

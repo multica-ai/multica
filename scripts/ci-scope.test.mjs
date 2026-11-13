@@ -42,7 +42,7 @@ for (const [name, files, selected] of [
   ["integration key gates", ["server/cmd/server/router.go"], ["backend", "runtime", "scripts"]],
   ["brand source", ["packages/ui/lib/multica-brand.ts"], ["frontend", "quality"]],
   ["CLI brand copy", ["server/cmd/multica/cmd_auth.go"], ["backend", "runtime", "quality"]],
-  ["mobile brand copy", ["apps/mobile/components/brand/multica-logo.tsx"], ["quality"]],
+  ["mobile app", ["apps/mobile/src/ui/App.tsx"], ["quality"]],
   ["README logo", ["docs/assets/logo-dark.svg"], ["quality"]],
   ["brand generator", ["scripts/brand/sync.mjs"], ["quality"]],
   ["PR evidence uploader", ["scripts/pr-shots"], ["quality"]],
