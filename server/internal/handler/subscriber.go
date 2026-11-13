@@ -46,13 +46,44 @@ func (h *Handler) ListIssueSubscribers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := make([]SubscriberResponse, len(subscribers))
-	for i, s := range subscribers {
-		resp[i] = subscriberToResponse(s)
+	// Project subscribers have no row here but are notified all the same, so
+	// they are part of the issue's effective list. A direct row wins: it
+	// carries the reason the member is involved in this issue specifically.
+	projectSubscribers, err := h.Queries.ListProjectSubscribersForIssue(r.Context(), issue.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list subscribers")
+		return
+	}
+
+	resp := make([]SubscriberResponse, 0, len(subscribers)+len(projectSubscribers))
+	direct := make(map[string]bool, len(subscribers))
+	for _, s := range subscribers {
+		resp = append(resp, subscriberToResponse(s))
+		if s.UserType == "member" {
+			direct[uuidToString(s.UserID)] = true
+		}
+	}
+	for _, ps := range projectSubscribers {
+		userID := uuidToString(ps.UserID)
+		if direct[userID] {
+			continue
+		}
+		resp = append(resp, SubscriberResponse{
+			IssueID:   uuidToString(issue.ID),
+			UserType:  "member",
+			UserID:    userID,
+			Reason:    subscriberReasonProject,
+			CreatedAt: timestampToString(ps.CreatedAt),
+		})
 	}
 
 	writeJSON(w, http.StatusOK, resp)
 }
+
+// subscriberReasonProject marks a subscription inherited from the issue's
+// project. It is never stored on issue_subscriber; leaving the issue writes an
+// opt-out tombstone instead (RemoveIssueSubscriber).
+const subscriberReasonProject = "project"
 
 // ListSubscribedIssueIDs returns the ids of every issue in the workspace the
 // caller subscribes to, so clients can evaluate the "subscribed" relation on
@@ -62,13 +93,19 @@ func (h *Handler) ListSubscribedIssueIDs(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	wsUUID, ok := parseUUIDOrBadRequest(w, ctxWorkspaceID(r.Context()), "workspace id")
+	workspaceID := ctxWorkspaceID(r.Context())
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
 	if !ok {
 		return
 	}
 	ids, err := h.Queries.ListSubscribedIssueIDs(r.Context(), db.ListSubscribedIssueIDsParams{
-		WorkspaceID: wsUUID,
-		UserID:      parseUUID(userID),
+		WorkspaceID:      wsUUID,
+		UserID:           parseUUID(userID),
+		HiddenProjectIds: hidden.Param(),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list subscribed issues")

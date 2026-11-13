@@ -64,14 +64,6 @@
     "search_runtime_filtered": "\"{{machine}}\"上沒有匹配\"{{query}}\"的 AI 代理。",
     "runtime_filtered": "\"{{machine}}\"上還沒有 AI 代理。"
   },
-  "runtime_filter": {
-    "all": "全部執行時",
-    "section_local": "本地",
-    "section_remote": "遠端",
-    "section_cloud": "雲端",
-    "agent_count_other": "{{count}} 個 AI 代理",
-    "empty": "還沒有機器"
-  },
   "columns": {
     "agent": "AI 代理",
     "status": "狀態",
@@ -199,7 +191,6 @@
     "rename_required": "名稱必填",
     "edit_description_title": "編輯描述",
     "description_placeholder": "這個 AI 代理做什麼？",
-    "save": "儲存",
     "cancel": "取消"
   },
   "overview": {
@@ -222,12 +213,7 @@
     "edit_access_aria": "訪問權限：{{value}}。變更訪問權限",
     "all_settings": "全部設定"
   },
-  "skill_attach": {
-    "trigger_aria": "附加工作區 skill",
-    "trigger_label": "附加"
-  },
   "pickers": {
-    "concurrency_tooltip": "併發 · 最多 {{value}} 次並行執行",
     "concurrency_range": "最大並行執行數（{{min}}–{{max}}）",
     "runtime_none": "無執行時",
     "runtime_tooltip": "執行時 · {{name}} · {{status}}",
@@ -303,13 +289,8 @@
     "duplicate_title": "複製 {{name}}",
     "step_ai": "透過對話建立",
     "modes": {
-      "template": {
-        "title": "使用模板",
-        "description": "從整理好的指令和 skill 開始，再根據工作區需要修改每個細節。"
-      },
       "ai": {
-        "title": "透過 AI 建立",
-        "description": "透過對話生成可編輯的配置草稿。"
+        "title": "透過 AI 建立"
       }
     },
     "sections": {
@@ -337,10 +318,6 @@
       }
     },
     "builder": {
-      "setup_title": "為 AI 代理構建器選擇執行時",
-      "setup_description": "該執行時用於建立對話，並預設用於新 AI 代理。",
-      "start": "開始對話",
-      "connect_runtime": "連線執行時",
       "draft_parse_failed": "本次回覆未能填入表單。請讓 AI 代理重新生成草稿，或手動填寫。",
       "start_failed": "無法啟動 AI 代理構建器。",
       "send_failed": "無法傳送訊息。",
@@ -448,23 +425,17 @@
     }
   },
   "create_dialog": {
-    "title_create": "建立 AI 代理",
-    "title_duplicate": "複製 AI 代理",
-    "description_duplicate": "基於\"{{name}}\"建立一個新 AI 代理。指令、環境變數和 skill 會一併複製。",
     "name_label": "名稱",
     "name_placeholder": "例如：深度研究 AI 代理",
     "description_label": "描述",
     "description_placeholder": "這個 AI 代理做什麼？",
-    "visibility_label": "可見性",
     "access": {
-      "label": "訪問權限",
       "private_title": "私有",
       "private_desc": "只有你可以執行該 AI 代理",
       "public_title": "公開",
       "public_desc": "選擇誰可以執行該 AI 代理",
       "public_workspace_option": "工作區內所有人",
       "public_members_group": "指定成員",
-      "public_members_empty": "沒有可選擇的工作區成員",
       "public_targets_empty_hint": "至少勾選下方一項——否則該 AI 代理仍為私有。"
     },
     "runtime_label": "執行時",
@@ -479,17 +450,10 @@
     "runtime_no_results": "沒有匹配的機器",
     "runtime_group_online": "{{online}}/{{total}} 線上",
     "duplicate_copy_suffix": "（副本）",
-    "create": "建立",
-    "creating": "建立中...",
-    "cancel": "取消",
-    "create_failed_toast": "建立 AI 代理失敗",
     "skill_attach_failed_toast": "AI 代理已建立，但 skill 關聯失敗：{{error}}",
     "squad_join_failed_toast": "AI 代理\"{{name}}\"已建立，但加入小隊失敗：{{error}}。你可以在 Members 標籤裡手動新增。",
     "instructions": {
       "label": "指令",
-      "placeholder_blank": "點選撰寫指令…",
-      "placeholder_duplicate": "點選檢視或編輯複製的指令",
-      "collapse": "收起",
       "editor_placeholder": "寫下這個 AI 代理該做什麼、關注什麼、要避開什麼…"
     },
     "skills_section": {
@@ -566,6 +530,7 @@
       "bulk_placeholder": "API_KEY=值\nBASE_URL=https://example.com",
       "bulk_plaintext_notice": "批次編輯時，值以明文顯示。",
       "bulk_unsupported_toast": "\"{{key}}\" 的值無法用文字表示，請用逐條編輯修改",
+      "bulk_invalid_key_toast": "批次編輯只支援 API_KEY 這類變數名稱，請用逐條編輯修改 \"{{key}}\"",
       "parse_error_malformed": "第 {{line}} 行不是 KEY=value 格式",
       "parse_error_duplicate": "第 {{line}} 行的 key \"{{key}}\" 重複",
       "paste_invalid_toast": "無法解析貼上的環境變數",
@@ -768,7 +733,7 @@
       "add_failed_toast": "新增 skill 失敗"
     },
     "integrations": {
-      "members_note": "只有工作區的所有者和管理員可以管理此連線。你可以在\"設定 → 整合\"中檢視已連線的 Bot。"
+      "members_note": "在 AI 代理首頁查看和管理訊息管道。"
     },
     "activity": {
       "status": {
@@ -987,7 +952,39 @@
     "tool_kind_write": "編輯",
     "tool_kind_read": "讀取",
     "tool_kind_misc": "其他",
-    "trigger_wakeup": "喚醒觸發"
+    "trigger_wakeup": "喚醒觸發",
+    "context_receipt_title": "上下文回執",
+    "context_receipt_summary_other": "{{count}} 個來源 · {{size}}",
+    "context_receipt_model": "模型",
+    "context_receipt_session": "工作階段",
+    "context_receipt_session_resumed": "沿用了先前的工作階段（其歷史也在上下文中）",
+    "context_receipt_session_new": "新工作階段",
+    "context_receipt_session_fresh_retry": "恢復工作階段被拒後改用新工作階段",
+    "context_receipt_mcp": "MCP 服務",
+    "context_receipt_mcp_none": "無",
+    "context_receipt_warning": "{{source}}：{{status}}",
+    "context_receipt_col_source": "來源",
+    "context_receipt_col_size": "大小",
+    "context_receipt_col_delivery": "交付方式",
+    "context_receipt_col_load": "載入狀態",
+    "context_receipt_same_as_brief": "同執行說明",
+    "context_receipt_footnote": "由 daemon 在代理程式啟動前記錄。只保存大小和短雜湊，不保存內容。「已驗證」表示該執行環境的這個版本經過測試，確認會載入該檔案。 技能的大小和雜湊涵蓋實際寫入的整個技能包。",
+    "context_source_runtime_brief": "執行說明",
+    "context_source_agent_instructions": "代理程式指令",
+    "context_source_project_description": "專案描述",
+    "context_source_existing_instructions": "儲存庫自帶指令",
+    "context_source_task_prompt": "本輪 prompt",
+    "context_source_skill": "技能：{{name}}",
+    "context_delivery_file": "檔案",
+    "context_delivery_inline": "系統提示",
+    "context_delivery_prompt": "本輪輸入",
+    "context_delivery_embedded": "在執行說明內",
+    "context_delivery_none": "無交付管道",
+    "context_load_delivered": "已送達",
+    "context_load_verified": "已驗證",
+    "context_load_verified_other_version": "僅在 {{version}} 驗證過",
+    "context_load_unverified": "未驗證",
+    "context_load_not_delivered": "未送達"
   },
   "task_failure": {
     "cancelled_by_system": "已由系統取消",

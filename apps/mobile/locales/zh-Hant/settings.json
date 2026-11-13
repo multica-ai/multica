@@ -75,12 +75,14 @@
     "mentions_description": "有人用 @ 提到你時，包括 @all 和 @squad。",
     "updates": "任務更新",
     "updates_description": "標題、描述、標籤、優先順序或截止日期變更時。",
+    "new_issues": "新任務",
+    "new_issues_description": "你訂閱的專案中有新任務建立時。",
     "agent_activity": "AI 代理動態",
     "agent_activity_description": "AI 代理執行失敗時。",
     "inbox_notifications": "收件箱通知",
     "system": "系統",
     "system_notifications": "系統通知",
-    "system_description": "帳號變更、安全提醒和產品更新。"
+    "chat_replies": "包含聊天回覆"
   },
   "groups.assignments_description": "任務分配給我或取消分配給我時。",
   "groups.mentions_description": "有人用 @ 提到你時，包括 @all 和 @squad。"

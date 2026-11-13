@@ -407,21 +407,6 @@ func NormalizeCloudRuntimeStatus(value string) string {
 	return "error"
 }
 
-// CloudRuntimeStatusForCode maps an HTTP status code to its bucket label.
-// Used by cloudruntime client instrumentation.
-func CloudRuntimeStatusForCode(code int) string {
-	switch {
-	case code >= 200 && code < 400:
-		return "ok"
-	case code >= 400 && code < 500:
-		return "4xx"
-	case code >= 500 && code < 600:
-		return "5xx"
-	default:
-		return "error"
-	}
-}
-
 func NormalizeDaemonWSKind(value string) string {
 	return normalizeFromAllowList(value, knownDaemonWSKinds, "other")
 }

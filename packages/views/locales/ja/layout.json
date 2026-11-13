@@ -78,9 +78,6 @@
     "workspaces_label": "ワークスペース",
     "create_workspace": "ワークスペースを作成",
     "pending_invitations_label": "保留中の招待",
-    "invitation_workspace_fallback": "ワークスペース",
-    "invitation_join": "参加",
-    "invitation_decline": "辞退",
     "log_out": "ログアウト",
     "new_issue": "新規タスク",
     "pinned_label": "ピン留め済み",
@@ -100,14 +97,25 @@
     "chat": "チャット",
     "autopilots": "自動化",
     "switch_workspace": "ワークスペースを切り替え",
-    "invitation_from": "{{name}} さんから招待されています",
     "pin_workspace": "ワークスペースをピン留め",
     "unpin_workspace": "ピン留めを解除",
     "open_in_new_window": "新しいウィンドウで開く",
     "open_in_new_window_click": "クリック",
     "open_in_other_window": "別のウィンドウで開いています",
     "in_other_window": "別ウィンドウ",
-    "all_workspaces_open": "すべてのワークスペースがすでにウィンドウで開いています"
+    "all_workspaces_open": "すべてのワークスペースがすでにウィンドウで開いています",
+    "copy_link": "リンクをコピー",
+    "link_copied": "リンクをコピーしました",
+    "workspace_settings": "ワークスペース設定",
+    "mark_all_read": "すべて既読にする",
+    "mark_all_read_failed": "すべて既読にできませんでした",
+    "reset_order": "デフォルトの順序に戻す",
+    "copy_workspace_link": "ワークスペースのリンクをコピー",
+    "workspace_meta_other": "{{slug}} · メンバー {{count}} 人"
+  },
+  "bottom_bar": {
+    "label": "ステータスバー",
+    "working_other": "{{count}} 体のエージェントが作業中"
   },
   "panels": {
     "work": {
@@ -129,6 +137,7 @@
       "assignee_me": "自分",
       "assignee_my_agents": "自分のエージェント",
       "assignee_me_and_my_agents": "自分と自分のエージェント",
+      "assignee_projects_only": "サイドバーの「プロジェクト」に表示されるタスクにのみ適用されます",
       "reset": "リセット",
       "load_more": "さらに表示",
       "show_less": "表示を減らす",
@@ -149,7 +158,8 @@
       "view_edit": "ビューを編集",
       "view_rename": "名前を変更",
       "view_duplicate": "複製",
-      "view_delete": "ビューを削除"
+      "view_delete": "ビューを削除",
+      "new_issue_here": "このプロジェクトに新規タスク"
     },
     "team": {
       "new_agent": "新規エージェント",
@@ -165,7 +175,8 @@
       "members_other": "メンバー {{count}} 人",
       "resources": "リソース",
       "runtimes_online_other": "{{count}} 台オンライン",
-      "invite_member": "メンバーを招待"
+      "invite_member": "メンバーを招待",
+      "open_issue": "{{identifier}} を開く"
     },
     "autopilots": {
       "all": "すべてのオートパイロット",
@@ -182,6 +193,8 @@
       "dark": "ダーク",
       "system": "システム"
     },
+    "mode": "モード",
+    "appearance_settings": "外観の設定",
     "language": "言語",
     "shortcuts": "キーボードショートカット"
   },
@@ -217,5 +230,19 @@
     "go_to_slide": "{{index}} 枚目に移動",
     "previous": "前へ",
     "next": "次へ"
+  },
+  "context_menu": {
+    "cut": "切り取り",
+    "copy": "コピー",
+    "paste": "貼り付け",
+    "select_all": "すべて選択",
+    "add_to_dictionary": "辞書に追加",
+    "open_link": "ブラウザでリンクを開く",
+    "copy_link_address": "リンクのアドレスをコピー",
+    "copy_image": "画像をコピー",
+    "copy_code": "コードをコピー",
+    "copy_table": "表をコピー",
+    "copied": "コピーしました",
+    "copy_failed": "コピーできませんでした"
   }
 }

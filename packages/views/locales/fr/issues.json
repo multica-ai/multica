@@ -56,7 +56,7 @@
   },
   "relation_filter_error": {
     "title": "Impossible de charger le filtre « Lien avec moi »",
-    "hint": "Les tâches filtrées par « Auxquels je suis abonné » ou « Assignés à mes agents » s'affichent une fois vos abonnements et agents chargés."
+    "hint": "Les tâches filtrées par « Auxquels je suis abonné » ou « Travail de mes agents » s'affichent une fois vos abonnements et agents chargés."
   },
   "source_context": {
     "create_action": "Créer une sous-tâche à partir d'ici",
@@ -194,10 +194,11 @@
     "section_relation": "Lien avec moi",
     "relation_assigned": "Qui me sont assignés",
     "relation_created": "Créés par moi",
-    "relation_my_agents": "Assignés à mes agents",
+    "relation_my_agents": "Travail de mes agents",
     "relation_subscribed": "Auxquels je suis abonné",
     "section_agent_status": "Statut de l'agent",
     "agent_status_running": "En cours d'exécution",
+    "agent_status_idle": "Inactif",
     "section_read_state": "État de lecture",
     "read_state_unread": "Non lu",
     "operator_label": "Condition",
@@ -321,6 +322,7 @@
     "card_project": "Projet",
     "card_labels": "Étiquettes",
     "card_child_progress": "Avancement des sous-tâches",
+    "card_pull_requests": "Pull requests",
     "show_sub_issues": "Afficher les sous-tâches",
     "layout_options": "Options de la vue {{layout}}"
   },
@@ -392,6 +394,7 @@
       "created_at": "Création",
       "updated_at": "Mise à jour",
       "child_progress": "Avancement des sous-tâches",
+      "pull_requests": "Pull requests",
       "creator": "Créé par"
     },
     "calculation": {
@@ -492,6 +495,18 @@
     "section_pull_requests": "Pull requests",
     "section_metadata": "Métadonnées",
     "section_details": "Détails",
+    "sidebar_settings": {
+      "open": "Personnaliser la barre latérale",
+      "title": "Barre latérale",
+      "reset": "Réinitialiser",
+      "footer": "Faites glisser pour réordonner. S'applique à toutes les tâches.",
+      "always_shown": "Toujours affiché",
+      "empty": "Rien sur cette tâche",
+      "customize": "Personnaliser",
+      "drag_handle": "Réordonner {{section}}",
+      "hidden_count_one": "{{count}} section masquée",
+      "hidden_count_other": "{{count}} sections masquées"
+    },
     "section_quick_actions": "Actions rapides",
     "quick_actions_more": "Afficher {{count}} de plus",
     "quick_action_runs_as": "S'exécute en tant que {{name}}",
@@ -505,6 +520,7 @@
     "quick_action_blocked_body": "« {{name}} » s'exécute sous un agent que vous n'êtes pas autorisé à déclencher. Demandez à un administrateur de l'espace de travail de rendre cet agent accessible à l'équipe, ou de rattacher cette action à un agent partagé.",
     "quick_action_blocked_ok": "Compris",
     "pull_requests_loading": "Chargement…",
+    "pull_request_state_open": "Ouverte",
     "pull_request_state_draft": "Brouillon",
     "pull_request_state_merged": "Fusionnée",
     "pull_request_state_closed": "Fermée",
@@ -543,6 +559,8 @@
     "unsubscribe": "Se désabonner",
     "delegated_subscription_badge": "Suivi via un agent",
     "delegated_subscription_hint": "Votre agent a créé cette tâche en votre nom : vous y êtes donc abonné. Vous serez notifié lorsqu'elle demandera une relecture, se terminera ou se bloquera.",
+    "project_subscription_badge": "Suivi via le projet",
+    "project_subscription_hint": "Vous êtes abonné à toutes les tâches de ce projet. Vous désabonner ici arrête uniquement les notifications de cette tâche.",
     "unsubscribe_this": "Se désabonner de cette tâche",
     "unsubscribe_subtree": "Se désabonner de cette tâche et de ses sous-tâches",
     "unsubscribe_subtree_failed": "Impossible de se désabonner des sous-tâches. Veuillez réessayer.",
@@ -587,10 +605,13 @@
   },
   "timeline": {
     "loading": "Chargement...",
-    "jump_to_latest": "Aller au plus récent"
+    "jump_to_latest": "Aller au plus récent",
+    "new_comments_one": "{{count}} nouveau commentaire",
+    "new_comments_other": "{{count}} nouveaux commentaires"
   },
   "activity": {
     "created": "a créé cette tâche",
+    "created_on_behalf_of": "a créé cette tâche au nom de {{name}}",
     "self_assigned": "s'est assigné cette tâche",
     "assigned_to": "a assigné à {{name}}",
     "removed_assignee": "a retiré l'assignation",
@@ -649,7 +670,10 @@
     "wakeup_checkin_coalesced_one": "{{count}} vérification silencieuse · dernière : {{note}}",
     "wakeup_checkin_coalesced_other": "{{count}} vérifications silencieuses · dernière : {{note}}",
     "wakeup_chip_created_by": "Réveil de {{name}}",
-    "wakeup_chip_system": "Règle système"
+    "wakeup_chip_system": "Règle système",
+    "environment_stopped": "a arrêté l'environnement {{name}}",
+    "environment_restarted": "a redémarré l'environnement {{name}}",
+    "environment_started": "a démarré l'environnement {{name}}"
   },
   "comment": {
     "add_reaction": "Ajouter une réaction",
@@ -753,7 +777,10 @@
     "recipient_count_other": "{{count}} agents recevront ce message",
     "steer_attachment_notice": "Seul du texte peut rejoindre une exécution en cours : un message avec des fichiers sera traité après.",
     "restart_send": "Arrêter et envoyer",
-    "restart_failed": "Impossible d'arrêter l'exécution en cours. Votre message n'a pas été envoyé."
+    "restart_failed": "Impossible d'arrêter l'exécution en cours. Votre message n'a pas été envoyé.",
+    "reply_action": "Répondre",
+    "actions_label": "Actions du commentaire",
+    "create_issue_from_selection": "Créer une sous-tâche à partir de la sélection"
   },
   "reply": {
     "recipients_changed": "La cible de la réponse a changé. Vérifiez les destinataires avant de réessayer.",
@@ -977,7 +1004,12 @@
     "delete_dialog_title_other": "Supprimer {{count}} tâches ?",
     "delete_dialog_desc_one": "Cette action est irréversible. La tâche sélectionnée et toutes ses données associées seront définitivement supprimées.",
     "delete_dialog_desc_other": "Cette action est irréversible. Les tâches sélectionnées et toutes leurs données associées seront définitivement supprimées.",
-    "cancel": "Annuler"
+    "cancel": "Annuler",
+    "copy_links": "Copier les liens",
+    "links_copied_one": "{{count}} lien copié",
+    "links_copied_other": "{{count}} liens copiés",
+    "delete_count_one": "Supprimer {{count}} tâche",
+    "delete_count_other": "Supprimer {{count}} tâches"
   },
   "card": {
     "update_failed": "Échec de la mise à jour de la tâche",
@@ -1014,12 +1046,14 @@
     "stop_agent_run": "Arrêter l’exécution de {{name}}",
     "relations": "Relations",
     "create_sub_issue": "Créer une sous-tâche",
+    "quick_actions": "Actions rapides",
     "set_parent_issue": "Définir la tâche parente...",
     "remove_parent_issue": "Retirer la tâche parente",
     "remove_parent_issue_success": "Tâche parente retirée",
     "add_sub_issue": "Ajouter une sous-tâche...",
     "delete_issue": "Supprimer la tâche",
-    "mark_duplicate": "Marquer comme doublon..."
+    "mark_duplicate": "Marquer comme doublon...",
+    "open_in_new_window": "Ouvrir dans une nouvelle fenêtre"
   },
   "pickers": {
     "custom_property": {
@@ -1115,7 +1149,7 @@
     "variant_my_any": "Toute relation",
     "variant_my_assigned": "Qui me sont assignés",
     "variant_my_created": "Que j'ai créés",
-    "variant_my_involved": "Impliqué"
+    "variant_my_involved": "Travail de mes agents"
   },
   "plugins": {
     "panels": "Plugins",
@@ -1395,15 +1429,16 @@
       "enable": "Activé pour cette tâche",
       "toggle": "Réveiller le responsable à la fin des sous-tâches",
       "save_error": "Impossible d’enregistrer la règle système.",
-      "default_on": "Activé par défaut dans cet espace. Modifiez la valeur par défaut dans Paramètres → Réveils.",
-      "default_off": "Désactivé par défaut dans cet espace. Modifiez la valeur par défaut dans Paramètres → Réveils.",
+      "default_on": "Activé par défaut dans cet espace.",
+      "default_off": "Désactivé par défaut dans cet espace.",
       "notify_member": "Notifier {{name}} dans sa boîte de réception",
       "instruction": "Que faire au réveil",
       "instruction_edit": "Modifier l’instruction",
       "instruction_default": "Non définie sur cette tâche ; instruction par défaut :",
       "instruction_placeholder": "Laisser vide pour l’instruction par défaut",
       "instruction_invalid": "Limitez l’instruction à 4 000 octets.",
-      "paused": "En pause : {{reason}}"
+      "paused": "En pause : {{reason}}",
+      "default_change": "Modifier la valeur par défaut"
     },
     "cond": {
       "status": "Quand cette tâche passe à {{status}}",
@@ -1779,16 +1814,13 @@
       "name_placeholder": "Nom de l’état",
       "add": "Ajouter"
     },
-    "menu": {
-      "view_flow": "Voir tout le flux",
-      "switch": "Changer de workflow"
-    },
     "flow": {
       "title": "Workflow {{workflow}}",
       "scope_own": "Seul ce projet utilise ce workflow.",
       "no_handoff_here": "Pas de relais",
       "scope_shared_one": "{{count}} projet utilise ce workflow. Ses transferts s’appliquent à chaque projet qui l’utilise.",
-      "scope_shared_other": "{{count}} projets utilisent ce workflow. Ses transferts s’appliquent à tous."
+      "scope_shared_other": "{{count}} projets utilisent ce workflow. Ses transferts s’appliquent à tous.",
+      "switch": "Changer de workflow"
     },
     "templates": {
       "delivery": {
@@ -1920,7 +1952,9 @@
       "running": "En cours",
       "exited": "Terminé",
       "stopped": "Arrêté",
-      "unreachable": "Sans réponse"
+      "unreachable": "Sans réponse",
+      "stopping": "Arrêt en cours",
+      "preparing": "Préparation"
     },
     "expires_in_minutes_one": "Expire dans {{count}} min",
     "expires_in_minutes_other": "Expire dans {{count}} min",
@@ -1939,6 +1973,87 @@
     "open": "Ouvrir",
     "copy_url": "Copier l'URL",
     "copied": "URL copiée",
-    "copy_failed": "Impossible de copier l'URL"
+    "copy_failed": "Impossible de copier l'URL",
+    "offline": "Hors ligne",
+    "machine_offline": "{{machine}} est hors ligne",
+    "more_actions": "Plus d'actions",
+    "view_logs": "Voir les journaux",
+    "restart": "Redémarrer",
+    "stop": "Arrêter",
+    "stop_confirm_item": "Arrêter…",
+    "run_first": "la première exécution",
+    "run_nth_one": "l'exécution {{count}}",
+    "run_nth_other": "l'exécution {{count}}",
+    "someone": "Quelqu'un",
+    "started_by": "Démarré par {{name}}",
+    "restarted_by": "Redémarré par {{name}}",
+    "started_by_agent_in_run": "Démarré par {{name}} dans {{run}}",
+    "stopped_by": "Arrêté par {{name}}",
+    "stopped_on_expiry": "Arrêté à l'expiration",
+    "exited_ago": "Terminé {{time}}",
+    "exit_code": "Code de sortie {{code}}",
+    "detected_label": "Service détecté · {{name}}",
+    "detected_no_logs": "Ce service n'a pas été démarré depuis la configuration des environnements : il n'a pas de journaux et ne peut pas être redémarré.",
+    "offline_hint": "Disponible quand cet appareil sera de nouveau en ligne.",
+    "outdated_hint": "Mettez à jour Multica sur cet appareil pour le gérer d'ici.",
+    "no_permission_hint": "Seuls les membres qui peuvent utiliser cet appareil peuvent l'arrêter ou le redémarrer.",
+    "waiting_machine": "En attente de l'appareil",
+    "waiting_ready": "En attente qu'il soit prêt",
+    "no_response": "Aucune réponse",
+    "action_failed": {
+      "stop": "Impossible d'arrêter",
+      "restart": "Impossible de redémarrer",
+      "start": "Impossible de démarrer"
+    },
+    "stop_confirm_title": "Arrêter {{name}} ?",
+    "stop_confirm_body": "Ce service ({{process}}) a été détecté automatiquement ; il n'a pas été démarré depuis la configuration des environnements. Une fois arrêté, il ne peut pas être redémarré ici : un agent devra le relancer.",
+    "cancel": "Annuler",
+    "preparing_title": "{{name}} prépare l'environnement",
+    "preparing_hint": "Il apparaîtra ici une fois démarré",
+    "start_menu": {
+      "trigger": "Démarrer un environnement",
+      "note": "Démarre selon la configuration des environnements du projet, avec le code de la dernière exécution sur cet appareil.",
+      "no_permission": "Seuls les membres qui peuvent utiliser un appareil peuvent y démarrer des environnements.",
+      "nothing_to_start": "Cette tâche n'a pas encore été exécutée, ou le code des exécutions précédentes a été nettoyé : rien ne peut être démarré directement.",
+      "ask_agent": "Demander à {{name}} de le démarrer",
+      "ask_any_agent": "Demander à un agent de le démarrer",
+      "new_run": "Nouvelle exécution",
+      "preparing": "Préparation",
+      "ask_agent_hint": "{{name}} préparera le code de cette tâche, puis démarrera l'environnement. Si le projet n'a pas de configuration des environnements, il décidera comment le démarrer.",
+      "ask_any_agent_hint": "L'agent préparera le code de cette tâche, puis démarrera l'environnement. Si le projet n'a pas de configuration des environnements, il décidera comment le démarrer.",
+      "ask_failed": "Impossible de solliciter l'agent",
+      "agent_instruction": "Démarre l'environnement : prépare le code de cette tâche, puis lance `multica env start` pour les environnements déclarés par le projet ; s'il n'en déclare aucun, décide toi-même comment le démarrer. Laisse-le tourner et réponds avec son adresse."
+    },
+    "log": {
+      "title": "{{name}} · Journaux",
+      "filter": "Filtrer les journaux",
+      "wrap": "Retour à la ligne",
+      "follow": "Suivre la fin",
+      "copy": "Copier",
+      "copied": "Journaux copiés",
+      "copy_failed": "Impossible de copier les journaux",
+      "refresh": "Actualiser",
+      "footer_one": "Dernière ligne · mise à jour à {{time}}",
+      "footer_other": "Dernières {{count}} lignes · mis à jour à {{time}}",
+      "loading": "Lecture des journaux…",
+      "empty": "Aucune sortie pour l'instant",
+      "no_match": "Aucune ligne ne correspond",
+      "no_response": "L'appareil n'a pas répondu",
+      "failed": "Impossible de lire les journaux : {{error}}",
+      "offline_excerpt": "Cet appareil est hors ligne. Voici les dernières lignes affichées avant l'arrêt.",
+      "offline_empty": "Les journaux seront disponibles quand cet appareil sera de nouveau en ligne.",
+      "exit_divider": "Terminé à {{time}}",
+      "exit_divider_code": "Terminé à {{time}} · code de sortie {{code}}",
+      "stopped_divider": "Arrêté à {{time}}"
+    },
+    "app_desktop_hint": "Une app de bureau. Basculez vers sa fenêtre depuis Multica Desktop sur la machine qui l'exécute.",
+    "app_remote_hint": "S'exécute sur {{machine}}. Basculez vers sa fenêtre depuis Multica Desktop sur cette machine.",
+    "focus": "Afficher la fenêtre",
+    "focus_gone": "{{name}} ne s'exécute plus",
+    "focus_unsupported": "Le daemon de cette machine ne peut pas encore basculer vers les fenêtres d'apps. Mettez à jour Multica et réessayez.",
+    "focus_unavailable": "Le daemon local n'est pas en cours d'exécution",
+    "focus_failed": "Impossible de basculer vers {{name}}",
+    "retry": "Réessayer",
+    "dismiss": "Ignorer"
   }
 }

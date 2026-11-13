@@ -64,14 +64,6 @@
     "search_runtime_filtered": "\"{{machine}}\"에서 \"{{query}}\"와 일치하는 에이전트가 없습니다.",
     "runtime_filtered": "\"{{machine}}\"에 에이전트가 없습니다."
   },
-  "runtime_filter": {
-    "all": "모든 런타임",
-    "section_local": "로컬",
-    "section_remote": "원격",
-    "section_cloud": "클라우드",
-    "agent_count_other": "에이전트 {{count}}개",
-    "empty": "아직 기기가 없습니다"
-  },
   "columns": {
     "agent": "에이전트",
     "status": "상태",
@@ -199,7 +191,6 @@
     "rename_required": "이름은 필수입니다",
     "edit_description_title": "설명 수정",
     "description_placeholder": "이 에이전트는 무엇을 하나요?",
-    "save": "저장",
     "cancel": "취소"
   },
   "overview": {
@@ -222,12 +213,7 @@
     "edit_access_aria": "접근 권한: {{value}}. 접근 권한 변경",
     "all_settings": "모든 설정"
   },
-  "skill_attach": {
-    "trigger_aria": "워크스페이스 스킬 연결",
-    "trigger_label": "연결"
-  },
   "pickers": {
-    "concurrency_tooltip": "동시 실행 · 최대 {{value}}개",
     "concurrency_range": "최대 동시 실행 수({{min}}-{{max}})",
     "runtime_none": "런타임 없음",
     "runtime_tooltip": "런타임 · {{name}} · {{status}}",
@@ -298,23 +284,17 @@
     "discard_confirm": "변경사항 버리기"
   },
   "create_dialog": {
-    "title_create": "에이전트 만들기",
-    "title_duplicate": "에이전트 복제",
-    "description_duplicate": "\"{{name}}\"을(를) 바탕으로 새 에이전트를 만듭니다. 지침, 환경 변수, 스킬이 복사됩니다.",
     "name_label": "이름",
     "name_placeholder": "예: 심층 리서치 에이전트",
     "description_label": "설명",
     "description_placeholder": "이 에이전트는 무엇을 하나요?",
-    "visibility_label": "공개 범위",
     "access": {
-      "label": "액세스",
       "private_title": "비공개",
       "private_desc": "본인만 이 에이전트를 실행할 수 있습니다",
       "public_title": "공개",
       "public_desc": "이 에이전트를 실행할 수 있는 사람을 선택하세요",
       "public_workspace_option": "이 워크스페이스의 모든 사람",
       "public_members_group": "특정 사용자",
-      "public_members_empty": "선택할 수 있는 워크스페이스 멤버가 없습니다",
       "public_targets_empty_hint": "아래에서 최소 하나 이상을 선택하세요. 그렇지 않으면 에이전트는 비공개로 유지됩니다."
     },
     "runtime_label": "런타임",
@@ -329,17 +309,10 @@
     "runtime_no_results": "일치하는 기기가 없습니다",
     "runtime_group_online": "{{online}}/{{total}} 온라인",
     "duplicate_copy_suffix": " (사본)",
-    "create": "만들기",
-    "creating": "만드는 중...",
-    "cancel": "취소",
-    "create_failed_toast": "에이전트를 만들지 못했습니다",
     "skill_attach_failed_toast": "에이전트는 만들었지만 스킬을 연결하지 못했습니다: {{error}}",
     "squad_join_failed_toast": "에이전트 \"{{name}}\"은(는) 만들었지만 스쿼드에 참가하지 못했습니다: {{error}}. 멤버에서 직접 추가할 수 있습니다.",
     "instructions": {
       "label": "지침",
-      "placeholder_blank": "클릭해서 지침 작성...",
-      "placeholder_duplicate": "클릭해서 복제된 지침 보기 또는 수정",
-      "collapse": "접기",
       "editor_placeholder": "이 에이전트가 무엇을 해야 하는지, 무엇에 집중해야 하는지, 무엇을 피해야 하는지 작성하세요..."
     },
     "skills_section": {
@@ -416,6 +389,7 @@
       "bulk_placeholder": "API_KEY=값\nBASE_URL=https://example.com",
       "bulk_plaintext_notice": "일괄 편집 중에는 값이 평문으로 표시됩니다.",
       "bulk_unsupported_toast": "\"{{key}}\" 값은 텍스트로 표현할 수 없습니다. 개별 편집에서 수정하세요",
+      "bulk_invalid_key_toast": "일괄 편집은 API_KEY 같은 변수 이름만 지원합니다. \"{{key}}\"은(는) 개별 편집에서 수정하세요",
       "parse_error_malformed": "{{line}}번째 줄이 KEY=value 형식이 아닙니다",
       "parse_error_duplicate": "{{line}}번째 줄의 키 \"{{key}}\"가 중복됩니다",
       "paste_invalid_toast": "붙여넣은 환경 변수를 파싱할 수 없습니다",
@@ -618,7 +592,7 @@
       "add_failed_toast": "스킬을 추가하지 못했습니다"
     },
     "integrations": {
-      "members_note": "이 연결을 관리할 수 있는 사람은 워크스페이스 소유자와 관리자뿐입니다. 연결된 봇은 설정 → 연동에서 확인할 수 있습니다."
+      "members_note": "에이전트 페이지에서 메시지 채널을 확인하고 관리하세요."
     },
     "activity": {
       "status": {
@@ -837,7 +811,39 @@
     "tool_kind_write": "편집",
     "tool_kind_read": "읽기",
     "tool_kind_misc": "기타",
-    "trigger_wakeup": "깨우기"
+    "trigger_wakeup": "깨우기",
+    "context_receipt_title": "받은 컨텍스트",
+    "context_receipt_summary_other": "소스 {{count}}개 · {{size}}",
+    "context_receipt_model": "모델",
+    "context_receipt_session": "세션",
+    "context_receipt_session_resumed": "이전 세션을 재개함 (그 기록도 컨텍스트에 포함)",
+    "context_receipt_session_new": "새 세션",
+    "context_receipt_session_fresh_retry": "재개가 거부되어 새 세션 사용",
+    "context_receipt_mcp": "MCP 서버",
+    "context_receipt_mcp_none": "없음",
+    "context_receipt_warning": "{{source}}: {{status}}",
+    "context_receipt_col_source": "소스",
+    "context_receipt_col_size": "크기",
+    "context_receipt_col_delivery": "전달 방식",
+    "context_receipt_col_load": "로드",
+    "context_receipt_same_as_brief": "런타임 안내와 동일",
+    "context_receipt_footnote": "에이전트 시작 전에 daemon이 기록했습니다. 크기와 짧은 해시만 저장하며 내용은 저장하지 않습니다. \"검증됨\"은 이 런타임 버전에서 파일을 로드하는 것이 확인되었다는 뜻입니다. 스킬 크기와 해시는 실제로 기록된 전체 패키지를 기준으로 합니다.",
+    "context_source_runtime_brief": "런타임 안내",
+    "context_source_agent_instructions": "에이전트 지침",
+    "context_source_project_description": "프로젝트 설명",
+    "context_source_existing_instructions": "저장소 지침",
+    "context_source_task_prompt": "이번 턴 프롬프트",
+    "context_source_skill": "스킬: {{name}}",
+    "context_delivery_file": "파일",
+    "context_delivery_inline": "시스템 프롬프트",
+    "context_delivery_prompt": "턴 입력",
+    "context_delivery_embedded": "런타임 안내 안",
+    "context_delivery_none": "전달 경로 없음",
+    "context_load_delivered": "전달됨",
+    "context_load_verified": "검증됨",
+    "context_load_verified_other_version": "{{version}}에서만 검증됨",
+    "context_load_unverified": "검증 안 됨",
+    "context_load_not_delivered": "전달 안 됨"
   },
   "task_failure": {
     "cancelled_by_system": "시스템에서 취소함",
@@ -900,13 +906,8 @@
     "duplicate_title": "{{name}} 복제",
     "step_ai": "대화로 만들기",
     "modes": {
-      "template": {
-        "title": "템플릿 사용",
-        "description": "정리된 지침과 스킬을 바탕으로 워크스페이스에 맞게 세부 항목을 조정합니다."
-      },
       "ai": {
-        "title": "AI로 만들기",
-        "description": "대화를 통해 수정 가능한 설정 초안을 만듭니다."
+        "title": "AI로 만들기"
       }
     },
     "sections": {
@@ -934,10 +935,6 @@
       }
     },
     "builder": {
-      "setup_title": "Agent Builder 런타임 선택",
-      "setup_description": "이 런타임은 생성 대화에 사용되며 새 에이전트의 기본값이 됩니다.",
-      "start": "대화 시작",
-      "connect_runtime": "런타임 연결",
       "draft_parse_failed": "이 응답으로 양식을 채울 수 없습니다. 에이전트에게 초안을 다시 생성하도록 요청하거나 직접 입력하세요.",
       "start_failed": "Agent Builder를 시작하지 못했습니다.",
       "send_failed": "메시지를 보내지 못했습니다.",

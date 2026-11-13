@@ -84,23 +84,6 @@
     "workflow_usage_other": "{{count}} 個工作流在用",
     "workflow_usage_none": "未被工作流使用"
   },
-  "wakeups": {
-    "description": "平臺對所有任務生效的規則。每個任務可以在自己的「喚醒」區域單獨修改。",
-    "child_done_title": "子任務結束時",
-    "child_done_description": "某個階段的子任務全部結束、且後面還有階段在等待時，喚醒父任務的負責人；全部子任務結束時再喚醒一次。負責人是成員時，改為傳送收件箱通知。",
-    "enabled": "預設開啟",
-    "instruction": "預設指令",
-    "instruction_hint": "發給被喚醒的 AI 代理。留空則使用下方的內建指令。",
-    "instruction_placeholder": "留空則使用內建指令",
-    "builtin": "內建指令",
-    "instruction_invalid": "指令最多 4,000 位元組。",
-    "save": "儲存",
-    "saving": "儲存中…",
-    "save_error": "無法儲存預設值。",
-    "customized_other": "{{count}} 個進行中的任務使用了自己的設定，不跟隨此預設值。",
-    "admin_only": "只有所有者和管理員可以修改預設值。",
-    "load_error": "無法載入喚醒預設值。"
-  },
   "quick_actions": {
     "title": "快捷操作",
     "description": "在任務側欄執行預設的 AI 代理和提示詞。",
@@ -186,6 +169,12 @@
       "after_run": "本輪結束後開始",
       "hint": "只決定預設選項，每條訊息傳送前仍可單獨修改。"
     },
+    "comment_images": {
+      "title": "留言中的圖片",
+      "thumbnails": "縮圖",
+      "full": "原尺寸",
+      "hint": "縮圖讓長討論更精簡，點擊圖片可查看原圖。"
+    },
     "comments_title": "評論與聊天",
     "region_title": "語言與地區",
     "issue_fields_title": "建立任務時顯示的欄位",
@@ -211,7 +200,86 @@
       "title": "主題",
       "description": "全域的顏色、邊框、陰影和圓角。",
       "default": "預設",
-      "pop": "普普"
+      "pop": "普普",
+      "built_in": "內建",
+      "installed": "已安裝",
+      "remove": "移除 {{name}}",
+      "safe_mode": "安全模式：關閉這個視窗之前，你的主題暫停生效。",
+      "safe_mode_exit": "恢復我的主題",
+      "folder": "主題資料夾",
+      "folder_problems": "主題資料夾裡有主題沒通過檢查。修改後儲存即可；在此之前繼續使用最後一個通過檢查的版本。"
+    },
+    "import": {
+      "button": "匯入主題",
+      "from_zip": "主題檔案（.zip）",
+      "from_folder": "主題資料夾",
+      "storage_full": "這台裝置的儲存空間不夠儲存這個主題。移除其他主題後再試。",
+      "confirm_title": "安裝「{{name}}」？",
+      "warning": "主題可以改變每個頁面的樣式，包括對話框和警告。只安裝你信任的人做的主題。",
+      "author": "作者",
+      "version": "版本",
+      "replaces": "{{to}}（取代 {{from}}）",
+      "includes": "包含",
+      "cancel": "取消",
+      "confirm": "安裝並使用",
+      "error_title": "無法安裝這個主題",
+      "error_description": "沒有做任何變更。主題檔案有以下問題：",
+      "close": "關閉",
+      "has_options_other": "{{count}} 個選項",
+      "has_assets_other": "{{count}} 個字型和圖片",
+      "beta": "Beta",
+      "beta_note": "自訂主題處於 Beta 階段。主題用到的變數和清單可能會變，主題可能需要更新。"
+    },
+    "store": {
+      "manage": "管理",
+      "title": "主題",
+      "description": "你安裝的主題，以及社群製作的主題。",
+      "description_local": "你安裝的主題。",
+      "search": "搜尋主題",
+      "installed_only": "只看已安裝",
+      "showing_other": "共 {{count}} 個主題",
+      "installed": "已安裝",
+      "loading": "正在載入主題",
+      "error": "無法載入主題商店，請稍後再試。",
+      "retry": "重試",
+      "none_installed": "還沒有安裝任何主題。",
+      "no_results": "沒有符合「{{query}}」的主題。",
+      "by": "作者：{{author}}",
+      "downloads_other": "{{downloads}} 次下載",
+      "source": "在 GitHub 上查看 {{repo}}",
+      "no_preview": "暫無預覽",
+      "screenshot_alt": "{{name}}（{{mode}}模式）",
+      "install": "安裝",
+      "installing": "正在安裝…",
+      "use": "使用",
+      "in_use": "使用中",
+      "update": "更新至 {{version}}",
+      "remove": "移除",
+      "taken": "已安裝相同 ID 的主題",
+      "installed_toast": "已安裝「{{name}}」。",
+      "updated": "已將「{{name}}」更新至 {{version}}。",
+      "install_failed": "無法安裝「{{name}}」",
+      "warning": "主題可以改變每個頁面的樣式，包括對話框與警告。商店主題會經過自動檢查，但皆由社群製作。"
+    },
+    "updates": {
+      "title": "商店主題",
+      "description_other": "你從商店安裝了 {{count}} 個主題。",
+      "check": "檢查更新",
+      "checking": "正在檢查…",
+      "up_to_date": "商店主題都是最新版本。",
+      "update_all": "全部更新（{{count}}）"
+    },
+    "own": {
+      "title": "製作自己的主題",
+      "description": "從 .zip 或資料夾匯入主題，或從目前主題的副本開始。"
+    },
+    "tools": {
+      "duplicate": "複製「{{name}}」為新主題",
+      "open_folder": "開啟主題資料夾",
+      "guide": "如何製作主題",
+      "duplicated_web": "已下載 {{file}}。解壓縮後編輯 theme.css，再匯入這個資料夾。",
+      "duplicated_desktop": "已在主題資料夾中建立「{{name}}」。儲存 theme.css 後變更立即生效。",
+      "duplicate_failed": "無法建立副本：{{error}}"
     },
     "theme_options": {
       "title": "主題選項",
@@ -345,6 +413,10 @@
         "label": "顯示或隱藏聊天窗",
         "description": "開啟或關閉懸浮聊天窗，開啟時自動聚焦輸入框。"
       },
+      "newChat": {
+        "label": "問 Multica",
+        "description": "在懸浮聊天窗裡開始新對話。"
+      },
       "findInIssue": {
         "label": "在任務中查詢",
         "description": "搜尋當前開啟的任務詳情。"
@@ -429,7 +501,10 @@
   },
   "chat": {
     "floating_label": "懸浮聊天窗",
-    "floating_hint": "在每個頁面顯示懸浮聊天按鈕。"
+    "floating_hint": "在每個頁面顯示懸浮聊天按鈕。",
+    "ask_agent_label": "「問 Multica」的 AI 代理",
+    "ask_agent_hint": "在此工作區從底部列發起新對話時使用的 AI 代理。",
+    "ask_agent_last_used": "上次使用的"
   },
   "issue": {
     "opening": {
@@ -497,7 +572,6 @@
       "members": "成員",
       "labels": "標籤",
       "issue_statuses": "任務狀態",
-      "wakeups": "喚醒",
       "properties": "屬性",
       "quick_actions": "快捷操作",
       "plugins": "外掛",
@@ -766,9 +840,16 @@
         "label": "優先順序與截止日期",
         "description": "你訂閱的任務優先順序或截止日期變更時"
       },
+      "new_issues": {
+        "label": "新任務",
+        "description": "你訂閱的專案中有新任務建立時"
+      },
       "agent_activity": {
         "label": "AI 代理活動",
         "description": "AI 代理執行失敗時"
+      },
+      "chat_replies": {
+        "label": "包含聊天回覆"
       }
     },
     "system": {
@@ -777,7 +858,7 @@
     },
     "browser": {
       "label": "瀏覽器通知",
-      "hint": "允許當前瀏覽器為新的收件箱條目彈出通知橫幅。",
+      "hint": "允許此瀏覽器為收件匣通知和聊天回覆顯示橫幅。",
       "enable": "啟用",
       "granted": "當前瀏覽器可以彈出通知橫幅。",
       "denied": "已被瀏覽器攔截。請在瀏覽器設定中為本站點開啟通知權限。",
@@ -1286,7 +1367,8 @@
     "github_load_more": "載入更多",
     "github_selected_count": "已選擇 {{count}} 個",
     "github_cancel": "取消",
-    "github_import": "新增倉庫",
+    "github_import": "新增 {{count}} 個倉庫",
+    "github_import_other": "新增 {{count}} 個倉庫",
     "save": "儲存",
     "saving": "儲存中...",
     "saved_hint": "所有改動已儲存",
@@ -1319,7 +1401,10 @@
       "close_others": "關閉其他標籤頁",
       "open_window": "在新視窗開啟",
       "new": "新建標籤頁",
-      "pinned_name": "{{title}}（已固定）"
+      "pinned_name": "{{title}}（已固定）",
+      "copy_link": "複製連結",
+      "link_copied": "已複製連結",
+      "close_right": "關閉右側標籤頁"
     },
     "updates": {
       "title": "更新",
@@ -1521,7 +1606,40 @@
     "github_actions": "GitHub 操作"
   },
   "channels": {
-    "breadcrumb": "路徑"
+    "breadcrumb": "路徑",
+    "add": "新增訊息管道",
+    "connect": "連接",
+    "disconnect": "中斷連接",
+    "open": "開啟",
+    "normal": "正常",
+    "waiting_message": "等待第一則訊息",
+    "disconnected": "已中斷",
+    "find_me": "在 {{platform}} 中找我",
+    "manage": "管理 {{platform}}",
+    "last_message": "最近訊息：{{time}}",
+    "ask_admin": "請找管理員",
+    "unavailable": "暫時無法連接",
+    "permissions_title": "誰可以連接",
+    "owner_or_admin": "AI 代理擁有者或工作區管理員",
+    "admin_only": "僅工作區管理員",
+    "connect_title": "連接訊息管道",
+    "choose_description": "選擇 AI 代理和平台。",
+    "authorize_description": "將 {{agent}} 連接到 {{platform}}。",
+    "agent_label": "AI 代理",
+    "choose_agent": "選擇 AI 代理",
+    "platform_label": "平台",
+    "region_label": "地區",
+    "method_label": "連接方式",
+    "feishu": "飛書（中國）",
+    "lark": "Lark（國際）",
+    "setup_guide": "設定指南",
+    "connection_changed": "此連接已無法使用。請關閉後重試。",
+    "connect_failed": "無法連接機器人。",
+    "connect_success": "訊息管道已連接。",
+    "disconnect_failed": "無法中斷機器人連接。",
+    "disconnect_title": "中斷訊息管道？",
+    "disconnect_description": "此 AI 代理將不再接收來自 {{platform}} 的訊息。",
+    "agent_unavailable": "AI 代理已無法使用"
   },
   "mcp_usage": {
     "agent_count_other": "已分配給 {{count}} 個 AI 代理",

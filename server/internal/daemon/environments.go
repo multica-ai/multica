@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -55,6 +57,10 @@ type environmentService struct {
 	sticky map[string]string
 	// reported is owned by the report loop: task ID → the last snapshot sent.
 	reported map[string]reportedSnapshot
+	// claiming marks runtimes with a command claim in flight; claimAgain
+	// asks that claim to run once more for a hint that arrived meanwhile.
+	claiming   map[string]bool
+	claimAgain map[string]bool
 }
 
 type reportedSnapshot struct {
@@ -82,6 +88,8 @@ func newEnvironmentService(cfg Config, client environmentReporter, ignoreCommand
 		tasks:          make(map[string]localenv.Task),
 		sticky:         make(map[string]string),
 		reported:       make(map[string]reportedSnapshot),
+		claiming:       make(map[string]bool),
+		claimAgain:     make(map[string]bool),
 	}
 }
 
@@ -145,6 +153,26 @@ func (s *environmentService) servesFrom(dir string) bool {
 	return false
 }
 
+// focus brings forward the desktop app last detected under key: an app found
+// on its own, or the app of a declared environment, under that environment's
+// key.
+func (s *environmentService) focus(ctx context.Context, key string) error {
+	s.mu.Lock()
+	var target *localenv.Environment
+	for i := range s.detected {
+		if s.detected[i].Key == key && s.detected[i].Kind == localenv.KindApp {
+			env := s.detected[i]
+			target = &env
+			break
+		}
+	}
+	s.mu.Unlock()
+	if target == nil {
+		return localenv.ErrAppGone
+	}
+	return target.Focus(ctx)
+}
+
 func (s *environmentService) nudge() {
 	if s == nil {
 		return
@@ -183,7 +211,7 @@ func (s *environmentService) run(ctx context.Context) {
 }
 
 func (s *environmentService) detect(ctx context.Context) {
-	found, err := s.detector.Detect(ctx, s.resolve, s.manager.Owns)
+	found, err := s.detector.Detect(ctx, s.resolve, s.manager.Owner)
 	if err != nil {
 		s.logger.Debug("environments: detection failed", "error", err)
 		return
@@ -227,14 +255,31 @@ func (s *environmentService) resolve(cwd string) (localenv.Task, bool) {
 // is not empty, and once more as empty after its last environment is gone.
 func (s *environmentService) report(ctx context.Context, now time.Time) {
 	groups := make(map[string][]localenv.Environment)
-	for _, env := range s.manager.Snapshot() {
-		if env.IssueID != "" {
-			groups[env.TaskID] = append(groups[env.TaskID], env)
+	declared := s.manager.Snapshot()
+	s.mu.Lock()
+	// A desktop app found among a declared environment's processes is not a
+	// row of its own: the environment is shown as that app when it has no URL
+	// to open instead.
+	apps := make(map[string]bool)
+	for _, env := range s.detected {
+		if env.Source == localenv.SourceConfig {
+			apps[env.Key] = true
 		}
 	}
-	s.mu.Lock()
+	for _, env := range declared {
+		if env.IssueID == "" {
+			continue
+		}
+		if env.URL == "" && env.State == localenv.StateRunning && apps[env.Key] {
+			env.Kind = localenv.KindApp
+		}
+		groups[env.TaskID] = append(groups[env.TaskID], env)
+	}
 	live := make(map[string]bool, len(s.detected))
 	for _, env := range s.detected {
+		if env.Source == localenv.SourceConfig {
+			continue
+		}
 		live[env.Key] = true
 		if owner, ok := s.sticky[env.Key]; ok {
 			env.TaskID = owner
@@ -337,7 +382,7 @@ func environmentFingerprint(envs []localenv.Environment) string {
 		if env.ExpiresAt != nil {
 			expires = env.ExpiresAt.UTC().Format(time.RFC3339)
 		}
-		parts = append(parts, strings.Join([]string{env.Key, env.State, env.URL, env.Label, env.Detail, expires}, "\x1f"))
+		parts = append(parts, strings.Join([]string{env.Key, env.Kind, env.Repo, env.State, env.URL, env.Label, env.Detail, expires, env.Excerpt}, "\x1f"))
 	}
 	sort.Strings(parts)
 	return strings.Join(parts, "\x1e")
@@ -347,8 +392,9 @@ func toEnvironmentReports(envs []localenv.Environment) []TaskEnvironmentReport {
 	out := make([]TaskEnvironmentReport, 0, len(envs))
 	for _, env := range envs {
 		out = append(out, TaskEnvironmentReport{
-			Key: env.Key, Source: env.Source, Name: env.Name, Label: env.Label, URL: env.URL,
+			Key: env.Key, Source: env.Source, Kind: env.Kind, Repo: env.Repo, Name: env.Name, Label: env.Label, URL: env.URL,
 			Port: env.Port, State: env.State, Detail: env.Detail, StartedAt: env.StartedAt, ExpiresAt: env.ExpiresAt,
+			Excerpt: env.Excerpt,
 		})
 	}
 	return out
@@ -470,6 +516,60 @@ func (d *Daemon) environmentListHandler() http.HandlerFunc {
 		}
 		writeEnvironmentResponse(w, environmentResponse{Environments: envs})
 	}
+}
+
+type environmentFocusRequest struct {
+	Key string `json:"key"`
+}
+
+// environmentFocusHandler brings a detected desktop app's window forward.
+// Desktop calls it on behalf of whoever sits at this machine, so unlike its
+// siblings there is no task credential to check. A request can only raise a
+// window this daemon already found in a task directory. Browsers cannot send
+// it: a page's POST always carries an Origin header, and a JSON body needs a
+// CORS preflight this server never answers.
+func (d *Daemon) environmentFocusHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		mediaType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
+		if r.Header.Get("Origin") != "" || mediaType != "application/json" {
+			writeEnvironmentFocusError(w, http.StatusForbidden, "forbidden", "focus requests come from Desktop, as JSON, without an Origin")
+			return
+		}
+		if d.environments == nil {
+			writeEnvironmentFocusError(w, http.StatusServiceUnavailable, "unavailable", "environments are not available on this daemon")
+			return
+		}
+		var req environmentFocusRequest
+		if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req); err != nil {
+			writeEnvironmentFocusError(w, http.StatusBadRequest, "invalid", "invalid request body: "+err.Error())
+			return
+		}
+		err := d.environments.focus(r.Context(), strings.TrimSpace(req.Key))
+		switch {
+		case err == nil:
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]bool{"focused": true})
+		case errors.Is(err, localenv.ErrAppGone):
+			writeEnvironmentFocusError(w, http.StatusNotFound, "gone", err.Error())
+		case errors.Is(err, localenv.ErrFocusUnsupported):
+			writeEnvironmentFocusError(w, http.StatusNotImplemented, "unsupported", err.Error())
+		default:
+			d.logger.Warn("environments: focus failed", "error", err)
+			writeEnvironmentFocusError(w, http.StatusInternalServerError, "failed", err.Error())
+		}
+	}
+}
+
+// The reason lets Desktop tell the user what happened; a daemon too old for
+// this endpoint answers the mux's plain-text 404 instead.
+func writeEnvironmentFocusError(w http.ResponseWriter, status int, reason, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]string{"reason": reason, "error": message})
 }
 
 func writeEnvironmentResponse(w http.ResponseWriter, resp environmentResponse) {

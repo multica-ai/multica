@@ -3,9 +3,11 @@ import { EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { Suggestion, type SuggestionProps } from "@tiptap/suggestion";
 import { PluginKey } from "@tiptap/pm/state";
-import { forwardRef, useImperativeHandle } from "react";
+import { forwardRef, useImperativeHandle, useState } from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { ContextMenu, ContextMenuContent, ContextMenuItem } from "@multica/ui/components/ui/context-menu";
+import { contextMenuOriginRef } from "@multica/ui/lib/context-menu-origin";
 import { createSuggestionPopupRender } from "./suggestion-popup";
 import { isPickerAcceptKey } from "../../common/picker-keys";
 import { PatchedListItem } from "./list-item";
@@ -204,6 +206,33 @@ describe("createSuggestionPopupRender", () => {
       });
     },
   );
+
+  it("stays open while a context menu opened in the editor takes focus and runs an item", async () => {
+    const ed = makeEditor("@");
+    await triggerSuggestion(ed, "@a");
+    const paste = vi.fn();
+    function EditMenu() {
+      const [open, setOpen] = useState(true);
+      return (
+        <ContextMenu open={open} onOpenChange={setOpen}>
+          <ContextMenuContent ref={contextMenuOriginRef(ed.view.dom)}>
+            <ContextMenuItem onClick={paste}>Paste</ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
+      );
+    }
+    render(<EditMenu />);
+
+    const menu = await screen.findByRole("menu");
+    await waitFor(() => expect(menu.contains(document.activeElement)).toBe(true));
+    const item = screen.getByRole("menuitem", { name: "Paste" });
+    fireEvent.pointerDown(item, { button: 0 });
+    fireEvent.click(item);
+
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    expect(paste).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("suggestion-popup")).toBeInTheDocument();
+  });
 
   it.each(["@", "/"] as const)(
     "keeps the %s popup open long enough for candidate row clicks to insert",

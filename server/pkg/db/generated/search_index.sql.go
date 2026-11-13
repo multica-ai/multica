@@ -33,20 +33,37 @@ func (q *Queries) GetSearchIndexCurrentSnapshot(ctx context.Context) (string, er
 
 const getSearchIndexManifest = `-- name: GetSearchIndexManifest :one
 
-WITH ws AS (SELECT $1::uuid AS id)
+WITH ws AS (SELECT $1::uuid AS id, $2::uuid[] AS hidden),
+visible_issue AS (
+    SELECT i.id, i.title, i.description FROM issue i, ws
+    WHERE i.workspace_id = ws.id
+      AND (ws.hidden IS NULL OR i.project_id IS NULL OR NOT (i.project_id = ANY(ws.hidden)))
+),
+visible_comment AS (
+    SELECT c.content FROM comment c
+    JOIN visible_issue vi ON vi.id = c.issue_id, ws
+    WHERE c.workspace_id = ws.id AND c.deleted_at IS NULL
+),
+visible_project AS (
+    SELECT p.title, p.description FROM project p, ws
+    WHERE p.workspace_id = ws.id AND (ws.hidden IS NULL OR NOT (p.id = ANY(ws.hidden)))
+)
 SELECT
     pg_current_snapshot()::text AS snapshot,
-    (SELECT count(*) FROM issue i, ws WHERE i.workspace_id = ws.id)::bigint AS issue_count,
-    (SELECT COALESCE(sum(octet_length(i.title) + COALESCE(octet_length(i.description), 0)), 0)
-        FROM issue i, ws WHERE i.workspace_id = ws.id)::bigint AS issue_bytes,
-    (SELECT count(*) FROM comment c, ws
-        WHERE c.workspace_id = ws.id AND c.deleted_at IS NULL)::bigint AS comment_count,
-    (SELECT COALESCE(sum(octet_length(c.content)), 0) FROM comment c, ws
-        WHERE c.workspace_id = ws.id AND c.deleted_at IS NULL)::bigint AS comment_bytes,
-    (SELECT count(*) FROM project p, ws WHERE p.workspace_id = ws.id)::bigint AS project_count,
-    (SELECT COALESCE(sum(octet_length(p.title) + COALESCE(octet_length(p.description), 0)), 0)
-        FROM project p, ws WHERE p.workspace_id = ws.id)::bigint AS project_bytes
+    (SELECT count(*) FROM visible_issue)::bigint AS issue_count,
+    (SELECT COALESCE(sum(octet_length(title) + COALESCE(octet_length(description), 0)), 0)
+        FROM visible_issue)::bigint AS issue_bytes,
+    (SELECT count(*) FROM visible_comment)::bigint AS comment_count,
+    (SELECT COALESCE(sum(octet_length(content)), 0) FROM visible_comment)::bigint AS comment_bytes,
+    (SELECT count(*) FROM visible_project)::bigint AS project_count,
+    (SELECT COALESCE(sum(octet_length(title) + COALESCE(octet_length(description), 0)), 0)
+        FROM visible_project)::bigint AS project_bytes
 `
+
+type GetSearchIndexManifestParams struct {
+	WorkspaceID      pgtype.UUID   `json:"workspace_id"`
+	HiddenProjectIds []pgtype.UUID `json:"hidden_project_ids"`
+}
 
 type GetSearchIndexManifestRow struct {
 	Snapshot     string `json:"snapshot"`
@@ -65,9 +82,10 @@ type GetSearchIndexManifestRow struct {
 // than this snapshot and reaches the client through the change log. The byte
 // totals let the client reject a workspace too large for its memory budget
 // before downloading it; octet_length reads the stored length, so TOASTed
-// bodies are not decompressed.
-func (q *Queries) GetSearchIndexManifest(ctx context.Context, workspaceID pgtype.UUID) (GetSearchIndexManifestRow, error) {
-	row := q.db.QueryRow(ctx, getSearchIndexManifest, workspaceID)
+// bodies are not decompressed. Rows in hidden_project_ids are left out, as
+// the snapshot leaves them out.
+func (q *Queries) GetSearchIndexManifest(ctx context.Context, arg GetSearchIndexManifestParams) (GetSearchIndexManifestRow, error) {
+	row := q.db.QueryRow(ctx, getSearchIndexManifest, arg.WorkspaceID, arg.HiddenProjectIds)
 	var i GetSearchIndexManifestRow
 	err := row.Scan(
 		&i.Snapshot,
@@ -234,7 +252,7 @@ func (q *Queries) ListSearchIndexCommentsByIssues(ctx context.Context, arg ListS
 }
 
 const listSearchIndexIssuesByIDs = `-- name: ListSearchIndexIssuesByIDs :many
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, requester_user_id FROM issue
 WHERE workspace_id = $1 AND id = ANY($2::uuid[])
 `
 
@@ -283,6 +301,7 @@ func (q *Queries) ListSearchIndexIssuesByIDs(ctx context.Context, arg ListSearch
 			&i.LastActivityAt,
 			&i.TriageState,
 			&i.DuplicateOfIssueID,
+			&i.RequesterUserID,
 		); err != nil {
 			return nil, err
 		}
@@ -295,7 +314,7 @@ func (q *Queries) ListSearchIndexIssuesByIDs(ctx context.Context, arg ListSearch
 }
 
 const listSearchIndexIssuesPage = `-- name: ListSearchIndexIssuesPage :many
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, requester_user_id FROM issue
 WHERE workspace_id = $1 AND number > $2
 ORDER BY number
 LIMIT $3
@@ -348,6 +367,7 @@ func (q *Queries) ListSearchIndexIssuesPage(ctx context.Context, arg ListSearchI
 			&i.LastActivityAt,
 			&i.TriageState,
 			&i.DuplicateOfIssueID,
+			&i.RequesterUserID,
 		); err != nil {
 			return nil, err
 		}

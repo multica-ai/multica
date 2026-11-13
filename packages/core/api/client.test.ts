@@ -4,6 +4,7 @@ import { setCurrentWorkspace } from "../platform/workspace-storage";
 import { configStore } from "../config";
 import type { StorageAdapter, User } from "../types";
 import { ApiClient, ApiError, CHAT_DRAFT_RESTORE_CAPABILITY, clientErrorMessage } from "./client";
+import { setApiRequestObserver } from "./request-observer";
 import { EMPTY_PLUGIN_PACKAGE_LIST, EMPTY_PLUGIN_PREVIEW, EMPTY_PLUGIN_SURFACE_LAUNCH } from "./schemas";
 
 afterEach(() => {
@@ -296,7 +297,9 @@ describe("ApiClient issue environments response schema", () => {
     task_id: "task-1",
     runtime_id: "rt-1",
     agent_id: "agent-1",
+    local_key: "config:web",
     source: "config",
+    kind: "server",
     name: "web",
     label: "Web app",
     url: "http://localhost:41000",
@@ -324,7 +327,16 @@ describe("ApiClient issue environments response schema", () => {
   it("parses a valid environment list", async () => {
     stubEnvironments({ environments: [validEnvironment] });
     const result = await new ApiClient("https://api.example.test").listIssueEnvironments("issue-1");
-    expect(result.environments).toEqual([validEnvironment]);
+    expect(result.environments).toEqual([{
+      ...validEnvironment,
+      repo: "",
+      excerpt: "",
+      controllable: false,
+      can_control: false,
+      pending_action: null,
+      last_action: null,
+      origin: null,
+    }]);
   });
 
   it("drops a malformed environment and keeps the rest", async () => {
@@ -339,11 +351,39 @@ describe("ApiClient issue environments response schema", () => {
     expect(result.environments[0]).toMatchObject({ state: "unreachable", source: "detected" });
   });
 
+  it("keeps a desktop app's kind and the key its daemon knows it by", async () => {
+    stubEnvironments({
+      environments: [{ ...validEnvironment, kind: "app", local_key: "detected:app", url: "", port: null }],
+    });
+    const result = await new ApiClient("https://api.example.test").listIssueEnvironments("issue-1");
+    expect(result.environments[0]).toMatchObject({ kind: "app", local_key: "detected:app" });
+  });
+
+  it("reads an older server's environment, with no kind or key, as a server", async () => {
+    const { kind: _kind, local_key: _key, ...older } = validEnvironment;
+    stubEnvironments({ environments: [older] });
+    const result = await new ApiClient("https://api.example.test").listIssueEnvironments("issue-1");
+    expect(result.environments[0]).toMatchObject({ kind: "server", local_key: "", url: "http://localhost:41000" });
+  });
+
+  it("reads an unknown kind as a server and a malformed key as none", async () => {
+    stubEnvironments({
+      environments: [
+        { ...validEnvironment, kind: "tunnel", local_key: { key: "config:web" } },
+        { ...validEnvironment, id: "env-2", kind: "app", local_key: null },
+      ],
+    });
+    const result = await new ApiClient("https://api.example.test").listIssueEnvironments("issue-1");
+    expect(result.environments).toHaveLength(2);
+    expect(result.environments[0]).toMatchObject({ kind: "server", local_key: "" });
+    expect(result.environments[1]).toMatchObject({ kind: "app", local_key: "" });
+  });
+
   it("falls back to an empty list when the body is not a list", async () => {
     stubEnvironments({ environments: "nope" });
     await expect(
       new ApiClient("https://api.example.test").listIssueEnvironments("issue-1"),
-    ).resolves.toEqual({ environments: [] });
+    ).resolves.toEqual({ environments: [], configs: [], pending_starts: [], failed_starts: [] });
   });
 });
 
@@ -1076,6 +1116,20 @@ describe("ApiClient", () => {
         statusText: "Conflict",
       });
     }
+  });
+
+  it("requests the timeline run view without changing full-history requests", async () => {
+    const fetch = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify([
+      { id: "task-1", result: { comment: "Inline reply" }, coalesced_comment_ids: "malformed", can_supplement: "malformed" },
+    ]), { status: 200, headers: { "Content-Type": "application/json" } })));
+    vi.stubGlobal("fetch", fetch);
+    const client = new ApiClient("https://api.example.test");
+    const tasks = await client.listTasksByIssue("issue-1", false, { view: "timeline" });
+    expect(String(fetch.mock.calls[0]?.[0])).toContain("/api/issues/issue-1/task-runs?view=timeline");
+    expect(tasks[0]?.result).toEqual({ comment: "Inline reply" });
+    expect(tasks[0]?.coalesced_comment_ids).toBeUndefined();
+    await client.listTasksByIssue("issue-1");
+    expect(String(fetch.mock.calls[1]?.[0])).toBe("https://api.example.test/api/issues/issue-1/task-runs");
   });
 
   it("preserves planned and delivered comment coverage from issue task runs", async () => {
@@ -3408,5 +3462,141 @@ describe("ApiClient shared credential across windows", () => {
     await expect(client.markOnboardingComplete()).rejects.toBeInstanceOf(ApiError);
 
     expect(onUnauthorized).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("ApiClient complete issue deliverables", () => {
+  it("loads a posting comment's thread and validates the comment response", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ invalid: true }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+    expect(await client.listComments("issue", { thread: "historical/comment" })).toEqual([]);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://api.example.test/api/issues/issue/comments?thread=historical%2Fcomment");
+  });
+
+});
+
+describe("ApiClient issue environments", () => {
+  const env = {
+    id: "env-1", issue_id: "issue-1", task_id: "task-1", source: "config", name: "web",
+    state: "running", started_at: "2026-11-10T00:00:00Z", last_seen_at: "2026-11-10T00:00:00Z",
+  };
+
+  function stub(body: unknown) {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(body), {
+      status: 200, headers: { "Content-Type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("reads an older server's environments as read-only", async () => {
+    stub({ environments: [env] });
+    const result = await new ApiClient("https://api.example.test").listIssueEnvironments("issue-1");
+    expect(result.configs).toEqual([]);
+    expect(result.pending_starts).toEqual([]);
+    expect(result.failed_starts).toEqual([]);
+    expect(result.environments[0]).toMatchObject({
+      repo: "", excerpt: "", controllable: false, can_control: false, pending_action: null, last_action: null, origin: null,
+    });
+  });
+
+  it("drops an action record it cannot read without losing the environment", async () => {
+    stub({
+      environments: [{ ...env, controllable: true, can_control: true, pending_action: { id: "cmd-1", action: "teleport", created_at: "x" } }],
+      configs: [{ runtime_id: "rt-1", task_id: "task-1", reported_at: "x", environments: [{ repo: "app", name: "web" }] }, { bad: true }],
+      pending_starts: [{ id: "cmd-2", action: "start", status: "queued", created_at: "x" }],
+      failed_starts: [{ id: "cmd-4", action: "start", status: "expired", task_id: "task-1", created_at: "x" }, { id: "cmd-5" }],
+    });
+    const result = await new ApiClient("https://api.example.test").listIssueEnvironments("issue-1");
+    expect(result.environments[0]).toMatchObject({ controllable: true, can_control: true, pending_action: null });
+    expect(result.configs).toEqual([{ runtime_id: "rt-1", task_id: "task-1", reported_at: "x", can_control: false, environments: [{ repo: "app", name: "web", label: "", start: "" }] }]);
+    expect(result.pending_starts[0]).toMatchObject({ id: "cmd-2", status: "failed" });
+    expect(result.failed_starts).toEqual([expect.objectContaining({ id: "cmd-4", status: "expired", task_id: "task-1" })]);
+  });
+
+  it("posts a start with the run and environment it names", async () => {
+    const fetchMock = stub({ id: "cmd-3", action: "start", status: "pending", created_at: "x" });
+    const result = await new ApiClient("https://api.example.test").startIssueEnvironment("issue-1", { task_id: "task-1", repo: "app", name: "web" });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe("https://api.example.test/api/issues/issue-1/environments/start");
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({ task_id: "task-1", repo: "app", name: "web" });
+    expect(result).toMatchObject({ id: "cmd-3", status: "pending", output: null });
+  });
+});
+
+describe("created-by filter compatibility", () => {
+  it.each([false, true])("retries literal creator filtering on an old server (POST=%s)", async (post) => {
+    const fetchMock = vi.fn().mockImplementation(async () => new Response(JSON.stringify({ issues: [], total: 0 }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+    await client.listIssues({ created_by_user_id: "me", ...(post ? { ids: ["issue"] } : {}) });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    if (post) {
+      expect(JSON.parse(fetchMock.mock.calls[1]![1].body)).toMatchObject({ creator_id: "me" });
+    } else {
+      expect(new URL(fetchMock.mock.calls[1]![0]).searchParams.get("creator_id")).toBe("me");
+    }
+  });
+  it("accepts a server acknowledgment without narrowing agent-created results", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ issues: [], total: 0, created_by_user_id: "me" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await new ApiClient("https://api.example.test").listIssues({ created_by_user_id: "me" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(new URL(fetchMock.mock.calls[0]![0]).searchParams.get("created_by_user_id")).toBe("me");
+  });
+});
+
+
+describe("grouped created-by compatibility", () => {
+  it("retries a legacy server with literal creator_id", async () => {
+    const fetchMock = vi.fn(async (_url: string) => Response.json({ groups: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    await new ApiClient("https://api.example.test").listGroupedIssues({ group_by: "assignee", created_by_user_id: "me" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(new URL(fetchMock.mock.calls[1]![0]).searchParams.get("creator_id")).toBe("me");
+  });
+});
+
+describe("ApiClient request observer", () => {
+  afterEach(() => setApiRequestObserver(null));
+
+  function observe() {
+    const events: unknown[] = [];
+    setApiRequestObserver({
+      onStart: (request) => events.push({ phase: "start", ...request }),
+      onEnd: (result) => events.push({ phase: "end", ...result }),
+    });
+    return events;
+  }
+
+  it("reports each request's start and its status, sharing the X-Request-ID", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response("[]", {
+      status: 200, headers: { "Content-Type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const events = observe();
+    await new ApiClient("https://api.example.test").listMembers("ws-1");
+
+    const sentId = (fetchMock.mock.calls[0]?.[1]?.headers as Record<string, string>)["X-Request-ID"];
+    expect(events).toEqual([
+      { phase: "start", requestId: sentId, method: "GET", path: "/api/workspaces/ws-1/members", body: null },
+      { phase: "end", requestId: sentId, status: 200, error: null },
+    ]);
+  });
+
+  it("reports the server's error message for a failed request", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: "version conflict" }), {
+      status: 500, headers: { "Content-Type": "application/json" },
+    })));
+    const events = observe();
+    await expect(new ApiClient("https://api.example.test").listMembers("ws-1")).rejects.toThrow();
+    expect(events[1]).toMatchObject({ phase: "end", status: 500, error: "version conflict" });
+  });
+
+  it("reports a request that never got a response", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+    const events = observe();
+    await expect(new ApiClient("https://api.example.test").listMembers("ws-1")).rejects.toThrow();
+    expect(events[1]).toMatchObject({ phase: "end", status: null, error: "TypeError: Failed to fetch" });
   });
 });

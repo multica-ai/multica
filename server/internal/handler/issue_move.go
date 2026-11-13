@@ -86,6 +86,9 @@ func (h *Handler) MoveIssue(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "project not found in this workspace")
 			return
 		}
+		if !h.requireProjectVisible(w, r, uuidToString(current.WorkspaceID), *projectID, http.StatusBadRequest, "project not found in this workspace") {
+			return
+		}
 	}
 
 	beforeID, ok := decodeIssueMoveAnchor(w, fields["before_id"], "before_id")
@@ -175,17 +178,21 @@ func (h *Handler) issueMoveAnchorPosition(
 		return nil, true
 	}
 	var position float64
+	var projectID pgtype.UUID
 	err := h.DB.QueryRow(r.Context(), `
-		SELECT position
+		SELECT position, project_id
 		FROM issue
 		WHERE workspace_id = $1 AND id = $2
-	`, workspaceID, *id).Scan(&position)
+	`, workspaceID, *id).Scan(&position, &projectID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusBadRequest, "move anchor not found in this workspace")
 		} else {
 			writeIssueTableQueryFailure(w, r, "failed to resolve move anchor")
 		}
+		return nil, false
+	}
+	if !h.requireProjectVisible(w, r, uuidToString(workspaceID), projectID, http.StatusBadRequest, "move anchor not found in this workspace") {
 		return nil, false
 	}
 	return &position, true

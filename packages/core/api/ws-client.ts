@@ -1,5 +1,6 @@
 import type { WSMessage, WSEventType } from "../types/events";
 import { type Logger, noopLogger } from "../logger";
+import { getRealtimeObserver, runWithSyncCauses } from "./realtime-observer";
 
 type EventHandler = (payload: unknown, actorId?: string, actorType?: string) => void;
 
@@ -32,6 +33,9 @@ export interface WSClientIdentity {
   os?: string;
 }
 
+/** `connecting` covers the first attempt; any later attempt is `reconnecting`. */
+export type WSConnectionStatus = "connecting" | "connected" | "reconnecting";
+
 export class WSClient {
   private ws: WebSocket | null = null;
   private baseUrl: string;
@@ -49,6 +53,8 @@ export class WSClient {
   private badFrameLogged = false;
   private onReconnectCallbacks = new Set<() => void>();
   private anyHandlers = new Set<(msg: WSMessage) => void>();
+  private status: WSConnectionStatus = "connecting";
+  private statusListeners = new Set<() => void>();
   private logger: Logger;
 
   /**
@@ -82,6 +88,7 @@ export class WSClient {
 
   connect() {
     this.badFrameLogged = false;
+    this.setStatus(this.reconnectAttempt > 0 ? "reconnecting" : "connecting");
     const url = new URL(this.baseUrl);
     // Token is never sent as a URL query parameter — it would be logged by
     // proxies, CDNs, and browser history.  In cookie mode the HttpOnly cookie
@@ -145,14 +152,11 @@ export class WSClient {
         return;
       }
       this.logger.debug("received", msg.type);
-      const eventHandlers = this.handlers.get(msg.type);
-      if (eventHandlers) {
-        for (const handler of eventHandlers) {
-          handler(msg.payload, msg.actor_id, msg.actor_type);
-        }
-      }
-      for (const handler of this.anyHandlers) {
-        handler(msg);
+      const observer = getRealtimeObserver();
+      if (observer) {
+        runWithSyncCauses([observer.onEvent(msg, false)], () => this.dispatch(msg));
+      } else {
+        this.dispatch(msg);
       }
     };
 
@@ -164,6 +168,18 @@ export class WSClient {
       // Suppress — onclose handles reconnect; errors during StrictMode
       // double-fire are expected in dev and harmless.
     };
+  }
+
+  private dispatch(msg: WSMessage) {
+    const eventHandlers = this.handlers.get(msg.type);
+    if (eventHandlers) {
+      for (const handler of eventHandlers) {
+        handler(msg.payload, msg.actor_id, msg.actor_type);
+      }
+    }
+    for (const handler of this.anyHandlers) {
+      handler(msg);
+    }
   }
 
   /**
@@ -184,6 +200,7 @@ export class WSClient {
     );
 
     this.reconnectAttempt++;
+    this.setStatus("reconnecting");
     this.logger.warn(
       `ws: disconnected, reconnecting in ${delay}ms (attempt ${this.reconnectAttempt})`,
     );
@@ -194,16 +211,27 @@ export class WSClient {
     this.logger.info("connected");
     const recoveredConnection = this.hasConnectedBefore || this.reconnectAttempt > 0;
     this.reconnectAttempt = 0;
+    this.setStatus("connected");
     if (recoveredConnection) {
-      for (const cb of this.onReconnectCallbacks) {
-        try {
-          cb();
-        } catch {
-          // ignore reconnect callback errors
+      const runCallbacks = () => {
+        for (const cb of this.onReconnectCallbacks) {
+          try {
+            cb();
+          } catch {
+            // ignore reconnect callback errors
+          }
         }
-      }
+      };
+      const observer = getRealtimeObserver();
+      if (observer) runWithSyncCauses([observer.onReconnect()], runCallbacks);
+      else runCallbacks();
     }
     this.hasConnectedBefore = true;
+  }
+
+  /** Close the socket the way a network drop would; the usual reconnect follows. */
+  drop() {
+    this.ws?.close();
   }
 
   disconnect() {
@@ -223,6 +251,24 @@ export class WSClient {
     this.handlers.clear();
     this.anyHandlers.clear();
     this.onReconnectCallbacks.clear();
+    this.statusListeners.clear();
+  }
+
+  getStatus(): WSConnectionStatus {
+    return this.status;
+  }
+
+  onStatusChange(listener: () => void) {
+    this.statusListeners.add(listener);
+    return () => {
+      this.statusListeners.delete(listener);
+    };
+  }
+
+  private setStatus(next: WSConnectionStatus) {
+    if (this.status === next) return;
+    this.status = next;
+    for (const listener of this.statusListeners) listener();
   }
 
   on(event: WSEventType, handler: EventHandler) {

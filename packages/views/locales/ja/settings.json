@@ -84,23 +84,6 @@
     "workflow_usage_other": "{{count}} 件のワークフローで使用中",
     "workflow_usage_none": "ワークフローで未使用"
   },
-  "wakeups": {
-    "description": "すべてのタスクに適用されるプラットフォームのルールです。各タスクの「ウェイクアップ」セクションで個別に変更できます。",
-    "child_done_title": "サブタスクが終わったとき",
-    "child_done_description": "あるステージが終わり、後のステージが待っているときに親タスクの担当者を起こし、すべてのサブタスクが終わったときにもう一度起こします。担当者がメンバーの場合は受信トレイに通知します。",
-    "enabled": "既定でオン",
-    "instruction": "既定の指示",
-    "instruction_hint": "起こしたエージェントに送られます。空欄のままなら下の組み込みの指示を使います。",
-    "instruction_placeholder": "空欄なら組み込みの指示を使います",
-    "builtin": "組み込みの指示",
-    "instruction_invalid": "指示は 4,000 バイト以内にしてください。",
-    "save": "保存",
-    "saving": "保存中…",
-    "save_error": "既定値を保存できませんでした。",
-    "customized_other": "進行中の {{count}} 件のタスクが個別の設定を使っており、この既定値に従いません。",
-    "admin_only": "既定値を変更できるのはオーナーと管理者だけです。",
-    "load_error": "ウェイクアップの既定値を読み込めませんでした。"
-  },
   "quick_actions": {
     "title": "クイックアクション",
     "description": "タスクのサイドバーから、設定済みのエージェントとプロンプトを実行します。",
@@ -186,6 +169,12 @@
       "after_run": "この実行の後に開始",
       "hint": "既定の動作だけを決めます。送信前にメッセージごとに変更できます。"
     },
+    "comment_images": {
+      "title": "コメント内の画像",
+      "thumbnails": "サムネイル",
+      "full": "元のサイズ",
+      "hint": "サムネイルにすると長いスレッドも短く収まります。画像をクリックすると元のサイズで表示します。"
+    },
     "comments_title": "コメントとチャット",
     "region_title": "言語と地域",
     "issue_fields_title": "タスク作成時に表示するフィールド",
@@ -211,7 +200,86 @@
       "title": "テーマ",
       "description": "アプリ全体の色、枠線、影、角丸。",
       "default": "デフォルト",
-      "pop": "ポップ"
+      "pop": "ポップ",
+      "built_in": "組み込み",
+      "installed": "インストール済み",
+      "remove": "{{name}} を削除",
+      "safe_mode": "セーフモード：このウィンドウを閉じるまでテーマを停止しています。",
+      "safe_mode_exit": "テーマを戻す",
+      "folder": "テーマフォルダ",
+      "folder_problems": "テーマフォルダ内の一部のテーマがチェックを通りません。修正して保存してください。それまでは最後に通ったバージョンを使います。"
+    },
+    "import": {
+      "button": "テーマを読み込む",
+      "from_zip": "テーマファイル（.zip）",
+      "from_folder": "テーマフォルダ",
+      "storage_full": "このデバイスにテーマを保存する空き容量がありません。ほかのテーマを削除してからもう一度お試しください。",
+      "confirm_title": "「{{name}}」をインストールしますか？",
+      "warning": "テーマはダイアログや警告を含むすべての画面の見た目を変えられます。信頼できる作者のテーマだけをインストールしてください。",
+      "author": "作者",
+      "version": "バージョン",
+      "replaces": "{{to}}（{{from}} を置き換え）",
+      "includes": "内容",
+      "cancel": "キャンセル",
+      "confirm": "インストールして使う",
+      "error_title": "このテーマをインストールできません",
+      "error_description": "何も変更していません。テーマファイルに次の問題があります：",
+      "close": "閉じる",
+      "has_options_other": "オプション {{count}} 個",
+      "has_assets_other": "フォント・画像 {{count}} 個",
+      "beta": "ベータ",
+      "beta_note": "カスタムテーマはベータ版です。テーマが使う変数やマニフェストは変わることがあり、テーマの更新が必要になる場合があります。"
+    },
+    "store": {
+      "manage": "管理",
+      "title": "テーマ",
+      "description": "インストールしたテーマと、コミュニティが作ったテーマです。",
+      "description_local": "インストールしたテーマです。",
+      "search": "テーマを検索",
+      "installed_only": "インストール済みのみ表示",
+      "showing_other": "{{count}} 個のテーマを表示中",
+      "installed": "インストール済み",
+      "loading": "テーマを読み込み中",
+      "error": "テーマストアを読み込めませんでした。しばらくしてからもう一度お試しください。",
+      "retry": "再試行",
+      "none_installed": "インストール済みのテーマはまだありません。",
+      "no_results": "「{{query}}」に一致するテーマはありません。",
+      "by": "作者：{{author}}",
+      "downloads_other": "{{downloads}} 回ダウンロード",
+      "source": "GitHub で {{repo}} を見る",
+      "no_preview": "プレビューなし",
+      "screenshot_alt": "{{name}}（{{mode}}モード）",
+      "install": "インストール",
+      "installing": "インストール中…",
+      "use": "使う",
+      "in_use": "使用中",
+      "update": "{{version}} に更新",
+      "remove": "削除",
+      "taken": "同じ ID のテーマがインストール済みです",
+      "installed_toast": "「{{name}}」をインストールしました。",
+      "updated": "「{{name}}」を {{version}} に更新しました。",
+      "install_failed": "「{{name}}」をインストールできませんでした",
+      "warning": "テーマはダイアログや警告を含むすべてのページのスタイルを変更できます。ストアのテーマは自動でチェックされますが、コミュニティが作成したものです。"
+    },
+    "updates": {
+      "title": "ストアのテーマ",
+      "description_other": "ストアのテーマを {{count}} 個インストールしています。",
+      "check": "アップデートを確認",
+      "checking": "確認中…",
+      "up_to_date": "ストアのテーマはすべて最新です。",
+      "update_all": "すべてアップデート ({{count}})"
+    },
+    "own": {
+      "title": "自分で作る",
+      "description": ".zip またはフォルダからテーマを読み込むか、現在のテーマのコピーから始めます。"
+    },
+    "tools": {
+      "duplicate": "「{{name}}」を複製して新しいテーマにする",
+      "open_folder": "テーマフォルダを開く",
+      "guide": "テーマの作り方",
+      "duplicated_web": "{{file}} をダウンロードしました。展開して theme.css を編集し、フォルダを読み込んでください。",
+      "duplicated_desktop": "テーマフォルダに「{{name}}」を作成しました。theme.css を保存するとすぐに反映されます。",
+      "duplicate_failed": "複製を作成できませんでした：{{error}}"
     },
     "theme_options": {
       "title": "テーマのオプション",
@@ -345,6 +413,10 @@
         "label": "チャットウィンドウを切り替え",
         "description": "フローティングチャットを開閉します。開いたときは入力欄にフォーカスします。"
       },
+      "newChat": {
+        "label": "Multica に質問",
+        "description": "フローティングチャットで新しいチャットを始めます。"
+      },
       "findInIssue": {
         "label": "タスク内を検索",
         "description": "開いているタスクの詳細を検索します。"
@@ -429,7 +501,10 @@
   },
   "chat": {
     "floating_label": "フローティングチャット",
-    "floating_hint": "すべてのページにフローティングチャットボタンを表示します。"
+    "floating_hint": "すべてのページにフローティングチャットボタンを表示します。",
+    "ask_agent_label": "「Multica に聞く」のエージェント",
+    "ask_agent_hint": "このワークスペースで、下部バーから始める新しいチャットの相手になるエージェント。",
+    "ask_agent_last_used": "最後に使用したエージェント"
   },
   "issue": {
     "opening": {
@@ -497,7 +572,6 @@
       "members": "メンバー",
       "labels": "ラベル",
       "issue_statuses": "タスクステータス",
-      "wakeups": "ウェイクアップ",
       "properties": "プロパティ",
       "quick_actions": "クイックアクション",
       "plugins": "プラグイン",
@@ -766,9 +840,16 @@
         "label": "優先度と期限",
         "description": "フォロー中のタスクの優先度や期限が変わったとき"
       },
+      "new_issues": {
+        "label": "新しいタスク",
+        "description": "購読中のプロジェクトでタスクが作成されたとき"
+      },
       "agent_activity": {
         "label": "エージェントのアクティビティ",
         "description": "エージェントの実行が失敗したとき"
+      },
+      "chat_replies": {
+        "label": "チャットの返信を含める"
       }
     },
     "system": {
@@ -777,7 +858,7 @@
     },
     "browser": {
       "label": "ブラウザ通知",
-      "hint": "このブラウザで新しいインボックス項目の通知バナーを表示できるようにします。",
+      "hint": "受信トレイの通知とチャットの返信のバナー表示を、このブラウザに許可します。",
       "enable": "有効にする",
       "granted": "このブラウザは通知バナーを表示できます。",
       "denied": "ブラウザによってブロックされています。ブラウザの設定でこのサイトの通知を許可してください。",
@@ -1286,7 +1367,8 @@
     "github_load_more": "さらに読み込む",
     "github_selected_count": "{{count}} 件選択",
     "github_cancel": "キャンセル",
-    "github_import": "リポジトリを追加",
+    "github_import": "{{count}} 件のリポジトリを追加",
+    "github_import_other": "{{count}} 件のリポジトリを追加",
     "save": "保存",
     "saving": "保存中...",
     "saved_hint": "すべての変更を保存しました",
@@ -1319,7 +1401,10 @@
       "close_others": "他のタブを閉じる",
       "open_window": "新しいウィンドウで開く",
       "new": "新しいタブ",
-      "pinned_name": "{{title}}（ピン留め）"
+      "pinned_name": "{{title}}（ピン留め）",
+      "copy_link": "リンクをコピー",
+      "link_copied": "リンクをコピーしました",
+      "close_right": "右側のタブを閉じる"
     },
     "updates": {
       "title": "アップデート",
@@ -1521,7 +1606,40 @@
     "github_actions": "GitHub の操作"
   },
   "channels": {
-    "breadcrumb": "パンくずリスト"
+    "breadcrumb": "パンくずリスト",
+    "add": "メッセージチャネルを追加",
+    "connect": "接続",
+    "disconnect": "接続を解除",
+    "open": "開く",
+    "normal": "接続済み",
+    "waiting_message": "最初のメッセージを待機中",
+    "disconnected": "未接続",
+    "find_me": "{{platform}} で話す",
+    "manage": "{{platform}} を管理",
+    "last_message": "最終メッセージ：{{time}}",
+    "ask_admin": "管理者に依頼",
+    "unavailable": "接続できません",
+    "permissions_title": "接続できるユーザー",
+    "owner_or_admin": "エージェント所有者またはワークスペース管理者",
+    "admin_only": "ワークスペース管理者のみ",
+    "connect_title": "メッセージチャネルを接続",
+    "choose_description": "エージェントとプラットフォームを選択してください。",
+    "authorize_description": "{{agent}} を {{platform}} に接続します。",
+    "agent_label": "エージェント",
+    "choose_agent": "エージェントを選択",
+    "platform_label": "プラットフォーム",
+    "region_label": "地域",
+    "method_label": "接続方法",
+    "feishu": "Feishu（中国）",
+    "lark": "Lark（国際版）",
+    "setup_guide": "設定ガイド",
+    "connection_changed": "この接続は利用できなくなりました。閉じて再試行してください。",
+    "connect_failed": "ボットを接続できませんでした。",
+    "connect_success": "メッセージチャネルを接続しました。",
+    "disconnect_failed": "ボットの接続を解除できませんでした。",
+    "disconnect_title": "メッセージチャネルの接続を解除しますか？",
+    "disconnect_description": "このエージェントは {{platform}} からのメッセージを受信しなくなります。",
+    "agent_unavailable": "エージェントを利用できません"
   },
   "mcp_usage": {
     "agent_count_other": "{{count}} 個のエージェントが使用中",

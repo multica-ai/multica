@@ -191,7 +191,6 @@
     "rename_required": "名前は必須です",
     "edit_description_title": "説明を編集",
     "description_placeholder": "このエージェントは何をしますか？",
-    "save": "保存",
     "cancel": "キャンセル"
   },
   "overview": {
@@ -214,12 +213,7 @@
     "edit_access_aria": "アクセス: {{value}}。アクセスを変更",
     "all_settings": "すべての設定"
   },
-  "skill_attach": {
-    "trigger_aria": "ワークスペースのスキルを追加",
-    "trigger_label": "追加"
-  },
   "pickers": {
-    "concurrency_tooltip": "同時実行数 · 最大 {{value}} 件",
     "concurrency_range": "最大同時実行数（{{min}}–{{max}}）",
     "runtime_none": "ランタイムなし",
     "runtime_tooltip": "ランタイム · {{name}} · {{status}}",
@@ -290,23 +284,17 @@
     "discard_confirm": "変更を破棄"
   },
   "create_dialog": {
-    "title_create": "エージェントを作成",
-    "title_duplicate": "エージェントを複製",
-    "description_duplicate": "\"{{name}}\" を基に新しいエージェントを作成します。指示、環境変数、スキルがコピーされます。",
     "name_label": "名前",
     "name_placeholder": "例: ディープリサーチエージェント",
     "description_label": "説明",
     "description_placeholder": "このエージェントは何をしますか？",
-    "visibility_label": "公開範囲",
     "access": {
-      "label": "アクセス",
       "private_title": "プライベート",
       "private_desc": "このエージェントを実行できるのはあなただけです",
       "public_title": "公開",
       "public_desc": "このエージェントを実行できる人を選択します",
       "public_workspace_option": "ワークスペース全員",
       "public_members_group": "特定のメンバー",
-      "public_members_empty": "選択できるワークスペースメンバーがいません",
       "public_targets_empty_hint": "以下から少なくとも1つを選択してください。そうでないとエージェントはプライベートのままになります。"
     },
     "runtime_label": "ランタイム",
@@ -321,17 +309,10 @@
     "runtime_no_results": "一致するマシンがありません",
     "runtime_group_online": "{{online}}/{{total}} オンライン",
     "duplicate_copy_suffix": " (コピー)",
-    "create": "作成",
-    "creating": "作成中...",
-    "cancel": "キャンセル",
-    "create_failed_toast": "エージェントを作成できませんでした",
     "skill_attach_failed_toast": "エージェントは作成されましたが、スキルを追加できませんでした: {{error}}",
     "squad_join_failed_toast": "エージェント \"{{name}}\" は作成されましたが、スクワッドに参加できませんでした: {{error}}。メンバーから手動で追加できます。",
     "instructions": {
       "label": "指示",
-      "placeholder_blank": "クリックして指示を作成...",
-      "placeholder_duplicate": "クリックして複製された指示を表示または編集",
-      "collapse": "折りたたむ",
       "editor_placeholder": "このエージェントが何をすべきか、何に集中すべきか、何を避けるべきかを記述してください..."
     },
     "skills_section": {
@@ -408,6 +389,7 @@
       "bulk_placeholder": "API_KEY=値\nBASE_URL=https://example.com",
       "bulk_plaintext_notice": "一括編集中は値が平文で表示されます。",
       "bulk_unsupported_toast": "\"{{key}}\" の値はテキストで表現できません。個別編集で変更してください",
+      "bulk_invalid_key_toast": "一括編集では API_KEY のような変数名のみ使えます。\"{{key}}\" は個別編集で変更してください",
       "parse_error_malformed": "{{line}} 行目が KEY=value 形式ではありません",
       "parse_error_duplicate": "{{line}} 行目のキー \"{{key}}\" が重複しています",
       "paste_invalid_toast": "貼り付けた環境変数を解析できませんでした",
@@ -610,7 +592,7 @@
       "add_failed_toast": "スキルを追加できませんでした"
     },
     "integrations": {
-      "members_note": "この接続を管理できるのはワークスペースのオーナーと管理者のみです。接続済みの Bot は「設定 → 連携」で確認できます。"
+      "members_note": "エージェントのページでメッセージチャネルを確認・管理できます。"
     },
     "activity": {
       "status": {
@@ -829,7 +811,39 @@
     "tool_kind_write": "編集",
     "tool_kind_read": "読み取り",
     "tool_kind_misc": "その他",
-    "trigger_wakeup": "起動"
+    "trigger_wakeup": "起動",
+    "context_receipt_title": "受け取ったコンテキスト",
+    "context_receipt_summary_other": "{{count}} 件のソース · {{size}}",
+    "context_receipt_model": "モデル",
+    "context_receipt_session": "セッション",
+    "context_receipt_session_resumed": "以前のセッションを再開（その履歴もコンテキストに含まれます）",
+    "context_receipt_session_new": "新しいセッション",
+    "context_receipt_session_fresh_retry": "再開が拒否されたため新しいセッション",
+    "context_receipt_mcp": "MCP サーバー",
+    "context_receipt_mcp_none": "なし",
+    "context_receipt_warning": "{{source}}: {{status}}",
+    "context_receipt_col_source": "ソース",
+    "context_receipt_col_size": "サイズ",
+    "context_receipt_col_delivery": "渡し方",
+    "context_receipt_col_load": "読み込み",
+    "context_receipt_same_as_brief": "ランタイム説明と同じ",
+    "context_receipt_footnote": "エージェント開始前に daemon が記録。サイズと短いハッシュのみで、内容は保存されません。「検証済み」はこのランタイムのバージョンでファイルの読み込みを確認済みという意味です。 スキルのサイズとハッシュは、書き込まれたパッケージ全体を対象とします。",
+    "context_source_runtime_brief": "ランタイム説明",
+    "context_source_agent_instructions": "エージェントの指示",
+    "context_source_project_description": "プロジェクトの説明",
+    "context_source_existing_instructions": "リポジトリの指示",
+    "context_source_task_prompt": "このターンのプロンプト",
+    "context_source_skill": "スキル: {{name}}",
+    "context_delivery_file": "ファイル",
+    "context_delivery_inline": "システムプロンプト",
+    "context_delivery_prompt": "ターン入力",
+    "context_delivery_embedded": "ランタイム説明の中",
+    "context_delivery_none": "経路なし",
+    "context_load_delivered": "送信済み",
+    "context_load_verified": "検証済み",
+    "context_load_verified_other_version": "{{version}} でのみ検証済み",
+    "context_load_unverified": "未検証",
+    "context_load_not_delivered": "未送信"
   },
   "task_failure": {
     "cancelled_by_system": "システムによってキャンセルされました",
@@ -874,14 +888,6 @@
       "user_cancelled": "ユーザーがキャンセルしました"
     }
   },
-  "runtime_filter": {
-    "all": "すべてのランタイム",
-    "section_local": "ローカル",
-    "section_remote": "リモート",
-    "section_cloud": "クラウド",
-    "agent_count_other": "エージェント {{count}} 件",
-    "empty": "まだマシンがありません"
-  },
   "last_active": {
     "today": "今日",
     "days_ago_other": "{{count}} 日前",
@@ -900,13 +906,8 @@
     "duplicate_title": "{{name}} を複製",
     "step_ai": "会話で作成",
     "modes": {
-      "template": {
-        "title": "テンプレートを使用",
-        "description": "整理された指示とスキルを基に、ワークスペースに合わせて詳細を調整します。"
-      },
       "ai": {
-        "title": "AI で作成",
-        "description": "対話で編集可能な設定の下書きを作成します。"
+        "title": "AI で作成"
       }
     },
     "sections": {
@@ -934,10 +935,6 @@
       }
     },
     "builder": {
-      "setup_title": "Agent Builder のランタイムを選択",
-      "setup_description": "このランタイムは作成時の対話と、新しいエージェントの既定値に使われます。",
-      "start": "会話を開始",
-      "connect_runtime": "ランタイムを接続",
       "draft_parse_failed": "この返信からフォームを入力できませんでした。エージェントに下書きの再生成を依頼するか、手動で入力してください。",
       "start_failed": "Agent Builder を開始できませんでした。",
       "send_failed": "メッセージを送信できませんでした。",

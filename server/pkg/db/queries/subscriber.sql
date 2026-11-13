@@ -160,9 +160,31 @@ DO UPDATE SET unsubscribed_at = NULL, opt_out_scope = NULL, reason = EXCLUDED.re
 -- can tell "never subscribed" (no row) from "chose to leave" (row with
 -- unsubscribed_at). scope='issue' keeps the opt-out from reaching descendants:
 -- future children of this issue are still allowed to subscribe the user.
-UPDATE issue_subscriber
-SET unsubscribed_at = now(), opt_out_scope = 'issue'
-WHERE issue_id = $1 AND user_type = $2 AND user_id = $3 AND unsubscribed_at IS NULL;
+--
+-- A member watching the issue's project has no row to retire, yet still hears
+-- about the issue, so the opt-out is inserted for them. An existing tombstone
+-- is left as it is: a 'subtree' opt-out must not be narrowed to 'issue'.
+-- Members with neither a row nor a project subscription get nothing, so
+-- leaving an issue you never watched does not block later auto-subscribes.
+WITH retired AS (
+    UPDATE issue_subscriber
+    SET unsubscribed_at = now(), opt_out_scope = 'issue'
+    WHERE issue_subscriber.issue_id = sqlc.arg(issue_id)
+      AND issue_subscriber.user_type = sqlc.arg(user_type)
+      AND issue_subscriber.user_id = sqlc.arg(user_id)
+      AND issue_subscriber.unsubscribed_at IS NULL
+    RETURNING issue_subscriber.issue_id
+)
+INSERT INTO issue_subscriber (issue_id, user_type, user_id, reason, unsubscribed_at, opt_out_scope)
+SELECT i.id, 'member', ps.user_id, 'manual', now(), 'issue'
+FROM issue i
+JOIN project_subscriber ps
+  ON ps.project_id = i.project_id AND ps.workspace_id = i.workspace_id
+WHERE i.id = sqlc.arg(issue_id)
+  AND sqlc.arg(user_type)::text = 'member'
+  AND ps.user_id = sqlc.arg(user_id)
+  AND NOT EXISTS (SELECT 1 FROM retired)
+ON CONFLICT (issue_id, user_type, user_id) DO NOTHING;
 
 -- name: UnsubscribeFromIssueSubtree :many
 -- Leave an issue AND every descendant in one action. An agent-built tree is
@@ -243,7 +265,9 @@ JOIN issue i ON i.id = s.issue_id
 WHERE i.workspace_id = sqlc.arg(workspace_id)
   AND s.user_type = 'member'
   AND s.user_id = sqlc.arg(user_id)
-  AND s.unsubscribed_at IS NULL;
+  AND s.unsubscribed_at IS NULL
+  -- MUL-8472: private projects the caller cannot see.
+  AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR i.project_id IS NULL OR NOT (i.project_id = ANY(sqlc.narg('hidden_project_ids')::uuid[])));
 
 -- name: IsIssueSubscriber :one
 SELECT EXISTS(

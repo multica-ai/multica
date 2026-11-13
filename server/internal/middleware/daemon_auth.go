@@ -136,6 +136,12 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 			r.Header.Del("X-Agent-ID")
 			r.Header.Del("X-Task-ID")
 
+			// The user identity is server-set too. Every user-credential
+			// branch below stamps it, but the mdt_ branch does not, so a
+			// client value would otherwise reach handlers that read it as
+			// the caller (requestUserID).
+			r.Header.Del("X-User-ID")
+
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" {
 				slog.Debug("daemon_auth: missing authorization header", "path", r.URL.Path)

@@ -20,12 +20,15 @@ import {
   setupDaemonManager,
 } from "./daemon-manager";
 import { setupLocalDirectory } from "./local-directory";
+import { setupThemeFolder } from "./theme-folder";
 import { configureLinuxFileDialogs } from "./linux-file-dialog";
 import { openExternalSafely, downloadURLSafely } from "./external-url";
 import { installContextMenu } from "./context-menu";
+import { devToolbarPreferencesPath, installDevToolbarToggle } from "./dev-toolbar-toggle";
 import { handleAppShortcut } from "./keyboard-shortcuts";
 import { installNavigationGestures } from "./navigation-gestures";
 import { installNavigationGuard } from "./navigation-guard";
+import { installWindowForegroundEvents, windowForeground } from "./window-foreground";
 import { createRendererWebPreferences } from "./renderer-web-preferences";
 import { getAppVersion } from "./app-version";
 import { loadRuntimeConfig } from "./runtime-config-loader";
@@ -356,6 +359,7 @@ function getSystemLocale(): string {
 }
 
 function loadRenderer(window: BrowserWindow): void {
+  installWindowForegroundEvents(window);
   const rendererEntry = join(__dirname, "../renderer/index.html");
   const rendererURL =
     is.dev && process.env["ELECTRON_RENDERER_URL"]
@@ -774,6 +778,7 @@ if (!gotTheLock) {
       readonly VITE_API_URL?: string;
       readonly VITE_WS_URL?: string;
       readonly VITE_APP_URL?: string;
+      readonly VITE_DEV_TOOLBAR?: string;
     };
 
     runtimeConfigResult = await loadRuntimeConfig({
@@ -872,6 +877,11 @@ if (!gotTheLock) {
     // blocking error and must not silently fall back to the cloud defaults.
     ipcMain.on("runtime-config:get", (event) => {
       event.returnValue = runtimeConfigResult;
+    });
+
+    installDevToolbarToggle({
+      enabled: is.dev && Boolean(viteEnv.VITE_DEV_TOOLBAR),
+      preferencesPath: devToolbarPreferencesPath(app.getPath("userData")),
     });
 
     ipcMain.on(RENDERER_ROUTE_CONTEXT_CHANNEL, (event, context: unknown) => {
@@ -984,6 +994,10 @@ if (!gotTheLock) {
       );
     });
 
+    ipcMain.handle("window:foreground", (event) =>
+      windowForeground(BrowserWindow.fromWebContents(event.sender)),
+    );
+
     // Main owns foreground detection and item-level dedupe. Every renderer
     // has its own WebSocket and `document.hasFocus()` only describes that one
     // window, so renderer-only gating can emit N duplicate system banners.
@@ -1001,9 +1015,7 @@ if (!gotTheLock) {
 
       const payload = parseNativeNotificationPayload(value);
       if (!payload || !Notification.isSupported()) return;
-      const anyWindowFocused = BrowserWindow.getAllWindows().some(
-        (window) => !window.isDestroyed() && window.isFocused(),
-      );
+      const anyWindowFocused = BrowserWindow.getAllWindows().some(windowForeground);
       if (!notificationGate.shouldShow(payload.itemId, anyWindowFocused)) {
         return;
       }
@@ -1025,11 +1037,17 @@ if (!gotTheLock) {
           {
             slug: payload.slug,
             itemId: payload.itemId,
-            issueKey: payload.issueKey,
+            ...(payload.chatSessionId
+              ? { chatSessionId: payload.chatSessionId }
+              : { issueKey: payload.issueKey }),
           },
           mainWindows.findByWorkspace(payload.slug),
         );
       });
+      notification.on("failed", (_event, error) => {
+        console.warn("Native notification delivery failed:", error);
+      });
+      notification.on("show", () => console.info("Native notification displayed"));
       notification.show();
     });
 
@@ -1075,6 +1093,7 @@ if (!gotTheLock) {
       () => mainWindows.all(),
     );
     setupLocalDirectory(() => mainWindows.mostRecent());
+    setupThemeFolder();
 
     // Registered after the updater and daemon gates, so a quit they hold
     // (busy daemon, pending install) leaves the session writable; only the

@@ -271,6 +271,17 @@ multica runtime profile create --display-name "内部 Claude 封装" \
 
 运行机制和自定义 profile 见[守护进程与运行时](/daemon-runtimes)。
 
+## 环境 [#environments]
+
+```bash
+multica env start web
+multica env start web --wait=false
+multica env list
+multica env stop web
+```
+
+`multica env`（完整写法 `multica environment`）启动仓库在 `.multica/environments.toml` 里声明的环境。环境由守护进程托管，运行结束后继续运行，显示在任务侧栏里，TTL 到期时停止。`start` 会等环境能响应后打印它的 URL。这些命令使用当前运行的凭据，所以只能在智能体的运行中使用；在你自己的电脑上请用任务侧栏。文件格式和示例见[环境](/environments)。
+
 ## 项目、工作区和自动化
 
 ```bash
@@ -306,6 +317,7 @@ multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1" --timezone Asia/
 | `workspace` | 创建、查看、切换工作区和邀请成员 |
 | `repo` | 管理工作区仓库，并把仓库检出到本机 |
 | `daemon`、`runtime` | 启停本机守护进程，查看和管理运行时 |
+| `env` | 启动、停止和列出仓库声明的环境（只能在智能体的运行中使用） |
 | `attachment` | 上传或下载附件 |
 | `user profile` | 查看或更新当前用户资料 |
 | `auth`、`login`、`setup` | 登录、查看认证状态和初始化连接 |
@@ -435,6 +447,7 @@ CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓�
 | `runtime` | `list/usage/activity/update/rename/delete` | 查看和管理运行时 | `usage`：`--days`（默认 90，最多 365）；`update`：`--target-version`（必填）、`--wait`；`delete`：`--cascade`（解绑绑定的智能体、保留其数据并取消其运行） |
 | | `profile list/create/update/delete` | 管理自定义运行时 profile | `create`：`--display-name`、`--command-name`（均必填）、`--runtime-type`（或旧的 `--protocol-family`）、`--description`；`update`：`--enabled` |
 | | `profile set-path/unset-path <profile-id>` | 固定本机可执行文件路径（仅本地生效，不上传服务器） | |
+| `env` | `start <name>` / `stop <name>` / `list` | 启动、停止或列出这条任务的声明式环境；只能在智能体的运行中使用。见[环境](/environments) | `start`：`--wait`（默认 `true`）；全部：`--output`（`table` 或 `json`） |
 
 ### Additional
 

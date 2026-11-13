@@ -12,6 +12,7 @@ const NOTIFICATION_GROUPS = [
   "comments",
   "mentions",
   "updates",
+  "new_issues",
   "agent_activity",
 ] as const;
 
@@ -58,6 +59,12 @@ export function useSettingsSearchIndex(
         anchor: "theme",
         title: t(($) => $.appearance.theme.title),
         description: t(($) => $.appearance.theme.description),
+      },
+      {
+        tab: "appearance",
+        anchor: "theme-import",
+        title: t(($) => $.appearance.own.title),
+        description: t(($) => $.appearance.own.description),
       },
       {
         tab: "appearance",
@@ -137,6 +144,12 @@ export function useSettingsSearchIndex(
       },
       {
         tab: "preferences",
+        anchor: "comment-images",
+        title: t(($) => $.preferences.comment_images.title),
+        description: t(($) => $.preferences.comment_images.hint),
+      },
+      {
+        tab: "preferences",
         anchor: "chat",
         title: t(($) => $.chat.floating_label),
         description: t(($) => $.chat.floating_hint),
@@ -168,6 +181,11 @@ export function useSettingsSearchIndex(
         title: t(($) => $.notifications.groups[group].label),
         description: t(($) => $.notifications.groups[group].description),
       })),
+      {
+        tab: "notifications",
+        anchor: "chat_replies",
+        title: t(($) => $.notifications.groups.chat_replies.label),
+      },
       {
         tab: "notifications",
         anchor: "system",
@@ -217,12 +235,6 @@ export function useSettingsSearchIndex(
       { tab: "workspace", anchor: "delete", title: t(($) => $.workspace.delete_title) },
       { tab: "members", anchor: "invitations", title: t(($) => $.members.pending_label) },
       { tab: "members", anchor: "links", title: t(($) => $.members.share_links_label) },
-      {
-        tab: "wakeups",
-        anchor: "child-done",
-        title: t(($) => $.wakeups.child_done_title),
-        description: t(($) => $.wakeups.child_done_description),
-      },
       {
         tab: "labels",
         title: t(($) => $.page.tabs.labels),

@@ -78,9 +78,6 @@
     "workspaces_label": "工作區",
     "create_workspace": "建立工作區",
     "pending_invitations_label": "待處理的邀請",
-    "invitation_workspace_fallback": "工作區",
-    "invitation_join": "加入",
-    "invitation_decline": "拒絕",
     "log_out": "退出登入",
     "new_issue": "新建任務",
     "pinned_label": "固定",
@@ -100,14 +97,25 @@
     "chat": "聊天",
     "autopilots": "自動化",
     "switch_workspace": "切換工作區",
-    "invitation_from": "{{name}} 邀請你加入",
     "pin_workspace": "置頂工作區",
     "unpin_workspace": "取消置頂",
     "open_in_new_window": "在新視窗開啟",
     "open_in_new_window_click": "點擊",
     "open_in_other_window": "已在其他視窗開啟",
     "in_other_window": "其他視窗",
-    "all_workspaces_open": "所有工作區都已在視窗中開啟"
+    "all_workspaces_open": "所有工作區都已在視窗中開啟",
+    "copy_link": "複製連結",
+    "link_copied": "已複製連結",
+    "workspace_settings": "工作區設定",
+    "mark_all_read": "全部標為已讀",
+    "mark_all_read_failed": "全部標為已讀失敗",
+    "reset_order": "恢復預設順序",
+    "copy_workspace_link": "複製工作區連結",
+    "workspace_meta_other": "{{slug}} · {{count}} 位成員"
+  },
+  "bottom_bar": {
+    "label": "狀態列",
+    "working_other": "{{count}} 個 AI 代理正在工作"
   },
   "panels": {
     "work": {
@@ -129,6 +137,7 @@
       "assignee_me": "我",
       "assignee_my_agents": "我的 AI 代理",
       "assignee_me_and_my_agents": "我和我的 AI 代理",
+      "assignee_projects_only": "僅作用於側邊欄「專案」下展開的任務",
       "reset": "重設",
       "load_more": "載入更多",
       "show_less": "收合",
@@ -149,7 +158,8 @@
       "view_edit": "編輯檢視",
       "view_rename": "重新命名",
       "view_duplicate": "建立副本",
-      "view_delete": "刪除檢視"
+      "view_delete": "刪除檢視",
+      "new_issue_here": "在此專案中新建任務"
     },
     "team": {
       "new_agent": "新建 AI 代理",
@@ -165,7 +175,8 @@
       "members_other": "{{count}} 位成員",
       "resources": "資源",
       "runtimes_online_other": "{{count}} 台線上",
-      "invite_member": "邀請成員"
+      "invite_member": "邀請成員",
+      "open_issue": "開啟 {{identifier}}"
     },
     "autopilots": {
       "all": "全部自動化",
@@ -182,6 +193,8 @@
       "dark": "深色",
       "system": "跟隨系統"
     },
+    "mode": "模式",
+    "appearance_settings": "外觀設定",
     "language": "語言",
     "shortcuts": "快捷鍵"
   },
@@ -217,5 +230,19 @@
     "go_to_slide": "前往第 {{index}} 張",
     "previous": "上一張",
     "next": "下一張"
+  },
+  "context_menu": {
+    "cut": "剪下",
+    "copy": "複製",
+    "paste": "貼上",
+    "select_all": "全選",
+    "add_to_dictionary": "加入字典",
+    "open_link": "在瀏覽器中開啟連結",
+    "copy_link_address": "複製連結網址",
+    "copy_image": "複製圖片",
+    "copy_code": "複製程式碼",
+    "copy_table": "複製表格",
+    "copied": "已複製",
+    "copy_failed": "複製失敗"
   }
 }

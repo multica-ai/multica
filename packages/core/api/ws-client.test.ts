@@ -243,6 +243,27 @@ describe("WSClient", () => {
       });
     }
 
+    it("reports connecting, connected, then reconnecting until the next auth ack", () => {
+      const ws = new WSClient("ws://example.test/ws");
+      const listener = vi.fn();
+      ws.onStatusChange(listener);
+      ws.setAuth("tok", "acme");
+      ws.connect();
+      expect(ws.getStatus()).toBe("connecting");
+
+      simulateAuthAck();
+      expect(ws.getStatus()).toBe("connected");
+
+      simulateDisconnect();
+      expect(ws.getStatus()).toBe("reconnecting");
+      vi.runOnlyPendingTimers();
+      expect(ws.getStatus()).toBe("reconnecting");
+
+      simulateAuthAck();
+      expect(ws.getStatus()).toBe("connected");
+      expect(listener).toHaveBeenCalledTimes(3);
+    });
+
     it("uses ~1000ms base delay for the first reconnect attempt", () => {
       // Pin Math.random so jitter is deterministic: random()=0.5 → jitter=0.
       vi.stubGlobal(

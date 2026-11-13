@@ -65,15 +65,6 @@
     "search_runtime_filtered": "No agents on \"{{machine}}\" match \"{{query}}\".",
     "runtime_filtered": "No agents on \"{{machine}}\"."
   },
-  "runtime_filter": {
-    "all": "All runtimes",
-    "section_local": "Local",
-    "section_remote": "Remote",
-    "section_cloud": "Cloud",
-    "agent_count_one": "{{count}} agent",
-    "agent_count_other": "{{count}} agents",
-    "empty": "No machines yet"
-  },
   "columns": {
     "agent": "Agent",
     "status": "Status",
@@ -208,7 +199,6 @@
     "rename_required": "Name is required",
     "edit_description_title": "Edit description",
     "description_placeholder": "What does this agent do?",
-    "save": "Save",
     "cancel": "Cancel"
   },
   "overview": {
@@ -234,12 +224,7 @@
     "edit_access_aria": "Access: {{value}}. Change access",
     "all_settings": "All settings"
   },
-  "skill_attach": {
-    "trigger_aria": "Attach a workspace skill",
-    "trigger_label": "Attach"
-  },
   "pickers": {
-    "concurrency_tooltip": "Concurrency · {{value}} max concurrent runs",
     "concurrency_range": "Max concurrent runs ({{min}}–{{max}})",
     "runtime_none": "No runtime",
     "runtime_tooltip": "Runtime · {{name}} · {{status}}",
@@ -315,13 +300,8 @@
     "duplicate_title": "Duplicate {{name}}",
     "step_ai": "Build through conversation",
     "modes": {
-      "template": {
-        "title": "Use a template",
-        "description": "Start from curated instructions and skills, then adapt every detail to your workspace."
-      },
       "ai": {
-        "title": "Build with AI",
-        "description": "Create an editable configuration through conversation."
+        "title": "Build with AI"
       }
     },
     "sections": {
@@ -349,10 +329,6 @@
       }
     },
     "builder": {
-      "setup_title": "Choose a runtime for Agent Builder",
-      "setup_description": "This runtime powers setup and is the default for the new agent.",
-      "start": "Start conversation",
-      "connect_runtime": "Connect a runtime",
       "draft_parse_failed": "This reply could not fill the form. Ask the assistant to generate the draft again, or fill it in manually.",
       "start_failed": "Could not start Agent Builder.",
       "send_failed": "Could not send your message.",
@@ -463,23 +439,17 @@
     }
   },
   "create_dialog": {
-    "title_create": "Create Agent",
-    "title_duplicate": "Duplicate Agent",
-    "description_duplicate": "Create a new agent based on \"{{name}}\". Instructions, env, and skills are copied for you.",
     "name_label": "Name",
     "name_placeholder": "e.g. Deep Research Agent",
     "description_label": "Description",
     "description_placeholder": "What does this agent do?",
-    "visibility_label": "Visibility",
     "access": {
-      "label": "Access",
       "private_title": "Private",
       "private_desc": "Only you can run this agent",
       "public_title": "Public",
       "public_desc": "Choose who can run this agent",
       "public_workspace_option": "Everyone in this workspace",
       "public_members_group": "Specific people",
-      "public_members_empty": "No workspace members to choose from",
       "public_targets_empty_hint": "Pick at least one option below — otherwise the agent stays private."
     },
     "runtime_label": "Runtime",
@@ -494,17 +464,10 @@
     "runtime_no_results": "No matching machines",
     "runtime_group_online": "{{online}}/{{total}} online",
     "duplicate_copy_suffix": " (Copy)",
-    "create": "Create",
-    "creating": "Creating...",
-    "cancel": "Cancel",
-    "create_failed_toast": "Failed to create agent",
     "skill_attach_failed_toast": "Agent created, but failed to attach skills: {{error}}",
     "squad_join_failed_toast": "Agent \"{{name}}\" was created but couldn't join the squad: {{error}}. You can add it manually from Members.",
     "instructions": {
       "label": "Instructions",
-      "placeholder_blank": "Click to write instructions…",
-      "placeholder_duplicate": "Click to view or edit the duplicated instructions",
-      "collapse": "Collapse",
       "editor_placeholder": "Write what this agent should do, what to focus on, what to avoid…"
     },
     "skills_section": {
@@ -584,6 +547,7 @@
       "bulk_placeholder": "API_KEY=value\nBASE_URL=https://example.com",
       "bulk_plaintext_notice": "Values are shown in plain text while bulk editing.",
       "bulk_unsupported_toast": "\"{{key}}\" can't be shown as text — edit it as a row",
+      "bulk_invalid_key_toast": "Bulk text only supports names like API_KEY — edit \"{{key}}\" as a row",
       "parse_error_malformed": "Line {{line}} isn't a KEY=value assignment",
       "parse_error_duplicate": "Duplicate key \"{{key}}\" on line {{line}}",
       "paste_invalid_toast": "Couldn't parse pasted environment variables",
@@ -788,7 +752,7 @@
       "add_failed_toast": "Failed to add skill"
     },
     "integrations": {
-      "members_note": "Only workspace owners and admins can manage this connection. You can view connected bots in Settings → Integrations."
+      "members_note": "View and manage messaging channels on the agent page."
     },
     "activity": {
       "status": {
@@ -1012,7 +976,40 @@
     "tool_kind_write": "Edits",
     "tool_kind_read": "Reads",
     "tool_kind_misc": "Other",
-    "trigger_wakeup": "Wakeup"
+    "trigger_wakeup": "Wakeup",
+    "context_receipt_title": "Context received",
+    "context_receipt_summary_one": "{{count}} source · {{size}}",
+    "context_receipt_summary_other": "{{count}} sources · {{size}}",
+    "context_receipt_model": "Model",
+    "context_receipt_session": "Session",
+    "context_receipt_session_resumed": "Resumed a prior session (its history is also in context)",
+    "context_receipt_session_new": "New session",
+    "context_receipt_session_fresh_retry": "New session after the resume was rejected",
+    "context_receipt_mcp": "MCP servers",
+    "context_receipt_mcp_none": "None",
+    "context_receipt_warning": "{{source}}: {{status}}",
+    "context_receipt_col_source": "Source",
+    "context_receipt_col_size": "Size",
+    "context_receipt_col_delivery": "Delivered via",
+    "context_receipt_col_load": "Loaded",
+    "context_receipt_same_as_brief": "Same as runtime brief",
+    "context_receipt_footnote": "Recorded by the daemon before the agent started. Sizes and short hashes only; no content is stored. \"Verified\" means this runtime version was tested to load the file. Skill sizes and hashes cover the complete written package.",
+    "context_source_runtime_brief": "Runtime brief",
+    "context_source_agent_instructions": "Agent instructions",
+    "context_source_project_description": "Project description",
+    "context_source_existing_instructions": "Repository instructions",
+    "context_source_task_prompt": "Turn prompt",
+    "context_source_skill": "Skill: {{name}}",
+    "context_delivery_file": "File",
+    "context_delivery_inline": "System prompt",
+    "context_delivery_prompt": "Turn input",
+    "context_delivery_embedded": "Inside the runtime brief",
+    "context_delivery_none": "No channel",
+    "context_load_delivered": "Delivered",
+    "context_load_verified": "Verified",
+    "context_load_verified_other_version": "Verified on {{version}} only",
+    "context_load_unverified": "Not verified",
+    "context_load_not_delivered": "Not delivered"
   },
   "task_failure": {
     "cancelled_by_system": "Cancelled by the system",

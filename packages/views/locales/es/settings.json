@@ -170,6 +170,12 @@
       "after_run": "Empezar tras esta ejecución",
       "hint": "Solo establece el valor predeterminado. Puedes cambiarlo para cualquier mensaje antes de enviarlo."
     },
+    "comment_images": {
+      "title": "Imágenes en comentarios",
+      "thumbnails": "Miniaturas",
+      "full": "Tamaño completo",
+      "hint": "Las miniaturas acortan los hilos largos; haz clic en una imagen para verla a tamaño completo."
+    },
     "comments_title": "Comentarios",
     "issue_fields": {
       "field": "Campo",
@@ -195,7 +201,91 @@
       "title": "Tema",
       "description": "Colores, bordes, sombras y esquinas de toda la app.",
       "default": "Predeterminado",
-      "pop": "Pop"
+      "pop": "Pop",
+      "built_in": "Integrados",
+      "installed": "Instalados",
+      "remove": "Quitar {{name}}",
+      "safe_mode": "Modo seguro: tu tema está en pausa hasta que cierres esta ventana.",
+      "safe_mode_exit": "Usar mi tema",
+      "folder": "Carpeta de temas",
+      "folder_problems": "Algunos temas de la carpeta de temas no pasan las comprobaciones. Corrígelos y guarda; mientras tanto se usa la última versión que las pasó."
+    },
+    "import": {
+      "button": "Importar tema",
+      "from_zip": "Archivo de tema (.zip)",
+      "from_folder": "Carpeta del tema",
+      "storage_full": "No hay espacio suficiente en este dispositivo para guardar el tema. Quita otro tema e inténtalo de nuevo.",
+      "confirm_title": "¿Instalar «{{name}}»?",
+      "warning": "Un tema puede cambiar el aspecto de todas las páginas, incluidos los diálogos y avisos. Instala solo temas de personas de confianza.",
+      "author": "Autor",
+      "version": "Versión",
+      "replaces": "{{to}} (sustituye a {{from}})",
+      "includes": "Incluye",
+      "cancel": "Cancelar",
+      "confirm": "Instalar y usar",
+      "error_title": "No se pudo instalar este tema",
+      "error_description": "No se ha cambiado nada. El archivo de tema tiene estos problemas:",
+      "close": "Cerrar",
+      "has_options_one": "{{count}} opción",
+      "has_options_other": "{{count}} opciones",
+      "has_assets_one": "{{count}} fuente o imagen",
+      "has_assets_other": "{{count}} fuentes e imágenes",
+      "beta": "Beta",
+      "beta_note": "Los temas personalizados están en beta. Las variables y el manifiesto que usa un tema pueden cambiar, y puede que haya que actualizarlo."
+    },
+    "store": {
+      "manage": "Gestionar",
+      "title": "Temas",
+      "description": "Los temas que has instalado y temas creados por la comunidad.",
+      "description_local": "Los temas que has instalado.",
+      "search": "Buscar temas",
+      "installed_only": "Mostrar solo instalados",
+      "showing_one": "Mostrando {{count}} tema",
+      "showing_other": "Mostrando {{count}} temas",
+      "installed": "Instalado",
+      "loading": "Cargando temas",
+      "error": "No se pudo cargar la tienda de temas. Inténtalo de nuevo en un momento.",
+      "retry": "Reintentar",
+      "none_installed": "Aún no hay temas instalados.",
+      "no_results": "Ningún tema coincide con «{{query}}».",
+      "by": "de {{author}}",
+      "downloads_one": "{{downloads}} descarga",
+      "downloads_other": "{{downloads}} descargas",
+      "source": "{{repo}} en GitHub",
+      "no_preview": "Sin vista previa",
+      "screenshot_alt": "{{name}} en modo {{mode}}",
+      "install": "Instalar",
+      "installing": "Instalando…",
+      "use": "Usar",
+      "in_use": "En uso",
+      "update": "Actualizar a {{version}}",
+      "remove": "Quitar",
+      "taken": "Ya hay un tema instalado con este id",
+      "installed_toast": "Se instaló «{{name}}».",
+      "updated": "«{{name}}» se actualizó a {{version}}.",
+      "install_failed": "No se pudo instalar «{{name}}»",
+      "warning": "Un tema puede cambiar el estilo de todas las páginas, incluidos los diálogos y las advertencias. Los temas de la tienda se revisan automáticamente, pero los crea la comunidad."
+    },
+    "updates": {
+      "title": "Temas de la tienda",
+      "description_one": "Tienes {{count}} tema de la tienda.",
+      "description_other": "Tienes {{count}} temas de la tienda.",
+      "check": "Buscar actualizaciones",
+      "checking": "Buscando…",
+      "up_to_date": "Tus temas de la tienda están actualizados.",
+      "update_all": "Actualizar todo ({{count}})"
+    },
+    "own": {
+      "title": "Crea el tuyo",
+      "description": "Importa un tema como .zip o carpeta, o empieza con una copia del actual."
+    },
+    "tools": {
+      "duplicate": "Duplicar «{{name}}» como tema nuevo",
+      "open_folder": "Abrir carpeta de temas",
+      "guide": "Cómo crear un tema",
+      "duplicated_web": "Se descargó {{file}}. Descomprímelo, edita theme.css e importa la carpeta.",
+      "duplicated_desktop": "Se creó «{{name}}» en la carpeta de temas. Los cambios en su theme.css se aplican al guardar.",
+      "duplicate_failed": "No se pudo crear la copia: {{error}}"
     },
     "theme_options": {
       "title": "Opciones del tema",
@@ -329,6 +419,10 @@
         "label": "Mostrar u ocultar la ventana de chat",
         "description": "Abre o cierra la ventana de chat flotante. Al abrirla, el foco va al campo de mensaje."
       },
+      "newChat": {
+        "label": "Pregunta a Multica",
+        "description": "Inicia un chat nuevo en la ventana de chat flotante."
+      },
       "findInIssue": {
         "label": "Buscar en la tarea",
         "description": "Busca dentro del detalle de la tarea abierta."
@@ -413,7 +507,10 @@
   },
   "chat": {
     "floating_label": "Ventana de chat flotante",
-    "floating_hint": "Muestra el botón de chat flotante en todas las páginas."
+    "floating_hint": "Muestra el botón de chat flotante en todas las páginas.",
+    "ask_agent_label": "Agente de Preguntar a Multica",
+    "ask_agent_hint": "El agente con el que empieza un chat nuevo desde la barra inferior, en este espacio de trabajo.",
+    "ask_agent_last_used": "El último usado"
   },
   "issue": {
     "description": "Elige qué campos mantiene cada diálogo de creación en su barra de herramientas. Los campos ocultos siguen disponibles en el menú ⋯ y reaparecen mientras tengan un valor.",
@@ -489,7 +586,6 @@
       "apps": "Apps conectadas",
       "channels": "Mensajería",
       "code": "Código",
-      "wakeups": "Despertares",
       "workflows": "Flujos de trabajo"
     },
     "groups": {
@@ -753,9 +849,16 @@
         "label": "Prioridad y fecha de entrega",
         "description": "Cuando cambian la prioridad o la fecha de entrega de tareas que sigues"
       },
+      "new_issues": {
+        "label": "Tareas nuevas",
+        "description": "Cuando se crea una tarea en un proyecto al que estás suscrito"
+      },
       "agent_activity": {
         "label": "Actividad de agentes",
         "description": "Cuando falla una ejecución de agente"
+      },
+      "chat_replies": {
+        "label": "Incluir respuestas del chat"
       }
     },
     "system": {
@@ -764,7 +867,7 @@
     },
     "browser": {
       "label": "Notificaciones del navegador",
-      "hint": "Permite que este navegador muestre avisos de notificación para nuevos elementos de la bandeja.",
+      "hint": "Permite que este navegador muestre avisos para las notificaciones de la bandeja de entrada y las respuestas del chat.",
       "enable": "Activar",
       "granted": "Este navegador puede mostrar avisos de notificación.",
       "denied": "Bloqueado por tu navegador. Activa las notificaciones para este sitio en la configuración del navegador.",
@@ -1274,7 +1377,9 @@
     "github_load_more": "Cargar más",
     "github_selected_count": "{{count}} seleccionados",
     "github_cancel": "Cancelar",
-    "github_import": "Añadir repositorios",
+    "github_import": "Añadir {{count}} repositorios",
+    "github_import_one": "Añadir {{count}} repositorio",
+    "github_import_other": "Añadir {{count}} repositorios",
     "save": "Guardar",
     "saving": "Guardando...",
     "saved_hint": "Todos los cambios guardados",
@@ -1307,7 +1412,10 @@
       "close_others": "Cerrar las demás pestañas",
       "open_window": "Abrir en ventana nueva",
       "new": "Pestaña nueva",
-      "pinned_name": "{{title}} (fijada)"
+      "pinned_name": "{{title}} (fijada)",
+      "copy_link": "Copiar enlace",
+      "link_copied": "Enlace copiado",
+      "close_right": "Cerrar las pestañas a la derecha"
     },
     "updates": {
       "title": "Actualizaciones",
@@ -1488,7 +1596,40 @@
     "status_unknown": "Estado no disponible"
   },
   "channels": {
-    "breadcrumb": "Migas de pan"
+    "breadcrumb": "Migas de pan",
+    "add": "Añadir canal de mensajería",
+    "connect": "Conectar",
+    "disconnect": "Desconectar",
+    "open": "Abrir",
+    "normal": "Conectado",
+    "waiting_message": "Esperando el primer mensaje",
+    "disconnected": "Desconectado",
+    "find_me": "Encuéntrame en {{platform}}",
+    "manage": "Gestionar {{platform}}",
+    "last_message": "Último mensaje: {{time}}",
+    "ask_admin": "Pide ayuda a un administrador",
+    "unavailable": "Conexión no disponible",
+    "permissions_title": "Quién puede conectar",
+    "owner_or_admin": "Propietario del agente o administrador del espacio",
+    "admin_only": "Solo administradores del espacio",
+    "connect_title": "Conectar canal de mensajería",
+    "choose_description": "Elige un agente y una plataforma.",
+    "authorize_description": "Conectar {{agent}} a {{platform}}.",
+    "agent_label": "Agente",
+    "choose_agent": "Elegir agente",
+    "platform_label": "Plataforma",
+    "region_label": "Región",
+    "method_label": "Método de conexión",
+    "feishu": "Feishu (China)",
+    "lark": "Lark (internacional)",
+    "setup_guide": "Guía de configuración",
+    "connection_changed": "Esta conexión ya no está disponible. Cierra esta ventana y vuelve a intentarlo.",
+    "connect_failed": "No se pudo conectar el bot.",
+    "connect_success": "Canal de mensajería conectado.",
+    "disconnect_failed": "No se pudo desconectar el bot.",
+    "disconnect_title": "¿Desconectar el canal de mensajería?",
+    "disconnect_description": "Este agente dejará de recibir mensajes de {{platform}}.",
+    "agent_unavailable": "Agente no disponible"
   },
   "code": {
     "github_actions": "Acciones de GitHub",
@@ -1526,24 +1667,6 @@
     "description": "Se aplica cuando todos los PR enlazados a una tarea se hayan fusionado, y solo a fusiones a partir de ahora.",
     "label": "Al fusionarse los PR, mover la tarea a",
     "none": "No cambiar"
-  },
-  "wakeups": {
-    "admin_only": "Solo los propietarios y administradores pueden cambiar estos valores predeterminados.",
-    "builtin": "Instrucción integrada",
-    "child_done_description": "Despierta al responsable del padre cuando una etapa termina y otra posterior está en espera, y una vez más cuando todas las subtareas se cierran. Si el responsable es un miembro, recibe una notificación en la bandeja de entrada.",
-    "child_done_title": "Al terminar las subtareas",
-    "customized_one": "{{count}} tarea abierta tiene su propio ajuste e ignora este valor predeterminado.",
-    "customized_other": "{{count}} tareas abiertas tienen su propio ajuste e ignoran este valor predeterminado.",
-    "description": "Reglas de la plataforma que se aplican a cada tarea. Cada tarea puede cambiarlas en su sección de Despertares.",
-    "enabled": "Activado por defecto",
-    "instruction": "Instrucción predeterminada",
-    "instruction_hint": "Se envía al agente despertado. Déjala vacía para usar la instrucción integrada de abajo.",
-    "instruction_invalid": "Mantén la instrucción dentro de 4.000 bytes.",
-    "instruction_placeholder": "Déjala vacía para usar la instrucción integrada",
-    "load_error": "No se han podido cargar los valores predeterminados de despertares.",
-    "save": "Guardar",
-    "save_error": "No se ha podido guardar el valor predeterminado.",
-    "saving": "Guardando…"
   },
   "connected_apps": {
     "description": "Cuentas que usan tus agentes para acceder a aplicaciones externas. Las acciones permitidas se ejecutan de inmediato.",

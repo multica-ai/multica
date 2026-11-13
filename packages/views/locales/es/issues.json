@@ -210,10 +210,11 @@
     "section_relation": "Relación conmigo",
     "relation_assigned": "Asignadas a mí",
     "relation_created": "Creadas por mí",
-    "relation_my_agents": "Asignadas a mis agentes",
+    "relation_my_agents": "Trabajo de mis agentes",
     "relation_subscribed": "Suscrito por mí",
     "section_agent_status": "Estado del agente",
     "agent_status_running": "En ejecución",
+    "agent_status_idle": "Inactivo",
     "section_read_state": "Estado de lectura",
     "read_state_unread": "Sin leer",
     "operator_label": "Coincidencia",
@@ -308,6 +309,7 @@
     "card_project": "Proyecto",
     "card_labels": "Etiquetas",
     "card_child_progress": "Progreso de subtareas",
+    "card_pull_requests": "Pull requests",
     "show_sub_issues": "Mostrar subtareas",
     "columns_section": "Columnas",
     "columns_locked_by_filter": "Quita el filtro de estado para mostrar u ocultar columnas.",
@@ -382,6 +384,7 @@
       "created_at": "Creada",
       "updated_at": "Actualizada",
       "child_progress": "Progreso de subtareas",
+      "pull_requests": "Pull requests",
       "creator": "Creada por"
     },
     "calculation": {
@@ -464,6 +467,18 @@
     "section_pull_requests": "Pull requests",
     "section_metadata": "Metadatos",
     "section_details": "Detalles",
+    "sidebar_settings": {
+      "open": "Personalizar barra lateral",
+      "title": "Barra lateral",
+      "reset": "Restablecer",
+      "footer": "Arrastra para reordenar. Se aplica a todas las tareas.",
+      "always_shown": "Siempre visible",
+      "empty": "Nada en esta tarea",
+      "customize": "Personalizar",
+      "drag_handle": "Reordenar {{section}}",
+      "hidden_count_one": "{{count}} sección oculta",
+      "hidden_count_other": "{{count}} secciones ocultas"
+    },
     "section_quick_actions": "Acciones rápidas",
     "quick_actions_more": "Mostrar {{count}} más",
     "quick_action_runs_as": "Se ejecuta como {{name}}",
@@ -477,6 +492,7 @@
     "quick_action_blocked_body": "\"{{name}}\" se ejecuta como un agente que no tienes permiso para activar. Pide a un administrador del espacio de trabajo que ponga ese agente a disposición del equipo o que dirija esta acción a uno compartido.",
     "quick_action_blocked_ok": "Entendido",
     "pull_requests_loading": "Cargando…",
+    "pull_request_state_open": "Abierto",
     "pull_request_state_draft": "Borrador",
     "pull_request_state_merged": "Fusionado",
     "pull_request_state_closed": "Cerrado",
@@ -512,6 +528,8 @@
     "unsubscribe": "Darse de baja",
     "delegated_subscription_badge": "Observando a través de un agente",
     "delegated_subscription_hint": "Tu agente creó esta tarea en tu nombre, así que estás suscrito. Recibirás una notificación cuando necesite revisión, termine o se quede atascada.",
+    "project_subscription_badge": "Suscrito a través del proyecto",
+    "project_subscription_hint": "Estás suscrito a todas las tareas de este proyecto. Darte de baja aquí solo detiene las notificaciones de esta tarea.",
     "unsubscribe_this": "Darse de baja de esta tarea",
     "unsubscribe_subtree": "Darse de baja de esta tarea y sus subtareas",
     "unsubscribe_subtree_failed": "No se ha podido dar de baja de las subtareas. Inténtalo de nuevo.",
@@ -570,10 +588,13 @@
   },
   "timeline": {
     "loading": "Cargando...",
-    "jump_to_latest": "Ir a lo más reciente"
+    "jump_to_latest": "Ir a lo más reciente",
+    "new_comments_one": "{{count}} comentario nuevo",
+    "new_comments_other": "{{count}} comentarios nuevos"
   },
   "activity": {
     "created": "creó esta tarea",
+    "created_on_behalf_of": "creó esta tarea en nombre de {{name}}",
     "self_assigned": "se autoasignó esta tarea",
     "assigned_to": "la asignó a {{name}}",
     "removed_assignee": "eliminó al asignado",
@@ -632,7 +653,10 @@
     "wakeup_checkin_coalesced_other": "{{count}} comprobaciones silenciosas · última: {{note}}",
     "wakeup_chip_created_by": "activación de {{name}}",
     "wakeup_chip_system": "Regla del sistema",
-    "wakeup_created_scheduled": "añadió una activación para {{agent}}: {{condition}}"
+    "wakeup_created_scheduled": "añadió una activación para {{agent}}: {{condition}}",
+    "environment_stopped": "detuvo el entorno {{name}}",
+    "environment_restarted": "reinició el entorno {{name}}",
+    "environment_started": "inició el entorno {{name}}"
   },
   "comment": {
     "add_reaction": "Añadir reacción",
@@ -736,7 +760,10 @@
     "recipient_count_other": "{{count}} agentes recibirán esto",
     "steer_attachment_notice": "Solo el texto puede unirse a una ejecución en marcha, así que un mensaje con archivos se procesa después.",
     "restart_send": "Detener y enviar",
-    "restart_failed": "No se ha podido detener la ejecución actual. Tu mensaje no se envió."
+    "restart_failed": "No se ha podido detener la ejecución actual. Tu mensaje no se envió.",
+    "reply_action": "Responder",
+    "actions_label": "Acciones del comentario",
+    "create_issue_from_selection": "Crear subtarea a partir de la selección"
   },
   "reply": {
     "recipients_changed": "El destino de la respuesta ha cambiado. Revisa los destinatarios antes de volver a enviar.",
@@ -891,7 +918,12 @@
     "cancel": "Cancelar",
     "update_partial_one": "Actualizada {{updated}} de {{count}} tarea. El resto no admite este cambio y se quedó como estaba.",
     "update_partial_other": "Actualizadas {{updated}} de {{count}} tareas. El resto no admite este cambio y se quedó como estaba.",
-    "delete_restricted": "Puedes eliminar las tareas que hayas creado tú o tus agentes. Los usuarios con rol owner o admin del espacio de trabajo pueden eliminar cualquier tarea."
+    "delete_restricted": "Puedes eliminar las tareas que hayas creado tú o tus agentes. Los usuarios con rol owner o admin del espacio de trabajo pueden eliminar cualquier tarea.",
+    "copy_links": "Copiar enlaces",
+    "links_copied_one": "{{count}} enlace copiado",
+    "links_copied_other": "{{count}} enlaces copiados",
+    "delete_count_one": "Eliminar {{count}} tarea",
+    "delete_count_other": "Eliminar {{count}} tareas"
   },
   "card": {
     "update_failed": "No se ha podido actualizar la tarea",
@@ -921,6 +953,7 @@
     "copy_project_directory_path": "Copiar ruta del directorio del proyecto",
     "relations": "Relaciones",
     "create_sub_issue": "Crear subtarea",
+    "quick_actions": "Acciones rápidas",
     "set_parent_issue": "Establecer tarea principal...",
     "remove_parent_issue": "Quitar tarea principal",
     "remove_parent_issue_success": "Tarea principal quitada",
@@ -933,7 +966,8 @@
     "mark_unread": "Marcar como no leído",
     "copy_identifier": "Copiar identificador",
     "identifier_copied": "{{identifier}} copiado",
-    "stop_agent_run": "Detener la ejecución de {{name}}"
+    "stop_agent_run": "Detener la ejecución de {{name}}",
+    "open_in_new_window": "Abrir en una ventana nueva"
   },
   "pickers": {
     "custom_property": {
@@ -1029,7 +1063,7 @@
     "variant_my_any": "Cualquier relación",
     "variant_my_assigned": "Asignadas a mí",
     "variant_my_created": "Creadas por mí",
-    "variant_my_involved": "En las que participo"
+    "variant_my_involved": "Trabajo de mis agentes"
   },
   "plugins": {
     "panels": "Plugins",
@@ -1309,15 +1343,16 @@
       "enable": "Activada para esta tarea",
       "toggle": "Activar al asignado cuando terminen las subtareas",
       "save_error": "No se ha podido guardar la regla del sistema.",
-      "default_on": "Activada por defecto en este espacio de trabajo. Cambia el valor por defecto en Ajustes > Activaciones.",
-      "default_off": "Desactivada por defecto en este espacio de trabajo. Cambia el valor por defecto en Ajustes > Activaciones.",
+      "default_on": "Activada por defecto en este espacio de trabajo.",
+      "default_off": "Desactivada por defecto en este espacio de trabajo.",
       "notify_member": "Notificar a {{name}} en su bandeja de entrada",
       "instruction": "Qué hacer al activarse",
       "instruction_edit": "Editar instrucción",
       "instruction_default": "Sin definir en esta tarea; usa el valor por defecto:",
       "instruction_placeholder": "Déjalo vacío para usar el valor por defecto",
       "instruction_invalid": "Mantén la instrucción dentro de 4.000 bytes.",
-      "paused": "Pausada: {{reason}}"
+      "paused": "Pausada: {{reason}}",
+      "default_change": "Cambiar el valor por defecto"
     },
     "cond": {
       "status": "Cuando esta tarea pasa a {{status}}",
@@ -1772,16 +1807,13 @@
       "name_placeholder": "Nombre del estado",
       "add": "Añadir"
     },
-    "menu": {
-      "view_flow": "Ver el flujo completo",
-      "switch": "Cambiar de flujo de trabajo"
-    },
     "flow": {
       "title": "Flujo de trabajo {{workflow}}",
       "scope_own": "Solo este proyecto usa este flujo de trabajo.",
       "no_handoff_here": "Sin traspaso",
       "scope_shared_one": "{{count}} proyecto usa este flujo de trabajo. Sus traspasos se aplican a todos los proyectos que lo usan.",
-      "scope_shared_other": "{{count}} proyectos usan este flujo de trabajo. Sus traspasos se aplican a todos ellos."
+      "scope_shared_other": "{{count}} proyectos usan este flujo de trabajo. Sus traspasos se aplican a todos ellos.",
+      "switch": "Cambiar de flujo de trabajo"
     },
     "templates": {
       "delivery": {
@@ -1819,7 +1851,7 @@
   },
   "relation_filter_error": {
     "title": "No se ha podido cargar el filtro «Relación conmigo»",
-    "hint": "Las tareas filtradas por «Suscrito por mí» o «Asignadas a mis agentes» no se pueden mostrar hasta que se carguen tus suscripciones y agentes."
+    "hint": "Las tareas filtradas por «Suscrito por mí» o «Trabajo de mis agentes» no se pueden mostrar hasta que se carguen tus suscripciones y agentes."
   },
   "views": {
     "builtin": {
@@ -1920,7 +1952,9 @@
       "running": "En ejecución",
       "exited": "Terminado",
       "stopped": "Detenido",
-      "unreachable": "Sin respuesta"
+      "unreachable": "Sin respuesta",
+      "stopping": "Deteniendo",
+      "preparing": "Preparando"
     },
     "expires_in_minutes_one": "Caduca en {{count}} min",
     "expires_in_minutes_other": "Caduca en {{count}} min",
@@ -1939,6 +1973,87 @@
     "open": "Abrir",
     "copy_url": "Copiar URL",
     "copied": "URL copiada",
-    "copy_failed": "No se pudo copiar la URL"
+    "copy_failed": "No se pudo copiar la URL",
+    "offline": "Sin conexión",
+    "machine_offline": "{{machine}} está sin conexión",
+    "more_actions": "Más acciones",
+    "view_logs": "Ver registros",
+    "restart": "Reiniciar",
+    "stop": "Detener",
+    "stop_confirm_item": "Detener…",
+    "run_first": "la primera ejecución",
+    "run_nth_one": "la ejecución {{count}}",
+    "run_nth_other": "la ejecución {{count}}",
+    "someone": "Alguien",
+    "started_by": "Iniciado por {{name}}",
+    "restarted_by": "Reiniciado por {{name}}",
+    "started_by_agent_in_run": "Iniciado por {{name}} en {{run}}",
+    "stopped_by": "Detenido por {{name}}",
+    "stopped_on_expiry": "Detenido al caducar",
+    "exited_ago": "Terminó {{time}}",
+    "exit_code": "Código de salida {{code}}",
+    "detected_label": "Servicio detectado · {{name}}",
+    "detected_no_logs": "Este servicio no se inició desde la configuración de entornos, así que no tiene registros ni se puede reiniciar.",
+    "offline_hint": "Disponible cuando este equipo vuelva a estar en línea.",
+    "outdated_hint": "Actualiza Multica en este equipo para gestionarlo desde aquí.",
+    "no_permission_hint": "Solo los miembros que pueden usar este equipo pueden detenerlo o reiniciarlo.",
+    "waiting_machine": "Esperando al equipo",
+    "waiting_ready": "Esperando a que esté listo",
+    "no_response": "Sin respuesta",
+    "action_failed": {
+      "stop": "No se pudo detener",
+      "restart": "No se pudo reiniciar",
+      "start": "No se pudo iniciar"
+    },
+    "stop_confirm_title": "¿Detener {{name}}?",
+    "stop_confirm_body": "Este servicio ({{process}}) se detectó automáticamente; no se inició desde la configuración de entornos. Una vez detenido, no se puede reiniciar aquí: un agente tendrá que volver a iniciarlo.",
+    "cancel": "Cancelar",
+    "preparing_title": "{{name}} está preparando el entorno",
+    "preparing_hint": "Aparecerá aquí cuando se inicie",
+    "start_menu": {
+      "trigger": "Iniciar un entorno",
+      "note": "Se inicia según la configuración de entornos del proyecto, con el código de la última ejecución en este equipo.",
+      "no_permission": "Solo los miembros que pueden usar un equipo pueden iniciar entornos en él.",
+      "nothing_to_start": "Esta tarea aún no se ha ejecutado, o el código de ejecuciones anteriores se ha limpiado, así que no hay nada que iniciar directamente.",
+      "ask_agent": "Pedir a {{name}} que lo inicie",
+      "ask_any_agent": "Pedir a un agente que lo inicie",
+      "new_run": "Nueva ejecución",
+      "preparing": "Preparando",
+      "ask_agent_hint": "{{name}} preparará el código de esta tarea y luego iniciará el entorno. Si el proyecto no tiene configuración de entornos, decidirá cómo iniciarlo.",
+      "ask_any_agent_hint": "El agente preparará el código de esta tarea y luego iniciará el entorno. Si el proyecto no tiene configuración de entornos, decidirá cómo iniciarlo.",
+      "ask_failed": "No se pudo pedir al agente",
+      "agent_instruction": "Inicia el entorno: prepara el código de esta tarea y ejecuta `multica env start` para los entornos que declara el proyecto; si no declara ninguno, decide tú cómo iniciarlo. Déjalo en marcha y responde con su dirección."
+    },
+    "log": {
+      "title": "{{name}} · Registros",
+      "filter": "Filtrar registros",
+      "wrap": "Ajustar líneas",
+      "follow": "Seguir lo último",
+      "copy": "Copiar",
+      "copied": "Registros copiados",
+      "copy_failed": "No se pudieron copiar los registros",
+      "refresh": "Actualizar",
+      "footer_one": "Mostrando la última línea · actualizado a las {{time}}",
+      "footer_other": "Mostrando las últimas {{count}} líneas · actualizado a las {{time}}",
+      "loading": "Leyendo los registros…",
+      "empty": "Todavía no hay salida",
+      "no_match": "Ninguna línea coincide",
+      "no_response": "El equipo no respondió",
+      "failed": "No se pudieron leer los registros: {{error}}",
+      "offline_excerpt": "Este equipo está sin conexión. Estas son las últimas líneas que imprimió antes de terminar.",
+      "offline_empty": "Los registros estarán disponibles cuando este equipo vuelva a estar en línea.",
+      "exit_divider": "Terminó a las {{time}}",
+      "exit_divider_code": "Terminó a las {{time}} · código de salida {{code}}",
+      "stopped_divider": "Detenido a las {{time}}"
+    },
+    "app_desktop_hint": "Una app de escritorio. Cambia a su ventana desde Multica Desktop en la máquina que la ejecuta.",
+    "app_remote_hint": "Se ejecuta en {{machine}}. Cambia a su ventana desde Multica Desktop en esa máquina.",
+    "focus": "Ir a la ventana",
+    "focus_gone": "{{name}} ya no se está ejecutando",
+    "focus_unsupported": "El daemon de esta máquina aún no puede cambiar a ventanas de apps. Actualiza Multica e inténtalo de nuevo.",
+    "focus_unavailable": "El daemon local no se está ejecutando",
+    "focus_failed": "No se pudo cambiar a {{name}}",
+    "retry": "Reintentar",
+    "dismiss": "Descartar"
   }
 }

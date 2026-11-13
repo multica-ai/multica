@@ -75,7 +75,7 @@ function section(name: ThemeVariableSection, entries: readonly Entry[]): ThemeVa
 }
 
 const COLORS: Entry[] = [
-  ["app-shell", "The frame around the page: rail, desktop toolbar and tab bar."],
+  ["app-shell", "The frame around the page: rail, bottom bar, desktop toolbar and tab bar."],
   ["page-canvas", "The page that lists, boards and conversations sit on."],
   ["surface", "Bounded content groups: cards, board cards, panels."],
   ["surface-foreground", "Text on a surface."],
@@ -90,7 +90,7 @@ const COLORS: Entry[] = [
   ["card-foreground", "Text on a card."],
   ["popover", "Shadcn alias; follows `surface-raised` unless set."],
   ["popover-foreground", "Text in menus and popovers."],
-  ["primary", "Primary buttons and strong marks; also used as text."],
+  ["primary", "Primary buttons and strong marks; also used as text. Fills switches that are on unless `switch-checked-background` is set."],
   ["primary-foreground", "Text on primary."],
   ["secondary", "Secondary buttons."],
   ["secondary-foreground", "Text on secondary."],
@@ -100,7 +100,7 @@ const COLORS: Entry[] = [
   ["accent", "Hover fill in menus and lists."],
   ["accent-foreground", "Text on accent."],
   ["border", "Dividers and table borders."],
-  ["input", "Input borders."],
+  ["input", "Input borders. Also fills pressed display chips and switches that are off, unless `display-chip-pressed-background` and `switch-unchecked-background` are set."],
   ["ring", "Focus ring."],
   ["sidebar", "Sidebar background (shadcn sidebar)."],
   ["sidebar-foreground", "Sidebar text."],
@@ -145,6 +145,9 @@ const STATUS: Entry[] = [
   ["priority-medium", "Medium priority icon and badge.", "var(--warning)"],
   ["priority-low", "Low priority icon and badge.", "var(--info)"],
   ["priority-none", "No-priority icon.", "var(--muted-foreground)"],
+  ["pr-open", "Open pull request icon.", "oklch(59.6% 0.145 163.225)", "oklch(76.5% 0.177 163.223)"],
+  ["pr-merged", "Merged pull request icon and pill. The pill's text defaults one shade darker in light mode.", "oklch(54.1% 0.281 293.009)", "oklch(70.2% 0.183 293.541)"],
+  ["pr-closed", "Closed pull request icon.", "oklch(58.6% 0.253 17.585)", "oklch(71.2% 0.194 13.428)"],
 ];
 
 const SHAPE: Entry[] = [
@@ -153,6 +156,7 @@ const SHAPE: Entry[] = [
   ["floating-shadow", "Dialogs and sheets."],
   ["menu-shadow", "Menus, selects and popovers."],
   ["tooltip", "Tooltip fill (dark in both modes)."],
+  ["tooltip-foreground", "Tooltip text. Unset, it is the app's dark-mode `--foreground` in both modes, whatever the theme sets on `.theme-dark`.", "var(--foreground)"],
   ["tooltip-shadow", "Tooltip shadow."],
   ["icon-stroke-width", "Stroke width of line icons.", "2"],
 ];
@@ -208,7 +212,15 @@ const CONTROLS: Entry[] = [
   ["menu-item-radius", "Items inside a menu.", "calc(var(--radius) * 0.75)"],
   ["menu-item-hover-background", "Highlighted menu item.", "var(--accent)"],
   ["menu-item-hover-color", "Text of the highlighted menu item.", "var(--accent-foreground)"],
+  ["display-chip-pressed-background", "Fill of a pressed on/off chip in the Display and sidebar settings popovers.", "var(--input)"],
+  ["display-chip-pressed-color", "Text of a pressed display chip.", "var(--foreground)"],
+  ["switch-checked-background", "Track of a switch that is on.", "var(--primary)"],
+  ["switch-unchecked-background", "Track of a switch that is off.", "var(--input)", "color-mix(in oklab, var(--input) 80%, transparent)"],
+  ["switch-checked-thumb", "Thumb of a switch that is on.", "var(--background)", "var(--primary-foreground)"],
+  ["switch-unchecked-thumb", "Thumb of a switch that is off.", "var(--background)", "var(--foreground)"],
+  ["switch-border-color", "Outline of a switch, on or off.", "transparent"],
   ["popover-radius", "Popovers.", "var(--radius)"],
+  ["floating-border-color", "Hairline around layers that float over the page without a backdrop: menus, popovers, select lists and floating panels.", "color-mix(in oklab, var(--surface-border), var(--foreground) 6%)"],
   ["dialog-radius", "Dialogs and alert dialogs.", "calc(var(--radius) * 1.5)"],
   ["tooltip-radius", "Tooltips.", "var(--radius)"],
   ["avatar-radius", "Avatars. Set a length for square avatars.", "calc(infinity * 1px)"],

@@ -1,6 +1,7 @@
 import reactConfig from "@multica/eslint-config/react";
 import { ICON_LIBRARY_IMPORT_PATTERNS, REDUCED_MOTION_IMPORT } from "@multica/eslint-config/base";
 import { NO_ROUND_CONTROLS } from "@multica/eslint-config/control-shape";
+import { NO_FULL_PAGE_NAVIGATION } from "@multica/eslint-config/full-page-navigation";
 import i18next from "eslint-plugin-i18next";
 import {
   NO_UNTRANSLATED_ATTRIBUTES,
@@ -46,6 +47,7 @@ export default [
         NO_UNTRANSLATED_ATTRIBUTES,
         NO_UNTRANSLATED_TOAST,
         NO_ROUND_CONTROLS,
+        NO_FULL_PAGE_NAVIGATION,
       ],
       "no-restricted-imports": [
         "error",
@@ -54,6 +56,15 @@ export default [
           patterns: ICON_LIBRARY_IMPORT_PATTERNS,
         },
       ],
+    },
+  },
+  {
+    // The dev toolbar only exists in development builds and speaks to the
+    // people building Multica, so its copy is not translated.
+    files: ["dev-toolbar/**/*.{ts,tsx}"],
+    rules: {
+      "i18next/no-literal-string": "off",
+      "no-restricted-syntax": ["error", NO_ROUND_CONTROLS, NO_FULL_PAGE_NAVIGATION],
     },
   },
 ];

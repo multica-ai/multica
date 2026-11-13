@@ -400,7 +400,7 @@ func (h *Handler) queryIssueTableRows(w http.ResponseWriter, r *http.Request, re
 
 	query := fmt.Sprintf(`%s
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
-       i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
+       i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.requester_user_id,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at,
 	       i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
 	       i.revision, i.duplicate_of_issue_id,
@@ -435,6 +435,7 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 			&row.issue.AssigneeID,
 			&row.issue.CreatorType,
 			&row.issue.CreatorID,
+			&row.issue.RequesterUserID,
 			&row.issue.ParentIssueID,
 			&row.issue.Position,
 			&row.issue.StartDate,
@@ -519,7 +520,7 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 	labelsByIssue := baseHandler.labelsByIssue(r.Context(), compiled.workspaceID, issueIDs)
 	// One Resolver and one originals read for the page — see
 	// newStatusCategoryFiller. (MUL-6243, MUL-7349)
-	fillTableRow := baseHandler.newStatusCategoryFiller(r.Context(), compiled.workspaceID, originals...)
+	fillTableRow := baseHandler.newStatusCategoryFiller(r.Context(), compiled.workspaceID, compiled.hidden, originals...)
 	responseRows := make([]issueTableRowResponse, len(scanned))
 	for index, row := range scanned {
 		issue := issueListRowToResponse(row.issue, prefix)

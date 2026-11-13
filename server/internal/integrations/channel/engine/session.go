@@ -224,17 +224,6 @@ type SessionTitles struct {
 	Fallback string
 }
 
-func (t SessionTitles) forType(ct channel.ChatType) string {
-	switch ct {
-	case channel.ChatTypeGroup:
-		return t.Group
-	case channel.ChatTypeP2P:
-		return t.Direct
-	default:
-		return t.Fallback
-	}
-}
-
 // ChatSession is the shared chat-session service. One instance is built per
 // channel_type (so the binding rows carry the right discriminator); the logic
 // is otherwise platform-neutral.

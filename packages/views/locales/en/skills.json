@@ -97,9 +97,7 @@
     "section_labels": "Labels",
     "filter_search_placeholder": "Filter...",
     "no_labels": "No labels yet",
-    "no_results": "No results",
-    "manage_labels": "Manage labels...",
-    "manage_labels_title": "Skill labels"
+    "no_results": "No results"
   },
   "detail": {
     "read_only": "Read-only",
@@ -254,15 +252,9 @@
     }
   },
   "create": {
-    "back": "Back",
-    "back_aria": "Back to method chooser",
     "close": "Close",
     "close_aria": "Close",
     "method": {
-      "chooser": {
-        "title": "New skill",
-        "desc": "Choose how to add a skill to this workspace."
-      },
       "manual": {
         "title": "Create manually",
         "desc": "Start from a blank SKILL.md."

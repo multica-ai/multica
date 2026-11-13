@@ -186,6 +186,10 @@ const (
 	PendingWorkKindModelList        = "model_list"
 	PendingWorkKindLocalSkills      = "local_skills"
 	PendingWorkKindLocalSkillImport = "local_skill_import"
+	// PendingWorkKindEnvironmentCommand asks a daemon that supports it to claim
+	// its queued environment commands instead of heartbeating. Older daemons
+	// heartbeat as for any kind, which claims nothing.
+	PendingWorkKindEnvironmentCommand = "environment_command"
 )
 
 // PendingWorkPayload is sent from server to daemon as a wakeup hint when a
@@ -329,6 +333,22 @@ type ChatDonePayload struct {
 	// follow for this turn (render a placeholder). Never true when
 	// QuickActions is already populated.
 	QuickActionsPending bool `json:"quick_actions_pending,omitempty"`
+	// Present only for a completed direct-chat reply eligible for an OS alert.
+	// Older clients ignore it; older servers omit it without affecting chat.
+	Notification *ChatReplyNotification `json:"notification,omitempty"`
+}
+
+type ChatReplyNotification struct {
+	WorkspaceID string `json:"workspace_id"`
+	Title       string `json:"title"`
+}
+
+type ChatReplyNotificationPayload struct {
+	WorkspaceID   string `json:"workspace_id"`
+	ChatSessionID string `json:"chat_session_id"`
+	MessageID     string `json:"message_id"`
+	Title         string `json:"title"`
+	Body          string `json:"body"`
 }
 
 // Outcome values carried by ChatCancelFinalizedPayload.

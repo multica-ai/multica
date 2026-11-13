@@ -11,9 +11,11 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
@@ -517,6 +519,9 @@ type Daemon struct {
 	// daemon tracks a handful of workspaces, and a mutex for a workspace that
 	// went away is a few bytes, not a leak worth a lifecycle.
 	registerSerial sync.Map
+
+	// Unowned directories remain untouched; warn once per path per daemon.
+	gcUnownedWarnings sync.Map
 
 	// agentsAvailable holds the current built-in agent CLI availability set —
 	// the same shape as cfg.Agents, which it supersedes as the read path.
@@ -1230,7 +1235,7 @@ func (d *Daemon) adoptAgentPath(ctx context.Context, provider, command, newPath,
 	// older or broken install must not be launched under the daemon's stale
 	// version policy, and must not slip past the minimum-version gate that the
 	// registration path applies (MUL-4486 review).
-	version, err := detectAgentVersion(ctx, agent.Command{Path: newPath})
+	version, err := detectAgentVersion(ctx, agent.Command{Path: newPath}.ForVersionProbe(provider))
 	if err != nil {
 		d.logger.Warn("re-resolved agent executable failed version detection; keeping pinned path",
 			"provider", provider, "command", command, "new_path", newPath, "error", err)
@@ -2619,7 +2624,7 @@ probeLoop:
 				"name", name, "version", heal.rejected.Detected, "error", heal.rejected.Error())
 			return heal.rejected.Detected, heal.rejected.Error(), builtinProbeBelowMinimum
 		}
-		version, err := detectAgentVersion(ctx, agent.Command{Path: resolved.Path})
+		version, err := detectAgentVersion(ctx, agent.Command{Path: resolved.Path}.ForVersionProbe(name))
 		if err != nil {
 			lastErr = err
 			if time.Since(startedAt) >= runtimeVersionProbeRetryWindow {
@@ -3193,7 +3198,7 @@ func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, 
 		// wrapper's, and only the former means anything to the min-version
 		// gate (GH #7046).
 		version, verErr := detectAgentVersion(ctx, agent.NewCommand(resolved,
-			agent.FilterLaunchPrefix(runtimeType, profile.FixedArgs, d.logger)))
+			agent.FilterLaunchPrefix(runtimeType, profile.FixedArgs, d.logger)).ForVersionProbe(runtimeType))
 		if verErr != nil {
 			d.logger.Debug("custom runtime profile: version probe failed (registering with empty version)",
 				"workspace_id", workspaceID, "profile_id", profile.ID, "path", resolved, "error", verErr)
@@ -3277,20 +3282,95 @@ func repoAllowlist(repos []RepoData) map[string]struct{} {
 	return allowed
 }
 
-func (d *Daemon) workspaceRepoAllowed(workspaceID, repoURL string) bool {
+// defaultGitPorts are the ports implied when a URL form omits one. A port
+// that differs from the scheme default can name a different server, so it
+// stays part of the identity.
+var defaultGitPorts = map[string]string{
+	"http": "80", "https": "443", "ssh": "22", "git": "9418",
+}
+
+// repoIdentity is the protocol-agnostic host+path identity of a clone URL,
+// so http, ssh, and scp-shorthand forms of the same repository compare
+// equal. Hosts are case-insensitive; repository paths are not guaranteed to
+// be, so path casing is preserved. It mirrors repositoryIdentity in
+// packages/views/settings/components/repositories-section.tsx — the two must
+// not drift, or a repo the UI refuses to add as a duplicate could still
+// bypass (or be rejected by) the daemon allowlist. An unparseable URL keeps
+// no identity and only ever matches by exact string.
+func repoIdentity(rawURL string) string {
+	value := strings.TrimSpace(rawURL)
+	if value == "" {
+		return ""
+	}
+
+	host := ""
+	path := ""
+	if !strings.Contains(value, "://") {
+		if m := scpLikeURL.FindStringSubmatch(value); m != nil {
+			host = m[1]
+			path = m[2]
+		}
+	}
+	if host == "" {
+		parsed, err := url.Parse(value)
+		if err != nil || parsed.Hostname() == "" {
+			return ""
+		}
+		host = parsed.Hostname()
+		if port := parsed.Port(); port != "" && port != defaultGitPorts[parsed.Scheme] {
+			host = host + ":" + port
+		}
+		path = parsed.Path
+	}
+
+	normalizedPath := strings.Trim(path, "/")
+	if len(normalizedPath) > 4 && strings.EqualFold(normalizedPath[len(normalizedPath)-4:], ".git") {
+		normalizedPath = normalizedPath[:len(normalizedPath)-4]
+	}
+	if normalizedPath == "" {
+		return ""
+	}
+	return strings.ToLower(host) + "/" + normalizedPath
+}
+
+var scpLikeURL = regexp.MustCompile(`^(?:[^@\s/]+@)?([^:\s/]+):(.+)$`)
+
+// resolveWorkspaceRepoURL returns the registered URL to use for cache and
+// checkout operations. Exact matches take precedence across both sources;
+// aliases prefer workspace bindings, then task repositories.
+func (d *Daemon) resolveWorkspaceRepoURL(workspaceID, repoURL string) string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	ws, ok := d.workspaces[workspaceID]
 	if !ok {
-		return false
+		return ""
 	}
 	if _, allowed := ws.allowedRepoURLs[repoURL]; allowed {
-		return true
+		return repoURL
 	}
 	if _, allowed := ws.taskRepoURLs[repoURL]; allowed {
-		return true
+		return repoURL
 	}
-	return false
+	identity := repoIdentity(repoURL)
+	if registeredURL := repoURLForIdentity(ws.allowedRepoURLs, identity); registeredURL != "" {
+		return registeredURL
+	}
+	return repoURLForIdentity(ws.taskRepoURLs, identity)
+}
+
+// Legacy bindings and task repositories can contain equivalent URLs. Choose
+// lexically within a source so map iteration cannot change the remote or ref.
+func repoURLForIdentity[V any](repos map[string]V, identity string) string {
+	if identity == "" {
+		return ""
+	}
+	match := ""
+	for url := range repos {
+		if repoIdentity(url) == identity && (match == "" || url < match) {
+			match = url
+		}
+	}
+	return match
 }
 
 // repoBarePathIsLive reports whether some watched workspace still claims the
@@ -3301,7 +3381,7 @@ func (d *Daemon) workspaceRepoAllowed(workspaceID, repoURL string) bool {
 // stale while the caller runs git and filesystem work on each repo in turn,
 // which is exactly the window in which a workspace can re-attach one.
 //
-// It mirrors workspaceRepoAllowed by unioning both sources: allowedRepoURLs
+// It mirrors resolveWorkspaceRepoURL by unioning both sources: allowedRepoURLs
 // (workspace-level bindings) and taskRepoURLs (project repos the server
 // surfaced through a task claim, which never appear in GetWorkspaceRepos).
 // Missing the second set would make the GC evict repos that tasks actively
@@ -3452,7 +3532,13 @@ func (d *Daemon) taskRepoDefaultRef(workspaceID, taskID, repoURL string) string 
 	if !ok || ws.taskRepoRefs == nil {
 		return ""
 	}
-	return strings.TrimSpace(ws.taskRepoRefs[taskID][repoURL])
+	refs := ws.taskRepoRefs[taskID]
+	if ref, ok := refs[repoURL]; ok {
+		return strings.TrimSpace(ref)
+	}
+	// A workspace binding and the current task can name the same repository
+	// differently. Resolving the cache URL must not lose the task's ref.
+	return strings.TrimSpace(refs[repoURLForIdentity(refs, repoIdentity(repoURL))])
 }
 
 func (d *Daemon) clearTaskRepoRefs(workspaceID, taskID string) {
@@ -3946,9 +4032,11 @@ func (d *Daemon) convergeWorkspaceRuntimesToZero(ctx context.Context, workspaceI
 	return nil
 }
 
-func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL string) error {
+// ensureRepoReady returns the registered URL after refreshing authorization
+// and preparing its cache. Callers must carry that URL through the checkout.
+func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL string) (string, error) {
 	if d.repoCache == nil {
-		return fmt.Errorf("repo cache not initialized")
+		return "", fmt.Errorf("repo cache not initialized")
 	}
 
 	repoURL = strings.TrimSpace(repoURL)
@@ -3957,7 +4045,7 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 	ws, ok := d.workspaces[workspaceID]
 	d.mu.Unlock()
 	if !ok {
-		return fmt.Errorf("workspace is not watched by this daemon: %s", workspaceID)
+		return "", fmt.Errorf("workspace is not watched by this daemon: %s", workspaceID)
 	}
 
 	// Record whether the cache already had this repo before we took the
@@ -3974,44 +4062,47 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 	//     a sibling goroutine on a concurrent cold-miss already refreshed
 	//     and populated the cache. We can skip the duplicate refresh — the
 	//     sibling's refresh is fresh enough for our gate read.
-	cacheHitOnEntry := d.workspaceRepoAllowed(workspaceID, repoURL) && d.repoCache.Lookup(workspaceID, repoURL) != ""
+	registeredURL := d.resolveWorkspaceRepoURL(workspaceID, repoURL)
+	cacheHitOnEntry := registeredURL != "" && d.repoCache.Lookup(workspaceID, registeredURL) != ""
 
 	if err := ws.repoRefreshMu.Lock(ctx); err != nil {
-		return err
+		return "", err
 	}
 	defer ws.repoRefreshMu.Unlock()
 
-	if !cacheHitOnEntry && d.workspaceRepoAllowed(workspaceID, repoURL) && d.repoCache.Lookup(workspaceID, repoURL) != "" {
-		return nil
+	registeredURL = d.resolveWorkspaceRepoURL(workspaceID, repoURL)
+	if !cacheHitOnEntry && registeredURL != "" && d.repoCache.Lookup(workspaceID, registeredURL) != "" {
+		return registeredURL, nil
 	}
 
 	resp, err := d.refreshWorkspaceRepos(ctx, workspaceID)
 	if err != nil {
-		return fmt.Errorf("refresh workspace repos: %w", err)
+		return "", fmt.Errorf("refresh workspace repos: %w", err)
 	}
 
-	if !d.workspaceRepoAllowed(workspaceID, repoURL) {
-		return ErrRepoNotConfigured
+	registeredURL = d.resolveWorkspaceRepoURL(workspaceID, repoURL)
+	if registeredURL == "" {
+		return "", ErrRepoNotConfigured
 	}
 
-	if d.repoCache.Lookup(workspaceID, repoURL) != "" {
-		return nil
+	if d.repoCache.Lookup(workspaceID, registeredURL) != "" {
+		return registeredURL, nil
 	}
 
 	syncErr := d.syncWorkspaceReposContext(ctx, workspaceID, resp.Repos)
 	if err := ctx.Err(); err != nil {
-		return context.Cause(ctx)
+		return "", context.Cause(ctx)
 	}
 
-	if d.repoCache.Lookup(workspaceID, repoURL) != "" {
-		return nil
+	if d.repoCache.Lookup(workspaceID, registeredURL) != "" {
+		return registeredURL, nil
 	}
 
 	if syncErr != nil {
-		return fmt.Errorf("repo is configured but not synced: %w", syncErr)
+		return "", fmt.Errorf("repo is configured but not synced: %w", syncErr)
 	}
 
-	return fmt.Errorf("repo is configured but not synced")
+	return "", fmt.Errorf("repo is configured but not synced")
 }
 
 // DefaultTokenRenewalInterval is how often the daemon asks the server to
@@ -4649,6 +4740,14 @@ func (d *Daemon) handlePendingWorkHint(runtimeID, kind string) {
 		// Not one of ours (stale relay fanout, or the runtime was just pruned).
 		return
 	}
+	// Environment commands have their own claim, and are answered by a member
+	// waiting in the sidebar, so they skip the heartbeat and its rate limit.
+	if kind == protocol.PendingWorkKindEnvironmentCommand {
+		if ctx := d.recoveryContext(); ctx.Err() == nil {
+			d.environments.claimCommands(ctx, runtimeID)
+		}
+		return
+	}
 
 	d.pendingWorkMu.Lock()
 	if d.pendingWorkInflight == nil {
@@ -4773,7 +4872,7 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 	}
 	models := catalog.Models
 	if catalog.Fallback {
-		d.logger.Warn("model discovery fell back to a static catalog; reporting it as non-authoritative",
+		d.logger.Warn("model discovery incomplete; reporting the catalog as non-authoritative",
 			"runtime_id", rt.ID, "provider", rt.Provider, "path", execPath, "count", len(models))
 	}
 	if rt.Provider == "codearts" && len(models) == 0 {
@@ -5994,6 +6093,9 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 			}
 			if err := execenv.WriteGCMeta(result.EnvRoot, meta, taskLog); err != nil {
 				taskLog.Warn("write gc meta failed (non-fatal)", "error", err)
+			}
+			if meta.Kind == execenv.GCKindIssue && !meta.LocalDirectory {
+				d.environments.reportDeclared(ctx, task.ID, result.EnvRoot)
 			}
 		}
 	}
@@ -7351,7 +7453,8 @@ func formatBytes(n int64) string {
 		return "unknown size"
 	case n < 1024:
 		return fmt.Sprintf("%d B", n)
-	case n < 1024*1024:
+	case n < 1024*1024-512:
+		// Sizes from 1023.5 KB up round to "1024 KB", so they print in MB.
 		return fmt.Sprintf("%.0f KB", float64(n)/1024)
 	default:
 		return fmt.Sprintf("%.2f MB", float64(n)/(1024*1024))
@@ -8711,6 +8814,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Build the runtime brief and inject it into the provider-specific
 	// instruction file when supported.
 	runtimeBrief, err := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx)
+	runtimeBriefWritten := err == nil
 	if err != nil {
 		d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", err)
 	}
@@ -8912,6 +9016,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			return TaskResult{}, fmt.Errorf("prepare fresh OpenCode session after clock check: %w", briefErr)
 		} else {
 			runtimeBrief = freshBrief
+			runtimeBriefWritten = true
 		}
 		prompt = BuildPrompt(task, provider, promptOptions...)
 	}
@@ -9098,6 +9203,26 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"idle_watchdog", execOpts.IdleWatchdogTimeout,
 	)
 
+	// MUL-9013: record what this run is being handed, before it starts, so a
+	// run that dies early still has a receipt. Rebuilt for the cold retry.
+	receiptInput := contextReceiptInput{
+		Provider:             provider,
+		RuntimeVersion:       resolvedVersion,
+		CustomRuntime:        usesCustomProfileCommand,
+		Model:                model,
+		WorkDir:              env.WorkDir,
+		Prompt:               prompt,
+		RuntimeBrief:         runtimeBrief,
+		InlineBrief:          execOpts.SystemPrompt != "",
+		BriefWritten:         runtimeBriefWritten,
+		ResumedSession:       execOpts.ResumeSessionID != "",
+		MCPConfig:            mcpConfig,
+		TaskCtx:              taskCtx,
+		Skills:               env.SkillReceipts(provider, taskCtx.AgentSkills),
+		ExistingInstructions: execenv.ExistingRuntimeConfigContent(env.WorkDir, provider),
+	}
+	d.reportContextReceipt(ctx, task.ID, buildContextReceipt(receiptInput), taskLog)
+
 	// Shared across the resume-retry below so the retry's transcript rows
 	// keep ascending seq values for the same task.
 	var msgSeq atomic.Int32
@@ -9159,15 +9284,33 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		task.PriorSessionResumeUnavailable = true
 		execOpts.ResumeContinuityNotice = ""
 		taskCtx.PriorSessionResumed = false
-		if freshBrief, briefErr := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx); briefErr != nil {
+		runtimeBriefWritten = false
+		freshBrief, briefErr := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx)
+		if briefErr != nil {
 			taskLog.Warn("execenv: re-inject cold runtime config for fresh retry failed (non-fatal)", "error", briefErr)
 		} else {
 			runtimeBrief = freshBrief
+			runtimeBriefWritten = true
 			if providerNeedsInlineSystemPrompt(provider) {
 				execOpts.SystemPrompt = runtimeBrief
 			}
 		}
 		freshPrompt := BuildPrompt(task, provider, promptOptions...)
+
+		receiptInput.Prompt = freshPrompt
+		receiptInput.RuntimeBrief = freshBrief
+		receiptInput.InlineBrief = execOpts.SystemPrompt != ""
+		if receiptInput.InlineBrief {
+			// A failed file rewrite leaves the prior inline payload in use.
+			receiptInput.RuntimeBrief = execOpts.SystemPrompt
+		}
+		receiptInput.BriefWritten = runtimeBriefWritten
+		receiptInput.ResumedSession = false
+		receiptInput.FreshRetry = true
+		receiptInput.TaskCtx = taskCtx
+		receiptInput.Skills = env.SkillReceipts(provider, taskCtx.AgentSkills)
+		receiptInput.ExistingInstructions = execenv.ExistingRuntimeConfigContent(env.WorkDir, provider)
+		d.reportContextReceipt(ctx, task.ID, buildContextReceipt(receiptInput), taskLog)
 
 		retryResult, retryTools, retryErr := d.executeAndDrain(ctx, backend, freshPrompt, withPriorTaskUsage(execOpts, firstUsage), taskLog, task.ID, env.CodexHome, &msgSeq)
 		if retryErr != nil {
@@ -9560,7 +9703,7 @@ func shouldRetryWithFreshSession(result agent.Result, priorSessionID string, too
 	if !agent.ResumeRejectionUndetectable(provider) {
 		return false
 	}
-	// antigravity, codearts, copilot, cursor, deveco and opencode scrape SessionID out
+	// antigravity, codearts, copilot, cursor, deveco, droid and opencode scrape SessionID out
 	// of stream output and have no rejection string captured anywhere, so an
 	// empty SessionID is the only thing they can offer. It proves no session
 	// was established this run, which is exactly what the gate relied on for
@@ -11219,6 +11362,10 @@ func defaultArgsForProvider(cfg Config, provider string) []string {
 		args = cfg.CodebuddyArgs
 	case "qwen":
 		args = cfg.QwenArgs
+	case "droid":
+		args = cfg.DroidArgs
+	case "amp":
+		args = cfg.AmpArgs
 	case "qwenpaw":
 		args = cfg.QwenpawArgs
 	default:
