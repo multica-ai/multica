@@ -448,10 +448,11 @@ function main() {
     const stagedCli = resolve(desktopRoot, "resources", "bin", binary);
     const artifact = statSync(stagedCli, { throwIfNoEntry: false });
     if (!artifact?.isFile() || artifact.size === 0) {
-      throw new Error(
-        `Packaging ${formatTarget(target)} requires a bundled CLI at ${stagedCli}. ` +
+      console.error(
+        `[package] Packaging ${formatTarget(target)} requires a bundled CLI at ${stagedCli}. ` +
           "Install Go or provide a prebuilt CLI for the target.",
       );
+      process.exit(1);
     }
 
     const builderArgs = builderArgsForTarget(target, parsed, version, {
