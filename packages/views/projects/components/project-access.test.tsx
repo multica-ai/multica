@@ -48,11 +48,18 @@ beforeEach(() => {
 });
 afterEach(() => { qc.clear(); });
 
-it("does not show the agent hint or load agents for workspace-visible projects", async () => {
+it("shows both access notices only when project-members visibility is selected", async () => {
   const user = userEvent.setup();
   renderControl({ ...project, visibility: "workspace" });
   await user.click(screen.getByRole("button", { name: "Access" }));
-  await screen.findByText(/owners and admins always have access/);
+  expect(await screen.findByRole("radio", { name: "Entire workspace" })).toBeChecked();
+  expect(screen.queryByText(/owners and admins always have access/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/Agents follow their owner/)).not.toBeInTheDocument();
+  await user.click(screen.getByRole("radio", { name: "Project members only" }));
+  expect(screen.getByText(/owners and admins always have access/)).toBeVisible();
+  expect(screen.getByText(/Agents follow their owner/)).toBeVisible();
+  await user.click(screen.getByRole("radio", { name: "Entire workspace" }));
+  expect(screen.queryByText(/owners and admins always have access/)).not.toBeInTheDocument();
   expect(screen.queryByText(/Agents follow their owner/)).not.toBeInTheDocument();
   expect(api.listAgents).not.toHaveBeenCalled();
 });
