@@ -383,10 +383,31 @@ describe("useTabStore actions", () => {
       store.addTab("/acme/projects", "B");
       store.addTab("/acme/skills", "C");
 
-      store.openTab("/acme/skills", "C again"); // hits C, at the far end
+      store.openTab("/acme/skills", "C again", { activate: true }); // hits C, at the far end
       const s = useTabStore.getState();
       expect(urls()).toEqual(["/acme/issues", "/acme/projects", "/acme/skills"]);
       expect(getActiveTab(s)?.url).toBe("/acme/skills");
+    });
+
+    it("a background dedupe hit keeps the active tab and flags the existing one", () => {
+      const store = useTabStore.getState();
+      store.switchWorkspace("acme"); // A active
+      const activeId = useTabStore.getState().byWorkspace.acme.activeTabId;
+      const skillsId = store.addTab("/acme/skills", "C");
+      const before = useTabStore.getState().byWorkspace.acme;
+
+      expect(store.openTab("/acme/skills", "C again")).toBe(skillsId);
+      expect(store.openTab("/acme/skills", "C again")).toBe(skillsId);
+
+      const s = useTabStore.getState();
+      expect(s.byWorkspace.acme).toBe(before); // no switch, no history visit
+      expect(getActiveTab(s)?.id).toBe(activeId);
+      expect(s.tabAttention).toEqual({ tabId: skillsId, sequence: 2 });
+
+      store.clearTabAttention(1); // a stale flash finishing keeps the newer signal
+      expect(useTabStore.getState().tabAttention?.sequence).toBe(2);
+      store.clearTabAttention(2);
+      expect(useTabStore.getState().tabAttention).toBeNull();
     });
   });
 

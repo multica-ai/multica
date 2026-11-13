@@ -173,6 +173,16 @@ interface TabStore {
    * Deliberately NOT persisted.
    */
   mountGeneration: number;
+  /**
+   * Bumped when a background open (Cmd/middle-click) lands on a tab that
+   * already shows the resource. The open must not move the user, so instead
+   * of activating that tab the tab bar flashes it. Not persisted; the tab
+   * bar clears it once the flash has played, so a later remount or effect
+   * re-run cannot replay it.
+   */
+  tabAttention: { tabId: string; sequence: number } | null;
+  /** Drop the attention signal, unless a newer one has replaced it. */
+  clearTabAttention: (sequence: number) => void;
 
   /**
    * Switch to a workspace.
@@ -818,6 +828,7 @@ export const useTabStore = create<TabStore>()(
       activeWorkspaceSlug: null,
       byWorkspace: {},
       mountGeneration: 0,
+      tabAttention: null,
 
       switchWorkspace(slug, openPath) {
         // Defensive no-op if slug is empty/invalid — callers like the
@@ -922,6 +933,17 @@ export const useTabStore = create<TabStore>()(
         // Dedup by resourceKey: the existing tab keeps its own url (its
         // filters/anchor are its view state); we only focus it.
         const existing = findTabForUrl(group, clean);
+        if (existing && opts?.activate !== true) {
+          // A background open keeps the user where they are: point at the
+          // tab already showing the resource instead of switching to it.
+          set({
+            tabAttention: {
+              tabId: existing.id,
+              sequence: (get().tabAttention?.sequence ?? 0) + 1,
+            },
+          });
+          return existing.id;
+        }
         if (existing) {
           const historyBase = withActiveSessionVisit(
             group,
@@ -1118,6 +1140,11 @@ export const useTabStore = create<TabStore>()(
         const nextGroup = withIssueAlias(group, uuid, identifier);
         if (nextGroup === group) return;
         set({ byWorkspace: { ...byWorkspace, [slug]: nextGroup } });
+      },
+
+      clearTabAttention(sequence) {
+        if (get().tabAttention?.sequence !== sequence) return;
+        set({ tabAttention: null });
       },
 
       navigateActiveSession(url, opts) {
@@ -1399,7 +1426,12 @@ export const useTabStore = create<TabStore>()(
       },
 
       reset() {
-        set({ activeWorkspaceSlug: null, byWorkspace: {}, mountGeneration: 0 });
+        set({
+          activeWorkspaceSlug: null,
+          byWorkspace: {},
+          mountGeneration: 0,
+          tabAttention: null,
+        });
       },
     }),
     {

@@ -22,6 +22,7 @@ type MockTab = {
 
 const state = vi.hoisted(() => ({
   activeWorkspaceSlug: "acme" as string | null,
+  tabAttention: null as { tabId: string; sequence: number } | null,
   byWorkspace: {
     acme: {
       activeTabId: "tA",
@@ -40,6 +41,7 @@ const state = vi.hoisted(() => ({
   addTab: vi.fn<(path: string, title: string) => string>(),
   updateTab: vi.fn<(tabId: string, patch: { title?: string }) => void>(),
   rememberIssueIdentity: vi.fn<(tabId: string, uuid: string, identifier: string) => void>(),
+  clearTabAttention: vi.fn<(sequence: number) => void>(),
   openIssueWindow: vi.fn(),
 }));
 
@@ -51,6 +53,9 @@ vi.mock("@/stores/tab-store", () => {
     get byWorkspace() {
       return state.byWorkspace;
     },
+    get tabAttention() {
+      return state.tabAttention;
+    },
     togglePin: state.togglePin,
     closeTab: state.closeTab,
     closeOtherTabs: state.closeOtherTabs,
@@ -60,6 +65,7 @@ vi.mock("@/stores/tab-store", () => {
     addTab: state.addTab,
     updateTab: state.updateTab,
     rememberIssueIdentity: state.rememberIssueIdentity,
+    clearTabAttention: state.clearTabAttention,
   };
   const useTabStore = Object.assign(
     (selector?: (s: typeof store) => unknown) =>
@@ -134,6 +140,7 @@ function englishTabBar() {
 
 function reset() {
   state.activeWorkspaceSlug = "acme";
+  state.tabAttention = null;
   state.byWorkspace = {
     acme: {
       activeTabId: "tA",
@@ -152,6 +159,7 @@ function reset() {
   state.addTab.mockReset();
   state.updateTab.mockReset();
   state.rememberIssueIdentity.mockReset();
+  state.clearTabAttention.mockReset();
   state.openIssueWindow.mockReset();
   pres.title = null;
   pres.titleResolved = true;
@@ -313,6 +321,27 @@ describe("TabBar title persistence", () => {
   it("does not re-persist when the resolved title already matches (no loop)", () => {
     render(<TabBar />);
     expect(state.updateTab).not.toHaveBeenCalled();
+  });
+});
+
+describe("TabBar background open of an open tab", () => {
+  it("flashes the tab it landed on without activating it", () => {
+    state.tabAttention = { tabId: "tB", sequence: 1 };
+    const { container } = render(<TabBar />);
+
+    const frame = container.querySelector('[data-tab-id="tB"]')!;
+    expect(frame.querySelector("[data-tab-attention]")).not.toBeNull();
+    expect(container.querySelectorAll("[data-tab-attention]")).toHaveLength(1);
+    expect(state.setActiveTab).not.toHaveBeenCalled();
+  });
+
+  it("clears the signal once the flash has played", async () => {
+    state.tabAttention = { tabId: "tB", sequence: 3 };
+    render(<TabBar />);
+
+    await waitFor(() => expect(state.clearTabAttention).toHaveBeenCalledWith(3), {
+      timeout: 3000,
+    });
   });
 });
 
