@@ -249,7 +249,7 @@ describe("IssueDetail title baselines (real editor and data hooks)", () => {
     holdSave = true;
     act(() => editor.blur());
     await waitFor(() => expect(releaseSave).toBeDefined());
-    expect(writes[0].status).toBe(oldStatus);
+    expect(writes[0]).toMatchObject({ status: oldStatus });
     const releaseOldSave = releaseSave!;
     await remoteTitle("Adopted title");
     await waitFor(() => expect(editor.textContent).toBe("Adopted title"));
