@@ -70,7 +70,7 @@ it("loads the member list, finds people by email, and adds and removes only afte
   await user.click(screen.getByRole("button", { name: "Access" }));
   await screen.findByText("member@test");
   expect(screen.getByText(/owners and admins always have access/)).toBeVisible();
-  expect(screen.getByText("Agents follow their owner's access. Add the owner to let their agents work here.")).toBeVisible();
+  expect(screen.getByText("Agents follow their owner's access.")).toBeVisible();
   expect(api.listAgents).not.toHaveBeenCalled();
   await user.click(screen.getByRole("button", { name: "Add workspace member" }));
   await user.type(screen.getByRole("combobox"), "outside@test");

@@ -204,7 +204,7 @@
     }
   },
   "access": {
-    "agent_notice": "Agents follow their owner's access. Add the owner to let their agents work here.",
+    "agent_notice": "Agents follow their owner's access.",
     "label": "Access",
     "title": "Access to {{title}}",
     "description": "Controls who can see this project and its issues, comments, and attachments.",
