@@ -153,7 +153,7 @@ function expandDow(field: string): number[] | null {
     for (let d = r.lo; d <= r.hi; d += r.step) days.add(d);
   }
   if (days.size === 0) return null;
-  return Array.from(days).toSorted((a, b) => a - b);
+  return Array.from(days).sort((a, b) => a - b);
 }
 
 /** Serialize a day set as maximal consecutive runs: [1,2,3,4,5] → "1-5",

@@ -51,7 +51,7 @@ export const DAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as con
  *  before it says "Mon–Wed" — but where the runs ARE is one question with one
  *  answer, and both callers used to scan for them separately. */
 export function consecutiveRuns(days: number[]): Array<[number, number]> {
-  const sorted = Array.from(new Set(days)).toSorted((a, b) => a - b);
+  const sorted = Array.from(new Set(days)).sort((a, b) => a - b);
   const runs: Array<[number, number]> = [];
   let i = 0;
   while (i < sorted.length) {

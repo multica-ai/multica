@@ -111,5 +111,5 @@ export function toggleDay(days: number[], day: number): number[] {
     if (days.length === 1) return days;
     return days.filter((d) => d !== day);
   }
-  return [...days, day].toSorted((a, b) => a - b);
+  return [...days, day].sort((a, b) => a - b);
 }
