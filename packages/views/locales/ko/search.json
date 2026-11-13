@@ -33,6 +33,7 @@
   },
   "commands": {
     "current_theme_aria": "현재 테마",
+    "current_mode_aria": "현재 모드",
     "new_issue": "새 태스크",
     "new_project": "새 프로젝트",
     "new_autopilot": "새 오토파일럿",
@@ -103,7 +104,6 @@
     "project": "프로젝트",
     "parent": "상위 태스크",
     "quick_actions": "빠른 작업",
-    "theme": "테마",
     "project_status": "프로젝트 상태",
     "no_project": "프로젝트 없음",
     "current": "현재"
@@ -133,14 +133,8 @@
     "type_to_find_people": "입력해서 멤버와 에이전트 찾기"
   },
   "delegate": {
-    "heading": "에이전트에게 맡기기",
-    "create_and_assign": "새 태스크를 만들어 {{name}}에게 지정",
-    "squad": "스쿼드",
-    "context_aria": "함께 보낼 컨텍스트",
-    "parent": "{{identifier}} 하위",
-    "pick_crumb": "선택",
-    "pick_another": "다른 에이전트나 스쿼드에게 맡기기...",
-    "detected": "지시로 인식"
+    "row": "에이전트에게 맡기기: “{{prompt}}”",
+    "hint": "빠른 만들기"
   },
   "best": {
     "assign": "{{subject}}를 {{name}}에게 지정",
@@ -159,8 +153,6 @@
     "navigate": "선택",
     "select": "실행",
     "open_in_new_tab": "새 탭에서 열기",
-    "delegate": "만들어서 {{name}}에게 맡기기",
-    "search_instead": "키워드로 검색",
     "back": "뒤로",
     "prefix_commands": "명령어",
     "prefix_issues": "태스크",

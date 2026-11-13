@@ -23,7 +23,6 @@ vi.mock("@multica/core/auth", () => ({
 vi.mock("@multica/core/agents", () => ({
   isAgentRuntimeBound: () => false,
   useAgentPresenceDetail: () => ({ availability: "online" }),
-  useCustomizeConversationStartersHref: () => null,
   useWorkspaceAgentAvailability: () => "available",
 }));
 vi.mock("../../common/use-app-foreground", () => ({

@@ -2617,8 +2617,8 @@ WHERE a.workspace_id = $1
           )
           OR (
             @mine_relation::text IN ('created', 'any')
-            AND i.creator_type = 'member'
-            AND i.creator_id = @member_id::uuid
+            AND ((i.creator_type = 'member' AND i.creator_id = @member_id::uuid)
+                 OR i.requester_user_id = @member_id::uuid)
           )
           OR (
             @mine_relation::text IN ('involved', 'any')

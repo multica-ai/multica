@@ -268,6 +268,17 @@ multica runtime profile create --display-name "內部 Claude 封裝" \
 
 執行機制和自定義 profile 見[守護程序與執行時](/daemon-runtimes)。
 
+## 環境 [#environments]
+
+```bash
+multica env start web
+multica env start web --wait=false
+multica env list
+multica env stop web
+```
+
+`multica env`（完整寫法 `multica environment`）啟動倉庫在 `.multica/environments.toml` 裡宣告的環境。環境由守護程序託管，執行結束後繼續執行，顯示在任務側欄裡，TTL 到期時停止。`start` 會等環境能回應後印出它的 URL。這些命令使用目前執行的憑據，所以只能在 AI 代理的執行中使用；在你自己的電腦上請用任務側欄。檔案格式和範例見[環境](/environments)。
+
 ## 專案、工作區和自動化
 
 ```bash
@@ -295,6 +306,7 @@ multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1" --timezone Asia/
 | `issue` | 建立、更新、分配和搜尋任務；管理評論、訂閱、標籤、屬性、喚醒、時間線與執行記錄 |
 | `project` | 管理專案、專案資源和專案使用的工作流 |
 | `workflow` | 管理工作流：狀態以及每個狀態交給誰處理 |
+| `issue-status` | 管理工作區狀態目錄：狀態及其顏色和圖示 |
 | `label`、`property` | 管理工作區標籤和自定義屬性 |
 | `view` | 讀取儲存的檢視，列出檢視裡的任務 |
 | `agent`、`skill`、`squad` | 管理 AI 代理、skill 和小隊 |
@@ -302,6 +314,7 @@ multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1" --timezone Asia/
 | `workspace` | 建立、檢視、切換工作區和邀請成員 |
 | `repo` | 管理工作區倉庫，並把倉庫檢出到本機 |
 | `daemon`、`runtime` | 啟停本機守護程序，檢視和管理執行時 |
+| `env` | 啟動、停止和列出倉庫宣告的環境（只能在 AI 代理的執行中使用） |
 | `attachment` | 上傳或下載附件 |
 | `user profile` | 檢視或更新當前使用者資料 |
 | `auth`、`login`、`setup` | 登入、檢視認證狀態和初始化連線 |
@@ -388,8 +401,9 @@ CLI 配置檔案包含可代表你訪問 Multica 的令牌。不要提交到倉�
 | | `status <id> <status>` | 修改專案狀態 | |
 | | `resource list/add/update/remove` | 管理專案附加資源 | `--type`、`--url`、`--default-branch-hint`、`--ref`、`--local-path`、`--daemon-id`、`--execution-mode`（本地目錄的 `in_place` / `worktree`） |
 | | `workflow get/set <project-id>` | 檢視專案當前生效的工作流，或切換工作流 | `set <project-id> <workflow\|default>`：`--map old=new`（可重複），`--dry-run` 列印狀態遷移計劃；切換不會重新分配任務，也不會啟動執行。僅管理員和專案負責人可操作 |
-| `workflow` | `list/get/create/update/delete` | 管理工作流；`get` 等命令接受 ID、ID 字首、完整名稱或 `default` | `create` / `update`：`--name`、`--description`、`--steps-file`（步驟的 JSON 陣列，整體替換）；`update`：`--map old=new`（可重複）、`--dry-run`。編輯和刪除僅限工作流所有者和工作區管理員；仍被專案使用的工作流不能刪除 |
+| `workflow` | `list/get/create/update/delete` | 管理工作流；`get` 等命令接受 ID、ID 字首、完整名稱或 `default`。工作流宣告的狀態屬於工作區狀態目錄，用 `issue-status` 修改 | `create` / `update`：`--name`、`--description`、`--steps-file`（步驟的 JSON 陣列，整體替換）；`update`：`--map old=new`（可重複）、`--dry-run`。編輯和刪除僅限工作流所有者和工作區管理員；仍被專案使用的工作流不能刪除 |
 | | `handoff set <workflow> <status-key>` | 設定單個步驟的處理人、說明和下一步/退回狀態，未指定的欄位保持不變 | `--handler`（`none`、`project_lead`、`creator`，或成員/ AI 代理/小隊的名稱或 UUID）、`--instructions` / `--instructions-file`、`--next`、`--back`、`--copy-for-project` |
+| `issue-status` | `list/get/create/update/archive` | 管理工作區狀態目錄，即所有工作流共用的狀態。修改任務目前狀態請用 `issue status` | `create`：`--name`、`--category`、`--color`、`--key`、`--icon`；`update`：`--name`、`--description`、`--color`、`--icon`（空值恢復為分類預設圖示）、`--position`；`list`：`--include-archived`。變更需要工作區擁有者或管理員權限 |
 | `label` | `list/get/create/update/delete` | 管理工作區標籤 | `list`：`--resource-type`（`issue` 或 `skill`）、`--full-id`；`create`：`--name`、`--color`、`--resource-type`（`issue` 或 `skill`）、`--description` |
 | `property` | `list/get/create/update/archive/unarchive` | 管理工作區自定義屬性 | `create`：`--name`、`--type`（`text`、`number`、`select`、`multi_select`、`date`、`checkbox`、`url`、`actor`、`multi_actor`、`multi_text`、`multi_url`）、`--option`（可重複，僅 select 型別）；`list`：`--include-archived`；型別建立後不可修改 |
 | `view` | `list/get/issues` | 讀取你能開啟的檢視（自己的和工作區共享的）；`issues` 按檢視儲存的排序列出檢視裡的任務，檢視儲存的全部篩選條件都由服務端執行。在 AI 代理執行中，看到的檢視和其中「我的」條件都屬於執行時的所有者 | `<view>` 接受 ID、ID 字首或完整名稱；`list`：`--scope`（`workspace`、`my`、`project`）、`--project`、`--full-id`；`issues`：`--limit`（最多 100）、`--cursor`（上一頁的 `next_cursor`）、`--today`（相對到期日篩選按哪一天計算，預設今天）、`--fields`（僅 JSON）、`--full-id` |
@@ -430,6 +444,7 @@ CLI 配置檔案包含可代表你訪問 Multica 的令牌。不要提交到倉�
 | `runtime` | `list/usage/activity/update/rename/delete` | 檢視和管理執行時 | `usage`：`--days`（預設 90，最多 365）；`update`：`--target-version`（必填）、`--wait`；`delete`：`--cascade`（解綁繫結的 AI 代理、保留其資料並取消其執行） |
 | | `profile list/create/update/delete` | 管理自定義執行時 profile | `create`：`--display-name`、`--command-name`（均必填）、`--runtime-type`（或舊的 `--protocol-family`）、`--description`；`update`：`--enabled` |
 | | `profile set-path/unset-path <profile-id>` | 固定本機可執行檔案路徑（僅本地生效，不上傳伺服器） | |
+| `env` | `start <name>` / `stop <name>` / `list` | 啟動、停止或列出這條任務的宣告式環境；只能在 AI 代理的執行中使用。見[環境](/environments) | `start`：`--wait`（預設 `true`）；全部：`--output`（`table` 或 `json`） |
 
 ### Additional
 

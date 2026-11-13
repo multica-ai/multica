@@ -41,6 +41,7 @@ const TYPE_GROUP: Partial<Record<InboxItemType, InboxTypeGroup>> = {
   assignee_changed: "assign",
   issue_subscribed: "assign",
   review_requested: "review",
+  issue_created: "change",
   status_changed: "change",
   priority_changed: "change",
   start_date_changed: "change",

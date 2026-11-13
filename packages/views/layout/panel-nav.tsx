@@ -76,7 +76,7 @@ export function PanelBody({
       ref={ref}
       style={fadeStyle}
       onClickCapture={onClickCapture}
-      className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-4 [&>section:first-child]:mt-0"
+      className="scrollbar-slim min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-4 [&>section:first-child]:mt-0"
     >
       {children}
     </div>
@@ -148,12 +148,17 @@ export function PanelList({
 }
 
 export const PANEL_ROW_CLASS =
-  "flex min-h-8 w-full items-center gap-2.5 rounded-lg px-3 py-1.5 text-left text-body transition-colors outline-none focus-visible:outline-2 focus-visible:outline-ring";
+  "flex min-h-[var(--nav-item-height,2rem)] w-full items-center gap-2.5 rounded-nav-item px-3 py-1.5 text-left text-body transition-colors outline-none focus-visible:outline-2 focus-visible:outline-ring";
+
+/** The `nav-item` theme anchor; every row with an active state carries it. */
+export function panelRowAnchor(active: boolean) {
+  return { "data-mc": "nav-item", "data-active": active ? "true" : "false" } as const;
+}
 
 export function panelRowStateClass(active: boolean) {
   return active
-    ? "bg-surface-selected text-surface-selected-foreground hover:bg-surface-selected"
-    : "text-muted-foreground hover:bg-surface-hover hover:text-foreground";
+    ? "bg-nav-item-active text-nav-item-active-foreground hover:bg-nav-item-active"
+    : "text-nav-item hover:bg-nav-item-hover hover:text-nav-item-hover-foreground";
 }
 
 export function PanelCount({ value, className }: { value: number; className?: string }) {
@@ -177,6 +182,10 @@ interface PanelLinkProps {
   trailing?: React.ReactNode;
   /** Runs before navigation, e.g. to select a list scope the page reads. */
   onNavigate?: () => void;
+  onContextMenu?: React.MouseEventHandler<HTMLAnchorElement>;
+  /** Rendered beside the link, inside the row's list item: a right-click menu,
+   *  which must not nest inside the anchor. */
+  menu?: React.ReactNode;
   className?: string;
 }
 
@@ -188,6 +197,8 @@ export function PanelLink({
   description,
   trailing,
   onNavigate,
+  onContextMenu,
+  menu,
   className,
 }: PanelLinkProps) {
   return (
@@ -197,6 +208,8 @@ export function PanelLink({
         newTabTitle={label}
         aria-current={active ? "page" : undefined}
         onClick={onNavigate}
+        onContextMenu={onContextMenu}
+        {...panelRowAnchor(active)}
         className={cn(
           PANEL_ROW_CLASS,
           panelRowStateClass(active),
@@ -217,6 +230,7 @@ export function PanelLink({
         )}
         {trailing}
       </AppLink>
+      {menu}
     </li>
   );
 }

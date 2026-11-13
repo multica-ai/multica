@@ -52,7 +52,8 @@ token's specific platform trap.
 content (string)
   ↓ preprocessMobileMarkdown
      legacy mention shortcode  →  [@name](mention://type/id)
-     legacy file-card lines    →  [📎 name](url)
+     image file-card lines     →  ![name](url)
+     other file-card lines     →  [📎 name](url)
      HTML <br>                 →  CommonMark "  \n" hard break
   ↓ splitMarkdown                 (marked@18 lexer; we use the AST only)
      code fence          → { type:'code',  lang, code }

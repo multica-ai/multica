@@ -621,7 +621,7 @@ const kimiUsageRecordType = "usage.record"
 // fields sum exactly to the `used` figure kimi reports over ACP (22530 and
 // 22566). So `inputOther` is uncached input only and maps straight onto
 // TokenUsage.InputTokens with no cached-prefix subtraction — unlike the ACP
-// `inputTokens` case excludeACPCachedInput exists to correct.
+// `inputTokens` case normalizeACPTokenUsage exists to correct.
 type kimiWireUsage struct {
 	Type string `json:"type"`
 	// Time is the record's epoch-millisecond write time. It is what keeps a

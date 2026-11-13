@@ -3,6 +3,7 @@
 import { cloneElement, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
+  BotOff,
   BellRing,
   Bot,
   CalendarClock,
@@ -168,6 +169,7 @@ function getActiveFilterCount(
     advancedFilter?: AdvancedFilterGroup | null;
     dateFilter?: IssueDateFilter | null;
     agentRunningFilter?: boolean;
+    agentIdleFilter?: boolean;
     unreadFilter?: boolean;
   },
   // Inside a saved view only the user's additions on top of the view's own
@@ -216,6 +218,7 @@ function getActiveFilterCount(
   }
   if (state.dateFilter) count++;
   if (state.agentRunningFilter && !baseline?.agentRunning) count++;
+  if (state.agentIdleFilter && !baseline?.agentIdle) count++;
   if (state.unreadFilter && !baseline?.unread) count++;
   return count;
 }
@@ -396,6 +399,7 @@ export function ActorSubContent({
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
+          onKeyDown={stopMenuSearchKeys}
           placeholder={t(($) => $.filters.placeholder)}
           className="w-full bg-transparent text-body placeholder:text-muted-foreground outline-none"
           autoFocus
@@ -565,6 +569,7 @@ export function ProjectSubContent({
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
+          onKeyDown={stopMenuSearchKeys}
           placeholder={t(($) => $.filters.placeholder)}
           className="w-full bg-transparent text-body placeholder:text-muted-foreground outline-none"
           autoFocus
@@ -694,6 +699,7 @@ export function LabelSubContent({
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
+          onKeyDown={stopMenuSearchKeys}
           placeholder={t(($) => $.filters.placeholder)}
           className="w-full bg-transparent text-body placeholder:text-muted-foreground outline-none"
           autoFocus
@@ -1041,8 +1047,8 @@ export function IssueFilterMenu({
   onTableFacetChange?: (facet: IssueTableFacetSpec | null) => void;
   dateFilter?: IssueDateFilter | null;
   onDateFilterChange?: (filter: IssueDateFilter | null) => void;
-  /** Opens the simple menu from the host, e.g. right after a view is named.
-   *  Pair it with `onOpenChange`. */
+  /** Opens the menu, or the advanced panel in advanced mode, from the host,
+   *  e.g. right after a view is named. Pair it with `onOpenChange`. */
   open?: boolean;
   /** Mirrors the menu's open state. */
   onOpenChange?: (open: boolean) => void;
@@ -1072,15 +1078,25 @@ export function IssueFilterMenu({
   const negatedFilters = useViewStore((s) => s.negatedFilters);
   const propertyFilters = useViewStore((s) => s.propertyFilters);
   const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
+  const agentIdleFilter = useViewStore((s) => s.agentIdleFilter);
   const unreadFilter = useViewStore((s) => s.unreadFilter);
   const viewStoreApi = useViewStoreApi();
   const act = viewStoreApi.getState();
   const advancedMode = advancedFilter !== null;
   const [panelOpen, setPanelOpen] = useState(false);
   // Leaving advanced mode from inside the panel unmounts it with no close
-  // event; the next entry must start closed until asked.
+  // event; the next entry must start closed until asked, and a host that
+  // holds `open` must hear it closed or the simple menu pops open instead.
+  const onOpenChangeRef = useRef(onOpenChange);
+  onOpenChangeRef.current = onOpenChange;
+  const wasAdvancedRef = useRef(advancedMode);
+  const menuOpen = open !== undefined && wasAdvancedRef.current && !advancedMode ? false : open;
   useEffect(() => {
-    if (!advancedMode) setPanelOpen(false);
+    if (!advancedMode) {
+      setPanelOpen(false);
+      if (wasAdvancedRef.current) onOpenChangeRef.current?.(false);
+    }
+    wasAdvancedRef.current = advancedMode;
   }, [advancedMode]);
   const [search, setSearch] = useState("");
   const query = search.trim().toLowerCase();
@@ -1127,6 +1143,7 @@ export function IssueFilterMenu({
         advancedFilter,
         dateFilter: showDateFilter ? dateFilter : null,
         agentRunningFilter,
+        agentIdleFilter,
         unreadFilter,
       },
       viewBaseline,
@@ -1144,7 +1161,7 @@ export function IssueFilterMenu({
   const [openProp, setOpenProp] = useState(open);
   if (open !== openProp) {
     setOpenProp(open);
-    if (open && activeAtOpen === null) setActiveAtOpen(new Set(chipByKey.keys()));
+    if (open && !advancedMode && activeAtOpen === null) setActiveAtOpen(new Set(chipByKey.keys()));
   }
   const activeKeys = activeAtOpen ?? new Set(chipByKey.keys());
   const dateFilterLabel = showDateFilter && dateFilter
@@ -1164,7 +1181,7 @@ export function IssueFilterMenu({
     key === "date"
       ? t(($) => $.filters.section_date)
       : key === "agentRunning"
-        ? `${t(($) => $.filters.section_agent_status)} ${t(($) => $.filters.agent_status_running)}`
+        ? `${t(($) => $.filters.section_agent_status)} ${t(($) => $.filters.agent_status_running)} ${t(($) => $.filters.agent_status_idle)}`
         : key === "unread"
           ? `${t(($) => $.filters.section_read_state)} ${t(($) => $.filters.read_state_unread)}`
         : key.startsWith("property:")
@@ -1240,14 +1257,25 @@ export function IssueFilterMenu({
               <DropdownMenuSubContent className="w-auto min-w-44">
                 <DropdownMenuCheckboxItem
                   checked={agentRunningFilter}
-                  disabled={viewBaseline?.agentRunning === true}
-                  title={viewBaseline?.agentRunning === true ? fixedTitle : undefined}
+                  disabled={viewBaseline?.agentRunning === true || viewBaseline?.agentIdle === true}
+                  title={viewBaseline?.agentRunning || viewBaseline?.agentIdle ? fixedTitle : undefined}
                   onCheckedChange={() => act.toggleAgentRunningFilter()}
                   className={FILTER_ITEM_CLASS}
                 >
                   <HoverCheck checked={agentRunningFilter} />
                   <Activity className="size-3.5 text-muted-foreground" />
                   {t(($) => $.filters.agent_status_running)}
+                </DropdownMenuCheckboxItem>
+                <DropdownMenuCheckboxItem
+                  checked={agentIdleFilter}
+                  disabled={viewBaseline?.agentRunning === true || viewBaseline?.agentIdle === true}
+                  title={viewBaseline?.agentRunning || viewBaseline?.agentIdle ? fixedTitle : undefined}
+                  onCheckedChange={() => act.toggleAgentIdleFilter()}
+                  className={FILTER_ITEM_CLASS}
+                >
+                  <HoverCheck checked={agentIdleFilter} />
+                  <BotOff className="size-3.5 text-muted-foreground" />
+                  {t(($) => $.filters.agent_status_idle)}
                 </DropdownMenuCheckboxItem>
               </DropdownMenuSubContent>
             </DropdownMenuSub>
@@ -1727,10 +1755,10 @@ export function IssueFilterMenu({
   if (advancedMode) {
     return (
       <Popover
-        open={panelOpen}
-        onOpenChange={(open) => {
-          setPanelOpen(open);
-          onOpenChange?.(open);
+        open={panelOpen || open === true}
+        onOpenChange={(next) => {
+          setPanelOpen(next);
+          onOpenChange?.(next);
         }}
       >
         {withTooltip ? (
@@ -1754,7 +1782,7 @@ export function IssueFilterMenu({
 
   return (
     <DropdownMenu
-      open={open}
+      open={menuOpen}
       onOpenChange={(next) => {
         if (freezeAnchor) {
           if (next && triggerRef.current) {
@@ -1865,6 +1893,7 @@ export function IssueDisplayControls({
   const advancedFilter = useViewStore((s) => s.advancedFilter);
   const negatedFilters = useViewStore((s) => s.negatedFilters);
   const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
+  const agentIdleFilter = useViewStore((s) => s.agentIdleFilter);
   const unreadFilter = useViewStore((s) => s.unreadFilter);
   const cardPropertyIds = useViewStore((s) => s.cardPropertyIds);
   const sortBy = useViewStore((s) => s.sortBy);
@@ -1947,6 +1976,7 @@ export function IssueDisplayControls({
       advancedFilter,
       dateFilter: showDateFilter ? dateFilter : null,
       agentRunningFilter,
+      agentIdleFilter,
       unreadFilter,
     },
     viewBaseline,
@@ -1973,7 +2003,7 @@ export function IssueDisplayControls({
     project: "group_project",
     assignee: "group_assignee",
   };
-  const CARD_PROPERTY_LABEL_KEY: Record<typeof CARD_PROPERTY_OPTIONS[number]["key"], "card_priority" | "card_description" | "card_assignee" | "card_start_date" | "card_due_date" | "card_project" | "card_labels" | "card_child_progress"> = {
+  const CARD_PROPERTY_LABEL_KEY: Record<typeof CARD_PROPERTY_OPTIONS[number]["key"], "card_priority" | "card_description" | "card_assignee" | "card_start_date" | "card_due_date" | "card_project" | "card_labels" | "card_child_progress" | "card_pull_requests"> = {
     priority: "card_priority",
     description: "card_description",
     assignee: "card_assignee",
@@ -1982,6 +2012,7 @@ export function IssueDisplayControls({
     project: "card_project",
     labels: "card_labels",
     childProgress: "card_child_progress",
+    pullRequests: "card_pull_requests",
   };
   const availableCardPropertyOptions = cardPropertyOptionsForView(viewMode);
   const availableSortOptions = sortOptionsForView(viewMode, grouping);

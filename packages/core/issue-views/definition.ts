@@ -41,6 +41,7 @@ export function issueViewDefinitionFromState(state: IssueViewState): IssueViewDe
       propertyFilters: state.propertyFilters,
       advancedFilter: pruneAdvancedFilter(state.advancedFilter),
       agentRunningFilter: state.agentRunningFilter,
+      agentIdleFilter: state.agentIdleFilter,
       unreadFilter: state.unreadFilter,
     },
     display: {
@@ -152,7 +153,7 @@ export function modifiedFilterDimensions(
     }
   }
   if (seed.advancedFilter !== live.advancedFilter) modified.add("advanced");
-  if (seed.agentRunningFilter !== live.agentRunningFilter) modified.add("agentRunning");
+  if (seed.agentRunningFilter !== live.agentRunningFilter || seed.agentIdleFilter !== live.agentIdleFilter) modified.add("agentRunning");
   if (seed.unreadFilter !== live.unreadFilter) modified.add("unread");
   return modified;
 }

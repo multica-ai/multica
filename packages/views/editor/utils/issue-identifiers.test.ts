@@ -36,6 +36,14 @@ describe("preprocessIssueIdentifiers", () => {
     );
   });
 
+  it("skips identifiers inside HTML attributes and anchors", () => {
+    const source =
+      '<img src="https://host/a.png" alt="MUL-1 screenshot"> <a href="#x">MUL-2</a> MUL-3';
+    expect(preprocessIssueIdentifiers(source)).toBe(
+      '<img src="https://host/a.png" alt="MUL-1 screenshot"> <a href="#x">MUL-2</a> [MUL-3](mention://issue/MUL-3)',
+    );
+  });
+
   // --- skip: code -------------------------------------------------------
   it("skips identifiers inside inline code", () => {
     expect(preprocessIssueIdentifiers("use `MUL-1` here")).toBe(
