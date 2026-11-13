@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestZcodeDesktopProviderRepositoryIsPrivateAndDoesNotModifyUserConfig(t *testing.T) {
@@ -93,18 +94,46 @@ func TestZcodeExplicitProviderRepositoryRemainsAuthoritative(t *testing.T) {
 	}
 }
 
-func TestCleanupStaleZcodeProviderSnapshotsRemovesLeftovers(t *testing.T) {
+// setZcodeTestTempDir points os.TempDir (TMPDIR on Unix, TMP/TEMP on
+// Windows) at a fresh directory, so snapshots land where the sweep looks.
+func setZcodeTestTempDir(t *testing.T) string {
+	t.Helper()
 	base := t.TempDir()
 	t.Setenv("TMPDIR", base)
-	// os.TempDir on Unix reads TMPDIR; recreate the leftover layout.
-	leftover := filepath.Join(base, zcodeProvidersTempPrefix+"orphan123")
-	if err := os.MkdirAll(leftover, 0o700); err != nil {
+	t.Setenv("TMP", base)
+	t.Setenv("TEMP", base)
+	return base
+}
+
+// writeZcodeSnapshotDir lays out a provider snapshot directory as
+// prepareZcodeRuntimeEnv does, with or without the owner file, and dates it
+// age into the past.
+func writeZcodeSnapshotDir(t *testing.T, base, name string, owner bool, age time.Duration) string {
+	t.Helper()
+	dir := filepath.Join(base, zcodeProvidersTempPrefix+name)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	secret := filepath.Join(leftover, "providers.json")
-	if err := os.WriteFile(secret, []byte(`{"apiKey":"x"}`), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "providers.json"), []byte(`{"apiKey":"x"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if owner {
+		if err := os.WriteFile(filepath.Join(dir, zcodeSnapshotOwnerFile), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	at := time.Now().Add(-age)
+	if err := os.Chtimes(dir, at, at); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func TestCleanupStaleZcodeProviderSnapshotsRemovesLeftovers(t *testing.T) {
+	base := setZcodeTestTempDir(t)
+	// A crash leftover: the owner file is there, but its lock died with the
+	// process that wrote it.
+	leftover := writeZcodeSnapshotDir(t, base, "orphan123", true, 2*zcodeSnapshotMinAge)
 	// Unrelated temp dir must survive.
 	keep := filepath.Join(base, "unrelated-temp")
 	if err := os.MkdirAll(keep, 0o700); err != nil {
@@ -119,6 +148,96 @@ func TestCleanupStaleZcodeProviderSnapshotsRemovesLeftovers(t *testing.T) {
 	}
 	if _, err := os.Stat(keep); err != nil {
 		t.Fatalf("unrelated dir was removed: %v", err)
+	}
+}
+
+// Another daemon starting on the same machine must not delete the provider
+// snapshot of a ZCode run still in progress (MUL-8546 preflight).
+func TestCleanupStaleZcodeProviderSnapshotsKeepsSnapshotInUse(t *testing.T) {
+	base := setZcodeTestTempDir(t)
+	install := t.TempDir()
+	executable := filepath.Join(install, "glm", "zcode.cjs")
+	builtin := filepath.Join(filepath.Dir(executable), "..", "config", "provider", "zcode-builtin.json")
+	if err := os.MkdirAll(filepath.Dir(builtin), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(builtin, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env, cleanup, err := prepareZcodeRuntimeEnv(executable, []string{"ZCODE_DATA_BASE_DIR=" + install})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cleanup)
+	snapshot := zcodeEnvValue(env, zcodePersonalConfigEnv)
+	if filepath.Dir(filepath.Dir(snapshot)) != base {
+		t.Fatalf("snapshot %q is not under the test temp dir %q", snapshot, base)
+	}
+	// Age the snapshot well past both thresholds: only its owner lock keeps it.
+	old := time.Now().Add(-2 * zcodeUnownedSnapshotMaxAge)
+	if err := os.Chtimes(filepath.Dir(snapshot), old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	if removed := CleanupStaleZcodeProviderSnapshots(); removed != 0 {
+		t.Fatalf("removed = %d, want 0 while the snapshot is in use", removed)
+	}
+	if _, err := os.ReadFile(snapshot); err != nil {
+		t.Fatalf("snapshot in use was removed: %v", err)
+	}
+
+	cleanup()
+	if _, err := os.Stat(filepath.Dir(snapshot)); !os.IsNotExist(err) {
+		t.Fatalf("cleanup left the snapshot directory: %v", err)
+	}
+}
+
+func TestZcodeProviderSnapshotSweepRules(t *testing.T) {
+	base := t.TempDir()
+	cases := []struct {
+		name   string
+		owner  bool
+		locked bool
+		age    time.Duration
+		remove bool
+	}{
+		{name: "owner gone", owner: true, age: 2 * zcodeSnapshotMinAge, remove: true},
+		{name: "owner gone but just created", owner: true, age: zcodeSnapshotMinAge / 2, remove: false},
+		{name: "owner alive", owner: true, locked: true, age: 2 * zcodeUnownedSnapshotMaxAge, remove: false},
+		{name: "unowned and recent", age: zcodeUnownedSnapshotMaxAge / 2, remove: false},
+		{name: "unowned and older than a day", age: zcodeUnownedSnapshotMaxAge + time.Hour, remove: true},
+	}
+	dirs := make([]string, len(cases))
+	for i, tc := range cases {
+		dirs[i] = writeZcodeSnapshotDir(t, base, strings.ReplaceAll(tc.name, " ", "-"), tc.owner, tc.age)
+		if tc.locked {
+			lock, ok, err := tryLockPiSessionFile(filepath.Join(dirs[i], zcodeSnapshotOwnerFile))
+			if err != nil || !ok {
+				t.Fatalf("%s: lock owner file: ok=%v err=%v", tc.name, ok, err)
+			}
+			t.Cleanup(func() { releasePiSessionFileLock(lock) })
+			// Locking may create a sidecar on Windows; date the dir again.
+			at := time.Now().Add(-tc.age)
+			if err := os.Chtimes(dirs[i], at, at); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	want := 0
+	for _, tc := range cases {
+		if tc.remove {
+			want++
+		}
+	}
+	if removed := cleanupStaleZcodeProviderSnapshots(base, time.Now()); removed != want {
+		t.Fatalf("removed = %d, want %d", removed, want)
+	}
+	for i, tc := range cases {
+		_, err := os.Stat(dirs[i])
+		if gone := os.IsNotExist(err); gone != tc.remove {
+			t.Errorf("%s: removed = %v, want %v (stat err %v)", tc.name, gone, tc.remove, err)
+		}
 	}
 }
 
