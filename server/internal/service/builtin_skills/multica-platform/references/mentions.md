@@ -112,18 +112,13 @@ is a no-op; a malformed UUID is rejected at the request boundary.
 
     [@all](mention://all/all)
 
-It notifies human members across the workspace, including people who do not
-participate in or subscribe to this issue. The author is excluded; notification
-preferences and private-project access still apply. It does NOT make any
-specific agent run.
-
-Use `@all` for an intentional workspace-wide announcement. For routine issue
-updates, review requests, or completion summaries, mention the specific member
-who needs to act, or post without a mention.
-
-At trigger time, a comment carrying `@all` SUPPRESSES the issue assignee's
-automatic on-comment trigger and the other implicit routing fallbacks (thread
-parent / conversation owner).
+It notifies every human member of the workspace except the author, not just
+people on this issue; notification preferences and private-project access
+still apply. It does NOT make any specific agent run. And it is special at
+trigger time: a comment that carries an `@all` mention is treated as a
+broadcast that SUPPRESSES the issue assignee's automatic on-comment trigger
+(and the other implicit routing fallbacks — thread parent / conversation
+owner). Use `@all` to announce, not to request work from the assignee.
 
 `@all` only suppresses those IMPLICIT routes. An EXPLICIT `@agent` / `@squad`
 mention in the same comment still fires normally: a comment reading
