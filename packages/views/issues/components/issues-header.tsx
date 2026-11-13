@@ -1903,6 +1903,7 @@ export function IssueDisplayControls({
   const cardProperties = useViewStore((s) => s.cardProperties);
   const tableGrouping = useViewStore((s) => s.tableGrouping ?? "none");
   const tableHierarchy = useViewStore((s) => s.tableHierarchy ?? true);
+  const boardHierarchy = useViewStore((s) => s.boardHierarchy ?? true);
   const tableColumnCount = useViewStore((s) => s.tableColumns.length);
   const showSubIssues = useViewStore((s) => s.showSubIssues);
   const hiddenStatuses = useViewStore((s) => s.hiddenStatuses);
@@ -2361,7 +2362,7 @@ export function IssueDisplayControls({
                   )}
                 </div>
               )}
-              {viewMode === "table" && (
+              {(viewMode === "table" || viewMode === "board") && (
                 <label className="flex cursor-pointer items-center justify-between gap-3">
                   <span className="min-w-0">
                     <span className="block text-caption font-medium text-muted-foreground">
@@ -2373,8 +2374,12 @@ export function IssueDisplayControls({
                   </span>
                   <Switch
                     size="sm"
-                    checked={tableHierarchy}
-                    onCheckedChange={() => act.toggleTableHierarchy()}
+                    checked={viewMode === "board" ? boardHierarchy : tableHierarchy}
+                    onCheckedChange={() =>
+                      viewMode === "board"
+                        ? act.toggleBoardHierarchy()
+                        : act.toggleTableHierarchy()
+                    }
                   />
                 </label>
               )}

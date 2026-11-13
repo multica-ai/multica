@@ -25,7 +25,15 @@ export function makeKanbanCollision(groupIds: Set<string>): CollisionDetection {
     const pointer = pointerWithin(args);
     if (pointer.length > 0) {
       const items = pointer.filter((c) => !groupIds.has(c.id as string));
-      if (items.length > 0) return items;
+      if (items.length > 0) {
+        // A sub-issue card sits inside its parent's card, so the pointer is
+        // within both; the innermost (smallest) card is the one under it.
+        const area = (id: string | number) => {
+          const rect = args.droppableRects.get(id);
+          return rect ? rect.width * rect.height : Infinity;
+        };
+        return [...items].sort((a, b) => area(a.id) - area(b.id));
+      }
       return pointer;
     }
     return closestCenter(args);
