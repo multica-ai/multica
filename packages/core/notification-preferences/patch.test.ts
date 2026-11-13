@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import {
   applyNotificationPreferencePatch,
@@ -114,7 +115,7 @@ describe("notification preference patches", () => {
       google_chat_webhook: raw,
     });
 
-    expect(applied.google_chat_webhook).toBe("••••");
+    expect(applied.google_chat_webhook).toBeUndefined();
     expect(JSON.stringify(applied)).not.toContain("token=t");
     expect(
       rollbackNotificationPreferencePatch(
@@ -123,6 +124,15 @@ describe("notification preference patches", () => {
         {},
       ),
     ).toEqual({});
+  });
+
+  it("keeps the confirmed webhook while replacing or removing it", () => {
+    const current = { google_chat_webhook: "masked", comments: "muted" } as const;
+    for (const webhook of ["replacement", ""]) {
+      expect(applyNotificationPreferencePatch(current, {
+        google_chat_webhook: webhook,
+      })).toEqual(current);
+    }
   });
 
   it("keeps a later Google Chat credential change when an earlier write fails", () => {

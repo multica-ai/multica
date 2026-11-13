@@ -293,7 +293,7 @@ describe("useUpdateNotificationPreferences", () => {
       queryClient.getQueryData<NotificationPreferenceResponse>(
         notificationPreferenceKeys.all(WORKSPACE_ID),
       )?.preferences.google_chat_webhook,
-    ).toBe("••••");
+    ).toBeUndefined();
 
     pending.resolve({
       workspace_id: WORKSPACE_ID,
@@ -305,5 +305,10 @@ describe("useUpdateNotificationPreferences", () => {
     await waitFor(() => {
       expect(result.current.isPending).toBe(false);
     });
+    expect(
+      queryClient.getQueryData<NotificationPreferenceResponse>(
+        notificationPreferenceKeys.all(WORKSPACE_ID),
+      )?.preferences.google_chat_webhook,
+    ).toBe("https://chat.googleapis.com/v1/spaces/AAAA…/messages?key=••••&token=••••");
   });
 });

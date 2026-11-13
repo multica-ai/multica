@@ -320,15 +320,23 @@ func TestGoogleChatWebhookRejectsInvalidOrUnreachableValuesWithoutStoring(t *tes
 		name    string
 		webhook string
 		sendErr error
+		code    string
 	}{
 		{
 			name:    "invalid host",
 			webhook: "https://example.com/v1/spaces/AAAA/messages?key=k&token=t",
+			code:    "google_chat_invalid_url",
+		},
+		{
+			name:    "missing credentials",
+			webhook: "https://chat.googleapis.com/v1/spaces/AAAA/messages?key=k",
+			code:    "google_chat_missing_credentials",
 		},
 		{
 			name:    "confirmation fails",
 			webhook: handlerGoogleChatWebhook,
 			sendErr: errors.New("connection refused"),
+			code:    "google_chat_connection_failed",
 		},
 	}
 	for _, test := range tests {
@@ -339,13 +347,19 @@ func TestGoogleChatWebhookRejectsInvalidOrUnreachableValuesWithoutStoring(t *tes
 			testHandler.GoogleChatSender = sender
 			t.Cleanup(func() { testHandler.GoogleChatSender = previousSender })
 
+			var response struct {
+				Code string `json:"code"`
+			}
 			testutil.Call(
 				t,
 				testHandler.PatchNotificationPreferences,
 				notificationPreferenceRequest(t, http.MethodPatch, map[string]string{
 					"google_chat_webhook": test.webhook,
 				}),
-			).Want(http.StatusBadRequest)
+			).Want(http.StatusBadRequest).JSON(&response)
+			if response.Code != test.code {
+				t.Fatalf("error code = %q, want %q", response.Code, test.code)
+			}
 
 			if got := dbfx.Count(t, `
 				SELECT count(*)

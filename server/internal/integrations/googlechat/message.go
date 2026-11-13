@@ -17,6 +17,9 @@ type NotificationItem struct {
 	Title           string
 	Body            string
 	IssueURL        string
+	Type            string
+	Actor           string
+	Details         map[string]string
 }
 
 // EscapeText prevents user-authored text from becoming Google Chat markup.
@@ -33,11 +36,12 @@ func FormatNotifications(workspaceName string, items []NotificationItem) string 
 	}
 
 	var message strings.Builder
-	fmt.Fprintf(&message, "*%d new notification", len(items))
 	if len(items) != 1 {
-		message.WriteString("s")
+		fmt.Fprintf(&message, "*%d new notifications in ", len(items))
+	} else {
+		message.WriteString("*")
 	}
-	fmt.Fprintf(&message, " in %s*", EscapeText(truncateCompactText(workspaceName)))
+	fmt.Fprintf(&message, "%s*", EscapeText(truncateCompactText(workspaceName)))
 
 	for index, item := range items {
 		line := formatNotificationLine(item)
@@ -63,10 +67,72 @@ func formatNotificationLine(item NotificationItem) string {
 		label = "<" + item.IssueURL + "|" + label + ">"
 	}
 	line := "\n• " + label
+	if action := notificationAction(item); action != "" {
+		line += " — " + EscapeText(truncateCompactText(action))
+	}
 	if body := truncateCompactText(item.Body); body != "" {
 		line += " — " + EscapeText(body)
 	}
 	return line
+}
+
+func notificationAction(item NotificationItem) string {
+	actor := item.Actor
+	if actor == "" {
+		actor = "Someone"
+	}
+	switch item.Type {
+	case "issue_assigned":
+		return actor + " assigned you"
+	case "unassigned":
+		return actor + " unassigned you"
+	case "assignee_changed":
+		return actor + " changed the assignee"
+	case "mentioned":
+		return actor + " mentioned you"
+	case "new_comment":
+		return actor + " commented"
+	case "issue_created":
+		return actor + " created an issue"
+	case "issue_subscribed":
+		return actor + " subscribed you"
+	case "review_requested":
+		return actor + " requested your review"
+	case "status_changed", "priority_changed", "start_date_changed", "due_date_changed":
+		field := strings.TrimSuffix(strings.ReplaceAll(item.Type, "_", " "), " changed")
+		from, to := item.Details["from"], item.Details["to"]
+		if from == "" {
+			from = "unset"
+		}
+		if to == "" {
+			to = "unset"
+		}
+		return fmt.Sprintf("%s changed %s: %s → %s", actor, field, from, to)
+	case "reaction_added":
+		return actor + " reacted " + item.Details["emoji"]
+	case "task_failed", "quick_create_failed":
+		return actor + "'s run failed"
+	case "task_completed", "agent_completed", "quick_create_done":
+		return actor + " completed the run"
+	case "agent_blocked":
+		return actor + " is blocked"
+	case "app_action_requested", "app_action_reminder":
+		return actor + " needs your approval"
+	case "app_connect_requested":
+		return actor + " needs you to connect an app"
+	case "children_done":
+		return "All sub-issues are done"
+	case "quick_create_unconfirmed":
+		return "Issue creation could not be confirmed"
+	case "autopilot_paused":
+		return "Autopilot paused"
+	case "autopilot_quota_exceeded":
+		return "Autopilot quota exceeded"
+	case "app_action_result":
+		return actor + " reported an app action result"
+	default:
+		return strings.ReplaceAll(item.Type, "_", " ")
+	}
 }
 
 func omittedItemsLine(count int) string {

@@ -24,6 +24,8 @@ type notifierQueries interface {
 	GetNotificationPreference(context.Context, db.GetNotificationPreferenceParams) (db.NotificationPreference, error)
 	GetWorkspace(context.Context, pgtype.UUID) (db.Workspace, error)
 	GetIssue(context.Context, pgtype.UUID) (db.Issue, error)
+	GetUser(context.Context, pgtype.UUID) (db.User, error)
+	GetAgent(context.Context, pgtype.UUID) (db.Agent, error)
 }
 
 // Notifier pushes new member inbox items to a configured Google Chat space.
@@ -133,6 +135,13 @@ func (n *Notifier) deliver(ctx context.Context, event events.Event) {
 	notification := NotificationItem{
 		Title: stringValue(item["title"]),
 		Body:  stringValue(item["body"]),
+		Type:  stringValue(item["type"]),
+		Actor: n.actorName(ctx, stringValue(item["actor_type"]), stringValue(item["actor_id"])),
+	}
+	if raw, ok := item["details"].(json.RawMessage); ok && len(raw) != 0 {
+		if err := json.Unmarshal(raw, &notification.Details); err != nil {
+			n.logger.WarnContext(ctx, "google chat: invalid notification details", "error", err)
+		}
 	}
 	if issueIDText := stringValue(item["issue_id"]); issueIDText != "" {
 		if issueID, parseErr := util.ParseUUID(issueIDText); parseErr == nil && issueID.Valid {
@@ -158,6 +167,33 @@ func (n *Notifier) deliver(ctx context.Context, event events.Event) {
 			"space_id", SpaceID(webhookURL),
 			"error", err)
 	}
+}
+
+func (n *Notifier) actorName(ctx context.Context, actorType, actorID string) string {
+	if actorType == "system" {
+		return "Multica"
+	}
+	id, err := util.ParseUUID(actorID)
+	if err != nil || !id.Valid {
+		return ""
+	}
+	var name string
+	switch actorType {
+	case "member":
+		var user db.User
+		user, err = n.queries.GetUser(ctx, id)
+		name = user.Name
+	case "agent":
+		var agent db.Agent
+		agent, err = n.queries.GetAgent(ctx, id)
+		name = agent.Name
+	default:
+		return ""
+	}
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		n.logger.WarnContext(ctx, "google chat: actor lookup failed", "actor_id", actorID, "error", err)
+	}
+	return name
 }
 
 func eventItem(payload any) (map[string]any, bool) {

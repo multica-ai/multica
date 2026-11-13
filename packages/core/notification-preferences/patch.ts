@@ -16,8 +16,6 @@ const NOTIFICATION_GROUP_KEYS: readonly NotificationGroupKey[] = [
   "system_notifications",
 ];
 
-const PENDING_MASKED_CREDENTIAL = "••••";
-
 function preferenceValue(
   preferences: NotificationPreferences,
   key: NotificationGroupKey,
@@ -68,13 +66,7 @@ export function applyNotificationPreferencePatch(
     }
   }
 
-  if (Object.hasOwn(patch, "google_chat_webhook")) {
-    if (patch.google_chat_webhook) {
-      next.google_chat_webhook = PENDING_MASKED_CREDENTIAL;
-    } else {
-      delete next.google_chat_webhook;
-    }
-  }
+  // Webhook writes require server confirmation; keep the last confirmed value.
 
   return next;
 }
@@ -104,20 +96,6 @@ export function rollbackNotificationPreferencePatch(
       delete next[key];
     } else {
       next[key] = previousValue;
-    }
-  }
-
-  if (Object.hasOwn(patch, "google_chat_webhook")) {
-    const patchedWebhook = patch.google_chat_webhook ?? "";
-    const currentWebhook = current.google_chat_webhook ?? "";
-    const expectedCurrent = patchedWebhook ? PENDING_MASKED_CREDENTIAL : "";
-    if (currentWebhook === expectedCurrent) {
-      const previousWebhook = previous.google_chat_webhook ?? "";
-      if (previousWebhook) {
-        next.google_chat_webhook = previousWebhook;
-      } else {
-        delete next.google_chat_webhook;
-      }
     }
   }
 

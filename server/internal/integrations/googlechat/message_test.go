@@ -16,10 +16,34 @@ func TestFormatNotificationsEscapesUserTextAndBuildsIssueLink(t *testing.T) {
 		Body:            "Ada > Bob\nneeds review",
 		IssueURL:        "https://app.example.com/acme/issues/ACME-12",
 	}})
-	want := "*1 new notification in Acme &lt;Ops&gt;*\n" +
+	want := "*Acme &lt;Ops&gt;*\n" +
 		"• <https://app.example.com/acme/issues/ACME-12|ACME-12: Fix &lt;checkout&gt; &amp; alerts> — Ada &gt; Bob needs review"
 	if got != want {
 		t.Fatalf("FormatNotifications() =\n%s\nwant\n%s", got, want)
+	}
+}
+
+func TestNotificationActions(t *testing.T) {
+	for _, test := range []struct {
+		kind, want string
+	}{
+		{"issue_assigned", "Alice &lt;Ops&gt; assigned you"},
+		{"mentioned", "Alice &lt;Ops&gt; mentioned you"},
+		{"new_comment", "Alice &lt;Ops&gt; commented"},
+		{"status_changed", "Alice &lt;Ops&gt; changed status: todo → done"},
+		{"priority_changed", "Alice &lt;Ops&gt; changed priority: todo → done"},
+		{"task_failed", "Alice &lt;Ops&gt;'s run failed"},
+		{"future_event", "future event"},
+	} {
+		t.Run(test.kind, func(t *testing.T) {
+			got := FormatNotifications("Acme", []NotificationItem{{
+				Title: "Fix login", Type: test.kind, Actor: "Alice <Ops>",
+				Details: map[string]string{"from": "todo", "to": "done"},
+			}})
+			if !strings.Contains(got, test.want) || strings.Contains(got, "1 new notification") {
+				t.Fatalf("message = %q, want action %q without count header", got, test.want)
+			}
+		})
 	}
 }
 

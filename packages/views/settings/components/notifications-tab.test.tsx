@@ -2,6 +2,7 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { renderWithI18n } from "../../test/i18n";
+import { ApiError } from "@multica/core/api";
 
 const state = vi.hoisted(() => ({
   preferences: {} as Record<string, string>,
@@ -72,7 +73,7 @@ describe("NotificationsTab Google Chat settings", () => {
     expect(save).toBeDisabled();
     expect(
       screen.getByText(
-        "Google Chat space → Apps & integrations → Webhooks → Add webhook → copy URL.",
+        "Google Chat space → Apps & integrations → Webhooks → Add webhook → copy URL. Saving sends a test message to the space.",
       ),
     ).toBeInTheDocument();
 
@@ -99,7 +100,7 @@ describe("NotificationsTab Google Chat settings", () => {
     };
     renderWithI18n(<NotificationsTab />);
 
-    expect(screen.getByText(/spaces\/AAAA…\/messages/)).toBeInTheDocument();
+    expect(screen.getByText("Connected to space AAAA…")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Replace" }));
     expect(
       screen.getByRole("textbox", { name: "Google Chat webhook URL" }),
@@ -107,6 +108,9 @@ describe("NotificationsTab Google Chat settings", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    expect(state.mutateAsync).not.toHaveBeenCalled();
+    const dialog = screen.getByRole("alertdialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
     await waitFor(() => {
       expect(state.mutateAsync).toHaveBeenCalledWith({
         comments: "muted",
@@ -114,9 +118,40 @@ describe("NotificationsTab Google Chat settings", () => {
       });
     });
   });
+
+  it("keeps input visible with a connecting label while confirmation is pending", () => {
+    state.isPending = true;
+    renderWithI18n(<NotificationsTab />);
+    expect(screen.getByRole("textbox", { name: "Google Chat webhook URL" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Connecting…" })).toBeDisabled();
+    expect(screen.queryByText(/Connected to space/)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["google_chat_invalid_url", "Saisissez une URL de webhook Google Chat commençant par"],
+    ["google_chat_missing_credentials", "L'URL du webhook doit inclure key et token."],
+    ["google_chat_connection_failed", "Impossible de se connecter à Google Chat."],
+    ["unknown", "Échec de la mise à jour"],
+  ])("shows localized inline errors for %s and preserves input", async (code, expected) => {
+    state.mutateAsync.mockRejectedValue(new ApiError("raw English server message", 400, "Bad Request", { code }));
+    renderWithI18n(<NotificationsTab />, { locale: "fr" });
+    const input = screen.getByRole("textbox", { name: "URL du webhook Google Chat" });
+    fireEvent.change(input, { target: { value: "https://example.com" } });
+    fireEvent.submit(input.closest("form")!);
+    const error = await screen.findByRole("alert");
+    expect(error.textContent).toContain(expected);
+    expect(error.textContent).not.toContain("raw English");
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(input).toHaveValue("https://example.com");
+    fireEvent.change(input, { target: { value: "https://chat.googleapis.com" } });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
 });
 
 describe("notification setting hierarchy", () => {
+  beforeEach(() => {
+    state.isPending = false;
+  });
   it.each([
     { systemMuted: false, chatMuted: false },
     { systemMuted: false, chatMuted: true },

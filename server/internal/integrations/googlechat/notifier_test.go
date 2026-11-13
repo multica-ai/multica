@@ -32,6 +32,8 @@ type fakeNotifierQueries struct {
 	preferences   map[string]string
 	workspace     db.Workspace
 	issue         db.Issue
+	user          db.User
+	agent         db.Agent
 }
 
 func (f *fakeNotifierQueries) GetMemberByUserAndWorkspace(context.Context, db.GetMemberByUserAndWorkspaceParams) (db.Member, error) {
@@ -52,6 +54,14 @@ func (f *fakeNotifierQueries) GetWorkspace(context.Context, pgtype.UUID) (db.Wor
 
 func (f *fakeNotifierQueries) GetIssue(context.Context, pgtype.UUID) (db.Issue, error) {
 	return f.issue, nil
+}
+
+func (f *fakeNotifierQueries) GetUser(context.Context, pgtype.UUID) (db.User, error) {
+	return f.user, nil
+}
+
+func (f *fakeNotifierQueries) GetAgent(context.Context, pgtype.UUID) (db.Agent, error) {
+	return f.agent, nil
 }
 
 type recordingSender struct {
@@ -109,6 +119,7 @@ func TestNotifierDeliversConfiguredMemberNotification(t *testing.T) {
 			WorkspaceID: workspaceID,
 			Number:      12,
 		},
+		user: db.User{Name: "Alice"},
 	}
 	sender := &recordingSender{}
 	notifier := NewNotifier(queries, sender, "https://app.example.com", slog.Default())
@@ -116,13 +127,19 @@ func TestNotifierDeliversConfiguredMemberNotification(t *testing.T) {
 	bus := events.New()
 	notifier.Register(bus)
 
-	bus.Publish(notifierEvent("member"))
+	event := notifierEvent("member")
+	item, _ := eventItem(event.Payload)
+	actorType, actorID := "member", notifierRecipientID
+	item["actor_type"], item["actor_id"] = &actorType, &actorID
+	item["type"] = "status_changed"
+	item["details"] = json.RawMessage(`{"from":"todo","to":"done"}`)
+	bus.Publish(event)
 
 	if sender.url != testWebhookURL {
 		t.Fatalf("webhook URL = %q", sender.url)
 	}
-	want := "*1 new notification in Acme*\n" +
-		"• <https://app.example.com/acme/issues/ACME-12|ACME-12: Checkout needs review> — Please check &lt;totals&gt;"
+	want := "*Acme*\n" +
+		"• <https://app.example.com/acme/issues/ACME-12|ACME-12: Checkout needs review> — Alice changed status: todo → done — Please check &lt;totals&gt;"
 	if sender.message != want {
 		t.Fatalf("message =\n%s\nwant\n%s", sender.message, want)
 	}
@@ -153,10 +170,18 @@ func TestNotifierOmitsIssueLinkWhenAppURLIsEmpty(t *testing.T) {
 
 	bus.Publish(notifierEvent("member"))
 
-	want := "*1 new notification in Acme*\n" +
+	want := "*Acme*\n" +
 		"• ACME-12: Checkout needs review — Please check &lt;totals&gt;"
 	if sender.message != want {
 		t.Fatalf("message =\n%s\nwant\n%s", sender.message, want)
+	}
+}
+
+func TestNotifierResolvesAgentActor(t *testing.T) {
+	queries := &fakeNotifierQueries{agent: db.Agent{Name: "Review bot"}}
+	notifier := NewNotifier(queries, nil, "", slog.Default())
+	if got := notifier.actorName(context.Background(), "agent", notifierRecipientID); got != "Review bot" {
+		t.Fatalf("actor = %q", got)
 	}
 }
 

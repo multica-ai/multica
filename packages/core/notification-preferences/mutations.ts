@@ -115,6 +115,21 @@ export function useUpdateNotificationPreferences() {
         ),
       }));
     },
+    onSuccess: (data, { patch, workspaceId }) => {
+      if (!Object.hasOwn(patch, "google_chat_webhook")) return;
+      qc.setQueryData<NotificationPreferenceResponse>(
+        notificationPreferenceKeys.all(workspaceId),
+        (old) => {
+          const preferences = { ...old?.preferences };
+          if (data.preferences.google_chat_webhook) {
+            preferences.google_chat_webhook = data.preferences.google_chat_webhook;
+          } else {
+            delete preferences.google_chat_webhook;
+          }
+          return { ...(old ?? data), preferences };
+        },
+      );
+    },
     onSettled: (_data, _error, { workspaceId }, context) => {
       const mutationKey = notificationPreferenceKeys.all(workspaceId);
       // The current mutation is still counted during onSettled. Reconcile

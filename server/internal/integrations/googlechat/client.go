@@ -21,6 +21,11 @@ const (
 
 var webhookPathPattern = regexp.MustCompile(`^/v1/spaces/([A-Za-z0-9_-]+)/messages$`)
 
+var (
+	ErrInvalidWebhookURL  = errors.New("Google Chat webhook must use https://chat.googleapis.com/v1/spaces/{space}/messages without a port, userinfo, or fragment")
+	ErrMissingCredentials = errors.New("Google Chat webhook must include non-empty key and token parameters")
+)
+
 // Sender posts rendered notification text to one Google Chat incoming webhook.
 type Sender interface {
 	Send(ctx context.Context, webhookURL, text string) error
@@ -50,21 +55,21 @@ func NewClient() *Client {
 func ValidateWebhookURL(raw string) (*url.URL, error) {
 	endpoint, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil {
-		return nil, errors.New("Google Chat webhook URL is invalid")
+		return nil, ErrInvalidWebhookURL
 	}
 	if endpoint.Scheme != "https" ||
 		endpoint.Host != webhookHost ||
 		endpoint.User != nil ||
 		endpoint.Port() != "" ||
 		endpoint.Fragment != "" {
-		return nil, errors.New("Google Chat webhook must use https://chat.googleapis.com without a port, userinfo, or fragment")
+		return nil, ErrInvalidWebhookURL
 	}
 	if !webhookPathPattern.MatchString(endpoint.EscapedPath()) {
-		return nil, errors.New("Google Chat webhook path must match /v1/spaces/{space}/messages")
+		return nil, ErrInvalidWebhookURL
 	}
 	query := endpoint.Query()
 	if strings.TrimSpace(query.Get("key")) == "" || strings.TrimSpace(query.Get("token")) == "" {
-		return nil, errors.New("Google Chat webhook must include non-empty key and token parameters")
+		return nil, ErrMissingCredentials
 	}
 	return endpoint, nil
 }
