@@ -452,6 +452,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		LLMDefaultModel:                strings.TrimSpace(os.Getenv("MULTICA_LLM_DEFAULT_MODEL")),
 		LLMMaxRetries:                  opts.LLMMaxRetries,
 		LLMDisableThinking:             opts.LLMDisableThinking,
+		LLMTranscribeModel:             strings.TrimSpace(os.Getenv("MULTICA_LLM_TRANSCRIBE_MODEL")),
 		ServerVersion:                  normalizeServerVersion(version),
 		GitExtraCACerts:                gitca.Load(slog.Default()),
 	}
@@ -1769,6 +1770,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// middleware.Auth and never call this (MUL-7436).
 		r.Post("/api/auth/refresh", h.RefreshSession)
 		r.Post("/api/upload-file", h.UploadFile)
+		// Voice input (MUL-9218): each call bills the transcription model, so
+		// it is human-only and budgeted per user.
+		r.With(
+			handler.RequireHumanActor,
+			middleware.UserRateLimit(rdb, "voice", envPositiveInt("RATE_LIMIT_VOICE_TRANSCRIBE", 30), time.Minute),
+		).Post("/api/voice/transcriptions", h.TranscribeVoice)
 		r.Post("/api/feedback", h.CreateFeedback)
 		r.With(handler.RequireHumanActor).Post("/api/client-usage", h.UpsertClientUsage)
 

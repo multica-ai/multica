@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -32,12 +33,13 @@ func (c *countingHTTPClient) Do(req *http.Request) (*http.Response, error) {
 // layer — agent runs reach a model by their own path, which no variable here
 // governs. See the package doc.)
 //
-// Both consumers of this package send private chat content upstream — the
-// first message of a chat session (auto-titling) and the tail of a conversation
-// (follow-up questions). "Leave the LLM variables empty" is the documented
-// answer for an operator whose policy forbids that (.env.example, the docs
-// environment-variables pages, and GitHub issue #7162), so the behaviour has to
-// be a tested guarantee rather than something that happens to be true today.
+// Every consumer of this package sends private user content upstream — the
+// first message of a chat session (auto-titling), the tail of a conversation
+// (follow-up questions) and recorded speech (voice input). "Leave the LLM
+// variables empty" is the documented answer for an operator whose policy
+// forbids that (.env.example, the docs environment-variables pages, and GitHub
+// issue #7162), so the behaviour has to be a tested guarantee rather than
+// something that happens to be true today.
 //
 // Every exported call path is exercised, because each one is a place a future
 // refactor could start building a request before consulting Enabled().
@@ -75,6 +77,13 @@ func TestUnconfiguredClientMakesZeroUpstreamRequests(t *testing.T) {
 			}},
 			{"GenerateJSON", func() error {
 				_, err := c.GenerateJSON(ctx, "", "system JSON", "private chat content", 0.3, 2048)
+				return err
+			}},
+			{"Transcribe", func() error {
+				_, err := c.Transcribe(ctx, TranscribeRequest{
+					Model: "gpt-4o-mini-transcribe", Audio: strings.NewReader("private speech"),
+					Filename: "voice.webm", ContentType: "audio/webm",
+				})
 				return err
 			}},
 		}

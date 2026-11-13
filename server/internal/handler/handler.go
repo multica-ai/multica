@@ -162,6 +162,11 @@ type Config struct {
 	// cmd/server validates the raw value before the boot continues, so a
 	// non-boolean never reaches this struct.
 	LLMDisableThinking bool
+	// LLMTranscribeModel -> MULTICA_LLM_TRANSCRIBE_MODEL. Voice input sends
+	// audio upstream only when this is set as well as the layer itself, so a
+	// deployment that configured the assist layer for chat titles does not
+	// start transcribing speech by surprise.
+	LLMTranscribeModel string
 	// ServerVersion is the build version of the running API binary (the same
 	// value main.go stamps via -X main.version and reports on /metrics).
 	// Surfaced through /api/config so self-hosted operators can confirm which

@@ -59,6 +59,11 @@ type AppConfig struct {
 	// so the app shows no Browse entry and makes no store requests.
 	ThemeStoreEnabled bool `json:"theme_store_enabled,omitempty"`
 
+	// VoiceInputAvailable tells the app it can offer the composer microphone:
+	// POST /api/voice/transcriptions has a model to send audio to. Omitted when
+	// false, and older servers omit it too, so the microphone stays hidden.
+	VoiceInputAvailable bool `json:"voice_input_available,omitempty"`
+
 	// PostHog public config for the frontend. The key is the same Project
 	// API Key the backend uses; returning it here (instead of baking it
 	// into the frontend bundle via NEXT_PUBLIC_*) means self-hosted
@@ -143,6 +148,7 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	config.DaemonSetupTarget = "self_host"
 	config.VCSIntegrationAvailable = h.cfg.VCSIntegrationEnabled
 	config.ThemeStoreEnabled = h.ThemeStore != nil
+	config.VoiceInputAvailable = h.voiceTranscriptionAvailable()
 	config.FeatureFlags = featureflags.EvaluateFrontendPublicFlags(r.Context(), h.FeatureFlags)
 	// Only surface the build version on self-hosted deployments. The managed
 	// cloud is continuously deployed and its users can't choose the build, so

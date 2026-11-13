@@ -168,6 +168,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `RATE_LIMIT_INVITATION_ACTOR_10M` | `10` | 每位邀請人在 10 分鐘滑動視窗內可建立的工作區邀請數；設為 `0` 可關閉此項限流 |
 | `RATE_LIMIT_INVITATION_WORKSPACE_24H` | `50` | 同一工作區內所有管理員在 24 小時滑動視窗內可建立的邀請總數；設為 `0` 可關閉此項限流 |
 | `RATE_LIMIT_INVITATION_RECIPIENT_24H` | `6` | 同一規範化收件信箱跨工作區在 24 小時滑動視窗內可收到的邀請數；設為 `0` 可關閉此項限流 |
+| `RATE_LIMIT_VOICE_TRANSCRIBE` | `30` | 每位成員每分鐘可請求的語音轉寫次數；需要 Redis |
 | `RATE_LIMIT_TRUSTED_PROXIES` | 空 | 允許提供 `X-Forwarded-For` 的代理 CIDR，逗號分隔 |
 | `MULTICA_TRUSTED_PROXIES` | 空 | 自動化 webhook 與實時連線使用的可信代理 CIDR |
 
@@ -213,17 +214,19 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `MULTICA_LLM_DEFAULT_MODEL` | `gpt-6-luna` | 請求未指定模型時使用 |
 | `MULTICA_LLM_MAX_RETRIES` | `2` | 單次呼叫的重試上限；`0` 表示禁用重試，`1`–`5` 表示最多重試 N 次 |
 | `MULTICA_LLM_DISABLE_THINKING` | `false` | 在每個請求中附帶 `chat_template_kwargs: {"enable_thinking": false}`，供支援該欄位的閘道器關閉模型思考 |
+| `MULTICA_LLM_TRANSCRIBE_MODEL` | 空 | 語音輸入使用的語音轉文字模型，例如 `gpt-4o-mini-transcribe` 或 `whisper-1`；未設定時語音輸入保持關閉 |
 
 `MULTICA_LLM_MAX_RETRIES` 是重試策略的唯一配置源。不設定時使用預設的 2 次；設為 `0` 表示每次呼叫只發一個請求；設為 1–5 表示最多重試這麼多次。它是上限而不是配額：只有可重試的失敗才會消耗它，請求成功或呼叫方自身的超時都會讓呼叫提前結束。其它取值（負數、非數字、大於 5）會讓服務啟動失敗，不會被靜默糾正。上限是一個延遲預算：退避從 0.5s 開始翻倍，上限 8s，更大的預算會超出呼叫方自身的超時，把可重試的失敗變成超時失敗。重試覆蓋連線失敗以及 HTTP 408、409、429 和 5xx；其餘 4xx 直接返回。服務啟動時會以 `llm retry policy` 列印生效策略，其中不包含任何憑據。
 
 `MULTICA_LLM_DISABLE_THINKING` 面向"模型會先跑一段推理（thinking）並吃掉輔助呼叫延遲預算"的閘道器。設為 `true`（或 `1`）時，服務端會在每個請求體中附帶 `chat_template_kwargs: {"enable_thinking": false}`；支援透傳該欄位的閘道器（vLLM/sglang 類部署、部分 GLM/Qwen 系的 LiteLLM 路由）會因此跳過思考階段。標準 OpenAI 端點會拒絕未知的請求體欄位，所以僅在上游接受時啟用。GPT-5.6 系模型和 GPT-6 Luna 在後續提問建議請求中已由服務端附帶 `reasoning_effort: none`。會話自動命名不傳送推理欄位；只有當所配置的上游接受 `chat_template_kwargs` 時，此項才會影響它。可接受的取值為 `true`/`false` 和 `1`/`0`（不區分大小寫）；其它取值會讓服務啟動失敗。啟動日誌會在重試策略旁列印生效狀態。
 
-有兩個功能會使用這一層，它們都會把聊天內容傳送到你配置的 endpoint：
+以下功能會使用這一層，它們都會把私有內容傳送到你配置的 endpoint：
 
 - **對話標題自動生成** —— 傳送新對話中使用者的第一條訊息，原文傳送。附件不會包含在內。
 - **後續提問建議**（AI 代理回覆下方的按鈕）—— 傳送對話末尾的內容：最多 6 條訊息，其中被追問的那條回覆上限 3000 字元，更早的每條上限 800 字元。
+- **語音輸入**（對話、留言和回覆輸入框中的麥克風），僅在同時設定了 `MULTICA_LLM_TRANSCRIBE_MODEL` 時啟用 —— 傳送成員口述的每段錄音（最多 10 MB 音訊），以及說話語言提示和自訂詞彙表。上游需要提供 OpenAI `/audio/transcriptions` 介面。伺服器不保存音訊。
 
-API key 與 base URL 都為空時，這一層關閉，不會發出任何上游請求——上面兩個功能都不再傳送內容。如果你的政策不允許這一層把聊天內容發到部署之外，這就是受支援的配置方式：對話繼續使用客戶端根據第一條訊息生成的標題，後續提問按鈕不再出現，其餘功能不受影響。
+API key 與 base URL 都為空時，這一層關閉，不會發出任何上游請求——上面的功能都不再傳送內容。如果你的政策不允許這一層把聊天內容發到部署之外，這就是受支援的配置方式：對話繼續使用客戶端根據第一條訊息生成的標題，後續提問按鈕不再出現，輸入框不顯示麥克風，其餘功能不受影響。
 
 <Callout type="info">
 這只覆蓋輔助生成這一層。AI 代理執行是另一條資料路徑：AI 代理回覆對話時，由你的守護程序呼叫該 AI 代理的 AI 程式設計工具，用的是那個工具自己的憑據，守護程序不會把上面的 `MULTICA_LLM_*` 配置傳給它。（AI 代理自身需要的執行級 Multica 連線變數由守護程序單獨注入。）把上面的變數留空不影響這條路徑——它由 AI 代理的執行時配置決定。

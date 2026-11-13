@@ -44,6 +44,12 @@
 //     Sends the tail of the conversation: up to 6 messages, the reply being
 //     answered capped at 3000 runes (2000 head + 1000 tail) and each older
 //     message at 800.
+//   - Voice input — server/internal/handler/voice.go. Sends the audio the
+//     user recorded in a composer (at most 10 MB, one clip per request), plus
+//     the spoken-language hint and the user's custom vocabulary, to the
+//     /audio/transcriptions endpoint. It runs only when
+//     MULTICA_LLM_TRANSCRIBE_MODEL is set as well; the server keeps no copy of
+//     the audio.
 //
 // Request shape beyond the prompts is deployment-controlled and lives in
 // Config: MaxRetries (transport budget) and DisableThinking, which appends
@@ -53,15 +59,15 @@
 // reject unknown body fields, so the knob is opt-in per deployment and off by
 // default.
 //
-// Both consumers send private chat content, which is why an unconfigured
+// Every consumer sends private user content, which is why an unconfigured
 // deployment making zero upstream requests is a contract rather than a side
 // effect: New with no API key and no base URL returns a disabled client whose
 // every call fails with ErrNotConfigured before an HTTP request is ever built,
-// and both consumers check Enabled() before doing any work
+// and every consumer checks Enabled() before doing any work
 // (TestUnconfiguredClientMakesZeroUpstreamRequests). An operator who must not
 // let THIS layer send chat content leaves MULTICA_LLM_API_KEY and
 // MULTICA_LLM_BASE_URL empty; the product stays whole (client-derived chat
-// titles, no follow-up question buttons).
+// titles, no follow-up question buttons, no voice input).
 //
 // The wrapper is intentionally small:
 //
@@ -83,6 +89,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -495,6 +502,53 @@ func (c *Client) GenerateJSON(ctx context.Context, model, systemPrompt, userProm
 		return "", errors.New("llm: upstream returned empty JSON content")
 	}
 	return choice.Message.Content, nil
+}
+
+// TranscribeRequest is one audio clip to turn into text.
+type TranscribeRequest struct {
+	// Model is required: transcription has no default model, so a deployment
+	// that never named one never sends audio anywhere.
+	Model       string
+	Audio       io.Reader
+	Filename    string
+	ContentType string
+	// Language is an optional ISO-639-1 hint; empty lets the model detect it.
+	Language string
+	// Prompt is optional context such as product names the model should spell
+	// the way the user does.
+	Prompt string
+}
+
+// Transcribe sends one audio clip to the upstream's /audio/transcriptions
+// endpoint and returns the recognized text.
+func (c *Client) Transcribe(ctx context.Context, req TranscribeRequest) (string, error) {
+	if !c.Enabled() {
+		return "", ErrNotConfigured
+	}
+	model := strings.TrimSpace(req.Model)
+	if model == "" {
+		return "", errors.New("llm: transcription model is required")
+	}
+	params := openai.AudioTranscriptionNewParams{
+		File:           openai.File(req.Audio, req.Filename, req.ContentType),
+		Model:          openai.AudioModel(model),
+		ResponseFormat: openai.AudioResponseFormatJSON,
+	}
+	if lang := strings.TrimSpace(req.Language); lang != "" {
+		params.Language = openai.String(lang)
+	}
+	if prompt := strings.TrimSpace(req.Prompt); prompt != "" {
+		params.Prompt = openai.String(prompt)
+	}
+
+	ctx, cancel := withDefaultTimeout(ctx)
+	defer cancel()
+
+	res, err := c.sdk.Audio.Transcriptions.New(ctx, params)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(res.Text), nil
 }
 
 func isUnsupportedParameter(err error, parameter string) bool {
