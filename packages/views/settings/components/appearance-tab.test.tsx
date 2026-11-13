@@ -1,11 +1,14 @@
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { configStore } from "@multica/core/config";
+import { setCurrentWorkspace } from "@multica/core/platform";
+import { WorkspaceSlugProvider } from "@multica/core/paths";
 import {
+  ACCENT_PRESETS,
   DEFAULT_APPEARANCE,
   parseTheme,
   readZip,
@@ -30,6 +33,7 @@ const api = vi.hoisted(() => ({
   listStoreThemes: vi.fn(),
   getStoreThemePackage: vi.fn(),
   getStoreThemeScreenshot: vi.fn(),
+  listWorkspaces: vi.fn(),
 }));
 vi.mock("@multica/core/api", () => ({ api }));
 
@@ -89,6 +93,7 @@ describe("AppearanceTab", () => {
   });
   afterEach(() => {
     cleanup();
+    setCurrentWorkspace(null, null);
   });
 
   it("switches the mode on this device", async () => {
@@ -117,8 +122,106 @@ describe("AppearanceTab", () => {
     expect(options[2]!.querySelector("[data-theme-swatch]")).toHaveAttribute("data-swatch-mode", "dark");
     await user.click(options[2]!);
 
-    expect(state().theme).toBe("github");
+    expect(state()).toMatchObject({ lightTheme: "github", darkTheme: "github" });
     expect(themeSelect()).toHaveTextContent("GitHub");
+  });
+
+  it("picks a second theme for dark mode only once asked, and merges them again when turned off", async () => {
+    const user = userEvent.setup();
+    render(<AppearanceTab />, { wrapper: Wrapper });
+    const split = () => screen.getByRole("switch", { name: "Use another theme in dark mode" });
+    expect(screen.queryByRole("combobox", { name: "Dark theme" })).toBeNull();
+
+    await user.click(split());
+    await user.click(screen.getByRole("combobox", { name: "Light theme" }));
+    await user.click(await screen.findByRole("option", { name: "Notion" }));
+    expect(state()).toMatchObject({ lightTheme: "notion", darkTheme: "default" });
+
+    const dark = screen.getByRole("combobox", { name: "Dark theme" });
+    await user.click(dark);
+    const options = await screen.findAllByRole("option");
+    expect(options[0]!.querySelector("[data-theme-swatch]")).toHaveAttribute("data-swatch-mode", "dark");
+    await user.click(screen.getByRole("option", { name: "GitHub" }));
+    expect(state()).toMatchObject({ lightTheme: "notion", darkTheme: "github" });
+    expect(dark).toHaveTextContent("GitHub");
+
+    await user.click(split());
+    expect(state()).toMatchObject({ lightTheme: "notion", darkTheme: "notion" });
+    expect(screen.queryByRole("combobox", { name: "Dark theme" })).toBeNull();
+    expect(themeSelect()).toHaveTextContent("Notion");
+  });
+
+  it("starts split when the two modes already use different themes", () => {
+    useAppearanceStore.setState({ lightTheme: "notion", darkTheme: "github" });
+    render(<AppearanceTab />, { wrapper: Wrapper });
+    expect(screen.getByRole("switch", { name: "Use another theme in dark mode" })).toBeChecked();
+    expect(screen.getByRole("combobox", { name: "Light theme" })).toHaveTextContent("Notion");
+    expect(screen.getByRole("combobox", { name: "Dark theme" })).toHaveTextContent("GitHub");
+  });
+
+  describe("in a workspace", () => {
+    const blue = ACCENT_PRESETS.find((preset) => preset.id === "blue")!.color;
+    function WorkspaceWrapper({ children }: { children: ReactNode }) {
+      return (
+        <Wrapper>
+          <WorkspaceSlugProvider slug="acme">{children}</WorkspaceSlugProvider>
+        </Wrapper>
+      );
+    }
+    const renderTab = async () => {
+      api.listWorkspaces.mockResolvedValue([{ id: "ws-1", slug: "acme", name: "Acme" }]);
+      await act(async () => setCurrentWorkspace("acme", "ws-1"));
+      render(<AppearanceTab />, { wrapper: WorkspaceWrapper });
+      expect(await screen.findByText("This device · Acme")).toBeInTheDocument();
+    };
+    const workspace = () => state().workspaces["ws-1"];
+
+    it("gives this workspace an accent, flags low contrast, and follows the global choice again", async () => {
+      const user = userEvent.setup();
+      await renderTab();
+      const accents = screen.getByRole("radiogroup", { name: "Accent color" });
+      expect(within(accents).getByRole("radio", { name: "Theme's own" })).toHaveAttribute("aria-checked", "true");
+      expect(screen.queryByRole("group", { name: "Custom color" })).toBeNull();
+      const followGlobal = screen.getByRole("button", { name: "Follow global" });
+      expect(followGlobal).toBeDisabled();
+
+      await user.click(within(accents).getByRole("radio", { name: "Blue" }));
+      expect(workspace()).toEqual({ accent: blue });
+      expect(within(accents).getByRole("radio", { name: "Blue" })).toHaveAttribute("aria-checked", "true");
+      expect(screen.queryByText(/below the 4\.5:1/)).toBeNull();
+
+      fireEvent.change(screen.getByLabelText("Custom color (Light)"), { target: { value: "#fde047" } });
+      expect(workspace()).toEqual({ accent: { light: "#fde047", dark: blue.dark } });
+      expect(screen.getByRole("status")).toHaveTextContent(/^Light: contrast is 1\.\d:1, below the 4\.5:1/);
+      expect(within(accents).getByRole("radio", { name: "Blue" })).toHaveAttribute("aria-checked", "false");
+
+      await user.click(followGlobal);
+      expect(state().workspaces).toEqual({});
+      expect(screen.queryByRole("status")).toBeNull();
+    });
+
+    it("gives this workspace its own themes, split by mode, without touching the global ones", async () => {
+      const user = userEvent.setup();
+      await renderTab();
+      const [, own] = screen.getAllByRole("combobox", { name: "Theme" });
+      expect(own).toHaveTextContent("Follow global");
+      expect(screen.getAllByRole("switch", { name: "Use another theme in dark mode" })).toHaveLength(1);
+
+      await user.click(own!);
+      await user.click(await screen.findByRole("option", { name: "Notion" }));
+      expect(workspace()).toEqual({ lightTheme: "notion", darkTheme: "notion" });
+
+      const [, split] = screen.getAllByRole("switch", { name: "Use another theme in dark mode" });
+      await user.click(split!);
+      await user.click(screen.getByRole("combobox", { name: "Dark theme" }));
+      await user.click(await screen.findByRole("option", { name: "GitHub" }));
+      expect(workspace()).toEqual({ lightTheme: "notion", darkTheme: "github" });
+      expect(state()).toMatchObject({ lightTheme: "default", darkTheme: "default" });
+
+      await user.click(screen.getByRole("combobox", { name: "Light theme" }));
+      await user.click(await screen.findByRole("option", { name: "Follow global" }));
+      expect(state().workspaces).toEqual({});
+    });
   });
 
   it("renders the options the active theme declares and saves them per theme", async () => {
@@ -219,14 +322,14 @@ describe("AppearanceTab", () => {
   });
 
   it("names the theme's fonts when the default choice keeps them", () => {
-    useAppearanceStore.setState({ theme: "github" });
+    useAppearanceStore.setState({ lightTheme: "github", darkTheme: "github" });
     const { unmount } = render(<AppearanceTab />, { wrapper: Wrapper });
     const [uiLatin] = screen.getAllByRole("combobox", { name: "Latin font" });
     expect(uiLatin).toHaveTextContent("Theme font");
     expect(screen.getByRole("combobox", { name: "Code font" })).toHaveTextContent("Theme font");
     unmount();
 
-    useAppearanceStore.setState({ theme: "default" });
+    useAppearanceStore.setState({ lightTheme: "default", darkTheme: "default" });
     render(<AppearanceTab />, { wrapper: Wrapper });
     expect(screen.getAllByRole("combobox", { name: "Latin font" })[0]).toHaveTextContent("Inter");
     expect(screen.getByRole("combobox", { name: "Code font" })).toHaveTextContent("Geist Mono");
@@ -264,7 +367,7 @@ describe("AppearanceTab", () => {
     await user.click(within(dialog).getByRole("button", { name: "Install and use" }));
 
     expect(useInstalledThemesStore.getState().themes.map((t) => t.id)).toEqual(["paper"]);
-    expect(state().theme).toBe("paper");
+    expect(state()).toMatchObject({ lightTheme: "paper", darkTheme: "paper" });
     expect(themeSelect()).toHaveTextContent("Paper");
     await user.click(themeSelect());
     expect(await screen.findByText("Installed")).toBeInTheDocument();
@@ -278,7 +381,7 @@ describe("AppearanceTab", () => {
     expect(within(themes).queryByRole("switch", { name: "Show installed only" })).toBeNull();
     await user.click(within(themes).getByRole("button", { name: "Remove Paper" }));
     expect(useInstalledThemesStore.getState().themes).toEqual([]);
-    expect(state().theme).toBe("default");
+    expect(state()).toMatchObject({ lightTheme: "default", darkTheme: "default" });
     expect(within(themes).getByText("No themes are installed yet.")).toBeInTheDocument();
     expect(api.listStoreThemes).not.toHaveBeenCalled();
   });
@@ -342,7 +445,7 @@ describe("AppearanceTab", () => {
     const createObjectURL = vi.fn((_blob: Blob) => "blob:theme");
     Object.assign(URL, { createObjectURL, revokeObjectURL: vi.fn() });
     const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
-    useAppearanceStore.setState({ theme: "github" });
+    useAppearanceStore.setState({ lightTheme: "github", darkTheme: "github" });
     render(<AppearanceTab />, { wrapper: Wrapper });
 
     expect(screen.queryByRole("button", { name: "Open themes folder" })).toBeNull();
@@ -385,7 +488,7 @@ describe("AppearanceTab", () => {
         "default-copy",
         "default-copy-2",
       ]);
-      expect(state().theme).toBe("default-copy-2");
+      expect(state()).toMatchObject({ lightTheme: "default-copy-2", darkTheme: "default-copy-2" });
       expect(useInstalledThemesStore.getState().themes.map((t) => t.id)).toEqual(["default-copy-2"]);
       expect(desktop.openThemeFolder).toHaveBeenCalledWith("default-copy-2");
     });
@@ -400,7 +503,7 @@ describe("AppearanceTab", () => {
         path: "/data/themes",
         problems: [{ folder: "ink", errors: ["theme.css line 2: @import is not allowed"] }],
       });
-      useAppearanceStore.setState({ theme: "paper" });
+      useAppearanceStore.setState({ lightTheme: "paper", darkTheme: "paper" });
       render(<AppearanceTab />, { wrapper: Wrapper });
 
       expect(screen.getByText(/Some themes in the themes folder don't pass the checks/)).toBeInTheDocument();
@@ -453,7 +556,7 @@ describe("AppearanceTab", () => {
         },
       ],
     });
-    useAppearanceStore.setState({ theme: "paper" });
+    useAppearanceStore.setState({ lightTheme: "paper", darkTheme: "paper" });
     render(<AppearanceTab />, { wrapper: Wrapper });
 
     expect(screen.getByRole("heading", { name: "Page" })).toBeInTheDocument();

@@ -548,7 +548,7 @@ describe("SearchCommand", () => {
 
     it("switches the colour theme from the theme submenu", async () => {
       const user = userEvent.setup();
-      useAppearanceStore.setState({ theme: "github" });
+      useAppearanceStore.setState({ lightTheme: "github", darkTheme: "github" });
       renderSearch();
       await user.type(input(), "主题");
       await user.click(await rowText("Change theme..."));
@@ -559,7 +559,7 @@ describe("SearchCommand", () => {
       );
       await user.click(screen.getByText("Pop"));
 
-      expect(useAppearanceStore.getState().theme).toBe("pop");
+      expect(useAppearanceStore.getState()).toMatchObject({ lightTheme: "pop", darkTheme: "pop" });
       expect(mockSetTheme).not.toHaveBeenCalled();
       expect(useSearchStore.getState().open).toBe(false);
     });
@@ -582,12 +582,12 @@ describe("SearchCommand", () => {
       expect(await rowText(name)).toHaveClass("min-w-0", "flex-1", "truncate");
 
       await user.keyboard("{Enter}");
-      expect(useAppearanceStore.getState().theme).toBe("solarized");
+      expect(useAppearanceStore.getState()).toMatchObject({ lightTheme: "solarized", darkTheme: "solarized" });
     });
 
     it("marks Default when the chosen theme is no longer installed", async () => {
       const user = userEvent.setup();
-      useAppearanceStore.setState({ theme: "uninstalled" });
+      useAppearanceStore.setState({ lightTheme: "uninstalled", darkTheme: "uninstalled" });
       renderSearch();
       await user.type(input(), "theme");
       await user.click(await rowText("Change theme..."));

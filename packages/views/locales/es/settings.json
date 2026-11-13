@@ -208,7 +208,30 @@
       "safe_mode": "Modo seguro: tu tema está en pausa hasta que cierres esta ventana.",
       "safe_mode_exit": "Usar mi tema",
       "folder": "Carpeta de temas",
-      "folder_problems": "Algunos temas de la carpeta de temas no pasan las comprobaciones. Corrígelos y guarda; mientras tanto se usa la última versión que las pasó."
+      "folder_problems": "Algunos temas de la carpeta de temas no pasan las comprobaciones. Corrígelos y guarda; mientras tanto se usa la última versión que las pasó.",
+      "light_title": "Tema claro",
+      "dark_title": "Tema oscuro",
+      "split": "Usar otro tema en modo oscuro"
+    },
+    "workspace": {
+      "title": "Este espacio de trabajo",
+      "description": "Haz que este espacio de trabajo se distinga a simple vista. Solo se aplica a este espacio de trabajo en este dispositivo; lo demás sigue la configuración de arriba.",
+      "reset": "Seguir la configuración global",
+      "follow": "Seguir la configuración global",
+      "accent": "Color de acento",
+      "accent_none": "El del tema",
+      "accent_custom": "Color personalizado",
+      "low_contrast": "{{mode}}: el contraste es de {{ratio}}:1, por debajo del 4.5:1 recomendado para que el texto se lea bien.",
+      "presets": {
+        "blue": "Azul",
+        "violet": "Violeta",
+        "pink": "Rosa",
+        "red": "Rojo",
+        "orange": "Naranja",
+        "green": "Verde",
+        "teal": "Verde azulado",
+        "slate": "Pizarra"
+      }
     },
     "import": {
       "button": "Importar tema",

@@ -207,7 +207,30 @@
       "safe_mode": "安全模式：关闭这个窗口之前，你的主题暂停生效。",
       "safe_mode_exit": "恢复我的主题",
       "folder": "主题文件夹",
-      "folder_problems": "主题文件夹里有主题没通过检查。修改后保存即可；在此之前继续使用最后一个通过检查的版本。"
+      "folder_problems": "主题文件夹里有主题没通过检查。修改后保存即可；在此之前继续使用最后一个通过检查的版本。",
+      "light_title": "浅色主题",
+      "dark_title": "深色主题",
+      "split": "深色模式使用另一个主题"
+    },
+    "workspace": {
+      "title": "此工作区",
+      "description": "让这个工作区一眼可辨。只作用于本设备上的这个工作区，其余仍按上面的设置。",
+      "reset": "恢复为跟随全局",
+      "follow": "跟随全局",
+      "accent": "强调色",
+      "accent_none": "主题自带",
+      "accent_custom": "自定义颜色",
+      "low_contrast": "{{mode}}：对比度只有 {{ratio}}:1，低于保证文字可读的 4.5:1。",
+      "presets": {
+        "blue": "蓝色",
+        "violet": "紫色",
+        "pink": "粉色",
+        "red": "红色",
+        "orange": "橙色",
+        "green": "绿色",
+        "teal": "青色",
+        "slate": "灰色"
+      }
     },
     "import": {
       "button": "导入主题",

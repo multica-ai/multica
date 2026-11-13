@@ -207,7 +207,30 @@
       "safe_mode": "安全模式：關閉這個視窗之前，你的主題暫停生效。",
       "safe_mode_exit": "恢復我的主題",
       "folder": "主題資料夾",
-      "folder_problems": "主題資料夾裡有主題沒通過檢查。修改後儲存即可；在此之前繼續使用最後一個通過檢查的版本。"
+      "folder_problems": "主題資料夾裡有主題沒通過檢查。修改後儲存即可；在此之前繼續使用最後一個通過檢查的版本。",
+      "light_title": "淺色主題",
+      "dark_title": "深色主題",
+      "split": "深色模式使用另一個主題"
+    },
+    "workspace": {
+      "title": "此工作區",
+      "description": "讓這個工作區一眼可辨。只作用於本裝置上的這個工作區，其餘仍依上面的設定。",
+      "reset": "恢復為跟隨全域",
+      "follow": "跟隨全域",
+      "accent": "強調色",
+      "accent_none": "主題內建",
+      "accent_custom": "自訂顏色",
+      "low_contrast": "{{mode}}：對比度只有 {{ratio}}:1，低於確保文字可讀的 4.5:1。",
+      "presets": {
+        "blue": "藍色",
+        "violet": "紫色",
+        "pink": "粉紅色",
+        "red": "紅色",
+        "orange": "橙色",
+        "green": "綠色",
+        "teal": "青色",
+        "slate": "灰色"
+      }
     },
     "import": {
       "button": "匯入主題",

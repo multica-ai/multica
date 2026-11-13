@@ -4,6 +4,7 @@ import {
   APPEARANCE_STORAGE_KEY,
   BUILT_IN_THEMES,
   DEFAULT_APPEARANCE,
+  activeAccent,
   activeTheme,
   appearanceRootVariables,
   appearanceStylesheet,
@@ -27,6 +28,8 @@ import {
 
 const pop = findBuiltInTheme("pop")!;
 const defaults = findBuiltInTheme("default")!;
+const light = { mode: "light" } as const;
+const dark = { mode: "dark" } as const;
 
 describe("appearance store", () => {
   beforeEach(() => {
@@ -35,9 +38,70 @@ describe("appearance store", () => {
   });
 
   it("saves the preferences on this device", () => {
-    useAppearanceStore.getState().set({ theme: "github", fontSize: 16, contentSize: 17 });
+    useAppearanceStore.getState().set({ lightTheme: "github", darkTheme: "github", fontSize: 16, contentSize: 17 });
     const saved = JSON.parse(localStorage.getItem(APPEARANCE_STORAGE_KEY) ?? "{}");
-    expect(saved.state).toMatchObject({ theme: "github", fontSize: 16, contentSize: 17 });
+    expect(saved.state).toMatchObject({ lightTheme: "github", darkTheme: "github", fontSize: 16, contentSize: 17 });
+  });
+
+  it("chooses a theme for both modes while they share one, and for the mode shown once split", () => {
+    const { chooseTheme, set } = useAppearanceStore.getState();
+    chooseTheme("notion", { mode: "dark" });
+    expect(useAppearanceStore.getState()).toMatchObject({ lightTheme: "notion", darkTheme: "notion" });
+    set({ darkTheme: "github" });
+    chooseTheme("pop", { mode: "dark" });
+    expect(useAppearanceStore.getState()).toMatchObject({ lightTheme: "notion", darkTheme: "pop" });
+    chooseTheme("blueprint", { mode: "light" });
+    expect(useAppearanceStore.getState()).toMatchObject({ lightTheme: "blueprint", darkTheme: "pop" });
+  });
+
+  it("chooses a theme in the workspace's own themes when it has them, and globally otherwise", () => {
+    const { chooseTheme, setWorkspaceAppearance } = useAppearanceStore.getState();
+    setWorkspaceAppearance("ws-1", { lightTheme: "notion", darkTheme: "notion", accent: { light: "#2563eb", dark: "#60a5fa" } });
+    chooseTheme("github", { mode: "light", workspaceId: "ws-1" });
+    chooseTheme("pop", { mode: "light", workspaceId: "ws-2" });
+    expect(useAppearanceStore.getState()).toMatchObject({
+      lightTheme: "pop",
+      darkTheme: "pop",
+      workspaces: { "ws-1": { lightTheme: "github", darkTheme: "github", accent: { light: "#2563eb" } } },
+    });
+  });
+
+  it("merges and clears a workspace's overrides", () => {
+    const { setWorkspaceAppearance } = useAppearanceStore.getState();
+    setWorkspaceAppearance("ws-1", { accent: { light: "#2563eb", dark: "#60a5fa" } });
+    setWorkspaceAppearance("ws-1", { lightTheme: "github", darkTheme: "notion" });
+    expect(useAppearanceStore.getState().workspaces["ws-1"]).toEqual({
+      accent: { light: "#2563eb", dark: "#60a5fa" },
+      lightTheme: "github",
+      darkTheme: "notion",
+    });
+    setWorkspaceAppearance("ws-1", { accent: undefined });
+    expect(useAppearanceStore.getState().workspaces["ws-1"]).toEqual({ lightTheme: "github", darkTheme: "notion" });
+    setWorkspaceAppearance("ws-1", null);
+    expect(useAppearanceStore.getState().workspaces).toEqual({});
+  });
+
+  it("stops using a removed theme everywhere it was chosen", () => {
+    const { set, forgetTheme } = useAppearanceStore.getState();
+    set({
+      lightTheme: "paper",
+      darkTheme: "github",
+      workspaces: {
+        "ws-1": { lightTheme: "paper", darkTheme: "paper", accent: { light: "#2563eb", dark: "#60a5fa" } },
+        "ws-2": { lightTheme: "paper", darkTheme: "notion" },
+        "ws-3": { lightTheme: "paper", darkTheme: "paper" },
+      },
+    });
+    forgetTheme("paper");
+    expect(useAppearanceStore.getState()).toMatchObject({
+      lightTheme: "default",
+      darkTheme: "github",
+      workspaces: {
+        "ws-1": { accent: { light: "#2563eb", dark: "#60a5fa" } },
+        "ws-2": { lightTheme: "notion", darkTheme: "notion" },
+      },
+    });
+    expect(useAppearanceStore.getState().workspaces).not.toHaveProperty("ws-3");
   });
 
   it("keeps option values per theme", () => {
@@ -50,9 +114,11 @@ describe("appearance store", () => {
   });
 
   it("resets everything to the defaults", () => {
-    const { set, setThemeOption, reset } = useAppearanceStore.getState();
-    set({ theme: "pop", contentFont: "serif" });
+    const { set, setThemeOption, setWorkspaceAppearance, reset } = useAppearanceStore.getState();
+    set({ lightTheme: "pop", darkTheme: "pop", contentFont: "serif" });
     setThemeOption("pop", "signal", "sky");
+    setWorkspaceAppearance("ws-1", { accent: { light: "#2563eb", dark: "#60a5fa" } });
+    expect(isDefaultAppearance(sanitizeAppearance(useAppearanceStore.getState()))).toBe(false);
     reset();
     expect(isDefaultAppearance(sanitizeAppearance(useAppearanceStore.getState()))).toBe(true);
   });
@@ -63,8 +129,9 @@ describe("appearance store", () => {
       JSON.stringify({ state: { style: "pop", cjkFont: "kai", accent: "violet" }, version: 0 }),
     );
     await useAppearanceStore.persist.rehydrate();
-    expect(useAppearanceStore.getState()).toMatchObject({ theme: "pop", uiCjkFont: "kai" });
+    expect(useAppearanceStore.getState()).toMatchObject({ lightTheme: "pop", darkTheme: "pop", uiCjkFont: "kai" });
     expect(useAppearanceStore.getState()).not.toHaveProperty("accent");
+    expect(useAppearanceStore.getState()).not.toHaveProperty("style");
   });
 });
 
@@ -84,7 +151,38 @@ describe("sanitizeAppearance", () => {
   });
 
   it("keeps the id of a theme that may be installed later", () => {
-    expect(sanitizeAppearance({ theme: "solarized" }).theme).toBe("solarized");
+    expect(sanitizeAppearance({ lightTheme: "solarized", darkTheme: "github" })).toMatchObject({
+      lightTheme: "solarized",
+      darkTheme: "github",
+    });
+  });
+
+  it("moves the one theme older versions saved into both modes", () => {
+    expect(sanitizeAppearance({ theme: "notion" })).toMatchObject({ lightTheme: "notion", darkTheme: "notion" });
+    expect(sanitizeAppearance({ style: "pop" })).toMatchObject({ lightTheme: "pop", darkTheme: "pop" });
+    expect(sanitizeAppearance({ theme: "Not An Id", style: "pop" })).toMatchObject({ lightTheme: "default" });
+    expect(sanitizeAppearance({ lightTheme: "github", theme: "notion" })).toMatchObject({
+      lightTheme: "github",
+      darkTheme: "github",
+    });
+    expect(sanitizeAppearance({ darkTheme: "github" })).toMatchObject({ lightTheme: "github", darkTheme: "github" });
+  });
+
+  it("keeps valid workspace overrides and drops the rest", () => {
+    expect(
+      sanitizeAppearance({
+        workspaces: {
+          "ws-1": { accent: { light: "#2563eb", dark: "#60a5fa" }, lightTheme: "notion" },
+          "ws-2": { accent: { light: "red", dark: "#fff" }, lightTheme: "Not An Id", darkTheme: "github" },
+          "ws-3": { accent: "#2563eb" },
+          "bad key!": { lightTheme: "github" },
+          "ws-4": null,
+        },
+      }).workspaces,
+    ).toEqual({
+      "ws-1": { accent: { light: "#2563eb", dark: "#60a5fa" }, lightTheme: "notion", darkTheme: "notion" },
+      "ws-2": { accent: { light: "#fff", dark: "#fff" }, lightTheme: "github", darkTheme: "github" },
+    });
   });
 
   it("accepts installed CJK families and follow-the-interface values", () => {
@@ -138,17 +236,28 @@ describe("appearanceStylesheet", () => {
   });
 
   it("writes contrast with selectors that outrank the theme's", () => {
-    const prefs = { ...DEFAULT_APPEARANCE, theme: "github", highContrast: true } as const;
-    const css = appearanceStylesheet(activeTheme(prefs), prefs);
+    const prefs = { ...DEFAULT_APPEARANCE, lightTheme: "github", darkTheme: "github", highContrast: true } as const;
+    const css = appearanceStylesheet(activeTheme(prefs, light), prefs);
     expect(css).not.toContain("--brand");
     expect(css).toMatch(/:root:not\(\.dark\), :root\.dark \{ --muted-foreground: color-mix/);
-    expect(activeTheme(prefs).css).toMatch(/^\.theme-light \{/);
+    expect(activeTheme(prefs, light).css).toMatch(/^\.theme-light \{/);
+  });
+
+  it("writes a workspace's accent per mode, with a label that reads on it", () => {
+    const css = appearanceStylesheet(defaults, DEFAULT_APPEARANCE, { light: "#2563eb", dark: "#60a5fa" });
+    expect(css).toBe(
+      [
+        ":root.theme-light { --brand: #2563eb; --brand-foreground: oklch(0.985 0 0); }",
+        ":root.theme-dark { --brand: #60a5fa; --brand-foreground: oklch(0.21 0.006 285.885); }",
+      ].join("\n"),
+    );
   });
 
   it("names the theme and its options, defaults included", () => {
     const prefs: AppearancePreferences = {
       ...DEFAULT_APPEARANCE,
-      theme: "pop",
+      lightTheme: "pop",
+      darkTheme: "pop",
       themeOptions: { pop: { signal: "sky", "status-blocks": false, unknown: true } },
     };
     expect(appearanceThemeAttributes(pop, prefs)).toEqual({
@@ -198,8 +307,44 @@ describe("appearanceStylesheet", () => {
   });
 
   it("falls back to the default theme in safe mode or when the theme is missing", () => {
-    expect(activeTheme({ ...DEFAULT_APPEARANCE, theme: "pop" }, true).id).toBe("default");
-    expect(activeTheme({ ...DEFAULT_APPEARANCE, theme: "not-installed" }).id).toBe("default");
+    const pop = { ...DEFAULT_APPEARANCE, lightTheme: "pop", darkTheme: "pop" };
+    expect(activeTheme(pop, light, true).id).toBe("default");
+    expect(activeTheme({ ...pop, workspaces: { "ws-1": { lightTheme: "notion", darkTheme: "notion" } } }, { mode: "light", workspaceId: "ws-1" }, true).id).toBe("default");
+    expect(activeTheme({ ...DEFAULT_APPEARANCE, lightTheme: "not-installed" }, light).id).toBe("default");
+  });
+
+  it("picks the theme for the mode shown, keeping each theme's options", () => {
+    const prefs: AppearancePreferences = {
+      ...DEFAULT_APPEARANCE,
+      lightTheme: "notion",
+      darkTheme: "pop",
+      themeOptions: { pop: { signal: "mint" }, notion: { x: true } },
+    };
+    expect(activeTheme(prefs, light).id).toBe("notion");
+    expect(activeTheme(prefs, dark).id).toBe("pop");
+    expect(appearanceThemeAttributes(activeTheme(prefs, dark), prefs)["data-theme-option-signal"]).toBe("mint");
+  });
+
+  it("resolves the workspace's theme, then the global theme for the mode, then Default", () => {
+    const prefs: AppearancePreferences = {
+      ...DEFAULT_APPEARANCE,
+      lightTheme: "notion",
+      darkTheme: "github",
+      workspaces: {
+        "ws-1": { lightTheme: "pop", darkTheme: "blueprint" },
+        "ws-2": { accent: { light: "#2563eb", dark: "#60a5fa" } },
+        "ws-3": { lightTheme: "not-installed", darkTheme: "not-installed" },
+      },
+    };
+    const shown = (mode: "light" | "dark", workspaceId: string | null) => activeTheme(prefs, { mode, workspaceId }).id;
+    expect([shown("light", "ws-1"), shown("dark", "ws-1")]).toEqual(["pop", "blueprint"]);
+    expect([shown("light", "ws-2"), shown("dark", "ws-2")]).toEqual(["notion", "github"]);
+    expect([shown("light", "ws-3"), shown("dark", "ws-3")]).toEqual(["notion", "github"]);
+    expect([shown("light", null), shown("dark", "unknown")]).toEqual(["notion", "github"]);
+    expect(activeTheme({ ...prefs, lightTheme: "gone" }, { mode: "light", workspaceId: "ws-3" }).id).toBe("default");
+    expect(activeAccent(prefs, "ws-2")).toEqual({ light: "#2563eb", dark: "#60a5fa" });
+    expect(activeAccent(prefs, "ws-1")).toBeUndefined();
+    expect(activeAccent(prefs, null)).toBeUndefined();
   });
 
   it("applies an installed theme and its CSS", () => {
@@ -210,7 +355,7 @@ describe("appearanceStylesheet", () => {
       css: '.theme-light { --page-canvas: oklch(0.97 0.02 85); }\n[data-mc="content"] p { hyphens: auto; }',
     };
     useInstalledThemesStore.setState({ themes: [theme] });
-    const active = activeTheme({ ...DEFAULT_APPEARANCE, theme: "paper" });
+    const active = activeTheme({ ...DEFAULT_APPEARANCE, lightTheme: "paper", darkTheme: "paper" }, light);
     expect(active).toBe(theme);
     expect(appearanceThemeCss(active)).toContain("hyphens: auto");
     useInstalledThemesStore.setState({ themes: [] });

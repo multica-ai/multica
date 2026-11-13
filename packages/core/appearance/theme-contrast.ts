@@ -69,7 +69,7 @@ export function parseColor(value: string): Rgba | null {
   if (!fn) return null;
   const [main = "", alphaPart] = fn[2]!.split("/");
   const parts = main.split(/[\s,]+/).filter(Boolean);
-  let alphaToken = alphaPart?.trim();
+  let alphaToken: string | undefined = alphaPart?.trim();
   if (alphaToken === undefined && parts.length === 4) alphaToken = parts.pop();
   if (parts.length !== 3) return null;
   const alpha = alphaToken === undefined ? 1 : num(alphaToken);

@@ -60,6 +60,14 @@ export function useSettingsSearchIndex(
         title: t(($) => $.appearance.theme.title),
         description: t(($) => $.appearance.theme.description),
       },
+      { tab: "appearance", anchor: "theme-split", title: t(($) => $.appearance.theme.split) },
+      {
+        tab: "appearance",
+        anchor: "workspace-appearance",
+        title: t(($) => $.appearance.workspace.title),
+        description: t(($) => $.appearance.workspace.description),
+      },
+      { tab: "appearance", anchor: "workspace-accent", title: t(($) => $.appearance.workspace.accent) },
       {
         tab: "appearance",
         anchor: "theme-import",

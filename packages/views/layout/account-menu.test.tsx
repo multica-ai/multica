@@ -65,7 +65,7 @@ afterEach(() => {
 describe("AccountMenu theme submenu", () => {
   it("shows the mode and the active colour theme on the Theme row", () => {
     theme.current = "dark";
-    useAppearanceStore.setState({ theme: "github" });
+    useAppearanceStore.setState({ lightTheme: "github", darkTheme: "github" });
     renderWithI18n(<AccountMenu />);
     fireEvent.click(screen.getByRole("button", { name: "Account" }));
 
@@ -79,7 +79,7 @@ describe("AccountMenu theme submenu", () => {
       folders: {},
       fromStore: {},
     });
-    useAppearanceStore.setState({ theme: "long" });
+    useAppearanceStore.setState({ lightTheme: "long", darkTheme: "long" });
     renderWithI18n(<AccountMenu />);
     fireEvent.click(screen.getByRole("button", { name: "Account" }));
 
@@ -95,7 +95,7 @@ describe("AccountMenu theme submenu", () => {
     expect(screen.getByRole("menuitemradio", { name: "Default" })).toHaveAttribute("aria-checked", "true");
     fireEvent.click(pop);
 
-    expect(useAppearanceStore.getState().theme).toBe("pop");
+    expect(useAppearanceStore.getState()).toMatchObject({ lightTheme: "pop", darkTheme: "pop" });
     expect(screen.getByRole("menuitemradio", { name: "Pop" })).toHaveAttribute("aria-checked", "true");
   });
 

@@ -4,7 +4,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { FolderMinus, Monitor, Moon, SquarePen, Sun } from "@multica/ui/icons";
 import { Command as CommandPrimitive } from "cmdk";
-import { useAppearanceStore } from "@multica/core/appearance";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { issueDetailOptions } from "@multica/core/issues/queries";
@@ -36,8 +35,7 @@ export function ThemePage({ query }: { query: string }) {
   const palette = usePalette();
   const { theme: mode, setTheme: setMode } = useTheme();
   const appliedMode = useAppliedMode();
-  const setAppearance = useAppearanceStore((s) => s.set);
-  const { themes, selected } = useColorThemes();
+  const { themes, selected, choose } = useColorThemes();
   const themeLabel = useThemeLabel();
   const currentMode = mode ?? "system";
   const q = query.trim().toLowerCase();
@@ -81,7 +79,7 @@ export function ThemePage({ query }: { query: string }) {
               value={`color-theme:${manifest.id}`}
               onSelect={() => {
                 palette.close();
-                setAppearance({ theme: manifest.id });
+                choose(manifest.id);
               }}
               className={ROW_CLASS}
             >

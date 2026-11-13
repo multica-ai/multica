@@ -1,14 +1,16 @@
 "use client";
 
 import { useMemo } from "react";
+import { useShallow } from "zustand/react/shallow";
 import {
   BUILT_IN_THEMES,
-  DEFAULT_THEME_ID,
-  findBuiltInTheme,
+  activeTheme,
   themeModeVariables,
   useAppearanceStore,
+  useAppearanceWorkspaceId,
   useInstalledThemesStore,
   type Theme,
+  type ThemeTarget,
 } from "@multica/core/appearance";
 import { useTheme } from "@multica/ui/components/common/theme-provider";
 import { useT } from "../../i18n";
@@ -32,16 +34,27 @@ export function useThemeLabel() {
         : theme.name;
 }
 
+/** Where this window shows a theme: the mode drawn and its workspace. */
+export function useThemeTarget(): ThemeTarget {
+  const mode = useAppliedMode();
+  const workspaceId = useAppearanceWorkspaceId();
+  return useMemo(() => ({ mode, workspaceId }), [mode, workspaceId]);
+}
+
 /**
- * The themes a person can pick, built-in ones first, and the one in use:
- * Default when the chosen theme is no longer installed.
+ * The themes a person can pick, built-in ones first; the one this window
+ * shows (Default when the chosen theme is no longer installed); and `choose`,
+ * which shows another one in its place.
  */
-export function useColorThemes(): { themes: readonly Theme[]; selected: Theme } {
-  const chosen = useAppearanceStore((s) => s.theme);
+export function useColorThemes(): { themes: readonly Theme[]; selected: Theme; choose: (id: string) => void } {
+  const target = useThemeTarget();
+  const choices = useAppearanceStore(
+    useShallow((s) => ({ lightTheme: s.lightTheme, darkTheme: s.darkTheme, workspaces: s.workspaces })),
+  );
+  const chooseTheme = useAppearanceStore((s) => s.chooseTheme);
   const installed = useInstalledThemesStore((s) => s.themes);
   const themes = useMemo(() => [...BUILT_IN_THEMES, ...installed], [installed]);
-  const selected = themes.find((theme) => theme.id === chosen) ?? findBuiltInTheme(DEFAULT_THEME_ID)!;
-  return { themes, selected };
+  return { themes, selected: activeTheme(choices, target), choose: (id) => chooseTheme(id, target) };
 }
 
 type SwatchToken =

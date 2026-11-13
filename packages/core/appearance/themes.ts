@@ -89,6 +89,8 @@ export interface ThemedColor {
   dark: string;
 }
 
+export type ThemeMode = keyof ThemedColor;
+
 /** manifest.json */
 export interface ThemeManifest {
   apiVersion: typeof THEME_API_VERSION;

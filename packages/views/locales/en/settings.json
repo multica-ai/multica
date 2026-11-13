@@ -208,7 +208,30 @@
       "safe_mode": "Safe mode: your theme is paused until you close this window.",
       "safe_mode_exit": "Use my theme",
       "folder": "Themes folder",
-      "folder_problems": "Some themes in the themes folder don't pass the checks. Fix them and save; the last version that passed stays in use."
+      "folder_problems": "Some themes in the themes folder don't pass the checks. Fix them and save; the last version that passed stays in use.",
+      "light_title": "Light theme",
+      "dark_title": "Dark theme",
+      "split": "Use another theme in dark mode"
+    },
+    "workspace": {
+      "title": "This workspace",
+      "description": "Make this workspace easy to tell apart. Applies only to this workspace on this device; everything else follows the choices above.",
+      "reset": "Follow global",
+      "follow": "Follow global",
+      "accent": "Accent color",
+      "accent_none": "Theme's own",
+      "accent_custom": "Custom color",
+      "low_contrast": "{{mode}}: contrast is {{ratio}}:1, below the 4.5:1 recommended for readable text.",
+      "presets": {
+        "blue": "Blue",
+        "violet": "Violet",
+        "pink": "Pink",
+        "red": "Red",
+        "orange": "Orange",
+        "green": "Green",
+        "teal": "Teal",
+        "slate": "Slate"
+      }
     },
     "import": {
       "button": "Import theme",

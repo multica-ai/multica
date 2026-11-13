@@ -30,7 +30,7 @@ import {
 import { useLocale, useT } from "../../i18n";
 import { SegmentedToggle } from "../../common/segmented-toggle";
 import { openExternal } from "../../platform/open-external";
-import { ThemePreview, useAppliedMode, useThemeLabel } from "./theme-swatch";
+import { ThemePreview, useAppliedMode, useColorThemes, useThemeLabel, useThemeTarget } from "./theme-swatch";
 
 /**
  * Settings → Appearance → Manage: the themes installed on this device and,
@@ -66,6 +66,7 @@ export function ThemesButton() {
 export function useStoreThemeInstall() {
   const { t } = useT("settings");
   const queryClient = useQueryClient();
+  const target = useThemeTarget();
   return useCallback(
     async (theme: StoreTheme) => {
       const themes = useInstalledThemesStore.getState();
@@ -93,7 +94,7 @@ export function useStoreThemeInstall() {
         if (update) {
           toast.success(t(($) => $.appearance.store.updated, { name: theme.name, version: theme.version }));
         } else {
-          useAppearanceStore.getState().set({ theme: theme.id });
+          useAppearanceStore.getState().chooseTheme(theme.id, target);
           toast.success(t(($) => $.appearance.store.installed_toast, { name: theme.name }));
         }
       } catch (error) {
@@ -102,7 +103,7 @@ export function useStoreThemeInstall() {
         });
       }
     },
-    [t, queryClient],
+    [t, queryClient, target],
   );
 }
 
@@ -300,9 +301,9 @@ function StateBadge({ inUse, installed }: { inUse: boolean; installed: boolean }
 
 function UseButton({ id, inUse }: { id: string; inUse: boolean }) {
   const { t } = useT("settings");
-  const set = useAppearanceStore((s) => s.set);
+  const { choose } = useColorThemes();
   return (
-    <Button variant="outline" size="xs" disabled={inUse} onClick={() => set({ theme: id })}>
+    <Button variant="outline" size="xs" disabled={inUse} onClick={() => choose(id)}>
       {inUse ? t(($) => $.appearance.store.in_use) : t(($) => $.appearance.store.use)}
     </Button>
   );
@@ -310,9 +311,9 @@ function UseButton({ id, inUse }: { id: string; inUse: boolean }) {
 
 function useRemoveTheme(id: string) {
   const uninstall = useInstalledThemesStore((s) => s.uninstall);
-  const set = useAppearanceStore((s) => s.set);
+  const forgetTheme = useAppearanceStore((s) => s.forgetTheme);
   return () => {
-    if (useAppearanceStore.getState().theme === id) set({ theme: "default" });
+    forgetTheme(id);
     uninstall(id);
   };
 }
@@ -327,7 +328,7 @@ function LocalThemeCard({ theme, name }: { theme: Theme; name: string }) {
   const { t } = useT("settings");
   const mode = useAppliedMode();
   const inFolder = useInstalledThemesStore((s) => theme.id in s.folders);
-  const inUse = useAppearanceStore((s) => s.theme === theme.id);
+  const inUse = useColorThemes().selected.id === theme.id;
   const remove = useRemoveTheme(theme.id);
   return (
     <ThemeCard
@@ -370,7 +371,7 @@ function StoreThemeCard({ theme }: { theme: StoreTheme }) {
   const [mode, setMode] = useState<StoreThemeMode>(supported.includes(appMode) ? appMode : supported[0] ?? appMode);
   const installed = useInstalledThemesStore((s) => s.themes);
   const fromStore = useInstalledThemesStore((s) => s.fromStore);
-  const active = useAppearanceStore((s) => s.theme);
+  const active = useColorThemes().selected.id;
   const install = useStoreThemeInstall();
   const remove = useRemoveTheme(theme.id);
   const [busy, setBusy] = useState(false);

@@ -9,6 +9,7 @@ import {
   useThemeFolderStatus,
   useThemeSafeMode,
 } from "@multica/core/appearance";
+import { setCurrentWorkspace } from "@multica/core/platform";
 import { AppearanceSync } from "./appearance-sync";
 
 const html = () => document.documentElement;
@@ -30,7 +31,11 @@ describe("AppearanceSync", () => {
     useInstalledThemesStore.setState({ themes: [] });
     useThemeSafeMode.setState({ active: false });
   });
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    html().classList.remove("dark");
+    setCurrentWorkspace(null, null);
+  });
 
   it("leaves <html> untouched for the defaults", () => {
     render(<AppearanceSync />);
@@ -76,7 +81,7 @@ describe("AppearanceSync", () => {
     render(<AppearanceSync />);
     act(() => {
       const { set, setThemeOption } = useAppearanceStore.getState();
-      set({ theme: "pop", highContrast: true, uiFont: "serif", fontSize: 15, contentCjkFont: "serif", density: "comfortable" });
+      set({ lightTheme: "pop", darkTheme: "pop", highContrast: true, uiFont: "serif", fontSize: 15, contentCjkFont: "serif", density: "comfortable" });
       setThemeOption("pop", "status-blocks", false);
     });
     expect(html().getAttribute("data-theme")).toBe("pop");
@@ -91,7 +96,7 @@ describe("AppearanceSync", () => {
     expect(themeCss()?.textContent).toContain('[data-mc="issue-group-header"]');
     expect(sheet()?.textContent).toContain("--muted-foreground: color-mix(");
 
-    act(() => useAppearanceStore.getState().set({ theme: "github" }));
+    act(() => useAppearanceStore.getState().set({ lightTheme: "github", darkTheme: "github" }));
     expect(html().hasAttribute("data-theme-option-signal")).toBe(false);
     expect(themeCss()?.textContent).not.toContain('[data-mc="issue-group-header"]');
     expect(themeCss()!.compareDocumentPosition(sheet()!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -106,13 +111,13 @@ describe("AppearanceSync", () => {
   it("keeps the adjustments after a theme stylesheet created later", () => {
     useAppearanceStore.setState({ highContrast: true });
     render(<AppearanceSync />);
-    act(() => useAppearanceStore.getState().set({ theme: "notion" }));
+    act(() => useAppearanceStore.getState().set({ lightTheme: "notion", darkTheme: "notion" }));
     expect(themeCss()!.compareDocumentPosition(sheet()!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("applies an installed theme's CSS, and nothing of it in safe mode", () => {
     useInstalledThemesStore.setState({ themes: [PAPER] });
-    useAppearanceStore.setState({ theme: "paper" });
+    useAppearanceStore.setState({ lightTheme: "paper", darkTheme: "paper" });
     render(<AppearanceSync />);
     expect(html().getAttribute("data-theme")).toBe("paper");
     expect(themeCss()?.textContent).toContain("hyphens: auto");
@@ -120,14 +125,56 @@ describe("AppearanceSync", () => {
     act(() => useThemeSafeMode.getState().enter());
     expect(html().hasAttribute("data-theme")).toBe(false);
     expect(themeCss()).toBeNull();
-    expect(useAppearanceStore.getState().theme).toBe("paper");
+    expect(useAppearanceStore.getState()).toMatchObject({ lightTheme: "paper", darkTheme: "paper" });
 
     act(() => useThemeSafeMode.getState().exit());
     expect(html().getAttribute("data-theme")).toBe("paper");
   });
 
+  it("swaps to the dark theme with the mode", async () => {
+    useAppearanceStore.setState({ lightTheme: "notion", darkTheme: "github" });
+    render(<AppearanceSync />);
+    expect(html().getAttribute("data-theme")).toBe("notion");
+
+    await act(async () => html().classList.add("dark"));
+    expect(html().getAttribute("data-theme")).toBe("github");
+    expect(html().classList.contains("theme-dark")).toBe(true);
+
+    await act(async () => html().classList.remove("dark"));
+    expect(html().getAttribute("data-theme")).toBe("notion");
+  });
+
+  it("draws the current workspace's theme and accent, and follows a workspace switch", async () => {
+    useAppearanceStore.setState({
+      lightTheme: "notion",
+      darkTheme: "notion",
+      workspaces: {
+        "ws-1": { lightTheme: "pop", darkTheme: "pop" },
+        "ws-2": { accent: { light: "#2563eb", dark: "#93c5fd" } },
+      },
+    });
+    await act(async () => setCurrentWorkspace("acme", "ws-1"));
+    render(<AppearanceSync />);
+    expect(html().getAttribute("data-theme")).toBe("pop");
+    expect(sheet()?.textContent ?? "").not.toContain("--brand:");
+
+    await act(async () => setCurrentWorkspace("beta", "ws-2"));
+    expect(html().getAttribute("data-theme")).toBe("notion");
+    expect(sheet()?.textContent).toContain(":root.theme-light { --brand: #2563eb;");
+    expect(sheet()?.textContent).toContain(":root.theme-dark { --brand: #93c5fd;");
+
+    act(() => useThemeSafeMode.getState().enter());
+    expect(html().hasAttribute("data-theme")).toBe(false);
+    expect(sheet()).toBeNull();
+
+    act(() => useThemeSafeMode.getState().exit());
+    await act(async () => setCurrentWorkspace(null, null));
+    expect(html().getAttribute("data-theme")).toBe("notion");
+    expect(sheet()?.textContent ?? "").not.toContain("--brand:");
+  });
+
   it("clears everything when the product UI unmounts", () => {
-    useAppearanceStore.setState({ theme: "pop", highContrast: true, codeFont: "system" });
+    useAppearanceStore.setState({ lightTheme: "pop", darkTheme: "pop", highContrast: true, codeFont: "system" });
     const { unmount } = render(<AppearanceSync />);
     expect(html().getAttribute("data-theme")).toBe("pop");
     expect(sheet()).not.toBeNull();
@@ -147,7 +194,7 @@ describe("AppearanceSync", () => {
     );
     localStorage.setItem(
       APPEARANCE_STORAGE_KEY,
-      JSON.stringify({ state: { theme: "paper" }, version: 0 }),
+      JSON.stringify({ state: { lightTheme: "paper", darkTheme: "paper" }, version: 0 }),
     );
     await act(async () => {
       window.dispatchEvent(new StorageEvent("storage", { key: INSTALLED_THEMES_STORAGE_KEY }));
@@ -189,7 +236,7 @@ describe("AppearanceSync", () => {
           { folder: "huge", error: "A theme can be at most 1024 KB and 64 files" },
         ],
       });
-      useAppearanceStore.setState({ theme: "paper" });
+      useAppearanceStore.setState({ lightTheme: "paper", darkTheme: "paper" });
       render(<AppearanceSync />);
       await vi.waitFor(() => expect(html().getAttribute("data-theme")).toBe("paper"));
       expect(themeCss()?.textContent).toContain("#fffdf8");

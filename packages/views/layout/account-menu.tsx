@@ -15,7 +15,6 @@ import {
   Sun,
   User,
 } from "@multica/ui/icons";
-import { useAppearanceStore } from "@multica/core/appearance";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspacePaths } from "@multica/core/paths";
 import type { SupportedLocale } from "@multica/core/i18n";
@@ -86,8 +85,7 @@ export function AccountMenu() {
   const logout = useLogout();
   const { theme: mode, setTheme: setMode } = useTheme();
   const appliedMode = useAppliedMode();
-  const setAppearance = useAppearanceStore((s) => s.set);
-  const { themes: colorThemes, selected: selectedTheme } = useColorThemes();
+  const { themes: colorThemes, selected: selectedTheme, choose: chooseTheme } = useColorThemes();
   const themeLabel = useThemeLabel();
   const language = useLanguageSwitch();
   const modeValue = (mode ?? "system") as (typeof THEMES)[number]["value"];
@@ -158,7 +156,7 @@ export function AccountMenu() {
                 <DropdownMenuLabel>{t(($) => $.account.theme)}</DropdownMenuLabel>
                 <DropdownMenuRadioGroup
                   value={selectedTheme.id}
-                  onValueChange={(next) => setAppearance({ theme: next as string })}
+                  onValueChange={(next) => chooseTheme(next as string)}
                 >
                   {colorThemes.map((manifest) => (
                     <DropdownMenuRadioItem key={manifest.id} value={manifest.id} closeOnClick={false}>

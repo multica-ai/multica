@@ -208,7 +208,30 @@
       "safe_mode": "Mode sans échec : votre thème est suspendu jusqu’à la fermeture de cette fenêtre.",
       "safe_mode_exit": "Utiliser mon thème",
       "folder": "Dossier des thèmes",
-      "folder_problems": "Certains thèmes du dossier des thèmes ne passent pas les vérifications. Corrigez-les et enregistrez ; la dernière version valide reste utilisée."
+      "folder_problems": "Certains thèmes du dossier des thèmes ne passent pas les vérifications. Corrigez-les et enregistrez ; la dernière version valide reste utilisée.",
+      "light_title": "Thème clair",
+      "dark_title": "Thème sombre",
+      "split": "Utiliser un autre thème en mode sombre"
+    },
+    "workspace": {
+      "title": "Cet espace de travail",
+      "description": "Distinguez cet espace de travail au premier coup d'œil. Ne s'applique qu'à cet espace de travail sur cet appareil ; le reste suit les réglages ci-dessus.",
+      "reset": "Suivre les réglages globaux",
+      "follow": "Suivre les réglages globaux",
+      "accent": "Couleur d'accent",
+      "accent_none": "Celle du thème",
+      "accent_custom": "Couleur personnalisée",
+      "low_contrast": "{{mode}} : le contraste n'est que de {{ratio}}:1, sous les 4.5:1 recommandés pour un texte lisible.",
+      "presets": {
+        "blue": "Bleu",
+        "violet": "Violet",
+        "pink": "Rose",
+        "red": "Rouge",
+        "orange": "Orange",
+        "green": "Vert",
+        "teal": "Sarcelle",
+        "slate": "Ardoise"
+      }
     },
     "import": {
       "button": "Importer un thème",

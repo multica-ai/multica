@@ -52,6 +52,7 @@ import { Slider } from "@multica/ui/components/ui/slider";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { useTheme } from "@multica/ui/components/common/theme-provider";
 import {
+  ACCENT_PRESETS,
   BUILT_IN_THEMES,
   CJK_FONTS,
   CODE_FONTS,
@@ -59,13 +60,16 @@ import {
   CONTENT_SIZES,
   DEFAULT_APPEARANCE,
   DEFAULT_FONT_SIZE,
+  DEFAULT_THEME_ID,
   DENSITIES,
   FOLLOW_UI,
   FONT_SIZES,
   UI_FONTS,
+  accentContrast,
   activeTheme,
   cjkFontStack,
   exportTheme,
+  findBuiltInTheme,
   isDefaultAppearance,
   isLocalFont,
   isSafeFontValue,
@@ -80,6 +84,7 @@ import {
   themeOptionValue,
   uiFontStack,
   useAppearanceStore,
+  useAppearanceWorkspaceId,
   useLocalCjkFonts,
   useInstalledThemesStore,
   useThemeFolderStatus,
@@ -92,8 +97,10 @@ import {
   type Theme,
   type ThemeOption,
   type ThemeOptionValue,
+  type ThemePair,
   type ThemedColor,
   type UiFont,
+  type WorkspaceAppearance,
 } from "@multica/core/appearance";
 import { storeThemeState, storeThemesOptions } from "@multica/core/appearance/theme-store";
 import { useConfigStore } from "@multica/core/config";
@@ -129,15 +136,20 @@ const CODE_FONT_NAME: Record<CodeFont, string> = {
   jetbrains: "JetBrains Mono",
   system: "SF Mono / Consolas",
 };
+/** The theme this window draws: Default in safe mode. */
+function useShownTheme(): Theme {
+  const { selected } = useColorThemes();
+  const safeMode = useThemeSafeMode((s) => s.active);
+  return safeMode ? findBuiltInTheme(DEFAULT_THEME_ID)! : selected;
+}
+
 /**
  * Whether the active theme sets a font variable. The default font choice
  * writes nothing, so on such a theme it shows the theme's font, not its own.
  */
 function useThemeSetsFont(variable: "font-ui" | "font-mono"): boolean {
   const appliedMode = useAppliedMode();
-  const theme = useAppearanceStore((s) => s.theme);
-  const safeMode = useThemeSafeMode();
-  const css = activeTheme({ theme }, safeMode.active).css;
+  const css = useShownTheme().css;
   return useMemo(() => variable in themeModeVariables(css)[appliedMode], [css, appliedMode, variable]);
 }
 
@@ -171,6 +183,7 @@ export function AppearanceTab() {
     >
       <div className="space-y-8">
         <ColorSection />
+        <WorkspaceSection />
         <ThemeOptionsSection />
         <InterfaceTextSection />
         <ContentTextSection />
@@ -180,32 +193,45 @@ export function AppearanceTab() {
   );
 }
 
-function ColorSection() {
+/** Select value for "use the global themes" in a workspace's theme picker; no theme id has `_`. */
+const FOLLOW_GLOBAL = "__global";
+
+/**
+ * A theme dropdown: built-in, installed and themes-folder groups, each theme
+ * drawn in `mode`. With `follow`, its first item stands for no choice
+ * (`null`). An id that is no longer installed shows as Default.
+ */
+function ThemeSelect({
+  label,
+  value,
+  mode,
+  follow,
+  onChange,
+}: {
+  label: string;
+  value: string | null;
+  mode: PreviewMode;
+  follow?: string;
+  onChange: (id: string | null) => void;
+}) {
   const { t } = useT("settings");
-  const { theme: mode, setTheme: setMode } = useTheme();
-  const appliedMode = useAppliedMode();
-  const theme = useAppearanceStore((s) => s.theme);
-  const set = useAppearanceStore((s) => s.set);
   const installed = useInstalledThemesStore((s) => s.themes);
   const folders = useInstalledThemesStore((s) => s.folders);
-  const folderProblems = useThemeFolderStatus((s) => s.problems);
-  const safeMode = useThemeSafeMode();
   const themeLabelFor = useThemeLabel();
-  const modeValue: ModeChoice = mode === "light" || mode === "dark" ? mode : "system";
-  const modeLabel = t(($) => $.appearance.mode.title);
-  const themeLabel = t(($) => $.appearance.theme.title);
+  const { themes } = useColorThemes();
   const imported = installed.filter((manifest) => !(manifest.id in folders));
   const fromFolder = installed.filter((manifest) => manifest.id in folders);
-  const { themes, selected } = useColorThemes();
-  const items = themes.map((manifest) => ({
-    value: manifest.id,
-    label: themeLabelFor(manifest),
-  }));
+  const selected =
+    value === null ? null : (themes.find((theme) => theme.id === value) ?? findBuiltInTheme(DEFAULT_THEME_ID)!);
+  const items = [
+    ...(follow ? [{ value: FOLLOW_GLOBAL, label: follow }] : []),
+    ...themes.map((manifest) => ({ value: manifest.id, label: themeLabelFor(manifest) })),
+  ];
 
   const option = (manifest: Theme, author?: string) => (
     <SelectItem key={manifest.id} value={manifest.id}>
       <span className="flex min-w-0 flex-1 items-center gap-2.5">
-        <ThemeSwatch theme={manifest} mode={appliedMode} />
+        <ThemeSwatch theme={manifest} mode={mode} />
         <span className="truncate">{themeLabelFor(manifest)}</span>
         {author ? (
           <span className="ml-auto shrink-0 pl-3 text-caption text-muted-foreground">{author}</span>
@@ -213,6 +239,129 @@ function ColorSection() {
       </span>
     </SelectItem>
   );
+
+  return (
+    <Select
+      items={items}
+      value={selected?.id ?? FOLLOW_GLOBAL}
+      onValueChange={(next) => {
+        if (next) onChange(next === FOLLOW_GLOBAL ? null : next);
+      }}
+    >
+      <SelectTrigger size="sm" className="w-48" aria-label={label}>
+        <SelectValue>
+          {selected ? (
+            <span className="flex min-w-0 items-center gap-2">
+              <ThemeSwatch theme={selected} mode={mode} />
+              <span className="truncate">{themeLabelFor(selected)}</span>
+            </span>
+          ) : (
+            <span className="truncate text-muted-foreground">{follow}</span>
+          )}
+        </SelectValue>
+      </SelectTrigger>
+      <SelectContent align="end" className="min-w-64">
+        {follow ? (
+          <>
+            <SelectItem value={FOLLOW_GLOBAL}>
+              <span className="truncate">{follow}</span>
+            </SelectItem>
+            <SelectSeparator />
+          </>
+        ) : null}
+        <SelectGroup>
+          <SelectLabel>{t(($) => $.appearance.theme.built_in)}</SelectLabel>
+          {BUILT_IN_THEMES.map((manifest) => option(manifest))}
+        </SelectGroup>
+        {imported.length > 0 ? (
+          <>
+            <SelectSeparator />
+            <SelectGroup>
+              <SelectLabel>{t(($) => $.appearance.theme.installed)}</SelectLabel>
+              {imported.map((manifest) => option(manifest, manifest.author))}
+            </SelectGroup>
+          </>
+        ) : null}
+        {fromFolder.length > 0 ? (
+          <>
+            <SelectSeparator />
+            <SelectGroup>
+              <SelectLabel>{t(($) => $.appearance.theme.folder)}</SelectLabel>
+              {fromFolder.map((manifest) => option(manifest, folders[manifest.id]))}
+            </SelectGroup>
+          </>
+        ) : null}
+      </SelectContent>
+    </Select>
+  );
+}
+
+/**
+ * One theme for both modes, or with the switch on, one per mode. The switch
+ * stays on while the two differ; turning it off gives dark mode the light
+ * theme. Shared by the global choice and a workspace's own.
+ */
+function useThemePairRows({
+  pair,
+  onChange,
+  anchor,
+}: {
+  /** `null` while there is no choice to split (a workspace following the global themes). */
+  pair: ThemePair | null;
+  onChange: (pair: ThemePair) => void;
+  anchor?: string;
+}) {
+  const { t } = useT("settings");
+  const [asked, setAsked] = useState(false);
+  const split = pair !== null && (asked || pair.lightTheme !== pair.darkTheme);
+  const splitLabel = t(($) => $.appearance.theme.split);
+  const darkLabel = t(($) => $.appearance.theme.dark_title);
+  return {
+    split,
+    /** What the first picker sets: both modes, or light once split. */
+    chooseFirst: (id: string) =>
+      onChange(split && pair ? { ...pair, lightTheme: id } : { lightTheme: id, darkTheme: id }),
+    rows:
+      pair === null ? null : (
+        <>
+          <SettingsRow label={splitLabel} anchor={anchor ? `${anchor}-split` : undefined}>
+            <Switch
+              checked={split}
+              onCheckedChange={(on) => {
+                setAsked(on);
+                if (!on) onChange({ ...pair, darkTheme: pair.lightTheme });
+              }}
+              aria-label={splitLabel}
+            />
+          </SettingsRow>
+          {split ? (
+            <SettingsRow label={darkLabel} anchor={anchor ? `${anchor}-dark` : undefined}>
+              <ThemeSelect
+                label={darkLabel}
+                value={pair.darkTheme}
+                mode="dark"
+                onChange={(id) => id && onChange({ ...pair, darkTheme: id })}
+              />
+            </SettingsRow>
+          ) : null}
+        </>
+      ),
+  };
+}
+
+function ColorSection() {
+  const { t } = useT("settings");
+  const { theme: mode, setTheme: setMode } = useTheme();
+  const appliedMode = useAppliedMode();
+  const pair = useAppearanceStore(useShallow((s) => ({ lightTheme: s.lightTheme, darkTheme: s.darkTheme })));
+  const set = useAppearanceStore((s) => s.set);
+  const folderProblems = useThemeFolderStatus((s) => s.problems);
+  const safeMode = useThemeSafeMode();
+  const shown = useShownTheme();
+  const modeValue: ModeChoice = mode === "light" || mode === "dark" ? mode : "system";
+  const modeLabel = t(($) => $.appearance.mode.title);
+  const pairRows = useThemePairRows({ pair, onChange: set, anchor: "theme" });
+  const themeLabel = pairRows.split ? t(($) => $.appearance.theme.light_title) : t(($) => $.appearance.theme.title);
 
   return (
     <SettingsSection title={t(($) => $.appearance.color.title)} anchor="color">
@@ -233,51 +382,18 @@ function ColorSection() {
         </SettingsRow>
         <SettingsRow label={themeLabel} description={t(($) => $.appearance.theme.description)} anchor="theme">
           <div className="flex items-center gap-2">
-            <Select
-              items={items}
-              value={selected.id}
-              onValueChange={(next) => {
-                if (next) set({ theme: next });
-              }}
-            >
-              <SelectTrigger size="sm" className="w-48" aria-label={themeLabel}>
-                <SelectValue>
-                  <span className="flex min-w-0 items-center gap-2">
-                    <ThemeSwatch theme={selected} mode={appliedMode} />
-                    <span className="truncate">{themeLabelFor(selected)}</span>
-                  </span>
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent align="end" className="min-w-64">
-                <SelectGroup>
-                  <SelectLabel>{t(($) => $.appearance.theme.built_in)}</SelectLabel>
-                  {BUILT_IN_THEMES.map((manifest) => option(manifest))}
-                </SelectGroup>
-                {imported.length > 0 ? (
-                  <>
-                    <SelectSeparator />
-                    <SelectGroup>
-                      <SelectLabel>{t(($) => $.appearance.theme.installed)}</SelectLabel>
-                      {imported.map((manifest) => option(manifest, manifest.author))}
-                    </SelectGroup>
-                  </>
-                ) : null}
-                {fromFolder.length > 0 ? (
-                  <>
-                    <SelectSeparator />
-                    <SelectGroup>
-                      <SelectLabel>{t(($) => $.appearance.theme.folder)}</SelectLabel>
-                      {fromFolder.map((manifest) => option(manifest, folders[manifest.id]))}
-                    </SelectGroup>
-                  </>
-                ) : null}
-              </SelectContent>
-            </Select>
+            <ThemeSelect
+              label={themeLabel}
+              value={pair.lightTheme}
+              mode={pairRows.split ? "light" : appliedMode}
+              onChange={(id) => id && pairRows.chooseFirst(id)}
+            />
             <ThemesButton />
           </div>
         </SettingsRow>
+        {pairRows.rows}
         <StoreThemesRow />
-        <OwnThemeRow theme={activeTheme({ theme }, safeMode.active)} />
+        <OwnThemeRow theme={shown} />
         {folderProblems.length > 0 ? (
           <div role="status" className="space-y-1.5 px-4 py-3 text-caption">
             <div className="flex items-center gap-2">
@@ -309,6 +425,108 @@ function ColorSection() {
   );
 }
 
+const sameColor = (a: ThemedColor | undefined, b: ThemedColor) =>
+  a?.light.toLowerCase() === b.light.toLowerCase() && a.dark.toLowerCase() === b.dark.toLowerCase();
+
+/**
+ * What this workspace shows instead of the global choice, so its windows are
+ * easy to tell apart: an accent over the theme's brand colour, or themes of
+ * its own. A low-contrast accent is flagged, not refused.
+ */
+function WorkspaceSection() {
+  const { t } = useT("settings");
+  const workspaceId = useAppearanceWorkspaceId();
+  const prefs = useAppearanceStore(useShallow(selectAppearance));
+  const setWorkspace = useAppearanceStore((s) => s.setWorkspaceAppearance);
+  useInstalledThemesStore((s) => s.themes);
+  const appliedMode = useAppliedMode();
+  const own = workspaceId ? prefs.workspaces[workspaceId] : undefined;
+  const pair =
+    own?.lightTheme && own.darkTheme ? { lightTheme: own.lightTheme, darkTheme: own.darkTheme } : null;
+  const update = (patch: WorkspaceAppearance) => {
+    if (workspaceId) setWorkspace(workspaceId, patch);
+  };
+  const pairRows = useThemePairRows({ pair, onChange: update, anchor: "workspace-theme" });
+  if (!workspaceId) return null;
+
+  const accent = own?.accent;
+  const accentLabel = t(($) => $.appearance.workspace.accent);
+  const customLabel = t(($) => $.appearance.workspace.accent_custom);
+  const themeLabel = pairRows.split ? t(($) => $.appearance.theme.light_title) : t(($) => $.appearance.theme.title);
+  const lowContrast = accent
+    ? (["light", "dark"] as const).flatMap((mode) => {
+        const failing = accentContrast(accent, (m) => activeTheme(prefs, { mode: m, workspaceId }), prefs.themeOptions)
+          .filter((check) => check.mode === mode && check.ratio < check.required);
+        return failing.length > 0 ? [{ mode, ratio: Math.min(...failing.map((check) => check.ratio)) }] : [];
+      })
+    : [];
+
+  return (
+    <SettingsSection
+      title={t(($) => $.appearance.workspace.title)}
+      description={t(($) => $.appearance.workspace.description)}
+      scope="device-workspace"
+      anchor="workspace-appearance"
+      action={
+        <Button variant="ghost" size="xs" disabled={!own} onClick={() => setWorkspace(workspaceId, null)}>
+          {t(($) => $.appearance.workspace.reset)}
+        </Button>
+      }
+    >
+      <SettingsCard>
+        <SettingsRow label={accentLabel} anchor="workspace-accent">
+          <div role="radiogroup" aria-label={accentLabel} className="flex flex-wrap items-center justify-end gap-2.5">
+            <ColorSwatch
+              label={t(($) => $.appearance.workspace.accent_none)}
+              color="linear-gradient(135deg, transparent 44%, var(--muted-foreground) 44% 56%, transparent 56%)"
+              className="border border-input"
+              selected={!accent}
+              onSelect={() => update({ accent: undefined })}
+            />
+            {ACCENT_PRESETS.map((preset) => (
+              <ColorSwatch
+                key={preset.id}
+                label={t(($) => $.appearance.workspace.presets[preset.id])}
+                color={preset.color[appliedMode]}
+                selected={sameColor(accent, preset.color)}
+                onSelect={() => update({ accent: preset.color })}
+              />
+            ))}
+          </div>
+        </SettingsRow>
+        {accent ? (
+          <SettingsRow label={customLabel} anchor="workspace-accent-custom">
+            <ModeColorInputs label={customLabel} value={accent} onChange={(next) => update({ accent: next })} />
+          </SettingsRow>
+        ) : null}
+        {lowContrast.map(({ mode, ratio }) => (
+          <div key={mode} role="status" className="flex items-center gap-2 px-4 py-3 text-caption">
+            <TriangleAlert aria-hidden="true" className="size-3.5 shrink-0 text-warning" />
+            <span className="min-w-0 flex-1">
+              {t(($) => $.appearance.workspace.low_contrast, {
+                mode: t(($) => $.appearance.mode[mode]),
+                ratio: ratio.toFixed(1),
+              })}
+            </span>
+          </div>
+        ))}
+        <SettingsRow label={themeLabel} anchor="workspace-theme">
+          <ThemeSelect
+            label={themeLabel}
+            value={pair?.lightTheme ?? null}
+            mode={pairRows.split ? "light" : appliedMode}
+            follow={t(($) => $.appearance.workspace.follow)}
+            onChange={(id) =>
+              id ? pairRows.chooseFirst(id) : update({ lightTheme: undefined, darkTheme: undefined })
+            }
+          />
+        </SettingsRow>
+        {pairRows.rows}
+      </SettingsCard>
+    </SettingsSection>
+  );
+}
+
 interface ThemeImport {
   chooseZip: () => void;
   chooseFolder: () => void;
@@ -330,7 +548,7 @@ function useThemeImport(): ThemeImport {
   const installed = useInstalledThemesStore((s) => s.themes);
   const install = useInstalledThemesStore((s) => s.install);
   const uninstall = useInstalledThemesStore((s) => s.uninstall);
-  const set = useAppearanceStore((s) => s.set);
+  const { choose } = useColorThemes();
   const previous = pending ? installed.find((theme) => theme.id === pending.id) : undefined;
 
   useEffect(() => {
@@ -350,7 +568,7 @@ function useThemeImport(): ThemeImport {
     const replaced = previous;
     try {
       install(pending);
-      set({ theme: pending.id });
+      choose(pending.id);
     } catch {
       if (replaced) install(replaced);
       else uninstall(pending.id);
@@ -529,7 +747,7 @@ function OwnThemeRow({ theme }: { theme: Theme }) {
   const themeLabelFor = useThemeLabel();
   const importer = useThemeImport();
   const install = useInstalledThemesStore((s) => s.install);
-  const set = useAppearanceStore((s) => s.set);
+  const { choose } = useColorThemes();
   const folder = themeFolderAPI();
 
   const duplicate = async () => {
@@ -548,7 +766,7 @@ function OwnThemeRow({ theme }: { theme: Theme }) {
       if (result.ok) {
         const copy = themeFromFiles(files);
         if (copy.ok) install(copy.theme);
-        set({ theme: target.id });
+        choose(target.id);
         void folder.openThemeFolder(target.id);
         toast.success(t(($) => $.appearance.tools.duplicated_desktop, { name: target.name }));
         return;
@@ -630,10 +848,8 @@ function ThemeOptionsSection() {
   const prefs = useAppearanceStore(useShallow(selectAppearance));
   const setThemeOption = useAppearanceStore((s) => s.setThemeOption);
   const set = useAppearanceStore((s) => s.set);
-  useInstalledThemesStore((s) => s.themes);
-  const safeMode = useThemeSafeMode((s) => s.active);
   const themeLabelFor = useThemeLabel();
-  const theme = activeTheme(prefs, safeMode);
+  const theme = useShownTheme();
   const options = theme.options ?? [];
   if (options.length === 0) return null;
   const chosen = prefs.themeOptions[theme.id];
@@ -714,7 +930,6 @@ function ThemeOptionRow({
   value: ThemeOptionValue;
   onChange: (value: ThemeOptionValue) => void;
 }) {
-  const { t } = useT("settings");
   const label = localizedText(option.label, locale);
   const description = localizedText(option.description, locale) || undefined;
   switch (option.type) {
@@ -772,30 +987,12 @@ function ThemeOptionRow({
         </SettingsRow>
       );
     }
-    case "color": {
-      const color = value as ThemedColor;
+    case "color":
       return (
         <SettingsRow label={label} description={description}>
-          <div role="group" aria-label={label} className="flex items-center gap-3">
-            {(["light", "dark"] as const).map((mode) => {
-              const modeLabel = t(($) => $.appearance.mode[mode]);
-              return (
-                <label key={mode} className="flex items-center gap-1.5 text-caption text-muted-foreground">
-                  <input
-                    type="color"
-                    aria-label={`${label} (${modeLabel})`}
-                    value={color[mode].length === 4 ? expandHex(color[mode]) : color[mode].slice(0, 7)}
-                    onChange={(event) => onChange({ ...color, [mode]: event.target.value })}
-                    className="size-6 cursor-pointer rounded-md border border-input bg-transparent p-0.5 [&::-webkit-color-swatch]:rounded-xs [&::-webkit-color-swatch]:border-0 [&::-webkit-color-swatch-wrapper]:p-0"
-                  />
-                  {modeLabel}
-                </label>
-              );
-            })}
-          </div>
+          <ModeColorInputs label={label} value={value as ThemedColor} onChange={onChange} />
         </SettingsRow>
       );
-    }
     case "slider":
       return (
         <SettingsRow label={label} description={description} size="text">
@@ -873,16 +1070,51 @@ function expandHex(hex: string): string {
   return `#${[...hex.slice(1)].map((c) => c + c).join("")}`;
 }
 
+/** A colour well per mode. */
+function ModeColorInputs({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: ThemedColor;
+  onChange: (value: ThemedColor) => void;
+}) {
+  const { t } = useT("settings");
+  return (
+    <div role="group" aria-label={label} className="flex items-center gap-3">
+      {(["light", "dark"] as const).map((mode) => {
+        const modeLabel = t(($) => $.appearance.mode[mode]);
+        return (
+          <label key={mode} className="flex items-center gap-1.5 text-caption text-muted-foreground">
+            <input
+              type="color"
+              aria-label={`${label} (${modeLabel})`}
+              value={value[mode].length === 4 ? expandHex(value[mode]) : value[mode].slice(0, 7)}
+              onChange={(event) => onChange({ ...value, [mode]: event.target.value })}
+              className="size-6 cursor-pointer rounded-md border border-input bg-transparent p-0.5 [&::-webkit-color-swatch]:rounded-xs [&::-webkit-color-swatch]:border-0 [&::-webkit-color-swatch-wrapper]:p-0"
+            />
+            {modeLabel}
+          </label>
+        );
+      })}
+    </div>
+  );
+}
+
 function ColorSwatch({
   label,
   color,
   selected,
   onSelect,
+  className,
 }: {
   label: string;
+  /** A CSS background: a colour, or a gradient for a choice that is not one. */
   color: string;
   selected: boolean;
   onSelect: () => void;
+  className?: string;
 }) {
   return (
     <button
@@ -892,10 +1124,11 @@ function ColorSwatch({
       aria-label={label}
       title={label}
       onClick={onSelect}
-      style={{ backgroundColor: color }}
+      style={{ background: color }}
       className={cn(
         // eslint-disable-next-line no-restricted-syntax -- color swatch
         "flex size-5 items-center justify-center rounded-full text-white outline-none ring-offset-2 ring-offset-surface transition-shadow focus-visible:ring-2 focus-visible:ring-ring",
+        className,
         selected && "ring-2 ring-foreground",
       )}
     >

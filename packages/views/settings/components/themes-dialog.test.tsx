@@ -115,7 +115,7 @@ describe("ThemesButton", () => {
     const [installInk] = screen.getAllByRole("button", { name: "Install" });
     await user.click(installInk!);
     await waitFor(() => expect(useInstalledThemesStore.getState().fromStore).toEqual({ ink: "1.0.0" }));
-    expect(useAppearanceStore.getState().theme).toBe("ink");
+    expect(useAppearanceStore.getState()).toMatchObject({ lightTheme: "ink", darkTheme: "ink" });
     expect(await screen.findByRole("button", { name: "In use" })).toBeTruthy();
     // The card stays where it was while the window is open.
     expect(screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual(["Ink", "Sand"]);
@@ -124,7 +124,7 @@ describe("ThemesButton", () => {
 
     await user.click(screen.getByRole("button", { name: "Remove Ink" }));
     expect(useInstalledThemesStore.getState().themes).toEqual([]);
-    expect(useAppearanceStore.getState().theme).toBe("default");
+    expect(useAppearanceStore.getState()).toMatchObject({ lightTheme: "default", darkTheme: "default" });
   });
 
   it("shows how often each store theme was downloaded, most downloaded first, and recounts after an install", async () => {

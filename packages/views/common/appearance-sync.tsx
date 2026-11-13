@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useLayoutEffect } from "react";
+import { useEffect, useLayoutEffect, useSyncExternalStore } from "react";
 import { useShallow } from "zustand/react/shallow";
 import {
   APPEARANCE_STORAGE_KEY,
   APPEARANCE_THEME_ATTR,
   INSTALLED_THEMES_STORAGE_KEY,
   THEME_OPTION_ATTR_PREFIX,
+  activeAccent,
   activeTheme,
   appearanceRootVariables,
   appearanceStylesheet,
@@ -15,10 +16,12 @@ import {
   selectAppearance,
   themeFromFolderFiles,
   useAppearanceStore,
+  useAppearanceWorkspaceId,
   useInstalledThemesStore,
   useThemeFolderStatus,
   useThemeSafeMode,
   type ThemeFolderEntry,
+  type ThemeMode,
 } from "@multica/core/appearance";
 import { getShortcutPlatform, getShortcutRuntime } from "@multica/core/shortcuts";
 import { themeFolderAPI } from "../platform/theme-folder";
@@ -70,6 +73,22 @@ function useModeClasses() {
       root.classList.remove("theme-light", "theme-dark");
     };
   }, []);
+}
+
+function subscribeRootClass(onChange: () => void) {
+  const observer = new MutationObserver(onChange);
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+  return () => observer.disconnect();
+}
+
+const rootMode = (): ThemeMode => (document.documentElement.classList.contains("dark") ? "dark" : "light");
+
+/**
+ * The mode <html> is drawn in. A store update renders synchronously, so when
+ * each mode has its own theme the swap is written before the next paint.
+ */
+function useRootMode(): ThemeMode {
+  return useSyncExternalStore(subscribeRootClass, rootMode, () => "light");
 }
 
 /** `is-desktop` / `is-web`, `mod-<os>` and `is-focused` on <html>, for theme CSS. */
@@ -154,25 +173,29 @@ function clearThemeAttributes(root: HTMLElement) {
 
 /**
  * Mirrors the appearance preferences onto `<html>`: the mode as
- * `theme-light` / `theme-dark`, the theme and its options as attributes, the
- * theme's CSS and the accent and contrast adjustments as two generated
- * stylesheets after the app's own, fonts, size and density as inline
- * variables. Mount it only around the product UI:
- * unmounting clears all of it, so pages outside it (web's landing and auth
- * pages) keep the default look. Changes made in another window or tab follow
- * via the storage event.
+ * `theme-light` / `theme-dark`, the theme for that mode and this window's
+ * workspace and its options as attributes, the theme's CSS and the option,
+ * accent and contrast adjustments as two generated stylesheets after the
+ * app's own, fonts, size and density as inline variables. Mount it only
+ * around the product UI: unmounting clears all of it, so pages outside it
+ * (web's landing and auth pages) keep the default look. Changes made in
+ * another window or tab follow via the storage event; each Desktop window
+ * resolves its own workspace.
  */
 export function AppearanceSync() {
   const prefs = useAppearanceStore(useShallow(selectAppearance));
   const installed = useInstalledThemesStore((s) => s.themes);
   const safeMode = useThemeSafeMode((s) => s.active);
+  const mode = useRootMode();
+  const workspaceId = useAppearanceWorkspaceId();
   useModeClasses();
   useStateClasses();
   useThemeFolderSync();
 
   useLayoutEffect(() => {
     const root = document.documentElement;
-    const theme = activeTheme(prefs, safeMode);
+    const theme = activeTheme(prefs, { mode, workspaceId }, safeMode);
+    const accent = safeMode ? undefined : activeAccent(prefs, workspaceId);
 
     clearThemeAttributes(root);
     for (const [name, value] of Object.entries(appearanceThemeAttributes(theme, prefs))) {
@@ -186,7 +209,7 @@ export function AppearanceSync() {
     }
 
     writeStyle(THEME_CSS_ELEMENT_ID, appearanceThemeCss(theme));
-    writeStyle(STYLE_ELEMENT_ID, appearanceStylesheet(theme, prefs));
+    writeStyle(STYLE_ELEMENT_ID, appearanceStylesheet(theme, prefs, accent));
     orderStyles();
 
     return () => {
@@ -195,7 +218,7 @@ export function AppearanceSync() {
       document.getElementById(STYLE_ELEMENT_ID)?.remove();
       document.getElementById(THEME_CSS_ELEMENT_ID)?.remove();
     };
-  }, [prefs, installed, safeMode]);
+  }, [prefs, installed, safeMode, mode, workspaceId]);
 
   useEffect(() => {
     const onStorage = (event: StorageEvent) => {
