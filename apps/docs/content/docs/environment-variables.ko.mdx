@@ -238,7 +238,7 @@ API key와 base URL이 모두 비어 있으면 이 레이어가 꺼지고 업스
 | 변수 | 기본값 | 설명 |
 |---|---|---|
 | `MULTICA_SERVER_URL` | `ws://localhost:8080/ws` | Multica API / WebSocket 주소. `http(s)`도 허용 |
-| `MULTICA_DAEMON_DEVICE_NAME` | host 이름 | 런타임 목록의 기기 이름 |
+| `MULTICA_DAEMON_DEVICE_NAME` | `사용자 이름@host 이름`(사용자 이름을 알 수 없으면 host 이름) | 런타임 목록의 기기 이름 |
 | `MULTICA_AGENT_RUNTIME_NAME` | `Local Agent` | 런타임 표시 이름 |
 | `MULTICA_DAEMON_POLL_INTERVAL` | `30s` | wakeup 이벤트가 없을 때 실행 polling 간격 |
 | `MULTICA_DAEMON_WS_CLAIM_POLL_INTERVAL` | `3m` | 정상 WebSocket에서 claim 안전 polling의 상한. `MULTICA_DAEMON_POLL_INTERVAL`과 독립적으로 설정되며, 하향 jitter를 적용한 기본 실제 간격은 `2m30s`–`2m45s`이고 구형 Server 또는 결과가 불확실한 claim은 일반 polling 간격을 유지합니다 |

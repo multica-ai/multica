@@ -235,7 +235,7 @@ Les variables ci-dessous sont lues sur l'ordinateur qui exécute vos agents, et 
 | Variable | Valeur par défaut | Description |
 |---|---|---|
 | `MULTICA_SERVER_URL` | `ws://localhost:8080/ws` | URL de l'API / WebSocket Multica ; accepte aussi `http(s)` |
-| `MULTICA_DAEMON_DEVICE_NAME` | nom d'hôte | Nom de l'appareil affiché dans la liste des runtimes |
+| `MULTICA_DAEMON_DEVICE_NAME` | `utilisateur@nom d'hôte` (nom d'hôte si l'utilisateur est inconnu) | Nom de l'appareil affiché dans la liste des runtimes |
 | `MULTICA_AGENT_RUNTIME_NAME` | `Local Agent` | Nom d'affichage du runtime |
 | `MULTICA_DAEMON_POLL_INTERVAL` | `30s` | Intervalle d'interrogation des exécutions lorsqu'aucun événement de réveil n'arrive |
 | `MULTICA_DAEMON_WS_CLAIM_POLL_INTERVAL` | `3m` | Borne supérieure des interrogations de sécurité de la prise en charge via WebSocket lorsque celle-ci est saine, configurée indépendamment de `MULTICA_DAEMON_POLL_INTERVAL` ; une gigue à la baisse ramène la valeur par défaut effective à `2m30s`–`2m45s`, tandis que les anciens serveurs et les prises en charge incertaines conservent l'intervalle d'interrogation ordinaire |

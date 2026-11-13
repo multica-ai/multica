@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -531,7 +532,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// canonical id was itself promoted from a pre-change profile file).
 	legacyDaemonIDs = filterLegacyIDs(legacyDaemonIDs, daemonID)
 
-	deviceName := envOrDefault("MULTICA_DAEMON_DEVICE_NAME", host)
+	deviceName := envOrDefault("MULTICA_DAEMON_DEVICE_NAME", defaultDeviceName(host, user.Current))
 	if overrides.DeviceName != "" {
 		deviceName = overrides.DeviceName
 	}
@@ -692,6 +693,28 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		QwenpawArgs:                     qwenpawArgs,
 		ProfileCommandOverrides:         profileCommandOverrides,
 	}, nil
+}
+
+// defaultDeviceName qualifies the hostname with the system user ("alice@build-01")
+// so users sharing a host can tell their runtimes apart. It only changes the
+// display name; daemon identity (daemon.id, LegacyDaemonIDs) still keys on the
+// hostname.
+func defaultDeviceName(host string, currentUser func() (*user.User, error)) string {
+	username := ""
+	if account, err := currentUser(); err == nil && account != nil {
+		username = account.Username
+	}
+	for _, candidate := range []string{username, os.Getenv("USER"), os.Getenv("USERNAME")} {
+		name := strings.TrimSpace(candidate)
+		// Windows reports local/domain accounts as DOMAIN\username.
+		if i := strings.LastIndexByte(name, '\\'); i >= 0 {
+			name = strings.TrimSpace(name[i+1:])
+		}
+		if name != "" {
+			return name + "@" + host
+		}
+	}
+	return host
 }
 
 // officialCloudHost is the hostname of Multica's hosted cloud. It's the only

@@ -9,11 +9,11 @@ describe("useDesktopRuntimeContext", () => {
     vi.resetModules();
   });
 
-  it("keeps daemon identity when the hook remounts on another route", async () => {
+  it.each(["Studio Mac", "alice@build-01"])("keeps daemon identity and %s when the hook remounts on another route", async (deviceName) => {
     const getStatus = vi.fn<() => Promise<DaemonStatus>>().mockResolvedValue({
       state: "running",
       daemonId: "daemon-local",
-      deviceName: "Studio Mac",
+      deviceName,
     });
     const daemonAPI = {
       getStatus,
@@ -37,7 +37,7 @@ describe("useDesktopRuntimeContext", () => {
     getStatus.mockResolvedValue({ state: "stopped" });
     const secondRoute = renderHook(() => useDesktopRuntimeContext());
     await waitFor(() =>
-      expect(secondRoute.result.current.localMachineName).toBe("Studio Mac"),
+      expect(secondRoute.result.current.localMachineName).toBe(deviceName),
     );
     expect(secondRoute.result.current.localDaemonId).toBe("daemon-local");
   });

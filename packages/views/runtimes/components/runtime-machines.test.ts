@@ -36,6 +36,22 @@ function makeRuntime(overrides: Partial<AgentRuntime> = {}): AgentRuntime {
 }
 
 describe("runtime machine grouping", () => {
+  it("keeps users on one host separate and matches this computer by daemon id", () => {
+    const machines = buildRuntimeMachines(
+      [
+        makeRuntime({ name: "Claude (alice@build-01)" }),
+        makeRuntime({ id: "runtime-2", daemon_id: "daemon-2", name: "Claude (bob@build-01)" }),
+      ],
+      { now: NOW, localDaemonId: "daemon-1", localMachineName: "alice@build-01", currentUserId: "user-1" },
+    );
+
+    expect(machines).toHaveLength(2);
+    expect(machines.find((machine) => machine.daemonId === "daemon-1"))
+      .toMatchObject({ title: "alice@build-01", isCurrent: true });
+    expect(machines.find((machine) => machine.daemonId === "daemon-2"))
+      .toMatchObject({ title: "bob@build-01", isCurrent: false });
+  });
+
   it("groups multiple provider runtimes by daemon id", () => {
     const machines = buildRuntimeMachines(
       [
@@ -412,6 +428,13 @@ describe("countRuntimeMachines", () => {
 });
 
 describe("splitRuntimeName", () => {
+  it("preserves a user-qualified device name", () => {
+    expect(splitRuntimeName("Claude (alice@build-01)")).toEqual({
+      base: "Claude",
+      hostname: "alice@build-01",
+    });
+  });
+
   it("separates daemon host suffix from provider name", () => {
     expect(splitRuntimeName("Claude (build-server-01)")).toEqual({
       base: "Claude",
