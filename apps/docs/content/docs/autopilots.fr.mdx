@@ -41,7 +41,7 @@ Voici une automatisation dont le mode de sortie est Créer une tâche. Cliquez s
 
 Le mode **Créer une tâche** utilise la même file d'exécution que les tâches ordinaires : lorsque le runtime est hors ligne, la tâche est tout de même créée, et l'exécution démarre quand le runtime revient en ligne.
 
-Le mode **Exécution seule** exige que le runtime soit disponible au moment du déclenchement ; sinon, l'exécution apparaît comme « Ignorée », et aucune tâche en attente n'est laissée derrière.
+Le mode **Exécution seule** met aussi son exécution en file d'attente lorsque le runtime est hors ligne, et l'exécution démarre quand le runtime revient en ligne. Chaque automatisation garde au plus une exécution en attente : un déclenchement survenant alors qu'une exécution précédente est encore en file est ignoré.
 
 ## Exécuter selon une planification
 
@@ -106,7 +106,7 @@ Pour déboguer un expéditeur, comparez les réponses de Multica à ce tableau :
 | Statut HTTP | Statut de la réponse | Signification |
 |---|---|---|
 | 200 | `accepted` | Acceptée et une exécution a été créée ; renvoie les ID de la livraison et de l'exécution. |
-| 200 | `skipped` | Acceptée, mais cette exécution a été ignorée (par exemple, le runtime est hors ligne en mode exécution seule) ; inclut la raison. |
+| 200 | `skipped` | Acceptée, mais cette exécution a été ignorée (par exemple, une exécution seule précédente attend encore un runtime hors ligne) ; inclut la raison. |
 | 200 | `ignored` | Aucune exécution créée : le déclencheur est désactivé, l'automatisation est en pause ou archivée, ou l'événement a été filtré ; le champ `reason` en indique la cause. |
 | 200 | `duplicate` | La clé d'idempotence correspond à une livraison existante ; renvoie l'ID de la livraison d'origine et n'exécute rien de nouveau. |
 | 400 | Message d'erreur | Le corps est vide, n'est pas du JSON valide, ou n'est pas un objet/tableau JSON. |

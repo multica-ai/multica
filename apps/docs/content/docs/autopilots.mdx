@@ -41,7 +41,7 @@ Below is an autopilot whose execution mode is Create issue. Click **Run now**, o
 
 **Create issue** mode uses the same run queue as regular issues: when the runtime is offline, the issue is still created, and the run starts once the runtime comes online.
 
-**Run only** requires the runtime to be available at trigger time; otherwise the run shows as skipped, and no waiting issue is left behind.
+**Run only** mode queues its run the same way when the runtime is offline, and the run starts once the runtime comes online. Each autopilot keeps at most one such waiting run: a trigger that fires while an earlier run is still queued is skipped.
 
 ## Run on a schedule
 
@@ -106,7 +106,7 @@ When debugging a sender, check Multica's responses against this table:
 | HTTP status | Response status | Meaning |
 |---|---|---|
 | 200 | `accepted` | Accepted and a run was created; returns the delivery and run IDs. |
-| 200 | `skipped` | Accepted, but this run was skipped (for example, the runtime is offline in run-only mode); includes the reason. |
+| 200 | `skipped` | Accepted, but this run was skipped (for example, an earlier run-only run is still waiting for an offline runtime); includes the reason. |
 | 200 | `ignored` | No run created: the trigger is disabled, the autopilot is paused or archived, or the event was filtered; the `reason` field explains why. |
 | 200 | `duplicate` | The idempotency key hit an existing delivery; returns the original delivery ID and doesn't run again. |
 | 400 | Error message | The body is empty, not valid JSON, or not a JSON object/array. |
