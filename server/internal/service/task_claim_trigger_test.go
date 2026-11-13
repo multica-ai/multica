@@ -21,6 +21,11 @@ func taskClaimTriggerPool(t *testing.T) *pgxpool.Pool {
 // conflict. Trigger DDL must not queue behind it and block that package's writer.
 func TestClaimCapacityTriggerDoesNotBlockSharedQueue(t *testing.T) {
 	shared := sharedTestPool(t)
+	pool := taskClaimTriggerPool(t)
+	agentID := createClaimCapacityFixture(t, context.Background(), pool)
+	name := fmt.Sprintf("claim_capacity_isolation_%d", time.Now().UnixNano())
+
+	// Finish database setup before holding a lock that can delay shared DDL.
 	holder, err := shared.Begin(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -30,9 +35,6 @@ func TestClaimCapacityTriggerDoesNotBlockSharedQueue(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pool := taskClaimTriggerPool(t)
-	agentID := createClaimCapacityFixture(t, context.Background(), pool)
-	name := fmt.Sprintf("claim_capacity_isolation_%d", time.Now().UnixNano())
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	createSleepTrigger(t, ctx, pool, name, name+"_fn", agentID)
