@@ -3129,8 +3129,11 @@ export class ApiClient {
   }
 
   // Inbox
+  // `include_snoozed` asks for the rows the Snoozed section shows. The server
+  // leaves them out for a client that does not ask, which would otherwise list
+  // a snoozed issue as plainly unread.
   async listInbox(): Promise<InboxItem[]> {
-    const raw = await this.fetch<unknown>("/api/inbox");
+    const raw = await this.fetch<unknown>("/api/inbox?include_snoozed=true");
     return parseWithFallback(raw, InboxItemListSchema, EMPTY_INBOX_ITEMS, {
       endpoint: "GET /api/inbox",
     });
@@ -3197,6 +3200,21 @@ export class ApiClient {
     return this.fetch(`/api/inbox/${id}/unarchive`, { method: "POST" });
   }
 
+  /**
+   * Snooze the item's issue until `until` (an ISO time). Issue-level, like
+   * archive: every active row on the issue goes with it.
+   */
+  async snoozeInbox(id: string, until: string): Promise<void> {
+    await this.fetch(`/api/inbox/${id}/snooze`, {
+      method: "POST",
+      body: JSON.stringify({ until }),
+    });
+  }
+
+  async unsnoozeInbox(id: string): Promise<void> {
+    await this.fetch(`/api/inbox/${id}/unsnooze`, { method: "POST" });
+  }
+
   // Raw unread ROW count — not the number any badge shows. The inbox renders
   // one row per issue, so a single issue with three unread notifications
   // counts once there and three times here. `getInboxUnreadSummary` is the
@@ -3207,10 +3225,10 @@ export class ApiClient {
     return this.fetch("/api/inbox/unread-count");
   }
 
-  // Cross-workspace unread summary: one entry per workspace the user belongs
-  // to that has unread inbox items. Backs the workspace-switcher dot for
-  // OTHER workspaces. Schema-guarded so a contract drift hides the dot rather
-  // than crashing the sidebar.
+  // Cross-workspace inbox summary: one entry per workspace the user belongs
+  // to that has unread items or issues waiting on them. Backs the Inbox badge
+  // and the workspace-switcher dot for OTHER workspaces. Schema-guarded so a
+  // contract drift hides them rather than crashing the sidebar.
   async getInboxUnreadSummary(): Promise<InboxWorkspaceUnread[]> {
     const raw = await this.fetch<unknown>("/api/inbox/unread-summary");
     return parseWithFallback(raw, InboxUnreadSummarySchema, EMPTY_INBOX_UNREAD_SUMMARY, {

@@ -9,7 +9,7 @@ import type { ReactNode } from "react";
 import { setApiInstance } from "../api";
 import type { ApiClient } from "../api/client";
 import type { InboxItem, InboxWorkspaceUnread } from "../types";
-import { useDeleteInbox, useMarkInboxRead, useMarkInboxUnread, useMarkIssueInboxRead, useUnarchiveInbox } from "./mutations";
+import { useDeleteInbox, useMarkInboxRead, useMarkInboxUnread, useMarkIssueInboxRead, useSnoozeInbox, useUnarchiveInbox, useUnsnoozeInbox } from "./mutations";
 import { inboxKeys, useInboxUnreadCount } from "./queries";
 import { onInboxSummaryInvalidate } from "./ws-updaters";
 import { createQueryClient } from "../query-client";
@@ -398,6 +398,105 @@ describe("useUnarchiveInbox", () => {
  * (MUL-6967). These pin the property that replaces the old local recompute:
  * whatever races, the badge converges on the server's value.
  */
+describe("useSnoozeInbox", () => {
+  const UNTIL = "2026-06-18T01:00:00.000Z";
+  let queryClient: QueryClient;
+  let snoozeInbox: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    snoozeInbox = vi.fn(async () => undefined);
+    setApiInstance({ snoozeInbox } as unknown as ApiClient);
+    queryClient.setQueryData(inboxKeys.list(WORKSPACE_ID), [
+      item({ id: "inbox-1", issue_id: "issue-1", archived: false, read: true }),
+      item({ id: "inbox-2", issue_id: "issue-1", archived: false, read: true }),
+      item({ id: "inbox-3", issue_id: "issue-1", archived: true, read: true }),
+      item({ id: "inbox-4", issue_id: "issue-2", archived: false, read: true }),
+    ]);
+    queryClient.setQueryData(inboxKeys.unreadSummary(), [{ workspace_id: WORKSPACE_ID, count: 1 }]);
+  });
+
+  it("puts every active notification of the issue away at once, and makes the row unread", async () => {
+    let finish!: () => void;
+    snoozeInbox.mockImplementation(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const { result } = renderHook(() => useSnoozeInbox(), { wrapper: createWrapper(queryClient) });
+
+    act(() => result.current.mutate({ id: "inbox-1", until: UNTIL }));
+    await waitFor(() => expect(snoozeInbox).toHaveBeenCalledWith("inbox-1", UNTIL));
+
+    expect(listCache(queryClient).map((row) => [row.id, row.snoozed_until ?? null, row.read])).toEqual([
+      ["inbox-1", UNTIL, false],
+      ["inbox-2", UNTIL, true],
+      // Archived, and another issue's: neither is touched.
+      ["inbox-3", null, true],
+      ["inbox-4", null, true],
+    ]);
+
+    await act(async () => finish());
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    // The badge is the server's to count: a snoozed issue leaves it.
+    await waitFor(() => {
+      expect(queryClient.getQueryState(inboxKeys.list(WORKSPACE_ID))?.isInvalidated).toBe(true);
+      expect(queryClient.getQueryState(inboxKeys.unreadSummary())?.isInvalidated).toBe(true);
+    });
+  });
+
+  it("puts the issue back when the request fails", async () => {
+    snoozeInbox.mockRejectedValue(new Error("offline"));
+    const { result } = renderHook(() => useSnoozeInbox(), { wrapper: createWrapper(queryClient) });
+
+    act(() => result.current.mutate({ id: "inbox-1", until: UNTIL }));
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    expect(listCache(queryClient).every((row) => row.snoozed_until == null && row.read)).toBe(true);
+  });
+});
+
+describe("useUnsnoozeInbox", () => {
+  const UNTIL = "2026-06-18T01:00:00.000Z";
+  let queryClient: QueryClient;
+  let unsnoozeInbox: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    unsnoozeInbox = vi.fn(async () => undefined);
+    setApiInstance({ unsnoozeInbox } as unknown as ApiClient);
+    queryClient.setQueryData(inboxKeys.list(WORKSPACE_ID), [
+      item({ id: "inbox-1", issue_id: "issue-1", archived: false, snoozed_until: UNTIL }),
+      item({ id: "inbox-2", issue_id: "issue-1", archived: false, snoozed_until: UNTIL }),
+      item({ id: "inbox-4", issue_id: "issue-2", archived: false, snoozed_until: UNTIL }),
+    ]);
+  });
+
+  it("brings the whole issue back now and leaves other snoozes alone", async () => {
+    const { result } = renderHook(() => useUnsnoozeInbox(), { wrapper: createWrapper(queryClient) });
+
+    act(() => result.current.mutate("inbox-2"));
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(unsnoozeInbox).toHaveBeenCalledWith("inbox-2");
+    expect(listCache(queryClient).map((row) => [row.id, row.snoozed_until ?? null])).toEqual([
+      ["inbox-1", null],
+      ["inbox-2", null],
+      ["inbox-4", UNTIL],
+    ]);
+  });
+
+  it("keeps the issue snoozed when the request fails", async () => {
+    unsnoozeInbox.mockRejectedValue(new Error("offline"));
+    const { result } = renderHook(() => useUnsnoozeInbox(), { wrapper: createWrapper(queryClient) });
+
+    act(() => result.current.mutate("inbox-2"));
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    expect(listCache(queryClient).every((row) => row.snoozed_until === UNTIL)).toBe(true);
+  });
+});
+
 describe("unread summary is server-owned", () => {
   let queryClient: QueryClient;
 

@@ -15,7 +15,7 @@ export const inboxKeys = {
   lookup: (wsId: string) => [...inboxKeys.archived(wsId), "lookup"] as const,
   facets: (wsId: string) => [...inboxKeys.all(wsId), "archived-facets"] as const,
   // Account-level (not workspace-scoped): a single shared cache entry that
-  // holds unread counts for every workspace the user belongs to.
+  // holds the inbox counts for every workspace the user belongs to.
   unreadSummary: () => ["inbox", "unread-summary"] as const,
 };
 
@@ -147,44 +147,56 @@ export function inboxUnreadSummaryEnabled(
 }
 
 /**
- * Whether any workspace OTHER than `currentWsId` has unread inbox items.
- * Drives the workspace-switcher dot: the active workspace's own unread is
- * already surfaced by the Inbox nav count, so it is excluded here to avoid a
+ * The number a workspace's Inbox badge shows: the issues waiting on the user,
+ * read or not (MUL-9215). Reading a row no longer clears it; handling the
+ * issue does. A server that predates the sectioned Inbox sends no `needs_you`,
+ * and the badge keeps counting unread issues as it did.
+ */
+export function inboxBadgeCount(entry: InboxWorkspaceUnread): number {
+  return entry.needs_you ?? entry.count;
+}
+
+/**
+ * Whether any workspace OTHER than `currentWsId` has issues waiting on the
+ * user. Drives the workspace-switcher dot: the active workspace's own count
+ * is already on the Inbox nav badge, so it is excluded here to avoid a
  * duplicate signal.
  */
 export function hasOtherWorkspaceUnread(
   summary: InboxWorkspaceUnread[],
   currentWsId: string | null | undefined,
 ): boolean {
-  return summary.some((s) => s.workspace_id !== currentWsId && s.count > 0);
+  return summary.some((s) => s.workspace_id !== currentWsId && inboxBadgeCount(s) > 0);
 }
 
 /**
- * Set of workspace ids that have unread inbox items. Lets the workspace
- * switcher dropdown mark WHICH workspace a pending message lives in (the
+ * Set of workspace ids that have issues waiting on the user. Lets the
+ * workspace switcher dropdown mark WHICH workspace they live in (the
  * aggregate switcher dot only says "somewhere else"). Workspaces with a zero
  * count are excluded.
  */
 export function unreadWorkspaceIds(summary: InboxWorkspaceUnread[]): Set<string> {
-  return new Set(summary.filter((s) => s.count > 0).map((s) => s.workspace_id));
+  return new Set(summary.filter((s) => inboxBadgeCount(s) > 0).map((s) => s.workspace_id));
 }
 
 /**
- * Unread inbox count for one workspace within the cross-workspace summary.
- * A workspace with nothing unread is absent from the response entirely, so a
- * missing entry means zero rather than "not loaded yet".
+ * Inbox badge count for one workspace within the cross-workspace summary.
+ * A workspace with nothing to report is absent from the response entirely, so
+ * a missing entry means zero rather than "not loaded yet".
  */
 export function unreadCountForWorkspace(
   summary: InboxWorkspaceUnread[],
   wsId: string | null | undefined,
 ): number {
   if (!wsId) return 0;
-  return summary.find((s) => s.workspace_id === wsId)?.count ?? 0;
+  const entry = summary.find((s) => s.workspace_id === wsId);
+  return entry ? inboxBadgeCount(entry) : 0;
 }
 
 /**
- * Unread inbox count for the given workspace — the number the sidebar nav
- * badge and the desktop dock badge render.
+ * Inbox badge count for the given workspace — the number the sidebar nav
+ * badge and the desktop dock badge render. See {@link inboxBadgeCount} for
+ * what it counts.
  *
  * Read from the cross-workspace summary, NOT from the inbox list. The summary
  * is one small server-computed row per workspace and the sidebar already
@@ -194,8 +206,8 @@ export function unreadCountForWorkspace(
  *
  * `GET /api/inbox/unread-count` is deliberately not the source: it counts raw
  * notification rows, while the inbox renders one row per issue. The summary
- * endpoint applies the same newest-per-issue rule `deduplicateInboxItems`
- * applies client-side, so this number matches the list the user sees.
+ * endpoint counts issues, so this number matches the "Needs you" section the
+ * user sees.
  */
 export function useInboxUnreadCount(
   wsId: string | null | undefined,

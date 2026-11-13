@@ -42,14 +42,27 @@ export type InboxItemType =
   | "app_action_result";
 
 /**
- * One workspace's unread inbox count in the cross-workspace summary
- * (`GET /api/inbox/unread-summary`). The sidebar uses this to light a dot on
- * the workspace switcher when a workspace OTHER than the active one has
- * unread items.
+ * The Inbox section a notification was filed under when it was written.
+ * `needs_you`: it is addressed to the recipient, so the issue waits on them.
+ * `updates`: they only follow the issue.
+ */
+export type InboxSection = "needs_you" | "updates";
+
+/**
+ * One workspace's inbox counts in the cross-workspace summary
+ * (`GET /api/inbox/unread-summary`). The rail badge and the workspace
+ * switcher dot read it.
  */
 export interface InboxWorkspaceUnread {
   workspace_id: string;
+  /** Unread issues. */
   count: number;
+  /**
+   * Issues waiting on the user, read or not: the rows of the Inbox's "Needs
+   * you" section, and what the badge shows. Absent from a server that
+   * predates the sectioned Inbox, where the badge falls back to `count`.
+   */
+  needs_you?: number;
 }
 
 export interface InboxItem {
@@ -85,6 +98,17 @@ export interface InboxItem {
   archived: boolean;
   created_at: string;
   details: Record<string, string> | null;
+  /**
+   * Absent from a server that predates the sectioned Inbox; every row then
+   * belongs to the one list it had.
+   */
+  section?: InboxSection | null;
+  /**
+   * When a snoozed row comes back. A time in the past means it already has.
+   * Snoozing is issue-level, so every row the issue had at the time carries
+   * the same value.
+   */
+  snoozed_until?: string | null;
 }
 
 

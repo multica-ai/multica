@@ -170,6 +170,67 @@ export function useArchiveInbox() {
   });
 }
 
+/**
+ * Snooze an issue until a time. Issue-level, like archive: every active
+ * notification on the issue is put away with it, and the one snoozed from is
+ * unread again so it reads as new when it comes back.
+ */
+export function useSnoozeInbox() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ id, until }: { id: string; until: string }) => api.snoozeInbox(id, until),
+    onMutate: async ({ id, until }) => {
+      await qc.cancelQueries({ queryKey: inboxKeys.list(wsId) });
+      const prev = qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId));
+      const issueId = prev?.find((item) => item.id === id)?.issue_id;
+      qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), (old) =>
+        old?.map((item) => {
+          if (item.archived) return item;
+          if (item.id === id) return { ...item, snoozed_until: until, read: false };
+          return issueId && item.issue_id === issueId ? { ...item, snoozed_until: until } : item;
+        }),
+      );
+      return { prev };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(inboxKeys.list(wsId), ctx.prev);
+    },
+    onSettled: () => {
+      // A snoozed issue leaves the badge until it comes back.
+      refreshInboxAfterWrite(qc, wsId);
+    },
+  });
+}
+
+/** Bring a snoozed issue back now. */
+export function useUnsnoozeInbox() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (id: string) => api.unsnoozeInbox(id),
+    onMutate: async (id) => {
+      await qc.cancelQueries({ queryKey: inboxKeys.list(wsId) });
+      const prev = qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId));
+      const issueId = prev?.find((item) => item.id === id)?.issue_id;
+      qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), (old) =>
+        old?.map((item) =>
+          !item.archived && (item.id === id || (issueId && item.issue_id === issueId))
+            ? { ...item, snoozed_until: null }
+            : item,
+        ),
+      );
+      return { prev };
+    },
+    onError: (_err, _id, ctx) => {
+      if (ctx?.prev) qc.setQueryData(inboxKeys.list(wsId), ctx.prev);
+    },
+    onSettled: () => {
+      refreshInboxAfterWrite(qc, wsId);
+    },
+  });
+}
+
 export function useDeleteInbox() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
