@@ -19,15 +19,15 @@
  * For v1 we render images via the same `MarkdownImage` used by inline
  * markdown rendering (consistent aspect-ratio + lightbox behavior). Non-
  * image attachments render as a tappable file card showing 📎 + filename
- * + size hint, opening the canonical download URL on tap.
+ * + size hint, opening a freshly signed download URL on tap.
  */
 import { useMemo } from "react";
-import { Linking, Pressable, View } from "react-native";
+import { Pressable, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import type { Attachment } from "@multica/core/types";
 import { standaloneAttachments } from "@/lib/attachment-dedup";
 import { MarkdownImage } from "@/lib/markdown/markdown-image";
-import { resolveAttachmentUrl } from "@/lib/attachment-url";
+import { openAttachment } from "@/lib/open-attachment";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
 import { Text } from "@/components/ui/text";
@@ -94,20 +94,10 @@ function FileCard({
   return (
     <Pressable
       onPress={() => {
-        // download_url is the canonical link — opening it hands off to
-        // Safari which handles auth-token-free download + previewing for
-        // common types (PDF, txt). Mirrors what the markdown link renderer
-        // does for `[name](url)`.
-        //
-        // The backend may return a server-relative URL like
-        // `/api/attachments/{id}/download` when no CloudFront signer is
-        // configured (MUL-2976). RN's `Linking.openURL` requires an
-        // absolute http(s) URL — it returns "Cannot open URL" otherwise —
-        // so resolve against `EXPO_PUBLIC_API_URL` first.
-        const target = resolveAttachmentUrl(attachment.download_url);
-        if (target) {
-          void Linking.openURL(target);
-        }
+        // The list's `download_url` is the auth-gated API path, which a
+        // native open cannot authenticate (401 missing authorization).
+        // `openAttachment` re-signs it through the metadata endpoint first.
+        void openAttachment(attachment.download_url);
       }}
       accessibilityRole="button"
       accessibilityLabel={`Open ${attachment.filename}`}
