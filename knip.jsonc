@@ -13,10 +13,6 @@
   // reads as "unused" from inside its own workspace.
   "include": ["files", "dependencies", "unlisted"],
 
-  // Go, and a workspace with its own Expo toolchain, lint pipeline, and React
-  // version (see apps/mobile/CLAUDE.md). Neither is covered by this config.
-  "ignoreWorkspaces": ["apps/mobile"],
-
   "workspaces": {
     ".": {
       "entry": ["scripts/*.mjs", "scripts/brand/*.mjs"],

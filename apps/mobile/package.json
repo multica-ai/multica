@@ -1,0 +1,53 @@
+{
+  "name": "@multica/mobile",
+  "version": "0.2.0",
+  "private": true,
+  "main": "index.ts",
+  "scripts": {
+    "dev": "expo start",
+    "dev:staging": "dotenv -e .env.staging -- cross-env APP_ENV=staging expo start",
+    "dev:prod": "dotenv -e .env.production.local -e .env.production -- cross-env APP_ENV=production expo start",
+    "ios": "expo prebuild --platform ios && expo run:ios",
+    "ios:staging": "dotenv -e .env.staging -- cross-env APP_ENV=staging pnpm ios",
+    "ios:prod": "dotenv -e .env.production.local -e .env.production -- cross-env APP_ENV=production pnpm ios",
+    "ios:device": "expo prebuild --platform ios && expo run:ios --device",
+    "ios:device:staging": "dotenv -e .env.staging -- cross-env APP_ENV=staging pnpm ios:device",
+    "ios:device:staging:release": "dotenv -e .env.staging -- cross-env APP_ENV=staging pnpm ios:device --configuration Release",
+    "ios:device:prod": "dotenv -e .env.production.local -e .env.production -- cross-env APP_ENV=production pnpm ios:device",
+    "ios:device:prod:release": "dotenv -e .env.production.local -e .env.production -- cross-env APP_ENV=production pnpm ios:device --configuration Release",
+    "bundle:ios": "dotenv -e .env.production -- cross-env APP_ENV=production expo export --platform ios --output-dir dist",
+    "lint": "expo lint",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@multica/core": "workspace:*",
+    "@react-native-community/netinfo": "12.0.1",
+    "@tanstack/react-query": "catalog:",
+    "expo": "~57.0.26",
+    "expo-build-properties": "~57.0.22",
+    "expo-constants": "~57.0.20",
+    "expo-dev-client": "^57.0.19",
+    "expo-linking": "~57.0.11",
+    "expo-localization": "~57.0.2",
+    "expo-secure-store": "~57.0.4",
+    "expo-sqlite": "~57.0.5",
+    "expo-status-bar": "~57.0.1",
+    "react": "19.2.3",
+    "react-native": "0.86.3",
+    "zustand": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-test-renderer": "^19.3.0",
+    "babel-preset-expo": "~57.0.14",
+    "cross-env": "^7.0.3",
+    "dotenv-cli": "^7.4.4",
+    "eslint": "^9.0.0",
+    "eslint-config-expo": "~57.0.2",
+    "react-test-renderer": "19.2.3",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}
