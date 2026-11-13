@@ -1,6 +1,6 @@
 # Multica for iOS
 
-The iPhone and iPad client. It is being rebuilt on `@multica/core`, the same logic the web and desktop apps run; this version connects, signs in and follows realtime updates, and the interface is still to come.
+The iPhone and iPad client, built on `@multica/core`, the same logic the web and desktop apps run. It covers sign-in, the inbox, your issues, issue detail with comments and agent runs, conversations with agents, search, and switching workspaces.
 
 ## Run it
 
@@ -14,6 +14,14 @@ pnpm ios:mobile:device:prod:release    # your iPhone, multica.ai
 ```
 
 `pnpm dev:mobile` starts only the bundler, for a build that is already installed.
+
+## Preview screens without Xcode
+
+```bash
+pnpm --filter @multica/mobile preview:web
+```
+
+opens a browser gallery of the app's screens in iPhone-sized frames, rendered from the real components with sample data. Pick screens, theme and language with `?screens=inbox,issue,chat&scheme=dark&locale=en`.
 
 ## Configuration
 
