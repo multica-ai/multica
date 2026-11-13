@@ -100,10 +100,11 @@ selfhost: ## Create .env if needed, then pull and start the official self-hosted
 		fi; \
 		echo "==> Generated random JWT_SECRET, POSTGRES_PASSWORD, and MULTICA_VCS_SECRET_KEY"; \
 	fi
-	@$(MAKE) --no-print-directory selfhost-start
+	@$(MAKE) --no-print-directory selfhost-start ENV_FILE=.env
 
 # Internal: runs in a second make so that a .env the recipe above just created
 # is included before Compose reads POSTGRES_PASSWORD from the environment.
+# ENV_FILE is pinned because Compose reads .env even when .env.worktree exists.
 selfhost-start:
 	@echo "==> Pulling official Multica images..."
 	@if ! $(COMPOSE) -f docker-compose.selfhost.yml pull; then \
@@ -138,7 +139,7 @@ selfhost-build: ## Build backend/web from the current checkout and start the sel
 		fi; \
 		echo "==> Generated random JWT_SECRET, POSTGRES_PASSWORD, and MULTICA_VCS_SECRET_KEY"; \
 	fi
-	@$(MAKE) --no-print-directory selfhost-build-start
+	@$(MAKE) --no-print-directory selfhost-build-start ENV_FILE=.env
 
 # Internal: see selfhost-start.
 selfhost-build-start:

@@ -569,10 +569,16 @@ done
 # this path needs its own driver.
 # ---------------------------------------------------------------------------
 
+# Args: <target> [worktree]. With `worktree`, a .env.worktree is present, the
+# way a contributor checkout looks after `make worktree-env`. The recipe still
+# writes .env and Compose still reads .env, so its password must win there too.
 run_first_recipe() {
-  local target=$1
+  local target=$1 layout=${2:-}
 
-  rm -f "$recipe_dir/.env"
+  rm -f "$recipe_dir/.env" "$recipe_dir/.env.worktree"
+  if [ "$layout" = "worktree" ]; then
+    printf 'POSTGRES_PASSWORD=worktree-password\n' >"$recipe_dir/.env.worktree"
+  fi
   : >"$record"
   : >"$curl_log"
 
@@ -587,16 +593,19 @@ run_first_recipe() {
 }
 
 for first_run_target in selfhost selfhost-build; do
-  run_first_recipe "$first_run_target" >/dev/null
-  generated_password="$(sed -n 's/^POSTGRES_PASSWORD=//p' "$recipe_dir/.env")"
-  received_password="$(grep '^postgres_password=' "$record" | tail -n 1 | cut -d= -f2- || true)"
+  for first_run_layout in "" worktree; do
+    run_first_recipe "$first_run_target" "$first_run_layout" >/dev/null
+    generated_password="$(sed -n 's/^POSTGRES_PASSWORD=//p' "$recipe_dir/.env")"
+    received_password="$(grep '^postgres_password=' "$record" | tail -n 1 | cut -d= -f2- || true)"
 
-  if [ -z "$generated_password" ] || [ "$received_password" != "$generated_password" ]; then
-    echo "[$first_run_target first run] Compose did not receive the POSTGRES_PASSWORD written to .env"
-    echo "  written to .env: ${generated_password:-<none>}"
-    echo "  received by Compose: ${received_password:-<none>}"
-    exit 1
-  fi
+    if [ -z "$generated_password" ] || [ "$received_password" != "$generated_password" ]; then
+      echo "[$first_run_target first run${first_run_layout:+ with .env.$first_run_layout}] Compose did not receive the POSTGRES_PASSWORD written to .env"
+      echo "  written to .env: ${generated_password:-<none>}"
+      echo "  received by Compose: ${received_password:-<none>}"
+      exit 1
+    fi
+  done
 done
+rm -f "$recipe_dir/.env.worktree"
 
 echo "self-host env derivation ok"
