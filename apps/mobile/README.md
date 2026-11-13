@@ -1,6 +1,6 @@
 # Multica for iOS
 
-The iPhone and iPad client, built on `@multica/core`, the same logic the web and desktop apps run. It covers sign-in, the inbox, your issues, issue detail with comments and agent runs, conversations with agents, search, and switching workspaces.
+The iPhone and iPad client, built on `@multica/core`, the same logic the web and desktop apps run. It covers sign-in, the inbox, your issues, issue detail with comments and agent runs, conversations with agents, search, and switching workspaces. From the workspace menu you also reach projects, views, squads and autopilots, which you can create and edit on the phone, and per-workspace notification settings.
 
 ## Run it
 
