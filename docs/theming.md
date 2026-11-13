@@ -171,17 +171,19 @@ those change without notice. Anchors, slots and hooks stay until the next
 | `[data-mc="app-rail"]` | The icon rail on the far left. |
 | `[data-mc="sidebar"]` | The navigation panel next to the rail; `data-state` is `expanded` or `collapsed`. |
 | `[data-mc="nav-item"]` | A row in the sidebar; `data-active` is `true` on the current one. |
+| `[data-mc="panel-section"]` | A labelled group of rows, headed by an `h3`, in the sidebar or a detail page's property panel. Scope it with `[data-mc="sidebar"] [data-mc="panel-section"]` for the sidebar only. |
 | `[data-mc="page"]` | The rounded canvas that holds the current page. |
+| `[data-mc="page-header"]` | The bar at the top of a page, with its title and actions. |
 | `[data-mc="window-toolbar"]` | Desktop only: the toolbar above the rail. |
 | `[data-mc="tab-bar"]` | Desktop only: the tab strip above the page. |
 | `[data-mc="bottom-bar"]` | The status bar under the page, on windows wide enough to show it. |
 | `[data-mc="issue-group-header"]` | A status group header in issue lists; `data-status` is the status key (`backlog`, `todo`, `in_progress`, `in_review`, `done`, `blocked`, `cancelled`, or a custom key). |
-| `[data-mc="issue-row"]` | One issue in a list; `data-status`, `data-priority` (`urgent`, `high`, `medium`, `low`, `none`) and `data-assignee-type` (`member`, `agent`, `squad` or `none`). |
+| `[data-mc="issue-row"]` | One issue in a list; `data-status`, `data-priority` (`urgent`, `high`, `medium`, `low`, `none`), `data-assignee-type` (`member`, `agent`, `squad` or `none`), `data-parity` (`even` or `odd`, the row's index within its status group, so stripes survive virtual scrolling where `:nth-child` does not) and `data-selected` (`true` or `false`, ticked for bulk actions). |
 | `[data-mc="board-column"]` | One column on a board. |
-| `[data-mc="board-card"]` | One issue card on a board; same attributes as `issue-row`. |
+| `[data-mc="board-card"]` | One issue card on a board; `data-status`, `data-priority` and `data-assignee-type` as on `issue-row`. Cards have no `data-parity` or `data-selected`. |
 | `[data-mc="status-icon"]` | The status glyph (an `svg`). |
 | `[data-mc="priority-icon"]` | The priority glyph (an `svg`). |
-| `[data-mc="label-chip"]` | A label; `data-color` is its hex colour. |
+| `[data-mc="label-chip"]` | A label; `data-color` is its hex colour. The chip paints with `var(--label-color)` and `var(--label-foreground)`, so a rule can restyle it without `!important`. |
 | `[data-mc="content"]` | Rich text: issue descriptions, comments, chat messages and documents, reading and editing. `data-density` is `document` or `compact` when reading. |
 | `[data-mc="comment"]` | A top-level comment card; `data-author-type` is `member`, `agent` or `system`. |
 | `[data-mc="comment-reply"]` | A reply inside a comment card; `data-author-type` as on `comment`. |
@@ -189,8 +191,27 @@ those change without notice. Anchors, slots and hooks stay until the next
 | `[data-mc="chat-window"]` | The chat panel. |
 | `[data-mc="chat-input"]` | The message box in chat. |
 | `[data-mc="chat-message"]` | One message in a chat; `data-role` is `user` or `assistant`. |
-| `[data-mc="inbox-item"]` | One notification in the inbox; `data-read` is `true` or `false`. |
+| `[data-mc="chat-bubble"]` | The bubble around a user message. Assistant replies have none: they are full-width rich text. |
+| `[data-mc="inbox-item"]` | One notification in the inbox; `data-read` is `true` or `false`, and `data-selected` is `true` on the one open in the detail pane. |
+| `[data-mc="unread-dot"]` | The unread marker on an inbox item. |
+| `[data-mc="toaster"]` | The toast region. Each toast inside is an `li` with `data-type` `success`, `error`, `info`, `warning`, `loading` or `default`. A plain toast usually has no `data-type`, so match it with both `li:not([data-type])` and `li[data-type="default"]`. |
 | `[data-mc="settings-page"]` | The settings page. |
+
+Each label chip sets `--label-color` (its hex colour) and `--label-foreground`
+(a text colour readable on it). Read them to draw a label another way, such
+as a dot in front of its name:
+
+```css
+[data-mc="label-chip"] { background: transparent; color: inherit; }
+[data-mc="label-chip"]::before { content: ""; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--label-color); }
+```
+
+A plain toast has no `data-type`, so style the default look with both
+selectors:
+
+```css
+[data-mc="toaster"] :is(li:not([data-type]), li[data-type="default"]) { border-radius: 0.75rem; }
+```
 
 UI primitives carry a `data-slot`; these are public too: `button` (also
 `data-variant` and `data-size`), `input`, `textarea`, `switch`, `checkbox`,
