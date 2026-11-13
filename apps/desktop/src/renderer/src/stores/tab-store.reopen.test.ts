@@ -49,6 +49,44 @@ describe("renderer-local closed destinations", () => {
     expect(active().url).toBe("/acme/issues?view=one&sort=old#anchor");
   });
 
+  it.each([
+    ["00000000-0000-4000-8000-000000000042", "ACME-42", false],
+    ["ACME-42", "00000000-0000-4000-8000-000000000042", false],
+    ["00000000-0000-4000-8000-000000000042", "ACME-42", true],
+    ["ACME-42", "00000000-0000-4000-8000-000000000042", true],
+  ] as const)("reuses a resolved live issue when recovering %s as %s (pinned %s)", (closedSegment, liveSegment, pinned) => {
+    const store = useTabStore.getState();
+    const uuid = "00000000-0000-4000-8000-000000000042";
+    const source = active().id;
+    const closed = store.openTab(`/acme/issues/${closedSegment}?filter=old#saved`, "Saved", { activate: true });
+    store.rememberIssueIdentity(closed, uuid, "ACME-42");
+    store.closeTab(closed);
+    const currentUrl = `/acme/issues/${liveSegment}?filter=current#live`;
+    const live = store.openTab(currentUrl, "Current", { activate: true });
+    store.commitViewState(live, `/acme/issues/${liveSegment}`, "draft", "Current draft");
+    if (pinned) store.togglePin(live);
+    store.setActiveTab(source);
+    const authoritative = useTabStore.getState().byWorkspace.acme.tabs.find((tab) => tab.id === live);
+
+    store.reopenClosedTab();
+
+    expect(active()).toBe(authoritative);
+    expect(active().url).toBe(currentUrl);
+    expect(useTabStore.getState().byWorkspace.acme.tabs).toHaveLength(2);
+    expect(useTabStore.getState().closedTabsByWorkspace.acme).toEqual([]);
+    store.setActiveTab(source);
+    expect(store.openTab(`/acme/issues/${closedSegment}`, "Background")).toBe(live);
+    expect(active().id).toBe(source);
+    const attention = useTabStore.getState().tabAttention!;
+    expect(attention.tabId).toBe(live);
+    expect(store.openTab(`/acme/issues/${closedSegment}`, "Background again")).toBe(live);
+    expect(useTabStore.getState().tabAttention?.sequence).toBe(attention.sequence + 1);
+    store.clearTabAttention(attention.sequence);
+    expect(useTabStore.getState().tabAttention?.sequence).toBe(attention.sequence + 1);
+    store.openTab(`/acme/issues/${closedSegment}`, "Foreground", { activate: true });
+    expect(active()).toBe(authoritative);
+  });
+
   it("clamps insertion around pinned prefixes after tab movement", () => {
     close("/acme/issues/ABC");
     const store = useTabStore.getState();

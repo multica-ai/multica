@@ -1172,7 +1172,7 @@ export const useTabStore = create<TabStore>()(
           set({ closedTabsByWorkspace: nextClosed });
           return;
         }
-        const existing = group.tabs.find((tab) => tab.resourceKey === resourceKeyForUrl(url));
+        const existing = findTabForUrl(group, url);
         const tab = existing ?? makeSession(url, destination.title);
         const index = Math.min(
           Math.max(destination.index, pinnedBoundary(group.tabs)),
