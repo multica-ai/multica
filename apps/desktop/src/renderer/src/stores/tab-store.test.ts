@@ -79,6 +79,53 @@ describe("resourceKeyForUrl", () => {
   });
 });
 
+describe("chat session tab identity", () => {
+  it.each([
+    ["/acme/chat?session=one", "/acme/chat?session=one"],
+    ["/acme/chat?filter=active&session=a%2Fb#message", "/acme/chat?session=a%2Fb"],
+    ["/acme/chat?session=one&view=archived&scope=agents", "/acme/chat?session=one"],
+    ["/acme/chat?session=", "/acme/chat"],
+    ["/acme/chat#session=one", "/acme/chat"],
+    ["/acme/issues?session=one", "/acme/issues"],
+    ["/acme/projects/chat?session=one", "/acme/projects/chat"],
+  ])("identifies %s as %s", (url, key) => {
+    expect(resourceKeyForUrl(url)).toBe(key);
+  });
+
+  it("rebuilds session keys for all restored tabs and preserves their state on background reuse", () => {
+    const tabs = Array.from({ length: 200 }, (_, index) => ({
+      id: `tab-${index}`,
+      url: `/acme/chat?session=chat-${index}&filter=kept#message`,
+      resourceKey: "/acme/chat",
+      title: `Conversation ${index}`,
+      pinned: index === 0,
+      history: { stack: [`/acme/chat?session=chat-${index}&filter=kept#message`], index: 0 },
+      memento: { scroll: {}, view: { "/acme/chat::draft": `draft-${index}` } },
+    }));
+    const restored = mergePersistedTabs({
+      activeWorkspaceSlug: "acme",
+      byWorkspace: { acme: { tabs, activeTabId: "tab-0", recentTabIds: ["tab-10"] } },
+    }, useTabStore.getState());
+    useTabStore.setState(restored);
+    const before = useTabStore.getState().byWorkspace.acme;
+    expect(before.tabs).toHaveLength(200);
+    expect(before.tabs.map(tab => tab.resourceKey)).toEqual(
+      tabs.map((_, index) => `/acme/chat?session=chat-${index}`),
+    );
+    const target = before.tabs[150];
+    const id = useTabStore.getState().openTab("/acme/chat?session=chat-150", "Chat");
+    expect(id).toBe(target.id);
+    expect(useTabStore.getState().byWorkspace.acme).toBe(before);
+    expect(useTabStore.getState().tabAttention?.tabId).toBe(target.id);
+    useTabStore.getState().openTab("/acme/chat?session=chat-150", "Chat", { activate: true });
+    expect(getActiveTab(useTabStore.getState())).toBe(target);
+    expect(target.url).toBe(tabs[150].url);
+    expect(target.history).toEqual(tabs[150].history);
+    expect(target.memento).toEqual(tabs[150].memento);
+    expect(useTabStore.getState().byWorkspace.acme.tabs).toHaveLength(200);
+  });
+});
+
 describe("browsingHistoryKeyForUrl", () => {
   it("keeps Inbox selections distinct while ignoring their other view state", () => {
     expect(browsingHistoryKeyForUrl("/acme/inbox")).toBe("/acme/inbox");
