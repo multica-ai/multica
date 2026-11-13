@@ -396,6 +396,85 @@ func TestActivityIssueUpdated_TitleChanged(t *testing.T) {
 	}
 }
 
+func TestActivityIssueUpdated_DescriptionSnapshots(t *testing.T) {
+	tests := []struct {
+		name string
+		from *string
+		to   *string
+	}{
+		{name: "added", from: nil, to: stringPtr("first description")},
+		{name: "updated", from: stringPtr("first description"), to: stringPtr("updated description")},
+		{name: "removed", from: stringPtr("updated description"), to: nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			queries := db.New(testPool)
+			bus := events.New()
+			registerActivityListeners(bus, queries)
+
+			issueID := createTestIssue(t, testWorkspaceID, testUserID)
+			t.Cleanup(func() {
+				cleanupActivities(t, issueID)
+				cleanupTestIssue(t, issueID)
+			})
+
+			bus.Publish(events.Event{
+				Type:        protocol.EventIssueUpdated,
+				WorkspaceID: testWorkspaceID,
+				ActorType:   "member",
+				ActorID:     testUserID,
+				Payload: map[string]any{
+					"issue": handler.IssueResponse{
+						ID:          issueID,
+						WorkspaceID: testWorkspaceID,
+						Title:       "activity test issue",
+						Description: tt.to,
+						Status:      "todo",
+						Priority:    "medium",
+						CreatorType: "member",
+						CreatorID:   testUserID,
+					},
+					"description_changed": true,
+					"prev_description":    tt.from,
+				},
+			})
+
+			activities := listActivitiesForIssue(t, queries, issueID)
+			if len(activities) != 1 {
+				t.Fatalf("expected 1 activity, got %d", len(activities))
+			}
+			if activities[0].Action != "description_updated" {
+				t.Fatalf("expected action 'description_updated', got %q", activities[0].Action)
+			}
+
+			var details map[string]*string
+			if err := json.Unmarshal(activities[0].Details, &details); err != nil {
+				t.Fatalf("failed to unmarshal details: %v", err)
+			}
+			assertOptionalStringEqual(t, "from", details["from"], tt.from)
+			assertOptionalStringEqual(t, "to", details["to"], tt.to)
+		})
+	}
+}
+
+func stringPtr(value string) *string {
+	return &value
+}
+
+func assertOptionalStringEqual(t *testing.T, field string, got, want *string) {
+	t.Helper()
+	if got == nil || want == nil {
+		if got != want {
+			t.Fatalf("expected %s %v, got %v", field, want, got)
+		}
+		return
+	}
+	if *got != *want {
+		t.Fatalf("expected %s %q, got %q", field, *want, *got)
+	}
+}
+
 func TestActivityTaskCompleted(t *testing.T) {
 	queries := db.New(testPool)
 	bus := events.New()
