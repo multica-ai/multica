@@ -39,7 +39,10 @@ interface TitleEditorProps {
   onSubmitShortcut?: () => void;
   onBlur?: (value: string) => void;
   onChange?: (value: string) => void;
-  /** Fires when an external defaultValue replaces the editor's text. */
+  /**
+   * Fires when defaultValue replaces the editor's text, including cache echoes
+   * of the host's own optimistic writes.
+   */
   onExternalValueAdopted?: (value: string) => void;
   /**
    * Called once when the Tiptap instance exists and its DOM is attached

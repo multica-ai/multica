@@ -188,6 +188,103 @@ async function blurTitle(editor: HTMLElement, count: number) {
 }
 
 describe("IssueDetail title baselines (real editor and data hooks)", () => {
+  it.each([
+    ["Dirty draft ", "Keep my version"],
+    ["  Dirty draft", "Keep my version"],
+    ["Dirty draft ", "Use the latest version"],
+    ["  Dirty draft", "Use the latest version"],
+  ])("preserves the normalized conflict draft for %j until %s", async (typed, action) => {
+    const editor = await openTitle();
+    await typeTitle(editor, typed);
+    await remoteTitle("Remote title");
+    holdSave = true;
+    act(() => editor.blur());
+    await waitFor(() => expect(releaseSave).toBeDefined());
+    expect(writes[0]).toEqual({ data: { title: "Dirty draft", title_base: "Original title" }, status: 409 });
+    await waitFor(() => expect(editor.textContent).toBe("Dirty draft"));
+    holdSave = false;
+    await act(async () => releaseSave!());
+    await waitFor(() => expect(qc.isMutating()).toBe(0));
+    expect(await screen.findByRole("button", { name: "Keep my version" })).toBeInTheDocument();
+    expect(editor.textContent).toBe("Dirty draft");
+    fireEvent.click(screen.getByRole("button", { name: action }));
+    if (action === "Keep my version") {
+      await waitFor(() => expect(writes).toHaveLength(2));
+      await waitFor(() => expect(qc.isMutating()).toBe(0));
+      expect(writes[1]).toEqual({ data: { title: "Dirty draft", title_base: "Remote title" }, status: 200 });
+    } else {
+      await waitFor(() => expect(document.querySelector(".title-editor")?.textContent).toBe("Remote title"));
+      expect(writes).toHaveLength(1);
+    }
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Keep my version" })).toBeNull());
+  });
+
+  it.each(["First edit ", "  First edit"])("completes a normalized save for %j and releases its adoption guard", async (typed) => {
+    const editor = await openTitle();
+    await typeTitle(editor, typed);
+    holdSave = true;
+    act(() => editor.blur());
+    await waitFor(() => expect(releaseSave).toBeDefined());
+    await waitFor(() => expect(editor.textContent).toBe("First edit"));
+    holdSave = false;
+    await act(async () => releaseSave!());
+    await waitFor(() => expect(qc.isMutating()).toBe(0));
+    expect(writes[0]).toEqual({ data: { title: "First edit", title_base: "Original title" }, status: 200 });
+    act(() => editor.focus());
+    await typeTitle(editor, "Second edit");
+    await blurTitle(editor, 2);
+    expect(writes[1]).toEqual({ data: { title: "Second edit", title_base: "First edit" }, status: 200 });
+    await remoteTitle("First edit");
+    await waitFor(() => expect(editor.textContent).toBe("First edit"));
+    act(() => editor.focus());
+    await typeTitle(editor, "After adoption");
+    await blurTitle(editor, 3);
+    expect(writes[2]).toEqual({ data: { title: "After adoption", title_base: "First edit" }, status: 200 });
+  });
+
+  it.each([200, 409])("tracks normalized save ownership after an older %s response", async (oldStatus) => {
+    const editor = await openTitle();
+    await typeTitle(editor, "Old save ");
+    if (oldStatus === 409) await remoteTitle("Remote title");
+    holdSave = true;
+    act(() => editor.blur());
+    await waitFor(() => expect(releaseSave).toBeDefined());
+    expect(writes[0].status).toBe(oldStatus);
+    const releaseOldSave = releaseSave!;
+    await remoteTitle("Adopted title");
+    await waitFor(() => expect(editor.textContent).toBe("Adopted title"));
+    act(() => editor.focus());
+    await typeTitle(editor, "Current draft ");
+    await remoteTitle("Latest remote");
+    act(() => editor.blur());
+    await waitFor(() => expect(writes).toHaveLength(2));
+    await waitFor(() => expect(editor.textContent).toBe("Current draft"));
+    const releaseCurrentSave = releaseSave!;
+    await act(async () => releaseOldSave());
+    await waitFor(() => expect(qc.isMutating()).toBe(1));
+    if (oldStatus === 409) {
+      // A failed mutation refetches the real server value. That adoption
+      // supersedes the pending save, just like a realtime external update.
+      await waitFor(() => expect(editor.textContent).toBe("Latest remote"));
+    } else {
+      expect(editor.textContent).toBe("Current draft");
+    }
+    await act(async () => releaseCurrentSave());
+    await waitFor(() => expect(qc.isMutating()).toBe(0));
+    expect(writes[1]).toEqual({ data: { title: "Current draft", title_base: "Adopted title" }, status: 409 });
+    if (oldStatus === 409) {
+      expect(screen.queryByRole("button", { name: "Keep my version" })).toBeNull();
+      holdSave = false;
+      act(() => editor.focus());
+      await typeTitle(editor, "After rollback adoption");
+      await blurTitle(editor, 3);
+      expect(writes[2]).toEqual({ data: { title: "After rollback adoption", title_base: "Latest remote" }, status: 200 });
+    } else {
+      expect(await screen.findByRole("button", { name: "Keep my version" })).toBeInTheDocument();
+      expect(editor.textContent).toBe("Current draft");
+    }
+  });
+
   it("saves edits against an external title adopted while focused and clean", async () => {
     const editor = await openTitle();
     await remoteTitle("Remote title");
