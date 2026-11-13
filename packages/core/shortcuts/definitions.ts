@@ -15,6 +15,7 @@ export type ShortcutActionId =
   | "findInIssue"
   | "archiveInboxItem"
   | "send"
+  | "voiceInput"
   | "goBack"
   | "goForward"
   | "goInbox"
@@ -110,6 +111,16 @@ export const SHORTCUT_ACTIONS: readonly ShortcutActionDefinition[] = [
     allowInEditable: false,
   },
   { id: "send", category: "general", defaultShortcut: primary("Enter"), allowInEditable: true },
+  // Voice input works where the caret is, so it must fire inside editors. It
+  // is matched on keydown AND keyup (holding it is push-to-talk), so the voice
+  // layer handles it rather than the global dispatcher. Option+Space types a
+  // non-breaking space on macOS, which nobody means to type.
+  {
+    id: "voiceInput",
+    category: "general",
+    defaultShortcut: createShortcutChord("Space", { alt: true }),
+    allowInEditable: true,
+  },
   // Browser-style history navigation (Mod+[ / Mod+]). Neither bracket is
   // app-owned (PRIMARY_RESERVED_KEYS) nor browser-owned
   // (BROWSER_ONLY_PRIMARY_RESERVED_KEYS), so both are recordable on every
@@ -142,6 +153,8 @@ const MODIFIER_KEYS = new Set([
 const NON_ACTIONABLE_KEYS = new Set(["Dead", "Process", "Unidentified"]);
 const KEY_LABELS: Record<string, string> = {
   " ": "Space",
+  // macOS types a non-breaking space for Option+Space.
+  "\u00a0": "Space",
   ArrowUp: "Up",
   ArrowDown: "Down",
   ArrowLeft: "Left",
@@ -397,6 +410,11 @@ export function isShortcutAllowedForAction(
         shortcut,
         createShortcutChord("Enter", { primary: true }),
       );
+  }
+  // Held while talking, so Option/Alt chords are allowed too: they leave
+  // typing alone as long as the key is not a printable character.
+  if (actionId === "voiceInput") {
+    return hasCommand || (shortcut.modifiers.alt && (shortcut.key === "Space" || shortcut.key.length > 1));
   }
   if (SHORTCUT_ACTION_BY_ID[actionId].allowInEditable) {
     return hasCommand;
