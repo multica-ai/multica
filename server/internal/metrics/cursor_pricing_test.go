@@ -58,6 +58,9 @@ func TestPriceForRuntimeModelCursorRates(t *testing.T) {
 		{"gpt-5.5-high-fast", 12.5, 75, 1.25, 0},
 		{"gemini-3.6-flash-high", 1.5, 7.5, 0.15, 0},
 		{"gemini-3.5-flash", 1.5, 9, 0.15, 0},
+		{"gemini-4-hydrogen-high", 1.5, 7.5, 0.075, 0},
+		{"gemini-4-hydrogen-xhigh", 1.5, 7.5, 0.075, 0},
+		{"gemini-4-carbon-medium", 4, 20, 0.2, 0},
 	} {
 		got, ok := PriceForRuntimeModel("cursor", tc.model)
 		if !ok {
@@ -76,6 +79,7 @@ func TestPriceForRuntimeModelCursorFastNeverBorrowsStandardRate(t *testing.T) {
 		"claude-sonnet-5[fast=true]",
 		"kimi-k3-fast",
 		"gemini-4-argon-fast",
+		"gemini-4-hydrogen-high-fast",
 	} {
 		if got, ok := PriceForRuntimeModel("cursor", model); ok {
 			t.Errorf("PriceForRuntimeModel(cursor, %q) = %+v; want unmapped", model, got)

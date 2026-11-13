@@ -499,8 +499,10 @@ const MODEL_PRICING: Record<
   //    is the bill, so Cursor rows use it even where it differs from the
   //    vendor rows above — except temporary promotional rates, which are not
   //    used: GPT-5.6 Sol keeps its $5 / $30 list rate (Fast at 2x) rather
-  //    than the sheet's promo price. Keys are the Cursor base id
-  //    left by `cursorBaseModel`, which drops the effort / thinking / fast
+  //    than the sheet's promo price, and Gemini 4 Carbon its $4 / $20 rate
+  //    from 2026-12-01 rather than the introductory $2 / $10 (the bare
+  //    gemini-4-carbon row above still carries the intro rate). Keys are the
+  //    Cursor base id left by `cursorBaseModel`, which drops the effort / thinking / fast
   //    variant parts — effort and thinking don't change per-token rates.
   //    A `-fast` row exists only where a Fast rate is published: on Cursor's
   //    sheet, or (where Cursor offers a Fast variant its sheet doesn't price)
@@ -557,6 +559,8 @@ const MODEL_PRICING: Record<
   "cursor/gpt-5-fast":           { input: 2.5,  output: 20,   cacheRead: 0.25,  cacheWrite: 0 },
   "cursor/gpt-5-mini":           { input: 0.25, output: 2,    cacheRead: 0.025, cacheWrite: 0 },
   "cursor/gemini-4-argon":       { input: 2,    output: 10,   cacheRead: 0.1,   cacheWrite: 0 },
+  "cursor/gemini-4-carbon":      { input: 4,    output: 20,   cacheRead: 0.2,   cacheWrite: 0 },
+  "cursor/gemini-4-hydrogen":    { input: 1.5,  output: 7.5,  cacheRead: 0.075, cacheWrite: 0 },
   "cursor/gemini-3.8-flash":     { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0 },
   "cursor/gemini-3.7-flash":     { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0 },
   // Cursor bills 3.6 / 3.5 Flash above Google's current (promotional /
