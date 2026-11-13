@@ -35,6 +35,7 @@
     "expo-blur": "~57.0.3",
     "expo-build-properties": "~57.0.22",
     "expo-constants": "~57.0.20",
+    "expo-crypto": "~57.0.4",
     "expo-dev-client": "^57.0.19",
     "expo-linking": "~57.0.11",
     "expo-localization": "~57.0.2",
