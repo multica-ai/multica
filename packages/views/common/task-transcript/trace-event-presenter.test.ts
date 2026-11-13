@@ -364,6 +364,25 @@ describe("parseUnifiedDiff", () => {
     ]);
   });
 
+  it("drops git extended headers of added and deleted files", () => {
+    expect(
+      parseUnifiedDiff(
+        "diff --git a/n.md b/n.md\nnew file mode 100644\nindex 0000000..45b983b\n--- /dev/null\n+++ b/n.md\n@@ -0,0 +1 @@\n+hi\n",
+      ),
+    ).toEqual([
+      { kind: "gap", text: "@@ -0,0 +1 @@" },
+      { kind: "add", text: "hi" },
+    ]);
+    expect(
+      parseUnifiedDiff(
+        "diff --git a/o.go b/o.go\ndeleted file mode 100644\nindex 45b983b..0000000\n--- a/o.go\n+++ /dev/null\n@@ -1 +0,0 @@\n-package o\n",
+      ),
+    ).toEqual([
+      { kind: "gap", text: "@@ -1 +0,0 @@" },
+      { kind: "remove", text: "package o" },
+    ]);
+  });
+
   // Inside a hunk, "---"/"+++" are ordinary changed lines whose content starts
   // with a dash or plus — a Markdown rule, a nested patch, a comment banner.
   // Treating them as file headers anywhere silently deleted real content.

@@ -401,6 +401,8 @@ export function parseUnifiedDiff(diff: string): TraceDiffLine[] {
       if (
         line.startsWith("diff --git") ||
         line.startsWith("index ") ||
+        // Git's extended headers, e.g. "new file mode 100644" on every added file.
+        /^(?:(?:old|new|deleted file|new file) mode|(?:dis)?similarity index|rename (?:from|to)|copy (?:from|to)) /.test(line) ||
         line.startsWith("--- ") ||
         line.startsWith("+++ ") ||
         line === "---" ||
