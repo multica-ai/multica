@@ -136,7 +136,7 @@ test.describe("Issues", () => {
   test("can create a new issue", async ({ page }) => {
     await preferManualCreateMode(page);
 
-    const newIssueButton = page.getByRole("button", { name: "New Issue" });
+    const newIssueButton = page.getByRole("button", { name: "New Issue" }).first();
     await expect(newIssueButton).toBeVisible();
     await newIssueButton.click();
 
@@ -188,7 +188,7 @@ test.describe("Issues", () => {
   test("can dismiss issue creation", async ({ page }) => {
     await preferManualCreateMode(page);
 
-    await page.getByRole("button", { name: "New Issue" }).click();
+    await page.getByRole("button", { name: "New Issue" }).first().click();
 
     const titleInput = page.getByRole("textbox", { name: "Issue title" });
     await expect(titleInput).toBeVisible();
@@ -196,6 +196,6 @@ test.describe("Issues", () => {
     await page.keyboard.press("Escape");
 
     await expect(titleInput).not.toBeVisible();
-    await expect(page.getByRole("button", { name: "New Issue" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "New Issue" }).first()).toBeVisible();
   });
 });

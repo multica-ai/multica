@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/inbox"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -19,40 +20,6 @@ import (
 type mention struct {
 	Type string // "member", "agent", "issue", or "all"
 	ID   string // user_id, agent_id, issue_id, or "all"
-}
-
-// statusLabels maps DB status values to human-readable labels for notifications.
-var statusLabels = map[string]string{
-	"backlog":     "Backlog",
-	"todo":        "Todo",
-	"in_progress": "In Progress",
-	"in_review":   "In Review",
-	"done":        "Done",
-	"blocked":     "Blocked",
-	"cancelled":   "Cancelled",
-}
-
-// priorityLabels maps DB priority values to human-readable labels for notifications.
-var priorityLabels = map[string]string{
-	"urgent": "Urgent",
-	"high":   "High",
-	"medium": "Medium",
-	"low":    "Low",
-	"none":   "No priority",
-}
-
-func statusLabel(s string) string {
-	if l, ok := statusLabels[s]; ok {
-		return l
-	}
-	return s
-}
-
-func priorityLabel(p string) string {
-	if l, ok := priorityLabels[p]; ok {
-		return l
-	}
-	return p
 }
 
 var emptyDetails = []byte("{}")
@@ -185,6 +152,7 @@ var notifTypeToGroup = map[string]string{
 	"task_failed":        "agent_activity",
 	"agent_blocked":      "agent_activity",
 	"agent_completed":    "agent_activity",
+	"issue_created":      "new_issues",
 }
 
 // isNotifMuted returns true if the given notification type is muted for a user
@@ -311,13 +279,47 @@ func notifySubscribers(
 	body string,
 	details []byte,
 ) {
+	notified := notifyIssueAndParentSubscribers(ctx, queries, bus, issueID, issueStatus,
+		workspaceID, e, exclude, notifType, severity, title, body, details)
+
+	// Project watchers hear about every issue in the project, after the
+	// issue-level fanout so nobody receives the same event twice.
+	projectExclude := make(map[string]bool, len(exclude)+len(notified))
+	for id := range exclude {
+		projectExclude[id] = true
+	}
+	for id := range notified {
+		projectExclude[id] = true
+	}
+	notifyProjectSubscribers(ctx, queries, bus, issueID, issueStatus, workspaceID, e,
+		projectExclude, notifType, severity, title, body, details)
+}
+
+// notifyIssueAndParentSubscribers is the issue-level half of notifySubscribers:
+// the issue's own subscribers, then — for bubbling types — its parent's.
+// Returns every member it notified.
+func notifyIssueAndParentSubscribers(
+	ctx context.Context,
+	queries *db.Queries,
+	bus *events.Bus,
+	issueID string,
+	issueStatus string,
+	workspaceID string,
+	e events.Event,
+	exclude map[string]bool,
+	notifType string,
+	severity string,
+	title string,
+	body string,
+	details []byte,
+) map[string]bool {
 	notified, tierSuppressed := notifyIssueSubscribers(ctx, queries, bus,
 		issueID, issueID, issueStatus, workspaceID, e, exclude,
 		notifType, severity, title, body, details)
 
 	// Only a small allowlist of event types bubbles to parent subscribers.
 	if !parentBubbleNotifTypes[notifType] {
-		return
+		return notified
 	}
 
 	// Also notify parent issue subscribers if this is a sub-issue.
@@ -325,10 +327,10 @@ func notifySubscribers(
 	if err != nil {
 		slog.Error("failed to get issue for parent notification",
 			"issue_id", issueID, "error", err)
-		return
+		return notified
 	}
 	if !issue.ParentIssueID.Valid {
-		return
+		return notified
 	}
 
 	// Merge already-notified IDs into exclude set for parent subscribers.
@@ -353,9 +355,113 @@ func notifySubscribers(
 	// Query subscribers from the parent issue, but the inbox item still
 	// points to the sub-issue so the user navigates to the actual change.
 	parentID := util.UUIDToString(issue.ParentIssueID)
-	notifyIssueSubscribers(ctx, queries, bus,
+	parentNotified, _ := notifyIssueSubscribers(ctx, queries, bus,
 		parentID, issueID, issueStatus, workspaceID, e, parentExclude,
 		notifType, severity, title, body, details)
+	for id := range parentNotified {
+		notified[id] = true
+	}
+	return notified
+}
+
+// notifyProjectSubscribers delivers an issue event to the members watching the
+// issue's project. A project subscription is an explicit request to hear about
+// every issue in it, so the delegated delivery tier does not narrow it; the
+// actor, the exclude set, muted preference groups and per-issue opt-outs
+// (ListProjectSubscribersForIssue) still apply.
+func notifyProjectSubscribers(
+	ctx context.Context,
+	queries *db.Queries,
+	bus *events.Bus,
+	issueID string,
+	issueStatus string,
+	workspaceID string,
+	e events.Event,
+	exclude map[string]bool,
+	notifType string,
+	severity string,
+	title string,
+	body string,
+	details []byte,
+) {
+	subscribers, err := queries.ListProjectSubscribersForIssue(ctx, parseUUID(issueID))
+	if err != nil {
+		slog.Error("failed to list project subscribers for notification",
+			"issue_id", issueID, "error", err)
+		return
+	}
+	if len(subscribers) == 0 {
+		return
+	}
+
+	recipients := make([]string, 0, len(subscribers))
+	for _, sub := range subscribers {
+		subID := util.UUIDToString(sub.UserID)
+		if subID == e.ActorID || exclude[subID] {
+			continue
+		}
+		recipients = append(recipients, subID)
+	}
+	userPrefs := loadUserPrefs(ctx, queries, workspaceID, recipients)
+
+	for _, subID := range recipients {
+		if prefs, ok := userPrefs[subID]; ok && isNotifMuted(prefs, notifType) {
+			continue
+		}
+		createMemberInboxItem(ctx, queries, bus, subID, workspaceID, e, issueID, issueStatus,
+			notifType, severity, title, body, details)
+	}
+}
+
+// createMemberInboxItem writes one member inbox row and announces it. Reports
+// whether a row was actually inserted.
+func createMemberInboxItem(
+	ctx context.Context,
+	queries *db.Queries,
+	bus *events.Bus,
+	recipientID string,
+	workspaceID string,
+	e events.Event,
+	issueID string,
+	issueStatus string,
+	notifType string,
+	severity string,
+	title string,
+	body string,
+	details []byte,
+) bool {
+	item, inserted, err := inbox.CreateIfEligible(ctx, queries, db.CreateInboxItemParams{
+		ID:            dbid.NewV7(),
+		WorkspaceID:   parseUUID(workspaceID),
+		RecipientType: "member",
+		RecipientID:   parseUUID(recipientID),
+		Type:          notifType,
+		Severity:      severity,
+		IssueID:       parseUUID(issueID),
+		Title:         title,
+		Body:          util.StrToText(body),
+		ActorType:     util.StrToText(e.ActorType),
+		ActorID:       optionalUUID(e.ActorID),
+		Details:       details,
+	})
+	if err != nil {
+		slog.Error("member notification creation failed",
+			"recipient_id", recipientID, "type", notifType, "error", err)
+		return false
+	}
+	if !inserted {
+		return false
+	}
+	resp := inboxItemToResponse(item)
+	resp["issue_status"] = issueStatus
+	bus.Publish(events.Event{
+		Type:        protocol.EventInboxNew,
+		WorkspaceID: workspaceID,
+		ActorType:   e.ActorType,
+		ActorID:     e.ActorID,
+		Payload:     map[string]any{"item": resp},
+	})
+	return true
 }
 
 // notifyIssueSubscribers sends inbox notifications to subscribers of
@@ -447,36 +553,10 @@ func notifyIssueSubscribers(
 			continue
 		}
 
-		item, err := queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
-			ID:            dbid.NewV7(),
-			WorkspaceID:   parseUUID(workspaceID),
-			RecipientType: "member",
-			RecipientID:   sub.UserID,
-			Type:          notifType,
-			Severity:      severity,
-			IssueID:       parseUUID(targetIssueID),
-			Title:         title,
-			Body:          util.StrToText(body),
-			ActorType:     util.StrToText(e.ActorType),
-			ActorID:       optionalUUID(e.ActorID),
-			Details:       details,
-		})
-		if err != nil {
-			slog.Error("subscriber notification creation failed",
-				"subscriber_id", subID, "type", notifType, "error", err)
-			continue
+		if createMemberInboxItem(ctx, queries, bus, subID, workspaceID, e, targetIssueID, issueStatus,
+			notifType, severity, title, body, details) {
+			notified[subID] = true
 		}
-
-		notified[subID] = true
-		resp := inboxItemToResponse(item)
-		resp["issue_status"] = issueStatus
-		bus.Publish(events.Event{
-			Type:        protocol.EventInboxNew,
-			WorkspaceID: workspaceID,
-			ActorType:   e.ActorType,
-			ActorID:     e.ActorID,
-			Payload:     map[string]any{"item": resp},
-		})
 	}
 
 	return notified, tierSuppressed
@@ -513,7 +593,7 @@ func notifyDirect(
 		}
 	}
 
-	item, err := queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+	item, inserted, err := inbox.CreateIfEligible(ctx, queries, db.CreateInboxItemParams{
 		ID:            dbid.NewV7(),
 		WorkspaceID:   parseUUID(workspaceID),
 		RecipientType: recipientType,
@@ -530,6 +610,9 @@ func notifyDirect(
 	if err != nil {
 		slog.Error("direct notification creation failed",
 			"issue_id", issueID, "recipient_id", recipientID, "type", notifType, "error", err)
+		return
+	}
+	if !inserted {
 		return
 	}
 
@@ -631,7 +714,7 @@ func notifyMentionedMembers(
 		if p, ok := mentionPrefs[id]; ok && isNotifMuted(p, "mentioned") {
 			continue
 		}
-		item, err := queries.CreateInboxItem(context.Background(), db.CreateInboxItemParams{
+		item, inserted, err := inbox.CreateIfEligible(context.Background(), queries, db.CreateInboxItemParams{
 			ID:            dbid.NewV7(),
 			WorkspaceID:   parseUUID(e.WorkspaceID),
 			RecipientType: "member",
@@ -646,6 +729,9 @@ func notifyMentionedMembers(
 		})
 		if err != nil {
 			slog.Error("mention inbox creation failed", "mentioned_id", id, "error", err)
+			continue
+		}
+		if !inserted {
 			continue
 		}
 		resp := inboxItemToResponse(item)
@@ -702,6 +788,14 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			mentions := parseMentions(*issue.Description)
 			notifyMentionedMembers(bus, queries, e, mentions, issue.ID, issue.Title, issue.Status,
 				issue.Title, skip, emptyDetails)
+		}
+
+		// Members watching the project hear about every new issue in it.
+		if issue.ProjectID != nil {
+			notifyProjectSubscribers(ctx, queries, bus, issue.ID, issue.Status, issue.WorkspaceID, e,
+				skip, "issue_created", "info",
+				issue.Title, "",
+				emptyDetails)
 		}
 	})
 

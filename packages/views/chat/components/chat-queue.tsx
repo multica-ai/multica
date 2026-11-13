@@ -8,9 +8,10 @@ import {
   Loader2,
   Pencil,
   Trash2,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import type { ChatQueuedTask } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -143,13 +144,12 @@ export function ChatQueue({
                         {t(($) => $.queue.steer)}
                       </Button>
                     </span>
-                    <Button
+                    <IconButton
                       variant="ghost"
                       size="icon-xs"
                       className="shrink-0 text-muted-foreground"
                       disabled={busyAction !== null}
-                      title={t(($) => $.queue.remove)}
-                      aria-label={t(($) => $.queue.remove)}
+                      label={t(($) => $.queue.remove)}
                       onClick={() => void run(removeKey, () => onRemove(task.task_id))}
                     >
                       {busyAction === removeKey ? (
@@ -157,18 +157,17 @@ export function ChatQueue({
                       ) : (
                         <Trash2 aria-hidden="true" />
                       )}
-                    </Button>
+                    </IconButton>
                     <DropdownMenu>
                       <DropdownMenuTrigger
                         render={
-                          <Button
+                          <IconButton
                             type="button"
                             variant="ghost"
                             size="icon-xs"
                             className="shrink-0 text-muted-foreground"
                             disabled={busyAction !== null}
-                            title={t(($) => $.queue.more)}
-                            aria-label={t(($) => $.queue.more)}
+                            label={t(($) => $.queue.more)}
                           />
                         }
                       >

@@ -75,7 +75,7 @@ var workspaceMcpLeakMarkers = []string{
 
 func mcpTestServer(t *testing.T, handler http.HandlerFunc) {
 	t.Helper()
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	t.Setenv("MULTICA_TOKEN", "test-token")
 	t.Setenv("MULTICA_WORKSPACE_ID", testWorkspaceMcpID)
 	srv := httptest.NewServer(handler)

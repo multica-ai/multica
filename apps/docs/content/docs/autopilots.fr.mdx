@@ -4,10 +4,15 @@ description: Confiez automatiquement le travail récurrent aux agents, selon une
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { AutopilotDemo } from "@/components/demos/autopilot-demo";
 
-Les automatisations prennent en charge le travail qui revient sans cesse — un résumé quotidien de l'avancement, une vérification périodique des dépendances, ou un agent lancé par un événement provenant d'un système externe.
+Un résumé quotidien de l'avancement, une vérification périodique des dépendances, un agent lancé par un événement venu d'un système externe : le travail qui revient sans cesse se confie à une automatisation.
 
-Chaque automatisation enregistre une procédure, un assigné et un ou plusieurs déclencheurs. Lorsqu'elle est déclenchée, Multica crée une tâche ou exécute directement l'agent, et conserve une trace de chaque exécution.
+Chaque automatisation enregistre une procédure, un assigné et un ou plusieurs déclencheurs. Lorsqu'elle est déclenchée, Multica crée une tâche ou exécute directement l'agent, et chaque exécution laisse une trace.
+
+## Automatisations et réveils de tâches [#vs-wakeups]
+
+Une automatisation lance du travail nouveau à partir d'un calendrier ou d'un webhook, et peut créer une tâche à chaque fois. Pour qu'un agent revienne plus tard sur une tâche existante, à une heure donnée ou après un événement sur cette tâche, ajoutez-lui plutôt un [réveil](/issue-wakeups). L'onglet **Réveils de tâches** de la page Automatisation liste tous les réveils de l'espace de travail.
 
 ## Créer une automatisation
 
@@ -21,7 +26,11 @@ Ouvrez **Automatisation** dans la barre latérale, choisissez un modèle ou part
 - **Abonnés** : les membres à notifier après la création automatique d'une tâche ;
 - **Déclencheurs** : une planification ou un webhook.
 
-Une automatisation est activée par défaut après l'enregistrement ; **Exécuter maintenant** lance manuellement le flux complet une fois, à tout moment.
+Une automatisation est activée par défaut après l'enregistrement. **Exécuter maintenant** lance le flux complet une fois, à tout moment, sans attendre la planification.
+
+Voici une automatisation dont le mode de sortie est Créer une tâche. Cliquez sur **Exécuter maintenant**, ou avancez jusqu'à la prochaine exécution planifiée, et regardez-la créer une tâche, la confier à l'agent, puis terminer l'exécution.
+
+<AutopilotDemo />
 
 ## Choisir un mode de sortie
 
@@ -30,7 +39,7 @@ Une automatisation est activée par défaut après l'enregistrement ; **Exécute
 | **Créer une tâche** | Chaque déclenchement crée d'abord une tâche, puis l'assigne à l'agent ou au squad assigné ; la discussion, le statut et les enregistrements d'exécution se trouvent tous sur la tâche. | Le travail que l'équipe doit relire, confirmer ou suivre. |
 | **Exécution seule** | Crée directement une exécution, sans tâche ; les résultats ne sont visibles que dans l'historique des exécutions de l'automatisation. | Les exécutions d'arrière-plan qui ne nécessitent aucune trace collaborative. |
 
-Le mode **Créer une tâche** utilise la même file d'exécution que les tâches ordinaires : lorsque le runtime est hors ligne, la tâche est tout de même créée et l'exécution attend que le runtime revienne en ligne.
+Le mode **Créer une tâche** utilise la même file d'exécution que les tâches ordinaires : lorsque le runtime est hors ligne, la tâche est tout de même créée, et l'exécution démarre quand le runtime revient en ligne.
 
 Le mode **Exécution seule** exige que le runtime soit disponible au moment du déclenchement ; sinon, l'exécution apparaît comme « Ignorée », et aucune tâche en attente n'est laissée derrière.
 
@@ -92,7 +101,7 @@ Seuls le créateur de l'automatisation, les propriétaires/administrateurs de l'
 
 ### Référence des réponses du webhook
 
-Lors du débogage d'un expéditeur, utilisez ce tableau pour interpréter les réponses de Multica :
+Pour déboguer un expéditeur, comparez les réponses de Multica à ce tableau :
 
 | Statut HTTP | Statut de la réponse | Signification |
 |---|---|---|
@@ -149,7 +158,7 @@ multica autopilot runs <autopilot-id>
 multica autopilot trigger-rotate-url <autopilot-id> <trigger-id>
 ```
 
-`autopilot get` définit par défaut `webhook_token`, `webhook_path` et `webhook_url` à `null`, et renvoie à la place `has_webhook_token` et `webhook_token_hint`. N'ajoutez `--show-secrets` que lorsque vous avez délibérément besoin de l'identifiant réel ; le CLI affiche alors un avertissement sur stderr afin que le JSON transmis par pipe reste valide.
+`autopilot get` définit par défaut `webhook_token`, `webhook_path` et `webhook_url` à `null`, et renvoie à la place `has_webhook_token` et `webhook_token_hint`. N'ajoutez `--show-secrets` que lorsque vous avez délibérément besoin de l'identifiant réel ; le CLI affiche son avertissement sur stderr, ce qui laisse intact le JSON transmis par pipe.
 
 Consultez [Utiliser le CLI](/cli) pour la liste complète des paramètres.
 
@@ -158,3 +167,4 @@ Consultez [Utiliser le CLI](/cli) pour la liste complète des paramètres.
 - [Assigner des tâches aux agents](/assigning-issues) — l'assignation et la fenêtre de confirmation.
 - [Boîte de réception et abonnements](/inbox) — où arrivent les notifications d'exécution.
 - [Exécutions](/tasks) — états des exécutions et gestion des échecs.
+- [Réveils de tâches](/issue-wakeups) — faire revenir un agent plus tard sur une tâche existante.

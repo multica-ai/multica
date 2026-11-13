@@ -17,9 +17,7 @@ import { useT } from "../i18n";
 import { createSubmitShortcutExtension } from "./extensions/submit-shortcut";
 import "./title-editor.css";
 
-// ---------------------------------------------------------------------------
 // Types
-// ---------------------------------------------------------------------------
 
 interface TitleEditorProps {
   defaultValue?: string;
@@ -61,17 +59,13 @@ interface TitleEditorRef {
   focusAtCoords: (coords: { x: number; y: number }) => void;
 }
 
-// ---------------------------------------------------------------------------
 // Single-paragraph document — prevents Enter from creating new lines
-// ---------------------------------------------------------------------------
 
 const SingleLineDocument = Document.extend({
   content: "paragraph",
 });
 
-// ---------------------------------------------------------------------------
 // Keyboard shortcuts: Enter → submit, Escape → blur
-// ---------------------------------------------------------------------------
 
 /**
  * Whether `onSubmitShortcut` may fire for the configured `send` chord.
@@ -112,9 +106,7 @@ function createTitleKeymap(opts: {
   });
 }
 
-// ---------------------------------------------------------------------------
 // Component
-// ---------------------------------------------------------------------------
 
 const TitleEditor = forwardRef<TitleEditorRef, TitleEditorProps>(
   function TitleEditor(

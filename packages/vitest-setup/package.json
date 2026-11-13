@@ -1,0 +1,9 @@
+{
+  "name": "@multica/vitest-setup",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./web-storage": "./web-storage.ts"
+  }
+}

@@ -6,7 +6,7 @@ import rehypeSanitize from 'rehype-sanitize'
 import remarkBreaks from 'remark-breaks'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
-import { FileText, Download } from 'lucide-react'
+import { FileText, Download } from '@multica/ui/icons'
 import { cn } from '@multica/ui/lib/utils'
 import { CODE_LIGATURE_CLASS } from '@multica/ui/lib/code-style'
 import { CodeBlock, InlineCode } from './CodeBlock'
@@ -125,6 +125,7 @@ function createComponents(
                 type="button"
                 className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
                 onClick={() => window.open(href, '_blank', 'noopener,noreferrer')}
+                aria-label={filename ? `Download ${filename}` : 'Download'}
               >
                 <Download className="size-3.5" />
               </button>

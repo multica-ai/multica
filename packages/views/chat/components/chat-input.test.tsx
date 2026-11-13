@@ -7,12 +7,17 @@ import type { DraftUpload } from "@multica/core/drafts";
 import enCommon from "../../locales/en/common.json";
 import enChat from "../../locales/en/chat.json";
 import enEditor from "../../locales/en/editor.json";
+import enIssues from "../../locales/en/issues.json";
 
 // Uploads flow through the module-level coordinator, which calls
 // `api.uploadFile(file, ctx, signal)` (MUL-5181 L2). Tests drive uploads by
 // mocking that call; it resolves a server Attachment row (makeUpload's extra
 // link/markdownLink fields are ignored by the engine, which re-derives them).
 const mockApiUploadFile = vi.hoisted(() => vi.fn());
+const mockToastInfo = vi.hoisted(() => vi.fn());
+vi.mock("sonner", () => ({
+  toast: Object.assign(vi.fn(), { info: mockToastInfo, error: vi.fn(), success: vi.fn() }),
+}));
 // Observability for the write-back insert path: a settle whose mount died
 // delivers into the live editor through this method.
 const insertMarkdownSpy = vi.hoisted(() => vi.fn());
@@ -50,7 +55,7 @@ function makeUpload(overrides: Partial<UploadResult> & { id: string; link: strin
   };
 }
 
-const TEST_RESOURCES = { en: { common: enCommon, chat: enChat, editor: enEditor } };
+const TEST_RESOURCES = { en: { common: enCommon, chat: enChat, editor: enEditor, issues: enIssues } };
 
 // Track drop-zone callbacks so the test can simulate a real drop.
 const dropHandlers = vi.hoisted(() => ({
@@ -244,6 +249,8 @@ vi.mock("@multica/core/chat", () => {
 
 import { ChatInput } from "./chat-input";
 import { useChatStore } from "@multica/core/chat";
+import { useCommentDraftStore } from "@multica/core/issues/stores";
+import { composeAnnotatedReply } from "@multica/core/drafts/reply-annotation";
 
 type ChatInputOnSend = React.ComponentProps<typeof ChatInput>["onSend"];
 type ChatInputCommit = Parameters<ChatInputOnSend>[2];
@@ -353,6 +360,7 @@ beforeEach(() => {
     delete state.inputDraftAttachments[key];
   });
   mockApiUploadFile.mockReset();
+  mockToastInfo.mockClear();
   mockApiUploadFile.mockImplementation(async () =>
     makeUpload({ id: "att-1", link: "https://cdn.example/att-1.png", filename: "img.png" }),
   );
@@ -376,6 +384,68 @@ function element(props: Partial<React.ComponentProps<typeof ChatInput>>) {
     </I18nProvider>
   );
 }
+
+describe("ChatInput annotations", () => {
+  const key = "chat:session-1" as const;
+  const annotation = {
+    id: "ann-1", sourceCommentId: "msg-1", sourceActorName: "Multica",
+    quote: "Use the cache.", note: "Why not the DB?", start: 0, prefix: "", suffix: "",
+  };
+  const slot = { draftKey: key, composer: undefined, editAnnotation: () => true };
+  function lastButton() {
+    const buttons = screen.getAllByRole("button");
+    return buttons[buttons.length - 1]!;
+  }
+
+  beforeEach(() => {
+    (useChatStore.getState() as unknown as { activeSessionId: string | null }).activeSessionId = "session-1";
+    useCommentDraftStore.setState({ drafts: {} });
+    useCommentDraftStore.getState().addAnnotation(key, annotation);
+  });
+
+  it("sends saved annotations on their own, then drops the sent ones", async () => {
+    const onSend = vi.fn<ChatInputOnSend>((_content, _ids, commitInput) => {
+      commitInput();
+      return true;
+    });
+    renderInput({ onSend, annotations: slot });
+
+    expect(screen.getByRole("button", { name: "1 annotation" })).toBeInTheDocument();
+    await waitFor(() => expect(lastButton()).not.toBeDisabled());
+    fireEvent.click(lastButton());
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend.mock.calls[0]![0]).toBe(composeAnnotatedReply("", [annotation]));
+    expect(useCommentDraftStore.getState().getAnnotations(key)).toEqual([]);
+    expect(screen.queryByRole("button", { name: "1 annotation" })).not.toBeInTheDocument();
+  });
+
+  it("quotes annotations ahead of the typed text and keeps them when the send is rejected", async () => {
+    const onSend = vi.fn<ChatInputOnSend>(() => false);
+    renderInput({ onSend, annotations: slot });
+
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "Also check retries" } });
+    fireEvent.click(lastButton());
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    const sent = onSend.mock.calls[0]![0];
+    expect(sent).toBe(composeAnnotatedReply("Also check retries", [annotation]));
+    expect(sent.startsWith("> Use the cache")).toBe(true);
+    expect(useCommentDraftStore.getState().getAnnotations(key)).toHaveLength(1);
+  });
+
+  it("leaves sends untouched without an annotation slot", async () => {
+    const onSend = vi.fn<ChatInputOnSend>(() => true);
+    renderInput({ onSend });
+
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "plain" } });
+    fireEvent.click(lastButton());
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend.mock.calls[0]![0]).toBe("plain");
+    expect(useCommentDraftStore.getState().getAnnotations(key)).toHaveLength(1);
+  });
+});
 
 // MUL-4864: an uncreated chat has ONE draft per workspace. `selectedAgentId`
 // picks where the first send goes; it does not own the draft. Switching agent
@@ -501,16 +571,15 @@ describe("ChatInput focusRequest", () => {
   });
 });
 
-describe("ChatInput conversation starter prefill", () => {
-  it("replaces live editor text and the stored draft", () => {
+describe("ChatInput conversation starter send", () => {
+  it("sends the chosen prompt immediately from an empty draft", async () => {
+    const onSend = vi.fn().mockResolvedValue(false);
     const onConversationStarterApplied = vi.fn();
-    const { rerender } = renderInput();
+    const { rerender } = renderInput({ onSend });
 
-    fireEvent.change(screen.getByTestId("editor"), {
-      target: { value: "unfinished local text" },
-    });
     rerender(
       element({
+        onSend,
         conversationStarterRequest: {
           id: 1,
           content: "Review the release pull request.",
@@ -525,18 +594,127 @@ describe("ChatInput conversation starter prefill", () => {
     );
     expect(editorState.adopted).toEqual(["Review the release pull request."]);
     expect(onConversationStarterApplied).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend).toHaveBeenCalledWith(
+      "Review the release pull request.",
+      undefined,
+      expect.any(Function),
+      [],
+    );
   });
 
-  it("applies each request only once", () => {
+  it("preserves an existing draft and explains why the starter was not sent", async () => {
+    const onSend = vi.fn().mockResolvedValue(true);
+    const { rerender } = renderInput({ onSend });
+    fireEvent.change(screen.getByTestId("editor"), {
+      target: { value: "unfinished local text" },
+    });
+    rerender(element({ onSend, conversationStarterRequest: { id: 1, content: "Deploy the release." } }));
+
+    await act(async () => {});
+    expect(onSend).not.toHaveBeenCalled();
+    expect(editorState.adopted).toEqual([]);
+    expect(useChatStore.getState().inputDrafts["__draft_new__"]).toBe("unfinished local text");
+    expect(mockToastInfo).toHaveBeenCalledWith("Send or clear your draft before using a starter.");
+  });
+
+  it("preserves staged attachments even when the draft text is empty", async () => {
+    const attachment = makeUpload({ id: "att-1", link: "https://cdn.example/att-1.png", filename: "image.png" });
+    const staged = { clientUploadId: "upload-1", status: "uploaded", filename: "image.png", size: 1, attachment } as DraftUpload;
+    useChatStore.getState().setInputDraftAttachments("__draft_new__", [staged]);
+    const { onSend } = renderInput({ conversationStarterRequest: { id: 1, content: "Deploy the release." } });
+
+    await act(async () => {});
+    expect(onSend).not.toHaveBeenCalled();
+    expect(useChatStore.getState().inputDraftAttachments["__draft_new__"]).toEqual([staged]);
+    expect(mockToastInfo).toHaveBeenCalledWith("Send or clear your draft before using a starter.");
+  });
+
+  it("sends each request only once across rerenders", async () => {
+    const onSend = vi.fn().mockResolvedValue(false);
     const request = {
       id: 1,
       content: "Review the release pull request.",
     };
-    const { rerender } = renderInput({ conversationStarterRequest: request });
+    const { rerender } = renderInput({ onSend, conversationStarterRequest: request });
 
-    rerender(element({ conversationStarterRequest: request }));
+    rerender(element({ onSend, conversationStarterRequest: request }));
 
     expect(editorState.adopted).toEqual([request.content]);
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+  });
+
+  it("keeps a rejected starter in the draft for manual retry", async () => {
+    const onSend = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    const request = { id: 1, content: "Review the release pull request." };
+    renderInput({ onSend, conversationStarterRequest: request });
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    const sendButton = screen.getByRole("button", { name: "Send" });
+    await waitFor(() => expect(sendButton).toBeEnabled());
+    expect(useChatStore.getState().inputDrafts["__draft_new__"]).toBe(request.content);
+    expect(editorState.cleared).toBe(0);
+
+    fireEvent.click(sendButton);
+    await waitFor(() => expect(editorState.cleared).toBe(1));
+    expect(onSend).toHaveBeenCalledTimes(2);
+    expect(useChatStore.getState().inputDrafts["__draft_new__"]).toBeUndefined();
+  });
+
+  it("ignores another starter while a send is pending", async () => {
+    let finishSend!: (accepted: boolean) => void;
+    const onSend = vi.fn(() => new Promise<boolean>((resolve) => { finishSend = resolve; }));
+    const first = { id: 1, content: "Review the release pull request." };
+    const second = { id: 2, content: "Deploy the release." };
+    const { rerender } = renderInput({ onSend, conversationStarterRequest: first });
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    rerender(element({ onSend, conversationStarterRequest: second }));
+    expect(editorState.adopted).toEqual([first.content]);
+    expect(useChatStore.getState().inputDrafts["__draft_new__"]).toBe(first.content);
+
+    await act(async () => finishSend(true));
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(editorState.cleared).toBe(1);
+  });
+
+  it.each([
+    { disabled: true },
+    { noAgent: true },
+    { isRunning: true, allowSubmitWhileRunning: false },
+  ])("does not replace a draft or defer a send when unavailable: %j", async (guard) => {
+    const onSend = vi.fn().mockResolvedValue(true);
+    const request = { id: 1, content: "Deploy the release." };
+    useChatStore.getState().setInputDraft("__draft_new__", "unfinished local text");
+    const { rerender } = renderInput({ onSend, conversationStarterRequest: request, ...guard });
+
+    expect(onSend).not.toHaveBeenCalled();
+    expect(editorState.adopted).toEqual([]);
+    expect(useChatStore.getState().inputDrafts["__draft_new__"]).toBe("unfinished local text");
+    rerender(element({ onSend, conversationStarterRequest: request }));
+    await act(async () => {});
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("does not defer a starter until an active upload finishes", async () => {
+    let finishUpload!: (result: UploadResult) => void;
+    mockApiUploadFile.mockImplementationOnce(() => new Promise<UploadResult>((resolve) => {
+      finishUpload = resolve;
+    }));
+    const onSend = vi.fn().mockResolvedValue(true);
+    const { rerender } = renderInput({ onSend });
+    act(() => dropHandlers.onDrop?.([new File(["x"], "image.png", { type: "image/png" })]));
+    const request = { id: 1, content: "Deploy the release." };
+    rerender(element({ onSend, conversationStarterRequest: request }));
+
+    expect(onSend).not.toHaveBeenCalled();
+    expect(editorState.adopted).toEqual([]);
+    expect(mockToastInfo).toHaveBeenCalledWith("Wait for uploads to finish before using a starter.");
+    await act(async () => finishUpload(makeUpload({
+      id: "att-1", link: "https://cdn.example/att-1.png", filename: "image.png",
+    })));
+    expect(onSend).not.toHaveBeenCalled();
+    expect(useChatStore.getState().inputDrafts["__draft_new__"]).toContain("att-1.png");
   });
 });
 
@@ -550,6 +728,134 @@ describe("ChatInput @ context wiring", () => {
 
     expect(editorProps.last?.mentionMode).toBe("context");
     expect(editorProps.last?.mentionContextItems).toBe(contextItems);
+  });
+});
+
+describe("ChatInput page context", () => {
+  const page = {
+    id: "issue-1", label: "MUL-1", description: "Fix [the] cache", type: "issue" as const, group: "current" as const,
+  };
+  const sendButton = () => screen.getByRole("button", { name: /^Send/ });
+  const pageChip = () => document.querySelector('[data-slot="chat-page-context"]');
+
+  beforeEach(() => {
+    (useChatStore.getState() as unknown as { activeSessionId: string | null }).activeSessionId = "session-1";
+  });
+
+  it("offers nothing off an issue or project page", () => {
+    renderInput({ pageContext: null });
+    expect(screen.queryByRole("button", { name: "Add this page as context" })).not.toBeInTheDocument();
+  });
+
+  it("Tab in the editor attaches the page and sends it ahead of the message, once", async () => {
+    const onSend = vi.fn<ChatInputOnSend>((_content, _ids, commitInput) => {
+      commitInput();
+      return true;
+    });
+    renderInput({ onSend, pageContext: page });
+    const editor = screen.getByTestId("editor");
+
+    expect(fireEvent.keyDown(editor, { key: "Tab" })).toBe(false);
+    expect(pageChip()).toHaveTextContent("MUL-1Fix [the] cache");
+    expect(screen.getByRole("button", { name: "Add this page as context" })).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.change(editor, { target: { value: "why is this slow?" } });
+    fireEvent.click(sendButton());
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend.mock.calls[0]![0]).toBe("[MUL-1](mention://issue/issue-1)\n\nwhy is this slow?");
+    expect(pageChip()).toBeNull();
+  });
+
+  // The chip clears in the same commit that scrubs the editor, not once the
+  // owner's promise settles: the owner commits before its own follow-up work.
+  it("drops the page when the owner commits, while the send is still pending", async () => {
+    let finishSend!: (accepted: boolean) => void;
+    const onSend = vi.fn<ChatInputOnSend>((_content, _ids, commitInput) => {
+      commitInput();
+      return new Promise<boolean>((resolve) => { finishSend = resolve; });
+    });
+    renderInput({ onSend, pageContext: page });
+    fireEvent.keyDown(screen.getByTestId("editor"), { key: "Tab" });
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "why is this slow?" } });
+
+    fireEvent.click(sendButton());
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(pageChip()).toBeNull();
+
+    await act(async () => finishSend(true));
+    expect(pageChip()).toBeNull();
+  });
+
+  // Stop before the task starts: the owner commits, cancels, restores the sent
+  // text (mention included) and reports false. A chip left behind would put the
+  // page in front of that restored text a second time.
+  it("keeps the page off after a committed send the owner then cancels", async () => {
+    const onSend = vi.fn<ChatInputOnSend>(async (_content, _ids, commitInput) => {
+      commitInput();
+      return false;
+    });
+    renderInput({ onSend, pageContext: page });
+    fireEvent.keyDown(screen.getByTestId("editor"), { key: "Tab" });
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "why is this slow?" } });
+
+    await act(async () => fireEvent.click(sendButton()));
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(pageChip()).toBeNull();
+  });
+
+  it("keeps the page for a retry when the owner rejects without committing", async () => {
+    const onSend = vi.fn<ChatInputOnSend>(async () => false);
+    renderInput({ onSend, pageContext: page });
+    fireEvent.keyDown(screen.getByTestId("editor"), { key: "Tab" });
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "why is this slow?" } });
+
+    await act(async () => fireEvent.click(sendButton()));
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(pageChip()).toHaveTextContent("MUL-1");
+  });
+
+  it("leaves Tab alone when the editor already used it, or it came from outside the editor", () => {
+    renderInput({ pageContext: page });
+    const editor = screen.getByTestId("editor");
+
+    editor.addEventListener("keydown", (event) => event.preventDefault(), { once: true });
+    fireEvent.keyDown(editor, { key: "Tab" });
+    fireEvent.keyDown(editor, { key: "Tab", shiftKey: true });
+    expect(fireEvent.keyDown(screen.getByRole("button", { name: "Add this page as context" }), { key: "Tab" })).toBe(true);
+    expect(pageChip()).toBeNull();
+  });
+
+  it("toggles from the button and drops the page when the page changes", () => {
+    const { rerender } = renderInput({ pageContext: page });
+
+    fireEvent.click(screen.getByRole("button", { name: "Add this page as context" }));
+    expect(pageChip()).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Remove page context" }));
+    expect(pageChip()).toBeNull();
+
+    fireEvent.keyDown(screen.getByTestId("editor"), { key: "Tab" });
+    rerender(element({ pageContext: { ...page, id: "issue-2", label: "MUL-2" } }));
+    expect(pageChip()).toBeNull();
+  });
+
+  it.each([
+    ["another page", { ...page, id: "issue-2", label: "MUL-2" }],
+    ["a page with no context", null],
+  ])("does not send the page after leaving it for %s and coming back", async (_, away) => {
+    const onSend = vi.fn<ChatInputOnSend>(() => true);
+    const { rerender } = renderInput({ onSend, pageContext: page });
+    fireEvent.keyDown(screen.getByTestId("editor"), { key: "Tab" });
+    expect(pageChip()).not.toBeNull();
+
+    rerender(element({ onSend, pageContext: away }));
+    rerender(element({ onSend, pageContext: page }));
+    expect(pageChip()).toBeNull();
+    expect(screen.getByRole("button", { name: "Add this page as context" })).toHaveAttribute("aria-pressed", "false");
+
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "A new question" } });
+    fireEvent.click(sendButton());
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend.mock.calls[0]![0]).toBe("A new question");
   });
 });
 
@@ -899,12 +1205,19 @@ describe("ChatInput attachment wiring", () => {
 
     // While the upload is pending the SubmitButton must be disabled.
     // Bypassing this would send the message with the attachment id
-    // missing from the body.
+    // missing from the body. It is aria-disabled rather than natively
+    // disabled so its "uploading" tooltip stays reachable.
     await waitFor(() => {
       const buttons = screen.getAllByRole("button");
       const sendButton = buttons[buttons.length - 1]!;
-      expect(sendButton).toBeDisabled();
+      expect(sendButton).toHaveAttribute("aria-disabled", "true");
+      expect(sendButton).toHaveAttribute("aria-busy", "true");
     });
+    {
+      const buttons = screen.getAllByRole("button");
+      fireEvent.click(buttons[buttons.length - 1]!);
+    }
+    expect(onSend).not.toHaveBeenCalled();
 
     await act(async () => {
       resolveUpload!(makeUpload({ id: "att-slow", link: "https://cdn.example/att-slow.png", filename: "slow.png" }));
@@ -1536,5 +1849,33 @@ describe("ChatInput revoked-access placeholder", () => {
     renderInput({ agentName: "Multica" });
 
     expect(editorProps.last?.placeholder).toBe("Message Multica…");
+  });
+});
+
+// A natively disabled send button takes no hover or focus, so the reason it is
+// blocked would never reach its tooltip; the blocked composer keeps it
+// aria-disabled and names the same reason as the placeholder.
+describe("ChatInput send disabled reason", () => {
+  function sendButton() {
+    const buttons = screen.getAllByRole("button");
+    return buttons[buttons.length - 1]!;
+  }
+
+  it("keeps the send button reachable and describes why it is blocked", () => {
+    const onSend = vi.fn();
+    renderInput({ disabled: true, agentArchived: true, onSend });
+
+    const button = sendButton();
+    expect(button).toHaveAttribute("aria-disabled", "true");
+    expect(button).not.toBeDisabled();
+    fireEvent.click(button);
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("stays natively disabled when the composer is only empty", () => {
+    renderInput({ agentName: "Multica" });
+
+    expect(sendButton()).toBeDisabled();
+    expect(sendButton()).not.toHaveAttribute("aria-disabled");
   });
 });

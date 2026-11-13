@@ -60,6 +60,7 @@ export function useInboxRealtime() {
         // unarchive there restores the item to THIS list — without refetching,
         // mobile keeps showing the pre-restore list.
         ws.on("inbox:unarchived", invalidate),
+        ws.on("inbox:deleted", invalidate),
         ws.on("inbox:batch-read", invalidate),
         ws.on("inbox:batch-archived", invalidate),
 

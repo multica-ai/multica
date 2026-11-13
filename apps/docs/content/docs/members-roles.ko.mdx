@@ -4,6 +4,7 @@ description: 멤버를 초대하고 owner, admin, member 세 가지 역할로 �
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { RolesDemo } from "@/components/demos/roles-demo";
 
 [워크스페이스](/workspaces)에 참여한 사람은 모두 멤버이며, 각 멤버는 `owner`, `admin`, `member` 중 하나의 역할을 가집니다. 역할은 워크스페이스 설정과 팀 관리 권한만 제어합니다. 태스크 생성, 댓글 작성 같은 일상적인 협업은 모든 멤버에게 열려 있습니다.
 
@@ -20,13 +21,15 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 워크스페이스에는 항상 `owner`가 한 명 이상 있어야 합니다. 마지막 `owner`는 강등되거나 제거될 수 없으며 워크스페이스를 떠날 수도 없습니다.
 
+<RolesDemo />
+
 <Callout type="info">
 역할은 에이전트를 실행할 수 있는 사람을 결정하지 않습니다. 각 에이전트에는 별도의 접근 범위(Access)가 있으며, `owner`와 `admin`도 권한이 없는 에이전트를 우회해서 실행할 수 없습니다. 자세한 내용은 [에이전트](/agents#권한과-access)를 참고하세요.
 </Callout>
 
 ## 멤버 초대
 
-`owner`와 `admin`은 설정 → 멤버에서 이메일을 입력하고 역할을 선택한 뒤 초대를 보낼 수 있습니다. 초대 시 부여할 수 있는 역할은 `admin`과 `member`뿐입니다. `owner`로 지정하려면 먼저 워크스페이스에 참여한 다음 기존 `owner`가 역할을 올려야 합니다.
+`owner`와 `admin`은 **설정 → 멤버**에서 **멤버 초대**를 누르고 이메일을 입력한 뒤 역할을 선택해 초대를 보냅니다. 초대 시 부여할 수 있는 역할은 `admin`과 `member`뿐입니다. `owner`로 지정하려면 먼저 워크스페이스에 참여한 다음 기존 `owner`가 역할을 올려야 합니다.
 
 ![멤버 관리: 초대 양식과 역할이 표시된 멤버 명단](/images/docs/members-roster.webp)
 
@@ -34,11 +37,13 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 초대 링크는 이메일에만 표시되며 제품 화면에서 확인하거나 복사할 수 없습니다. 이메일 전송에 실패해도 초대 기록은 남으므로 취소한 뒤 다시 보낼 수 있습니다.
 
+바로 전달할 수 있는 링크가 필요하면 **설정 → 멤버**의 **공유 링크**에서 역할과 유효 기간을 선택해 링크를 만드세요. 링크를 가진 사람은 링크가 만료되거나 취소될 때까지 선택한 역할로 참여할 수 있습니다.
+
 ## 역할 변경
 
-`admin`은 `admin`과 `member` 사이에서 역할을 변경할 수 있고 두 역할의 멤버를 제거할 수도 있습니다. `owner` 승격, 역할 변경, 제거처럼 `owner`와 관련된 변경은 `owner`만 수행할 수 있습니다.
+멤버 목록에서 해당 멤버 오른쪽의 작업 메뉴를 열고 **역할 변경**을 선택하면 즉시 적용됩니다.
 
-역할 변경은 즉시 적용됩니다.
+`admin`은 `admin`과 `member` 사이에서 역할을 변경할 수 있고 두 역할의 멤버를 제거할 수도 있습니다. `owner` 승격, 역할 변경, 제거처럼 `owner`와 관련된 변경은 `owner`만 수행할 수 있습니다.
 
 ## 멤버 제거
 

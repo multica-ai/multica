@@ -54,6 +54,7 @@ const RESET_STATE = {
   },
   lastAssigneeType: undefined,
   lastAssigneeId: undefined,
+  batchContinuationBaseline: undefined,
 };
 
 describe("issue draft store — last assignee", () => {
@@ -73,6 +74,73 @@ describe("issue draft store — last assignee", () => {
     expect(draft.manual.title).toBe("");
     expect(draft.manual.assigneeType).toBe("member");
     expect(draft.manual.assigneeId).toBe("alice");
+  });
+
+  it("clearDraft resets status for a fresh create", () => {
+    const { setManual, clearDraft } = useIssueDraftStore.getState();
+    setManual({ status: "done" });
+    clearDraft();
+
+    expect(useIssueDraftStore.getState().draft.manual.status).toBe("todo");
+  });
+
+  it("persists todo for an untouched batch continuation but keeps an explicitly edited draft", async () => {
+    setCurrentWorkspace("batch", "ws_batch");
+    await flush();
+    await flush();
+
+    const storedStatus = () =>
+      JSON.parse(localStorage.getItem("multica_issue_draft:batch") ?? "{}").state.draft.manual.status;
+
+    const store = useIssueDraftStore.getState();
+    // "Create another" resets the form but carries the submitted status and
+    // assignee into the next issue, so the reset itself is not user input.
+    store.setManual({ status: "in_progress", assigneeType: "member", assigneeId: "alice" });
+    store.beginBatchContinuation();
+    expect(storedStatus()).toBe("todo");
+
+    // A field the user changed IS input, even before a title is typed.
+    useIssueDraftStore.getState().setManual({ status: "done" });
+    expect(storedStatus()).toBe("done");
+
+    // As is a started next issue.
+    useIssueDraftStore.getState().setManual({ title: "Unfinished next issue" });
+    expect(storedStatus()).toBe("done");
+    setCurrentWorkspace(null, null);
+  });
+
+  it("persists an explicitly selected status on a fresh create before any title is typed", async () => {
+    setCurrentWorkspace("status-only", "ws_status");
+    await flush();
+    await flush();
+
+    useIssueDraftStore.getState().setManual({ status: "in_progress" });
+
+    const stored = JSON.parse(localStorage.getItem("multica_issue_draft:status-only") ?? "{}");
+    expect(stored.state.draft.manual.status).toBe("in_progress");
+    setCurrentWorkspace(null, null);
+  });
+
+  it("rehydrates an explicitly selected status that never got a title", async () => {
+    setCurrentWorkspace("status-rehydrate", "ws_status");
+    await flush();
+    await flush();
+
+    useIssueDraftStore.getState().setManual({ status: "in_progress" });
+    expect(
+      JSON.parse(localStorage.getItem("multica_issue_draft:status-rehydrate") ?? "{}")
+        .state.draft.manual.status,
+    ).toBe("in_progress");
+
+    // Leave and come back to the workspace: the persisted selection returns.
+    setCurrentWorkspace(null, null);
+    await flush();
+    setCurrentWorkspace("status-rehydrate", "ws_status");
+    await flush();
+    await flush();
+
+    expect(useIssueDraftStore.getState().draft.manual.status).toBe("in_progress");
+    setCurrentWorkspace(null, null);
   });
 
   it("clearDraft yields an empty assignee when none has ever been remembered", () => {
@@ -178,6 +246,215 @@ describe("issue draft store — last assignee", () => {
   });
 });
 
+describe("issue draft store — keep-open batch continuation", () => {
+  beforeEach(() => {
+    useIssueDraftStore.setState(RESET_STATE);
+  });
+
+  // Stands in for `resetForNextIssue` in the create dialog: the batch reset
+  // writes the carried values, then marks the result as the baseline.
+  function beginContinuation() {
+    const store = useIssueDraftStore.getState();
+    store.setManual({ status: "in_progress", assigneeType: "member", assigneeId: "alice" });
+    store.beginBatchContinuation();
+  }
+
+  it("does not treat an untouched continuation's inherited fields as a draft", () => {
+    beginContinuation();
+
+    expect(useIssueDraftStore.getState().hasDraft()).toBe(false);
+  });
+
+  it.each([
+    ["priority", (s: ReturnType<typeof useIssueDraftStore.getState>) => s.setShared({ priority: "high" })],
+    ["project", (s: ReturnType<typeof useIssueDraftStore.getState>) => s.setShared({ projectId: "project-1" })],
+    ["due date", (s: ReturnType<typeof useIssueDraftStore.getState>) => s.setShared({ dueDate: "2026-10-01" })],
+    ["start date", (s: ReturnType<typeof useIssueDraftStore.getState>) => s.setManual({ startDate: "2026-10-01" })],
+    ["labels", (s: ReturnType<typeof useIssueDraftStore.getState>) => s.setManual({ labelIds: ["label-1"] })],
+    ["status", (s: ReturnType<typeof useIssueDraftStore.getState>) => s.setManual({ status: "done" })],
+    ["assignee", (s: ReturnType<typeof useIssueDraftStore.getState>) => s.setManual({ assigneeId: "bob" })],
+    ["custom properties", (s: ReturnType<typeof useIssueDraftStore.getState>) => s.setManual({ propertyValues: { "property-1": "option-1" } })],
+    ["title", (s: ReturnType<typeof useIssueDraftStore.getState>) => s.setManual({ title: "Next issue" })],
+  ])("keeps a %s-only edit recoverable after a keep-open reset", (_field, edit) => {
+    beginContinuation();
+    expect(useIssueDraftStore.getState().hasDraft()).toBe(false);
+
+    edit(useIssueDraftStore.getState());
+
+    expect(useIssueDraftStore.getState().hasDraft()).toBe(true);
+  });
+
+  it("does not treat a mode switch on an untouched continuation as an edit", () => {
+    beginContinuation();
+
+    // `switchToAgent` commits the manual form's shared fields, flips the active
+    // mode and (on a blank form) leaves the agent slot empty. None of that is
+    // user intent, so the continuation is still untouched.
+    const store = useIssueDraftStore.getState();
+    store.setShared({ projectId: undefined, priority: "none", dueDate: null });
+    store.setActiveMode("agent");
+
+    expect(useIssueDraftStore.getState().hasDraft()).toBe(false);
+  });
+
+  it("persists todo for a continuation that was only switched to agent mode", async () => {
+    setCurrentWorkspace("mode-switch", "ws_mode");
+    await flush();
+    await flush();
+
+    const storedStatus = () =>
+      JSON.parse(localStorage.getItem("multica_issue_draft:mode-switch") ?? "{}").state.draft.manual.status;
+
+    beginContinuation();
+    expect(storedStatus()).toBe("todo");
+
+    const store = useIssueDraftStore.getState();
+    store.setShared({ projectId: undefined, priority: "none", dueDate: null });
+    store.setActiveMode("agent");
+
+    // A mode switch is not an edit: the batch's status must not survive into
+    // the next fresh create through storage either.
+    expect(storedStatus()).toBe("todo");
+    setCurrentWorkspace(null, null);
+  });
+
+  it("does not treat a mode switch's agent assist-init as an edit", () => {
+    const store = useIssueDraftStore.getState();
+    // A batch that inherited an agent assignee: `switchToAgent` hands it to the
+    // agent slot so the next issue can be filed by the same agent.
+    store.setManual({ status: "in_progress", assigneeType: "agent", assigneeId: "agent-1" });
+    useIssueDraftStore.getState().beginBatchContinuation();
+
+    const switching = useIssueDraftStore.getState();
+    switching.setShared({ projectId: undefined, priority: "none", dueDate: null });
+    switching.setAgent({ actorType: "agent", actorId: "agent-1" });
+    switching.setActiveMode("agent");
+
+    // The agent slot belongs to the other form, so filling it is not an edit of
+    // the continuation the manual form left behind.
+    expect(useIssueDraftStore.getState().hasDraft()).toBe(false);
+  });
+
+  it("keeps an edited draft and its status recoverable across a mode switch", async () => {
+    setCurrentWorkspace("switch-edit", "ws_switch");
+    await flush();
+    await flush();
+
+    const storedDraft = () =>
+      JSON.parse(localStorage.getItem("multica_issue_draft:switch-edit") ?? "{}").state.draft ?? {};
+
+    beginContinuation();
+    // A real selection for the next issue, re-committed by the switch along
+    // with the mode flip.
+    const store = useIssueDraftStore.getState();
+    store.setShared({ priority: "high" });
+    store.setShared({ projectId: undefined, priority: "high", dueDate: null });
+    store.setActiveMode("agent");
+
+    expect(useIssueDraftStore.getState().hasDraft()).toBe(true);
+    expect(storedDraft().shared?.priority).toBe("high");
+    expect(storedDraft().manual?.status).toBe("in_progress");
+    setCurrentWorkspace(null, null);
+  });
+
+  it("ends an untouched continuation by normalizing only its inherited status", () => {
+    beginContinuation();
+    useIssueDraftStore.getState().endBatchContinuation();
+
+    const state = useIssueDraftStore.getState();
+    expect(state.draft.manual.status).toBe("todo");
+    // Closing is not a fresh create: the rest of the reset — the carried
+    // assignee, the shared slot — is left exactly as it was.
+    expect(state.draft.manual.assigneeId).toBe("alice");
+    expect(state.draft.shared.priority).toBe("none");
+    expect(state.batchContinuationBaseline).toBeUndefined();
+  });
+
+  it("keeps an edited continuation as it is, inherited status included", () => {
+    beginContinuation();
+    const store = useIssueDraftStore.getState();
+    store.setShared({ priority: "high" });
+    store.setAgent({ prompt: "audit the flaky test" });
+
+    useIssueDraftStore.getState().endBatchContinuation();
+
+    const state = useIssueDraftStore.getState();
+    expect(state.draft.shared.priority).toBe("high");
+    // Agent-side content is a real draft, not continuation bookkeeping.
+    expect(state.draft.agent.prompt).toBe("audit the flaky test");
+    // An edited continuation is the user's unfinished next issue, so the
+    // status the batch inherited stays with it.
+    expect(state.draft.manual.status).toBe("in_progress");
+    expect(state.batchContinuationBaseline).toBeUndefined();
+  });
+
+  it("keeps a status the user picked in the continuation", () => {
+    beginContinuation();
+    useIssueDraftStore.getState().setManual({ status: "done" });
+
+    useIssueDraftStore.getState().endBatchContinuation();
+
+    expect(useIssueDraftStore.getState().draft.manual.status).toBe("done");
+  });
+
+  it("normalizes a mode-only continuation's status and keeps its seeded agent prompt", () => {
+    const store = useIssueDraftStore.getState();
+    store.setManual({ status: "in_progress", assigneeType: "agent", assigneeId: "agent-1" });
+    useIssueDraftStore.getState().beginBatchContinuation();
+
+    // `switchToAgent` commits the unchanged shared fields, seeds the agent slot
+    // from the manual form and flips the mode — none of it a manual edit.
+    const switching = useIssueDraftStore.getState();
+    switching.setShared({ projectId: undefined, priority: "none", dueDate: null });
+    switching.setAgent({ prompt: "audit the flaky test", actorType: "agent", actorId: "agent-1" });
+    switching.setActiveMode("agent");
+
+    useIssueDraftStore.getState().endBatchContinuation();
+
+    const state = useIssueDraftStore.getState();
+    // Only the inherited status is dropped; the agent side is left intact.
+    expect(state.draft.manual.status).toBe("todo");
+    expect(state.draft.agent.prompt).toBe("audit the flaky test");
+    expect(state.draft.agent.actorId).toBe("agent-1");
+    expect(state.draft.activeMode).toBe("agent");
+    expect(state.batchContinuationBaseline).toBeUndefined();
+  });
+
+  it("leaves the restored ordinary draft alone when the snapshot is already gone", () => {
+    // The source-context wrapper restores the ordinary draft and drops the
+    // snapshot before the manual panel's close cleanup runs.
+    useIssueDraftStore.getState().setShared({ priority: "high" });
+    useIssueDraftStore.getState().setManual({ status: "backlog" });
+    const ordinary = useIssueDraftStore.getState().draft;
+
+    useIssueDraftStore.getState().endBatchContinuation();
+
+    expect(useIssueDraftStore.getState().draft).toBe(ordinary);
+  });
+
+  it("stops tracking a continuation once the draft is cleared", () => {
+    beginContinuation();
+    useIssueDraftStore.getState().clearDraft();
+    expect(useIssueDraftStore.getState().batchContinuationBaseline).toBeUndefined();
+
+    // The fresh draft is judged on content alone again — and its status is the
+    // reset todo, not whatever the batch had submitted.
+    useIssueDraftStore.getState().setManual({ status: "in_progress" });
+    expect(useIssueDraftStore.getState().draft.manual.status).toBe("in_progress");
+    expect(useIssueDraftStore.getState().hasDraft()).toBe(false);
+  });
+
+  it("drops the continuation snapshot when an isolated draft session starts", () => {
+    beginContinuation();
+    const isolated = useIssueDraftStore.getState();
+    isolated.beginIsolatedDraft();
+    expect(useIssueDraftStore.getState().batchContinuationBaseline).toBeUndefined();
+
+    useIssueDraftStore.getState().endIsolatedDraft();
+    expect(useIssueDraftStore.getState().batchContinuationBaseline).toBeUndefined();
+  });
+});
+
 describe("issue draft store — mode switch preserves both sides", () => {
   beforeEach(() => {
     useIssueDraftStore.setState(RESET_STATE);
@@ -210,6 +487,35 @@ describe("issue draft store — legacy rehydrate", () => {
 
   afterEach(() => {
     setCurrentWorkspace(null, null);
+  });
+
+  it("drops obsolete status and stage preferences from persisted state", async () => {
+    localStorage.setItem(
+      "multica_issue_draft:legacy-pref",
+      JSON.stringify({
+        state: {
+          draft: { manual: { status: "todo" } },
+          lastStatus: "done",
+          lastStage: 3,
+          lastStageParentIssueId: "parent-a",
+        },
+        version: 0,
+      }),
+    );
+
+    setCurrentWorkspace("legacy-pref", "ws_pref");
+    await flush();
+    await flush();
+
+    const state = useIssueDraftStore.getState();
+    expect("lastStatus" in state).toBe(false);
+    expect("lastStage" in state).toBe(false);
+    expect("lastStageParentIssueId" in state).toBe(false);
+    state.setManual({ title: "new draft" });
+    const stored = JSON.parse(localStorage.getItem("multica_issue_draft:legacy-pref") ?? "{}");
+    expect(stored.state).not.toHaveProperty("lastStatus");
+    expect(stored.state).not.toHaveProperty("lastStage");
+    expect(stored.state).not.toHaveProperty("lastStageParentIssueId");
   });
 
   it("migrates a pre-MUL-5181 flat draft into the shared/manual slots", async () => {

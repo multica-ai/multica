@@ -11,7 +11,7 @@
  */
 import { type ComponentProps } from "react";
 import { Ionicons } from "@expo/vector-icons";
-import { useTheme } from "@react-navigation/native";
+import { useTheme } from "expo-router";
 import { Button, type ButtonProps } from "@/components/ui/button";
 
 interface Props extends Omit<ButtonProps, "children" | "size"> {

@@ -16,10 +16,10 @@ import (
 // mis-wired cache branch in production code.
 func reportModelList(t *testing.T, requestID string, body map[string]any) *httptest.ResponseRecorder {
 	t.Helper()
-	req := newDaemonTokenRequest(
+	req := newOwnerDaemonRequest(
 		http.MethodPost,
 		"/api/daemon/runtimes/"+testRuntimeID+"/models/"+requestID+"/result",
-		body, testWorkspaceID, "daemon-mul5549",
+		body,
 	)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("runtimeId", testRuntimeID)

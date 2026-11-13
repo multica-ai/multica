@@ -1,0 +1,126 @@
+---
+title: 釘釘 Bot
+description: 把 AI 代理接入釘釘，在私聊或群聊中直接交代工作。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+
+把[AI 代理](/agents)接入釘釘後，AI 代理所在工作區的成員可以私聊 Bot、在群裡 @ Bot，或用 `/issue` 指令直接建立 Multica [任務](/issues)。對話和執行記錄會儲存到 Multica 工作區。
+
+<Callout type="info">
+釘釘整合[由社群維護](/community-maintained)，不提供官方支援 SLA。遇到問題請提交到 [GitHub 任務](https://github.com/multica-ai/multica/issues)。
+</Callout>
+
+## 連線 Bot
+
+AI 代理所有者或工作區 owner/admin 可以把 AI 代理接入釘釘。一個 AI 代理對應一個釘釘 Bot。
+
+<Steps>
+<Step>
+
+### 建立 Stream 模式機器人 [#1-建立-stream-模式機器人]
+
+1. 在[釘釘開放平臺](https://open-dev.dingtalk.com)建立一個**企業內部應用**。
+2. 開啟機器人能力，其中**訊息接收模式**設為 **Stream 模式**。
+
+</Step>
+<Step>
+
+### 給機器人授權 [#2-給機器人授權]
+
+預設已新增"機器人發訊息權限"（`qyapi_robot_sendmsg`）。如需在 Multica 平臺顯示 Bot 名稱，需手動新增"釘群基礎資訊管理權限"（`qyapi_chat_manage`）。
+
+</Step>
+<Step>
+
+### 獲取應用憑證 [#3-獲取應用憑證]
+
+進入**憑證與基礎資訊**頁面，複製 **Client ID（AppKey）** 和 **Client Secret（AppSecret）**。
+
+</Step>
+<Step>
+
+### 把 AI 代理接入釘釘 [#4-把 AI 代理接入釘釘]
+
+1. 回到 Multica，開啟 **AI 代理 → _你的 AI 代理_ → 訊息渠道**。
+2. 點選 **新增訊息管道**，再選擇 **釘釘**。
+3. 填入 **AppKey** 和 **AppSecret** 後提交。
+
+</Step>
+<Step>
+
+### 關聯釘釘帳號與 Multica 平臺帳號 [#5-關聯釘釘帳號與-multica-平臺帳號]
+
+在釘釘上跟 Bot 私聊，或者在群裡 @ Bot，觸發一次關聯請求。Bot 會在私聊裡發來一個連結（有效期約 15 分鐘），點選後看到連線成功的提示即完成關聯。
+
+</Step>
+</Steps>
+
+## 在釘釘中交代工作 [#在釘釘中給 AI 代理交代工作]
+
+### 私聊
+
+直接給 Bot 發訊息即可。AI 代理處理完成後，把結果回覆到私聊裡。
+
+### 群聊
+
+把 Bot 加入釘群，再傳送 `@your-bot <訊息>`。每次追問都要重新 @，Bot 只處理 @ 它的訊息。
+
+### 傳送圖片
+
+私聊和群聊都支援圖文混排訊息，圖片支援 PNG、JPEG、GIF、WebP 和 BMP；每條訊息最多 4 張，每張不超過 10 MB。暫不支援檔案和語音訊息。
+
+群聊中的圖文混排訊息裡，@ Bot 產生的文字也會作為訊息內容發給 AI 代理。要去掉其中的 Bot 名稱，需新增"釘群基礎資訊管理權限"（`qyapi_chat_manage`）。
+
+### 引用訊息繼續追問
+
+使用釘釘的引用功能選中一條訊息，再輸入本輪內容；群聊中仍需 @ Bot。Multica 會把釘釘回撥提供的、受支援的引用內容放在本輪訊息前，作為 AI 代理的上下文。引用中的 `/issue`、`/new` 或 `/clear` 只是引用內容，不會作為本輪指令執行。
+
+### 訊息處理反饋
+
+Multica 收到釘釘訊息後，會嘗試在原訊息上新增釘釘的 `收到` 表情，表示訊息已交給 AI 代理；AI 代理處理完成、回覆成功發到釘釘後，`收到` 換成 `Done`；任務被取消時，撤回 `收到` 表情。
+
+表情反饋依賴釘釘介面，不保證即時更新。判斷結果時請結合 Bot 回覆和 Multica 中的執行記錄。
+
+### 使用 `/issue` 建立任務
+
+傳送 `/issue <標題>` 或者 `/issue <標題>{換行}<詳細描述>`，會建立一個新 Multica 任務，並自動指派給這個 Bot 繫結的 AI 代理。同一條訊息裡的圖片會作為附件加到該任務中。和普通訊息不同，`/issue` 指令不會在 Multica 的[對話](/chat)中留下記錄。
+
+### 使用 `/new` 新建 Chat
+
+傳送 `/new` 會建立一個新的空 Multica Chat，後續釘釘訊息會路由到新 Chat。傳送 `/new <訊息>` 會建立新 Chat，並把訊息作為第一輪。之前的 Chat 仍儲存在 Multica 中，可以繼續使用。
+
+### 使用 `/clear` 清空當前上下文
+
+傳送 `/clear` 會保留當前 Multica Chat，並把新的 AI 代理可見上下文應用到下一條訊息。傳送 `/clear <訊息>` 會把訊息作為邊界後的第一輪。完整 Chat 歷史仍會顯示在 Multica 中。
+
+## 管理連線
+
+- 在**AI 代理 → _你的 AI 代理_ → 訊息渠道**頁面，AI 代理所有者、工作區 owner/admin 可以在此連線釘釘，或者斷開連線。連線上釘釘後，這裡會顯示 Bot 名稱和已成功處理過訊息的釘群，以及 Bot 在釘群內的活躍狀態資料，有 AI 代理讀權限的工作區成員都能看到這些資訊。最近 90 天沒有成功處理訊息的群會歸入**長期未活躍**，展開時再載入。
+- **設定 → 訊息渠道** 按平台列出你有讀取權限的已連接 AI 代理。點選 AI 代理，進入其 **訊息渠道**，檢視 Bot 的群組活動或管理連線。斷開後 Bot 停止接收訊息，安裝記錄仍會保留用於審計。工作區 owner/admin 還可以忘記某個群。忘記只會從列表中移除該群，不會刪除對話和訊息。如果已關聯釘釘帳號的工作區成員以後在該群再次 @ Bot，且 Multica 成功接收這條訊息，群會重新出現。
+
+
+## 自託管配置 [#自部署配置]
+
+Multica Cloud 使用者可跳過本節。自託管部署需要先設定一個用於加密釘釘 `AppSecret` 的金鑰：
+
+```dotenv
+MULTICA_DINGTALK_SECRET_KEY=<base64-encoded 32-byte key>
+```
+
+可以這樣生成：
+
+```bash
+openssl rand -base64 32
+```
+
+重啟 API 服務後，再連線釘釘。該金鑰需要長期儲存：更換或丟失後，已有 token 無法解密，需要重新連線。
+
+帳號繫結連結使用 `MULTICA_APP_URL`，未設定時回退到 `FRONTEND_ORIGIN`；它需要指向成員可以訪問的 Multica 地址。
+
+## 接下來
+
+- [聊天整合](/channels) —— Channel 引擎、會話與授權是怎麼運作的
+- [AI 代理](/agents) · [Chat](/chat) · [任務](/issues)
+- [環境變數](/environment-variables) —— 完整的自部署配置參考

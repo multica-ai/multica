@@ -1,6 +1,6 @@
 "use client";
 
-import { Check } from "lucide-react";
+import { Check } from "@multica/ui/icons";
 import {
   PROJECT_STATUS_CONFIG,
   PROJECT_STATUS_ORDER,

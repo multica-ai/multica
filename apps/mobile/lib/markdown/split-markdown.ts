@@ -1,49 +1,50 @@
 /**
- * Hybrid-render segment splitter.
+ * Split Markdown into native prose, React code blocks, and interactive images.
+ * Use lexer token boundaries so fenced/indented code and paragraph images are
+ * handled without fragile regex reconstruction. Preserve prose through token.raw.
  *
- * react-native-enriched-markdown gives us native-quality rendering of
- * prose (paragraphs / headings / lists / quotes / tables / inline code /
- * links / mentions) but does NOT let us inject React for any leaf node
- * (see issues #54, #232, #246 — maintainer's stance is "no custom
- * renderers, ever, by design"). That blocks three product needs:
- *
- *   1. Shiki syntax-highlighted code blocks (web parity).
- *   2. Tap-to-lightbox on images.
- *   3. Horizontal scroll + copy button on code.
- *
- * Maintainer-endorsed workaround (issue #246): split the markdown at
- * those boundaries, render each fragment as its own enriched instance
- * for prose and as React for the rest. This file is that splitter.
- *
- * Strategy:
- *
- *   - Run `marked.lexer` (we already depend on it for preprocess).
- *   - Walk the top-level token list.
- *   - `code` token → emit a `code` segment.
- *   - `paragraph` token containing image tokens → split the paragraph
- *     at each image boundary. Each image becomes its own `image`
- *     segment; the surrounding text rejoins the prose stream. (RN's
- *     <Image> can't be inline in a <Text>, and tap-to-lightbox needs a
- *     Pressable wrapper that's not viable inside an attributed string
- *     anyway. GitHub mobile and Linear iOS both promote inline images
- *     to block-level — we follow.)
- *   - Every other block stays in the prose buffer and is handed to
- *     enriched verbatim via `token.raw`.
- *
- * Why not regex: code inside lists, indented code, paragraph-embedded
- * images, and consecutive code blocks without a blank line all have
- * boundaries regex can't reliably detect. marked.lexer already knows;
- * reuse it.
- *
- * Known trade-off: code blocks nested inside a list item stay with the
- * list and render via enriched (no Shiki). That's because the splitter
- * only inspects top-level tokens — descending into list/quote children
- * would force us to also re-serialise their surrounding markdown,
- * complicating prose reconstruction. Top-level code is the >95% case
- * for issue descriptions / comments; revisit if real content shows
- * otherwise.
+ * Only top-level code is extracted. Nested list/quote code stays in the native
+ * renderer to preserve its surrounding Markdown structure.
  */
 import { marked, type Tokens } from "marked";
+import { fromMarkdown } from "mdast-util-from-markdown";
+import { normalizeUri } from "micromark-util-sanitize-uri";
+
+function imageUrisBySource(input: string): Map<string, string> {
+  // Marked's href has already lost backslash escapes. Read destinations from
+  // the source with the sequence's CommonMark parser instead of decoding href
+  // again: \&amp; must stay literal, while &amp; must decode once.
+  const tree = fromMarkdown(input);
+  type Node = typeof tree | (typeof tree.children)[number];
+  const pending: Node[] = [tree];
+  const nodes: Node[] = [];
+  while (pending.length) {
+    const node = pending.pop()!;
+    nodes.push(node);
+    if ("children" in node) {
+      for (let i = node.children.length - 1; i >= 0; i--) pending.push(node.children[i]!);
+    }
+  }
+  const definitions = new Map<string, string>();
+  for (const node of nodes) {
+    if (node.type === "definition" && !definitions.has(node.identifier)) {
+      definitions.set(node.identifier, node.url);
+    }
+  }
+  const uris = new Map<string, string>();
+  for (const node of nodes) {
+    if (node.type !== "image" && node.type !== "imageReference") continue;
+    const url = node.type === "image" ? node.url : definitions.get(node.identifier);
+    const start = node.position?.start.offset;
+    const end = node.position?.end.offset;
+    if (url !== undefined && start !== undefined && end !== undefined) {
+      // Marked normalizes CRLF and bare CR before creating token.raw.
+      const source = input.slice(start, end).replace(/\r\n?/g, "\n");
+      uris.set(source, normalizeUri(url));
+    }
+  }
+  return uris;
+}
 
 export type MarkdownSegment =
   | { type: "prose"; content: string }
@@ -56,6 +57,7 @@ export function splitMarkdown(input: string): MarkdownSegment[] {
   const tokens = marked.lexer(input);
   const out: MarkdownSegment[] = [];
   let proseBuffer = "";
+  let imageUris: Map<string, string> | undefined;
 
   const flushProse = () => {
     const trimmed = proseBuffer.replace(/^\s+|\s+$/g, "");
@@ -107,7 +109,9 @@ export function splitMarkdown(input: string): MarkdownSegment[] {
           const img = t as Tokens.Image;
           out.push({
             type: "image",
-            uri: img.href,
+            // Only parse CommonMark destinations when an interactive image is
+            // present. Marked-only extensions retain their lexer destination.
+            uri: (imageUris ??= imageUrisBySource(input)).get(img.raw) ?? normalizeUri(img.href),
             alt: img.text ?? "",
           });
         } else {

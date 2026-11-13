@@ -343,7 +343,6 @@ describe("builderArgsForTarget", () => {
       "--publish",
       "always",
       "-c.directories.output=dist/mac-x64",
-      "-c.mac.minimumSystemVersion=12.0.0",
       "-c.publish.channel=latest-x64",
     ]);
   });

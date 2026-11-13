@@ -99,13 +99,17 @@ export function MentionPickerBody({ query, mode = "comment" }: Props) {
   // Server-side issue search (mirrors web's mention-suggestion.tsx). Empty
   // query → no fetch + no issues section. Debounced 200ms; in-flight
   // cancelled on every keystroke via AbortController.
-  const [issueResults, setIssueResults] = useState<Issue[]>([]);
+  const [searchResult, setSearchResult] = useState<{ query: string; issues: Issue[] }>({
+    query: "",
+    issues: [],
+  });
+  const issueResults = useMemo(
+    () => searchResult.query === query.trim() ? searchResult.issues : [],
+    [searchResult, query],
+  );
   useEffect(() => {
     const trimmed = query.trim();
-    if (!trimmed) {
-      setIssueResults([]);
-      return;
-    }
+    if (!trimmed) return;
     const ac = new AbortController();
     const timer = setTimeout(() => {
       void api
@@ -113,8 +117,12 @@ export function MentionPickerBody({ query, mode = "comment" }: Props) {
           { q: trimmed, limit: 8, include_closed: false },
           { signal: ac.signal },
         )
-        .then((res) => setIssueResults(res.issues))
-        .catch(() => setIssueResults([]));
+        .then((res) => {
+          if (!ac.signal.aborted) setSearchResult({ query: trimmed, issues: res.issues });
+        })
+        .catch(() => {
+          if (!ac.signal.aborted) setSearchResult({ query: trimmed, issues: [] });
+        });
     }, 200);
     return () => {
       ac.abort();

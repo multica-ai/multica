@@ -521,7 +521,7 @@ features.multi_agent = true
 	if err := ensureCodexSandboxConfig(configPath, policy, "0.121.0", nil); err != nil {
 		t.Fatalf("ensureCodexSandboxConfig failed: %v", err)
 	}
-	if err := ensureCodexMultiAgentConfig(configPath, nil); err != nil {
+	if err := ensureCodexMultiAgentConfig(configPath, "0.145.0", nil); err != nil {
 		t.Fatalf("ensureCodexMultiAgentConfig failed: %v", err)
 	}
 	if err := ensureCodexMemoryConfig(configPath, nil); err != nil {
@@ -556,7 +556,7 @@ features.multi_agent = true
 	if err := ensureCodexSandboxConfig(configPath, policy, "0.121.0", nil); err != nil {
 		t.Fatalf("ensureCodexSandboxConfig (rerun) failed: %v", err)
 	}
-	if err := ensureCodexMultiAgentConfig(configPath, nil); err != nil {
+	if err := ensureCodexMultiAgentConfig(configPath, "0.145.0", nil); err != nil {
 		t.Fatalf("ensureCodexMultiAgentConfig (rerun) failed: %v", err)
 	}
 	if err := ensureCodexMemoryConfig(configPath, nil); err != nil {

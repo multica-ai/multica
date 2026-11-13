@@ -450,6 +450,115 @@ func TestResolveAgent(t *testing.T) {
 	})
 }
 
+func TestResolveAgentOverlappingNames(t *testing.T) {
+	const (
+		reviewerID = "f656eab8-1111-1111-1111-111111111111"
+		claudeID   = "9b0ff9a2-2222-2222-2222-222222222222"
+	)
+
+	tests := []struct {
+		name          string
+		input         string
+		wantID        string
+		reverse       bool
+		duplicate     bool
+		wantAmbiguous bool
+	}{
+		{
+			name:   "exact shorter name wins",
+			input:  "Reviewer",
+			wantID: reviewerID,
+		},
+		{
+			name:   "exact match ignores case",
+			input:  "rEvIeWeR",
+			wantID: reviewerID,
+		},
+		{
+			name:    "exact match is independent of directory order",
+			input:   "reviewer",
+			wantID:  reviewerID,
+			reverse: true,
+		},
+		{
+			name:   "surrounding whitespace is normalized",
+			input:  "  Reviewer  ",
+			wantID: reviewerID,
+		},
+		{
+			name:   "at-prefixed name is normalized",
+			input:  "@reviewer",
+			wantID: reviewerID,
+		},
+		{
+			name:   "short ID uses shared assignee matching",
+			input:  "f656eab8",
+			wantID: reviewerID,
+		},
+		{
+			name:   "agent mention uses shared assignee matching",
+			input:  "[Reviewer](mention://agent/" + reviewerID + ")",
+			wantID: reviewerID,
+		},
+		{
+			name:   "unique substring still resolves",
+			input:  "claude",
+			wantID: claudeID,
+		},
+		{
+			name:          "substring without exact match remains ambiguous",
+			input:         "review",
+			wantAmbiguous: true,
+		},
+		{
+			name:          "duplicate full names remain ambiguous",
+			input:         "Reviewer",
+			duplicate:     true,
+			wantAmbiguous: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			agents := []map[string]any{
+				{"id": reviewerID, "name": "Reviewer"},
+				{"id": claudeID, "name": "Claude Reviewer"},
+			}
+			if tt.reverse {
+				agents[0], agents[1] = agents[1], agents[0]
+			}
+			if tt.duplicate {
+				agents = append(agents, map[string]any{
+					"id": "33333333-3333-3333-3333-333333333333", "name": "reviewer",
+				})
+			}
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet || r.URL.Path != "/api/agents" || r.URL.Query().Get("workspace_id") != "ws-1" {
+					t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+					http.NotFound(w, r)
+					return
+				}
+				json.NewEncoder(w).Encode(agents)
+			}))
+			defer srv.Close()
+
+			client := cli.NewAPIClient(srv.URL, "ws-1", "test-token")
+			got, err := resolveAgent(context.Background(), client, tt.input)
+			if tt.wantAmbiguous {
+				if err == nil || !strings.Contains(err.Error(), "ambiguous") {
+					t.Fatalf("got (%q, %v), want ambiguity error", got, err)
+				}
+				if tt.duplicate && strings.Contains(err.Error(), "Claude Reviewer") {
+					t.Fatalf("duplicate full-name error includes substring-only match: %v", err)
+				}
+				return
+			}
+			if err != nil || got != tt.wantID {
+				t.Fatalf("got (%q, %v), want (%q, nil)", got, err, tt.wantID)
+			}
+		})
+	}
+}
+
 func TestRunAutopilotCreateSendsProjectID(t *testing.T) {
 	const (
 		agentID   = "11111111-1111-1111-1111-111111111111"

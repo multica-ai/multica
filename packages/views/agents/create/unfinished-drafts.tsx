@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronRight, MessageSquare } from "lucide-react";
+import { ChevronRight, MessageSquare } from "@multica/ui/icons";
 import { decodeBuilderInput, stripBuilderDraft } from "@multica/core/agents";
 import type { AgentBuilderSessionSummary } from "@multica/core/types";
 import {

@@ -7,7 +7,9 @@ import (
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/testutil"
+	"github.com/multica-ai/multica/server/internal/themestore"
 )
 
 func TestGetConfigReportsCdnSignedMode(t *testing.T) {
@@ -49,12 +51,24 @@ func TestGetConfigReportsCdnSignedMode(t *testing.T) {
 	if cfg.CdnDomain != "cdn.example.com" {
 		t.Fatalf("cdn_domain: want cdn.example.com alongside cdn_signed, got %q", cfg.CdnDomain)
 	}
+	t.Setenv("LOCAL_UPLOAD_DIR", t.TempDir())
+	t.Setenv("LOCAL_UPLOAD_BASE_URL", "https://local.example.test")
+	testHandler.CFSigner = nil
+	testHandler.Storage = storage.NewLocalStorageFromEnv()
+	if cfg := fetch(); !cfg.CdnSigned || cfg.CdnDomain != "local.example.test" {
+		t.Fatalf("local storage must declare private downloads even with a base URL: %+v", cfg)
+	}
 }
 
 func TestGetConfigIncludesRuntimeAuthConfig(t *testing.T) {
 	origStorage := testHandler.Storage
+	origCfg := testHandler.cfg
 	testHandler.Storage = &mockStorage{}
-	defer func() { testHandler.Storage = origStorage }()
+	testHandler.cfg.PublicURL = "https://api.example.com"
+	defer func() {
+		testHandler.Storage = origStorage
+		testHandler.cfg = origCfg
+	}()
 
 	t.Setenv("ALLOW_SIGNUP", "false")
 	t.Setenv("GOOGLE_CLIENT_ID", "google-client-id")
@@ -79,6 +93,9 @@ func TestGetConfigIncludesRuntimeAuthConfig(t *testing.T) {
 
 	if cfg.CdnDomain != "cdn.example.com" {
 		t.Fatalf("cdn_domain: want cdn.example.com, got %q", cfg.CdnDomain)
+	}
+	if cfg.AttachmentPublicURL != "https://api.example.com" {
+		t.Fatalf("attachment_public_url = %q, want API public URL", cfg.AttachmentPublicURL)
 	}
 	if cfg.AllowSignup {
 		t.Fatalf("allow_signup: want false, got true")
@@ -119,6 +136,32 @@ func TestGetConfigUsesDaemonServerURLOverride(t *testing.T) {
 	}
 	if cfg.DaemonAppURL != "https://app.example.com" {
 		t.Fatalf("daemon_app_url: want app URL, got %q", cfg.DaemonAppURL)
+	}
+}
+
+func TestGetConfigDeclaresDaemonSetupTarget(t *testing.T) {
+	for _, tt := range []struct {
+		name, appURL, wantTarget, wantServerURL string
+	}{
+		{"official Cloud", "https://multica.ai", "cloud", ""},
+		{"configured self-host", "https://app.example.com", "self_host", "https://api.example.com"},
+		{"incomplete self-host", "", "self_host", ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("MULTICA_APP_URL", tt.appURL)
+			t.Setenv("FRONTEND_ORIGIN", "")
+			t.Setenv("MULTICA_PUBLIC_URL", "https://api.example.com")
+			t.Setenv("MULTICA_DAEMON_SERVER_URL", "")
+			var cfg AppConfig
+			req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+			testutil.Call(t, testHandler.GetConfig, req).Want(http.StatusOK).JSON(&cfg)
+			if cfg.DaemonSetupTarget != tt.wantTarget {
+				t.Fatalf("daemon_setup_target = %q, want %q", cfg.DaemonSetupTarget, tt.wantTarget)
+			}
+			if cfg.DaemonServerURL != tt.wantServerURL {
+				t.Fatalf("daemon_server_url = %q, want %q", cfg.DaemonServerURL, tt.wantServerURL)
+			}
+		})
 	}
 }
 
@@ -449,6 +492,9 @@ func TestGetConfigExposesFrontendFeatureFlags(t *testing.T) {
 	if !cfg.FeatureFlags["settings_resource_labels"] {
 		t.Fatalf("settings_resource_labels: want true for installed clients, got false")
 	}
+	if !cfg.FeatureFlags["project_workflows_v1"] {
+		t.Fatal("project_workflows_v1: want true for installed clients")
+	}
 	if !cfg.FeatureFlags["agents_agent_builder"] {
 		t.Fatalf("agents_agent_builder: want true for installed clients, got false")
 	}
@@ -497,6 +543,24 @@ func TestGetConfigExposesEnabledPluginsV1Flag(t *testing.T) {
 	}
 	if !cfg.FeatureFlags["plugins_v1"] {
 		t.Fatal("plugins_v1: want true with flag enabled, got false")
+	}
+}
+
+func TestGetConfigKeepsProjectWorkflowsEnabledForInstalledClients(t *testing.T) {
+	h := &Handler{}
+	withFeatureFlag(t, h, "project_workflows_v1", false)
+
+	w := httptest.NewRecorder()
+	h.GetConfig(w, httptest.NewRequest(http.MethodGet, "/api/config", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetConfig: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var cfg AppConfig
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if !cfg.FeatureFlags["project_workflows_v1"] {
+		t.Fatal("retired project_workflows_v1 overrides must not hide workflows in installed clients")
 	}
 }
 
@@ -597,5 +661,34 @@ func TestGetConfigDeclaresCommentDeleteKeepsReplies(t *testing.T) {
 	}
 	if raw["comment_delete_keep_replies_supported"] != true {
 		t.Fatalf("comment_delete_keep_replies_supported = %v, want true", raw["comment_delete_keep_replies_supported"])
+	}
+}
+
+func TestGetConfigReportsTheThemeStore(t *testing.T) {
+	orig := testHandler.ThemeStore
+	t.Cleanup(func() { testHandler.ThemeStore = orig })
+
+	fetch := func() map[string]json.RawMessage {
+		t.Helper()
+		w := httptest.NewRecorder()
+		testHandler.GetConfig(w, httptest.NewRequest(http.MethodGet, "/api/config", nil))
+		var cfg map[string]json.RawMessage
+		if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+			t.Fatalf("decode config: %v", err)
+		}
+		return cfg
+	}
+
+	testHandler.ThemeStore = nil
+	if _, ok := fetch()["theme_store_enabled"]; ok {
+		t.Fatal("theme_store_enabled must be omitted when the store is off")
+	}
+	store, err := themestore.New(themestore.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	testHandler.ThemeStore = store
+	if raw := fetch()["theme_store_enabled"]; string(raw) != "true" {
+		t.Fatalf("theme_store_enabled: want true, got %s", raw)
 	}
 }

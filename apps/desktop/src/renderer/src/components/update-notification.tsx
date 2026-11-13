@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { RefreshCw, X } from "lucide-react";
+import { RefreshCw, X } from "@multica/ui/icons";
 
 // Downloads run silently in the background (main process has
 // autoDownload=true). The renderer only renders UI once the package is fully
@@ -33,6 +33,7 @@ export function UpdateNotification() {
         type="button"
         onClick={() => setDismissed(true)}
         className="absolute top-2 right-2 rounded-md p-1 text-muted-foreground hover:text-foreground transition-colors"
+        aria-label="Dismiss"
       >
         <X className="size-3.5" />
       </button>

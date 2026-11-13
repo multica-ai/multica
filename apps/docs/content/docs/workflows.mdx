@@ -1,0 +1,97 @@
+---
+title: Workflows
+description: Set the steps a project's issues follow and who takes over at each step.
+---
+
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { WorkflowDemo } from "@/components/demos/workflow-demo";
+
+A workflow sets the steps a project's issues go through, who handles each step, and what they should do.
+
+For example, a delivery workflow could look like this:
+
+| Step | Who handles it | What they do |
+|---|---|---|
+| Development | An engineering agent | Implement the change and prepare it for review. |
+| Review | A review agent | Check the result, then pass it to QA or send it back for changes. |
+| QA | A team member | Try the result and decide whether it is ready to finish. |
+
+Moving an issue into Review hands it to the review agent. The description, discussion, and earlier results stay on the same issue, so the next person or agent can pick up where the last one left off.
+
+The **Delivery** template has this shape. Projects that do not choose a workflow use **Default**: every status is available and nothing is handed off automatically, just as before.
+
+## Create a workflow
+
+In the web or desktop app, a workspace `owner` or `admin` can create workflows:
+
+<Steps>
+<Step>
+
+Open **Settings → Workflows** and choose **New workflow**. Start blank or use the **Delivery**, **Content**, or **Community** template.
+
+</Step>
+<Step>
+
+Name the workflow and choose its status columns. Drag the middle columns into the order your team uses.
+
+</Step>
+<Step>
+
+Select a column and choose what happens when an issue enters it: **No handoff**, **Hand to an agent**, or **Hand to a member**. You can also choose the **Project lead** from the member picker.
+
+</Step>
+<Step>
+
+For an agent step, write what it should do. Then set **When done, move to** (the next column if you leave it unset) and **If rejected, send back to** (used when this step finds the work it received unacceptable and it needs rework). Use **Blocked**, not send-back, when the step cannot continue for an outside reason.
+
+</Step>
+<Step>
+
+Preview the agent's brief, then save.
+
+</Step>
+</Steps>
+
+If you added a new status, save the workflow before setting up that status's handoff.
+
+**No handoff** keeps the current assignee. Handing to a member assigns the work without starting an agent. Handing to an agent asks it to start this step; it still needs to be available to you, and its computer needs to be online to run.
+
+## Use it in a project
+
+Open a project and choose its **Workflow**. Workspace owners, admins, and the project's lead, when that lead is a member, can change this choice.
+
+The confirmation shows which issues keep their status. If the new workflow does not have a status some issues are using, choose where those issues should go. Switching workflows does not hand off issues or start agents.
+
+The project's board now follows the workflow's columns. Each issue's status picker offers the steps in that workflow and shows who takes over. Projects that have not chosen a workflow use **Default**; you can switch back to it later.
+
+## Move work to the next step
+
+Change an issue's status or drag its card to another column. If that step has a handoff, check who will receive it and, for an agent, the instructions it will receive.
+
+<WorkflowDemo />
+
+When you create an issue in a project without picking an assignee, and its status has a handoff, the issue goes straight to that step's handler; an agent starts right away. The create dialog shows who it will be handed to. To create it without starting anything yet, put it in Backlog.
+
+When the previous assignee is an agent with a run underway or waiting to start, the confirmation adds an option to stop or cancel it, selected by default. Leave it selected unless you want both agents working at once; the comments and work it already saved are kept.
+
+**When done, move to** and **If rejected, send back to** tell the agent where to move the issue next. A run finishing does not move the issue by itself: the member or agent handling the step updates its status. When an agent moves the issue into the next step, that step's handoff runs just as it would for a member.
+
+You can see the handoff and its instructions in the issue's timeline. Open the workflow menu on the project board to view the full flow.
+
+## Adjust a workflow
+
+A workflow can be shared by several projects. Changes saved in **Settings → Workflows** apply to every project using it. To give one project a different process, duplicate the workflow and select the copy in that project.
+
+Admins can also set a handoff from the project board: hover a column header and click **Hand to…**, or click the handler already shown. If other projects share the workflow, you are asked **Where should this change apply?** Choosing only the current project makes a copy of the workflow for it and leaves the other projects unchanged.
+
+Removing a column may ask you to choose a new status for issues already in it. Other issues stay where they are, and this move does not start agents. The status library below the workflows is where you rename or recolor statuses; those changes are shared wherever the status is used.
+
+To delete a workflow, first switch the projects using it to another workflow. Issues keep their current status.
+
+If **Settings** does not include **Workflows**, the feature is not available in this workspace yet, and statuses are still managed in **Settings → Issue Statuses**.
+
+## Related guides
+
+- [Projects](/projects) — organize the issues that follow a workflow.
+- [Quick Actions](/quick-actions) — save a frequent request as a button on an issue.
+- [Autopilots](/autopilots) — start recurring work on a schedule or from an outside event.

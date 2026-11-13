@@ -8,6 +8,14 @@ const (
 	ScopeUser      = "user"
 	ScopeTask      = "task"
 	ScopeChat      = "chat"
+	// ScopeWorkspaceMember holds one user's connections bound to one
+	// workspace (see WorkspaceMemberScopeID). Content private to a member of
+	// a workspace goes here rather than to ScopeUser: each of these
+	// connections is re-authorized against that workspace on every write, so
+	// removal from the workspace stops delivery even while the user stays
+	// connected to another workspace. Joined at connect time only; clients
+	// cannot subscribe to it.
+	ScopeWorkspaceMember = "workspace_member"
 	// ScopeDaemonRuntime routes daemon wakeup frames through the Redis relay.
 	// It is consumed by the daemon WebSocket hub, not by browser clients.
 	ScopeDaemonRuntime = "daemon_runtime"
@@ -28,6 +36,12 @@ const (
 	// replica, and the relay is how the others reach it.
 	ScopeWecomOutbound = "wecom_outbound"
 )
+
+// WorkspaceMemberScopeID is the ScopeWorkspaceMember room for userID's
+// connections to workspaceID.
+func WorkspaceMemberScopeID(workspaceID, userID string) string {
+	return workspaceID + ":" + userID
+}
 
 // Broadcaster is the abstraction every realtime event producer should depend
 // on instead of *Hub directly.

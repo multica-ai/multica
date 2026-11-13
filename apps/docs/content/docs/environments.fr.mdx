@@ -1,0 +1,248 @@
+---
+title: Environnements
+description: Voir les serveurs de développement et les apps que lancent les exécutions d'une tâche, et les déclarer dans .multica/environments.toml pour que les membres puissent les démarrer, les arrêter et lire leurs journaux depuis la barre latérale.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
+
+Quand un agent travaille sur une application web, le résultat est souvent quelque chose à ouvrir : un serveur de développement, un aperçu, une app de bureau. La section **Environnements** de la barre latérale d'une tâche liste ce que les exécutions de la tâche font tourner, regroupé par appareil, avec un lien pour ouvrir chaque élément.
+
+Un environnement y apparaît de deux façons :
+
+| | Détecté | Déclaré |
+|---|---|---|
+| D'où il vient | Le daemon trouve un serveur à l'écoute dans le répertoire d'une exécution | Le dépôt le décrit dans `.multica/environments.toml`, et un agent le démarre avec `multica env start` |
+| Mise en place | Aucune | Ajouter le fichier au dépôt |
+| Après la fin de l'exécution | Reste affiché tant que le processus tourne | Supervisé par le daemon jusqu'à son arrêt ou la fin de son TTL |
+| Depuis la barre latérale | Ouvrir, copier l'URL, arrêter | Ouvrir, copier l'URL, démarrer, arrêter, redémarrer, voir les journaux |
+
+La détection rend la section utile sans configuration. La déclaration rend un environnement reproductible : chaque exécution le démarre de la même façon, sur ses propres ports, avec un journal lisible depuis la barre latérale.
+
+## Serveurs détectés [#detected]
+
+Sur macOS et Linux, le daemon cherche environ toutes les 30 secondes les processus à l'écoute sur un port TCP. Un processus apparaît dans la barre latérale quand :
+
+- son répertoire de travail se trouve dans le répertoire d'une des exécutions de la tâche ;
+- il a été trouvé lors de deux analyses consécutives, pour écarter les serveurs de test éphémères.
+
+Sont exclus :
+
+- les outils de codage IA eux-mêmes et le CLI `multica` ;
+- les serveurs lancés depuis le [répertoire local](/project-resources) d'un projet, qui sont les vôtres et non ceux d'une exécution ;
+- les serveurs qui appartiennent déjà à un environnement déclaré, listés une seule fois, sous cet environnement ;
+- les serveurs d'exécutions qui ne sont pas liées à une tâche, comme les sessions de chat.
+
+Une app de bureau (par exemple une app Electron) est listée une seule fois, comme une app, et non port par port. Elle n'a pas d'URL ; depuis Multica Desktop sur le même appareil, **Afficher la fenêtre** la met au premier plan. Ses ports de débogage à distance ne sont pas proposés comme liens.
+
+Un serveur détecté reste affiché après la fin de son exécution, tant qu'il reste à l'écoute. Les membres peuvent l'arrêter depuis la barre latérale, mais le daemon ne sait pas comment il a été lancé : il n'a donc pas de journal et ne peut pas être redémarré. Pour en disposer, déclarez-le.
+
+## Déclarer des environnements [#declare]
+
+Ajoutez `.multica/environments.toml` à la racine du dépôt et committez-le sur la branche que vos exécutions récupèrent. La barre latérale ne trouve le fichier qu'à la racine d'un checkout ou un répertoire en dessous, et ignore un fichier qui contient des erreurs ; `multica env start` indique ce qui ne va pas. Chaque table `[environments.<name>]` est un environnement :
+
+```toml
+[environments.web]
+label = "Web app"
+start = "npm ci && npx vite --port $MULTICA_PORT --strictPort"
+ttl = "24h"
+```
+
+Un agent le démarre ensuite depuis son checkout :
+
+```bash
+multica env start web
+```
+
+La commande attend que l'environnement réponde, puis affiche son URL. L'environnement apparaît dans la barre latérale, continue de tourner après la fin de l'exécution et s'arrête à la fin de son TTL.
+
+### Champs [#fields]
+
+| Champ | Obligatoire | Par défaut | Rôle |
+|---|---|---|---|
+| `start` | Oui | | Commande shell qui démarre l'environnement. Exécutée avec `/bin/sh -c` depuis le répertoire qui contient `.multica/`. |
+| `label` | Non | Le nom | Nom affiché dans la barre latérale. |
+| `url` | Non | `http://localhost:$MULTICA_PORT` | Adresse que les membres ouvrent. Mettez `url = ""` pour ce qui n'a pas de page, comme un worker ou une app de bureau. |
+| `ready` | Non | Identique à `url` | Adresse interrogée jusqu'à ce qu'elle réponde avec un statut inférieur à 500 (un 404 compte). Sans `ready` ni `url`, l'environnement est en cours dès que `start` est lancé. |
+| `stop` | Non | | Commande exécutée avant que le daemon n'envoie un signal aux processus. Utile quand `start` crée quelque chose que ses processus ne possèdent pas, comme des conteneurs. |
+| `ttl` | Non | `24h` | Durée avant l'arrêt, de `1m` à `168h`. Utilisez `s`, `m` ou `h` ; `7d` n'est pas accepté. |
+
+Le nom de l'environnement est la partie après `environments.` : lettres minuscules, chiffres, `-` et `_`, 40 caractères au plus, en commençant par une lettre ou un chiffre.
+
+### Ports et variables [#ports]
+
+Chaque environnement reçoit dix ports libres rien qu'à lui, de `MULTICA_PORT` à `MULTICA_PORT+9`. Deux exécutions sur le même appareil, ou deux tâches, n'entrent jamais en conflit : n'écrivez donc jamais un port en dur.
+
+`start` et `stop` reçoivent ces variables :
+
+| Variable | Valeur |
+|---|---|
+| `MULTICA_PORT` | Le premier port du bloc, par exemple `41000` |
+| `MULTICA_ENVIRONMENT` | Le nom de l'environnement |
+| `PATH` | Le `PATH` de l'agent qui a lancé `multica env start`, pour que la chaîne d'outils du dépôt soit trouvée. Un démarrage depuis la barre latérale reprend le dernier utilisé par un agent pour cet environnement sur la tâche. |
+
+Ils héritent aussi de l'environnement du daemon, sauf de ses variables `MULTICA_*`, identifiants compris : un environnement ne peut pas agir au nom de l'exécution. Dans `url` et `ready`, seul `$MULTICA_PORT` (ou `${MULTICA_PORT}`) est remplacé. Pour un second port, calculez-le dans le shell, par exemple `API_PORT=$((MULTICA_PORT + 1))`.
+
+### Garder `start` au premier plan [#foreground]
+
+`start` s'exécute en tant que chef d'un nouveau groupe de processus. L'environnement vit tant qu'un processus de ce groupe tourne, et l'arrêter envoie un signal à tout le groupe. Donc :
+
+- Gardez le serveur principal au premier plan. Les processus auxiliaires lancés avec `&` ne posent pas de problème : ils restent dans le groupe.
+- Ne confiez pas le travail à quelque chose hors du groupe, comme `docker compose up -d`, un service système ou `setsid`. L'environnement passerait aussitôt à **Terminé**, et l'arrêter n'atteindrait pas ce travail. Lancez ces outils au premier plan et ajoutez une commande `stop`.
+- Le checkout d'une exécution démarre sans dépendances installées. Installez-les dans `start` ; les dix minutes pendant lesquelles le daemon attend que l'environnement soit prêt incluent ce temps.
+
+## Exemples [#examples]
+
+Chaque exemple est un `.multica/environments.toml` complet. Remplacez `npm ci` par la commande d'installation de votre gestionnaire de paquets (`pnpm install --frozen-lockfile`, `yarn install --immutable`) selon le dépôt.
+
+<Tabs items={["Next.js", "Vite", "Go API", "Web + API", "docker compose"]}>
+<Tab value="Next.js">
+
+```toml
+[environments.web]
+label = "Web app"
+start = "npm ci && npx next dev --port $MULTICA_PORT"
+ttl = "24h"
+```
+
+</Tab>
+<Tab value="Vite">
+
+```toml
+[environments.web]
+label = "Web app"
+start = "npm ci && npx vite --port $MULTICA_PORT --strictPort"
+ttl = "24h"
+```
+
+`--strictPort` fait échouer Vite au lieu de le laisser passer discrètement à un autre port, ce qui laisserait le lien de la barre latérale pointer vers rien.
+
+</Tab>
+<Tab value="Go API">
+
+```toml
+[environments.api]
+label = "API"
+start = "PORT=$MULTICA_PORT go run ./cmd/server"
+ready = "http://localhost:$MULTICA_PORT/healthz"
+ttl = "8h"
+```
+
+On suppose ici que le serveur lit son port dans `PORT` et expose un contrôle de santé sur `/healthz` ; adaptez les deux à votre code.
+
+</Tab>
+<Tab value="Web + API">
+
+```toml
+[environments.app]
+label = "Web + API"
+start = """
+API_PORT=$((MULTICA_PORT + 1))
+(cd api && PORT=$API_PORT go run .) &
+cd web && npm ci && VITE_API_URL=http://localhost:$API_PORT npx vite --port $MULTICA_PORT --strictPort
+"""
+ttl = "24h"
+```
+
+L'API tourne en arrière-plan sur le deuxième port du bloc, et l'application web au premier plan sur le premier. Arrêter l'environnement arrête les deux.
+
+</Tab>
+<Tab value="docker compose">
+
+```toml
+[environments.stack]
+label = "Full stack"
+start = "docker compose -p env-$MULTICA_PORT up --build"
+stop = "docker compose -p env-$MULTICA_PORT down"
+ttl = "8h"
+```
+
+Dans `compose.yaml`, publiez le service web sur le port de l'environnement :
+
+```yaml
+services:
+  web:
+    build: .
+    ports:
+      - "${MULTICA_PORT:-3000}:3000"
+```
+
+Sans `-d`, `up` reste au premier plan. Les conteneurs appartiennent à Docker, pas aux processus de l'environnement : c'est `stop` qui les arrête. `-p env-$MULTICA_PORT` donne à chaque environnement son propre projet Compose, pour que des exécutions parallèles ne partagent pas de conteneurs.
+
+</Tab>
+</Tabs>
+
+Pour déclarer plusieurs environnements, ajoutez d'autres tables dans le même fichier. Les processus d'un environnement s'arrêtent avec lui, même quand un autre environnement du même checkout les utilise. Les serveurs qui doivent continuer de tourner ensemble, comme une application web et son API, vont dans un seul environnement, comme dans l'exemple Web + API.
+
+## Démarrer et arrêter avec le CLI [#cli]
+
+| Commande | Effet |
+|---|---|
+| `multica env start <name>` | Démarre l'environnement à partir du `.multica/environments.toml` trouvé dans le répertoire courant ou un parent. Attend qu'il soit prêt, puis affiche son URL. Si cette tâche a déjà un environnement de ce nom en cours depuis le même checkout, le renvoie tel quel. |
+| `multica env start <name> --wait=false` | Rend la main dès qu'il a démarré. |
+| `multica env list` | Liste les environnements de cette tâche sur cet appareil, avec leur état, leur URL et le chemin de leur journal. |
+| `multica env stop <name>` | Arrête l'environnement en cours de ce nom pour cette tâche sur cet appareil : exécute la commande `stop` s'il y en a une, puis envoie `SIGTERM` aux processus restants, et `SIGKILL` 10 secondes plus tard. Si plusieurs tournent sous ce nom, il en arrête un ; pour en arrêter un en particulier, utilisez la barre latérale. |
+
+Les trois acceptent `--output json`. `multica environment` est la forme longue de `multica env`.
+
+<Callout type="info">
+Ces commandes utilisent l'identifiant de la tâche en cours : elles **ne fonctionnent que pendant l'exécution d'un agent**. Lancées dans votre propre terminal, elles échouent avec `MULTICA_DAEMON_PORT not set`. Pour démarrer ou arrêter un environnement vous-même, utilisez la barre latérale.
+</Callout>
+
+Si la commande de démarrage se termine avant d'être prête, `multica env start` échoue et affiche les dernières lignes de son journal. Si elle ne répond toujours pas après 10 minutes, la commande rend la main, l'environnement reste en **Démarrage** et la raison (par exemple « not answering at http://localhost:41000 ») est affichée avec lui.
+
+Les environnements appartiennent à la tâche, pas à une exécution : une exécution ultérieure sur la même tâche peut lister et arrêter ce qu'une précédente a démarré. Démarrer de nouveau un nom ne réutilise l'environnement en cours que s'il tourne depuis le même checkout sur cet appareil. Une exécution avec un autre checkout démarre une seconde instance sous le même nom, sur ses propres ports : vérifiez `multica env list` avant d'en démarrer une.
+
+## Gérer les environnements dans la barre latérale [#sidebar]
+
+Chaque environnement affiche son état, quand il a démarré ou s'est terminé, quand il expire et qui l'a démarré. **Ouvrir** ouvre son URL et **Copier l'URL** la copie. Les environnements terminés sont regroupés sous « N terminés ».
+
+- **Démarrer** : cliquez sur **+** à côté de **Environnements**. Le menu liste les environnements déclarés par la dernière exécution sur chaque appareil, et démarre celui que vous choisissez avec le code de cette exécution. Si la tâche n'a pas encore été exécutée ou si ce code a été nettoyé, il propose plutôt de le demander à un agent : l'agent prépare le code et lance `multica env start`, ou détermine comment démarrer le projet s'il ne déclare rien.
+- **Arrêter, redémarrer, voir les journaux** : ouvrez le menu **Plus d'actions** de l'environnement. **Redémarrer** relit la déclaration dans le checkout ; le checkout et son `.multica/environments.toml` doivent donc encore exister. Un serveur détecté ne propose que **Arrêter**, après confirmation.
+
+Démarrer, arrêter et redémarrer demandent d'être un membre de l'espace de travail qui a accès à la tâche et peut utiliser le runtime de cet appareil (voir [Daemon et runtimes](/daemon-runtimes)). L'appareil doit être en ligne, avec une version de Multica qui prend en charge le contrôle des environnements ; sinon, les boutons indiquent ce qui manque. Lire les journaux demande seulement l'accès à la tâche.
+
+### Journaux [#logs]
+
+**Voir les journaux** affiche les 500 dernières lignes de sortie d'un environnement déclaré, dans la limite de 256 Kio. Tant que l'environnement tourne, l'affichage suit la nouvelle sortie environ toutes les cinq secondes ; vous pouvez suspendre le suivi, actualiser, filtrer, activer le retour à la ligne et copier.
+
+Quand un environnement plante, ses deux dernières lignes de sortie sont conservées avec lui : la barre latérale peut montrer pourquoi il s'est arrêté même une fois l'appareil hors ligne. Une nouvelle lecture nécessite que l'appareil soit en ligne.
+
+Le journal complet reste sur l'appareil, sous `<workspaces root>/.environments/v1/`, et est conservé sept jours après la fin de l'environnement. `multica env start` et `multica env list` affichent son chemin.
+
+<Callout type="warning">
+Toute personne ayant accès à la tâche peut lire les journaux d'un environnement. Multica masque les secrets reconnaissables dans les lignes envoyées et supprime les lectures de journaux après dix minutes, mais ne comptez pas dessus : gardez les identifiants hors de la sortie de vos serveurs.
+</Callout>
+
+## États [#states]
+
+| État | Signification |
+|---|---|
+| Démarrage | Démarré ; attend que son adresse `ready` réponde. |
+| En cours | Prêt, ou à l'écoute (pour un serveur détecté). |
+| Terminé | Ses processus se sont arrêtés d'eux-mêmes, par exemple après un plantage. Le code de sortie et les dernières lignes de sortie sont affichés. |
+| Arrêté | Arrêté par un agent, un membre ou son TTL (« Arrêté à l'expiration »). |
+| Sans réponse | L'appareil qui le fait tourner ne l'a pas signalé depuis trois minutes : le daemon s'est arrêté, ou l'appareil est en veille ou hors ligne. Il retrouve son état réel dès que le daemon se manifeste. |
+
+Pendant que le daemon est arrêté, rien n'est supervisé ; au redémarrage, il reprend les environnements dont les processus tournent encore. Un répertoire d'exécution où tourne un environnement n'est pas supprimé par le nettoyage des espaces de travail du daemon tant que l'environnement n'est pas arrêté.
+
+## Laisser un agent écrire le fichier [#agent]
+
+Les agents connaissent le format : la compétence de plateforme intégrée à Multica, que reçoit chaque agent, documente `.multica/environments.toml` et la façon de le vérifier. Demandez-le dans une tâche, par exemple :
+
+> Ajoute un `.multica/environments.toml` pour que l'application web de ce dépôt puisse être démarrée avec `multica env start`. Démarre-la une fois pour vérifier qu'elle fonctionne, puis ouvre une PR.
+
+L'agent regarde comment le projet démarre, écrit le fichier avec des ports tirés de `MULTICA_PORT`, démarre l'environnement pour vérifier qu'il répond, et livre le fichier comme n'importe quelle autre modification. Une fois fusionné, chaque exécution suivante peut démarrer l'environnement, et les membres aussi depuis la barre latérale.
+
+## Limites connues [#limitations]
+
+- **macOS et Linux uniquement.** Sous Windows, les serveurs ne sont pas détectés et `multica env start` indique que les environnements ne sont pas encore pris en charge.
+- **Une URL localhost ne s'ouvre que sur l'appareil qui l'exécute.** Quand l'environnement tourne sur un autre appareil, comme un serveur de build ou l'ordinateur d'un collègue, la barre latérale l'indique ; ouvrez-le sur cet appareil, ou redirigez le port vous-même.
+- **Redémarrages du daemon sous systemd.** Sous Linux avec le [démarrage à l'ouverture de session](/daemon-runtimes#autostart), redémarrer ou mettre à jour le daemon arrête aussi ses environnements déclarés. Redémarrez-les ensuite.
+- **Un appareil par environnement.** Un environnement tourne là où a tourné l'exécution qui l'a démarré ; il ne suit pas la tâche.
+
+## Étapes suivantes
+
+- [Daemon et runtimes](/daemon-runtimes) — le daemon qui détecte et supervise les environnements.
+- [Utiliser le CLI](/cli#environments) — les commandes `multica env` parmi le reste du CLI.
+- [Exécutions](/tasks) — d'où vient le répertoire d'une exécution.

@@ -111,6 +111,35 @@ func TestShardedStreamRelayDeliverMessageUsesEnvelopeScope(t *testing.T) {
 	}
 }
 
+// A member's private content published on another node lands only on that
+// member's connections to the same workspace, as it does on the local path.
+func TestShardedStreamRelayDeliversWorkspaceMemberScopeToThatWorkspaceOnly(t *testing.T) {
+	hub := NewHub()
+	newClient := func(userID, workspaceID string) *Client {
+		c := &Client{hub: hub, send: make(chan []byte, 4), userID: userID, workspaceID: workspaceID}
+		hub.registerClient(c)
+		return c
+	}
+	owner := newClient("owner", "ws-x")
+	ownerElsewhere := newClient("owner", "ws-y")
+	peer := newClient("peer", "ws-x")
+	relay := NewShardedStreamRelay(hub, nil, nil, ShardedStreamRelayConfig{})
+
+	relay.deliverMessage(redis.XMessage{Values: envelopeRedisValues(envelope{
+		EventID:     "event-1",
+		Scope:       ScopeWorkspaceMember,
+		ScopeID:     WorkspaceMemberScopeID("ws-x", "owner"),
+		PayloadJSON: `{"type":"chat:done"}`,
+	})})
+
+	if len(owner.send) != 1 {
+		t.Fatalf("owner's ws-x connection got %d frames, want 1", len(owner.send))
+	}
+	if len(ownerElsewhere.send) != 0 || len(peer.send) != 0 {
+		t.Fatalf("relayed frame reached ws-y owner (%d) or peer (%d)", len(ownerElsewhere.send), len(peer.send))
+	}
+}
+
 func TestShardedStreamRelayReplayStartIDIsBounded(t *testing.T) {
 	grace := 5 * time.Minute
 	relay := NewShardedStreamRelay(NewHub(), nil, nil, ShardedStreamRelayConfig{

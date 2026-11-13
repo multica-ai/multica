@@ -159,13 +159,18 @@ describe("formatEnvFile", () => {
     });
   });
 
-  it("refuses keys the parser could not read back", () => {
-    expect(formatEnvFile([{ key: "foo-bar", value: "x" }])).toEqual({
-      ok: false,
-      reason: "unrepresentable",
-      key: "foo-bar",
-    });
-  });
+  // The API stores any key, but a line only reads back with a dotenv
+  // identifier. Report it as the key's problem, not the value's (#10357).
+  it.each(["foo-bar", "MY-TOOL_api_key", "1ST", "has space"])(
+    "refuses key %j as an invalid name",
+    (key) => {
+      expect(formatEnvFile([{ key, value: "x" }])).toEqual({
+        ok: false,
+        reason: "invalid_key",
+        key,
+      });
+    },
+  );
 
   it("refuses duplicate keys, which no text could round-trip", () => {
     expect(

@@ -36,6 +36,13 @@ require_rendered_value "$default_config" 'MULTICA_VCS_INTEGRATION_ENABLED: "true
 require_rendered_value "$default_config" 'MULTICA_CLOUD_URL: ""'
 require_rendered_value "$default_config" 'MULTICA_DATABASE_STARTUP_TIMEOUT: "3m"'
 require_rendered_value "$default_config" 'MULTICA_DATABASE_CONNECT_TIMEOUT: "5s"'
+require_rendered_value "$default_config" 'MULTICA_MAX_PREVIEW_SIZE: "2MiB"'
+preview_config="$(
+  helm template multica "$CHART_DIR" \
+    --show-only templates/configmap.yaml \
+    --set-string backend.config.maxPreviewSize=8MiB
+)"
+require_rendered_value "$preview_config" 'MULTICA_MAX_PREVIEW_SIZE: "8MiB"'
 
 require_rendered_value "$default_config" 'MAINTENANCE_PORT: ""'
 maintenance_config="$(helm template multica "$CHART_DIR" --show-only templates/configmap.yaml --set-string backend.config.maintenancePort=6061)"

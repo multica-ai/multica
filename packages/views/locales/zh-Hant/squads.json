@@ -1,0 +1,158 @@
+{
+  "page": {
+    "title": "小隊",
+    "new_button": "新建小隊",
+    "empty_no_match": "沒有匹配篩選條件的小隊。",
+    "table": {
+      "name": "小隊",
+      "leader": "隊長",
+      "members": "成員",
+      "creator": "建立者",
+      "created": "建立時間"
+    },
+    "no_matches": "沒有匹配的小隊",
+    "row_menu": "小隊操作",
+    "archive_action": "歸檔"
+  },
+  "member_type": {
+    "agent": "AI 代理",
+    "member": "成員"
+  },
+  "archive_dialog": {
+    "title": "歸檔這個小隊？",
+    "description": "“{{name}}” 將被歸檔，該小隊當前承接的任務會轉交給小隊負責人。此操作無法撤銷，如需恢復路由請新建小隊。",
+    "cancel": "取消",
+    "confirm": "歸檔",
+    "archiving": "歸檔中…",
+    "success": "已歸檔小隊"
+  },
+  "name_editor": {
+    "placeholder": "小隊名稱"
+  },
+  "add_member_dialog": {
+    "title": "新增成員",
+    "description": "可選擇工作區成員或 AI 代理。",
+    "label_member": "成員",
+    "label_role": "角色",
+    "label_optional": "（可選）",
+    "cancel": "取消",
+    "select_target": "選擇成員或 AI 代理",
+    "search_placeholder": "搜尋成員或 AI 代理...",
+    "members_section": "成員",
+    "agents_section": "AI 代理",
+    "role_placeholder": "例如：審查者、前端負責人",
+    "add": "新增"
+  },
+  "role_editor": {
+    "empty": "新增角色…",
+    "placeholder": "角色（例如：審查者）"
+  },
+  "description_editor": {
+    "empty": "新增描述",
+    "placeholder": "這個小隊負責什麼？"
+  },
+  "members_tab": {
+    "section_title": "成員",
+    "add_member_button": "新增成員",
+    "empty_title": "還沒有成員",
+    "empty_description": "加入 AI 代理或成員後，指派給這個小隊的任務會由他們接手。",
+    "create_agent_button": "建立 AI 代理",
+    "leader_chip": "隊長",
+    "view_agent_tooltip": "開啟 AI 代理詳情",
+    "make_leader_tooltip": "設為小隊負責人",
+    "remove_member_tooltip": "從小隊移除",
+    "status_working": "工作中",
+    "status_idle": "空閒",
+    "status_offline": "離線",
+    "status_unstable": "不穩定",
+    "status_archived": "已歸檔",
+    "issue_status_blocked": "已阻塞",
+    "active_issue_more": "還有 {{count}} 個"
+  },
+  "detail": {
+    "assign_work": "指派工作",
+    "copy_link": "複製連結",
+    "link_copied": "已複製連結",
+    "not_found": "找不到該小隊",
+    "not_found_description": "它可能已被刪除，或你沒有訪問權限。",
+    "back_to_list": "全部小隊",
+    "instructions": "指引",
+    "edit": "編輯",
+    "cancel": "取消",
+    "recent_work": "近期工作",
+    "recent_work_empty": "還沒有指派給這個小隊的任務。",
+    "member_menu": "{{name}} 的操作",
+    "working_on": "正在處理"
+  },
+  "details": {
+    "leader": "隊長",
+    "members": "成員",
+    "created_by": "建立者",
+    "created": "建立時間",
+    "updated": "更新時間",
+    "visibility": "可見範圍",
+    "visibility_workspace": "工作區"
+  },
+  "toasts": {
+    "member_added": "已新增成員",
+    "member_add_failed": "新增成員失敗",
+    "member_removed": "已移除成員",
+    "member_remove_failed": "移除成員失敗",
+    "role_updated": "角色已更新",
+    "role_update_failed": "更新角色失敗",
+    "leader_updated": "隊長已更新",
+    "leader_update_failed": "更新隊長失敗",
+    "archive_failed": "歸檔小隊失敗",
+    "instructions_saved": "指引已儲存",
+    "update_failed": "儲存失敗"
+  },
+  "profile_card": {
+    "unavailable": "小隊不可用",
+    "detail_link": "詳情 →",
+    "archived": "已歸檔",
+    "member_count_other": "{{count}} 名成員",
+    "members_section": "成員",
+    "more_members_other": "還有 {{count}} 人"
+  },
+  "instructions_tab": {
+    "description": "隊長每次處理分配給此小隊的任務時，都會讀取這些指引。",
+    "unsaved_changes": "有未儲存的修改",
+    "save_button": "儲存",
+    "placeholder": "例如：始終先編寫失敗測試。提交應保持小而獨立。"
+  },
+  "scope": {
+    "mine": "我的小隊",
+    "all": "全部小隊"
+  },
+  "toolbar": {},
+  "intro": {
+    "title": "讓 AI 代理組隊，像團隊一樣做事",
+    "description": "把任務交給小隊，隊長 AI 代理會讀懂需求，依成員的角色分派下一步，並追蹤到目標完成。你只需要對接一個入口。",
+    "slides": {
+      "route": {
+        "title": "一個入口，自動分派",
+        "description": "隊長讀懂任務後，@ 最適合下一步的成員。只有被點名的成員會開始工作。"
+      },
+      "roles": {
+        "title": "依角色分工",
+        "description": "角色描述告訴隊長每位成員擅長什麼。成員可以是 AI 代理，也可以是人。"
+      },
+      "progress": {
+        "title": "進展集中在一處",
+        "description": "小隊詳情頁列出近期的任務，以及每位成員正在做什麼。"
+      }
+    },
+    "art": {
+      "assignee": "負責人",
+      "squad_name": "前端小隊",
+      "issue_dark_mode": "設定頁支援深色模式切換",
+      "issue_board_columns": "看板欄寬可拖曳調整",
+      "issue_inbox_gestures": "行動版收件箱手勢",
+      "issue_paste_images": "留言支援貼上圖片",
+      "delegating": "依角色挑選成員...",
+      "role_frontend": "前端",
+      "role_testing": "測試",
+      "role_product": "產品"
+    }
+  }
+}

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Gauge, Loader2 } from "lucide-react";
+import { Gauge, Loader2 } from "@multica/ui/icons";
 import {
   useCreateWorkspaceSubscriptionPortal,
   workspaceSubscriptionSummaryOptions,

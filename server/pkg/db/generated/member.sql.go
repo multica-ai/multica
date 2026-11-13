@@ -14,7 +14,7 @@ import (
 const createMember = `-- name: CreateMember :one
 INSERT INTO member (workspace_id, user_id, role)
 VALUES ($1, $2, $3)
-RETURNING id, workspace_id, user_id, role, created_at
+RETURNING id, workspace_id, user_id, role, created_at, pinned_at
 `
 
 type CreateMemberParams struct {
@@ -32,6 +32,7 @@ func (q *Queries) CreateMember(ctx context.Context, arg CreateMemberParams) (Mem
 		&i.UserID,
 		&i.Role,
 		&i.CreatedAt,
+		&i.PinnedAt,
 	)
 	return i, err
 }
@@ -46,7 +47,7 @@ func (q *Queries) DeleteMember(ctx context.Context, id pgtype.UUID) error {
 }
 
 const getMember = `-- name: GetMember :one
-SELECT id, workspace_id, user_id, role, created_at FROM member
+SELECT id, workspace_id, user_id, role, created_at, pinned_at FROM member
 WHERE id = $1
 `
 
@@ -59,12 +60,13 @@ func (q *Queries) GetMember(ctx context.Context, id pgtype.UUID) (Member, error)
 		&i.UserID,
 		&i.Role,
 		&i.CreatedAt,
+		&i.PinnedAt,
 	)
 	return i, err
 }
 
 const getMemberByUserAndWorkspace = `-- name: GetMemberByUserAndWorkspace :one
-SELECT id, workspace_id, user_id, role, created_at FROM member
+SELECT id, workspace_id, user_id, role, created_at, pinned_at FROM member
 WHERE user_id = $1 AND workspace_id = $2
 `
 
@@ -82,12 +84,53 @@ func (q *Queries) GetMemberByUserAndWorkspace(ctx context.Context, arg GetMember
 		&i.UserID,
 		&i.Role,
 		&i.CreatedAt,
+		&i.PinnedAt,
 	)
 	return i, err
 }
 
+const getRealtimeMemberships = `-- name: GetRealtimeMemberships :many
+SELECT m.user_id, m.workspace_id
+FROM member m
+JOIN (
+    SELECT unnest($1::uuid[]) AS user_id,
+           unnest($2::uuid[]) AS workspace_id
+) AS requested
+    ON m.user_id = requested.user_id AND m.workspace_id = requested.workspace_id
+`
+
+type GetRealtimeMembershipsParams struct {
+	UserIds      []pgtype.UUID `json:"user_ids"`
+	WorkspaceIds []pgtype.UUID `json:"workspace_ids"`
+}
+
+type GetRealtimeMembershipsRow struct {
+	UserID      pgtype.UUID `json:"user_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) GetRealtimeMemberships(ctx context.Context, arg GetRealtimeMembershipsParams) ([]GetRealtimeMembershipsRow, error) {
+	rows, err := q.db.Query(ctx, getRealtimeMemberships, arg.UserIds, arg.WorkspaceIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetRealtimeMembershipsRow{}
+	for rows.Next() {
+		var i GetRealtimeMembershipsRow
+		if err := rows.Scan(&i.UserID, &i.WorkspaceID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMembers = `-- name: ListMembers :many
-SELECT id, workspace_id, user_id, role, created_at FROM member
+SELECT id, workspace_id, user_id, role, created_at, pinned_at FROM member
 WHERE workspace_id = $1
 ORDER BY created_at ASC
 `
@@ -107,6 +150,7 @@ func (q *Queries) ListMembers(ctx context.Context, workspaceID pgtype.UUID) ([]M
 			&i.UserID,
 			&i.Role,
 			&i.CreatedAt,
+			&i.PinnedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -196,7 +240,7 @@ func (q *Queries) ListWorkspaceManagerUserIDs(ctx context.Context, workspaceID p
 const updateMemberRole = `-- name: UpdateMemberRole :one
 UPDATE member SET role = $2
 WHERE id = $1
-RETURNING id, workspace_id, user_id, role, created_at
+RETURNING id, workspace_id, user_id, role, created_at, pinned_at
 `
 
 type UpdateMemberRoleParams struct {
@@ -213,6 +257,7 @@ func (q *Queries) UpdateMemberRole(ctx context.Context, arg UpdateMemberRolePara
 		&i.UserID,
 		&i.Role,
 		&i.CreatedAt,
+		&i.PinnedAt,
 	)
 	return i, err
 }

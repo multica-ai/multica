@@ -70,6 +70,14 @@ export function composeAnnotatedReply(content: string, annotations: readonly Rep
   return command ? `${command}\n\n${sections}` : sections;
 }
 
+/** A selection's instruction is the comment body, including any /note command. */
+export function composeSelectionReply(annotation: ReplyAnnotation, instruction: string): string {
+  const text = instruction.trim();
+  const command = text.match(/^\/note(?=\s|$)/i)?.[0];
+  const note = command ? text.slice(command.length).trim() : text;
+  return note ? composeAnnotatedReply(command ?? "", [{ ...annotation, note }]) : "";
+}
+
 /** Relocate only an unambiguous quote with matching context after source edits. */
 export function locateReplyAnnotation(text: string, annotation: ReplyAnnotation): number | null {
   const matches = (start: number) =>

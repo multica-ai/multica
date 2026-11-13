@@ -8,61 +8,13 @@ import (
 	"strings"
 )
 
-// Background
+// Disable native Codex memory in task-local configuration by default to keep
+// host or previous-task memories from crossing workspace boundaries. The user's
+// global configuration is untouched; MULTICA_CODEX_MEMORY opts into native memory.
 //
-// Codex CLI ships a native auto-memory subsystem: by default it writes
-// summaries of agent turns to `$CODEX_HOME/memories/raw_memories.md`
-// plus `state_*.sqlite`, and reads them back into the model context on
-// the next turn. The decision of what gets written is internal to Codex
-// — users cannot audit or edit the contents from any Multica UI.
-//
-// This conflicts with the Multica daemon's context model. Multica
-// already keeps per-(agent, issue) state via PriorSessionID, the issue
-// description / comments, issue metadata, and CLAUDE.md skill memory —
-// each channel is explicit, user-visible, and editable. Layering Codex
-// native memory on top introduces an opaque, daemon-uncontrolled second
-// store that can leak across tasks and (worse) across workspaces:
-//
-//   - Per-task `codex-home/memories/` is preserved across `Reuse()` and
-//     is never cleared by `prepareCodexHomeWithOpts`, so stale memories
-//     from a prior turn on the same (agent, issue) feed into the next.
-//   - Codex CLI may also read user-level state from `~/.codex/memories/`
-//     entirely outside the daemon's per-task isolation, dragging
-//     unrelated host-project context into Multica tasks. The reproduction
-//     in github.com/multica-ai/multica#3130 saw Raw Memories from
-//     `D:\Project\MoHaYu\WowChat` (a host-local project) injected into a
-//     brand-new Multica issue's first Codex turn.
-//
-// Mitigation: write a managed block into the per-task `config.toml` that
-// disables both the `features.memories` flag and the `memories.*`
-// generation/consumption switches. Codex then neither writes nor reads
-// from its memory subsystem, eliminating both leak paths regardless of
-// where the residual files sit on disk. The user's global
-// `~/.codex/config.toml` is never modified.
-//
-// Users who explicitly want Codex native memory inside a Multica task
-// (and accept the leak risk) can keep the feature enabled by setting
-// `MULTICA_CODEX_MEMORY=1` in the daemon environment. The long-term
-// answer for durable agent context is a Multica-owned, user-visible,
-// project- or issue-scoped memory store — not re-enabling Codex's
-// hidden auto-memory.
-//
-// Layout note
-//
-// TOML rejects redefining a table that has already been created —
-// including implicitly via a dotted key — so the managed block must
-// adapt to the user's existing config. Two independent managed blocks
-// are written:
-//
-//   1. memory-feature: disables `features.memories`. If the user's
-//      config contains a top-level `[features]` table, the override is
-//      injected inside that table; otherwise it goes at the file root
-//      in dotted-key form.
-//   2. memory-config: disables `memories.generate_memories` and
-//      `memories.use_memories`. If the user's config contains a
-//      top-level `[memories]` table, the overrides are injected inside
-//      that table; otherwise they go at the file root in dotted-key
-//      form.
+// Write separate feature and memory switches. Insert overrides inside existing
+// TOML tables when present; dotted keys at the root would otherwise redefine
+// tables, including tables created implicitly by earlier dotted keys.
 
 // MulticaCodexMemoryEnv is the env var users can set to keep Codex
 // native memory enabled inside daemon-managed tasks. Anything truthy

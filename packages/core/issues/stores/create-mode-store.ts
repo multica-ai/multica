@@ -15,12 +15,19 @@ import { useModalStore } from "../../modals";
  * file an issue" doesn't change per workspace, so this lives in plain
  * localStorage rather than the workspace-aware StateStorage that scopes
  * per-workspace stores like quick-create-store / draft-store.
+ *
+ * `expanded` is the dialog size the user last left it at (the ⤢ button), so
+ * someone who writes long descriptions or pastes screenshots doesn't have to
+ * expand the dialog again on every open. Same scope as the mode: it's how this
+ * person likes to write, not a property of the workspace.
  */
 export type CreateMode = "agent" | "manual";
 
 interface CreateModeState {
   lastMode: CreateMode;
   setLastMode: (mode: CreateMode) => void;
+  expanded: boolean;
+  setExpanded: (expanded: boolean) => void;
 }
 
 export const useCreateModeStore = create<CreateModeState>()(
@@ -28,6 +35,8 @@ export const useCreateModeStore = create<CreateModeState>()(
     (set) => ({
       lastMode: "agent",
       setLastMode: (mode) => set({ lastMode: mode }),
+      expanded: false,
+      setExpanded: (expanded) => set({ expanded }),
     }),
     {
       name: "multica_create_mode",

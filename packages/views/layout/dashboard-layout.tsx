@@ -1,51 +1,80 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { SidebarProvider, SidebarInset } from "@multica/ui/components/ui/sidebar";
+import { SidebarProvider } from "@multica/ui/components/ui/sidebar";
+import { AppearanceSync } from "../common/appearance-sync";
 import { ModalRegistry } from "../modals/registry";
 import { SourceBackfillModal } from "../onboarding";
-import { AppSidebar } from "./app-sidebar";
+import { AppRail } from "./app-rail";
+import { AppBottomBar } from "./bottom-bar";
+import { AppShellProvider } from "./app-shell-context";
+import { CompactNavSheet } from "./compact-nav-sheet";
 import { DashboardGuard } from "./dashboard-guard";
 import { NavigationProgress } from "./navigation-progress";
+import { ShellRouteDataPrefetch } from "./route-data-prefetch";
+import { SpacePanel } from "./space-panel";
 import { WorkspacePresencePrefetch } from "./workspace-presence-prefetch";
 import { GlobalShortcuts } from "./global-shortcuts";
 
 interface DashboardLayoutProps {
   children: ReactNode;
-  /** Rendered inside SidebarInset (e.g. ChatWindow, ChatFab — absolute-positioned overlays) */
+  /** Rendered inside the content column (e.g. ChatWindow, ChatFab — absolute-positioned overlays) */
   extra?: ReactNode;
-  /** Rendered inside sidebar header as a search trigger */
-  searchSlot?: ReactNode;
   /** Loading indicator */
   loadingIndicator?: ReactNode;
+}
+
+/**
+ * The content card: the space panel and the page share one surface on the
+ * app shell, split by a single hairline. From `md` up the bottom bar sits
+ * under it, in place of a bottom margin; below `md` the card is the whole
+ * window. Desktop builds the same card in its own layout, under the tab bar.
+ */
+export function AppShellCard({ children }: { children: ReactNode }) {
+  return (
+    <main data-mc="page" className="relative flex min-h-0 min-w-0 flex-1 flex-row overflow-hidden bg-page-canvas md:mt-2 md:mr-2 md:rounded-page md:shadow-[var(--page-shadow,var(--surface-shadow))] md:ring-1 md:ring-page-border">
+      <SpacePanel />
+      <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">{children}</div>
+    </main>
+  );
 }
 
 export function DashboardLayout({
   children,
   extra,
-  searchSlot,
   loadingIndicator,
 }: DashboardLayoutProps) {
   return (
-    <DashboardGuard
-      loadingFallback={
-        <div className="flex h-svh items-center justify-center">
-          {loadingIndicator}
-        </div>
-      }
-    >
-      <SidebarProvider className="h-svh bg-app-shell">
-        <GlobalShortcuts />
-        <WorkspacePresencePrefetch />
-        <AppSidebar searchSlot={searchSlot} />
-        <SidebarInset className="relative overflow-hidden">
-          <NavigationProgress />
-          {children}
-          <ModalRegistry />
-          <SourceBackfillModal />
-          {extra}
-        </SidebarInset>
-      </SidebarProvider>
-    </DashboardGuard>
+    <>
+      <AppearanceSync />
+      <DashboardGuard
+        loadingFallback={
+          <div className="flex h-svh items-center justify-center">
+            {loadingIndicator}
+          </div>
+        }
+      >
+        <SidebarProvider className="h-svh bg-app-shell [--sidebar-wrapper-fill:var(--app-shell)]">
+          <AppShellProvider>
+            <ShellRouteDataPrefetch>
+              <GlobalShortcuts />
+              <WorkspacePresencePrefetch />
+              <AppRail className="hidden md:flex" />
+              <CompactNavSheet />
+              <div className="flex min-w-0 flex-1 flex-col">
+                <AppShellCard>
+                  <NavigationProgress />
+                  {children}
+                  <ModalRegistry />
+                  <SourceBackfillModal />
+                  {extra}
+                </AppShellCard>
+                <AppBottomBar />
+              </div>
+            </ShellRouteDataPrefetch>
+          </AppShellProvider>
+        </SidebarProvider>
+      </DashboardGuard>
+    </>
   );
 }

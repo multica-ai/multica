@@ -52,6 +52,27 @@ type OutboundReplier struct {
 // (no DB-backed token mint). *BindingTokenService is the production value.
 type binder interface {
 	Mint(ctx context.Context, workspaceID, installationID pgtype.UUID, wecomUserID string) (BindingToken, error)
+	Withdraw(ctx context.Context, raw string) error
+}
+
+// errcodeUserMustMessageFirst — WeCom refused an aibot_send_msg because the
+// person has never written to the bot in that conversation. The bot may push
+// into a chat only after the user has spoken there: "需要用户在会话中给机器人发消息，
+// 后续机器人才能主动推送消息给对应会话中" (developer.work.weixin.qq.com/document/path/101463).
+// The global errcode table names the code and the same remedy: "846607 发送消息
+// 命中限制 智能机器人发送消息频率超限，请确保用户在该会话中给机器人发过消息"
+// (.../path/90313). The errmsg the server sends with it reads "aibot send msg
+// frequency limit exceeded", which is why the code and not the text decides.
+//
+// For a group trigger the conversation is the sender's 1:1, which a member who
+// has only ever @-mentioned the bot in a room has never opened.
+const errcodeUserMustMessageFirst = 846607
+
+// userMustMessageFirst reports whether a private send was refused because the
+// recipient has not yet written to the bot in their 1:1.
+func userMustMessageFirst(err error) bool {
+	var apiErr *wecomAPIError
+	return errors.As(err, &apiErr) && apiErr.Code == errcodeUserMustMessageFirst
 }
 
 // OutboundReplierConfig configures the replier. Binding + AppURL are
@@ -160,7 +181,7 @@ func (r *OutboundReplier) Reply(ctx context.Context, inst engine.ResolvedInstall
 				"installation_id", util.UUIDToString(inst.ID), "error", err)
 		}
 	case engine.OutcomeInvokeDenied:
-		if err := r.sendInvokeDenied(ctx, inst, msg); err != nil {
+		if err := r.sendInvokeDenied(ctx, inst, msg, c); err != nil {
 			r.logger.WarnContext(ctx, "wecom replier: invoke-denied notice failed",
 				"installation_id", util.UUIDToString(inst.ID), "error", err)
 		}
@@ -233,6 +254,30 @@ func (r *OutboundReplier) sendBindingPrompt(ctx context.Context, inst engine.Res
 	// address outbound.go uses for inbox pushes), never to the room. Lark's
 	// SendBindingPromptCard targets the sender's OpenID for the same reason.
 	if err := r.postPrivate(ctx, inst, sender, text); err != nil {
+		// The room is about to be told that a message in the 1:1 gets an
+		// answer. Left live, the refused link would make that message's mint
+		// come back Reused inside BindingTokenMintInterval, and the user would
+		// be told to tap a link above that is not there. Withdrawing it lets
+		// the next message mint a link that can reach them. Only this refusal:
+		// any other leaves the throttle as it was, so a 45009 is not answered
+		// with a fresh mint per message. A throttled prompt has no raw token
+		// to withdraw.
+		if userMustMessageFirst(err) && !token.Reused {
+			if werr := r.binding.Withdraw(ctx, token.Raw); werr != nil {
+				r.logger.WarnContext(ctx, "wecom replier: withdraw undelivered binding link failed",
+					"installation_id", util.UUIDToString(inst.ID), "error", werr)
+			}
+		}
+		// A member who has only ever @-mentioned the bot in a room cannot be
+		// written to privately until they write to it first. Without a word
+		// in the room they hear nothing at all, so the room is asked to make
+		// that first move. The line carries no token and names no one; the
+		// link itself still only ever goes to the 1:1, once they open it.
+		if userMustMessageFirst(err) && aibotChatTypeFromChannel(msg.Source.ChatType) == chatTypeGroupInt {
+			if perr := r.post(ctx, inst, msg, c.MessageMeFirst); perr != nil {
+				return errors.Join(err, perr)
+			}
+		}
 		return err
 	}
 	// A group trigger still needs an answer — silence reads as a broken bot —
@@ -248,21 +293,28 @@ func (r *OutboundReplier) sendBindingPrompt(ctx context.Context, inst engine.Res
 // sendInvokeDenied tells a member the agent is not theirs to run.
 //
 // A 1:1 is answered in place. A GROUP trigger is answered in the sender's own
-// 1:1 and the room hears nothing: a line there would tell everyone present both
-// which member was refused and that the agent is someone's private one. The
-// sender is bound by definition at this point — the identity check is what
-// produced the user id this verdict was read for — so a 1:1 route to them
-// exists.
+// 1:1 and the room hears nothing about the refusal: a line there would tell
+// everyone present both which member was refused and that the agent is
+// someone's private one. Being bound does not mean they have ever written to
+// the bot in that 1:1, though, and until they have WeCom refuses the push
+// (errcodeUserMustMessageFirst). The room is then asked, in roomCopy, to make
+// that first move — the same line an unbound member gets, so it says nothing
+// about why. Their first message in the 1:1 is refused in place.
 //
-// Either way the only reader is the sender, so the sender's own profile picks
-// the language — not the room's, which is what Reply resolved for everything
-// else it says.
-func (r *OutboundReplier) sendInvokeDenied(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage) error {
+// The refusal's only reader is the sender, so the sender's own profile picks
+// its language — not the room's, which is what Reply resolved into roomCopy.
+func (r *OutboundReplier) sendInvokeDenied(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, roomCopy copyPack) error {
 	text := copyFor(localeFor(ctx, r.languages, inst.ID, chatTypeSingleInt, msg.Source.SenderID)).InvokeDenied
 	if aibotChatTypeFromChannel(msg.Source.ChatType) != chatTypeGroupInt {
 		return r.post(ctx, inst, msg, text)
 	}
-	return r.postPrivate(ctx, inst, msg.Source.SenderID, text)
+	err := r.postPrivate(ctx, inst, msg.Source.SenderID, text)
+	if userMustMessageFirst(err) {
+		if perr := r.post(ctx, inst, msg, roomCopy.MessageMeFirst); perr != nil {
+			return errors.Join(err, perr)
+		}
+	}
+	return err
 }
 
 // postPrivate delivers text to a single user's 1:1 chat (chat_type=1),

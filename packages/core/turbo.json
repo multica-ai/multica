@@ -1,0 +1,11 @@
+{
+  "extends": ["//"],
+  "tasks": {
+    "test": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/server/internal/handler/testdata/quick_action_bodies.json"
+      ]
+    }
+  }
+}

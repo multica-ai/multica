@@ -30,9 +30,10 @@ import { useWorkspaceId } from "@multica/core/hooks";
  * `onSwitchMode`; the shell stores it as the next panel's `data` so seeding
  * works exactly like a fresh open.
  *
- * Manual-mode `isExpanded` is lifted up because it drives `DialogContent`'s
- * className — the className lives here in the shell since the Popup is here,
- * but the toggle for that state lives in the manual panel body.
+ * `isExpanded` is lifted up because it drives `DialogContent`'s className —
+ * the className lives here in the shell since the Popup is here, but the
+ * toggle for that state lives in the panel bodies. It is persisted in the
+ * create-mode store, so the dialog reopens at the size it was last left at.
  */
 export function CreateIssueDialog({
   onClose,
@@ -120,15 +121,30 @@ function CreateIssueDialogBody({
 }) {
   const setLastMode = useCreateModeStore((s) => s.setLastMode);
   const [mode, setMode] = useState<CreateMode>(initialMode);
+  const [manualOpened, setManualOpened] = useState(initialMode === "manual");
   const [panelData, setPanelData] = useState(data ?? null);
-  const [isExpanded, setIsExpanded] = useState(false);
-  const effectiveData = sourceContextData
-    ? { ...(panelData ?? {}), ...sourceContextData }
-    : panelData;
+  // Remembered across opens: the dialog reopens at the size it was left at.
+  const isExpanded = useCreateModeStore((s) => s.expanded);
+  const setIsExpanded = useCreateModeStore((s) => s.setExpanded);
+  const effectiveData = {
+    ...(panelData ?? {}),
+    ...sourceContextData,
+  };
 
   const switchTo = (next: CreateMode) => (carry?: Record<string, unknown> | null) => {
     setLastMode(next);
-    setPanelData(carry ?? null);
+    // Apply contextual owner defaults only on the first visit to manual mode.
+    // Later visits must preserve the user's edits, including an explicit clear.
+    const seedParentOwner = next === "manual" && !manualOpened
+      && typeof data?.parent_issue_id === "string"
+      && carry?.parent_issue_id === data?.parent_issue_id
+      && data?.assignee_type && data?.assignee_id;
+    setPanelData(seedParentOwner ? {
+      ...carry,
+      assignee_type: data.assignee_type,
+      assignee_id: data.assignee_id,
+    } : carry ?? null);
+    if (next === "manual") setManualOpened(true);
     setMode(next);
   };
 

@@ -217,7 +217,7 @@ func TestOutboundTerminalReactionLifecycle(t *testing.T) {
 				actions = append(actions, verb+msg.MessageID+":"+name)
 				return nil
 			}
-			ack.OnIngested(context.Background(), engine.ResolvedInstallation{ID: q.installation.ID}, groupReactionMessage("source"), sid)
+			ack.OnIngested(context.Background(), engine.ResolvedInstallation{ID: q.installation.ID}, groupReactionMessage("source"), sid, sid)
 			o := NewOutbound(q, nil, client, ack, nil)
 			err = o.processEvent(ctx, events.Event{Type: tc.eventType, TaskID: util.UUIDToString(taskID), ChatSessionID: util.UUIDToString(sid), Payload: tc.payload})
 			if (err != nil) != tc.sendFails {
@@ -252,9 +252,9 @@ func TestOutboundTerminalWithoutDeliverySettlesOnlyOwnedInput(t *testing.T) {
 			for i, name := range []string{"a", "b", "other"} {
 				ack.client.rememberReplySource(inst.ID, sessionUUID(byte(70+i)), sid, groupReactionMessage(name))
 			}
-			ack.OnIngested(context.Background(), inst, groupReactionMessage("a"), sid)
-			ack.OnIngested(context.Background(), inst, groupReactionMessage("b"), sid)
-			ack.OnIngested(context.Background(), inst, groupReactionMessage("other"), sessionUUID(62))
+			ack.OnIngested(context.Background(), inst, groupReactionMessage("a"), sid, sid)
+			ack.OnIngested(context.Background(), inst, groupReactionMessage("b"), sid, sid)
+			ack.OnIngested(context.Background(), inst, groupReactionMessage("other"), sessionUUID(62), sessionUUID(62))
 			q := missingDeliveryInputQueries{deliveryOnlyOutboundQueries{
 				task:  db.AgentTaskQueue{ChatInputTaskID: sessionUUID(63)},
 				input: []db.ChatMessage{{ID: sessionUUID(70), ChannelIngested: true}},
@@ -297,7 +297,7 @@ func TestOutboundPartialReplyFailureDoesNotMarkDone(t *testing.T) {
 	}
 	ack, actions := newTestAckWithMessageIDs(time.Now)
 	ack.client.rememberReplySource(q.installation.ID, q.input[0].ID, sid, groupReactionMessage("source"))
-	ack.OnIngested(context.Background(), engine.ResolvedInstallation{ID: q.installation.ID}, groupReactionMessage("source"), sid)
+	ack.OnIngested(context.Background(), engine.ResolvedInstallation{ID: q.installation.ID}, groupReactionMessage("source"), sid, sid)
 	err = NewOutbound(q, nil, client, ack, nil).processEvent(context.Background(), events.Event{
 		Type: protocol.EventChatDone, TaskID: util.UUIDToString(tid), ChatSessionID: util.UUIDToString(sid), Payload: protocol.ChatDonePayload{Content: strings.Repeat("answer\n", 6000)},
 	})

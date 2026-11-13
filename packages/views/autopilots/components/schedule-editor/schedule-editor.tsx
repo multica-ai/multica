@@ -11,7 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Clock, Pencil } from "lucide-react";
+import { Clock, Pencil } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { Input } from "@multica/ui/components/ui/input";
 import {

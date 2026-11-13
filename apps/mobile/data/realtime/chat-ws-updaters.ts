@@ -37,9 +37,7 @@ import type {
 } from "@multica/core/types";
 import { chatKeys } from "@/data/queries/chat";
 
-// =====================================================
 // Sessions list (ChatSession[] keyed by wsId)
-// =====================================================
 
 export function patchSessionListAfterRename(
   qc: QueryClient,
@@ -90,9 +88,7 @@ export function flipSessionUnread(
   );
 }
 
-// =====================================================
 // Messages cache (ChatMessage[] keyed by sessionId)
-// =====================================================
 
 /**
  * Apply `chat:done` to the messages cache.
@@ -205,9 +201,7 @@ export async function applyChatQuickActionsToCache(
   );
 }
 
-// =====================================================
 // Pending task (ChatPendingTask keyed by sessionId)
-// =====================================================
 
 export function seedPendingTaskFromQueued(
   qc: QueryClient,
@@ -296,9 +290,7 @@ export function seedAcceptedPendingTask(
   invalidatePendingTask(qc, payload.chat_session_id);
 }
 
-// =====================================================
 // Task messages (live timeline, keyed by taskId)
-// =====================================================
 
 /**
  * Append a `task:message` payload into the per-task timeline cache.
@@ -326,4 +318,12 @@ export function appendTaskMessage(
       return [...old, payload].sort((a, b) => a.seq - b.seq);
     },
   );
+}
+
+export async function refreshTaskMessages(qc: QueryClient, taskId: string) {
+  const queryKey = chatKeys.taskMessages(taskId);
+  // Invalidation alone reuses an unfinished first load. Cancel it first,
+  // retaining any WS rows received since it began instead of reverting them.
+  await qc.cancelQueries({ queryKey }, { revert: false, silent: true });
+  await qc.invalidateQueries({ queryKey });
 }

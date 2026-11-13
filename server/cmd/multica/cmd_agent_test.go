@@ -251,7 +251,7 @@ func TestMissingServerConfigMessageExplainsPortOnlyContext(t *testing.T) {
 // and asserts the CLI refuses the config-PAT fallback from the escaped cwd.
 func TestNewAPIClient_WorkdirParentEscapeFailsClosed(t *testing.T) {
 	// Seed a user config with a mul_ PAT that must never be picked up.
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	if err := cli.SaveCLIConfig(cli.CLIConfig{Token: "mul_owner_pat"}); err != nil {
 		t.Fatalf("seed config: %v", err)
 	}
@@ -333,7 +333,7 @@ func TestNewAPIClient_LeftoverMarkerActionableError(t *testing.T) {
 // Outside agent context, the three-level fallback (flag → env → config) is
 // unchanged.
 func TestResolveWorkspaceID_AgentContextSkipsConfig(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 
 	// Seed the global CLI config with a workspace_id that must NOT be
 	// picked up while running inside an agent task.
@@ -428,7 +428,7 @@ func TestResolveWorkspaceID_AgentContextSkipsConfig(t *testing.T) {
 }
 
 func TestResolveToken_AgentContextSkipsConfig(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 
 	if err := cli.SaveCLIConfig(cli.CLIConfig{Token: "mul_profile_token"}); err != nil {
 		t.Fatalf("seed config: %v", err)
@@ -642,7 +642,7 @@ func TestNewAPIClient_AgentContextRequiresTaskToken(t *testing.T) {
 
 func TestNewAPIClient_DaemonPortRequiresTaskToken(t *testing.T) {
 	t.Chdir(t.TempDir())
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:8080")
 	t.Setenv("MULTICA_WORKSPACE_ID", "workspace-123")
 	t.Setenv("MULTICA_AGENT_ID", "")
@@ -667,7 +667,7 @@ func TestNewAPIClient_DaemonPortRequiresTaskToken(t *testing.T) {
 }
 
 func TestNewAPIClient_WorkdirMarkerRequiresTaskToken(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:8080")
 	t.Setenv("MULTICA_AGENT_ID", "")
 	t.Setenv("MULTICA_TASK_ID", "")
@@ -775,7 +775,7 @@ func TestParseCustomEnv(t *testing.T) {
 // --custom-env* flags are gone from `agent update`; the hint must
 // surface their replacement so users discover the new audited path.
 func TestAgentUpdateNoFieldsErrorPointsAtEnvCommand(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:0")
 	t.Setenv("MULTICA_WORKSPACE_ID", "test-ws")
 	t.Setenv("MULTICA_TOKEN", "test-token")
@@ -831,7 +831,7 @@ func TestAgentMaxConcurrentTasksFlagValidation(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	t.Setenv("MULTICA_SERVER_URL", srv.URL)
 	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
 	t.Setenv("MULTICA_TOKEN", "test-token")

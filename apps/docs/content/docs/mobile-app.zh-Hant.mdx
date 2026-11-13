@@ -1,0 +1,110 @@
+---
+title: 移動 App（iOS）
+description: 從原始碼把 Multica 安裝到 iPhone，並連線 Cloud 或自託管例項。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+
+Multica iOS 客戶端目前還沒有上架 App Store。你可以在 Mac 上從公開的原始碼倉庫構建 Release 版本，再安裝到自己的 iPhone。Android 客戶端暫未提供。
+
+安裝後的 App 預設連線 Multica Cloud，用已有帳號登入即可。工作區、任務、評論和執行記錄都儲存在服務端，不需要從 Web 或 Desktop 同步。
+
+## 準備工作
+
+你需要：
+
+- 一臺安裝了 Xcode 的 Mac；
+- 已在 **Xcode → Settings → Accounts** 中登入的 Apple ID；
+- 一臺透過 USB 連線的 iPhone；
+- 在 iPhone 的**設定 → 隱私與安全性**中開啟開發者模式；
+- Node.js、pnpm 和 Git。
+
+Xcode 或真機開發環境未配置時，先完成 Expo 的 [iOS Device 環境配置](https://docs.expo.dev/get-started/set-up-your-environment/)。
+
+## 安裝到 iPhone
+
+<Steps>
+<Step>
+克隆倉庫並安裝依賴：
+
+```bash
+git clone https://github.com/multica-ai/multica.git
+cd multica
+pnpm install
+```
+</Step>
+<Step>
+從倉庫根目錄執行：
+
+```bash
+pnpm ios:mobile:device:prod:release
+```
+
+這會構建一個不依賴 Metro 的 Release 版本，並安裝到已連線的 iPhone。第一次構建需要下載 iOS 依賴並編譯 React Native，之後會重複使用 Xcode 快取。
+</Step>
+<Step>
+在 iPhone 上開啟 App。如果系統阻止開啟，到**設定 → 通用 → VPN 與裝置管理**中信任對應的開發者憑證。
+</Step>
+</Steps>
+
+## 免費簽名的 7 天限制
+
+免費 Apple ID 簽名的 App 只能使用 7 天。到期後，把 iPhone 重新連線到 Mac，並再次執行同一條構建命令即可續簽。
+
+Apple Developer Program 帳號簽名的有效期更長，也可以用於 TestFlight 和正式分發。無論使用哪種簽名，服務端資料都不會因為重新安裝或續簽而丟失。
+
+## 簽名失敗
+
+如果 Xcode 提示 `No matching provisioning profiles found`，預設 bundle identifier 可能不屬於你的 Apple ID。換成自己控制的反向網域後重新構建：
+
+```bash
+export EXPO_BUNDLE_IDENTIFIER_PROD=com.yourname.multica
+pnpm ios:mobile:device:prod:release
+```
+
+這個值只需要在你的 Apple Developer team 中可用，不影響 Multica 帳號或工作區。
+
+## 更新
+
+iOS 自助安裝版不會自動更新。拉取最新程式碼、更新依賴並重新構建：
+
+```bash
+git pull --ff-only
+pnpm install
+pnpm ios:mobile:device:prod:release
+```
+
+## 連線自託管例項
+
+Release 構建會把 API 地址寫入 App。`apps/mobile/.env.production` 已隨倉庫提交，預設指向 multica.ai 的公開後端，乾淨克隆即可構建生產版本。
+
+要連線自託管例項：
+
+<Steps>
+<Step>
+把 `apps/mobile/.env.production.example` 複製為 `apps/mobile/.env.production.local`，在副本里填寫地址：
+
+```dotenv
+EXPO_PUBLIC_API_URL=https://api.example.com
+EXPO_PUBLIC_WEB_URL=https://app.example.com
+```
+
+`.local` 檔案按 key 覆蓋提交的預設值，且已被 gitignore，個人 API 地址不會進入倉庫。`EXPO_PUBLIC_API_URL` 必填；`EXPO_PUBLIC_WEB_URL` 用於 "Copy link"、"Open on web" 等入口。兩個都要設定：沒寫的 key 會沿用 multica.ai 的預設值，這些入口就會開啟 multica.ai，而不是你的例項。
+</Step>
+<Step>
+重新執行構建命令 `pnpm ios:mobile:device:prod:release`。iPhone 必須能訪問這個 API 地址；使用區域網地址時不要寫 `localhost`，它在 iPhone 上指向手機本身。
+</Step>
+</Steps>
+
+<Callout type="warning">
+直接修改 `.env.production` 會改變當前 checkout 的生產配置。個人配置請放在 gitignore 的 `.env.production.local` 中。
+</Callout>
+
+開發移動端、使用 Simulator 或連線 staging 的說明見倉庫中的 [`apps/mobile/README.md`](https://github.com/multica-ai/multica/blob/main/apps/mobile/README.md)。
+
+## 接下來
+
+- [快速上手](/cloud-quickstart) — 完成第一次執行。
+- [Desktop 應用](/desktop-app) — 桌面端的標籤頁與內建守護程序。
+- [故障排查](/troubleshooting) — 連線與執行問題排查。

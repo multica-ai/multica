@@ -4,7 +4,7 @@ import {
   XCircle,
   Loader2,
   Play,
-} from "lucide-react";
+} from "@multica/ui/icons";
 
 // Visual-only mapping for a task status: icon + tone. Deliberately carries no
 // `label` — the human-readable status word comes from `taskStatusLabel(status, t)`

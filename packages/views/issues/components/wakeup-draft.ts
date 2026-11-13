@@ -78,9 +78,9 @@ export interface WakeupDraft {
   assignee: { type: "member" | "agent" | "squad"; id: string } | null;
   /** Null waits for every sub-issue. */
   stage: number | null;
-  prEvent: "checks_finished" | "merged";
+  prEvent: "checks_finished" | "merged" | "conflicts";
   otherIssue: { id: string; identifier: string } | null;
-  otherState: "done" | "ended" | "in_review";
+  otherState: "done" | "ended" | "in_review" | "blocked";
   maxFires: number;
   agentId: string;
   instruction: string;

@@ -32,7 +32,7 @@ func dshProbeFixture(t *testing.T, body string, manifest bool) string {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte("{}\n"), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(installedDshProfileManifest()), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -46,6 +46,18 @@ func dshProbeFixture(t *testing.T, body string, manifest bool) string {
 
 const dshProbeOKFrame = `printf '%s\n' '{"v":1,"type":"probe","runtime":"dsh","plugin_version":"test","protocol_version":1}'`
 
+// shortenDshProbeTimeoutForHang is for a fixture whose probe never answers, so
+// the test waits out a short budget instead of the production one. A fixture
+// that answers must keep the production budget: it returns as soon as it has
+// answered, and a short budget turns a slow answer on a loaded machine into a
+// timeout — a different verdict from the one under test.
+func shortenDshProbeTimeoutForHang(t *testing.T) {
+	t.Helper()
+	orig := dshProbeTimeout
+	t.Cleanup(func() { dshProbeTimeout = orig })
+	dshProbeTimeout = 300 * time.Millisecond
+}
+
 // Only a profile that is genuinely absent may be installed or condemned. Every
 // other failure mode is a statement about this instant, and treating them alike
 // is what let a momentary failure during a DSH upgrade demote a working runtime
@@ -58,6 +70,7 @@ func TestProbeDshMulticaProfile(t *testing.T) {
 		name     string
 		body     string
 		manifest bool
+		hangs    bool
 		want     dshProbeVerdict
 	}{
 		{
@@ -79,7 +92,7 @@ func TestProbeDshMulticaProfile(t *testing.T) {
 		},
 		{
 			name: "manifest present but the probe times out",
-			body: `exec sleep 30`, manifest: true, want: dshProbeUnavailable,
+			body: `exec sleep 30`, manifest: true, hangs: true, want: dshProbeUnavailable,
 		},
 		{
 			// The case the whole classification turns on. Asked for a profile
@@ -87,7 +100,7 @@ func TestProbeDshMulticaProfile(t *testing.T) {
 			// nothing. Calling that transient made a missing profile
 			// undetectable on the one host the automatic install exists for.
 			name: "probe hangs with no manifest",
-			body: `exec sleep 30`, want: dshProbeMissingProfile,
+			body: `exec sleep 30`, hangs: true, want: dshProbeMissingProfile,
 		},
 		{
 			name: "exit 0 printing nothing, no manifest",
@@ -120,9 +133,6 @@ func TestProbeDshMulticaProfile(t *testing.T) {
 			manifest: true, want: dshProbeIncompatible,
 		},
 	}
-	origTimeout := dshProbeTimeout
-	t.Cleanup(func() { dshProbeTimeout = origTimeout })
-	dshProbeTimeout = 2 * time.Second
 
 	// A cancelled round says nothing about the profile, whatever the manifest
 	// says: the probe never got to finish on its own terms.
@@ -137,12 +147,76 @@ func TestProbeDshMulticaProfile(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.hangs {
+				shortenDshProbeTimeoutForHang(t)
+			}
 			path := dshProbeFixture(t, tc.body, tc.manifest)
 			if got := probeDshMulticaProfile(context.Background(), path); got != tc.want {
 				t.Fatalf("probeDshMulticaProfile() = %v, want %v", got, tc.want)
 			}
 		})
 	}
+
+	// A manifest that does not name the runtime is missing. Probing it is what
+	// hangs, so the classification must not start dsh at all.
+	t.Run("unreferenced manifest is missing without probing", func(t *testing.T) {
+		manifests := []string{"{}\n", "{\"dependencies\":{}}\n", dshSkeletonProfileManifest()}
+		for _, manifest := range manifests {
+			home := t.TempDir()
+			t.Setenv("DSH_HOME", home)
+			dir := filepath.Join(home, "profiles", dshMulticaProfileName)
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(manifest), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			marker := filepath.Join(t.TempDir(), "ran")
+			t.Setenv("DSH_PROBE_MARKER", marker)
+			path := filepath.Join(t.TempDir(), "dsh")
+			script := "#!/bin/sh\ncase \"$*\" in\n  *--probe*) touch \"$DSH_PROBE_MARKER\"; exec sleep 30 ;;\n  *) printf '%s\\n' '0.1.2-rc.1' ;;\nesac\n"
+			if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			start := time.Now()
+			if got := probeDshMulticaProfile(context.Background(), path); got != dshProbeMissingProfile {
+				t.Fatalf("probeDshMulticaProfile() = %v, want missing", got)
+			}
+			if time.Since(start) > time.Second {
+				t.Fatal("an unreferenced manifest still ran the probe")
+			}
+			if _, err := os.Stat(marker); err == nil {
+				t.Fatal("dsh --probe ran for a manifest that does not name the runtime")
+			}
+		}
+	})
+
+	// A file that cannot be parsed is not evidence the runtime is absent, so a
+	// failed probe over it stays transient and the probe does run.
+	t.Run("unparseable manifest still probes", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("DSH_HOME", home)
+		dir := filepath.Join(home, "profiles", dshMulticaProfileName)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte("{\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		marker := filepath.Join(t.TempDir(), "ran")
+		t.Setenv("DSH_PROBE_MARKER", marker)
+		path := filepath.Join(t.TempDir(), "dsh")
+		script := "#!/bin/sh\ncase \"$*\" in\n  *--probe*) touch \"$DSH_PROBE_MARKER\"; exit 0 ;;\n  *) printf '%s\\n' '0.1.2-rc.1' ;;\nesac\n"
+		if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if got := probeDshMulticaProfile(context.Background(), path); got != dshProbeUnavailable {
+			t.Fatalf("probeDshMulticaProfile() = %v, want unavailable", got)
+		}
+		if _, err := os.Stat(marker); err != nil {
+			t.Fatal("dsh --probe did not run for an unparseable manifest")
+		}
+	})
 }
 
 // The four ways a probe can fail while the profile IS installed must not
@@ -159,24 +233,27 @@ func TestProbeBuiltinRuntime_DshFailureWithProfileInstalledIsNotCondemned(t *tes
 		t.Skip("shell fixture")
 	}
 	tests := []struct {
-		name string
-		body string
+		name  string
+		body  string
+		hangs bool
 	}{
-		{name: "timeout", body: `exec sleep 30`},
+		{name: "timeout", body: `exec sleep 30`, hangs: true},
 		{name: "non-zero exit", body: `printf '%s\n' 'cannot boot' >&2; exit 1`},
 		{name: "malformed output", body: `printf '%s\n' 'not json at all'`},
 		{name: "future protocol", body: `printf '%s\n' '{"v":2,"type":"probe","runtime":"dsh","protocol_version":2}'`},
 	}
-	origTimeout, origDelay, origWindow := dshProbeTimeout, runtimeVersionProbeRetryDelay, runtimeVersionProbeRetryWindow
+	origDelay, origWindow := runtimeVersionProbeRetryDelay, runtimeVersionProbeRetryWindow
 	t.Cleanup(func() {
-		dshProbeTimeout, runtimeVersionProbeRetryDelay, runtimeVersionProbeRetryWindow = origTimeout, origDelay, origWindow
+		runtimeVersionProbeRetryDelay, runtimeVersionProbeRetryWindow = origDelay, origWindow
 	})
-	dshProbeTimeout = 300 * time.Millisecond
 	runtimeVersionProbeRetryDelay = time.Millisecond
 	runtimeVersionProbeRetryWindow = 10 * time.Millisecond
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.hangs {
+				shortenDshProbeTimeoutForHang(t)
+			}
 			path := dshProbeFixture(t, tc.body, true)
 			record := filepath.Join(t.TempDir(), "provisioned.log")
 			// A bundle IS configured: the assertion is that these failures never
@@ -450,6 +527,8 @@ func TestNewRuntimeVerdict_DshProfileCarriesAStructuredCause(t *testing.T) {
 		verdict    builtinProbeVerdict
 		installing bool
 	}{
+		{name: "migration, no install", verdict: builtinProbeProfileMigration},
+		{name: "migration ignores install wait", verdict: builtinProbeProfileMigration, installing: true},
 		{name: "missing, no install", verdict: builtinProbeMissingProfile},
 		{name: "missing, install running", verdict: builtinProbeMissingProfile, installing: true},
 	} {
@@ -461,7 +540,7 @@ func TestNewRuntimeVerdict_DshProfileCarriesAStructuredCause(t *testing.T) {
 			if got.offline.Code != RuntimeOfflineCodeDshProfile {
 				t.Fatalf("code = %q, want %q", got.offline.Code, RuntimeOfflineCodeDshProfile)
 			}
-			if got.offline.Installing != tc.installing {
+			if got.offline.Installing != (tc.installing && tc.verdict != builtinProbeProfileMigration) {
 				t.Fatalf("installing = %v, want %v", got.offline.Installing, tc.installing)
 			}
 			// A repair that NAMES what is missing, and deliberately carries no
@@ -483,5 +562,45 @@ func TestNewRuntimeVerdict_DshProfileCarriesAStructuredCause(t *testing.T) {
 	if demotableBuiltinProbeVerdict(builtinProbeIncompatibleProfile) {
 		t.Fatal("an incompatible profile can demote a live runtime; " +
 			"the daemon may be the stale side of that protocol skew")
+	}
+}
+
+func TestProbeBuiltinRuntime_DshLegacyProfile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture")
+	}
+	for _, manifest := range []string{
+		`{"dsh":{"profile":{"bundles":["dsh-profile-multica"]}}}`,
+		`{"dependencies":{"@multica-ai/dsh-runtime":"0.0.0-local"},"dsh":{"profile":{"bundles":["dsh-profile-multica"]}}}`,
+		`{"dependencies":{"@multica-ai/dsh-runtime":"0.0.0-local"}}`,
+		`{"dsh":{"profile":{"bundles":["@multica-ai/dsh-runtime","dsh-profile-multica"]}}}`,
+	} {
+		t.Run(manifest, func(t *testing.T) {
+			path := dshProbeFixture(t, dshProbeOKFrame, true)
+			home := os.Getenv("DSH_HOME")
+			writeDshProfileManifest(t, home, manifest)
+			t.Setenv(dshProfileBundleEnv, "@multica-ai/dsh-runtime")
+			d := &Daemon{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), agentVersions: map[string]string{}}
+			_, reason, verdict := d.probeBuiltinRuntime(context.Background(), "dsh", AgentEntry{Path: path, Command: "dsh"})
+			if verdict != builtinProbeProfileMigration || !demotableBuiltinProbeVerdict(verdict) {
+				t.Fatalf("profile verdict = %v, want demotable migration", verdict)
+			}
+			if !strings.Contains(reason, "dsh.profile.bundles") {
+				t.Fatalf("missing migration guidance: %s", reason)
+			}
+			if err := provisionDshMulticaProfile(context.Background(), path, d.logger); err == nil {
+				t.Fatal("explicit provisioning did not refuse the existing bridge")
+			}
+			if d.dshInstallInFlight.Load() {
+				t.Fatal("migration started automatic provisioning")
+			}
+			if dshMulticaProfilePresent() {
+				t.Fatal("invalid profile will not force a discovery round")
+			}
+			data, err := os.ReadFile(filepath.Join(home, "profiles", dshMulticaProfileName, "package.json"))
+			if err != nil || string(data) != manifest {
+				t.Fatalf("profile changed: %s, %v", data, err)
+			}
+		})
 	}
 }

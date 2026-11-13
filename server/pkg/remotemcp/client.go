@@ -17,6 +17,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/httptransport"
 )
 
 const (
@@ -118,7 +120,7 @@ func NewSecureHTTPClient(endpoint *url.URL) *http.Client {
 	// the guard after the connection was approved.
 	devOrigin := isDevOrigin(endpoint)
 	dialer := &net.Dialer{Timeout: ConnectTimeout, KeepAlive: 30 * time.Second}
-	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport := httptransport.CloneDefault().(*http.Transport)
 	transport.Proxy = nil
 	if devOrigin {
 		// Trust an extra CA for this origin, never skip verification: a plugin

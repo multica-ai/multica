@@ -12,7 +12,11 @@
  * One sample per ref is a report, not a verdict. A difference near the noise
  * floor means "run it again by hand", not "regression".
  *
- *   node scripts/perf-compare.mjs --base <ref> --head <ref> [--out <dir>]
+ *   node scripts/perf-compare.mjs --base <ref> --head <ref> [--out <dir>] [--scenario <name>]
+ *
+ * `--scenario` picks the measurement: `typing-under-live-runs` (default) or
+ * `image-thread` (MUL-8182). Both write the same report path, so one run
+ * measures exactly one of them.
  */
 import { execFileSync, spawn } from "node:child_process";
 import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync } from "node:fs";
@@ -29,8 +33,33 @@ const flag = (name, fallback) => {
 const baseRef = flag("base");
 const headRef = flag("head", "HEAD");
 const outDir = resolve(flag("out", join(repoRoot, "perf-report")));
-if (!baseRef) {
-  console.error("usage: node scripts/perf-compare.mjs --base <ref> [--head <ref>] [--out <dir>]");
+const buildCache = join(repoRoot, ".turbo", "perf-build-cache");
+const SCENARIOS = {
+  "typing-under-live-runs": {
+    title: "Comment typing under live runs (MUL-7227)",
+    spec: "typing-under-live-runs.spec.ts",
+    metrics: [],
+  },
+  "image-thread": {
+    title: "Comment typing beside an image-heavy thread (MUL-8182)",
+    spec: "image-heavy-thread.spec.ts",
+    metrics: [
+      ["layout_shift", "Layout shift (sum)"],
+      ["images_mounted", "Images mounted"],
+      ["originals_served", "Originals fetched"],
+      ["keystrokes_over_frame", "Keystrokes over 16.7 ms"],
+      ["key_frame_p95_ms", "Keydown to frame p95 (ms)"],
+      ["image_bytes_served", "Image bytes fetched"],
+      ["js_heap_mb", "JS heap (MB)"],
+    ],
+  },
+};
+const scenarioName = flag("scenario", "typing-under-live-runs");
+const scenario = SCENARIOS[scenarioName];
+if (!baseRef || !scenario) {
+  console.error(
+    `usage: node scripts/perf-compare.mjs --base <ref> [--head <ref>] [--out <dir>] [--scenario ${Object.keys(SCENARIOS).join("|")}]`,
+  );
   process.exit(2);
 }
 
@@ -200,7 +229,7 @@ async function measure(ref, label) {
     const buildStart = Date.now();
     const buildLog = execFileSync(
       "pnpm",
-      ["exec", "turbo", "build", "--filter=@multica/web"],
+      ["exec", "turbo", "build", "--filter=@multica/web", `--cache-dir=${buildCache}`],
       { cwd: checkout, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] },
     );
     process.stdout.write(buildLog);
@@ -228,12 +257,14 @@ async function measure(ref, label) {
     const measureStart = Date.now();
     let scenarioExit = 0;
     try {
-      run("pnpm", ["exec", "playwright", "test", "--config=playwright.perf.config.ts"], {
+      run("pnpm", ["exec", "playwright", "test", "--config=playwright.perf.config.ts",
+        `--repeat-each=${process.env.PERF_REPEATS ?? "1"}`, ...(scenario.spec ? [scenario.spec] : [])], {
         cwd: repoRoot,
         env: {
           ...process.env,
           PLAYWRIGHT_BASE_URL: `http://127.0.0.1:${port}`,
           PERF_REPORT_PATH: reportPath,
+          PERF_SCENARIO: scenarioName,
         },
       });
     } catch (error) {
@@ -281,7 +312,7 @@ const METRICS = [
 
 function markdown(base, head) {
   const usable = base.status === "ok" && head.status === "ok";
-  const rows = METRICS.map(([key, label]) => {
+  const rows = [...METRICS, ...scenario.metrics].map(([key, label]) => {
     const a = base[key];
     const b = head[key];
     if (typeof a !== "number" || typeof b !== "number") return `| ${label} | ${a ?? "—"} | ${b ?? "—"} | — | — |`;
@@ -292,10 +323,10 @@ function markdown(base, head) {
   const timing = (r) =>
     `install ${r.timings_s.install}s · build ${r.timings_s.build}s${r.build_cached ? " (restored from cache — not a real build)" : ""} · start ${r.timings_s.start}s · measure ${r.timings_s.measure}s`;
   return [
-    "## Comment typing under live runs (MUL-7227)",
+    `## ${scenario.title}`,
     "",
     usable
-      ? "One sample per ref. This is a report, not a merge gate — read a small difference as noise until a second run says otherwise."
+      ? `${head.samples?.length ?? 1} sample(s) per ref; numeric metrics are medians. This is a report, not a merge gate — small differences may be noise.`
       : `**Not a usable comparison.** base: \`${base.status}\`, head: \`${head.status}\`.`,
     "",
     "| Metric | base | head | Δ | ratio |",

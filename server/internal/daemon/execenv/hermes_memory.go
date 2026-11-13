@@ -14,52 +14,13 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 )
 
-// Background
+// Agent/profile-scoped Hermes memory lives under hermes-state and is linked
+// into the task home overlay. It survives tasks and issues without sharing the
+// host's memories or another agent's files. Different Hermes profiles use separate
+// stores. Session databases have their own conversation scope in hermes_sessions.go.
 //
-// Hermes keeps its long-term memory (MEMORY.md / USER.md and whatever else the
-// agent writes back) in `<HERMES_HOME>/memories/`. Multica has to take over
-// HERMES_HOME to inject an agent's bound skills — Hermes discovers skills only
-// from its own home, never from the workspace (see hermes_home.go) — so the
-// overlay inherited the decision of where memory lives and made it task-local.
-//
-// Nobody designed the two behaviours that produced (issue #6638):
-//
-//   - An agent WITH skills bound got a fresh memories/ per task, so it forgot
-//     everything between tasks. Users read that as "Hermes 失忆", and it changed
-//     the moment they bound an unrelated skill, with no UI signal.
-//   - An agent with NO skills bound built no overlay at all, ran against the
-//     user's real ~/.hermes, and therefore shared one memories/ with every
-//     other skill-less agent, task, and issue on the runtime.
-//
-// This file makes memory an agent-scoped store Multica owns:
-//
-//	<multica profile dir>/hermes-state/<agent>/<hermes profile>/memories
-//
-// linked into the per-task overlay. Memory then survives across tasks and issues
-// for the same agent, never touches the user's home, and is invisible to other
-// agents. The shape is deliberately identical to the per-issue Codex session
-// store (codex_home.go) and the per-agent Reasonix state home — same lifecycle,
-// same GC, same active-store guard.
-//
-// Scoping to (hermes profile, agent) rather than agent alone mirrors Hermes' own
-// model, where a profile is an isolated instance: pointing an agent at a
-// different profile gives it a different identity, so it gets a different memory
-// line. Same semantics as the Codex store keying on (profile, agent, issue).
-//
-// Deliberately NOT covered here:
-//
-//   - The session database (state.db and its WAL sidecars) stays task-local.
-//     Sharing a live SQLite database between one agent's concurrent tasks needs
-//     lock and consistency work — plus Windows byte-range locks on -shm — that
-//     plain memory files do not. Users get "remembers the agreements", not
-//     "remembers the transcript".
-//   - Skill-less Hermes agents still run against the host home unchanged.
-//     Tightening that would break the only workaround #6638's reporter has, and
-//     it belongs with the platform-wide memory_scope work (MUL-5969).
-//
-// Known trade-off, shared with the host-passthrough behaviour it replaces: one
-// agent's concurrent tasks write the same files and Hermes rewrites them whole,
-// so concurrent memory updates are last-writer-wins.
+// Skill-less agents still use the host home without this overlay. Concurrent tasks
+// of the same agent may overwrite memory files; updates remain last-writer-wins.
 
 // hermesMemoryStoreRoot is the directory under the daemon's Multica profile dir
 // that holds every agent's persistent Hermes state. `hermes-state` (not

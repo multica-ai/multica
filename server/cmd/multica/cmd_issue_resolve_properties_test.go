@@ -413,7 +413,7 @@ func TestRunIssueListActorFilterSharesMembersRequest(t *testing.T) {
 	if srv.membersCalls != 1 {
 		t.Errorf("members calls = %d, want one shared by the filter and the resolution", srv.membersCalls)
 	}
-	want := map[string][]string{
+	want := map[string][]any{
 		testReviewerDefID: {"member:" + testMemberAdaID},
 		testOwnersDefID:   {"member:" + testMemberAdaID},
 	}

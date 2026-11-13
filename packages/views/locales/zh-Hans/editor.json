@@ -117,6 +117,7 @@
   },
   "code_block": {
     "html_preview": "HTML 预览",
+    "close_preview": "关闭",
     "copy_code": "复制代码",
     "show_preview": "显示预览",
     "show_source": "显示源码",
@@ -164,5 +165,18 @@
     "export_png": "下载 PNG",
     "export_svg": "下载 SVG",
     "export_source": "下载 .mmd"
+  },
+  "table": {
+    "reset_widths": "重置列宽",
+    "expand": "展开表格",
+    "copy_markdown": "复制为 Markdown",
+    "copy_csv": "复制为 CSV",
+    "copied": "已复制",
+    "resize_column": "调整“{{name}}”列宽",
+    "expanded_title": "表格",
+    "filter_placeholder": "筛选行",
+    "clear_filter": "清除筛选",
+    "no_matches": "没有匹配的行",
+    "close": "关闭"
   }
 }

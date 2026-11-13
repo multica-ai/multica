@@ -36,6 +36,8 @@ export function IssuePropertyPills({
     <div className="flex flex-wrap items-center gap-1.5">
       <StatusPicker
         status={issue.status}
+        projectId={issue.project_id}
+        issue={issue}
         onUpdate={onUpdate}
         triggerRender={<PillButton />}
         align="start"

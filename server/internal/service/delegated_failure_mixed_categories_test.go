@@ -26,8 +26,9 @@ func TestPendingRecoveryConvertedTerminalHistoryDoesNotStarveAnotherWorkspace(t 
 		}
 		return target.comment.ID
 	}
+	historySignals := make(map[pgtype.UUID]bool)
 	for range 100 {
-		signal(history, historyService)
+		historySignals[signal(history, historyService)] = true
 	}
 	historyRows.Exec(t, `UPDATE issue SET status='legacy_closed' WHERE id=$1`, history.issueID)
 	live, svc := seedDelegatedFailureFixture(t)
@@ -36,20 +37,21 @@ func TestPendingRecoveryConvertedTerminalHistoryDoesNotStarveAnotherWorkspace(t 
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The scan is not workspace-scoped, so only this test's signals are checked.
 	found := false
 	for _, row := range pending {
 		if row.ID == target {
 			found = true
 		}
+		if historySignals[row.ID] {
+			t.Fatal("scan returned a signal whose source issue is in a converted closed status")
+		}
 	}
 	if !found {
 		t.Fatal("100 old terminal signals starved another workspace's live recovery")
 	}
-	if len(pending) != 1 {
-		t.Fatalf("scan returned %d signals, want only the live signal", len(pending))
-	}
-	result, err := svc.RecoverPendingDelegatedFailures(ctx, 100)
-	if err != nil || result.Replayed != 1 {
-		t.Fatalf("live recovery = %+v, %v; want one replay", result, err)
+	sweepDelegatedFailureRecoveries(t, svc)
+	if live.pending(t, svc, target) {
+		t.Fatal("live recovery is still pending after the sweep; want one replay")
 	}
 }

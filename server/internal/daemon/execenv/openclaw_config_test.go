@@ -1542,7 +1542,7 @@ func TestPrepareOpenclawSkillWriteMatchesScanPath(t *testing.T) {
 		t.Fatalf("prepareOpenclawConfig: %v", err)
 	}
 	cfgPath := result.ConfigPath
-	if err := writeContextFiles(workDir, "openclaw", TaskContextForEnv{
+	if _, err := writeContextFiles(workDir, "openclaw", TaskContextForEnv{
 		IssueID:     "issue-1",
 		AgentSkills: skills,
 	}, nil); err != nil {

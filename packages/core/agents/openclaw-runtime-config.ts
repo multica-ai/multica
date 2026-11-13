@@ -17,6 +17,10 @@ export interface OpenclawGatewayPin {
 export interface OpenclawRuntimeConfig {
   mode?: OpenclawRoutingMode;
   gateway?: OpenclawGatewayPin;
+  // Persistent agent-level model override. `agent.model` selects the OpenClaw
+  // identity; this setting selects the underlying LLM for all runs claimed
+  // until it is changed or cleared. Each claim receives the current value.
+  modelOverride?: string;
 }
 
 // Sentinel the API substitutes for a non-empty `gateway.token` on every read.
@@ -37,6 +41,9 @@ export function parseOpenclawRuntimeConfig(
   const out: OpenclawRuntimeConfig = {};
   if (root.mode === "local" || root.mode === "gateway") {
     out.mode = root.mode;
+  }
+  if (typeof root.model_override === "string" && root.model_override.trim() !== "") {
+    out.modelOverride = root.model_override.trim();
   }
   if (root.gateway && typeof root.gateway === "object" && !Array.isArray(root.gateway)) {
     const gw = root.gateway as Record<string, unknown>;
@@ -59,6 +66,7 @@ export function serializeOpenclawRuntimeConfig(
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   if (cfg.mode) out.mode = cfg.mode;
+  if (cfg.modelOverride) out.model_override = cfg.modelOverride;
   if (cfg.gateway) {
     const gw: Record<string, unknown> = {};
     if (cfg.gateway.host) gw.host = cfg.gateway.host;
@@ -84,6 +92,7 @@ export function openclawRuntimeConfigEquals(
   b: OpenclawRuntimeConfig,
 ): boolean {
   if ((a.mode ?? "local") !== (b.mode ?? "local")) return false;
+  if ((a.modelOverride ?? "") !== (b.modelOverride ?? "")) return false;
   const aGw = a.gateway ?? {};
   const bGw = b.gateway ?? {};
   if ((aGw.host ?? "") !== (bGw.host ?? "")) return false;

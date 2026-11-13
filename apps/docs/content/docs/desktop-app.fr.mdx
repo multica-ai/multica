@@ -4,6 +4,9 @@ description: Installez Multica Desktop, utilisez les onglets de Desktop et le da
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
+import { DesktopTabsDemo } from "@/components/demos/desktop-tabs-demo";
 
 Multica Desktop est disponible pour macOS, Windows et Linux. Il utilise le même compte et les mêmes données d'espace de travail que l'application web, mais il gère automatiquement le daemon sur votre machine et conserve un ensemble d'onglets distinct pour chaque espace de travail.
 
@@ -22,6 +25,8 @@ Vous pouvez être connecté aux deux en même temps. Tant qu'ils se connectent a
 
 ## Installation
 
+<Steps>
+<Step>
 Choisissez le programme d'installation correspondant à votre système d'exploitation et à l'architecture de votre processeur sur la [page de téléchargement de Multica](https://multica.ai/download) :
 
 | Plateforme | Programme d'installation |
@@ -29,8 +34,11 @@ Choisissez le programme d'installation correspondant à votre système d'exploit
 | macOS | `.dmg` |
 | Windows | `.exe` |
 | Linux | `.AppImage`, `.deb` ou `.rpm` |
-
+</Step>
+<Step>
 Après l'installation, connectez-vous avec la même adresse e-mail que sur le web. Une fois connecté, Desktop démarre son propre CLI Multica intégré et détecte les outils de codage IA déjà installés sur la machine.
+</Step>
+</Steps>
 
 <Callout type="info">
 Le CLI intégré à Desktop sert uniquement au runtime géré par l'application. Si vous voulez aussi exécuter des commandes comme `multica issue` dans un terminal, installez le CLI séparément en suivant l'[étape 2 du démarrage rapide](/cloud-quickstart#2-connectez-un-ordinateur).
@@ -40,7 +48,9 @@ Le CLI intégré à Desktop sert uniquement au runtime géré par l'application.
 
 Desktop enregistre les onglets par espace de travail. Par exemple, si vous ouvrez trois tâches dans l'espace de travail A puis passez à l'espace de travail B, vous voyez les onglets propres à B ; revenez à A et les trois onglets précédents sont toujours là.
 
-Une même ressource ne s'ouvre qu'une seule fois dans l'espace de travail courant. Les onglets peuvent être réordonnés, épinglés et fermés, et chacun conserve son propre historique de navigation avant/arrière et sa position de défilement. Cliquer sur un lien de l'application pour ce déploiement, ou le coller, l'ouvre directement dans un onglet au lieu de basculer vers le navigateur.
+<DesktopTabsDemo />
+
+Une même ressource ne s'ouvre qu'une seule fois dans l'espace de travail courant. Les onglets peuvent être réordonnés, épinglés et fermés, et chacun conserve son propre historique de navigation avant/arrière et sa position de défilement. Les onglets épinglés se placent à gauche et n'ont pas de bouton de fermeture ; désépinglez un onglet pour le fermer. Ouvrir une autre page depuis un onglet épinglé crée un nouvel onglet, et l'onglet épinglé reste sur sa page. Cliquer sur un lien de l'application pour ce déploiement, ou le coller, l'ouvre directement dans un onglet au lieu de basculer vers le navigateur.
 
 La déconnexion efface tous les onglets enregistrés sur la machine : la personne suivante qui se connecte ne voit jamais les pages laissées par le compte précédent.
 
@@ -64,21 +74,13 @@ Les mises à jour sont distribuées par système d'exploitation et par architect
 
 - Windows arm64 et macOS x64 (Intel) utilisent chacun leur propre flux de mise à jour ;
 - toutes les autres architectures utilisent le flux par défaut ;
-- l'application sélectionne automatiquement le bon flux de mise à jour — aucun choix manuel n'est nécessaire ;
+- l'application sélectionne automatiquement le bon flux de mise à jour, sans choix manuel ;
 - sous Linux, la mise à jour automatique ne fonctionne qu'avec `.AppImage` ; mettez à jour `.deb` et `.rpm` en installant un nouveau paquet par-dessus l'ancien ;
 - si la mise à jour automatique échoue, réinstallez de la même façon par-dessus avec le programme d'installation correspondant, disponible sur la page de téléchargement.
 
 ## Se connecter à une instance auto-hébergée
 
-Desktop se connecte par défaut à Multica Cloud. Pour vous connecter à une instance auto-hébergée, créez `desktop.json` dans le répertoire `.multica` de votre répertoire personnel :
-
-| Plateforme | Chemin |
-| --- | --- |
-| macOS | `/Users/<you>/.multica/desktop.json` |
-| Linux | `/home/<you>/.multica/desktop.json` |
-| Windows | `C:\Users\<you>\.multica\desktop.json` |
-
-Ce sont les emplacements par défaut — si votre répertoire personnel a été déplacé ou redirigé, utilisez son chemin réel.
+Desktop se connecte par défaut à Multica Cloud. Pour vous connecter à une instance auto-hébergée, créez `desktop.json` dans le répertoire `.multica` de votre répertoire personnel, avec ce contenu :
 
 ```json
 {
@@ -86,6 +88,38 @@ Ce sont les emplacements par défaut — si votre répertoire personnel a été 
   "apiUrl": "https://api.example.com"
 }
 ```
+
+<Tabs groupId="os" persist items={["macOS / Linux", "Windows"]}>
+<Tab value="macOS / Linux">
+
+| Plateforme | Chemin |
+| --- | --- |
+| macOS | `/Users/<you>/.multica/desktop.json` |
+| Linux | `/home/<you>/.multica/desktop.json` |
+
+</Tab>
+<Tab value="Windows">
+
+Le chemin du fichier est `C:\Users\<you>\.multica\desktop.json`.
+
+Le Bloc-notes et la redirection PowerShell produisent facilement un fichier que Desktop ne peut pas lire (voir [Windows : vérifier le nom et l'encodage du fichier](#windows--vérifier-le-nom-et-lencodage-du-fichier)) ; créez-le plutôt depuis PowerShell en une seule étape :
+
+```powershell
+$dir = "$env:USERPROFILE\.multica"
+New-Item -ItemType Directory -Force $dir | Out-Null
+$json = @'
+{
+  "schemaVersion": 1,
+  "apiUrl": "https://api.example.com"
+}
+'@
+[System.IO.File]::WriteAllText("$dir\desktop.json", $json)
+```
+
+</Tab>
+</Tabs>
+
+Ce sont les emplacements par défaut. Si votre répertoire personnel a été déplacé ou redirigé, utilisez son chemin réel.
 
 <Callout type="warning">
 Il ne s'agit **pas** du `~/.multica/config.json` du CLI, et les noms de clés diffèrent : le CLI utilise `server_url`, Desktop utilise `apiUrl`. Desktop ne lit jamais la configuration du CLI — il gère un profil de daemon distinct dans `~/.multica/profiles/desktop-<host>/`. Modifier `config.json` ne change pas le serveur auquel Desktop se connecte.
@@ -111,49 +145,37 @@ En général, `apiUrl` seul suffit. Ne les définissez explicitement que si la d
 }
 ```
 
-Redémarrez Desktop après l'enregistrement — le fichier n'est lu qu'une fois, au démarrage. Les deux modes d'échec se manifestent différemment, ce qui est le moyen le plus rapide de les distinguer :
+Redémarrez Desktop après l'enregistrement : le fichier n'est lu qu'une fois, au démarrage. Les deux modes d'échec se manifestent différemment :
 
-- **Fichier introuvable** (mauvais répertoire, ou nom de fichier qui n'est pas exactement `desktop.json`) — Desktop utilise la configuration Cloud par défaut et n'affiche aucune erreur. Donc, si Desktop indique toujours une adresse Cloud sans aucune erreur de configuration, le fichier ne se trouve pas là où Desktop le cherche.
-- **Fichier trouvé mais invalide** (JSON, version ou URL) — Desktop affiche une erreur de configuration et ne se rabat pas sur Cloud.
+- **Fichier introuvable** (mauvais répertoire, ou nom de fichier qui n'est pas exactement `desktop.json`) : Desktop utilise la configuration Cloud par défaut et n'affiche aucune erreur. Donc, si Desktop indique toujours une adresse Cloud sans aucune erreur de configuration, le fichier ne se trouve pas là où Desktop le cherche.
+- **Fichier trouvé mais invalide** (JSON, version ou URL) : Desktop affiche une erreur de configuration et ne se rabat pas sur Cloud.
 
 Supprimez le fichier et redémarrez pour revenir à la configuration Cloud par défaut.
 
 <Callout type="warning">
-Desktop ne peut se connecter qu'à des adresses joignables à la fois depuis le navigateur et depuis la machine d'exécution. Si une instance auto-hébergée distante n'utilise pas HTTPS ou ne fait pas passer le WebSocket par son proxy, Desktop ne peut pas établir de connexion ; consultez le [démarrage rapide en auto-hébergement](/self-host-quickstart#3-choisir-le-mode-daccès) pour la configuration complète.
+Desktop ne peut se connecter qu'à des adresses joignables à la fois depuis le navigateur et depuis la machine d'exécution. Si une instance auto-hébergée distante n'utilise pas HTTPS ou ne fait pas passer le WebSocket par son proxy, Desktop ne peut pas établir de connexion ; consultez le [démarrage rapide en auto-hébergement](/self-host-quickstart#remote-access) pour la configuration complète.
 </Callout>
 
 ### Windows : vérifier le nom et l'encodage du fichier
 
-Deux comportements par défaut des éditeurs Windows produisent silencieusement un fichier que Desktop ne peut pas utiliser :
+Deux façons courantes d'écrire le fichier sous Windows produisent un fichier que Desktop ne peut pas lire :
 
-- **Le Bloc-notes ajoute `.txt`.** Enregistrer sous `desktop.json` peut produire `desktop.json.txt`, que Desktop considère comme introuvable. Activez l'affichage des extensions de noms de fichiers dans l'Explorateur de fichiers, ou choisissez *Tous les fichiers* dans la boîte de dialogue d'enregistrement. Pour voir le vrai nom du fichier, exécutez `Get-ChildItem "$env:USERPROFILE\.multica" -Filter "desktop.json*"` dans PowerShell — la colonne `Name` doit indiquer exactement `desktop.json`.
+- **Le Bloc-notes ajoute `.txt`.** Enregistrer sous `desktop.json` peut produire `desktop.json.txt`, que Desktop considère comme introuvable. Activez l'affichage des extensions de noms de fichiers dans l'Explorateur de fichiers, ou choisissez *Tous les fichiers* dans la boîte de dialogue d'enregistrement. Pour voir le vrai nom du fichier, exécutez `Get-ChildItem "$env:USERPROFILE\.multica" -Filter "desktop.json*"` dans PowerShell ; la colonne `Name` doit indiquer exactement `desktop.json`.
 - **La redirection PowerShell écrit en UTF-16 ou avec un BOM.** `> desktop.json` et `Out-File` peuvent produire un encodage impossible à analyser, qui se traduit par une erreur de configuration.
 
-Pour éviter ces deux problèmes, créez le fichier depuis PowerShell en une seule étape :
-
-```powershell
-$dir = "$env:USERPROFILE\.multica"
-New-Item -ItemType Directory -Force $dir | Out-Null
-$json = @'
-{
-  "schemaVersion": 1,
-  "apiUrl": "https://api.example.com"
-}
-'@
-[System.IO.File]::WriteAllText("$dir\desktop.json", $json)
-```
+La commande PowerShell de l'onglet Windows ci-dessus évite ces deux problèmes.
 
 ## Windows Defender signale Multica comme un virus
 
-**Symptôme** : Sécurité Windows signale une menace telle que `Trojan:Script/Wacatac.B!ml` et met en quarantaine un fichier de l'installation de Desktop. L'élément concerné est normalement le CLI intégré, et non l'exécutable de l'application :
+Sécurité Windows signale une menace telle que `Trojan:Script/Wacatac.B!ml` et met en quarantaine un fichier de l'installation de Desktop. L'élément concerné est normalement le CLI intégré, et non l'exécutable de l'application :
 
 ```text
 C:\Users\<you>\AppData\Local\Programs\@multicadesktop\resources\app.asar.unpacked\resources\bin\multica.exe
 ```
 
-**Il s'agit d'un faux positif.** Le suffixe `!ml` signifie que le verdict provient des heuristiques d'apprentissage automatique de Defender, et non d'une signature de logiciel malveillant. Les builds Windows de Multica ne sont pas encore signées avec Authenticode, et un binaire non signé tout juste publié, qui lance des processus en arrière-plan et ouvre des connexions réseau, correspond exactement au profil que ces heuristiques jugent suspect. Chaque artefact Windows est construit par GitHub Actions à partir du code source public de ce dépôt.
+Il s'agit d'un faux positif. Le suffixe `!ml` signifie que le verdict provient des heuristiques d'apprentissage automatique de Defender, et non d'une signature de logiciel malveillant. Les builds Windows de Multica ne sont pas encore signées avec Authenticode, et un binaire non signé tout juste publié, qui lance des processus en arrière-plan et ouvre des connexions réseau, est facilement jugé suspect par ces heuristiques. Chaque artefact Windows est construit par GitHub Actions à partir du code source public de ce dépôt.
 
-**Vérifiez par vous-même** — chaque release GitHub publie un fichier `checksums.txt` couvrant toutes les archives du CLI :
+Vous pouvez le vérifier vous-même : chaque release GitHub publie un fichier `checksums.txt` couvrant toutes les archives du CLI.
 
 ```powershell
 Get-FileHash .\multica-cli-<version>-windows-amd64.zip -Algorithm SHA256
@@ -161,15 +183,24 @@ Get-FileHash .\multica-cli-<version>-windows-amd64.zip -Algorithm SHA256
 
 Comparez l'empreinte obtenue avec la ligne correspondante de `checksums.txt` dans la [dernière release](https://github.com/multica-ai/multica/releases/latest).
 
-**Comment corriger** :
+Corrigez-le en trois étapes :
 
-1. **Restaurez le fichier mis en quarantaine** — Sécurité Windows → *Protection contre les virus et menaces* → *Historique de protection* → sélectionnez l'élément Multica → *Actions* → *Restaurer*.
-2. **Ajoutez une exclusion** pour qu'il ne soit plus mis en quarantaine — *Protection contre les virus et menaces* → *Gérer les paramètres* → *Exclusions* → *Ajouter une exclusion* → *Dossier*, et ajoutez les deux dossiers suivants :
-   - `%LOCALAPPDATA%\Programs\@multicadesktop`
-   - `%APPDATA%\Multica`
+<Steps>
+<Step>
+Restaurez le fichier mis en quarantaine : Sécurité Windows → *Protection contre les virus et menaces* → *Historique de protection* → sélectionnez l'élément Multica → *Actions* → *Restaurer*.
+</Step>
+<Step>
+Ajoutez une exclusion pour qu'il ne soit plus mis en quarantaine : *Protection contre les virus et menaces* → *Gérer les paramètres* → *Exclusions* → *Ajouter une exclusion* → *Dossier*, et ajoutez les deux dossiers suivants :
 
-   Les deux chemins sont nécessaires : lorsque le CLI intégré disparaît, Desktop télécharge un remplaçant dans `%APPDATA%\Multica\bin` ; exclure uniquement le dossier d'installation vous enferme donc dans une boucle où le remplaçant est lui aussi mis en quarantaine.
-3. **Signalez le faux positif à Microsoft** sur [Microsoft Security Intelligence — soumettre un fichier](https://www.microsoft.com/en-us/wdsi/filesubmission), en choisissant *Software developer* et *Incorrectly detected as malware*. C'est ce qui permet de retirer la détection pour tous les utilisateurs, généralement en quelques jours.
+- `%LOCALAPPDATA%\Programs\@multicadesktop`
+- `%APPDATA%\Multica`
+
+Les deux chemins sont nécessaires : lorsque le CLI intégré disparaît, Desktop télécharge un remplaçant dans `%APPDATA%\Multica\bin` ; exclure uniquement le dossier d'installation vous enferme donc dans une boucle où le remplaçant est lui aussi mis en quarantaine.
+</Step>
+<Step>
+Signalez le faux positif à Microsoft sur [Microsoft Security Intelligence — soumettre un fichier](https://www.microsoft.com/en-us/wdsi/filesubmission), en choisissant *Software developer* et *Incorrectly detected as malware*. C'est ce qui permet de retirer la détection pour tous les utilisateurs, généralement en quelques jours.
+</Step>
+</Steps>
 
 <Callout type="warning">
 N'ajoutez ces exclusions que si vous avez installé Multica depuis la [page de téléchargement](https://multica.ai/download) ou les [releases GitHub](https://github.com/multica-ai/multica/releases) et que la somme de contrôle correspond. Une exclusion désactive la protection en temps réel pour tout le contenu de ce dossier.
