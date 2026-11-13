@@ -240,11 +240,13 @@ export function LabelPicker({
 
   // In a custom trigger (PillButton) the trigger is itself a button, so the
   // chips can't carry their own remove button. Otherwise fall back to the
-  // chip-wrap div used by the issue-detail sidebar.
+  // chip-wrap div used by the issue-detail sidebar. Its `py-1.5` puts the
+  // first line of 20px chips at the centre of a 32px property row, level with
+  // the row's label, however many lines the chips wrap onto.
   const resolvedTriggerRender =
     triggerRender ??
     (hasLabels ? (
-      <div className="flex flex-wrap items-center gap-1 cursor-pointer rounded-xs px-1 -mx-1 hover:bg-accent/30 transition-colors" />
+      <div className="flex flex-wrap items-center gap-1 cursor-pointer rounded-xs px-1 -mx-1 py-1.5 hover:bg-accent/30 transition-colors" />
     ) : undefined);
 
   return (
