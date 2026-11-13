@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -29,6 +30,53 @@ func TestRedisClientName(t *testing.T) {
 				t.Errorf("redisClientName(%q, %q) = %q, want %q", tt.existing, tt.suffix, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestRequireSharedRealtimeRelay(t *testing.T) {
+	const secretURL = "redis://:super-secret-password@127.0.0.1:6379/0"
+	tests := []struct {
+		name     string
+		replicas int
+		url      string
+		wantErr  string
+	}{
+		{name: "single replica without redis", replicas: 1},
+		{name: "single replica with valid redis", replicas: 1, url: "redis://127.0.0.1:6379/0"},
+		{name: "multi replica with valid redis", replicas: 2, url: "rediss://cache.internal:6380/1"},
+		{name: "multi replica without redis", replicas: 2, wantErr: "shared realtime relay is not configured"},
+		{name: "multi replica with malformed redis", replicas: 3, url: "http://not-redis", wantErr: "shared realtime relay configuration is invalid"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := requireSharedRealtimeRelay(tt.replicas, tt.url, false)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("requireSharedRealtimeRelay() error = %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("requireSharedRealtimeRelay() error = %v, want %q", err, tt.wantErr)
+			}
+			if strings.Contains(err.Error(), "super-secret-password") {
+				t.Fatalf("relay diagnostic leaked the redis URL: %v", err)
+			}
+		})
+	}
+
+	// A password-carrying URL that parses is accepted, and the diagnostic path
+	// must never echo it: both the accepted and the rejected case are checked.
+	if err := requireSharedRealtimeRelay(2, secretURL, false); err != nil {
+		t.Fatalf("requireSharedRealtimeRelay() rejected a valid secret URL: %v", err)
+	}
+	badSecretURL := "http://:super-secret-password@127.0.0.1:6379/0"
+	err := requireSharedRealtimeRelay(2, badSecretURL, false)
+	if err == nil {
+		t.Fatal("requireSharedRealtimeRelay() accepted a malformed secret URL")
+	}
+	if strings.Contains(err.Error(), "super-secret-password") || strings.Contains(err.Error(), badSecretURL) {
+		t.Fatalf("relay diagnostic leaked the redis URL: %v", err)
 	}
 }
 

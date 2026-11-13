@@ -74,11 +74,18 @@ spec:
                 name: {{ .Release.Name }}-config
             - secretRef:
                 name: {{ .Values.existingSecret }}
-          {{- if or (not .Values.postgres.external.enabled) $extraCACerts }}
+          {{- if or (not .Values.postgres.external.enabled) $extraCACerts (gt (int .Values.backend.replicas) 1) }}
           env:
             {{- if not .Values.postgres.external.enabled }}
             - name: DATABASE_URL
               value: {{ include "multica.databaseUrl" . | quote }}
+            {{- end }}
+            {{- if gt (int .Values.backend.replicas) 1 }}
+            # Tells the process how many backends share this deployment. More
+            # than one requires a shared realtime relay (REDIS_URL in the
+            # existing Secret); the process refuses to start without it.
+            - name: MULTICA_BACKEND_REPLICAS
+              value: {{ .Values.backend.replicas | quote }}
             {{- end }}
             {{- if $extraCACerts }}
             # Go loads the system bundle file plus every file in these
