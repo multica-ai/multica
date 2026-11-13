@@ -19,21 +19,6 @@ name: Mobile Verify
 # selected, otherwise frontend-quality handles docs/mobile-only changes.
 
 on:
-# - apps/mobile/**                — the app itself
-# - packages/core/**              — mobile imports types AND pure functions
-#                                   (agents, markdown, permissions, api/schemas, …),
-#                                   not only @multica/core/types
-# - package.json / pnpm-lock.yaml — install graph
-# - pnpm-workspace.yaml           — catalog versions
-# - turbo.json                    — turbo task pipeline
-#
-# Mobile's vitest suite is intentionally narrow (Node env, pure-function
-# tests under apps/mobile/lib/*.test.ts — see apps/mobile/vitest.config.ts).
-# RN component-level rendering is not exercised here.
-# Repository-wide radius checks run once in CI: frontend-build owns them when
-# selected, otherwise frontend-quality handles docs/mobile-only changes.
-
-on:
   push:
     branches: [main]
     paths:
