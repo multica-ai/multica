@@ -24,6 +24,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/attachmentpreview"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
+	"github.com/multica-ai/multica/server/internal/connectedapps"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -44,6 +45,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/seatcapacity"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/storage"
+	"github.com/multica-ai/multica/server/internal/themestore"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/internal/util/secretbox"
 	composiosdk "github.com/multica-ai/multica/server/pkg/composio"
@@ -461,6 +463,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.InvitationRateLimiters = handler.NewMemoryInvitationRateLimiters(invitationRateLimits)
 	h.Metrics = opts.BusinessMetrics
 	h.FeatureFlags = opts.FeatureFlags
+	h.ThemeStore = themeStoreFromEnv()
 	h.TaskService.FeatureFlags = opts.FeatureFlags
 	h.TaskService.Metrics = opts.BusinessMetrics
 	h.IssueService.Metrics = opts.BusinessMetrics
@@ -1273,6 +1276,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// as WeCom above).
 			var telegramMedia engine.MediaResolver
 			telegramOutbound := telegram.NewOutbound(queries, box.Open, "", nil, slog.Default())
+			// How much of a run's tool calls the streamed reply shows: auto
+			// (default), off, summary or detail.
+			progressMode, known := telegram.ParseProgressMode(os.Getenv("MULTICA_TELEGRAM_TOOL_PROGRESS"))
+			if !known {
+				slog.Warn("telegram: unknown MULTICA_TELEGRAM_TOOL_PROGRESS; using auto",
+					"value", os.Getenv("MULTICA_TELEGRAM_TOOL_PROGRESS"))
+			}
+			telegramOutbound.SetProgressMode(progressMode)
 			if store != nil {
 				telegramMedia = telegram.NewMediaResolver(box.Open, store, engine.NewDBMediaIntentLedger(queries), "", nil, slog.Default())
 				telegramOutbound.EnableFileDelivery(store)
@@ -1340,6 +1351,22 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 						slog.Error("composio: service init failed; composio integration disabled", "error", serr)
 					} else {
 						h.Composio = svc
+						// Connected Apps v2 (MUL-8516): runs reach their apps
+						// through the Multica gateway, which holds the Composio
+						// key and applies account rules and confirmations.
+						appsSvc, aerr := connectedapps.New(connectedapps.Config{
+							Queries:       queries,
+							Composio:      svc,
+							TokenSecret:   connectedapps.DeriveTokenSecret(stateSecret),
+							PublicBaseURL: callbackBase,
+							Bus:           bus,
+						})
+						if aerr != nil {
+							slog.Error("connected apps: init failed; agents run without apps", "error", aerr)
+						} else {
+							appsSvc.SetResumer(h)
+							h.ConnectedApps = appsSvc
+						}
 						// Stage 3 (MUL-3721) hook: feed the per-task MCP
 						// overlay builder into TaskService so every Enqueue*
 						// path attaches the initiator user's Composio session
@@ -1348,8 +1375,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 						// constructed inside NewHandler — and exposes its
 						// Composio field for exactly this kind of late wiring,
 						// so no Handler-level mutation is needed.
-						if h.TaskService != nil {
-							h.TaskService.Composio = svc
+						if h.TaskService != nil && h.ConnectedApps != nil {
+							h.TaskService.Composio = h.ConnectedApps
 						}
 						slog.Info("composio integration enabled")
 					}
@@ -1528,16 +1555,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		realtime.HandleWebSocket(hub, mc, pr, slugResolver, w, r)
 	})
 
-	// Local file serving (when using local storage). Served through the
-	// handler so /uploads/* carries the same preview security headers as the
-	// /api/attachments download endpoint; self-hosted split-origin/same-origin
-	// clients can then iframe-preview PDFs/HTML fetched straight from the
-	// static route instead of hitting the global frame-ancestors 'none' CSP.
-	// See MUL-3821 / #4477.
-	if _, ok := store.(*storage.LocalStorage); ok {
-		r.Get("/uploads/*", h.ServeLocalUpload)
-	}
-
 	// Capability-authenticated attachment download (MUL-5292). Public by
 	// necessity: a native download (Electron's webContents.downloadURL, a
 	// cross-site webview <img>) carries neither Authorization nor a session
@@ -1572,6 +1589,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	authRL := middleware.RateLimit(rdb, envPositiveInt("RATE_LIMIT_AUTH", 5), time.Minute, trustedProxies)
 	authVerifyRL := middleware.RateLimit(rdb, envPositiveInt("RATE_LIMIT_AUTH_VERIFY", 20), time.Minute, trustedProxies)
 	contactSalesRL := middleware.RateLimit(rdb, envPositiveInt("RATE_LIMIT_CONTACT_SALES", 5), time.Hour, trustedProxies)
+	siteStarReadRL := middleware.RateLimit(rdb, envPositiveInt("RATE_LIMIT_SITE_STAR_READ", 30), time.Minute, trustedProxies)
+	siteStarSpinRL := middleware.RateLimit(rdb, envPositiveInt("RATE_LIMIT_SITE_STAR_SPIN", 40), time.Minute, trustedProxies)
 	r.With(authRL).Post("/auth/send-code", h.SendCode)
 	r.With(authVerifyRL).Post("/auth/verify-code", h.VerifyCode)
 	r.With(authRL).Post("/auth/google", h.GoogleLogin)
@@ -1580,6 +1599,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// Public API
 	r.Get("/api/config", h.GetConfig)
 	r.With(contactSalesRL).Post("/api/contact-sales", h.CreateContactSales)
+	// The marketing site's shared footer star. Reads and spins live on
+	// separate paths because the limiter keys on path and IP.
+	r.With(siteStarReadRL).Get("/api/site/star", h.GetSiteStar)
+	r.With(siteStarSpinRL).Post("/api/site/star/turns", h.AddSiteStarTurns)
 	// Public share-link preview — no auth: shows the workspace name/slug and
 	// inviter so a not-yet-logged-in visitor can see what they're joining.
 	r.Get("/api/share-links/{code}", h.GetShareLinkInfo)
@@ -1618,6 +1641,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// Auth group made a missing cookie a hard 401, breaking the flow for exactly
 	// the browsers above; the other four composio endpoints stay session-gated.
 	r.Get("/api/integrations/composio/callback", h.ComposioCallback)
+	// Apps MCP gateway (MUL-8516). Outside the Auth group: a run presents its
+	// task-scoped bearer token, verified by the gateway itself.
+	r.Post("/api/apps/mcp", h.AppsGateway)
 
 	// Daemon API routes (require daemon token or valid user token)
 	r.Route("/api/daemon", func(r chi.Router) {
@@ -1652,6 +1678,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/runtimes/{runtimeId}/models/{requestId}/result", h.ReportModelListResult)
 		r.Post("/runtimes/{runtimeId}/local-skills/{requestId}/result", h.ReportLocalSkillListResult)
 		r.Post("/runtimes/{runtimeId}/local-skills/import/{requestId}/result", h.ReportLocalSkillImportResult)
+		r.Post("/runtimes/{runtimeId}/environment-commands/claim", h.ClaimEnvironmentCommands)
+		r.Post("/runtimes/{runtimeId}/environment-commands/{commandId}/result", h.ReportEnvironmentCommandResult)
 
 		r.Get("/tasks/{taskId}/status", h.GetTaskStatus)
 		r.Post("/tasks/{taskId}/start", h.StartTask)
@@ -1662,6 +1690,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/tasks/{taskId}/complete", h.CompleteTask)
 		r.Post("/tasks/{taskId}/fail", h.FailTask)
 		r.Post("/tasks/{taskId}/usage", h.ReportTaskUsage)
+		r.Post("/tasks/{taskId}/environments", h.ReportTaskEnvironments)
+		r.Post("/tasks/{taskId}/environment-configs", h.ReportTaskEnvironmentConfigs)
+		r.Post("/tasks/{taskId}/context-receipt", h.ReportTaskContextReceipt)
 		r.Post("/tasks/{taskId}/messages", h.ReportTaskMessages)
 		r.Get("/tasks/{taskId}/messages", h.ListTaskMessages)
 		r.Post("/tasks/{taskId}/cancel-ack", h.AckTaskCancelled)
@@ -1717,12 +1748,17 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// against it. Sits in the user-scoped group for that reason: there is
 		// no workspace in the path to gate on.
 		// --- User-scoped routes (no workspace context required) ---
+		r.Get("/api/theme-store/themes", h.ListStoreThemes)
+		r.Get("/api/theme-store/themes/{themeId}/package", h.GetStoreThemePackage)
+		r.Get("/api/theme-store/themes/{themeId}/screenshots/{mode}", h.GetStoreThemeScreenshot)
 		r.Get("/api/me", h.GetMe)
 		r.Patch("/api/me", h.UpdateMe)
 		r.Patch("/api/me/onboarding", h.PatchOnboarding)
 		r.Post("/api/me/onboarding/complete", h.CompleteOnboarding)
 		r.Post("/api/me/onboarding/cloud-waitlist", h.JoinCloudWaitlist)
 		r.Post("/api/me/whats-new/seen", h.MarkWhatsNewSeen)
+		r.With(handler.RequireHumanActor).Post("/api/me/star-prompt/claim", h.ClaimStarPromptShowing)
+		r.With(handler.RequireHumanActor).Post("/api/me/star-prompt/starred", h.MarkStarPromptStarred)
 		// Credential minting is human-only (MUL-8154): an agent task token
 		// (mat_) or cloud-node PAT (mcn_) authenticates as its owner, so
 		// without this guard a prompt-injected agent could trade its scoped,
@@ -1768,6 +1804,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
 					r.Get("/", h.GetWorkspace)
+					r.Put("/pin", h.SetWorkspacePinned)
 					r.Get("/members", h.ListMembersWithUser)
 					r.Post("/leave", h.LeaveWorkspace)
 					r.Get("/invitations", h.ListWorkspaceInvitations)
@@ -2093,6 +2130,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/table/facets", h.ListIssueTableFacets)
 				r.Get("/search", h.SearchIssues)
 				r.Get("/child-progress", h.ChildIssueProgress)
+				r.Get("/pull-requests", h.ListIssuePullRequestSummaries)
 				r.Get("/children", h.ListChildrenByParents)
 				r.Get("/grouped", h.ListGroupedIssues)
 				// The caller's issues with an agent result they have not seen
@@ -2160,6 +2198,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/metadata/{key}", h.DeleteIssueMetadataKey)
 					r.Put("/properties/{propertyId}", h.SetIssueProperty)
 					r.Delete("/properties/{propertyId}", h.DeleteIssueProperty)
+					r.Get("/environments", h.ListIssueEnvironments)
+					r.With(handler.RequireHumanActor).Post("/environments/start", h.StartIssueEnvironment)
+					r.With(handler.RequireHumanActor).Post("/environments/{environmentId}/stop", h.StopIssueEnvironment)
+					r.With(handler.RequireHumanActor).Post("/environments/{environmentId}/restart", h.RestartIssueEnvironment)
+					r.Post("/environments/{environmentId}/logs", h.ReadIssueEnvironmentLogs)
+					r.Get("/environment-commands/{commandId}", h.GetIssueEnvironmentCommand)
 					r.Get("/pull-requests", h.ListPullRequestsForIssue)
 					r.Post("/pull-requests", h.LinkIssuePullRequest)
 					r.Delete("/pull-requests/{prId}", h.UnlinkIssuePullRequest)
@@ -2169,6 +2213,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// Task messages (user-facing, not daemon auth)
 			r.Get("/api/tasks/{taskId}/messages", h.ListTaskMessagesByUser)
+			r.Get("/api/tasks/{taskId}/context-receipt", h.GetTaskContextReceipt)
 			r.With(handler.RequireHumanActor).Post("/api/tasks/{taskId}/retry-source-context", h.RetrySourceContextQuickCreate)
 
 			// Issue quick actions (definitions; running one lives under
@@ -2242,6 +2287,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/", h.UpdateProject)
 					r.Delete("/", h.DeleteProject)
 					r.Post("/workflow", h.SetProjectWorkflow)
+					r.Get("/members", h.ListProjectMembers)
+					r.Post("/members", h.AddProjectMembers)
+					r.Delete("/members/{userId}", h.RemoveProjectMember)
+					r.Get("/subscription", h.GetProjectSubscription)
+					r.Put("/subscription", h.SubscribeToProject)
+					r.Delete("/subscription", h.UnsubscribeFromProject)
 					r.Get("/resources", h.ListProjectResources)
 					r.Post("/resources", h.CreateProjectResource)
 					r.Put("/resources/{resourceId}", h.UpdateProjectResource)
@@ -2253,6 +2304,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/squads", func(r chi.Router) {
 				r.Get("/", h.ListSquads)
 				r.Post("/", h.CreateSquad)
+				// The squads behind the caller's "my agents" relation; backs
+				// that filter on client-filtered surfaces.
+				r.Get("/involved", h.ListInvolvedSquadIDs)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetSquad)
 					r.Put("/", h.UpdateSquad)
@@ -2358,6 +2412,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetAgent)
 					r.Put("/", h.UpdateAgent)
+					r.Get("/apps", h.ListAgentApps)
+					r.With(handler.RequireHumanActor).Put("/apps", h.UpdateAgentApps)
 					r.Post("/archive", h.ArchiveAgent)
 					r.Post("/restore", h.RestoreAgent)
 					r.Post("/cancel-tasks", h.CancelAgentTasks)
@@ -2558,6 +2614,32 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Get("/api/chat/history", h.GetChatChannelHistory)
 			r.Get("/api/chat/thread", h.GetChatThread)
 
+			// Connected Apps (MUL-8516)
+			// Connected Apps management and decisions are for people; runs
+			// reach apps only through /api/apps/mcp.
+			r.Route("/api/apps", func(r chi.Router) {
+				r.Use(handler.RequireHumanActor)
+				r.Get("/", h.GetAppsOverview)
+				r.Get("/catalog", h.ListAppCatalog)
+				r.Put("/settings", h.UpdateAppSettings)
+				r.Post("/team/connect", h.ConnectTeamApp)
+				r.Get("/team/impact", h.GetTeamAppImpact)
+				r.Delete("/team/connections/{id}", h.DisconnectTeamApp)
+				r.Post("/personal/connect", h.ConnectPersonalApp)
+				r.Get("/rules", h.GetAppRules)
+				r.Put("/rules", h.UpdateAppRules)
+				r.Get("/activity", h.ListAppActivity)
+				r.Get("/tools", h.ListAppTools)
+				r.Put("/tools/class", h.UpdateAppToolClass)
+			})
+			r.With(handler.RequireHumanActor).Get("/api/app-calls", h.ListIssueAppCalls)
+			r.Route("/api/app-requests", func(r chi.Router) {
+				r.Use(handler.RequireHumanActor)
+				r.Get("/", h.ListAppRequests)
+				r.Post("/{id}/approve", h.ApproveAppRequest)
+				r.Post("/{id}/reject", h.RejectAppRequest)
+			})
+
 			// Inbox
 			r.Route("/api/inbox", func(r chi.Router) {
 				r.Get("/", h.ListInbox)
@@ -2582,6 +2664,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/{id}/unread", h.MarkInboxUnread)
 				r.Post("/{id}/archive", h.ArchiveInboxItem)
 				r.Post("/{id}/unarchive", h.UnarchiveInboxItem)
+				r.Delete("/{id}", h.DeleteInboxItem)
 			})
 
 			// Notification preferences
@@ -2770,6 +2853,20 @@ func optionalUUID(s string) pgtype.UUID {
 		return pgtype.UUID{}
 	}
 	return util.MustParseUUID(s)
+}
+
+// themeStoreFromEnv builds the community theme store, which is always on.
+// MULTICA_THEME_REGISTRY_URL points it at another registry's index.json. A
+// URL that does not parse turns the store off rather than failing the boot.
+func themeStoreFromEnv() *themestore.Store {
+	store, err := themestore.New(themestore.Config{
+		IndexURL: strings.TrimSpace(os.Getenv("MULTICA_THEME_REGISTRY_URL")),
+	})
+	if err != nil {
+		slog.Error("theme store: turned off", "error", err)
+		return nil
+	}
+	return store
 }
 
 func splitAndTrim(s string) []string {

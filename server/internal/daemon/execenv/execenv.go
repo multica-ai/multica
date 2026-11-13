@@ -256,6 +256,7 @@ type IssueStatusForEnv struct {
 
 type SkillContextForEnv struct {
 	Name        string
+	BuiltinName string // original built-in identity; empty for workspace and plugin skills
 	Description string
 	Content     string
 	Files       []SkillFileContextForEnv
@@ -1159,8 +1160,8 @@ type GCMeta struct {
 	// this by never falling into the gcActionClean branch (which would
 	// RemoveAll envRoot — safe by structure, but we still want to keep the
 	// envRoot's output/ and logs/ around longer so users can inspect what
-	// the agent did in their own tree). Pattern-based artifact cleanup is
-	// still allowed.
+	// the agent did in their own tree). Artifact cleanup and expiry of the
+	// Codex home are still allowed; locally stored session history is retained.
 	LocalDirectory bool `json:"local_directory,omitempty"`
 }
 

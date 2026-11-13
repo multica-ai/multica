@@ -40,8 +40,8 @@ Never paste the token into an issue, chat message, log, or source repository. If
 
 ### Connect it to an agent [#2-connect-it-to-an-agent]
 
-1. In Multica, open **Agents**, select an agent, and open **Integrations**.
-2. Click **Connect Telegram**.
+1. In Multica, open **Agents**, select an agent, and open **Messaging**.
+2. Click **Add messaging channel**, then choose **Telegram**.
 3. Paste the Bot token and click **Connect**.
 
 Multica calls Telegram to verify the Bot, checks that no outgoing webhook conflicts with long polling, encrypts the token, and starts one supervised `getUpdates` connection. A Bot already connected to another agent or workspace must be disconnected there first.
@@ -100,7 +100,7 @@ When a reply that addresses the Bot quotes a message carrying a photo or file, t
 
 ### Replies and supported content
 
-The Bot streams text by posting and editing a Telegram message, quotes the triggering message, preserves forum topics, and splits long replies under Telegram's message limit.
+The Bot streams text by posting and editing a Telegram message, quotes the triggering message, preserves forum topics, and splits long replies under Telegram's message limit. While the agent works, the same message lists its current steps, such as running a command or reading a file, with the time elapsed. A private chat shows what each step is working on; a group shows only the kind of work. Set `MULTICA_TELEGRAM_TOOL_PROGRESS` to `off`, `summary` or `detail` to change this.
 
 Photos, files, video, voice, and audio messages reach the agent as attachments on the same conversation, with the caption as the message text, and files the agent produces are sent back into the chat after its reply. Both directions need object storage on the server (see the self-hosting section below).
 
@@ -125,7 +125,7 @@ Without object storage, the Bot answers media with the unsupported-message notic
 
 ## Manage connections
 
-Open **Settings → Messaging → Telegram** to view connected Bots. Owners and admins can disconnect one. Disconnecting stops long polling and outbound replies but preserves Multica conversations and audit records.
+Open **Settings → Messaging** to see connected agents grouped by platform. Select an agent to open its **Messaging** section. Workspace owners and admins can disconnect the Bot from its management menu there. Disconnecting stops long polling and outbound replies but preserves Multica conversations and audit records.
 
 ## Self-hosting setup
 

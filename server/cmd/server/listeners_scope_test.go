@@ -274,8 +274,35 @@ func TestRegisterListeners_ChatRoutingKeepsInProcessListeners(t *testing.T) {
 	}
 }
 
+// A pin is one member's own in every workspace, with or without a private
+// project: one published without its member reaches nobody.
+func TestRegisterListeners_PinEventsWithoutMemberAreDropped(t *testing.T) {
+	for _, eventType := range []string{protocol.EventPinCreated, protocol.EventPinDeleted, protocol.EventPinReordered} {
+		t.Run(eventType, func(t *testing.T) {
+			bus := events.New()
+			fb := &fakeBroadcaster{}
+			registerListeners(bus, fb)
+
+			bus.Publish(events.Event{
+				Type: eventType, WorkspaceID: "ws-1", ActorType: "member", ActorID: "owner-1",
+				Payload: map[string]any{"item_type": "issue", "item_id": "issue-1"},
+			})
+
+			fb.mu.Lock()
+			defer fb.mu.Unlock()
+			if len(fb.workspaceCalls) != 0 || len(fb.scopeCalls) != 0 || len(fb.userCalls) != 0 || fb.broadcastCalled != 0 {
+				t.Fatalf("pin event was delivered: workspace=%+v scope=%+v user=%+v broadcast=%d",
+					fb.workspaceCalls, fb.scopeCalls, fb.userCalls, fb.broadcastCalled)
+			}
+		})
+	}
+}
+
 func TestRegisterListeners_MemberPrivateEventsGoOnlyToThatMember(t *testing.T) {
-	for _, eventType := range []string{protocol.EventIssueViewPreferenceChanged, protocol.EventIssueViewChanged} {
+	for _, eventType := range []string{
+		protocol.EventIssueViewPreferenceChanged, protocol.EventIssueViewChanged,
+		protocol.EventPinCreated, protocol.EventPinDeleted, protocol.EventPinReordered,
+	} {
 		t.Run(eventType, func(t *testing.T) {
 			bus := events.New()
 			fb := &fakeBroadcaster{}

@@ -89,6 +89,7 @@ import {
 import { AgentInstructionsSection } from "./agent-instructions-section";
 import { AgentPropertiesPanel } from "./agent-properties-panel";
 import { describeCancelImpact } from "./agent-row-actions";
+import { AgentChannelLinks, AgentChannelsSection } from "./agent-channels-section";
 import { AgentSkillsSection } from "./agent-skills-section";
 import { AgentWorkDialog } from "./agent-work-dialog";
 import { AgentWorkSections } from "./tabs/activity-tab";
@@ -116,6 +117,7 @@ interface AgentDetailPageProps {
 export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   const { t } = useT("agents");
   const wsId = useWorkspaceId();
+  const [scrollParent, setScrollParent] = useState<HTMLDivElement | null>(null);
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
   const qc = useQueryClient();
@@ -172,7 +174,15 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [confirmCancelRuns, setConfirmCancelRuns] = useState(false);
 
-  const urlView = viewFromParams(navigation.searchParams);
+  const requestedView = viewFromParams(navigation.searchParams);
+  const urlView = requestedView === "integrations" ? "channels" : requestedView;
+  useEffect(() => {
+    if (requestedView !== "integrations" || !agent) return;
+    const params = new URLSearchParams(navigation.searchParams);
+    params.delete("tab");
+    params.set("view", "channels");
+    navigation.replace(`${navigation.pathname}?${params}`);
+  }, [requestedView, navigation, agent]);
   const [advancedSection, setAdvancedSection] = useState<AdvancedSection | null>(
     () => (isAdvancedSection(urlView) ? urlView : null),
   );
@@ -627,6 +637,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   return (
     <>
       <ObjectPage
+        scrollRef={setScrollParent}
         layoutId={AGENT_DETAIL_LAYOUT_ID}
         segments={[listSegment]}
         leaf={
@@ -671,10 +682,18 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
                 ) : null
               }
             />
+            <AgentChannelLinks agent={agent} />
             {notices.length > 0 && <div className="space-y-2">{notices}</div>}
           </div>
 
-          <AgentWorkSections agent={agent} onViewAll={() => openWork(true)} />
+          <AgentWorkSections
+            key={`${wsId}:${agent.id}`}
+            agent={agent}
+            scrollParent={scrollParent}
+            onViewAll={() => openWork(true)}
+          />
+
+          <AgentChannelsSection agent={agent} />
 
           <AgentInstructionsSection
             agent={agent}

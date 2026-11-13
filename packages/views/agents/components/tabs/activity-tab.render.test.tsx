@@ -1,8 +1,11 @@
 // @vitest-environment jsdom
 
+import { useState } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { VirtuosoMockContext } from "react-virtuoso";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { api } from "@multica/core/api";
 import type { Agent, AgentActivityBucket, AgentTask } from "@multica/core/types";
 import { WorkspaceSlugProvider } from "@multica/core/paths";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -19,8 +22,9 @@ vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
 
-// History fixtures have no issue links, so they need no issue-detail requests.
-vi.mock("@multica/core/api", () => ({ api: {} }));
+vi.mock("@multica/core/api", () => ({ api: {
+  getIssue: vi.fn((id: string) => Promise.resolve({ id, title: `Issue ${id}`, identifier: id })),
+} }));
 
 // Keep transcript internals out of history pagination tests while exposing
 // the identity of each rendered task row.
@@ -65,6 +69,13 @@ const baseAgent = {
 
 const EMPTY_RECENT = "This agent hasn't completed anything yet.";
 
+function WorkSections({ onViewAll }: { onViewAll: () => void }) {
+  const [scrollParent, setScrollParent] = useState<HTMLDivElement | null>(null);
+  return <div ref={setScrollParent} style={{ height: 1200, overflowY: "auto" }}>
+    <AgentWorkSections agent={baseAgent} onViewAll={onViewAll} scrollParent={scrollParent} />
+  </div>;
+}
+
 function renderTab(performance = false, onViewAll = vi.fn()) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -84,7 +95,9 @@ function renderTab(performance = false, onViewAll = vi.fn()) {
         <QueryClientProvider client={queryClient}>
           <WorkspaceSlugProvider slug="acme">
             {performance && <AgentPerformanceSummary agent={baseAgent} />}
-            <AgentWorkSections agent={baseAgent} onViewAll={onViewAll} />
+            <VirtuosoMockContext.Provider value={{ viewportHeight: 1600, itemHeight: 40 }}>
+              <WorkSections onViewAll={onViewAll} />
+            </VirtuosoMockContext.Provider>
           </WorkspaceSlugProvider>
         </QueryClientProvider>
       </NavigationProvider>
@@ -95,6 +108,7 @@ function renderTab(performance = false, onViewAll = vi.fn()) {
 beforeEach(() => {
   agentTasksRef.current = () => new Promise<unknown>(() => {});
   activityRef.current = [];
+  vi.mocked(api.getIssue).mockClear();
 });
 
 describe("agent outcome presentation", () => {
@@ -281,5 +295,39 @@ describe("AgentWorkSections section counts", () => {
     renderTab(false, onViewAll);
     fireEvent.click(screen.getByRole("button", { name: "View all" }));
     expect(onViewAll).toHaveBeenCalledTimes(1);
+  });
+});
+
+
+describe("AgentWorkSections windowed history", () => {
+  it("bounds mounted rows after repeatedly revealing cached history", async () => {
+    agentTasksRef.current = () => Promise.resolve({
+      tasks: Array.from({ length: 210 }, (_, i) => historyTask(i)),
+      nextCursor: null,
+    });
+    renderTab();
+    await screen.findByTestId("task-0");
+    for (let i = 0; i < 10; i++) {
+      fireEvent.click(screen.getByRole("button", { name: /Show more/ }));
+    }
+    expect(screen.queryByRole("button", { name: /Show more/ })).not.toBeInTheDocument();
+    expect(screen.getAllByTestId(/^task-/).length).toBeLessThan(50);
+    expect(document.querySelector("[data-virtuoso-scroller]")).toBeInTheDocument();
+  });
+
+  it("resolves issues only for the mounted window, sharing duplicate issue lookups", async () => {
+    agentTasksRef.current = () => Promise.resolve({
+      tasks: Array.from({ length: 210 }, (_, i) => ({ ...historyTask(i), issue_id: `issue-${Math.floor(i / 2)}` })),
+      nextCursor: null,
+    });
+    renderTab();
+    await screen.findAllByText("Issue issue-0");
+    for (let i = 0; i < 10; i++) {
+      fireEvent.click(screen.getByRole("button", { name: /Show more/ }));
+    }
+    await screen.findAllByText("Issue issue-10");
+    expect(vi.mocked(api.getIssue).mock.calls.length).toBeLessThan(30);
+    expect(vi.mocked(api.getIssue).mock.calls.filter(([id]) => id === "issue-0")).toHaveLength(1);
+    expect(screen.queryByText("Issue issue-104")).not.toBeInTheDocument();
   });
 });

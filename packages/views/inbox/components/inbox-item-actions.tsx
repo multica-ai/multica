@@ -1,6 +1,6 @@
 "use client";
 
-import { Archive, ArchiveRestore, Check, CircleDot, ExternalLink } from "@multica/ui/icons";
+import { Archive, ArchiveRestore, Check, CircleDot, ExternalLink, Trash2 } from "@multica/ui/icons";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import type { InboxItem } from "@multica/core/types";
 import type { RowActionItem } from "../../common/row-actions-menu";
@@ -17,6 +17,7 @@ export interface InboxRowActions {
    * reversal-of-the-current-view the row's inline button performs.
    */
   onAction: (id: string) => void;
+  onDelete: (id: string) => void;
 }
 
 /**
@@ -97,6 +98,16 @@ export function useInboxItemActions(
         <Archive className="h-4 w-4" />
       ),
       onSelect: () => actions.onAction(item.id),
+    },
+  ]);
+
+  groups.push([
+    {
+      key: "delete",
+      label: t(($) => $.context_menu.delete),
+      icon: <Trash2 className="h-4 w-4" />,
+      danger: true,
+      onSelect: () => actions.onDelete(item.id),
     },
   ]);
 

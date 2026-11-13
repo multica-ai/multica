@@ -147,6 +147,7 @@ export interface EditorExtensionsOptions {
   placeholder?: string | (() => string);
   queryClient?: import("@tanstack/react-query").QueryClient;
   onSubmitRef?: RefObject<(() => void) | undefined>;
+  onEnterRef?: RefObject<(() => void) | undefined>;
   onUploadFileRef?: RefObject<
     ((file: File, uploadId: string) => Promise<UploadResult | null>) | undefined
   >;
@@ -309,7 +310,7 @@ export function createEditorExtensions(
       if (!fn) return false;
       fn();
       return true;
-    }),
+    }, () => options.onEnterRef?.current),
     createBlurShortcutExtension(),
     createFileUploadExtension(options.onUploadFileRef!, options.pasteAsFileThresholdRef),
   ];

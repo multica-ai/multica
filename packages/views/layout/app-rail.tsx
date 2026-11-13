@@ -1,12 +1,30 @@
 "use client";
 
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Settings, Users, type IconComponent } from "@multica/ui/icons";
+import {
+  DndContext,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-kit/modifiers";
+import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { CheckCheck, ExternalLink, Link2, RotateCcw, Settings, Users, type IconComponent } from "@multica/ui/icons";
+import { toast } from "sonner";
 import { useChatStore } from "@multica/core/chat";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
 import { countUnreadChatMessages } from "@multica/core/chat/unread";
-import { useInboxUnreadCount } from "@multica/core/inbox/queries";
+import {
+  deduplicateInboxItems,
+  inboxListOptions,
+  useInboxUnreadCount,
+} from "@multica/core/inbox/queries";
+import { useMarkAllInboxRead } from "@multica/core/inbox/mutations";
+import { resolveRailOrder, useRailOrderStore } from "@multica/core/navigation";
 import {
   RAIL_SPACES,
   useCurrentWorkspace,
@@ -15,11 +33,20 @@ import {
   type RailSpaceId,
 } from "@multica/core/paths";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { CappedNumberFlow } from "@multica/ui/components/ui/number-flow";
 import { cn } from "@multica/ui/lib/utils";
+import { copyText } from "@multica/ui/lib/clipboard";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from "@multica/ui/components/ui/dropdown-menu";
 import { useAppForeground } from "../common/use-app-foreground";
+import { useRowMenu } from "../common/point-menu";
 import { useT } from "../i18n";
-import { AppLink, useNavigation } from "../navigation";
+import { AppLink, useIntentNavigate, useNavigation } from "../navigation";
 import { AccountMenu } from "./account-menu";
 import { useAppShell } from "./app-shell-context";
 import { NewIssueButton, SearchButton } from "./global-actions";
@@ -29,6 +56,7 @@ import { useTeamAgentStatus } from "./panels/team-status";
 import { RAIL_ICON_BUTTON_CLASS } from "./rail-styles";
 import { RailWorkspaces } from "./rail-workspaces";
 import { routeIconForPath } from "./route-icon-components";
+import { useDragClickGuard } from "./use-drag-click-guard";
 
 type RailBadge =
   | { kind: "count"; value: number; tone: "brand" | "neutral" }
@@ -84,7 +112,7 @@ function RailBadgeMark({ badge }: { badge: RailBadge }) {
       <span
         aria-hidden
         className={cn(
-          "absolute top-1.5 right-3.5 size-2 rounded-full bg-warning",
+          "absolute top-1 right-3 size-2 rounded-full bg-warning",
           ring,
         )}
       />
@@ -95,12 +123,36 @@ function RailBadgeMark({ badge }: { badge: RailBadge }) {
       value={badge.value}
       animated={false}
       className={cn(
-        "absolute top-0.5 right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] leading-none font-medium tabular-nums",
+        "absolute top-0 right-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] leading-none font-medium tabular-nums",
         ring,
         badge.tone === "brand" ? "bg-brand text-brand-foreground" : "bg-foreground text-background",
       )}
     />
   );
+}
+
+/**
+ * The Inbox item returns to the last notification opened there. Once that
+ * notification has left the active list (archived here, on another device, or
+ * by the server), the Inbox page treats `?issue=` as a shared link and
+ * replaces itself with the issue, so the click looks like it did nothing.
+ * Drop a selection the cached list no longer holds; with no cached list the
+ * page still decides.
+ */
+function useInboxReturnHref(href: string, wsId: string | undefined): string {
+  const { data: items } = useQuery({ ...inboxListOptions(wsId ?? ""), enabled: false });
+  return useMemo(() => {
+    const queryAt = href.indexOf("?");
+    if (!items || queryAt < 0) return href;
+    const params = new URLSearchParams(href.slice(queryAt + 1));
+    const key = params.get("issue");
+    if (!key || params.has("view")) return href;
+    if (deduplicateInboxItems(items).some((item) => (item.issue_id ?? item.id) === key)) return href;
+    params.delete("issue");
+    const query = params.toString();
+    const path = href.slice(0, queryAt);
+    return query ? `${path}?${query}` : path;
+  }, [href, items]);
 }
 
 /** Hover previews of a collapsed nav. Mouse only: a touch tap navigates. */
@@ -136,31 +188,137 @@ function RailSpaceLink({
   badge?: RailBadge;
 }) {
   const peekHandlers = usePeekHandlers(space, true);
+  // Desktop only: in a browser the link keeps the browser's own link menu.
+  const { openInNewTab } = useNavigation();
+  const rowMenu = useRowMenu();
+  const link = (
+    <AppLink
+      href={href}
+      data-space={space}
+      newTabTitle={fullLabel}
+      draggable={false}
+      aria-current={active ? "page" : undefined}
+      onContextMenu={openInNewTab ? rowMenu.openAtPointer : undefined}
+      {...peekHandlers}
+      className="group relative flex size-12 flex-col items-center justify-center gap-1 rounded-rail-item text-rail-item transition-colors outline-none hover:bg-rail-item-hover hover:text-rail-item-active-foreground focus-visible:outline-2 focus-visible:outline-ring aria-[current=page]:bg-rail-item-active aria-[current=page]:font-medium aria-[current=page]:text-rail-item-active-foreground"
+    >
+      <Icon className="size-5" />
+      <span className="max-w-full truncate px-0.5 text-micro leading-[14px]">{label}</span>
+      {badge && <RailBadgeMark badge={badge} />}
+    </AppLink>
+  );
+  // The menu portals out of the sortable item, but its React events still
+  // bubble through it; a press inside the menu must not start a drag.
+  const menu = rowMenu.menu.point && (
+    <span className="contents" onPointerDown={(event) => event.stopPropagation()}>
+      <RailSpaceMenu space={space} href={href} title={fullLabel} unread={badge?.kind === "count" ? badge.value : 0} state={rowMenu} />
+    </span>
+  );
+  // A label the same as the full name still needs the tooltip whenever a
+  // locale's text doesn't fit the 48px item.
+  if (label === fullLabel) {
+    return (
+      <>
+        <TruncatedTooltip content={fullLabel} side="right">
+          {link}
+        </TruncatedTooltip>
+        {menu}
+      </>
+    );
+  }
   return (
-    <li>
-      <TooltipHint label={label === fullLabel ? null : fullLabel} side="right">
-        <AppLink
-          href={href}
-          data-space={space}
-          newTabTitle={fullLabel}
-          aria-current={active ? "page" : undefined}
-          {...peekHandlers}
-          className="group relative flex h-[52px] w-[52px] flex-col items-center justify-center gap-1 rounded-xl text-muted-foreground transition-colors outline-none hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground focus-visible:outline-2 focus-visible:outline-ring aria-[current=page]:bg-sidebar-accent aria-[current=page]:font-medium aria-[current=page]:text-sidebar-accent-foreground"
-        >
-          <Icon className="size-5" />
-          <span className="max-w-full truncate px-1 text-micro leading-[14px]">{label}</span>
-          {badge && <RailBadgeMark badge={badge} />}
-        </AppLink>
+    <>
+      <TooltipHint label={fullLabel} side="right">
+        {link}
       </TooltipHint>
+      {menu}
+    </>
+  );
+}
+
+/** A rail space's right-click menu. */
+function RailSpaceMenu({
+  space,
+  href,
+  title,
+  unread,
+  state,
+}: {
+  space: RailSpaceId;
+  href: string;
+  title: string;
+  unread: number;
+  state: ReturnType<typeof useRowMenu>;
+}) {
+  const { t } = useT("layout");
+  const { t: tCommon } = useT("common");
+  const { getShareableUrl } = useNavigation();
+  const intentNavigate = useIntentNavigate();
+  const copyLink = async () => {
+    if (await copyText(getShareableUrl(href))) toast.success(t(($) => $.rail.link_copied));
+  };
+  const markAllRead = useMarkAllInboxRead();
+  const customOrder = useRailOrderStore((s) => s.order !== null);
+  const setOrder = useRailOrderStore((s) => s.setOrder);
+  return (
+    <DropdownMenu open={state.menu.open} onOpenChange={state.onOpenChange}>
+      <DropdownMenuContent align="start" anchor={state.anchor} className="w-auto min-w-44">
+        <DropdownMenuItem onClick={() => intentNavigate(href, "foreground-tab", title)}>
+          <ExternalLink />
+          {tCommon(($) => $.navigation.open_in_new_tab)}
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => void copyLink()}>
+          <Link2 />
+          {t(($) => $.rail.copy_link)}
+        </DropdownMenuItem>
+        {space === "inbox" && unread > 0 && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onClick={() =>
+                markAllRead.mutate(undefined, {
+                  onError: () => toast.error(t(($) => $.rail.mark_all_read_failed)),
+                })
+              }
+            >
+              <CheckCheck />
+              {t(($) => $.rail.mark_all_read)}
+            </DropdownMenuItem>
+          </>
+        )}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem disabled={!customOrder} onClick={() => setOrder(RAIL_SPACES)}>
+          <RotateCcw />
+          {t(($) => $.rail.reset_order)}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function SortableRailItem({ id, children }: { id: RailSpaceId; children: React.ReactNode }) {
+  const { listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  return (
+    <li
+      ref={setNodeRef}
+      data-rail-item={id}
+      style={{ transform: CSS.Translate.toString(transform), transition }}
+      className={cn("relative rounded-xl", isDragging && "z-10 bg-app-shell shadow-[var(--menu-shadow)]")}
+      {...listeners}
+    >
+      {children}
     </li>
   );
 }
 
+const DRAG_MODIFIERS = [restrictToVerticalAxis, restrictToFirstScrollableAncestor];
+
 /**
- * The app rail: workspaces, New issue and search, the five spaces, then help,
- * settings and the account. It sits on the app shell, outside the content
- * card, and stays put while the panel beside it collapses. Desktop passes
- * `globalActions={false}`: its title bar carries New issue and search.
+ * The app rail: workspaces, New issue and search, the five spaces in the
+ * user's order (drag to reorder), then help, settings and the account. It
+ * sits on the app shell, outside the content card, and stays put while the
+ * panel beside it collapses. Desktop passes `globalActions={false}`: its
+ * title bar carries New issue and search.
  */
 export function AppRail({
   topSlot,
@@ -176,7 +334,26 @@ export function AppRail({
   const shell = useAppShell();
   const badges = useRailBadges();
   const space = shell?.space ?? null;
+  const wsId = useCurrentWorkspace()?.id;
+  const inboxHref = useInboxReturnHref(shell?.spaceHref("inbox", p.inbox()) ?? p.inbox(), wsId);
   const settingsPeek = usePeekHandlers("settings", space === "settings");
+  const savedOrder = useRailOrderStore((s) => s.order);
+  const setOrder = useRailOrderStore((s) => s.setOrder);
+  const order = useMemo(() => resolveRailOrder(savedOrder), [savedOrder]);
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  const { arm: armClickGuard, release: releaseClickGuard } = useDragClickGuard();
+
+  const onDragEnd = useCallback(
+    ({ active, over }: DragEndEvent) => {
+      releaseClickGuard();
+      if (!over || active.id === over.id) return;
+      const from = order.indexOf(active.id as RailSpaceId);
+      const to = order.indexOf(over.id as RailSpaceId);
+      if (from === -1 || to === -1) return;
+      setOrder(arrayMove(order, from, to));
+    },
+    [order, releaseClickGuard, setOrder],
+  );
 
   const items: Record<RailSpaceId, { href: string; icon: IconComponent; label: string; fullLabel: string }> = {
     inbox: {
@@ -211,12 +388,17 @@ export function AppRail({
     },
   };
 
+  // The 34px workspace tile is centred on the card's 48px header band, so it
+  // shares a centre line with the column and page titles: the card starts
+  // 8px down, plus (48 - 34) / 2. Desktop's card starts below its title bar,
+  // so it passes its own top inset with the same 7px.
   return (
     <nav
       aria-label={t(($) => $.rail.label)}
       data-slot="app-rail"
+      data-mc="app-rail"
       className={cn(
-        "flex h-full w-16 shrink-0 flex-col items-center overflow-y-auto overflow-x-hidden pt-3 pb-2.5 [scrollbar-width:none]",
+        "flex h-full w-14 shrink-0 flex-col items-center overflow-y-auto overflow-x-hidden pt-[15px] pb-2.5 [scrollbar-width:none]",
         className,
       )}
     >
@@ -230,18 +412,30 @@ export function AppRail({
       ) : (
         <div className="h-2 shrink-0" />
       )}
-      <ul className="flex flex-col items-center gap-0.5">
-        {RAIL_SPACES.map((id) => (
-          <RailSpaceLink
-            key={id}
-            space={id}
-            {...items[id]}
-            href={shell?.spaceHref(id, items[id].href) ?? items[id].href}
-            active={space === id}
-            badge={badges[id]}
-          />
-        ))}
-      </ul>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        modifiers={DRAG_MODIFIERS}
+        onDragStart={armClickGuard}
+        onDragEnd={onDragEnd}
+        onDragCancel={releaseClickGuard}
+      >
+        <SortableContext items={order} strategy={verticalListSortingStrategy}>
+          <ul className="flex flex-col items-center gap-0.5">
+            {order.map((id) => (
+              <SortableRailItem key={id} id={id}>
+                <RailSpaceLink
+                  space={id}
+                  {...items[id]}
+                  href={id === "inbox" ? inboxHref : (shell?.spaceHref(id, items[id].href) ?? items[id].href)}
+                  active={space === id}
+                  badge={badges[id]}
+                />
+              </SortableRailItem>
+            ))}
+          </ul>
+        </SortableContext>
+      </DndContext>
       <div className="mt-auto flex flex-col items-center gap-1 pt-2">
         <HelpLauncher />
         <TooltipHint label={t(($) => $.nav.settings)} side="right">

@@ -338,7 +338,7 @@ func (q *Queries) ListNamedIssueWorkflowSteps(ctx context.Context, workspaceID p
 }
 
 const listProjectsUsingDefaultIssueWorkflow = `-- name: ListProjectsUsingDefaultIssueWorkflow :many
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, creator_type, creator_id, visibility FROM project
 WHERE workspace_id = $1::uuid
   AND workflow_id IS NULL
 ORDER BY created_at, id
@@ -368,6 +368,9 @@ func (q *Queries) ListProjectsUsingDefaultIssueWorkflow(ctx context.Context, wor
 			&i.StartDate,
 			&i.DueDate,
 			&i.WorkflowID,
+			&i.CreatorType,
+			&i.CreatorID,
+			&i.Visibility,
 		); err != nil {
 			return nil, err
 		}
@@ -380,7 +383,7 @@ func (q *Queries) ListProjectsUsingDefaultIssueWorkflow(ctx context.Context, wor
 }
 
 const listProjectsUsingIssueWorkflow = `-- name: ListProjectsUsingIssueWorkflow :many
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, creator_type, creator_id, visibility FROM project
 WHERE workspace_id = $1::uuid
   AND workflow_id = $2::uuid
 ORDER BY created_at, id
@@ -415,6 +418,9 @@ func (q *Queries) ListProjectsUsingIssueWorkflow(ctx context.Context, arg ListPr
 			&i.StartDate,
 			&i.DueDate,
 			&i.WorkflowID,
+			&i.CreatorType,
+			&i.CreatorID,
+			&i.Visibility,
 		); err != nil {
 			return nil, err
 		}
@@ -427,7 +433,7 @@ func (q *Queries) ListProjectsUsingIssueWorkflow(ctx context.Context, arg ListPr
 }
 
 const lockProjectForWorkflowChange = `-- name: LockProjectForWorkflowChange :one
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, creator_type, creator_id, visibility FROM project
 WHERE id = $1::uuid
   AND workspace_id = $2::uuid
 FOR UPDATE
@@ -457,6 +463,9 @@ func (q *Queries) LockProjectForWorkflowChange(ctx context.Context, arg LockProj
 		&i.StartDate,
 		&i.DueDate,
 		&i.WorkflowID,
+		&i.CreatorType,
+		&i.CreatorID,
+		&i.Visibility,
 	)
 	return i, err
 }
@@ -478,7 +487,7 @@ WHERE i.workspace_id = $2::uuid
   AND i.project_id = ANY($3::uuid[])
   AND i.status = $4::text
   AND i.status <> $1::text
-RETURNING i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.duplicate_of_issue_id
+RETURNING i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.duplicate_of_issue_id, i.requester_user_id
 `
 
 type RemapProjectIssueStatusParams struct {
@@ -539,6 +548,7 @@ func (q *Queries) RemapProjectIssueStatus(ctx context.Context, arg RemapProjectI
 			&i.LastActivityAt,
 			&i.TriageState,
 			&i.DuplicateOfIssueID,
+			&i.RequesterUserID,
 		); err != nil {
 			return nil, err
 		}
@@ -580,7 +590,7 @@ UPDATE project SET
     updated_at = now()
 WHERE id = $2::uuid
   AND workspace_id = $3::uuid
-RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id
+RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, creator_type, creator_id, visibility
 `
 
 type SetProjectWorkflowParams struct {
@@ -607,6 +617,9 @@ func (q *Queries) SetProjectWorkflow(ctx context.Context, arg SetProjectWorkflow
 		&i.StartDate,
 		&i.DueDate,
 		&i.WorkflowID,
+		&i.CreatorType,
+		&i.CreatorID,
+		&i.Visibility,
 	)
 	return i, err
 }

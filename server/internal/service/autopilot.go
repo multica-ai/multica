@@ -616,10 +616,27 @@ func (s *AutopilotService) dispatchAutopilotRun(
 	run *db.AutopilotRun,
 	actorUserID pgtype.UUID,
 ) (*db.AutopilotRun, dispatch.ReasonCode, error) {
+	if err := s.guardAutopilotProjectAccess(ctx, autopilot, run, actorUserID); err != nil {
+		if skipped, code := s.handleDispatchSkip(ctx, autopilot, run, err); skipped != nil {
+			return skipped, code, nil
+		}
+		s.failRun(ctx, run.ID, err.Error())
+		s.captureAutopilotRunFailed(autopilot, *run, source, err.Error())
+		return run, dispatch.ReasonInternalError, fmt.Errorf("check project access: %w", err)
+	}
 	switch autopilot.ExecutionMode {
 	case "create_issue":
 		triggerTimezone := s.resolveAutopilotTriggerTimezone(ctx, triggerID)
-		if err := s.dispatchCreateIssue(ctx, autopilot, run, triggerTimezone, actorUserID); err != nil {
+		err := s.dispatchCreateIssue(ctx, autopilot, run, triggerTimezone, actorUserID)
+		// Same rule as IssueService.Create: a collision on uq_issue_workspace_number
+		// means the workspace counter trails MAX(issue.number), and the failed
+		// dispatch already rolled its own increment back. Heal, then dispatch once
+		// more — otherwise this run fails and every later dispatch of this autopilot
+		// fails with it, which is how one drifted workspace wedges a board.
+		if err != nil && healIssueCounterAfterCollision(ctx, s.Queries, autopilot.WorkspaceID, err) {
+			err = s.dispatchCreateIssue(ctx, autopilot, run, triggerTimezone, actorUserID)
+		}
+		if err != nil {
 			if skipped, code := s.handleDispatchSkip(ctx, autopilot, run, err); skipped != nil {
 				return skipped, code, nil
 			}
@@ -659,6 +676,44 @@ func (s *AutopilotService) dispatchAutopilotRun(
 	})
 
 	return run, "", nil
+}
+
+// guardAutopilotProjectAccess skips a run whose autopilot is bound to a
+// private project (MUL-8472) that the run's human or the executing agent's
+// owner cannot see. It runs before any side effect, so neither mode writes an
+// issue into the project or hands its context to a run: create_issue used to
+// file the issue and only then have the enqueue refuse, and run_only had no
+// check at all. The human is the one the run will act for: the member who
+// clicked "run now", else the trigger's owner, else the agent's owner, the
+// same order the run's attribution falls back through.
+func (s *AutopilotService) guardAutopilotProjectAccess(ctx context.Context, ap db.Autopilot, run *db.AutopilotRun, actorUserID pgtype.UUID) error {
+	current, err := s.Queries.GetAutopilotInWorkspace(ctx, db.GetAutopilotInWorkspaceParams{
+		ID:          ap.ID,
+		WorkspaceID: ap.WorkspaceID,
+	})
+	if err != nil {
+		return fmt.Errorf("refresh autopilot: %w", err)
+	}
+	if !current.ProjectID.Valid {
+		return nil
+	}
+	leader, _, err := s.resolveAutopilotLeader(ctx, current)
+	if err != nil {
+		// The mode-specific dispatch reports an unresolvable assignee.
+		return nil
+	}
+	human := actorUserID
+	if !human.Valid {
+		human = ResolveAutopilotTriggerPrincipal(ctx, s.Queries, run.TriggerID, current.ID, current.WorkspaceID)
+	}
+	err = s.TaskSvc.guardRunProjectsAccess(ctx, current.WorkspaceID, leader, human, leader.OwnerID, current.ProjectID)
+	if errors.Is(err, ErrProjectAccessDenied) {
+		return &errDispatchSkipped{
+			reason: "the person this run acts for or the agent's owner cannot access the autopilot's private project",
+			code:   dispatch.ReasonProjectAccessBlocked,
+		}
+	}
+	return err
 }
 
 // dispatchFailReasonCode types a dispatch error that fell through to failRun.
@@ -763,7 +818,7 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		OriginID:      ap.ID,
 	})
 	if err != nil {
-		return fmt.Errorf("create issue: %w", err)
+		return classifyIssueNumberCollision(fmt.Errorf("create issue: %w", err), issueNumber)
 	}
 
 	// Fan out the default subscriber template inside the same tx as the

@@ -8,3 +8,4 @@ export * from "./sidebar-views";
 export * from "./view-target";
 export * from "./definition";
 export * from "./rename-store";
+export * from "./edit-store";

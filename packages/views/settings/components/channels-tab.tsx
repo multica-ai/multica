@@ -1,236 +1,212 @@
 "use client";
 
-import type { ReactNode } from "react";
-import { ChevronRight } from "@multica/ui/icons";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useWorkspaceId } from "@multica/core/hooks";
-import { useCurrentMember } from "@multica/core/permissions";
-import { larkInstallationsOptions } from "@multica/core/lark";
-import { slackInstallationsOptions } from "@multica/core/slack";
-import { dingtalkInstallationsOptions } from "@multica/core/dingtalk";
-import { wecomInstallationsOptions } from "@multica/core/wecom";
-import { telegramInstallationsOptions } from "@multica/core/telegram";
-import { cn } from "@multica/ui/lib/utils";
+import { agentListOptions } from "@multica/core/workspace/queries";
+import { useWorkspacePaths } from "@multica/core/paths";
+import { Button } from "@multica/ui/components/ui/button";
+import { ActorAvatar } from "../../common/actor-avatar";
 import { AppLink, useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
-import { LarkTab } from "./lark-tab";
-import { SlackTab } from "./slack-tab";
-import { DingTalkTab } from "./dingtalk-tab";
-import { WecomTab } from "./wecom-tab";
-import { TelegramTab } from "./telegram-tab";
-import { SettingsCard, SettingsTab } from "./settings-layout";
+import { ChannelConnectDialog } from "./channel-connect-dialog";
+import { ChannelDisconnectDialog } from "./channel-disconnect-dialog";
 import { IntegrationChannelIcon } from "./integration-channel-icon";
+import { SettingsCard, SettingsSection, SettingsTab } from "./settings-layout";
 import {
-  resolveSettingsLocation,
-  settingsHref,
+  CHANNEL_INTEGRATIONS,
   type ChannelIntegration,
+  settingsHref,
 } from "./settings-navigation";
+import {
+  useMessagingChannels,
+  type ChannelConnection,
+} from "./use-messaging-channels";
 
-interface ConnectionState {
-  data?: boolean;
-  isPending: boolean;
-  isError: boolean;
-}
-
-interface ChannelEntry {
-  id: ChannelIntegration;
-  label: string;
-  description: string;
-  content: ReactNode;
-  state: ConnectionState;
-  boundLabel?: string;
-  connectedLabel?: string;
-}
-
-// The IM channels soft-revoke: the row survives with status 'revoked', so a row
-// count never falls back to zero and would report a torn-down bot as connected
-// forever (#8496).
-const hasActiveInstallation = (data: {
-  installations?: { status: string }[];
-}) => data.installations?.some((inst) => inst.status === "active") ?? false;
-
-/**
- * Messaging channels: a directory of the chat apps agents can be reached
- * from, each opening its own detail page. Code hosting lives on the Code page
- * and account-level app connections on Connected apps.
- */
 export function ChannelsTab() {
   const { t } = useT("settings");
   const navigation = useNavigation();
-  const wsId = useWorkspaceId();
-  const { member } = useCurrentMember(wsId);
-  const canView = !!wsId && !!member;
-
-  // Reuse the detail pages' query caches. Never report a failed or pending
-  // read as disconnected.
-  const lark = useQuery({
-    ...larkInstallationsOptions(wsId),
-    enabled: canView,
-    select: (data) => {
-      const active = data.installations.filter((inst) => inst.status === "active");
-      return {
-        active: active.length > 0,
-        verified: active.some((inst) => !!inst.first_message_received_at),
-      };
-    },
-  });
-  const slack = useQuery({
-    ...slackInstallationsOptions(wsId),
-    enabled: canView,
-    select: hasActiveInstallation,
-  });
-  const dingtalk = useQuery({
-    ...dingtalkInstallationsOptions(wsId),
-    enabled: canView,
-    select: hasActiveInstallation,
-  });
-  const wecom = useQuery({
-    ...wecomInstallationsOptions(wsId),
-    enabled: canView,
-    select: hasActiveInstallation,
-  });
-  const telegram = useQuery({
-    ...telegramInstallationsOptions(wsId),
-    enabled: canView,
-    select: hasActiveInstallation,
-  });
-  const channels: ChannelEntry[] = [
-    {
-      id: "lark",
-      label: t(($) => $.lark.section_title),
-      description: t(($) => $.lark.page_description),
-      content: <LarkTab />,
-      state: { ...lark, data: lark.data?.active },
-      boundLabel: lark.data?.verified ? undefined : t(($) => $.lark.bound_label),
-      connectedLabel: t(($) => $.lark.inbound_verified),
-    },
-    {
-      id: "slack",
-      label: t(($) => $.slack.section_title),
-      description: t(($) => $.slack.page_description),
-      content: <SlackTab />,
-      state: slack,
-    },
-    {
-      id: "dingtalk",
-      label: t(($) => $.dingtalk.section_title),
-      description: t(($) => $.dingtalk.page_description),
-      content: <DingTalkTab />,
-      state: dingtalk,
-    },
-    {
-      id: "wecom",
-      label: t(($) => $.wecom.section_title),
-      description: t(($) => $.wecom.page_description),
-      content: <WecomTab />,
-      state: wecom,
-    },
-    {
-      id: "telegram",
-      label: t(($) => $.telegram.section_title),
-      description: t(($) => $.telegram.page_description),
-      content: <TelegramTab />,
-      state: telegram,
-    },
-  ];
-  const requested = resolveSettingsLocation(navigation.searchParams).integration;
-  const selected = channels.find((channel) => channel.id === requested);
-  const href = (integration?: string) =>
-    settingsHref(navigation.pathname, navigation.searchParams, "channels", {
-      integration,
-    });
-
-  if (selected) {
-    return (
-      <SettingsTab
-        title={selected.label}
-        description={selected.description}
-        scope="workspace"
-        breadcrumb={
-          <nav
-            aria-label={t(($) => $.channels.breadcrumb)}
-            className="flex items-center gap-1.5 text-caption text-muted-foreground"
-          >
-            <AppLink
-              href={href()}
-              className="rounded-sm hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
-            >
-              {t(($) => $.page.tabs.channels)}
-            </AppLink>
-            <ChevronRight aria-hidden="true" className="size-3" />
-            <span aria-current="page" className="text-foreground">
-              {selected.label}
-            </span>
-          </nav>
-        }
-      >
-        {selected.content}
-      </SettingsTab>
-    );
-  }
+  const paths = useWorkspacePaths();
+  const { wsId, queries, connections, isAdmin, available } =
+    useMessagingChannels();
+  const agentsQuery = useQuery(agentListOptions(wsId));
+  const agents = agentsQuery.data ?? [];
+  const [connecting, setConnecting] = useState<ChannelIntegration | null>(null);
+  const [disconnecting, setDisconnecting] = useState<ChannelConnection | null>(
+    null,
+  );
+  const legacyDetail = navigation.searchParams.get("integration");
+  useEffect(() => {
+    if (legacyDetail)
+      navigation.replace(
+        settingsHref(navigation.pathname, navigation.searchParams, "channels"),
+      );
+  }, [legacyDetail, navigation]);
 
   return (
     <SettingsTab title={t(($) => $.page.tabs.channels)} scope="workspace">
       <SettingsCard>
-        {channels.map((channel) => (
-          <AppLink
-            key={channel.id}
-            href={href(channel.id)}
-            className="group flex items-center gap-4 px-4 py-4 first:rounded-t-xl last:rounded-b-xl hover:bg-surface-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
-          >
-            <span
-              aria-hidden="true"
-              className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-surface-border bg-background text-foreground"
+        {CHANNEL_INTEGRATIONS.filter(
+          (id) =>
+            isAdmin ||
+            queries[id].data?.configured ||
+            queries[id].isPending ||
+            queries[id].isError,
+        ).map((id) => {
+          const query = queries[id];
+          const orphaned =
+            isAdmin && agentsQuery.isSuccess
+              ? connections.filter(
+                  (entry) =>
+                    entry.channel === id &&
+                    !agents.some(
+                      (agent) => agent.id === entry.installation.agent_id,
+                    ),
+                )
+              : [];
+          const connectedAgents = agents.filter((agent) =>
+            connections.some(
+              (entry) =>
+                entry.channel === id &&
+                entry.installation.agent_id === agent.id,
+            ),
+          );
+          return (
+            <div
+              key={id}
+              className="flex flex-wrap items-center gap-3 px-4 py-4"
             >
-              <IntegrationChannelIcon channel={channel.id} />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                <span className="text-body font-medium text-foreground">
-                  {channel.label}
-                </span>{" "}
-                <ConnectionBadge state={channel.state} boundLabel={channel.boundLabel} connectedLabel={channel.connectedLabel} />
+              <IntegrationChannelIcon channel={id} />
+              <span className="w-24 shrink-0 text-body font-medium">
+                {t(($) => $[id].section_title)}
               </span>
-              <span className="mt-1 block text-caption leading-5 text-muted-foreground">
-                {channel.description}
-              </span>
-            </span>
-            <ChevronRight
-              className="size-4 shrink-0 text-muted-foreground group-hover:text-foreground"
-              aria-hidden="true"
-            />
-          </AppLink>
-        ))}
+              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                {query.isError || agentsQuery.isError ? (
+                  <span
+                    role="alert"
+                    className="text-caption text-muted-foreground"
+                  >
+                    {t(($) => $.integrations.status_unknown)}
+                  </span>
+                ) : query.isPending || agentsQuery.isPending ? (
+                  <span className="text-caption text-muted-foreground">
+                    {t(($) => $.integrations.status_loading)}
+                  </span>
+                ) : connectedAgents.length || orphaned.length ? (
+                  connectedAgents.map((agent) => (
+                    <AppLink
+                      key={agent.id}
+                      href={`${paths.agentDetail(agent.id)}?view=channels`}
+                      className="flex min-w-0 items-center gap-1.5 rounded-md px-1 py-0.5 text-caption hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-ring"
+                    >
+                      <ActorAvatar
+                        actorType="agent"
+                        actorId={agent.id}
+                        size="xs"
+                        profileLink={false}
+                      />
+                      <span className="max-w-32 truncate">{agent.name}</span>
+                    </AppLink>
+                  ))
+                ) : (
+                  <span className="text-caption text-muted-foreground">
+                    {t(($) => $.channels.disconnected)}
+                  </span>
+                )}
+                {orphaned.map((entry) => (
+                  <span
+                    key={entry.installation.id}
+                    className="inline-flex items-center gap-2 text-caption text-muted-foreground"
+                  >
+                    {t(($) => $.channels.agent_unavailable)}
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      onClick={() => setDisconnecting(entry)}
+                    >
+                      {t(($) => $.channels.disconnect)}
+                    </Button>
+                  </span>
+                ))}
+                {!query.isPending &&
+                !query.isError &&
+                !query.data?.configured &&
+                isAdmin ? (
+                  <span className="text-caption text-muted-foreground">
+                    {t(($) => $.channels.unavailable)}
+                  </span>
+                ) : null}
+              </div>
+              {query.isError ? (
+                <Button
+                  size="xs"
+                  variant="outline"
+                  onClick={() => void query.refetch()}
+                >
+                  {t(($) => $.lark.install_retry)}
+                </Button>
+              ) : isAdmin && available(id) ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={
+                    !agents.some(
+                      (agent) =>
+                        !agent.archived_at &&
+                        !connectedAgents.some(
+                          (connected) => connected.id === agent.id,
+                        ),
+                    )
+                  }
+                  onClick={() => setConnecting(id)}
+                >
+                  {t(($) => $.channels.connect)}
+                </Button>
+              ) : null}
+            </div>
+          );
+        })}
       </SettingsCard>
+      <SettingsSection title={t(($) => $.channels.permissions_title)}>
+        <SettingsCard>
+          <div className="flex flex-wrap justify-between gap-2 px-4 py-3 text-caption">
+            <span>
+              {t(($) => $.lark.section_title)},{" "}
+              {t(($) => $.dingtalk.section_title)}
+            </span>
+            <span className="text-muted-foreground">
+              {t(($) => $.channels.owner_or_admin)}
+            </span>
+          </div>
+          <div className="flex flex-wrap justify-between gap-2 px-4 py-3 text-caption">
+            <span>
+              {t(($) => $.slack.section_title)},{" "}
+              {t(($) => $.wecom.section_title)},{" "}
+              {t(($) => $.telegram.section_title)}
+            </span>
+            <span className="text-muted-foreground">
+              {t(($) => $.channels.admin_only)}
+            </span>
+          </div>
+        </SettingsCard>
+      </SettingsSection>
+      <ChannelConnectDialog
+        key={connecting ?? "closed"}
+        agents={agents}
+        initialChannel={connecting ?? undefined}
+        open={connecting !== null}
+        onOpenChange={(open) => {
+          if (!open) setConnecting(null);
+        }}
+      />
+      {disconnecting ? (
+        <ChannelDisconnectDialog
+          connection={disconnecting}
+          open
+          onOpenChange={(open) => {
+            if (!open) setDisconnecting(null);
+          }}
+        />
+      ) : null}
     </SettingsTab>
-  );
-}
-
-export function ConnectionBadge({ state, boundLabel, connectedLabel }: {
-  state: ConnectionState;
-  boundLabel?: string;
-  connectedLabel?: string;
-}) {
-  const { t } = useT("settings");
-  const connected = !state.isError && !state.isPending && state.data === true;
-  const label = state.isError
-    ? t(($) => $.integrations.status_unknown)
-    : state.isPending
-      ? t(($) => $.integrations.status_loading)
-      : connected
-        ? (boundLabel ?? connectedLabel ?? t(($) => $.integrations.status_connected))
-        : t(($) => $.integrations.status_not_connected);
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 text-caption",
-        connected && !boundLabel ? "text-success" : "text-muted-foreground",
-      )}
-    >
-      {connected && !boundLabel && (
-        <span aria-hidden="true" className="size-1.5 rounded-full bg-success" />
-      )}
-      {label}
-    </span>
   );
 }

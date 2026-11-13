@@ -59,11 +59,13 @@ export function LabelChip({ label, onRemove, className, fullName }: LabelChipPro
   return (
     <span
       data-slot="label-chip"
+      data-mc="label-chip"
+      data-color={label.color}
       // `min-w-0` lets the chip shrink when it is a flex item in a width-capped
       // container (the create toolbar's label pill). Without it the chip keeps
       // its content width and the parent clips it mid-shape; with it the inner
       // name truncates and the chip keeps its rounded ends.
-      className={`inline-flex min-w-0 items-center gap-1 rounded-full px-2 py-0.5 text-caption font-medium ${className ?? ""}`}
+      className={`inline-flex min-w-0 items-center gap-1 rounded-label px-2 py-0.5 text-caption font-medium ${className ?? ""}`}
       style={{ backgroundColor: label.color, color: textColor }}
       // aria-label exposes the full name to screen readers when the span
       // visually truncates; sighted users get it from the hover tooltip,
@@ -84,6 +86,7 @@ export function LabelChip({ label, onRemove, className, fullName }: LabelChipPro
             // bg-current/20 uses the computed text color so the hover state is
             // visible on both light and dark chip backgrounds. hover:bg-black/10
             // was invisible on darker chips (anything requiring light text).
+            // eslint-disable-next-line no-restricted-syntax -- clear button inside a round label tag
             className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full hover:bg-current/20 focus:outline-none focus:ring-1 focus:ring-current"
             aria-label={t(($) => $.remove_label, { name: label.name })}
           >

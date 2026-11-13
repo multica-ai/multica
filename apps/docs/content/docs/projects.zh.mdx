@@ -48,7 +48,7 @@ import { ProjectDemo } from "@/components/demos/project-demo";
 项目资源告诉智能体使用哪些代码和工作目录：
 
 - **GitHub 仓库**：提供可 checkout 的仓库和可选 ref。
-- **本地目录**：让指定电脑上的运行时在已有目录中工作，目录内容会被智能体直接修改。
+- **本地目录**：让指定电脑上的运行时使用已有目录：智能体直接修改该目录，或在它的独立 worktree 中工作。
 
 具体选择和安全边界见[项目资源](/project-resources)。
 
@@ -66,7 +66,7 @@ import { ProjectDemo } from "@/components/demos/project-demo";
 
 ## 创建、编辑和删除
 
-工作区成员都可以创建和编辑项目；只有 `owner` 和 `admin` 可以删除。
+工作区成员都可以创建和编辑项目。成员可以删除自己或自己当前拥有的智能体创建的项目；智能体只能删除自己创建的项目。人类 `owner` 和 `admin` 可以删除任何项目，包括创建者未知的旧项目。
 
 <Callout type="warning">
 删除项目不会删除其中的任务：它们解除关联后继续保留在工作区；项目的描述、状态和资源会被永久删除。

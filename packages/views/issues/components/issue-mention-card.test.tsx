@@ -21,6 +21,7 @@ vi.mock("@multica/core/paths", () => ({
 }));
 
 vi.mock("./issue-chip", () => ({
+  useChipIssue: () => undefined,
   IssueChip: ({
     fallbackLabel,
     children,

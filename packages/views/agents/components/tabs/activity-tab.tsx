@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useMemo, useState } from "react";
+import { forwardRef, memo, useCallback, useMemo, useState } from "react";
 import {
   ArrowUpRight,
   CircleHelp,
@@ -11,6 +11,7 @@ import {
   X,
 } from "@multica/ui/icons";
 import { toast } from "sonner";
+import { Virtuoso, type ListProps } from "react-virtuoso";
 import {
   Tooltip,
   TooltipContent,
@@ -19,8 +20,8 @@ import {
 import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { cn } from "@multica/ui/lib/utils";
-import { useInfiniteQuery, useQueries, useQuery } from "@tanstack/react-query";
-import type { Agent, AgentTask, Issue } from "@multica/core/types";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import type { Agent, AgentTask } from "@multica/core/types";
 import {
   agentTaskSnapshotOptions,
   agentTasksOptions,
@@ -32,7 +33,8 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { AppLink } from "../../../navigation";
-import { TranscriptButton } from "../../../common/task-transcript";
+import { TranscriptButton, type TimelineItem } from "../../../common/task-transcript";
+import { VirtuosoSeed } from "../../../common/virtuoso-seed";
 import { AttributionBadge } from "../../../issues/components/attribution-badge";
 import {
   ObjectSection,
@@ -47,6 +49,27 @@ import { useT, useTimeAgo } from "../../../i18n";
 // Reveal cached rows in small batches and fetch another page only on demand.
 const RECENT_INITIAL = 10;
 const RECENT_PAGE = 20;
+const RECENT_ROW_HEIGHT = 41;
+const RECENT_SCROLL_SEEK = {
+  enter: (velocity: number) => Math.abs(velocity) > 2000,
+  exit: (velocity: number) => Math.abs(velocity) < 300,
+};
+const RecentWorkList = forwardRef<HTMLDivElement, ListProps>(function RecentWorkList(
+  { children, style, "data-testid": testId },
+  ref,
+) {
+  return (
+    <div ref={ref} style={style} data-testid={testId} className="divide-y">
+      {children}
+    </div>
+  );
+});
+const RECENT_LIST_COMPONENTS = {
+  List: RecentWorkList,
+  ScrollSeekPlaceholder: RecentWorkScrollPlaceholder,
+};
+const recentTaskKey = (_index: number, task: AgentTask) => task.id;
+
 // Placeholder rows shown while the lazily-loaded per-agent task list is
 // still in flight, so first paint is a skeleton rather than the "nothing
 // finished yet" empty state (which reads as a wrong answer).
@@ -65,8 +88,10 @@ const TOUCH_ACTION_CLASS = "[@media(hover:none)]:p-2";
 export function AgentWorkSections({
   agent,
   onViewAll,
+  scrollParent,
 }: {
   agent: Agent;
+  scrollParent: HTMLElement | null;
   /** Opens every issue assigned to this agent. */
   onViewAll: () => void;
 }) {
@@ -153,35 +178,9 @@ export function AgentWorkSections({
   );
   const hasMoreRecent = recentTasksAll.length > recentTasks.length || hasNextPage;
 
-  // Resolve issue identifiers + titles for any task we'll render. Going
-  // through `issueDetailOptions` is the same lookup the rest of the app
-  // uses, so the cache is shared and we don't pay for a duplicate request.
-  const displayedTasks = useMemo(
-    () => [...activeTasks, ...recentTasks],
-    [activeTasks, recentTasks],
-  );
-  const issueIds = useMemo(
-    () =>
-      Array.from(
-        new Set(displayedTasks.map((t) => t.issue_id).filter((id) => id !== "")),
-      ),
-    [displayedTasks],
-  );
-  const issueQueries = useQueries({
-    queries: issueIds.map((id) => issueDetailOptions(wsId, id)),
-  });
-  const issueMap = useMemo(() => {
-    const m = new Map<string, Issue>();
-    issueQueries.forEach((q, i) => {
-      const id = issueIds[i]!;
-      if (q.data) m.set(id, q.data);
-    });
-    return m;
-  }, [issueQueries, issueIds]);
-
   return (
     <>
-      <NowSection tasks={activeTasks} issueMap={issueMap} agent={agent} />
+      <NowSection tasks={activeTasks} agent={agent} />
       <RecentWorkSection
         tasks={recentTasks}
         weekRuns={activityLoading ? null : weekRuns}
@@ -201,7 +200,7 @@ export function AgentWorkSections({
           }
         }}
         onViewAll={onViewAll}
-        issueMap={issueMap}
+        scrollParent={scrollParent}
         agent={agent}
       />
     </>
@@ -318,11 +317,9 @@ export function SuccessRate({
 
 function NowSection({
   tasks,
-  issueMap,
   agent,
 }: {
   tasks: AgentTask[];
-  issueMap: Map<string, Issue>;
   agent: Agent;
 }) {
   const { t } = useT("agents");
@@ -342,7 +339,7 @@ function NowSection({
       ) : (
         <ObjectSectionCard>
           {tasks.map((task) => (
-            <LiveTaskRow key={task.id} task={task} issueMap={issueMap} agent={agent} />
+            <LiveTaskRow key={task.id} task={task} agent={agent} />
           ))}
         </ObjectSectionCard>
       )}
@@ -359,9 +356,10 @@ function RecentWorkSection({
   fetchingMore,
   fetchMoreFailed,
   onViewAll,
-  issueMap,
   agent,
+  scrollParent,
 }: {
+  scrollParent: HTMLElement | null;
   tasks: AgentTask[];
   /** Runs in the last 7 days; `null` until the activity window has loaded. */
   weekRuns: number | null;
@@ -371,10 +369,23 @@ function RecentWorkSection({
   fetchingMore: boolean;
   fetchMoreFailed: boolean;
   onViewAll: () => void;
-  issueMap: Map<string, Issue>;
   agent: Agent;
 }) {
   const { t } = useT("agents");
+  const [transcript, setTranscript] = useState<{
+    task: AgentTask;
+    items: TimelineItem[];
+    fromKeyboard: boolean;
+  } | null>(null);
+  const openTranscript = useCallback((task: AgentTask, items: TimelineItem[], fromKeyboard: boolean) => {
+    setTranscript({ task, items, fromKeyboard });
+  }, []);
+  const closeTranscript = useCallback((open: boolean) => {
+    if (!open) setTranscript(null);
+  }, []);
+  const renderRow = useCallback((_index: number, task: AgentTask) => (
+    <RecentTaskRow task={task} agentName={agent.name} onOpenTranscript={openTranscript} />
+  ), [agent.name, openTranscript]);
   return (
     <ObjectSection
       title={t(($) => $.tab_body.activity.section_recent)}
@@ -399,10 +410,39 @@ function RecentWorkSection({
         )
       ) : (
         <ObjectSectionCard>
-          {tasks.map((task) => (
-            <RecentTaskRow key={task.id} task={task} issueMap={issueMap} agent={agent} />
-          ))}
+          {scrollParent ? (
+            <Virtuoso
+              data={tasks}
+              customScrollParent={scrollParent}
+              defaultItemHeight={RECENT_ROW_HEIGHT}
+              initialItemCount={Math.min(RECENT_INITIAL, tasks.length)}
+              increaseViewportBy={200}
+              components={RECENT_LIST_COMPONENTS}
+              scrollSeekConfiguration={RECENT_SCROLL_SEEK}
+              computeItemKey={recentTaskKey}
+              itemContent={renderRow}
+            />
+          ) : (
+            <VirtuosoSeed
+              data={tasks}
+              count={RECENT_INITIAL}
+              estimatedItemHeight={RECENT_ROW_HEIGHT}
+              computeItemKey={recentTaskKey}
+              itemContent={renderRow}
+            />
+          )}
         </ObjectSectionCard>
+      )}
+      {transcript && (
+        <TranscriptButton
+          task={transcript.task}
+          agentName={agent.name}
+          items={transcript.items}
+          renderButton={false}
+          open
+          finalFocus={transcript.fromKeyboard}
+          onOpenChange={closeTranscript}
+        />
       )}
       {!loading && hasMore && (
         <Button
@@ -418,6 +458,16 @@ function RecentWorkSection({
         </Button>
       )}
     </ObjectSection>
+  );
+}
+
+function RecentWorkScrollPlaceholder({ height }: { height: number }) {
+  return (
+    <div style={{ height }} aria-hidden="true" className="flex items-center gap-3 px-3">
+      <div className="size-4 shrink-0 rounded-full bg-muted" />
+      <div className="h-3 w-3/5 rounded-xs bg-muted" />
+      <div className="ml-auto h-3 w-24 rounded-xs bg-muted" />
+    </div>
   );
 }
 
@@ -448,11 +498,15 @@ type AgentsT = ReturnType<typeof useT<"agents">>["t"];
 type TimeAgoFn = (dateStr: string) => string;
 
 /** What every task row shows, whichever section it sits in. */
-function useTaskRowModel(task: AgentTask, issueMap: Map<string, Issue>) {
+function useTaskRowModel(task: AgentTask) {
   const { t } = useT("agents");
   const cfg = taskStatusConfig[task.status] ?? taskStatusConfig.queued!;
   const hasIssue = task.issue_id !== "";
-  const issue = hasIssue ? issueMap.get(task.issue_id) : undefined;
+  const wsId = useWorkspaceId();
+  const { data: issue } = useQuery({
+    ...issueDetailOptions(wsId, task.issue_id),
+    enabled: hasIssue,
+  });
   const isTerminalStatus =
     task.status === "completed" ||
     task.status === "failed" ||
@@ -564,11 +618,9 @@ const HOVER_ACTIONS_CLASS =
 /** A run in progress: what it is working on, for how long, and a way in. */
 function LiveTaskRow({
   task,
-  issueMap,
   agent,
 }: {
   task: AgentTask;
-  issueMap: Map<string, Issue>;
   agent: Agent;
 }) {
   const { t } = useT("agents");
@@ -576,7 +628,7 @@ function LiveTaskRow({
   const paths = useWorkspacePaths();
   const [cancelling, setCancelling] = useState(false);
   const { cfg, hasIssue, issue, title, SourceIcon, sourceLabel, sourceFallback, statusLabel } =
-    useTaskRowModel(task, issueMap);
+    useTaskRowModel(task);
   const Icon = cfg.icon;
   const isRunning = task.status === "running";
   // Queued tasks have no messages yet — hiding the transcript button avoids
@@ -680,19 +732,19 @@ function LiveTaskRow({
 }
 
 /** A finished run on one line: outcome, what it was, and when. */
-function RecentTaskRow({
+const RecentTaskRow = memo(function RecentTaskRow({
   task,
-  issueMap,
-  agent,
+  agentName,
+  onOpenTranscript,
 }: {
   task: AgentTask;
-  issueMap: Map<string, Issue>;
-  agent: Agent;
+  agentName: string;
+  onOpenTranscript: (task: AgentTask, items: TimelineItem[], fromKeyboard: boolean) => void;
 }) {
   const { t } = useT("agents");
   const timeAgo = useTimeAgo();
   const { cfg, hasIssue, issue, title, SourceIcon, sourceLabel, failureLabel, statusLabel } =
-    useTaskRowModel(task, issueMap);
+    useTaskRowModel(task);
   const Icon = cfg.icon;
 
   let durationText: string | null = null;
@@ -743,15 +795,16 @@ function RecentTaskRow({
         {hasIssue && <OpenIssueIconLink issueId={task.issue_id} />}
         <TranscriptButton
           task={task}
-          agentName={agent.name}
+          agentName={agentName}
           isLive={false}
+          onOpenTranscript={(items, fromKeyboard) => onOpenTranscript(task, items, fromKeyboard)}
           title={t(($) => $.tab_body.activity.transcript_tooltip)}
           className={TOUCH_ACTION_CLASS}
         />
       </div>
     </div>
   );
-}
+});
 
 function Sep() {
   // mx-1 puts visible whitespace around the dot; without it inline JSX

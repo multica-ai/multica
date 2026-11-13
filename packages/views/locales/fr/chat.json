@@ -13,7 +13,21 @@
     "unread_other": "{{count}} discussions non lues",
     "default": "Demander à Multica"
   },
+  "bar": {
+    "history": "Historique des discussions",
+    "history_group": {
+      "today": "Aujourd'hui",
+      "week": "7 derniers jours",
+      "older": "Plus anciennes"
+    },
+    "close_chip": "Fermer {{title}}",
+    "all_chats": "Toutes les discussions",
+    "more_one": "{{count}} autre discussion",
+    "more_other": "{{count}} autres discussions"
+  },
   "input": {
+    "page_context_add": "Ajouter cette page comme contexte",
+    "page_context_remove": "Retirer le contexte de la page",
     "placeholder_no_agent": "Créez un agent pour commencer à discuter",
     "placeholder_archived": "Cette session est archivée",
     "placeholder_archived_agent": "Cet agent a été archivé",
@@ -52,6 +66,8 @@
     "action_failed_toast": "Impossible de mettre à jour le message en file d'attente"
   },
   "message_list": {
+    "jump_to_latest": "Aller au plus récent",
+    "new_reply": "Nouvelle réponse",
     "show_details": "Afficher les détails",
     "replied_in": "Réponse en {{elapsed}}",
     "failed_after": "Échec après {{elapsed}}",
@@ -133,6 +149,7 @@
     "restore_tooltip": "Restaurer",
     "expand_tooltip": "Développer",
     "minimize_tooltip": "Réduire",
+    "close_tooltip": "Fermer",
     "another_running": "Une autre discussion est en cours",
     "another_unread": "Une autre discussion a des réponses non lues",
     "running": "En cours",
@@ -172,7 +189,6 @@
       "label": "Recommander une action",
       "prompt": "Examinez ce que vous savez de mon espace de travail et recommandez une première action utile."
     },
-    "customize": "Personnaliser les amorces",
     "uploading": "Attendez la fin des téléversements avant d’utiliser une amorce.",
     "draft_in_progress": "Envoyez ou effacez votre brouillon avant d’utiliser une amorce."
   },
@@ -238,8 +254,6 @@
     "no_response_preview": "Aucune réponse textuelle",
     "quick_agents": "Agents fréquents",
     "add": "Ajouter",
-    "add_agent": "Ajouter un agent fréquent",
-    "unpin_agent": "Retirer des agents fréquents",
     "waiting": "En attente de réponse",
     "pin": "Épingler",
     "unpin": "Détacher",

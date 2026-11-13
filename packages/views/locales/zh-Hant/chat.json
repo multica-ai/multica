@@ -12,7 +12,20 @@
     "unread_other": "{{count}} 條未讀對話",
     "default": "問 Multica"
   },
+  "bar": {
+    "history": "對話記錄",
+    "history_group": {
+      "today": "今天",
+      "week": "過去 7 天",
+      "older": "更早"
+    },
+    "close_chip": "關閉 {{title}}",
+    "all_chats": "全部對話",
+    "more_other": "另外 {{count}} 個對話"
+  },
   "input": {
+    "page_context_add": "將目前頁面加入為上下文",
+    "page_context_remove": "移除頁面上下文",
     "placeholder_no_agent": "建立一個 AI 代理後才能開始對話",
     "placeholder_archived": "此會話已歸檔",
     "placeholder_archived_agent": "該 AI 代理已歸檔",
@@ -50,6 +63,8 @@
     "action_failed_toast": "無法更新排隊訊息"
   },
   "message_list": {
+    "jump_to_latest": "跳到最新",
+    "new_reply": "新回覆",
     "show_details": "檢視詳情",
     "replied_in": "{{elapsed}} 內回覆",
     "failed_after": "{{elapsed}} 後失敗",
@@ -129,6 +144,7 @@
     "restore_tooltip": "還原",
     "expand_tooltip": "展開",
     "minimize_tooltip": "最小化",
+    "close_tooltip": "關閉",
     "another_running": "另一個對話正在執行",
     "another_unread": "另一個對話有未讀回覆",
     "running": "執行中",
@@ -168,7 +184,6 @@
       "label": "推薦一個操作",
       "prompt": "根據你對我的工作區的瞭解，推薦一個有用的初始操作。"
     },
-    "customize": "自定義開場建議",
     "uploading": "請等待附件上傳完成後再使用開場建議。",
     "draft_in_progress": "請先傳送或清空草稿，再使用開場建議。"
   },
@@ -234,8 +249,6 @@
     "no_response_preview": "無文字回覆",
     "quick_agents": "常用 AI 代理",
     "add": "新增",
-    "add_agent": "新增常用 AI 代理",
-    "unpin_agent": "移出常用",
     "waiting": "等待回覆",
     "pin": "置頂",
     "unpin": "取消置頂",

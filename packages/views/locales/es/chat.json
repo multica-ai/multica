@@ -13,7 +13,21 @@
     "unread_other": "{{count}} chats sin leer",
     "default": "Pregunta a Multica"
   },
+  "bar": {
+    "history": "Historial de chats",
+    "history_group": {
+      "today": "Hoy",
+      "week": "Últimos 7 días",
+      "older": "Anteriores"
+    },
+    "close_chip": "Cerrar {{title}}",
+    "all_chats": "Todos los chats",
+    "more_one": "{{count}} chat más",
+    "more_other": "{{count}} chats más"
+  },
   "input": {
+    "page_context_add": "Añadir esta página como contexto",
+    "page_context_remove": "Quitar el contexto de la página",
     "placeholder_no_agent": "Crea un agente para empezar a chatear",
     "placeholder_archived": "Esta sesión está archivada",
     "placeholder_archived_agent": "Este agente se ha archivado",
@@ -52,6 +66,8 @@
     "action_failed_toast": "No se ha podido actualizar el mensaje en cola"
   },
   "message_list": {
+    "jump_to_latest": "Ir a lo más reciente",
+    "new_reply": "Nueva respuesta",
     "show_details": "Mostrar detalles",
     "replied_in": "Respondió en {{elapsed}}",
     "failed_after": "Falló tras {{elapsed}}",
@@ -133,6 +149,7 @@
     "restore_tooltip": "Restaurar",
     "expand_tooltip": "Expandir",
     "minimize_tooltip": "Minimizar",
+    "close_tooltip": "Cerrar",
     "another_running": "Otro chat está en ejecución",
     "another_unread": "Otro chat tiene respuestas sin leer",
     "running": "En ejecución",
@@ -172,7 +189,6 @@
       "label": "Recomienda una acción",
       "prompt": "Revisa lo que sabes de mi espacio de trabajo y recomiéndame una primera acción útil."
     },
-    "customize": "Personalizar inicios",
     "uploading": "Espera a que terminen las subidas antes de usar una sugerencia.",
     "draft_in_progress": "Envía o borra tu borrador antes de usar una sugerencia."
   },
@@ -238,8 +254,6 @@
     "no_response_preview": "Sin respuesta de texto",
     "quick_agents": "Agentes frecuentes",
     "add": "Añadir",
-    "add_agent": "Añadir un agente frecuente",
-    "unpin_agent": "Quitar de frecuentes",
     "waiting": "Esperando respuesta",
     "pin": "Fijar",
     "unpin": "Dejar de fijar",

@@ -160,21 +160,6 @@ func (f issueInboxFixture) openIssue() int64 {
 	return resp.Count
 }
 
-// openInInbox is selecting the issue's row in the inbox: it renders the
-// group's newest row and marks that one read, which reads the whole issue.
-func (f issueInboxFixture) openInInbox() {
-	f.t.Helper()
-	var items []InboxItemResponse
-	testutil.Call(f.t, inboxWorkspaceHandler(testHandler.ListInbox),
-		inboxRequest(http.MethodGet, "/api/inbox", f.workspaceID)).
-		Want(http.StatusOK).
-		JSON(&items)
-	if len(items) == 0 {
-		f.t.Fatal("the inbox lists nothing for the issue")
-	}
-	f.markRead(items[0].ID)
-}
-
 func (f issueInboxFixture) markRead(id string) {
 	f.t.Helper()
 	testutil.Call(f.t, inboxWorkspaceHandler(testHandler.MarkInboxRead),

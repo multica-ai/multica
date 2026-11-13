@@ -1,6 +1,6 @@
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import { inboxKeys, mapArchivedInboxCache, type ArchivedInboxCache } from "./queries";
-import type { InboxItem, IssuePriority, IssueStatus } from "../types";
+import type { InboxItem, IssueAssigneeType, IssuePriority, IssueStatus } from "../types";
 
 // Re-read a query because the server changed — in a way that is never answered
 // by a request that was already on the wire before the change.
@@ -66,27 +66,54 @@ function patchInboxLists(
   }
 }
 
+/** Issue fields inbox rows mirror for display and filtering. */
+export interface InboxIssueProjectionPatch {
+  status?: IssueStatus;
+  priority?: IssuePriority;
+  project_id?: string | null;
+  assignee_type?: IssueAssigneeType | null;
+  assignee_id?: string | null;
+  due_date?: string | null;
+  label_ids?: string[];
+}
+
 export function patchInboxIssueProjection(
   qc: QueryClient,
   wsId: string,
   issueId: string,
-  patch: { status?: IssueStatus; priority?: IssuePriority },
+  patch: InboxIssueProjectionPatch,
 ) {
   const project = (old: InboxItem[]) => {
     let changed = false;
     const next = old.map((item) => {
       if (item.issue_id !== issueId) return item;
       changed = true;
+      // Do not manufacture a projection on data returned by an older
+      // backend. Capability detection relies on `undefined` continuing to
+      // mean "this endpoint version does not provide the field".
+      const hasIssueFields = item.issue_label_ids !== undefined;
       return {
         ...item,
         ...(patch.status !== undefined
           ? { issue_status: patch.status }
           : {}),
-        // Do not manufacture the projection on data returned by an older
-        // backend. Capability detection relies on `undefined` continuing to
-        // mean "this endpoint version does not provide issue_priority".
         ...(patch.priority !== undefined && item.issue_priority !== undefined
           ? { issue_priority: patch.priority }
+          : {}),
+        ...(hasIssueFields && patch.project_id !== undefined
+          ? { issue_project_id: patch.project_id }
+          : {}),
+        ...(hasIssueFields && patch.assignee_type !== undefined
+          ? { issue_assignee_type: patch.assignee_type }
+          : {}),
+        ...(hasIssueFields && patch.assignee_id !== undefined
+          ? { issue_assignee_id: patch.assignee_id }
+          : {}),
+        ...(hasIssueFields && patch.due_date !== undefined
+          ? { issue_due_date: patch.due_date }
+          : {}),
+        ...(hasIssueFields && patch.label_ids !== undefined
+          ? { issue_label_ids: patch.label_ids }
           : {}),
       };
     });
@@ -140,6 +167,48 @@ export async function onInboxIssueDeleted(
     refreshInboxQuery(qc, inboxKeys.lookup(wsId)),
     refreshInboxQuery(qc, inboxKeys.facets(wsId)),
   ]);
+}
+
+// The delete mutations' own inbox cleanup. The deleting client cannot count
+// on its `issue:deleted` echo arriving (a proxied deployment can drop the
+// socket silently), and the inbox list it loaded before the delete keeps rows
+// whose issue no longer exists — clicking one routes to a 404. Mirrors
+// `onInboxIssueDeleted`'s DB-cascade prune for a batch, plus the mutation
+// write discipline the update mutations already follow: a list response that
+// was on the wire before the delete lands on top of the prune and
+// resurrects the rows, so the lists are cancelled first and owed a re-read
+// when that interrupted a request (see `cancelInboxLists`).
+export async function onInboxIssuesDeleted(
+  qc: QueryClient,
+  wsId: string,
+  issueIds: string[],
+) {
+  if (issueIds.length === 0) return;
+  const interrupted = cancelInboxLists(qc, wsId);
+  const deleted = new Set(issueIds);
+  patchInboxLists(qc, wsId, (items) => {
+    const next = items.filter((i) => i.issue_id === null || !deleted.has(i.issue_id));
+    return next.length === items.length ? items : next;
+  });
+  const refreshes: Promise<unknown>[] = [
+    onInboxSummaryInvalidate(qc),
+    refreshInboxQuery(qc, inboxKeys.pages(wsId)),
+    refreshInboxQuery(qc, inboxKeys.lookup(wsId)),
+    refreshInboxQuery(qc, inboxKeys.facets(wsId)),
+  ];
+  if (interrupted) refreshes.push(onInboxInvalidate(qc, wsId));
+  await Promise.all(refreshes);
+}
+
+// An issue field the archive filters and counts on changed. Loaded rows are
+// patched in place, but which groups match and the facet counts are decided
+// by the server: an issue that newly matches a filter would never appear, and
+// with `staleTime: Infinity` an empty result would stay empty. Marked
+// synchronously so an archive that is not mounted re-reads on its next visit.
+export async function refreshArchivedInboxMatches(qc: QueryClient, wsId: string) {
+  const keys = [inboxKeys.pages(wsId), inboxKeys.lookup(wsId), inboxKeys.facets(wsId)];
+  for (const queryKey of keys) void qc.invalidateQueries({ queryKey, refetchType: "none" });
+  await Promise.all(keys.map((queryKey) => refreshInboxQuery(qc, queryKey)));
 }
 
 // Whether a request for either inbox list is out (paused ones included).

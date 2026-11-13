@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 import type { TFunction } from "i18next";
 import { createI18n } from "@multica/core/i18n/react";

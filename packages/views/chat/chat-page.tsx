@@ -31,11 +31,13 @@ import { ChatSessionHeader } from "./components/chat-session-header";
 import { EmptyState } from "./components/chat-empty-state";
 import { NewChatButton } from "./components/new-chat-button";
 import { useChatController } from "./components/use-chat-controller";
+import { useChatAnnotations } from "./components/use-chat-annotations";
 import { OfflineBanner } from "./components/offline-banner";
 import { NoAgentBanner } from "./components/no-agent-banner";
 import { ArchivedAgentBanner } from "./components/archived-agent-banner";
 import { AgentAccessRevokedBanner } from "./components/agent-access-revoked-banner";
 import { RuntimeRequiredBanner } from "./components/runtime-required-banner";
+import { ChatAppRequests } from "../common/app-requests";
 import { useRegisterCommandBarContext } from "../search/register-context";
 
 /**
@@ -102,6 +104,11 @@ export function ChatPage() {
   // Toast when an accepted refresh later fails in the daemon (async half).
   useQuickActionsFailureToast(c.activeSessionId ?? null);
   const regenerateQuickActions = useRegenerateChatQuickActions();
+  const annotations = useChatAnnotations({
+    sessionId: c.activeSessionId,
+    agentName: c.activeAgent?.name,
+    enabled: !c.isSessionArchived && !c.isAgentArchived && !c.isAgentAccessRevoked && c.isAgentRuntimeBound && !c.noAgent,
+  });
   const urlSession = searchParams.get("session") || null;
   const urlAgent = searchParams.get("agent") || null;
 
@@ -421,13 +428,13 @@ export function ChatPage() {
               : undefined
           }
           quickActionsPendingMessageId={quickActionsPending?.message_id ?? null}
+          annotations={annotations}
         />
       ) : (
         <EmptyState
           agent={c.activeAgent}
           hasSessions={c.sessions.length > 0}
           onPickPrompt={c.sendConversationStarter}
-          customizeHref={c.customizeConversationStartersHref}
         />
       )}
 
@@ -445,6 +452,10 @@ export function ChatPage() {
       ) : (
         <OfflineBanner agentName={c.activeAgent?.name} availability={c.availability} />
       )}
+
+      <div className="px-4">
+        <ChatAppRequests sessionId={c.activeSessionId} />
+      </div>
 
       <ChatQueue
         tasks={queuedTasks}
@@ -483,6 +494,7 @@ export function ChatPage() {
         onProjectChange={changeProjectContext}
         isProjectUpdating={c.isProjectUpdating}
         focusRequest={c.focusInputRequest}
+        annotations={annotations}
       />
     </div>
   );

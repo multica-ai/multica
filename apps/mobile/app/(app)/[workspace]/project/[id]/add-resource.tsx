@@ -21,7 +21,7 @@ import {
   looksLikeCommitSha,
   splitGithubUrlRef,
   validateGitRef,
-} from "@multica/core/github";
+} from "@multica/core/github/repo-ref";
 import { Text } from "@/components/ui/text";
 import { TextField } from "@/components/ui/text-field";
 import { useCreateProjectResource } from "@/data/mutations/projects";

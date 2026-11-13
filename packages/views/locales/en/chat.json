@@ -13,7 +13,21 @@
     "unread_other": "{{count}} unread chats",
     "default": "Ask Multica"
   },
+  "bar": {
+    "history": "Chat history",
+    "history_group": {
+      "today": "Today",
+      "week": "Last 7 days",
+      "older": "Older"
+    },
+    "close_chip": "Close {{title}}",
+    "all_chats": "All chats",
+    "more_one": "{{count}} more chat",
+    "more_other": "{{count}} more chats"
+  },
   "input": {
+    "page_context_add": "Add this page as context",
+    "page_context_remove": "Remove page context",
     "placeholder_no_agent": "Create an agent to start chatting",
     "placeholder_archived": "This session is archived",
     "placeholder_archived_agent": "This agent has been archived",
@@ -52,6 +66,8 @@
     "action_failed_toast": "Couldn't update the queued message"
   },
   "message_list": {
+    "jump_to_latest": "Jump to latest",
+    "new_reply": "New reply",
     "show_details": "Show details",
     "replied_in": "Replied in {{elapsed}}",
     "failed_after": "Failed after {{elapsed}}",
@@ -133,6 +149,7 @@
     "restore_tooltip": "Restore",
     "expand_tooltip": "Expand",
     "minimize_tooltip": "Minimize",
+    "close_tooltip": "Close",
     "another_running": "Another chat is running",
     "another_unread": "Another chat has unread replies",
     "running": "Running",
@@ -172,7 +189,6 @@
       "label": "Recommend an action",
       "prompt": "Review what you know about my workspace and recommend a useful first action."
     },
-    "customize": "Customize starters",
     "uploading": "Wait for uploads to finish before using a starter.",
     "draft_in_progress": "Send or clear your draft before using a starter."
   },
@@ -238,8 +254,6 @@
     "no_response_preview": "No text reply",
     "quick_agents": "Frequent agents",
     "add": "Add",
-    "add_agent": "Add a frequent agent",
-    "unpin_agent": "Remove from frequent",
     "waiting": "Waiting for reply",
     "pin": "Pin",
     "unpin": "Unpin",

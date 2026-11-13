@@ -236,3 +236,31 @@ describe("Send = Enter editor behavior", () => {
     expect(editor.state.doc.firstChild?.textContent).toBe("line\n");
   });
 });
+
+describe("annotation Enter actions", () => {
+  it.each(["windows", "macos"] as const)("keeps save and send fixed on %s despite an Enter send preference", (platform) => {
+    configureShortcutPlatform(platform);
+    useShortcutStore.getState().setShortcut("send", createShortcutChord("Enter"));
+    let saved = 0;
+    let sent = 0;
+    const editor = new Editor({
+      element: document.createElement("div"),
+      content: "<p>A note</p>",
+      extensions: [StarterKit, createSubmitShortcutExtension(() => { sent++; return true; }, () => () => { saved++; })],
+    });
+    editors.push(editor);
+    expect(press(editor, event("Enter"))).toBe(true);
+    expect(saved).toBe(1);
+    expect(sent).toBe(0);
+    press(editor, event("Enter", { shiftKey: true }));
+    expect(saved).toBe(1);
+    expect(sent).toBe(0);
+    expect(press(editor, event("Enter", platform === "macos" ? { metaKey: true } : { ctrlKey: true }))).toBe(true);
+    expect(sent).toBe(1);
+    press(editor, event("Enter", { repeat: true }));
+    const composing = new KeyboardEvent("keydown", { key: "Enter", isComposing: true });
+    press(editor, composing);
+    expect(saved).toBe(1);
+    expect(sent).toBe(1);
+  });
+});

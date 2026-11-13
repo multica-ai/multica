@@ -64,6 +64,14 @@ func TestRunTaskListsAllocatedSkillInvocationName(t *testing.T) {
 	if err := os.WriteFile(userSkillPath, []byte(userSkill), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	userPlatformPath := filepath.Join(workDir, ".claude", "skills", "multica-platform", "SKILL.md")
+	const userPlatform = "---\nname: multica-platform\n---\n\nUser-owned platform skill.\n"
+	if err := os.MkdirAll(filepath.Dir(userPlatformPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(userPlatformPath, []byte(userPlatform), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	ref, err := json.Marshal(localDirectoryRef{
 		LocalPath: workDir, DaemonID: "daemon-skill-collision", ExecutionMode: localDirectoryModeInPlace,
 	})
@@ -102,7 +110,11 @@ func TestRunTaskListsAllocatedSkillInvocationName(t *testing.T) {
 		ProjectResources: []ProjectResourceData{{ID: "local-resource", ResourceType: localDirectoryResourceType, ResourceRef: ref}},
 		Agent: &AgentData{
 			ID: "agent-skill-collision", Name: "test-agent",
-			Skills: []SkillData{{ID: "assigned-review", Source: "workspace", Name: "Review", Content: "---\nname: original-review\n---\n\nAssigned review skill.\n"}},
+			Skills: []SkillData{
+				{ID: "assigned-review", Source: "workspace", Name: "Review", Content: "---\nname: original-review\n---\n\nAssigned review skill.\n"},
+				{ID: "e78e3700-7776-427a-a0bb-96a6f7b41af6", Source: "workspace", Name: "multica-platform", Content: userPlatform},
+				{ID: "builtin:multica-platform", Source: "builtin", Name: "multica-platform", Content: "---\nname: multica-platform\n---\n\nPlatform contracts.\n"},
+			},
 		},
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -123,5 +135,16 @@ func TestRunTaskListsAllocatedSkillInvocationName(t *testing.T) {
 	}
 	if got, err := os.ReadFile(userSkillPath); err != nil || string(got) != userSkill {
 		t.Fatalf("user-owned skill changed: %q, %v", got, err)
+	}
+	for _, want := range []string{
+		"load the `multica-platform-multica-multica` skill and open the reference(s)",
+		"Before creating sub-issues, read `references/sub-issues.md` in the `multica-platform-multica-multica` skill",
+	} {
+		if !strings.Contains(string(brief), want) {
+			t.Errorf("runtime brief lost platform hint %q", want)
+		}
+	}
+	if got, err := os.ReadFile(userPlatformPath); err != nil || string(got) != userPlatform {
+		t.Fatalf("user-owned platform skill changed: %q, %v", got, err)
 	}
 }

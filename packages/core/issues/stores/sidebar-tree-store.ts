@@ -45,6 +45,12 @@ export const DEFAULT_SIDEBAR_PROJECT_SETTINGS: SidebarProjectSettings = {
 };
 
 
+export interface SidebarLocateRequest {
+  issueId: string;
+  /** The project row's sidebar source, `project:{id}`. */
+  source: string;
+}
+
 /**
  * This device's sidebar layout. The Projects section's settings and order are
  * per user on the server (see `sidebar-project-prefs`); what is left here is
@@ -63,10 +69,20 @@ interface SidebarTreeState {
   projectsCollapsed: boolean;
   viewsCollapsed: boolean;
   pinnedCollapsed: boolean;
+  workingCollapsed: boolean;
+  needsAttentionCollapsed: boolean;
+  /**
+   * An issue the user asked to show in its project's row, until the Work
+   * panel has opened that row and scrolled to it. Not persisted.
+   */
+  locate: SidebarLocateRequest | null;
   setExpanded: (key: string, expanded: boolean) => void;
+  requestLocate: (request: SidebarLocateRequest | null) => void;
   setProjectsCollapsed: (collapsed: boolean) => void;
   setViewsCollapsed: (collapsed: boolean) => void;
   setPinnedCollapsed: (collapsed: boolean) => void;
+  setWorkingCollapsed: (collapsed: boolean) => void;
+  setNeedsAttentionCollapsed: (collapsed: boolean) => void;
 }
 
 type PersistedSidebarTree = Pick<
@@ -78,6 +94,8 @@ type PersistedSidebarTree = Pick<
   | "projectsCollapsed"
   | "viewsCollapsed"
   | "pinnedCollapsed"
+  | "workingCollapsed"
+  | "needsAttentionCollapsed"
 >;
 
 const INITIAL: PersistedSidebarTree = {
@@ -88,12 +106,16 @@ const INITIAL: PersistedSidebarTree = {
   projectsCollapsed: false,
   viewsCollapsed: false,
   pinnedCollapsed: false,
+  workingCollapsed: false,
+  needsAttentionCollapsed: false,
 };
 
 export const useSidebarTreeStore = create<SidebarTreeState>()(
   persist(
     (set) => ({
       ...INITIAL,
+      locate: null,
+      requestLocate: (locate) => set({ locate }),
       setExpanded: (key, expanded) =>
         set((s) => {
           if (s.expanded.includes(key) === expanded) return s;
@@ -102,6 +124,8 @@ export const useSidebarTreeStore = create<SidebarTreeState>()(
       setProjectsCollapsed: (collapsed) => set({ projectsCollapsed: collapsed }),
       setViewsCollapsed: (collapsed) => set({ viewsCollapsed: collapsed }),
       setPinnedCollapsed: (collapsed) => set({ pinnedCollapsed: collapsed }),
+      setWorkingCollapsed: (collapsed) => set({ workingCollapsed: collapsed }),
+      setNeedsAttentionCollapsed: (collapsed) => set({ needsAttentionCollapsed: collapsed }),
     }),
     {
       name: "multica_sidebar_tree",
@@ -114,6 +138,8 @@ export const useSidebarTreeStore = create<SidebarTreeState>()(
         projectsCollapsed: state.projectsCollapsed,
         viewsCollapsed: state.viewsCollapsed,
         pinnedCollapsed: state.pinnedCollapsed,
+        workingCollapsed: state.workingCollapsed,
+        needsAttentionCollapsed: state.needsAttentionCollapsed,
       }),
       // A workspace switch rehydrates into the previous workspace's state:
       // start from the initial values, never from `current`'s data.

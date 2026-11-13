@@ -4,15 +4,17 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
-import { useInboxFilterStore, type InboxFilters } from "@multica/core/inbox/filter-store";
+import { EMPTY_INBOX_FILTERS, filterInboxItems, useInboxFilterStore, type InboxFilters } from "@multica/core/inbox/filter-store";
 import { archivedInboxLookupOptions, inboxKeys } from "@multica/core/inbox/queries";
+import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
 import { onInboxIssueDeleted, patchInboxIssueProjection } from "@multica/core/inbox/ws-updaters";
 import type { ArchivedInboxPage } from "@multica/core/types/inbox";
 import type { InboxItem } from "@multica/core/types";
 import { InboxPage } from "./inbox-page";
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
-vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "workspace-1" }));
+let workspaceId = "workspace-1";
+vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => workspaceId }));
 vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
     inbox: () => "/acme/inbox",
@@ -45,7 +47,13 @@ vi.mock("./inbox-list", () => ({
     ))}</div>
   ),
 }));
-vi.mock("./inbox-filter-menu", () => ({ InboxFilterMenu: () => null }));
+const filterMenuUnmounted = vi.hoisted(() => vi.fn());
+vi.mock("./inbox-filter-menu", () => ({
+  InboxFilterMenu: () => {
+    useEffect(() => () => filterMenuUnmounted(), []);
+    return <div data-testid="filter-menu" />;
+  },
+}));
 vi.mock("./inbox-list-item", () => ({ useTimeAgo: () => vi.fn() }));
 let rowActions: { onAction: (id: string) => void };
 vi.mock("./inbox-context-menu", () => ({
@@ -73,6 +81,8 @@ function item(overrides: Partial<InboxItem> = {}): InboxItem {
 
 let qc: QueryClient;
 beforeEach(() => {
+  workspaceId = "workspace-1";
+  useInboxSelectionStore.setState({ lastResolvedKeyByWorkspace: {} });
   qc = new QueryClient({ defaultOptions: {
     queries: { retry: false, staleTime: Infinity, gcTime: 0 },
     mutations: { retry: false },
@@ -80,6 +90,7 @@ beforeEach(() => {
   searchParams = new URLSearchParams();
   replace.mockClear();
   detailUnmounted.mockClear();
+  filterMenuUnmounted.mockClear();
   useInboxFilterStore.setState({ filtersByWorkspace: {} });
   useInboxFilterStore.getState().toggleUnreadOnly("workspace-1");
 });
@@ -96,6 +107,107 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 const page = (items: InboxItem[]): ArchivedInboxPage => ({ items, hasMore: false, nextCursor: null });
+
+it("stays in Inbox after a failed first load and opens the selection when retry succeeds", async () => {
+  useInboxFilterStore.setState({ filtersByWorkspace: {} });
+  searchParams.set("issue", "issue-a");
+  const listInbox = vi.fn()
+    .mockRejectedValueOnce(new Error("Inbox unavailable"))
+    .mockResolvedValue([item({ read: true })]);
+  setApiInstance({ listInbox, markInboxRead: async () => item({ read: true }), getInboxUnreadSummary: async () => [] } as unknown as ApiClient);
+
+  renderPage();
+  await waitFor(() => expect(qc.getQueryState(inboxKeys.list("workspace-1"))?.status).toBe("error"));
+  expect(replace).not.toHaveBeenCalled();
+
+  await act(async () => { await qc.refetchQueries({ queryKey: inboxKeys.list("workspace-1") }); });
+  expect(await screen.findByTestId("detail")).toHaveTextContent("issue-a");
+  expect(replace).not.toHaveBeenCalled();
+});
+
+it("clears a remembered selection after leaving Inbox, archiving the read notification and evicting its cache", async () => {
+  useInboxFilterStore.setState({ filtersByWorkspace: {} });
+  let rows = [item({ read: true })];
+  setApiInstance({ listInbox: async () => rows, markInboxRead: async () => rows[0]!, getInboxUnreadSummary: async () => [] } as unknown as ApiClient);
+  const first = renderPage();
+  fireEvent.click(await screen.findByText("inbox-a"));
+  expect(await screen.findByTestId("detail")).toHaveTextContent("issue-a");
+  await waitFor(() => expect(qc.isMutating()).toBe(0));
+  first.unmount();
+
+  // Cmd+K archive-all-read outside Inbox, or an archive on another client.
+  rows = [];
+  qc.removeQueries({ queryKey: inboxKeys.list("workspace-1") });
+  searchParams = new URLSearchParams("issue=issue-a");
+  replace.mockClear();
+  renderPage();
+
+  await waitFor(() => expect(replace).toHaveBeenLastCalledWith("/acme/inbox"));
+  expect(replace).not.toHaveBeenCalledWith("/acme/issues/issue-a");
+});
+
+it.each(["inbox", "archived"])("preserves an unknown shared link in %s", async (view) => {
+  useInboxFilterStore.setState({ filtersByWorkspace: {} });
+  searchParams = new URLSearchParams(view === "archived" ? "view=archived" : "");
+  searchParams.set("issue", "shared-issue");
+  setApiInstance({
+    listInbox: async () => [],
+    listArchivedInboxPage: async () => page([]),
+    getInboxUnreadSummary: async () => [],
+  } as unknown as ApiClient);
+  renderPage();
+
+  await waitFor(() => expect(replace).toHaveBeenLastCalledWith("/acme/issues/shared-issue"));
+});
+
+it("remembers workspace A after visiting workspace B and losing A's cached notifications", async () => {
+  useInboxFilterStore.setState({ filtersByWorkspace: {} });
+  let rows = [item({ read: true })];
+  setApiInstance({ listInbox: async () => rows, markInboxRead: async () => rows[0]!, getInboxUnreadSummary: async () => [] } as unknown as ApiClient);
+  const first = renderPage();
+  fireEvent.click(await screen.findByText("inbox-a"));
+  expect(await screen.findByTestId("detail")).toHaveTextContent("issue-a");
+  await waitFor(() => expect(qc.isMutating()).toBe(0));
+  first.unmount();
+
+  workspaceId = "workspace-2";
+  rows = [item({ id: "inbox-b", issue_id: "issue-b", workspace_id: workspaceId, read: true })];
+  const second = renderPage();
+  fireEvent.click(await screen.findByText("inbox-b"));
+  expect(await screen.findByTestId("detail")).toHaveTextContent("issue-b");
+  await waitFor(() => expect(qc.isMutating()).toBe(0));
+  second.unmount();
+
+  // Switching workspaces lets A's inactive query expire after ten minutes.
+  qc.removeQueries({ queryKey: inboxKeys.list("workspace-1") });
+  workspaceId = "workspace-1";
+  rows = [];
+  searchParams = new URLSearchParams("issue=issue-a");
+  replace.mockClear();
+  renderPage();
+
+  await waitFor(() => expect(replace).toHaveBeenLastCalledWith("/acme/inbox"));
+  expect(replace).not.toHaveBeenCalledWith("/acme/issues/issue-a");
+});
+
+it("does not reuse another workspace's recognition for an unknown shared link", async () => {
+  useInboxFilterStore.setState({ filtersByWorkspace: {} });
+  let rows = [item({ read: true })];
+  setApiInstance({ listInbox: async () => rows, markInboxRead: async () => rows[0]!, getInboxUnreadSummary: async () => [] } as unknown as ApiClient);
+  const first = renderPage();
+  fireEvent.click(await screen.findByText("inbox-a"));
+  expect(await screen.findByTestId("detail")).toHaveTextContent("issue-a");
+  await waitFor(() => expect(qc.isMutating()).toBe(0));
+  first.unmount();
+
+  workspaceId = "workspace-2";
+  rows = [];
+  searchParams = new URLSearchParams("issue=issue-a");
+  replace.mockClear();
+  renderPage();
+
+  await waitFor(() => expect(replace).toHaveBeenLastCalledWith("/acme/issues/issue-a"));
+});
 
 it.each([false, true])("clears an older unread assignment when opening a read row via URL=%s", async (viaUrl) => {
   useInboxFilterStore.setState({ filtersByWorkspace: {} });
@@ -197,6 +309,51 @@ it.each(["click", "url"])("keeps the archived row and detail mounted through ref
   expect(screen.queryByText("inbox-a")).not.toBeInTheDocument();
 });
 
+it("keeps an older archived notification open through auto-read when the lookup carries its type filter", async () => {
+  searchParams = new URLSearchParams("view=archived");
+  useInboxFilterStore.getState().toggleFilterValue("workspace-1", "type", "mention");
+  const gate = deferred<void>();
+  let rows = [
+    item({ id: "newer-change", type: "status_changed", archived: true, read: false, issue_label_ids: [] }),
+    item({ id: "older-mention", type: "mentioned", archived: true, issue_label_ids: [], created_at: "2026-06-15T07:00:00Z" }),
+  ];
+  const listArchivedInboxPage = vi.fn(async (filters: InboxFilters) =>
+    page(filterInboxItems(rows, { ...EMPTY_INBOX_FILTERS, ...filters })));
+  const markInboxRead = vi.fn(async (id: string) => {
+    rows = rows.map((row) => row.id === id ? { ...row, read: true } : row);
+    await gate.promise;
+    return rows.find((row) => row.id === id)!;
+  });
+  setApiInstance({ listArchivedInboxPage, markInboxRead, getInboxUnreadSummary: async () => [] } as unknown as ApiClient);
+  renderPage();
+  fireEvent.click(await screen.findByText("older-mention"));
+  expect(await screen.findByTestId("detail")).toHaveTextContent("issue-a");
+  await waitFor(() => expect(markInboxRead).toHaveBeenCalledWith("older-mention"));
+  await act(async () => gate.resolve());
+  await waitFor(() => expect(listArchivedInboxPage.mock.calls.length).toBeGreaterThanOrEqual(3));
+  await waitFor(() => expect(qc.isFetching()).toBe(0));
+  expect(replace).not.toHaveBeenCalledWith("/acme/inbox?view=archived");
+  expect(screen.getByTestId("detail")).toHaveTextContent("issue-a");
+});
+
+it("asks the lookup with the view's filters except unread, and clears a filtered-out deep link instead of redirecting", async () => {
+  searchParams = new URLSearchParams("view=archived&issue=issue-a");
+  useInboxFilterStore.getState().toggleFilterValue("workspace-1", "type", "mention");
+  const rows = [item({ id: "comment-only", archived: true, issue_label_ids: [] })];
+  const listArchivedInboxPage = vi.fn(async (filters: InboxFilters, options: { groupId?: string }) => {
+    const matches = filterInboxItems(rows, { ...EMPTY_INBOX_FILTERS, ...filters });
+    return page(options.groupId ? matches.filter((row) => row.issue_id === options.groupId) : matches);
+  });
+  setApiInstance({ listArchivedInboxPage, getInboxUnreadSummary: async () => [] } as unknown as ApiClient);
+  renderPage();
+
+  await waitFor(() => expect(replace).toHaveBeenLastCalledWith("/acme/inbox?view=archived"));
+  const lookups = listArchivedInboxPage.mock.calls.filter(([, options]) => options.groupId === "issue-a");
+  expect(lookups[0]![0]).toMatchObject({ types: ["mention"], unreadOnly: false });
+  expect(lookups.at(-1)![0]).toMatchObject({ types: [], unreadOnly: false });
+  expect(replace).not.toHaveBeenCalledWith(expect.stringContaining("/issues/"));
+});
+
 it("keeps reading through lookup failure and clears a confirmed missing notification", async () => {
   const fixture = archivedFixture();
   const detail = await openArchived(fixture);
@@ -251,4 +408,23 @@ it.each(["status", "priority", "actor"] as const)("still applies the %s filter t
   await waitFor(() => expect(screen.queryByTestId("detail")).not.toBeInTheDocument());
   expect(screen.queryByText("inbox-a")).not.toBeInTheDocument();
   expect(replace).toHaveBeenLastCalledWith("/acme/inbox?view=archived");
+});
+
+it("keeps the archived list and its filter menu mounted while a new filter loads", async () => {
+  searchParams = new URLSearchParams("view=archived");
+  const next = deferred<ArchivedInboxPage>();
+  const listArchivedInboxPage = vi.fn(async (filters: InboxFilters) =>
+    filters.statuses.length ? next.promise : page([item({ archived: true })]));
+  setApiInstance({ listArchivedInboxPage, getInboxUnreadSummary: async () => [] } as unknown as ApiClient);
+  renderPage();
+  await screen.findByText("inbox-a");
+  const menu = screen.getByTestId("filter-menu");
+  act(() => useInboxFilterStore.getState().toggleStatusFilter("workspace-1", "todo"));
+  await waitFor(() => expect(listArchivedInboxPage).toHaveBeenCalledTimes(2));
+  expect(screen.getByTestId("filter-menu")).toBe(menu);
+  expect(screen.getByText("inbox-a")).toBeInTheDocument();
+  act(() => useInboxFilterStore.getState().toggleStatusFilter("workspace-1", "in_progress"));
+  await act(async () => next.resolve(page([item({ archived: true })])));
+  expect(screen.getByTestId("filter-menu")).toBe(menu);
+  expect(filterMenuUnmounted).not.toHaveBeenCalled();
 });
