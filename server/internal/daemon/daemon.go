@@ -8485,8 +8485,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// Hermes overlay's task-local state.db — carried over from the prior task.
 		envReused = env != nil
 	}
-	commitDiff := newCommitDiffRecorder()
-	defer commitDiff.close()
 	if env == nil {
 		var err error
 		prepParams := execenv.PrepareParams{
@@ -8585,7 +8583,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		} else {
 			if localAssignment != nil {
 				prepParams.LocalWorkDir = localAssignment.AbsPath
-				commitDiff.record(localAssignment.AbsPath)
 			}
 			env, err = d.prepareExecutionEnvironment(prepareCtx, prepParams)
 			if err != nil {
@@ -8594,14 +8591,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}
 	}
 	phaseRecorder.Mark(taskPhaseEnvironmentReady)
-	var msgSeq atomic.Int32
-	includeWorktreeDiff := true
-	defer func() {
-		d.reportCommitDiff(task.ID, commitDiff, &msgSeq, taskLog, includeWorktreeDiff, taskResult.FailureReason)
-	}()
-	if !env.LocalDirectory && env.LocalWorktree == nil {
-		commitDiff.restoreCheckouts(env.RootDir, env.WorkDir)
-	}
 	// Belt-and-suspenders: also mark whatever root we ended up with, in case
 	// future changes diverge from ResolveRootDir.
 	if env.RootDir != resolvedRoot && env.RootDir != "" {
@@ -8630,7 +8619,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				taskResult.BranchName = outcome.Branch
 			}
 			if finalizeErr == nil {
-				commitDiff.finalized(env.LocalWorktree.GitRoot, outcome.BaseCommit, outcome.HeadCommit, outcome.LeftoverRef)
 				// The configured local_directory becomes authoritative only after
 				// Finalize confirms the disposable task worktree is actually gone.
 				if localAssignment != nil {
@@ -8638,7 +8626,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				}
 				return
 			}
-			commitDiff.preserved(env.LocalWorktree.Path, env.LocalWorktree.BaseCommit)
 			// Finalize could not complete its delivery contract, so the task
 			// worktree remains authoritative. This covers both an uncommitted
 			// change set and a committed branch whose worktree removal could not
@@ -8695,7 +8682,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if env.LocalDirectory || env.LocalWorktree != nil {
 		defer func() {
 			if taskResult.FailureReason == taskfailure.ReasonProcessCleanupUnconfirmed.String() {
-				includeWorktreeDiff = false
 				return // Preserve files that an unconfirmed process may still use.
 			}
 			var cleanupErr error
@@ -8726,12 +8712,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			// inspection. (In place there is no commit and no branch, so a
 			// cleanup failure stays a warning: the leftover files are visible
 			// in the user's own tree and removable by hand.)
-			if cleanupErr != nil {
-				includeWorktreeDiff = false
-				if env.LocalWorktree != nil {
-					env.LocalWorktree.AbortWithReason(fmt.Errorf(
-						"could not remove the runtime's own files from the worktree before committing: %w", cleanupErr))
-				}
+			if cleanupErr != nil && env.LocalWorktree != nil {
+				env.LocalWorktree.AbortWithReason(fmt.Errorf(
+					"could not remove the runtime's own files from the worktree before committing: %w", cleanupErr))
 			}
 		}()
 	}
@@ -9198,7 +9181,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		WorkspaceID: task.WorkspaceID,
 		TaskID:      task.ID,
 		IssueID:     task.IssueID,
-		CommitDiff:  commitDiff,
 		AgentID:     task.AgentID,
 		AgentName:   task.Agent.Name,
 		WorkDir:     env.WorkDir,
@@ -9243,6 +9225,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 
 	// Shared across the resume-retry below so the retry's transcript rows
 	// keep ascending seq values for the same task.
+	var msgSeq atomic.Int32
 	d.reportThinkingLevelWarning(ctx, task.ID, selection.ThinkingLevelWarning, &msgSeq, taskLog)
 	outputObserver := &taskOutputObserver{}
 	ctx = withTaskOutputObserver(ctx, outputObserver)

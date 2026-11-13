@@ -289,9 +289,6 @@ func (w *LocalWorktree) UnmarshalJSON(data []byte) error {
 
 // LocalWorktreeOutcome is what a finished worktree task delivered.
 type LocalWorktreeOutcome struct {
-	// BaseCommit and HeadCommit identify the delivered range after successful cleanup.
-	BaseCommit string
-	HeadCommit string
 	// Branch is the branch holding the task's work, or "" when the task made
 	// no changes at all (a read-only run) — in that case the branch is deleted
 	// so it never shows up in the user's `git branch` as an empty artifact.
@@ -764,8 +761,6 @@ func (w *LocalWorktree) Finalize(logger *slog.Logger) (LocalWorktreeOutcome, err
 			"continued", w.Continued,
 		)
 	}
-	outcome.BaseCommit = w.BaseCommit
-	outcome.HeadCommit = tip
 	return outcome, nil
 }
 
