@@ -174,7 +174,8 @@ multica view delete "Urgent bugs"
   condition tree refuses filter flags: pass `--clear-filters`, or
   `--definition-file` with JSON edited from `view get`.
 - `--dry-run` prints the request unsaved. After saving, check the result with
-  `view issues`. "Changed since it was read" saved nothing: re-run. A
+  `view issues`. "Changed since it was read" saved nothing: re-run; a stale
+  `view get` export is refused too, so export again and redo the edits. A
   permission refusal means the runtime owner neither owns the view nor is an
   admin: report it rather than duplicating the view to work around it.
 

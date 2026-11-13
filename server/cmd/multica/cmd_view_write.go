@@ -112,7 +112,9 @@ is also how to replace a view's advanced condition tree with simple filters.
 
 The write carries the revision that was read, so if the view changed in the
 meantime the server refuses it instead of overwriting; re-run to apply the
-change on top of the latest version. Only the owner can change a private view;
+change on top of the latest version. A --definition-file exported from this
+view with ` + "`view get`" + ` carries its own revision: if the view changed after the
+export, nothing is saved, so export it again and redo the edits. Only the owner can change a private view;
 a workspace-shared view can also be changed by workspace owners and admins.`,
 	Example: `  multica view update "Open bugs" --priority urgent --priority high
   multica view update "Open bugs" --status "" --view-mode board --grouping assignee
@@ -253,21 +255,61 @@ func definitionOfView(view map[string]any) (issueViewDefinition, error) {
 	return issueViewDefinition{Query: query, Display: display}, nil
 }
 
-// readViewDefinitionFile reads --definition-file. A key the file omits is
-// returned nil, meaning "keep the current one".
-func readViewDefinitionFile(path string) (query, display map[string]any, err error) {
+// viewDefinitionFile is a parsed --definition-file. Query or Display is nil
+// when the file omits it, meaning "keep the current one". ID and Revision are
+// set when the file is a view exported with `view get`.
+type viewDefinitionFile struct {
+	Query, Display map[string]any
+	ID             string
+	Revision       float64
+}
+
+// loadViewDefinitionFile reads --definition-file, or returns nil when unset.
+func loadViewDefinitionFile(cmd *cobra.Command) (*viewDefinitionFile, error) {
+	path, _ := cmd.Flags().GetString("definition-file")
+	if path == "" {
+		return nil, nil
+	}
+	return readViewDefinitionFile(path)
+}
+
+// checkExportedRevision refuses a file exported from this view at an older
+// revision: writing its query/display would undo whatever changed since.
+// A file without a revision, or exported from another view, is a template.
+func checkExportedRevision(file *viewDefinitionFile, view map[string]any) error {
+	if file == nil || file.Revision == 0 || (file.ID != "" && file.ID != strVal(view, "id")) {
+		return nil
+	}
+	if current, _ := view["revision"].(float64); file.Revision != current {
+		return fmt.Errorf("--definition-file was exported from view %q at revision %v, but the view is now at revision %v; nothing was saved. Export it again with `multica view get` and redo your edits", strVal(view, "name"), file.Revision, view["revision"])
+	}
+	return nil
+}
+
+func readViewDefinitionFile(path string) (*viewDefinitionFile, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, nil, fmt.Errorf("read --definition-file: %w", err)
+		return nil, fmt.Errorf("read --definition-file: %w", err)
 	}
 	var doc map[string]json.RawMessage
 	if err := json.Unmarshal(data, &doc); err != nil || doc == nil {
-		return nil, nil, fmt.Errorf("--definition-file must hold a JSON object with \"query\" and/or \"display\"")
+		return nil, fmt.Errorf("--definition-file must hold a JSON object with \"query\" and/or \"display\"")
 	}
 	if raw, ok := doc["definition_version"]; ok {
 		var version float64
 		if json.Unmarshal(raw, &version) != nil || version != issueViewDefinitionVersion {
-			return nil, nil, fmt.Errorf("--definition-file has definition_version %s, but this CLI writes version %d", string(raw), issueViewDefinitionVersion)
+			return nil, fmt.Errorf("--definition-file has definition_version %s, but this CLI writes version %d", string(raw), issueViewDefinitionVersion)
+		}
+	}
+	file := &viewDefinitionFile{}
+	if raw, ok := doc["id"]; ok {
+		if json.Unmarshal(raw, &file.ID) != nil {
+			return nil, fmt.Errorf("--definition-file: \"id\" must be a string")
+		}
+	}
+	if raw, ok := doc["revision"]; ok {
+		if json.Unmarshal(raw, &file.Revision) != nil || file.Revision < 1 {
+			return nil, fmt.Errorf("--definition-file: \"revision\" must be a positive number")
 		}
 	}
 	decode := func(key string) (map[string]any, error) {
@@ -281,16 +323,16 @@ func readViewDefinitionFile(path string) (query, display map[string]any, err err
 		}
 		return object, nil
 	}
-	if query, err = decode("query"); err != nil {
-		return nil, nil, err
+	if file.Query, err = decode("query"); err != nil {
+		return nil, err
 	}
-	if display, err = decode("display"); err != nil {
-		return nil, nil, err
+	if file.Display, err = decode("display"); err != nil {
+		return nil, err
 	}
-	if query == nil && display == nil {
-		return nil, nil, fmt.Errorf("--definition-file has neither \"query\" nor \"display\"")
+	if file.Query == nil && file.Display == nil {
+		return nil, fmt.Errorf("--definition-file has neither \"query\" nor \"display\"")
 	}
-	return query, display, nil
+	return file, nil
 }
 
 func anyFlagChanged(cmd *cobra.Command, names []string) bool {
@@ -692,20 +734,16 @@ func (b *viewDefinitionBuilder) applyDisplay(display map[string]any) error {
 	return nil
 }
 
-// buildViewDefinition layers --definition-file, --clear-filters and the
-// filter and display flags over base, in that order.
-func buildViewDefinition(ctx context.Context, client *cli.APIClient, cmd *cobra.Command, base issueViewDefinition, scopeType string) (issueViewDefinition, error) {
+// buildViewDefinition layers file (--definition-file, may be nil),
+// --clear-filters and the filter and display flags over base, in that order.
+func buildViewDefinition(ctx context.Context, client *cli.APIClient, cmd *cobra.Command, base issueViewDefinition, file *viewDefinitionFile, scopeType string) (issueViewDefinition, error) {
 	def := base
-	if path, _ := cmd.Flags().GetString("definition-file"); path != "" {
-		query, display, err := readViewDefinitionFile(path)
-		if err != nil {
-			return def, err
+	if file != nil {
+		if file.Query != nil {
+			def.Query = file.Query
 		}
-		if query != nil {
-			def.Query = query
-		}
-		if display != nil {
-			def.Display = display
+		if file.Display != nil {
+			def.Display = file.Display
 		}
 	}
 	if clear, _ := cmd.Flags().GetBool("clear-filters"); clear {
@@ -890,7 +928,11 @@ func runViewCreate(cmd *cobra.Command, _ []string) error {
 	}
 	body["visibility"] = visibility
 
-	def, err := buildViewDefinition(ctx, client, cmd, issueViewDefinition{Query: map[string]any{}, Display: map[string]any{}}, scope)
+	file, err := loadViewDefinitionFile(cmd)
+	if err != nil {
+		return err
+	}
+	def, err := buildViewDefinition(ctx, client, cmd, issueViewDefinition{Query: map[string]any{}, Display: map[string]any{}}, file, scope)
 	if err != nil {
 		return err
 	}
@@ -939,7 +981,11 @@ func runViewDuplicate(cmd *cobra.Command, args []string) error {
 	if scope == "project" {
 		body["scope_id"] = source["scope_id"]
 	}
-	def, err := buildViewDefinition(ctx, client, cmd, base, scope)
+	file, err := loadViewDefinitionFile(cmd)
+	if err != nil {
+		return err
+	}
+	def, err := buildViewDefinition(ctx, client, cmd, base, file, scope)
 	if err != nil {
 		return err
 	}
@@ -988,7 +1034,16 @@ func runViewUpdate(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		def, err := buildViewDefinition(ctx, client, cmd, base, scope)
+		file, err := loadViewDefinitionFile(cmd)
+		if err != nil {
+			return err
+		}
+		// After this check the file's revision is the one sent as
+		// expected_revision, so a change landing before the write is a 409.
+		if err := checkExportedRevision(file, view); err != nil {
+			return err
+		}
+		def, err := buildViewDefinition(ctx, client, cmd, base, file, scope)
 		if err != nil {
 			return err
 		}

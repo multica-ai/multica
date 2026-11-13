@@ -354,6 +354,88 @@ func TestViewUpdateAppliesTheDefinitionFileThenFlags(t *testing.T) {
 	}
 }
 
+func writeViewDefinitionFile(t *testing.T, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "view.json")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// An export edited after someone else saved the view must not overwrite that
+// save: the export's revision is the write's precondition.
+func TestViewUpdateRefusesAStaleExportedDefinition(t *testing.T) {
+	srv := newViewWriteServer(t)
+	path := writeViewDefinitionFile(t, `{"id":"`+testViewWriteViewUUID+`","revision":2,"definition_version":1,"query":{"statusFilters":["todo"]},"display":{"viewMode":"list"}}`)
+	err := runViewUpdate(newViewWriteTestCmd(t, "update", map[string][]string{"definition-file": {path}}), []string{"Bugs"})
+	if err == nil || !strings.Contains(err.Error(), "revision 2") || !strings.Contains(err.Error(), "revision 3") {
+		t.Fatalf("err = %v", err)
+	}
+	if patches := srv.recorded(http.MethodPatch); len(patches) != 0 {
+		t.Fatalf("a stale export was written: %+v", patches)
+	}
+}
+
+func TestViewDefinitionFileRevisionOnlyBindsItsOwnView(t *testing.T) {
+	cases := map[string]struct {
+		run          func(cmd *cobra.Command) error
+		use, content string
+		method       string
+	}{
+		"current export of this view": {
+			use: "update", method: http.MethodPatch,
+			content: `{"id":"` + testViewWriteViewUUID + `","revision":3,"display":{"viewMode":"list"}}`,
+		},
+		"template without a revision": {
+			use: "update", method: http.MethodPatch,
+			content: `{"display":{"viewMode":"list"}}`,
+		},
+		"export of another view": {
+			use: "update", method: http.MethodPatch,
+			content: `{"id":"6f000000-0000-0000-0000-000000000009","revision":1,"display":{"viewMode":"list"}}`,
+		},
+		"export used to create a new view": {
+			use: "create", method: http.MethodPost,
+			content: `{"id":"` + testViewWriteViewUUID + `","revision":1,"display":{"viewMode":"list"}}`,
+		},
+		"export used to duplicate": {
+			use: "duplicate", method: http.MethodPost,
+			content: `{"id":"` + testViewWriteViewUUID + `","revision":1,"display":{"viewMode":"list"}}`,
+		},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			srv := newViewWriteServer(t)
+			flags := map[string][]string{"definition-file": {writeViewDefinitionFile(t, c.content)}}
+			if c.use == "create" {
+				flags["name"] = []string{"From export"}
+			}
+			cmd := newViewWriteTestCmd(t, c.use, flags)
+			_, err := captureStdout(t, func() error {
+				switch c.use {
+				case "create":
+					return runViewCreate(cmd, nil)
+				case "duplicate":
+					return runViewDuplicate(cmd, []string{"Bugs"})
+				default:
+					return runViewUpdate(cmd, []string{"Bugs"})
+				}
+			})
+			if err != nil {
+				t.Fatalf("run: %v", err)
+			}
+			writes := srv.recorded(c.method)
+			if len(writes) != 1 || !reflect.DeepEqual(writes[0].body["display"], map[string]any{"viewMode": "list"}) {
+				t.Fatalf("writes = %+v", writes)
+			}
+			if c.method == http.MethodPatch && writes[0].body["expected_revision"] != float64(3) {
+				t.Fatalf("expected_revision = %v, want 3", writes[0].body["expected_revision"])
+			}
+		})
+	}
+}
+
 func TestViewUpdateRefusesWhatItCannotRepresent(t *testing.T) {
 	t.Run("advanced tree with flat filters", func(t *testing.T) {
 		srv := newViewWriteServer(t)
