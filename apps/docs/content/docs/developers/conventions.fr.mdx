@@ -30,14 +30,14 @@ Le monorepo impose des frontières strictes entre les packages :
 
 | Package | Peut dépendre de | Ne doit PAS dépendre de |
 | --- | --- | --- |
-| `packages/core` | rien de spécifique à une application | `react-dom`, `next/*`, bibliothèques d'UI, `process.env`, `localStorage` ou `sessionStorage` en direct (persister via `StorageAdapter` ; seuls `analytics/exception-dedupe.ts` et `appearance/safe-mode.ts` utilisent `sessionStorage`, limité à l'onglet) |
+| `packages/core` | rien de spécifique à une application | `react-dom`, `next/*`, bibliothèques d'UI, `process.env`, `localStorage` ou `sessionStorage` en direct (persister via `StorageAdapter` ; seuls `analytics/exception-dedupe.ts` et `appearance/safe-mode.ts` utilisent `sessionStorage`, limité à l'onglet), globales DOM non protégées comme les événements de `window` ou `document` (core s'exécute aussi sur React Native) |
 | `packages/ui` | rien | `@multica/core`, logique métier |
 | `packages/views` | `core/`, `ui/` | `next/*`, `react-router-dom`, définitions de stores |
 | `apps/web/platform/` | `next/*` | autres applications |
 | `apps/desktop/.../platform/` | `react-router-dom`, electron | autres applications |
-| `apps/mobile/` | types et fonctions pures de `@multica/core`, via le sous-chemin propre à chaque module | pages React, stores et implémentations de plateforme de Web/Desktop, y compris les barrels de core qui les réexportent |
+| `apps/mobile/` | `@multica/core` dans son ensemble, React Native, Expo | `packages/views`, `packages/ui`, API DOM |
 
-Le fichier `AGENTS.md` à la racine fait foi pour ces frontières et leurs rares exceptions ; modifiez les deux ensemble. Le lint impose la ligne `packages/core` (`packages/core/eslint.config.mjs`) et les imports de core dans mobile (`apps/mobile/eslint.config.js`).
+Le fichier `AGENTS.md` à la racine fait foi pour ces frontières et leurs rares exceptions ; modifiez les deux ensemble. Le lint impose la ligne `packages/core` (`packages/core/eslint.config.mjs`).
 
 Si une logique apparaît dans les deux applications, elle DOIT être extraite dans un package partagé. Aucune exception pour une « petite » duplication. Mobile possède sa propre UI, sa propre couche de données et son propre processus de publication ; il ne partage que les types et les fonctions pures.
 
@@ -315,7 +315,7 @@ Les descriptions sont facultatives et omises par défaut. Avant d'en ajouter une
 - Gardez visibles, lorsqu'ils sont pertinents, les permissions, le coût, les conséquences destructrices, les prérequis d'exécution, les contraintes de saisie et la reprise après erreur. Ne les cachez pas dans une aide qui n'apparaît qu'au survol.
 - N'affichez des indications d'introduction que là où elles sont nécessaires. Placez l'utilisation avancée et les diagnostics dans une aide explicite et accessible plutôt que dans le corps de page par défaut.
 - Conservez les libellés de champ, les noms accessibles et les associations de description nécessaires. Ne déplacez pas en bloc une prose visible redondante vers du texte réservé aux lecteurs d'écran.
-- Relisez ensemble les textes anglais et traduits, y compris les chaînes indépendantes de l'application mobile. En revue de PR, vérifiez l'information ajoutée, la répétition sur un même écran, les conditions d'affichage et les contraintes préservées. La longueur est un signal de revue, pas une règle de suppression automatique.
+- Relisez ensemble les textes anglais et traduits. En revue de PR, vérifiez l'information ajoutée, la répétition sur un même écran, les conditions d'affichage et les contraintes préservées. La longueur est un signal de revue, pas une règle de suppression automatique.
 
 Les composants de paramètres partagés acceptent déjà des descriptions facultatives. Les exemples et les nouveaux points d'appel doivent les omettre sauf justification ; n'ajoutez pas de props de description obligatoires ni de politique de rédaction distincte.
 

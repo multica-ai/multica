@@ -28,14 +28,14 @@ monorepo 的包邊界是硬約束：
 
 | 包 | 可依賴 | 不能依賴 |
 | --- | --- | --- |
-| `packages/core` | 僅平臺無關基礎庫 | `react-dom`、`next/*`、UI 庫、`process.env`、直接使用 `localStorage` 或 `sessionStorage`（持久化走 `StorageAdapter`；僅 `analytics/exception-dedupe.ts` 和 `appearance/safe-mode.ts` 使用分頁級的 `sessionStorage`） |
+| `packages/core` | 僅平臺無關基礎庫 | `react-dom`、`next/*`、UI 庫、`process.env`、直接使用 `localStorage` 或 `sessionStorage`（持久化走 `StorageAdapter`；僅 `analytics/exception-dedupe.ts` 和 `appearance/safe-mode.ts` 使用分頁級的 `sessionStorage`）、未加保護的 DOM 全域物件，如 `window` 事件或 `document`（core 也在 React Native 上執行） |
 | `packages/ui` | 無業務依賴 | `@multica/core`、業務邏輯 |
 | `packages/views` | `core/`、`ui/` | `next/*`、`react-router-dom`、store 定義 |
 | `apps/web/platform/` | `next/*` | 其他 app |
 | `apps/desktop/.../platform/` | `react-router-dom`、electron | 其他 app |
-| `apps/mobile/` | `@multica/core` 的類型和純函式，透過各模組自己的子路徑匯入 | Web/Desktop 的 React 頁面、store 和平臺實現，以及重新匯出它們的 core barrel |
+| `apps/mobile/` | 整個 `@multica/core`、React Native、Expo | `packages/views`、`packages/ui`、DOM API |
 
-包邊界及其少數例外以根目錄 `AGENTS.md` 為準，修改時兩處同步。`packages/core` 這一行由 `packages/core/eslint.config.mjs` 透過 lint 強制，mobile 對 core 的匯入由 `apps/mobile/eslint.config.js` 強制。
+包邊界及其少數例外以根目錄 `AGENTS.md` 為準，修改時兩處同步。`packages/core` 這一行由 `packages/core/eslint.config.mjs` 透過 lint 強制。
 
 Web 和 Desktop 都有的邏輯，**必須**抽到共享包。"小段重複"也不算例外。Mobile 擁有獨立的 UI、資料層和發布流程，只共享類型與純函式。
 
@@ -319,7 +319,7 @@ description 預設省略。新增前先問：**沒有這句話，使用者會誤
 - 權限、費用、不可撤銷後果、執行前提、輸入限制和錯誤恢復資訊應在相關狀態下直接可見，不藏進只能懸停查看的幫助中。
 - 首次使用說明只在需要的位置展示；高級用法與診斷細節放入可明確開啟、支援鍵盤操作的幫助中。
 - 保留輸入標籤、無障礙名稱和必要的描述關聯。不要把刪掉的視覺廢話全部轉成螢幕閱讀器專用文本。
-- 同時檢查英文、各語言翻譯和移動端獨立文案。PR 評審檢查新增資訊、同屏重複、顯示條件和保留的約束；字數只是複查信號，不是自動刪除標準。
+- 同時檢查英文和各語言翻譯。PR 評審檢查新增資訊、同屏重複、顯示條件和保留的約束；字數只是複查信號，不是自動刪除標準。
 
 共享設定元件已經支援可選 description。示例與新增呼叫預設省略，不增加強制填寫描述的元件屬性，也不另建一份文案規範。
 
