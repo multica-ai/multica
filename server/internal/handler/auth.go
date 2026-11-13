@@ -85,6 +85,10 @@ type UserResponse struct {
 	StarPromptStarredAt   *string `json:"star_prompt_starred_at"`
 	CreatedAt             string  `json:"created_at"`
 	UpdatedAt             string  `json:"updated_at"`
+	// TotpEnabled is true when the user has a verified TOTP secret
+	// (totp_enabled_at IS NOT NULL). Additive field — old clients that
+	// don't know about it will simply ignore it.
+	TotpEnabled bool `json:"totp_enabled"`
 }
 
 // MaxProfileDescriptionLen caps the user-supplied profile_description body.
@@ -117,6 +121,7 @@ func (h *Handler) userToResponse(u db.User) UserResponse {
 		StarPromptStarredAt:     timestampToPtr(u.StarPromptStarredAt),
 		CreatedAt:               timestampToString(u.CreatedAt),
 		UpdatedAt:               timestampToString(u.UpdatedAt),
+		TotpEnabled:             u.TotpEnabledAt.Valid,
 	}
 }
 

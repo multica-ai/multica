@@ -1876,6 +1876,11 @@ type User struct {
 	StarPromptShownCount  int32              `json:"star_prompt_shown_count"`
 	StarPromptLastShownAt pgtype.Timestamptz `json:"star_prompt_last_shown_at"`
 	StarPromptStarredAt   pgtype.Timestamptz `json:"star_prompt_starred_at"`
+	TotpSecretEncrypted   []byte             `json:"totp_secret_encrypted"`
+	TotpEnabledAt         pgtype.Timestamptz `json:"totp_enabled_at"`
+	TotpLastUsedStep      pgtype.Int8        `json:"totp_last_used_step"`
+	TotpFailedAttempts    int32              `json:"totp_failed_attempts"`
+	TotpLockedUntil       pgtype.Timestamptz `json:"totp_locked_until"`
 }
 
 type UserComposioConnection struct {

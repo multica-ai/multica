@@ -14,6 +14,10 @@ export interface ParseOptions {
   /** Endpoint identifier used in the warning log so we can grep for which
    *  contract drifted in production telemetry. */
   endpoint: string;
+  /** Omit the raw response from the failure log. Set for responses that carry
+   *  credentials (tokens, TOTP secrets) so a contract drift never writes them
+   *  to client logs; the structured zod issues are still reported. */
+  sensitive?: boolean;
 }
 
 /**
@@ -48,7 +52,7 @@ export function parseWithFallback<T>(
     {
       endpoint: opts.endpoint,
       issues: result.error.issues,
-      received: data,
+      received: opts.sensitive ? "[redacted]" : data,
     },
   );
   return fallback;

@@ -19,6 +19,9 @@ interface ConfigState {
   // must be hidden. Defaults to false so unknown / older servers behave like
   // the managed-cloud case.
   workspaceCreationDisabled: boolean;
+  // TOTP 2FA support flag. Defaults to false so older servers that don't
+  // advertise this field degrade gracefully (no TOTP UI shown).
+  totpSupported: boolean;
   // Self-host-only gate for the Git provider integration (Forgejo / Gitea /
   // GitLab). When false the whole Settings → Integrations "Git providers"
   // section is hidden. Defaults to false so unknown / older servers and the
@@ -57,6 +60,7 @@ interface ConfigState {
     allowSignup: boolean;
     googleClientId?: string;
     workspaceCreationDisabled?: boolean;
+    totpSupported?: boolean;
     vcsIntegrationAvailable?: boolean;
   }) => void;
   setDaemonConfig: (config: {
@@ -85,6 +89,7 @@ export const configStore = createStore<ConfigState>((set) => ({
   daemonConfigStatus: "loading",
   daemonSetupTarget: "unknown",
   workspaceCreationDisabled: false,
+  totpSupported: false,
   vcsIntegrationAvailable: false,
   featureFlags: {},
   serverVersion: "",
@@ -99,8 +104,16 @@ export const configStore = createStore<ConfigState>((set) => ({
     allowSignup,
     googleClientId = "",
     workspaceCreationDisabled = false,
+    totpSupported = false,
     vcsIntegrationAvailable = false,
-  }) => set({ allowSignup, googleClientId, workspaceCreationDisabled, vcsIntegrationAvailable }),
+  }) =>
+    set({
+      allowSignup,
+      googleClientId,
+      workspaceCreationDisabled,
+      totpSupported,
+      vcsIntegrationAvailable,
+    }),
   setDaemonConfig: ({
     daemonServerUrl = "",
     daemonAppUrl = "",
