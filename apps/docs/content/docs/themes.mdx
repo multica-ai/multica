@@ -18,6 +18,8 @@ import { Step, Steps } from "fumadocs-ui/components/steps";
 
 **Theme** sets the colors, borders, shadows, and corners across the app. Multica comes with Default, Pop, GitHub, Blueprint, and Notion; pick one from the dropdown. **Manage**, next to it, is where you install, update, and remove other themes. A theme supports light mode, dark mode, or both, and follows the mode you picked.
 
+To use a different theme in dark mode, turn on **Use another theme in dark mode** and pick it under **Dark theme**. Switching the mode, including through System, switches the theme with it, and each theme keeps its own options.
+
 Some themes come with options, such as an accent color or a page width. They show up under **Theme options** while that theme is in use; **Reset options** puts them back to the theme's defaults.
 
 The rest of the page is independent of the theme:
@@ -28,7 +30,16 @@ The rest of the page is independent of the theme:
 | **Content text** | Font, size, and line height for issue descriptions, comments, chat, and documents, plus the code font. |
 | **Layout and accessibility** | Row density in lists, Reduce motion, and Increase contrast. |
 
-When you pick a font other than the default, or turn on Increase contrast, your choice wins over the theme's. A theme sets the colors; to change a color it doesn't offer as an option, pick another theme or [make your own](/developers/themes).
+When you pick a font other than the default, or turn on Increase contrast, your choice wins over the theme's. A theme sets the colors, apart from a workspace's accent color (see below); to change a color it doesn't offer as an option, pick another theme or [make your own](/developers/themes).
+
+## This workspace
+
+**This workspace** makes the workspace you're in easy to tell apart, for example when two are open in separate desktop windows:
+
+- **Accent color** replaces the theme's brand color in this workspace. Pick a preset, or set your own under **Custom color**, one for light and one for dark. Multica warns when a color is hard to read against the page, but keeps it.
+- **Theme** gives the workspace its own theme, again one for both modes or one per mode. **Follow global** uses the themes chosen above.
+
+**Follow global** at the top of the group removes everything the workspace sets. In the desktop app, each window shows its own workspace's choices.
 
 ## The theme store
 
@@ -92,7 +103,7 @@ The theme is paused until you close the window. The Appearance page shows a noti
 
 ## Where it is stored
 
-Mode, theme, theme options, and installed themes are saved on this device and are not synced to your account. Each browser and each desktop app has its own. They are the same in every workspace on that device.
+Mode, theme, theme options, workspace choices, and installed themes are saved on this device and are not synced to your account. Each browser and each desktop app has its own. Apart from **This workspace**, they are the same in every workspace on that device.
 
 ## Self-hosting
 

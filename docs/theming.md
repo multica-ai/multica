@@ -24,6 +24,31 @@ GitHub, Blueprint and Notion show fonts, content styling and anchor CSS.
 Duplicating one turns it into a folder you can edit; see
 [Writing a theme](#writing-a-theme).
 
+## Which theme is used
+
+People pick one theme for both modes, or, with **Use another theme in dark
+mode**, a light theme and a dark theme. Under **This workspace** they can
+also give the current workspace its own themes or an accent colour, so
+workspaces open side by side are easy to tell apart. The theme a window
+draws is the first of:
+
+1. the workspace's theme for the current mode, when it has one;
+2. the theme chosen for the current mode;
+3. Default.
+
+A theme that is no longer installed is skipped. Safe mode always draws
+Default and ignores the workspace's accent. Switching the mode, including
+the system's, switches the theme with it; each theme keeps its own options.
+On Desktop every window follows its own workspace.
+
+A workspace's accent sets `--brand` for each mode and a readable
+`--brand-foreground` on it, and wins over the theme's. The Appearance page
+warns when the accent falls below 4.5:1 against the reading surfaces or its
+own label, but keeps it. A theme's CSS can't tell whether an accent is set,
+so draw brand-coloured things from `--brand` rather than a fixed colour.
+
+These choices are saved on the device with the rest of Appearance.
+
 ## The folder
 
 ```text
@@ -95,8 +120,9 @@ CSS loads after the app's own styles while the theme is active, so at equal
 specificity the theme wins; keep selectors that simple and avoid
 `!important`. What the person picks on the Appearance page still wins over a
 theme: high contrast replaces the muted and border colours, and font choices
-other than the defaults replace the font variables. Colour is the theme's
-alone; to let people pick one, declare an option.
+other than the defaults replace the font variables, and a workspace's
+accent replaces `--brand`. Other colours are the theme's alone; to let
+people pick one, declare an option.
 
 ## Variables
 
