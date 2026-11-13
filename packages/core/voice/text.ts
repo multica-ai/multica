@@ -1,16 +1,21 @@
 const CJK = /[\u3000-\u303f\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uff00-\uffef]/;
 
+const OPENING = /[([{“‘«¿¡]/;
+const CLOSING = /[)\]}”’».,!?;:%…'"]/;
+
 /**
- * The separator to put between text already in the draft and dictated text
- * landing right after it: a space between two words of a spaced language,
- * nothing where either side is CJK or the draft already ends in whitespace.
+ * The separator to put between two adjacent pieces of text when dictation
+ * joins them (draft then transcript, or transcript then draft): a space
+ * between two words of a spaced language, nothing where either side is CJK,
+ * whitespace already separates them, or punctuation hugs the word.
  */
-export function dictationSeparator(before: string, text: string): string {
-  if (!before || !text) return "";
+export function dictationSeparator(before: string, after: string): string {
+  if (!before || !after) return "";
   const last = before[before.length - 1]!;
-  const first = text[0]!;
+  const first = after[0]!;
   if (/\s/.test(last) || /\s/.test(first)) return "";
   if (CJK.test(last) || CJK.test(first)) return "";
+  if (OPENING.test(last) || CLOSING.test(first)) return "";
   return " ";
 }
 

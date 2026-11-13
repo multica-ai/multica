@@ -17,6 +17,11 @@ describe("dictationSeparator", () => {
     ["Design 工作区", "badge", ""],
     ["the badge", "不更新", ""],
     ["line\n", "next", ""],
+    ["brave", "world", " "],
+    ["brave", ", then", ""],
+    ["brave", "'s", ""],
+    ["see (", "docs", ""],
+    ["缓存", "first", ""],
   ])("between %j and %j", (before, text, sep) => {
     expect(dictationSeparator(before, text)).toBe(sep);
   });

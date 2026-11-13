@@ -56,6 +56,29 @@ describe("insertDictation", () => {
     expect(markdown(ed)).toBe("Hello there");
   });
 
+  it("keeps the following word separate mid-sentence and leaves the caret after the dictation", () => {
+    const ed = makeEditor("Hello world");
+    ed.commands.setTextSelection(7);
+    insertDictation(ed, "brave", true);
+    expect(markdown(ed)).toBe("Hello brave world");
+    insertDictation(ed, "new", true);
+    expect(markdown(ed)).toBe("Hello brave new world");
+  });
+
+  it("does not add a space before the punctuation that follows", () => {
+    const ed = makeEditor("Hello, world");
+    ed.commands.setTextSelection(6);
+    insertDictation(ed, "there", true);
+    expect(markdown(ed)).toBe("Hello there, world");
+  });
+
+  it("does not add spaces inside Chinese text", () => {
+    const ed = makeEditor("今天发布");
+    ed.commands.setTextSelection(3);
+    insertDictation(ed, "我们", true);
+    expect(markdown(ed)).toBe("今天我们发布");
+  });
+
   it("collapses line breaks and inserts nothing for blank text", () => {
     const ed = makeEditor();
     insertDictation(ed, "one\n\ntwo\nthree", false);
