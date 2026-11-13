@@ -122,9 +122,7 @@
   },
   "panels": {
     "work": {
-      "my_agents": "Trabajo de mis agentes",
       "all_issues": "Todas las tareas",
-      "unread": "Sin leer",
       "views": "Vistas",
       "new_project": "Nuevo proyecto",
       "new_issue_in_project": "Nueva tarea en {{name}}",

@@ -128,8 +128,8 @@ describe("AllViewsPage", () => {
 
     expect(screen.getByRole("heading", { level: 1, name: "All views" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "All views" }));
-    expect(await screen.findByRole("menuitemradio", { name: /^All views/ })).toHaveTextContent("6");
-    expect(screen.getByRole("menuitemradio", { name: /^Built-in/ })).toHaveTextContent("4");
+    expect(await screen.findByRole("menuitemradio", { name: /^All views/ })).toHaveTextContent("4");
+    expect(screen.getByRole("menuitemradio", { name: /^Built-in/ })).toHaveTextContent("2");
     expect(screen.getByRole("menuitemradio", { name: /^Created by me/ })).toHaveTextContent("1");
     await user.click(screen.getByRole("menuitemradio", { name: /^Shared/ }));
 
@@ -172,17 +172,12 @@ describe("AllViewsPage", () => {
     expect(useActiveIssueViewStore.getState().active[WORKSPACE_KEY]).toBe("v2");
   });
 
-  it("lists Unread as a built-in that is starred on demand and opens its view", async () => {
-    const user = userEvent.setup();
-    const { push } = renderPage();
+  it("no longer lists the two built-ins the Inbox replaced", () => {
+    renderPage();
 
-    await user.click(screen.getByRole("button", { name: "Add Unread to sidebar" }));
-    expect(mocks.star).toHaveBeenCalledWith("builtin:unread");
-    expect(push).not.toHaveBeenCalled();
-
-    await user.click(screen.getByText("Unread"));
-    expect(push).toHaveBeenCalledWith("/acme/issues?view=unread");
-    expect(useActiveIssueViewStore.getState().active[WORKSPACE_KEY]).toBe("unread");
+    expect(screen.queryByText("Unread")).not.toBeInTheDocument();
+    expect(screen.queryByText("My agents' work")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /^(Add .+ to|Remove .+ from) sidebar$/ })).toHaveLength(4);
   });
 
   it("opens a view in place for a shift-click, which rows never hand to the browser", async () => {
@@ -214,23 +209,18 @@ describe("AllViewsPage", () => {
     expect(useActiveIssueViewStore.getState().active[WORKSPACE_KEY]).toBe("v-open");
   });
 
-  it("gives My Issues and My agents' work their own URLs", async () => {
+  it("opens My Issues at its own URL", async () => {
     const user = userEvent.setup();
     const openInNewTab = vi.fn();
     const { push } = renderPage({ openInNewTab });
-    const row = (name: string) =>
-      screen
-        .getByRole("button", { name: new RegExp(`^(Add ${name} to|Remove ${name} from) sidebar$`) })
-        .closest('[role="row"]')!;
+    const row = screen.getByRole("button", { name: "Remove My Issues from sidebar" }).closest('[role="row"]')!;
 
     await user.keyboard("{Meta>}");
-    await user.click(row("My Issues"));
-    await user.click(row("My agents' work"));
+    await user.click(row);
     await user.keyboard("{/Meta}");
     expect(openInNewTab).toHaveBeenCalledWith("/acme/my-issues", "My Issues");
-    expect(openInNewTab).toHaveBeenCalledWith("/acme/my-issues?scope=agents", "My agents' work");
 
-    await user.click(row("My agents' work"));
-    expect(push).toHaveBeenCalledWith("/acme/my-issues?scope=agents");
+    await user.click(row);
+    expect(push).toHaveBeenCalledWith("/acme/my-issues");
   });
 });

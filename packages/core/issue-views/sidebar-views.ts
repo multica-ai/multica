@@ -8,15 +8,18 @@ import type { PinnedItem } from "../types";
 import { issueViewEverywhereOptions } from "./queries";
 import { issueViewPreferenceOptions, useUpdateIssueViewPreference } from "./preferences";
 
-/** The views every workspace has without saving anything. */
-export type BuiltinViewKey = "my_issues" | "my_agents" | "all_issues" | "unread";
-export const BUILTIN_VIEW_KEYS: readonly BuiltinViewKey[] = ["my_issues", "my_agents", "all_issues", "unread"];
-
 /**
- * The built-ins starred before the user arranges the list. Unread is opt-in
- * while it overlaps with Inbox.
+ * The views every workspace has without saving anything.
+ *
+ * "My agents' work" and "Unread" used to be here. The Inbox answers both now
+ * (what agents are doing for you, and what came back), so a stored order that
+ * still names them resolves without them.
  */
-const DEFAULT_STARRED_BUILTINS: readonly BuiltinViewKey[] = ["my_issues", "my_agents", "all_issues"];
+export type BuiltinViewKey = "my_issues" | "all_issues";
+export const BUILTIN_VIEW_KEYS: readonly BuiltinViewKey[] = ["my_issues", "all_issues"];
+
+/** The built-ins starred before the user arranges the list. */
+const DEFAULT_STARRED_BUILTINS: readonly BuiltinViewKey[] = BUILTIN_VIEW_KEYS;
 
 export const builtinViewItemId = (key: BuiltinViewKey) => `builtin:${key}`;
 export const savedViewItemId = (viewId: string) => `view:${viewId}`;

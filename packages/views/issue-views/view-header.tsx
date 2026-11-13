@@ -168,16 +168,21 @@ export function IssueViewHeader({
   const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
   const toggleAgentRunningFilter = useViewStore((s) => s.toggleAgentRunningFilter);
 
+  // My agents' work is still a page (old links and open tabs land on it), but
+  // no longer a built-in view: it has a name and no star.
+  const myAgents = base.kind === "my" && myScope === "agents";
   const builtinKey: BuiltinViewKey | null =
-    base.kind === "workspace" ? "all_issues" : base.kind === "my" ? (myScope === "agents" ? "my_agents" : "my_issues") : null;
+    base.kind === "workspace" ? "all_issues" : base.kind === "my" && !myAgents ? "my_issues" : null;
   const baseName =
     base.kind === "project"
       ? base.project.title
-      : t(($) => $.views.builtin[builtinKey!]);
+      : myAgents
+        ? t(($) => $.views.builtin.my_agents)
+        : t(($) => $.views.builtin[builtinKey!]);
   const baseIcon =
     base.kind === "project" ? (
       <ProjectIcon project={base.project} size="sm" />
-    ) : builtinKey === "my_agents" ? (
+    ) : myAgents ? (
       <Bot className="size-4" />
     ) : builtinKey === "my_issues" ? (
       <CircleUser className="size-4" />
@@ -206,7 +211,7 @@ export function IssueViewHeader({
   const unreadView = isUnreadView(activeView);
   const activeViewName = unreadView ? t(($) => $.views.builtin.unread) : activeView?.name;
   const starId = unreadView
-    ? builtinViewItemId("unread")
+    ? null
     : activeView
       ? savedViewItemId(activeView.id)
       : builtinKey
@@ -471,7 +476,7 @@ export function IssueViewHeader({
                       <DropdownMenuItem
                         onClick={() =>
                           actions.copyLink(
-                            builtinKey === "my_agents"
+                            myAgents
                               ? paths.myAgents()
                               : base.kind === "my"
                                 ? paths.myIssues()

@@ -3,7 +3,6 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Bot,
   CircleUser,
   Copy,
   Layers,
@@ -54,7 +53,6 @@ import {
 import { useT } from "../i18n";
 import { useBuiltinViewNavigation } from "./builtin-views";
 import { DeleteViewDialog } from "./delete-view-dialog";
-import { UnreadViewIcon } from "./unread-view-icon";
 import { useIssueViewActions } from "./use-view-actions";
 
 type DirectoryScope = "all" | "builtin" | "mine" | "shared";
@@ -69,9 +67,7 @@ type DirectoryRow =
 
 const BUILTIN_ICON: Record<BuiltinViewKey, React.ReactNode> = {
   my_issues: <CircleUser className="size-4 shrink-0 text-muted-foreground" />,
-  my_agents: <Bot className="size-4 shrink-0 text-muted-foreground" />,
   all_issues: <ListTodo className="size-4 shrink-0 text-muted-foreground" />,
-  unread: <UnreadViewIcon />,
 };
 
 /** Every view the user can open, and the switch that puts it in the sidebar. */
