@@ -2,6 +2,7 @@ export * from "./store";
 export * from "./canonical-id";
 export * from "./queries";
 export * from "./mutations";
+export * from "./description-save";
 export * from "./ws-updaters";
 export * from "./workdir";
 export * from "./config";
