@@ -482,9 +482,7 @@ describe("InlineCommentRun", () => {
       vi.spyOn(window, "getComputedStyle").mockImplementation((el, pseudo) => {
         const style = originalComputedStyle(el, pseudo);
         if (!clipped(el)) return style;
-        style.overflowX = "hidden";
-        style.overflowY = "hidden";
-        return style;
+        return { overflowX: "hidden", overflowY: "hidden" } as CSSStyleDeclaration;
       });
     });
     afterEach(() => {

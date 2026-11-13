@@ -295,9 +295,6 @@ func stepFromTaskMessage(payload any) (progressStep, bool) {
 func stepFromMessage(msg taskMessage) (progressStep, bool) {
 	switch msg.msgType {
 	case "tool_use":
-		if msg.tool == "multica_commit_diff" {
-			return progressStep{}, false
-		}
 		return stepFromToolUse(msg.tool, msg.input), true
 	case "error":
 		return progressStep{kind: progressError, arg: safeFragment(msg.content)}, true

@@ -269,27 +269,5 @@
     "archive": "Archiver la discussion",
     "unarchive": "Désarchiver la discussion",
     "delete": "Supprimer la discussion"
-  },
-  "commit_changes": {
-    "heading": "Fichiers modifiés pendant cette exécution",
-    "files": "Fichiers modifiés",
-    "incomplete": "Certaines modifications ont été omises en raison des limites d’enregistrement.",
-    "unavailable": "Le diff de ce fichier n’a pas pu être enregistré en entier. Consultez-le dans le dépôt.",
-    "no_text": "Aucun diff textuel disponible.",
-    "loading": "Chargement des modifications…",
-    "retry": "Recharger les modifications",
-    "empty": "Aucune modification n’a été enregistrée pour cette exécution.",
-    "worktree": "Arbre de travail : début et fin",
-    "commits": "Commits",
-    "draft": "Brouillon enregistré",
-    "recorded_files_one": "{{count}} fichier",
-    "recorded_files_other": "{{count}} fichiers",
-    "incomplete_record": "Enregistrement incomplet",
-    "repositories_omitted": "Certains dépôts n’ont pas été enregistrés car la limite de dépôts a été atteinte.",
-    "worktree_unavailable": "Impossible d’enregistrer les modifications de l’arbre de travail.",
-    "commits_unavailable": "Impossible d’enregistrer les différences entre les commits.",
-    "draft_unavailable": "Impossible d’enregistrer les modifications du brouillon.",
-    "worktree_unchanged": "Aucune modification nette de l’arbre de travail.",
-    "comparison_unchanged": "Aucun fichier modifié dans cette comparaison."
   }
 }

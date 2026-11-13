@@ -394,18 +394,6 @@ func TestOutboundTakesTheStepsOffACancelledReply(t *testing.T) {
 }
 
 // Who sees a step's argument is the mode's decision and the chat's.
-func TestStepForHidesCommitDiff(t *testing.T) {
-	for _, mode := range []ProgressMode{ProgressAuto, ProgressSummary, ProgressDetail} {
-		o := &Outbound{progress: mode}
-		for _, private := range []bool{false, true} {
-			step, ok := o.stepFor(&replyTarget{private: private}, toolCall("multica_commit_diff", map[string]any{"repository": "private-repository"}))
-			if ok {
-				t.Fatalf("internal record became a Telegram step: %+v", step)
-			}
-		}
-	}
-}
-
 func TestStepForShowsArgumentsByModeAndChat(t *testing.T) {
 	call := toolCall("Bash", map[string]any{"command": "cat notes.txt"})
 	cases := []struct {
