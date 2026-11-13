@@ -6,6 +6,7 @@ import (
 	"log/slog"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/attribution"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/inbox"
@@ -91,17 +92,33 @@ func issueStatusIsHandoff(
 	workspaceID pgtype.UUID,
 	status string,
 ) (bool, error) {
+	handoff, _, err := issueStatusHandoff(ctx, queries, workspaceID, status)
+	return handoff, err
+}
+
+// issueStatusHandoff answers issueStatusIsHandoff and, with the same catalog
+// read, whether the status WAITS on a person: a started status other than
+// in_progress (in review, blocked, a custom gate). done / closed are a handoff
+// that waits on no one, which is what separates the two answers. The Inbox
+// files a status change under "Needs you" only when it waits (MUL-9215).
+func issueStatusHandoff(
+	ctx context.Context,
+	queries *db.Queries,
+	workspaceID pgtype.UUID,
+	status string,
+) (handoff, waitsOnHuman bool, err error) {
 	category, err := issuestatus.CategoryWithError(ctx, queries, workspaceID, status)
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 	switch category {
 	case issuestatus.CategoryDone, issuestatus.CategoryClosed:
-		return true, nil
+		return true, false, nil
 	case issuestatus.CategoryStarted:
-		return status != issuestatus.InProgress, nil
+		waits := status != issuestatus.InProgress
+		return waits, waits, nil
 	default:
-		return false, nil
+		return false, false, nil
 	}
 }
 
@@ -258,6 +275,188 @@ func archiveStaleTaskFailedInbox(
 		"row_count", len(rows), "recipient_count", len(counts))
 }
 
+// publishInboxArchived tells each member whose rows were just archived, so
+// connected clients drop the issue without a reload.
+func publishInboxArchived(bus *events.Bus, workspaceID, issueID, reason string, counts map[string]int64) {
+	for recipientID, count := range counts {
+		bus.Publish(events.Event{
+			Type:        protocol.EventInboxBatchArchived,
+			WorkspaceID: workspaceID,
+			Payload: map[string]any{
+				"recipient_id": recipientID,
+				"count":        count,
+				"issue_id":     issueID,
+				"reason":       reason,
+			},
+		})
+	}
+}
+
+// memberStartedRun reports the member whose own action started this run, the
+// one the Inbox lists it under "Working" for. Runs nobody started by hand
+// (delegation, a reaction to an agent's comment, an autopilot) have none.
+func memberStartedRun(task db.AgentTaskQueue) (string, bool) {
+	if !task.OriginatorUserID.Valid || task.OriginatorSource.String != string(attribution.SourceDirectHuman) {
+		return "", false
+	}
+	return util.UUIDToString(task.OriginatorUserID), true
+}
+
+// archiveInboxOnRunStart takes an issue out of a member's "Needs you" when
+// their own action starts an agent run on it: the issue is with the agent now.
+// The Inbox lists it under "Working" from the run itself, and it comes back
+// through notifyRunEnded or the task:failed listener when the run ends. Runs
+// the member did not start themselves leave the Inbox alone, and so does the
+// retry of an earlier attempt, which is the same hand-over continuing.
+func archiveInboxOnRunStart(ctx context.Context, queries *db.Queries, bus *events.Bus, e events.Event) {
+	payload, ok := e.Payload.(map[string]any)
+	if !ok {
+		return
+	}
+	issueID, _ := payload["issue_id"].(string)
+	taskID, _ := payload["task_id"].(string)
+	issueUUID, err := util.ParseUUID(issueID)
+	if err != nil {
+		return
+	}
+	taskUUID, err := util.ParseUUID(taskID)
+	if err != nil {
+		return
+	}
+	task, err := queries.GetAgentTask(ctx, taskUUID)
+	if err != nil {
+		slog.Error("archive handed-over inbox: failed to get task", "task_id", taskID, "error", err)
+		return
+	}
+	originator, ok := memberStartedRun(task)
+	if !ok || task.RetryOfTaskID.Valid {
+		return
+	}
+	count, err := queries.ArchiveInboxByIssue(ctx, db.ArchiveInboxByIssueParams{
+		WorkspaceID:   parseUUID(e.WorkspaceID),
+		RecipientType: "member",
+		RecipientID:   task.OriginatorUserID,
+		IssueID:       issueUUID,
+	})
+	if err != nil {
+		slog.Error("archive handed-over inbox: query failed",
+			"workspace_id", e.WorkspaceID, "issue_id", issueID, "member_id", originator, "error", err)
+		return
+	}
+	if count == 0 {
+		return
+	}
+	publishInboxArchived(bus, e.WorkspaceID, issueID, "handed_to_agent", map[string]int64{originator: count})
+}
+
+// archiveInboxForClosedIssue takes an issue out of every Inbox once it reaches
+// a done or cancelled status, whoever moved it there: nothing on it waits on
+// anyone. The caller records the status change after this, so followers still
+// get the one update saying the issue closed.
+//
+// FAIL CLOSED: an unresolved custom status keeps the rows, since hiding what
+// waits on someone is worse than leaving it listed.
+func archiveInboxForClosedIssue(ctx context.Context, queries *db.Queries, bus *events.Bus, workspaceID, issueID, status string) {
+	category, err := issuestatus.CategoryWithError(ctx, queries, parseUUID(workspaceID), status)
+	if err != nil {
+		slog.Warn("resolve issue status category for inbox archive; keeping rows",
+			"issue_id", issueID, "status", status, "error", err)
+		return
+	}
+	if category != issuestatus.CategoryDone && category != issuestatus.CategoryClosed {
+		return
+	}
+	rows, err := queries.ArchiveInboxByIssueForAll(ctx, db.ArchiveInboxByIssueForAllParams{
+		WorkspaceID: parseUUID(workspaceID),
+		IssueID:     parseUUID(issueID),
+	})
+	if err != nil {
+		slog.Error("archive closed-issue inbox: query failed",
+			"workspace_id", workspaceID, "issue_id", issueID, "error", err)
+		return
+	}
+	counts := map[string]int64{}
+	for _, row := range rows {
+		if row.RecipientType != "member" {
+			continue
+		}
+		counts[util.UUIDToString(row.RecipientID)]++
+	}
+	publishInboxArchived(bus, workspaceID, issueID, "issue_closed", counts)
+}
+
+// runDetails names the run an inbox row reports.
+func runDetails(taskID string) []byte {
+	if taskID == "" {
+		return emptyDetails
+	}
+	details, _ := json.Marshal(map[string]string{"task_id": taskID})
+	return details
+}
+
+// notifyRunEnded hands an issue back to the member whose own action started
+// the run, when the run completes: the row lands in their "Needs you" whether
+// or not the agent mentioned them. Runs nobody started by hand leave people
+// alone; whoever answers for the issue hears through the agent's comment or
+// the status it sets.
+func notifyRunEnded(ctx context.Context, queries *db.Queries, bus *events.Bus, e events.Event) {
+	payload, ok := e.Payload.(map[string]any)
+	if !ok {
+		return
+	}
+	issueID, _ := payload["issue_id"].(string)
+	taskID, _ := payload["task_id"].(string)
+	agentID, _ := payload["agent_id"].(string)
+	issueUUID, err := util.ParseUUID(issueID)
+	if err != nil {
+		return
+	}
+	taskUUID, err := util.ParseUUID(taskID)
+	if err != nil {
+		return
+	}
+	task, err := queries.GetAgentTask(ctx, taskUUID)
+	if err != nil {
+		slog.Error("run ended notification: failed to get task", "task_id", taskID, "error", err)
+		return
+	}
+	originator, ok := memberStartedRun(task)
+	if !ok {
+		return
+	}
+	issue, err := queries.GetIssue(ctx, issueUUID)
+	if err != nil {
+		slog.Error("run ended notification: failed to get issue", "issue_id", issueID, "error", err)
+		return
+	}
+	// A run that closed the issue has nothing to hand back: the status change
+	// already told everyone. An unresolved custom status still hands back,
+	// since a spare row costs one archive and a missing one strands the issue.
+	if category, err := issuestatus.CategoryWithError(ctx, queries, issue.WorkspaceID, issue.Status); err == nil &&
+		(category == issuestatus.CategoryDone || category == issuestatus.CategoryClosed) {
+		return
+	}
+	notifyDirect(ctx, queries, bus,
+		"member", originator,
+		e.WorkspaceID,
+		events.Event{Type: e.Type, WorkspaceID: e.WorkspaceID, ActorType: "agent", ActorID: agentID},
+		issueID, issue.Status,
+		"agent_completed", "action_required",
+		issue.Title, "",
+		runDetails(taskID),
+	)
+}
+
+// memberAnswersForIssue reports whether the member created the issue or has it
+// assigned: the two relations that make what happens on it theirs to handle.
+func memberAnswersForIssue(issue db.Issue, memberID string) bool {
+	if issue.CreatorType == "member" && util.UUIDToString(issue.CreatorID) == memberID {
+		return true
+	}
+	return issue.AssigneeType.String == "member" && issue.AssigneeID.Valid &&
+		util.UUIDToString(issue.AssigneeID) == memberID
+}
+
 // notifySubscribers queries the subscriber table for an issue, excludes the
 // actor and any extra IDs, and creates inbox items for each remaining member
 // subscriber. Publishes an inbox:new event for each notification.
@@ -408,8 +607,10 @@ func notifyProjectSubscribers(
 		if prefs, ok := userPrefs[subID]; ok && isNotifMuted(prefs, notifType) {
 			continue
 		}
+		// Watching a project is following it: whoever answers for the issue
+		// was reached through its own subscribers first and is excluded here.
 		createMemberInboxItem(ctx, queries, bus, subID, workspaceID, e, issueID, issueStatus,
-			notifType, severity, title, body, details)
+			notifType, severity, title, body, details, inbox.SectionUpdates)
 	}
 }
 
@@ -429,6 +630,7 @@ func createMemberInboxItem(
 	title string,
 	body string,
 	details []byte,
+	section string,
 ) bool {
 	item, inserted, err := inbox.CreateIfEligible(ctx, queries, db.CreateInboxItemParams{
 		ID:            dbid.NewV7(),
@@ -443,6 +645,7 @@ func createMemberInboxItem(
 		ActorType:     util.StrToText(e.ActorType),
 		ActorID:       optionalUUID(e.ActorID),
 		Details:       details,
+		Section:       util.StrToText(section),
 	})
 	if err != nil {
 		slog.Error("member notification creation failed",
@@ -500,11 +703,24 @@ func notifyIssueSubscribers(
 	// outcomes are not symmetric: a spare inbox row costs one dismissal, while
 	// a dropped one silently strands the issue on a status whose whole purpose
 	// is to be waited on, with no other signal to the delegated subscriber.
-	statusIsHandoff, err := issueStatusIsHandoff(ctx, queries, parseUUID(workspaceID), issueStatus)
+	//
+	// The same direction decides the section: on a failed read the status is
+	// taken to wait on a person, so the row lands in "Needs you".
+	statusIsHandoff, statusWaitsOnHuman, err := issueStatusHandoff(ctx, queries, parseUUID(workspaceID), issueStatus)
 	if err != nil {
 		slog.Warn("resolve issue status handoff for delegated delivery; delivering",
 			"issue_id", subscriberIssueID, "status", issueStatus, "error", err)
 		statusIsHandoff = true
+		statusWaitsOnHuman = true
+	}
+
+	// Who answers for the issue the notification points at decides its Inbox
+	// section. FAIL OPEN again: without the issue, every recipient is treated
+	// as answering for it.
+	targetIssue, targetIssueErr := queries.GetIssue(ctx, parseUUID(targetIssueID))
+	if targetIssueErr != nil {
+		slog.Warn("load issue for inbox section; filing under needs you",
+			"issue_id", targetIssueID, "error", targetIssueErr)
 	}
 
 	subs, err := queries.ListIssueSubscribers(ctx, parseUUID(subscriberIssueID))
@@ -553,8 +769,14 @@ func notifyIssueSubscribers(
 			continue
 		}
 
+		// A delegated subscription means an agent filed the issue on this
+		// member's behalf, so it is theirs as much as one they created.
+		addressed := sub.Reason == "delegated" || targetIssueErr != nil ||
+			memberAnswersForIssue(targetIssue, subID)
+		section := inbox.SubscriberSection(notifType, addressed, statusWaitsOnHuman)
+
 		if createMemberInboxItem(ctx, queries, bus, subID, workspaceID, e, targetIssueID, issueStatus,
-			notifType, severity, title, body, details) {
+			notifType, severity, title, body, details, section) {
 			notified[subID] = true
 		}
 	}
@@ -888,6 +1110,9 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 				"from": prevStatus,
 				"to":   issue.Status,
 			})
+			// A done or cancelled issue leaves every Inbox before the change is
+			// recorded, so what remains is the one update saying it closed.
+			archiveInboxForClosedIssue(ctx, queries, bus, e.WorkspaceID, issue.ID, issue.Status)
 			notifySubscribers(ctx, queries, bus, issue.ID, issue.Status, e.WorkspaceID, e,
 				nil, "status_changed", "info",
 				issue.Title, "",
@@ -1126,16 +1351,29 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		)
 	})
 
-	// task:completed — no inbox notification (completion is visible from status change)
+	// task:queued — the member who started the run has handed the issue over
+	bus.Subscribe(protocol.EventTaskQueued, func(e events.Event) {
+		archiveInboxOnRunStart(ctx, queries, bus, e)
+	})
 
-	// task:failed — notify all subscribers except the agent
+	// task:completed — hand the issue back to the member who started the run
+	bus.Subscribe(protocol.EventTaskCompleted, func(e events.Event) {
+		notifyRunEnded(ctx, queries, bus, e)
+	})
+
+	// task:failed — notify all subscribers except the agent, once the failure
+	// is final: an attempt with a retry pending has not ended the run.
 	bus.Subscribe(protocol.EventTaskFailed, func(e events.Event) {
 		payload, ok := e.Payload.(map[string]any)
 		if !ok {
 			return
 		}
+		if retryPending, _ := payload["retry_pending"].(bool); retryPending {
+			return
+		}
 		agentID, _ := payload["agent_id"].(string)
 		issueID, _ := payload["issue_id"].(string)
+		taskID, _ := payload["task_id"].(string)
 		if issueID == "" {
 			return
 		}
@@ -1150,17 +1388,37 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		if agentID != "" {
 			exclude[agentID] = true
 		}
+		agentEvent := events.Event{
+			Type:        e.Type,
+			WorkspaceID: e.WorkspaceID,
+			ActorType:   "agent",
+			ActorID:     agentID,
+		}
+		details := runDetails(taskID)
+
+		// The member who started the run gets it back in "Needs you" whatever
+		// their relation to the issue. Everyone else is filed by that relation
+		// in the subscriber fan-out.
+		if taskUUID, err := util.ParseUUID(taskID); err == nil {
+			if task, err := queries.GetAgentTask(ctx, taskUUID); err != nil {
+				slog.Error("task:failed notification: failed to get task", "task_id", taskID, "error", err)
+			} else if originator, ok := memberStartedRun(task); ok {
+				notifyDirect(ctx, queries, bus,
+					"member", originator,
+					e.WorkspaceID, agentEvent, issueID, issue.Status,
+					"task_failed", "action_required",
+					issue.Title, "",
+					details,
+				)
+				exclude[originator] = true
+			}
+		}
 
 		notifySubscribers(ctx, queries, bus, issueID, issue.Status, e.WorkspaceID,
-			events.Event{
-				Type:        e.Type,
-				WorkspaceID: e.WorkspaceID,
-				ActorType:   "agent",
-				ActorID:     agentID,
-			},
+			agentEvent,
 			exclude, "task_failed", "action_required",
 			issue.Title, "",
-			emptyDetails)
+			details)
 	})
 }
 
@@ -1183,5 +1441,7 @@ func inboxItemToResponse(item db.InboxItem) map[string]any {
 		"actor_type":     util.TextToPtr(item.ActorType),
 		"actor_id":       util.UUIDToPtr(item.ActorID),
 		"details":        json.RawMessage(item.Details),
+		"section":        inbox.EffectiveSection(item.Section, item.Type, item.Read),
+		"snoozed_until":  util.TimestampToPtr(item.SnoozedUntil),
 	}
 }
