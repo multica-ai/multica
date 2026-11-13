@@ -28,8 +28,10 @@ const patterns: { re: RegExp; replacement: string }[] = [
   { re: /\bBearer\s+[A-Za-z0-9\-._~+/]+=*/gi, replacement: "Bearer [REDACTED]" },
   // Connection strings with embedded passwords
   { re: /(?:postgres|mysql|mongodb|redis|amqp)(?:ql)?:\/\/[^:\s]+:[^@\s]+@/gi, replacement: "[REDACTED CONNECTION STRING]@" },
-  // Generic key=value secret env vars
-  { re: /(?:API_KEY|API_SECRET|SECRET_KEY|SECRET|ACCESS_TOKEN|AUTH_TOKEN|PRIVATE_KEY|DATABASE_URL|DB_PASSWORD|DB_URL|REDIS_URL|PASSWORD|TOKEN)\s*[=:]\s*\S+/gi, replacement: "[REDACTED CREDENTIAL]" },
+  // Generic key=value secret env vars. The name and separator are kept: the
+  // keyword is not anchored, so replacing the whole match would erase the tail of
+  // a prefixed name ("GITEA_TOKEN=..." -> "GITEA_[REDACTED CREDENTIAL]").
+  { re: /(\b[A-Z0-9_]*(?:API_KEY|API_SECRET|SECRET_KEY|SECRET|ACCESS_TOKEN|AUTH_TOKEN|PRIVATE_KEY|DATABASE_URL|DB_PASSWORD|DB_URL|REDIS_URL|PASSWORD|TOKEN)\s*[=:]\s*)\S+/gi, replacement: "$1[REDACTED CREDENTIAL]" },
 ];
 
 export function redactSecrets(text: string): string {
