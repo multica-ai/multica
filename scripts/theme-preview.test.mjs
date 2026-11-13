@@ -299,7 +299,8 @@ test("anchors nest as they do in the app", () => {
   assert.ok(inside(sidebar, "page"), "the sidebar sits inside the page canvas");
   assert.ok(!inside(rail, "page"), "the rail sits outside the page canvas");
   for (const el of anchors(elements, "nav-item")) assert.ok(inside(el, "sidebar"), "nav items sit inside the sidebar");
-  for (const name of ["issue-group-header", "issue-row", "comment", "comment-composer"]) {
+  for (const el of anchors(elements, "panel-section")) assert.ok(inside(el, "sidebar"), "panel sections sit inside the sidebar");
+  for (const name of ["page-header", "issue-group-header", "issue-row", "comment", "comment-composer"]) {
     for (const el of anchors(elements, name)) assert.ok(inside(el, "page"), `${name} sits inside the page`);
   }
   for (const el of anchors(elements, "comment-reply")) assert.ok(inside(el, "comment"), "replies sit inside their comment");

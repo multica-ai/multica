@@ -1,5 +1,6 @@
 "use client";
 
+import type { CSSProperties } from "react";
 import type { Label } from "@multica/core/types";
 import { X } from "@multica/ui/icons";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
@@ -15,14 +16,16 @@ import { TruncatedTooltip } from "@multica/ui/components/common/truncated-toolti
  * table.
  *
  * The malformed-hex fallback returns dark-on-default which is readable on
- * the default `backgroundColor` rendering path — better than pure black
+ * the default `--label-color` rendering path — better than pure black
  * which disappears on dark chips.
  *
- * SECURITY INVARIANT: `LabelChip` applies `style={{ backgroundColor: color }}`
- * directly, trusting the backend's color format. The backend's
- * `normalizeColor` regex pins the value to `^#?[0-9a-fA-F]{6}$`. If that regex
- * ever loosens (named colors, `url(...)`, etc.), this becomes an injection
- * vector.
+ * SECURITY INVARIANT: `LabelChip` sets the color as the `--label-color`
+ * custom property and paints with `var(--label-color)`, trusting the backend's
+ * color format. The backend's `normalizeColor` regex pins the value to
+ * `^#?[0-9a-fA-F]{6}$`. A custom property is substituted wherever a theme's
+ * CSS reads it, not only in this chip's background, so if that regex ever
+ * loosens (named colors, `url(...)`, etc.) this becomes an injection vector
+ * into every rule that uses the variable.
  */
 function contrastTextColor(hex: string): string {
   const h = hex.replace("#", "");
@@ -65,8 +68,10 @@ export function LabelChip({ label, onRemove, className, fullName }: LabelChipPro
       // container (the create toolbar's label pill). Without it the chip keeps
       // its content width and the parent clips it mid-shape; with it the inner
       // name truncates and the chip keeps its rounded ends.
-      className={`inline-flex min-w-0 items-center gap-1 rounded-label px-2 py-0.5 text-caption font-medium ${className ?? ""}`}
-      style={{ backgroundColor: label.color, color: textColor }}
+      // Custom properties rather than inline colors, so a theme can restyle the
+      // chip from `var(--label-color)` without `!important`.
+      className={`inline-flex min-w-0 items-center gap-1 rounded-label bg-(--label-color) px-2 py-0.5 text-caption font-medium text-(--label-foreground) ${className ?? ""}`}
+      style={{ "--label-color": label.color, "--label-foreground": textColor } as CSSProperties}
       // aria-label exposes the full name to screen readers when the span
       // visually truncates; sighted users get it from the hover tooltip,
       // which only opens when the name is actually cut off.
