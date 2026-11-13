@@ -76,6 +76,8 @@ export const DRAWINGS = {
     <path d="M14.5 3.25h6.25V9.5M20.75 3.25 12.5 11.5"/>`,
   Bell: `<path class="b" d="M5 17.25h14l-1.35-1.95a3 3 0 0 1-.55-1.73V10a5.1 5.1 0 0 0-10.2 0v3.57c0 .62-.19 1.22-.55 1.73Z"/>
     <path d="M9.5 20.25c.55.95 1.5 1.5 2.5 1.5s1.95-.55 2.5-1.5"/>`,
+  Mic: `<path class="b" d="M8.25 6.5a3.75 3.75 0 0 1 7.5 0v4.25a3.75 3.75 0 0 1-7.5 0Z"/>
+    <path d="M5 11a7 7 0 0 0 14 0M12 18v3.25"/>`,
   Filter: `<path d="M3.75 6.5h16.5M7 12h10M10.25 17.5h3.5"/>`,
   Pin: `<path class="b" d="${shape([[9.25, 3, 1], [14.75, 3, 1], [14.75, 8.25, 1], [18, 12.75, 1.5], [6, 12.75, 1.5], [9.25, 8.25, 1]])}"/>
     <path d="M12 12.75v8.5M8 3h8"/>`,
@@ -427,6 +429,7 @@ Object.assign(DRAWINGS, {
   GitPullRequestClosed: `<circle cx="6.25" cy="6" r="2.75"/><circle cx="17.75" cy="18" r="2.75"/><path d="M6.25 8.75v12.5M17.75 15.25V11M15.5 3.5 20 8M20 3.5 15.5 8"/>`,
   GitPullRequestDraft: `<circle cx="6.25" cy="6" r="2.75"/><circle cx="17.75" cy="18" r="2.75"/><path d="M6.25 8.75v12.5"/>${dot(17.75, 6, 1.3)}${dot(17.75, 11, 1.3)}`,
   BotOff: `${DRAWINGS.Bot}<path d="m2.5 2.5 19 19"/>`,
+  MicOff: `${DRAWINGS.Mic}<path d="m3 3 18 18"/>`,
   PencilLine: `${DRAWINGS.Pencil}<path d="M13 20.25h7.5"/>`,
 
   // Command palette
