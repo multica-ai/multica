@@ -75,6 +75,17 @@
     --color-priority-medium: var(--priority-medium, var(--warning));
     --color-priority-low: var(--priority-low, var(--info));
     --color-priority-none: var(--priority-none, var(--muted-foreground));
+    /* Pull request states keep GitHub's hues by default, a shade lighter in
+       dark mode, so each has a dark alias reading the same public name. The
+       Merged pill's light-mode text defaults one shade darker again, so 11px
+       copy on its tint keeps AA contrast on every surface. */
+    --color-pr-open: var(--pr-open, oklch(59.6% 0.145 163.225));
+    --color-pr-open-dark: var(--pr-open, oklch(76.5% 0.177 163.223));
+    --color-pr-merged: var(--pr-merged, oklch(54.1% 0.281 293.009));
+    --color-pr-merged-dark: var(--pr-merged, oklch(70.2% 0.183 293.541));
+    --color-pr-merged-text: var(--pr-merged, oklch(49.1% 0.27 292.581));
+    --color-pr-closed: var(--pr-closed, oklch(58.6% 0.253 17.585));
+    --color-pr-closed-dark: var(--pr-closed, oklch(71.2% 0.194 13.428));
 }
 
 /* Icon stroke: only glyphs drawn at the default width follow it, so a call

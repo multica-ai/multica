@@ -204,6 +204,7 @@
     }
   },
   "access": {
+    "agent_notice": "Los agentes tienen el mismo acceso que su propietario.",
     "label": "Acceso",
     "title": "Acceso a {{title}}",
     "description": "Define quién puede ver este proyecto, sus tareas, comentarios y archivos adjuntos.",

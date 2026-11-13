@@ -601,6 +601,7 @@
   },
   "activity": {
     "created": "このタスクを作成しました",
+    "created_on_behalf_of": "{{name}} の代理としてこのタスクを作成しました",
     "self_assigned": "このタスクを自分に割り当てました",
     "assigned_to": "{{name}} に割り当てました",
     "removed_assignee": "担当者を削除しました",

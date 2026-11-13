@@ -203,7 +203,6 @@ allowlist の正確な判定順序は[ログインとサインアップ](/auth-s
 | Plugins | `MULTICA_PLUGIN_SURFACE_ORIGIN` | バックエンドへルーティングする Cookie なしの専用 origin。app/API origin と分離し、`Host` を保持すること |
 | Plugins | `MULTICA_PLUGIN_API_URL` | バージョンを含む Plugin Public API の完全な Base URL（例: `https://plugin-api.example.com/v1`）。未設定時は `MULTICA_PUBLIC_URL` + `/v1` |
 | Plugins | `MULTICA_PLUGIN_DIR` | 開発時にローカル plugin bundle を公開するための任意の絶対ディレクトリ |
-| テーマストア | `MULTICA_THEME_STORE` | 既定で有効。公式の [multica-themes](https://github.com/multica-ai/multica-themes) レジストリを読みます。`off` でコミュニティのテーマストアを無効にし、レジストリへのリクエストを止めます |
 | テーマストア | `MULTICA_THEME_REGISTRY_URL` | 公式レジストリの fork など、別のレジストリの `index.json`。[テーマと外観](/themes#セルフホスト)を参照 |
 
 `GITHUB_APP_ID` と秘密鍵を設定しなくても、PR の関連付け・ミラー・マージ時のステータス変更は通常どおり動きますが、カードに CI とマージ可否のステータスが表示されず、「GitHub から選択」のリポジトリ入口も無効になります。
@@ -279,7 +278,7 @@ API key と base URL の両方が空の場合、このレイヤーは無効に�
 | `MULTICA_GC_ENABLED` | `true` | `false` または `0` でクリーンアップ全体を止める |
 | `MULTICA_GC_INTERVAL` | `2h` | クリーンアップの間隔。デーモン起動の約 30 秒後に最初の 1 回を実行 |
 | `MULTICA_GC_TTL` | `24h` | タスクが `done` または `closed` カテゴリに入ってから、またはチャットセッションがアーカイブされてから、実行ディレクトリを削除するまでの時間 |
-| `MULTICA_GC_COMPLETED_TASK_TTL` | `14d` | タスクの実行が完了してからディレクトリ全体を削除するまでの時間。タスクが閉じているかどうかは問わない。`0` で無効。プロジェクトのローカルディレクトリでの実行には適用されない |
+| `MULTICA_GC_COMPLETED_TASK_TTL` | `14d` | 実行完了後、管理対象のタスクディレクトリを削除するまでの時間。ローカルディレクトリ実行は `codex-home` のみ削除し、daemon ログ、出力、外部のセッションを保持。ローカル履歴を持つ home は保持。`0` で無効 |
 | `MULTICA_GC_ORPHAN_TTL` | `72h` | 持ち主が見つからないディレクトリを、変更がないまま何時間経ったら削除するか |
 | `MULTICA_GC_ARTIFACT_TTL` | `12h` | 実行終了からデーモンが再生成できる内容を削除するまでの時間。次の行のパターンは、まだ閉じていないタスクと、管理対象の作業ディレクトリを使う未アーカイブのチャットに適用される。デーモンが管理する Codex キャッシュにも同じ時間が適用される。`0` でこれらのキャッシュを保持する |
 | `MULTICA_GC_ARTIFACT_PATTERNS` | `node_modules,.next,.turbo` | 再生成できるとみなすディレクトリ名（カンマ区切り）。設定するとデフォルトの一覧を**置き換える**ため、デフォルトも残したいなら一緒に書く。`/` や `\` を含む項目は無視される |

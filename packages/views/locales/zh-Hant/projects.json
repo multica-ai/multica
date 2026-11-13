@@ -204,6 +204,7 @@
     }
   },
   "access": {
+    "agent_notice": "AI 代理的權限跟隨其擁有者。",
     "label": "存取權限",
     "title": "{{title}}的存取權限",
     "description": "控制誰能查看專案及其中的任務、評論和附件。",

@@ -45,13 +45,17 @@ Install steps are in [Install AI coding tools](/install-agent-runtime).
 | Qoder CN CLI | `qoderclicn` | ✓ | ✓ | ✓ | `.qoder/skills/` |
 | Qwen Code | `qwen` | ✓ | ✓ | ✓ | `.qwen/skills/` |
 | QwenPaw | `qwenpaw` | ✓ | ✓ | — | per-run workspace `skills/` |
-| Amp | `amp` | ✓ | — | ✓ | `.agents/skills/` |
+| Amp | `amp` | ✓ | — | Mode | `.agents/skills/` |
 | Factory Droid | `droid` | ✓ | — | ✓ | `.factory/skills/` |
 | Reasonix | `reasonix` | ✓ | ✓ | ✓ | `.reasonix/skills/` |
 | Trae CLI | `traecli` | ✓ | ✓ | ✓ | `.traecli/skills/` |
 | Dim | `dim` | ✓ | ✓ | ✓ | — |
 | ZeroClaw | `zeroclaw` | ✓ | — | — | — |
 | ZCode | `zcode` / ZCode Desktop | ✓ | ✓ | ✓ | `.zcode/skills/` |
+
+For Amp, the model field selects an Amp **mode**, such as `high`, rather than an underlying model ID. Leave it empty to use Amp’s default.
+
+Amp also requires `AMP_API_KEY` in the daemon or agent environment; a saved interactive login alone is not enough.
 
 "Multica-managed MCP" means you can define MCP servers in the agent configuration and Multica passes them to the tool before a run. The column only says whether Multica can configure it for you, not whether the tool has other ways to configure MCP.
 
@@ -89,7 +93,7 @@ Retry and session-resumption rules are in [Runs](/tasks#manual-retry).
 
 ## MCP configuration
 
-Antigravity, GitHub Copilot CLI, DevEco Code, Muse Code, and ZeroClaw do not read the MCP configuration on an agent yet, so the field is not shown when creating agents for them.
+Amp, Factory Droid, Antigravity, GitHub Copilot CLI, DevEco Code, Muse Code, and ZeroClaw do not read the MCP configuration on an agent yet, so the field is not shown when creating agents for them.
 
 Managed MCP delivery for Pi requires Pi 0.99.0 or later. Older Pi versions continue to run agents that have no MCP configuration.
 

@@ -145,6 +145,9 @@ const STATUS: Entry[] = [
   ["priority-medium", "Medium priority icon and badge.", "var(--warning)"],
   ["priority-low", "Low priority icon and badge.", "var(--info)"],
   ["priority-none", "No-priority icon.", "var(--muted-foreground)"],
+  ["pr-open", "Open pull request icon.", "oklch(59.6% 0.145 163.225)", "oklch(76.5% 0.177 163.223)"],
+  ["pr-merged", "Merged pull request icon and pill. The pill's text defaults one shade darker in light mode.", "oklch(54.1% 0.281 293.009)", "oklch(70.2% 0.183 293.541)"],
+  ["pr-closed", "Closed pull request icon.", "oklch(58.6% 0.253 17.585)", "oklch(71.2% 0.194 13.428)"],
 ];
 
 const SHAPE: Entry[] = [

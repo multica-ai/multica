@@ -246,3 +246,117 @@ func TestRunRuntimeDeleteConflictWithoutMessageKeepsWrapper(t *testing.T) {
 		t.Fatalf("error = %q, want the generic wrapper", err.Error())
 	}
 }
+
+func newRuntimeUpdateTestCmd(serverURL, output string) *cobra.Command {
+	cmd := &cobra.Command{Use: "update"}
+	cmd.Flags().String("server-url", "", "")
+	cmd.Flags().String("workspace-id", "", "")
+	cmd.Flags().String("profile", "", "")
+	cmd.Flags().String("target-version", "", "")
+	cmd.Flags().String("output", "json", "")
+	cmd.Flags().Bool("wait", false, "")
+	_ = cmd.Flags().Set("server-url", serverURL)
+	_ = cmd.Flags().Set("workspace-id", "ws-1")
+	_ = cmd.Flags().Set("target-version", "9.9.9")
+	_ = cmd.Flags().Set("output", output)
+	_ = cmd.Flags().Set("wait", "true")
+	return cmd
+}
+
+// runtimeUpdateStub answers the initiate call, then the single status poll --wait makes.
+func runtimeUpdateStub(t *testing.T, terminal map[string]any) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/runtimes/rt-1/update":
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "upd-1", "status": "in_progress"})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/runtimes/rt-1/update/upd-1":
+			_ = json.NewEncoder(w).Encode(terminal)
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+}
+
+func isolateRuntimeUpdateTest(t *testing.T) {
+	t.Helper()
+	// Leave any daemon-task marker above this checkout, or the client demands a mat_ token.
+	t.Chdir(t.TempDir())
+	clearDaemonTaskEnv(t)
+	redirectTestHome(t, t.TempDir())
+	t.Setenv("MULTICA_TOKEN", "test-token")
+}
+
+func TestRuntimeUpdateWaitFailedReturnsError(t *testing.T) {
+	isolateRuntimeUpdateTest(t)
+	srv := runtimeUpdateStub(t, map[string]any{"id": "upd-1", "status": "failed", "error": "mismatch"})
+	defer srv.Close()
+
+	out, err := captureRuntimeStdout(t, func() error {
+		return runRuntimeUpdate(newRuntimeUpdateTestCmd(srv.URL, "table"), []string{"rt-1"})
+	})
+	if err == nil {
+		t.Fatal("failed update returned nil")
+	}
+	if !strings.Contains(err.Error(), "failed") || !strings.Contains(err.Error(), "mismatch") {
+		t.Fatalf("error = %q, want the status and the server error", err.Error())
+	}
+	if strings.TrimSpace(out) != "" {
+		t.Fatalf("stdout = %q, want no extra copy of the failure", out)
+	}
+}
+
+func TestRuntimeUpdateWaitTimeoutReturnsError(t *testing.T) {
+	isolateRuntimeUpdateTest(t)
+	srv := runtimeUpdateStub(t, map[string]any{"id": "upd-1", "status": "timeout", "error": "gave up"})
+	defer srv.Close()
+
+	err := runRuntimeUpdate(newRuntimeUpdateTestCmd(srv.URL, "table"), []string{"rt-1"})
+	if err == nil {
+		t.Fatal("timed-out update returned nil")
+	}
+	if !strings.Contains(err.Error(), "timeout") || !strings.Contains(err.Error(), "gave up") {
+		t.Fatalf("error = %q, want the status and the server error", err.Error())
+	}
+}
+
+func TestRuntimeUpdateWaitCompletedReturnsNil(t *testing.T) {
+	isolateRuntimeUpdateTest(t)
+	srv := runtimeUpdateStub(t, map[string]any{"id": "upd-1", "status": "completed", "output": "now 9.9.9"})
+	defer srv.Close()
+
+	out, err := captureRuntimeStdout(t, func() error {
+		return runRuntimeUpdate(newRuntimeUpdateTestCmd(srv.URL, "table"), []string{"rt-1"})
+	})
+	if err != nil {
+		t.Fatalf("completed update: %v", err)
+	}
+	if !strings.Contains(out, "Update completed: now 9.9.9") {
+		t.Fatalf("stdout = %q, want the existing completion line", out)
+	}
+}
+
+func TestRuntimeUpdateWaitFailedJSONStillPrintsBody(t *testing.T) {
+	isolateRuntimeUpdateTest(t)
+	srv := runtimeUpdateStub(t, map[string]any{"id": "upd-1", "status": "failed", "error": "mismatch"})
+	defer srv.Close()
+
+	out, err := captureRuntimeStdout(t, func() error {
+		return runRuntimeUpdate(newRuntimeUpdateTestCmd(srv.URL, "json"), []string{"rt-1"})
+	})
+	if err == nil {
+		t.Fatal("failed JSON update returned nil")
+	}
+	if !strings.Contains(err.Error(), "failed") || !strings.Contains(err.Error(), "mismatch") {
+		t.Fatalf("error = %q, want the status and the server error", err.Error())
+	}
+	var got map[string]any
+	if decodeErr := json.Unmarshal([]byte(out), &got); decodeErr != nil {
+		t.Fatalf("stdout is not JSON %q: %v", out, decodeErr)
+	}
+	if got["status"] != "failed" || got["error"] != "mismatch" {
+		t.Fatalf("stdout = %#v, want the failed update object", got)
+	}
+}

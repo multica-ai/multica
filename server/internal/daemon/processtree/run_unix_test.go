@@ -26,7 +26,10 @@ func TestCombinedOutputKillsDescendantsHoldingOutput(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 	started := time.Now()
-	_, err := CombinedOutput(ctx, exec.Command(script, marker), 250*time.Millisecond)
+	// Exec'ing the freshly written script directly fails with ETXTBSY when a
+	// parallel test forks while the write descriptor is open (golang/go#22315);
+	// sh only reads it.
+	_, err := CombinedOutput(ctx, exec.Command("/bin/sh", script, marker), 250*time.Millisecond)
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("CombinedOutput error = %v, want deadline exceeded", err)
 	}
