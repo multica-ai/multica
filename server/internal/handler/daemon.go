@@ -2137,6 +2137,16 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// An explicit force list also opts in for clients that predate the header.
+	wantAck := len(req.ForceRecheckRuntimeIDs) > 0 || requestHasClientCapability(r, protocol.DaemonCapabilityForceRecheckV1)
+	respondEmpty := func() {
+		response := map[string]any{"tasks": []AgentTaskResponse{}}
+		if wantAck {
+			response["force_rechecked_runtime_ids"] = []string{}
+		}
+		writeMeasuredJSON(w, http.StatusOK, response)
+	}
+
 	// max_tasks semantics (MUL-4257 review): a negative count is malformed; zero
 	// is a valid "no free slots" poll that must claim nothing — never coerce to
 	// 1, which would dispatch a task the daemon cannot run and strand it until
@@ -2147,7 +2157,7 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.MaxTasks == 0 {
-		writeMeasuredJSON(w, http.StatusOK, map[string]any{"tasks": []AgentTaskResponse{}, "force_rechecked_runtime_ids": []string{}})
+		respondEmpty()
 		return
 	}
 	maxTasks := req.MaxTasks
@@ -2169,7 +2179,7 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 		idByKey[util.UUIDToString(ruid)] = ruid
 	}
 	if len(idByKey) == 0 {
-		writeMeasuredJSON(w, http.StatusOK, map[string]any{"tasks": []AgentTaskResponse{}, "force_rechecked_runtime_ids": []string{}})
+		respondEmpty()
 		return
 	}
 	ids := make([]pgtype.UUID, 0, len(idByKey))
@@ -2229,7 +2239,7 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 		authorized = append(authorized, rt.ID)
 	}
 	if len(authorized) == 0 {
-		writeMeasuredJSON(w, http.StatusOK, map[string]any{"tasks": []AgentTaskResponse{}, "force_rechecked_runtime_ids": []string{}})
+		respondEmpty()
 		return
 	}
 
@@ -2348,16 +2358,14 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 			"total_ms", time.Since(start).Milliseconds())
 	}
 	response := map[string]any{"tasks": out}
-	// force_rechecked_runtime_ids acknowledges the forced runtimes whose scan came
-	// back with zero candidates (#7452): those are confirmed idle and cache-repaired,
-	// so the daemon drops the wakeup hint for them and keeps every other forced
-	// runtime forced. The field is ALWAYS emitted, even when empty, so a daemon can
-	// tell "acknowledged nothing" from an older server that omits it entirely.
-	// Additive/optional: an older daemon ignores it.
-	if forceRechecked == nil {
-		forceRechecked = []string{}
+	if wantAck {
+		// An explicit empty list keeps outstanding hints pending. Absence
+		// tells the client to fall back to legacy polling.
+		if forceRechecked == nil {
+			forceRechecked = []string{}
+		}
+		response["force_rechecked_runtime_ids"] = forceRechecked
 	}
-	response["force_rechecked_runtime_ids"] = forceRechecked
 	// Only opted-in daemons understand this additive response metadata. Query
 	// after the claim so a future fire_at can shorten the long healthy-WS safety
 	// poll; a task that crossed fire_at during this request yields a bounded
