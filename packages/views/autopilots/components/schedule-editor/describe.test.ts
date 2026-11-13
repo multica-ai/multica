@@ -6,8 +6,7 @@ import { createI18n } from "@multica/core/i18n/react";
 import enAutopilots from "../../../locales/en/autopilots.json";
 import zhAutopilots from "../../../locales/zh-Hans/autopilots.json";
 import { describeSchedule } from "./describe";
-import { parseCron } from "./cron-mapping";
-import { getDefaultScheduleConfig } from "./model";
+import { parseCron, getDefaultScheduleConfig } from "@multica/core/autopilots/schedule";
 
 // The description is the editor's plain-language readback of the structured
 // model. Advanced-only expressions have no structured model to describe, so

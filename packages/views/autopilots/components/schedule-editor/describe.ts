@@ -1,7 +1,6 @@
 import { useCallback } from "react";
 import { useT } from "../../../i18n";
-import type { ScheduleConfig } from "./model";
-import { consecutiveRuns, DAY_KEYS, pad2 } from "./model";
+import { type ScheduleConfig, consecutiveRuns, DAY_KEYS, pad2 } from "@multica/core/autopilots/schedule";
 
 type AutopilotsT = ReturnType<typeof useT<"autopilots">>["t"];
 

@@ -7,8 +7,7 @@ import { ApiError } from "@multica/core/api";
 import type { SupportedLocale } from "@multica/core/i18n";
 import { renderWithI18n } from "../../../test/i18n";
 import { ScheduleEditor } from "./schedule-editor";
-import type { ScheduleConfig } from "./model";
-import { cronFields, parseCron, toCron } from "./cron-mapping";
+import { type ScheduleConfig, cronFields, parseCron, toCron } from "@multica/core/autopilots/schedule";
 
 // The heaviest interaction cases drive several async userEvent steps through
 // Base UI dropdowns; fast locally, but a loaded CI runner can push a single one
