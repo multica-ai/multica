@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { CHAT_SCRIPT, ISSUE_SCRIPT, type Lang, type VoiceScript } from "./copy";
+import { CHAT_SCRIPT, type Lang, type VoiceScript } from "./copy";
 import { mockSession, type VoiceSession } from "./voice-session";
 
 /** Frozen sessions at the interesting points of one dictation. */
@@ -23,8 +23,6 @@ export function samples(lang: Lang, script: VoiceScript = CHAT_SCRIPT[lang]) {
     network: mockSession({ phase: "error", error: "network" }),
   } satisfies Record<string, VoiceSession>;
 }
-
-export const issueSamples = (lang: Lang) => samples(lang, ISSUE_SCRIPT[lang]);
 
 export function Gallery({ items, columns = 3 }: { items: { label: string; node: ReactNode }[]; columns?: number }) {
   return (

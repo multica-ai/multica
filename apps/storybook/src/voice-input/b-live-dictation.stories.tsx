@@ -7,7 +7,7 @@ import { Gallery, samples } from "./gallery";
 import { label } from "./labels";
 import { DemoStage } from "./stage";
 
-const meta = { title: "Voice input/B · Live dictation", id: "voice-input-b-live-dictation" } satisfies Meta;
+const meta = { title: "Voice input/Explored/B · Live dictation", id: "voice-input-b-live-dictation" } satisfies Meta;
 export default meta;
 
 export const TryIt: StoryObj = {

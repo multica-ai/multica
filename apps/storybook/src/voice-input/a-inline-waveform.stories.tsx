@@ -6,7 +6,7 @@ import { Gallery, samples } from "./gallery";
 import { label } from "./labels";
 import { DemoStage } from "./stage";
 
-const meta = { title: "Voice input/A · Inline waveform", id: "voice-input-a-inline-waveform" } satisfies Meta;
+const meta = { title: "Voice input/Explored/A · Inline waveform", id: "voice-input-a-inline-waveform" } satisfies Meta;
 export default meta;
 
 export const TryIt: StoryObj = {

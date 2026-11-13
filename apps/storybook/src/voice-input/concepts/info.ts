@@ -81,19 +81,4 @@ export const SEND_SLOT: ConceptInfo = {
   tradeoff: { en: "Sends without review; drag gestures are awkward with a mouse.", zh: "不经审阅直接发出；用鼠标做拖拽手势比较别扭。" },
 };
 
-export const VOICE_TO_ISSUE: ConceptInfo = {
-  letter: "F",
-  name: { en: "Voice to issue", zh: "说出一个 Issue" },
-  pitch: {
-    en: "Say the whole thing; Multica fills in the title, description and the properties it heard, and marks what came from your voice so you can check it.",
-    zh: "把事情一口气说完，Multica 自动填好标题、描述和听到的属性（优先级、负责人、项目），并标出哪些来自语音，方便你核对。",
-  },
-  how: {
-    en: ["Click the mic in the footer, or press ⌘⇧Space", "Done when finished", "Watch the fields fill in"],
-    zh: ["点底部的麦克风，或按 ⌘⇧Space", "说完点「完成」", "看字段依次填好"],
-  },
-  bestFor: { en: "Capturing an issue in one breath, especially on mobile.", zh: "一口气记下一个 Issue，尤其在手机上。" },
-  tradeoff: { en: "Needs an extraction model; wrong guesses must be easy to spot.", zh: "需要抽取模型；猜错的字段必须一眼能看出来。" },
-};
-
-export const ALL_CONCEPTS = [INLINE_WAVEFORM, LIVE_DICTATION, PUSH_TO_TALK, FOCUS_MODE, SEND_SLOT, VOICE_TO_ISSUE];
+export const ALL_CONCEPTS = [INLINE_WAVEFORM, LIVE_DICTATION, PUSH_TO_TALK, FOCUS_MODE, SEND_SLOT];

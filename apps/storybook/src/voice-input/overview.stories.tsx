@@ -6,13 +6,13 @@ import { InlineWaveform } from "./concepts/inline-waveform";
 import { LiveDictation } from "./concepts/live-dictation";
 import { PushToTalk } from "./concepts/push-to-talk";
 import { SendSlot } from "./concepts/send-slot";
-import { VoiceToIssue } from "./concepts/voice-to-issue";
 import { useStoryEnv } from "./env";
-import { issueSamples, samples } from "./gallery";
+import { samples } from "./gallery";
 import type { ConceptInfo } from "./stage";
 
 const meta = {
-  title: "Voice input/Overview",
+  title: "Voice input/Explored/All directions",
+  id: "voice-input-overview",
   parameters: { layout: "fullscreen" },
 } satisfies Meta;
 export default meta;
@@ -54,16 +54,15 @@ function Overview() {
     <PushToTalk key="c" frozen={s.listening} />,
     <FocusMode key="d" frozen={s.listening} initialOpen />,
     <SendSlot key="e" frozen={s.listening} />,
-    <VoiceToIssue key="f" frozen={issueSamples(lang).listening} />,
   ];
   return (
     <div className="min-h-screen bg-page-canvas p-8">
       <header className="mb-6 max-w-3xl">
-        <h1 className="text-display-sm font-semibold">{lang === "zh" ? "语音输入：六种方向" : "Voice input: six directions"}</h1>
+        <h1 className="text-display-sm font-semibold">{lang === "zh" ? "第一轮探索：五种方向" : "First round: five directions"}</h1>
         <p className="mt-2 text-body text-muted-foreground">
           {lang === "zh"
-            ? "每个方向都定格在「正在听」这一刻。左侧栏里每个方向都有可以直接玩的「Try it」和完整的「States」。"
-            : "Each direction is frozen mid-dictation. Every direction in the sidebar has a playable “Try it” and a full “States” sheet."}
+            ? "每个方向都定格在「正在听」这一刻。最终选了 A + C，见「Composer (A + C)」。这里保留探索过程，方便回看。"
+            : "Each direction is frozen mid-dictation. A + C were picked; see “Composer (A + C)”. The exploration stays here for reference."}
         </p>
       </header>
       <div className="grid grid-cols-3 gap-6">
@@ -77,4 +76,4 @@ function Overview() {
   );
 }
 
-export const AllDirections: StoryObj = { name: "All directions", render: () => <Overview /> };
+export const AllDirections: StoryObj = { name: "Overview", render: () => <Overview /> };

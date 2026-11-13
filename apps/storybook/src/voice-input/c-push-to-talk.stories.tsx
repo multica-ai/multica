@@ -6,7 +6,7 @@ import { Gallery, samples } from "./gallery";
 import { label } from "./labels";
 import { DemoStage } from "./stage";
 
-const meta = { title: "Voice input/C · Push-to-talk", id: "voice-input-c-push-to-talk" } satisfies Meta;
+const meta = { title: "Voice input/Explored/C · Push-to-talk", id: "voice-input-c-push-to-talk" } satisfies Meta;
 export default meta;
 
 export const TryIt: StoryObj = {
