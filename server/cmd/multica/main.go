@@ -87,6 +87,7 @@ func init() {
 	rootCmd.AddCommand(agentCmd)
 	rootCmd.AddCommand(autopilotCmd)
 	rootCmd.AddCommand(workspaceCmd)
+	rootCmd.AddCommand(serviceAccountCmd)
 	rootCmd.AddCommand(repoCmd)
 	rootCmd.AddCommand(environmentCmd)
 	rootCmd.AddCommand(skillCmd)

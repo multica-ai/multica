@@ -75,6 +75,16 @@ curl https://api.multica.ai/api/issues \
 
 如果令牌可能洩露，到 **設定 → API Token** 中立即吊銷。吊銷後，這個 PAT 無法再次使用，已經儲存它的其他電腦和指令碼也會失去訪問權限。
 
+## 服務帳號
+
+服務帳號是一種機器身分：屬於且僅屬於一個工作區、由基礎設施而非真人操作的帳號——例如守護程序、CI 執行器或機器人。由工作區管理員建立並簽發其憑據，機器的存取權因此不必依賴任何個人帳號。
+
+```bash
+multica service-account create --name "ci-runner" <工作區>
+```
+
+原始憑據只會顯示一次。以 `multica service-account token mint` 簽發替換憑據，以 `multica service-account token revoke` 吊銷個別憑據。服務帳號無法以驗證碼登入，也無法自行簽發權杖；這些動作僅限工作區管理員。
+
 ## AI 代理執行的臨時令牌
 
 守護程序領取執行後，伺服器會為這次執行建立一個以 `mat_` 開頭的臨時令牌。它繫結當前使用者、工作區、AI 代理和執行，最長有效 24 小時，並在執行結束時清理。

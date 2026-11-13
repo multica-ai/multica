@@ -1876,6 +1876,7 @@ type User struct {
 	StarPromptShownCount  int32              `json:"star_prompt_shown_count"`
 	StarPromptLastShownAt pgtype.Timestamptz `json:"star_prompt_last_shown_at"`
 	StarPromptStarredAt   pgtype.Timestamptz `json:"star_prompt_starred_at"`
+	Kind                  string             `json:"kind"`
 }
 
 type UserComposioConnection struct {
