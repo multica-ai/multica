@@ -190,6 +190,7 @@
     "./drafts": "./drafts/index.ts",
     "./drafts/*": "./drafts/*.ts",
     "./shortcuts": "./shortcuts/index.ts",
+    "./voice": "./voice/index.ts",
     "./analytics": "./analytics/index.ts",
     "./diagnostics": "./diagnostics/index.ts",
     "./client-usage": "./client-usage/index.ts",

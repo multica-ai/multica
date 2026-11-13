@@ -1,4 +1,4 @@
-import type { ZodType } from "zod";
+import { z, type ZodType } from "zod";
 import { AgentRuntimeSchema, EMPTY_RUNTIME } from "../runtimes/schema";
 import type { IssueWakeup, IssueWakeupInput, IssueWakeupSummaryRow, PausedWakeup, SystemWakeup, WakeupRun, WorkspaceSystemWakeup } from "../types/issue-wakeup";
 import type { WorkspaceWakeupPage, WorkspaceWakeupFilters } from "../types/issue-wakeup";
@@ -724,6 +724,20 @@ export function clientErrorMessage(err: unknown): string | undefined {
   }
   return undefined;
 }
+
+// Thrown by transcribeVoice. `status` lets the composer tell a rate limit or
+// a too-long clip apart from a transcription that simply failed.
+export class VoiceTranscriptionError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "VoiceTranscriptionError";
+    this.status = status;
+  }
+}
+
+const VoiceTranscriptionSchema = z.object({ text: z.string().catch("") });
 
 // Thrown by getAttachmentTextContent when the server refuses to inline a
 // file because it exceeds the server-configured preview limit. UI maps to a "too large, please
@@ -3992,6 +4006,46 @@ export class ApiClient {
   }
 
   // File Upload & Attachments
+  /**
+   * Turns one recorded clip into text. Like uploadFile it bypasses
+   * `this.fetch` so the browser sets the multipart boundary.
+   */
+  async transcribeVoice(
+    audio: Blob,
+    opts: { language?: string; prompt?: string; signal?: AbortSignal } = {},
+  ): Promise<string> {
+    const formData = new FormData();
+    formData.append("file", audio, "voice");
+    if (opts.language) formData.append("language", opts.language);
+    if (opts.prompt) formData.append("prompt", opts.prompt);
+
+    const rid = createRequestId();
+    const start = Date.now();
+    this.logger.info("→ POST /api/voice/transcriptions", { rid, size: audio.size });
+
+    const credentialUsed = this.getToken();
+    const res = await fetch(`${this.baseUrl}/api/voice/transcriptions`, {
+      method: "POST",
+      headers: this.authHeaders(),
+      body: formData,
+      credentials: "include",
+      signal: opts.signal,
+    });
+
+    if (!res.ok) {
+      if (res.status === 401) this.handleUnauthorized(credentialUsed);
+      const message = await this.parseErrorMessage(res, `Transcription failed: ${res.status}`);
+      this.logger.error(`← ${res.status} /api/voice/transcriptions`, { rid, duration: `${Date.now() - start}ms`, error: message });
+      throw new VoiceTranscriptionError(message, res.status);
+    }
+
+    this.logger.info(`← ${res.status} /api/voice/transcriptions`, { rid, duration: `${Date.now() - start}ms` });
+    const raw = (await res.json()) as unknown;
+    return parseWithFallback(raw, VoiceTranscriptionSchema, { text: "" }, {
+      endpoint: "POST /api/voice/transcriptions",
+    }).text;
+  }
+
   async uploadFile(
     file: File,
     opts?: { issueId?: string; commentId?: string; chatSessionId?: string },

@@ -341,6 +341,31 @@ describe("keyboard shortcut definitions", () => {
     }
   });
 
+  it("lets voice input use Option chords that do not type a character", () => {
+    const allowed = (key: string, modifiers: Parameters<typeof createShortcutChord>[1]) =>
+      isShortcutAllowedForAction("voiceInput", createShortcutChord(key, modifiers), "macos", "web");
+    expect(allowed("Space", { alt: true })).toBe(true);
+    expect(allowed("F8", { alt: true })).toBe(true);
+    expect(allowed("G", { primary: true, shift: true })).toBe(true);
+    // Option+letter types a character on macOS.
+    expect(allowed("V", { alt: true })).toBe(false);
+    expect(allowed("Space", {})).toBe(false);
+    expect(allowed("Space", { shift: true })).toBe(false);
+    // Spotlight.
+    expect(allowed("Space", { primary: true })).toBe(false);
+    expect(SHORTCUT_ACTION_BY_ID.voiceInput.defaultShortcut).toEqual(
+      createShortcutChord("Space", { alt: true }),
+    );
+    // macOS reports Option+Space as a non-breaking space.
+    expect(
+      shortcutMatchesEvent(
+        SHORTCUT_ACTION_BY_ID.voiceInput.defaultShortcut,
+        keyEvent("\u00a0", { altKey: true }),
+        "macos",
+      ),
+    ).toBe(true);
+  });
+
   it("prevents unsafe plain keys from hijacking editors and global navigation", () => {
     expect(
       isShortcutAllowedForAction("openSearch", createShortcutChord("J"), "macos"),

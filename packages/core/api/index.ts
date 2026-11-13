@@ -5,6 +5,7 @@ export {
   dispatchReasonCode,
   errorCode,
   PreviewTooLargeError,
+  VoiceTranscriptionError,
   PreviewUnsupportedError,
 } from "./client";
 export type {

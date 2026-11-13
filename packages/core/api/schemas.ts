@@ -1072,6 +1072,10 @@ export interface AppConfigResponse {
    * /api/theme-store. Off when the operator turned it off, and absent on older
    * servers, so the app shows no Browse entry and makes no store requests. */
   theme_store_enabled?: boolean;
+  /** Whether POST /api/voice/transcriptions has a model to send audio to.
+   * Absent on older servers and on deployments without one, so the composer
+   * microphone stays hidden. */
+  voice_input_available?: boolean;
   server_version?: string;
 }
 
@@ -1361,6 +1365,7 @@ export const AppConfigSchema = z.object({
   issue_create_properties_supported: BooleanWithDefaultSchema(false),
   comment_delete_keep_replies_supported: BooleanWithDefaultSchema(false),
   theme_store_enabled: BooleanWithDefaultSchema(false),
+  voice_input_available: BooleanWithDefaultSchema(false),
   server_version: OptionalStringSchema,
 }).loose();
 
@@ -1385,6 +1390,7 @@ export const EMPTY_APP_CONFIG: AppConfigResponse = {
   // Fail closed: old servers delete a comment's replies with it.
   comment_delete_keep_replies_supported: false,
   theme_store_enabled: false,
+  voice_input_available: false,
   feature_flags: {},
 };
 
