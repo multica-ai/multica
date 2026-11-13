@@ -6,7 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { paths } from "@multica/core/paths";
 import { workspaceListOptions } from "@multica/core/workspace/queries";
-import { InvitePage } from "@multica/views/invite";
+import { InvitationsPage } from "@multica/views/invitations";
 
 export default function InviteAcceptPage() {
   const router = useRouter();
@@ -32,5 +32,11 @@ export default function InviteAcceptPage() {
   const onBack =
     wsList.length > 0 ? () => router.push(paths.root()) : undefined;
 
-  return <InvitePage invitationId={params.id} onBack={onBack} />;
+  // The root layout sets `body { overflow: hidden }` (app-shell convention),
+  // so the page owns its scroll; otherwise a long invitation list is cut off.
+  return (
+    <div className="h-full overflow-y-auto bg-background">
+      <InvitationsPage invitationId={params.id} onBack={onBack} />
+    </div>
+  );
 }

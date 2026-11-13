@@ -5,11 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -19,6 +21,96 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 )
+
+func TestHealthHandlerReportsEmptyCLICommitWithoutFallback(t *testing.T) {
+	d := &Daemon{
+		cfg:        Config{CLIVersion: "v9.9.9", DaemonID: "daemon-test", ServerBaseURL: "https://api.example.test"},
+		workspaces: map[string]*workspaceState{},
+		logger:     slog.Default(),
+	}
+	rec := httptest.NewRecorder()
+	d.healthHandler(time.Now()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+	var raw map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode health response: %v", err)
+	}
+	if got, present := raw["cli_commit"]; !present || got != "" {
+		t.Fatalf("cli_commit: got %v, present %v; want an explicit empty string without version fallback", got, present)
+	}
+}
+
+func TestHealthHandlerReportsCLICommitAndSameIdentitySnapshot(t *testing.T) {
+	for _, commit := range []string{strings.Repeat("a", 40), "", "unknown", "2ae2dbb", "malformed"} {
+		t.Run("commit="+commit, func(t *testing.T) {
+			d := New(Config{
+				WorkspacesRoot: t.TempDir(), CLICommit: commit, CLIVersion: "v9.9.9",
+				Profile: "profile-test", DaemonID: "daemon-test", DeviceName: "device-test",
+				ServerBaseURL: "https://api.example.test",
+			}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			d.workspaces["workspace-test"] = &workspaceState{runtimeIDs: []string{"runtime-test"}}
+			d.ready.Store(true)
+			d.activeTasks.Store(2)
+			d.runningTasks.Store(1)
+			d.resourceWaitTasks.Store(1)
+			rec := httptest.NewRecorder()
+			d.healthHandler(time.Now()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("health status: got %d, want 200", rec.Code)
+			}
+			var raw map[string]any
+			if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+				t.Fatalf("decode raw health response: %v", err)
+			}
+			for key, want := range map[string]any{
+				"cli_commit": commit, "cli_version": "v9.9.9", "profile": "profile-test",
+				"daemon_id": "daemon-test", "server_url": "https://api.example.test",
+				"device_name": "device-test", "status": "running", "os": runtime.GOOS,
+				"active_task_count": float64(2), "running_task_count": float64(1),
+				"resource_wait_task_count": float64(1),
+			} {
+				if got, present := raw[key]; !present || got != want {
+					t.Errorf("%s: got %v, present %v; want %v", key, got, present, want)
+				}
+			}
+			var typed HealthResponse
+			if err := json.Unmarshal(rec.Body.Bytes(), &typed); err != nil {
+				t.Fatalf("decode typed health response: %v", err)
+			}
+			if typed.CLICommit != commit || len(typed.Workspaces) != 1 ||
+				typed.Workspaces[0].ID != "workspace-test" || len(typed.Workspaces[0].Runtimes) != 1 ||
+				typed.Workspaces[0].Runtimes[0] != "runtime-test" {
+				t.Fatalf("commit or workspace/runtime projection changed: %+v", typed)
+			}
+		})
+	}
+}
+
+func TestHealthHandlerCLICommitIsCopiedAtDaemonConstruction(t *testing.T) {
+	cfg := Config{WorkspacesRoot: t.TempDir(), CLICommit: strings.Repeat("a", 40),
+		CLIVersion: "v9.9.9", Profile: "profile-test", DaemonID: "daemon-test",
+		ServerBaseURL: "https://api.example.test"}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	d := New(cfg, logger)
+	read := func(d *Daemon) HealthResponse {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		d.healthHandler(time.Now()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+		var resp HealthResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode health response: %v", err)
+		}
+		return resp
+	}
+	// Changing the input for a later instance cannot change the running instance's build identity.
+	cfg.CLICommit = strings.Repeat("b", 40)
+	cfg.CLIVersion = "v10.0.0"
+	if got := read(d); got.CLICommit != strings.Repeat("a", 40) || got.CLIVersion != "v9.9.9" {
+		t.Fatalf("original daemon identity changed: %+v", got)
+	}
+	if got := read(New(cfg, logger)); got.CLICommit != strings.Repeat("b", 40) || got.CLIVersion != "v10.0.0" {
+		t.Fatalf("new daemon did not use new build identity: %+v", got)
+	}
+}
 
 func TestHealthHandlerReportsCLIVersionAndTaskCounts(t *testing.T) {
 	t.Parallel()
@@ -574,6 +666,199 @@ func TestRepoCheckoutRejectsUnresolvableWorkdirWithTheReason(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "resolve requested workdir") {
 		t.Fatalf("rejection body should name the resolution failure: %s", rec.Body.String())
+	}
+}
+
+// repoCheckoutHarness drives the /repo/checkout handler against a real repo
+// cache holding every repository in urls, for one task rooted at root.
+type repoCheckoutHarness struct {
+	d        *Daemon
+	root     string
+	isolated bool
+}
+
+func newRepoCheckoutHarness(t *testing.T, isolated bool, urls ...string) *repoCheckoutHarness {
+	t.Helper()
+	const workspaceID = "ws-1"
+	repos := make([]RepoData, 0, len(urls))
+	infos := make([]repocache.RepoInfo, 0, len(urls))
+	for _, url := range urls {
+		repos = append(repos, RepoData{URL: url})
+		infos = append(infos, repocache.RepoInfo{URL: url})
+	}
+	d := newRepoReadyTestDaemon(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/daemon/workspaces/"+workspaceID+"/repos" {
+			http.NotFound(w, r)
+			return
+		}
+		json.NewEncoder(w).Encode(WorkspaceReposResponse{WorkspaceID: workspaceID, Repos: repos, ReposVersion: "v1"})
+	})
+	if err := d.repoCache.Sync(workspaceID, infos); err != nil {
+		t.Fatalf("seed repo cache: %v", err)
+	}
+	d.workspaces[workspaceID] = newWorkspaceState(workspaceID, nil, "v1", repos, nil)
+	root := t.TempDir()
+	d.registerActiveRepoCheckoutTask("mat_repo_checkout_test", activeRepoCheckoutTask{
+		WorkspaceID: workspaceID,
+		TaskID:      "task-1",
+		AgentName:   "Test Agent",
+		WorkDir:     root,
+	})
+	return &repoCheckoutHarness{d: d, root: root, isolated: isolated}
+}
+
+func (h *repoCheckoutHarness) checkout(t *testing.T, url, from string, fresh bool) (int, repocache.WorktreeResult, string) {
+	t.Helper()
+	req := repoCheckoutRequest{URL: url, WorkspaceID: "ws-1", WorkDir: from, TaskID: "task-1", Fresh: fresh}
+	if h.isolated {
+		req.CheckoutMode = repoCheckoutModeIsolated
+	}
+	body, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("encode request: %v", err)
+	}
+	rec := httptest.NewRecorder()
+	h.d.repoCheckoutHandler().ServeHTTP(rec, authorizedRepoCheckoutRequest(bytes.NewReader(body)))
+	var result repocache.WorktreeResult
+	if rec.Code == http.StatusOK {
+		if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+			t.Fatalf("decode checkout result: %v", err)
+		}
+	}
+	return rec.Code, result, rec.Body.String()
+}
+
+func (h *repoCheckoutHarness) mustCheckout(t *testing.T, url, from string) repocache.WorktreeResult {
+	t.Helper()
+	status, result, body := h.checkout(t, url, from, false)
+	if status != http.StatusOK {
+		t.Fatalf("checkout of %s from %s: expected 200, got %d: %s", url, from, status, body)
+	}
+	return result
+}
+
+func runDaemonTestGit(t *testing.T, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
+		"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %s: %v", args, out, err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// createNamedDaemonTestRepo creates a repository whose directory, and so whose
+// checkout directory, is named "repo", holding identity.txt = label.
+func createNamedDaemonTestRepo(t *testing.T, label string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "repo")
+	runDaemonTestGit(t, "init", "-b", "main", path)
+	if err := os.WriteFile(filepath.Join(path, "identity.txt"), []byte(label), 0o644); err != nil {
+		t.Fatalf("write identity: %v", err)
+	}
+	runDaemonTestGit(t, "-C", path, "add", "identity.txt")
+	runDaemonTestGit(t, "-C", path, "commit", "-m", label)
+	return path
+}
+
+var repoCheckoutModes = []struct {
+	name     string
+	isolated bool
+}{
+	{name: "linked", isolated: false},
+	{name: "isolated", isolated: true},
+}
+
+// Re-running checkout from inside the checkout it created, as an agent whose
+// shell stayed there does, reuses that checkout instead of nesting a new
+// worktree on a new branch inside it (MUL-9099).
+func TestRepoCheckoutFromInsideExistingCheckoutReusesIt(t *testing.T) {
+	t.Parallel()
+
+	for _, mode := range repoCheckoutModes {
+		t.Run(mode.name, func(t *testing.T) {
+			t.Parallel()
+
+			sourceRepo := createDaemonTestRepo(t)
+			h := newRepoCheckoutHarness(t, mode.isolated, sourceRepo)
+			first := h.mustCheckout(t, sourceRepo, h.root)
+			subdir := filepath.Join(first.Path, "server")
+			if err := os.Mkdir(subdir, 0o755); err != nil {
+				t.Fatalf("mkdir inside checkout: %v", err)
+			}
+
+			for _, from := range []string{first.Path, subdir} {
+				again := h.mustCheckout(t, sourceRepo, from)
+				if again.Path != first.Path || again.BranchName != first.BranchName {
+					t.Fatalf("checkout from %s = %s on %s, want the existing %s on %s", from, again.Path, again.BranchName, first.Path, first.BranchName)
+				}
+				if again.Kept != repocache.KeptTaskBranch {
+					t.Fatalf("checkout from %s: Kept = %q, want %q", from, again.Kept, repocache.KeptTaskBranch)
+				}
+			}
+			if _, err := os.Lstat(filepath.Join(first.Path, filepath.Base(first.Path))); !os.IsNotExist(err) {
+				t.Fatalf("a checkout was nested inside the existing one (lstat err = %v)", err)
+			}
+		})
+	}
+}
+
+// A different repository whose checkout directory has the same name — an
+// upstream and its fork — requested from inside the first one's checkout is
+// placed inside it as before, and never retargets, resets, or cleans it.
+// Re-running either one later, from anywhere inside, reuses its own checkout.
+func TestRepoCheckoutOfSameNamedRepoInsideCheckoutLeavesItAlone(t *testing.T) {
+	t.Parallel()
+
+	for _, mode := range repoCheckoutModes {
+		for _, fresh := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/fresh=%t", mode.name, fresh), func(t *testing.T) {
+				t.Parallel()
+
+				a, b := createNamedDaemonTestRepo(t, "repo-A"), createNamedDaemonTestRepo(t, "repo-B")
+				h := newRepoCheckoutHarness(t, mode.isolated, a, b)
+				first := h.mustCheckout(t, a, h.root)
+				originBefore := runDaemonTestGit(t, "-C", first.Path, "remote", "get-url", "origin")
+				headBefore := runDaemonTestGit(t, "-C", first.Path, "rev-parse", "HEAD")
+				note := filepath.Join(first.Path, "local-work.txt")
+				if err := os.WriteFile(note, []byte("keep repo A work"), 0o644); err != nil {
+					t.Fatalf("write local work: %v", err)
+				}
+
+				status, second, body := h.checkout(t, b, first.Path, fresh)
+				if status != http.StatusOK {
+					t.Fatalf("checkout of B from inside A: expected 200, got %d: %s", status, body)
+				}
+				if got := runDaemonTestGit(t, "-C", first.Path, "remote", "get-url", "origin"); got != originBefore {
+					t.Errorf("requesting B changed A's origin: %q -> %q", originBefore, got)
+				}
+				if got := runDaemonTestGit(t, "-C", first.Path, "rev-parse", "HEAD"); got != headBefore {
+					t.Errorf("requesting B moved A's HEAD: %s -> %s", headBefore, got)
+				}
+				if data, err := os.ReadFile(note); err != nil || string(data) != "keep repo A work" {
+					t.Errorf("requesting B discarded A's local work: %q %v", data, err)
+				}
+				if want := filepath.Join(first.Path, "repo"); second.Path != want {
+					t.Fatalf("B checkout path = %s, want it placed inside A at %s", second.Path, want)
+				}
+				if data, err := os.ReadFile(filepath.Join(second.Path, "identity.txt")); err != nil || string(data) != "repo-B" {
+					t.Fatalf("B checkout holds the wrong repository: %q %v", data, err)
+				}
+
+				// B's checkout sits inside A's; each re-run climbs only out of
+				// its own repository's checkout.
+				if again := h.mustCheckout(t, b, second.Path); again.Path != second.Path {
+					t.Errorf("re-running B from its checkout = %s, want %s", again.Path, second.Path)
+				}
+				if again := h.mustCheckout(t, a, second.Path); again.Path != first.Path {
+					t.Errorf("re-running A from inside B's checkout = %s, want %s", again.Path, first.Path)
+				}
+			})
+		}
 	}
 }
 

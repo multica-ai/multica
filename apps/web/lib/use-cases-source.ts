@@ -1,7 +1,7 @@
 import { loader } from "fumadocs-core/source";
 import { defineI18n } from "fumadocs-core/i18n";
 import type { SupportedLocale } from "@multica/core/i18n";
-import { useCases } from "@/.source";
+import { useCases } from "@/.source/server";
 import { mergeUseCasePagesWithEnglishFallback } from "./use-case-locale-fallback";
 
 // Use-case content uses dot-suffixed MDX files (`<slug>.en.mdx`,
@@ -17,7 +17,7 @@ export const i18n = defineI18n({
 export type UseCaseLang = (typeof i18n.languages)[number];
 
 export function getUseCaseLangForLocale(locale: SupportedLocale): UseCaseLang {
-  if (locale === "zh-Hans") return "zh";
+  if (locale === "zh-Hans" || locale === "zh-Hant") return "zh";
   if (locale === "ko") return "ko";
   if (locale === "ja") return "ja";
   return "en";

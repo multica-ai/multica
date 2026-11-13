@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CircleOff } from "lucide-react";
+import { CircleOff } from "@multica/ui/icons";
 import { api } from "@multica/core/api";
 import { derivePRMergeStatus, PR_MERGE_STATUS_NONE } from "@multica/core/github";
 import { useWorkspaceId } from "@multica/core/hooks";

@@ -302,6 +302,9 @@ func loadRuntimeMcpServerConfigs(provider string) (map[string]any, bool, error) 
 		}
 		key, format = "mcp.servers", "json"
 	default:
+		// pi is intentionally absent. The CLI reads ~/.pi/agent/mcp.json on its
+		// own, and a project .pi/mcp.json replaces entries with the same name.
+		// Copying the user file into the task file would start those servers twice.
 		return map[string]any{}, false, nil
 	}
 
@@ -312,8 +315,13 @@ func loadRuntimeMcpServerConfigs(provider string) (map[string]any, bool, error) 
 		if err != nil {
 			return nil, true, err
 		}
-		if configured, ok := nestedRuntimeMcpMap(cfg, key); ok {
+		if configured, ok := runtimeMcpServersForProvider(provider, key, cfg); ok {
 			for name, entry := range configured {
+				// OpenCode 2.x uses disabled, but the task adapters only read
+				// enabled. Keep disabled entries in inventory, not in task config.
+				if server, ok := entry.(map[string]any); provider == "opencode" && ok && server["disabled"] == true {
+					continue
+				}
 				servers[name] = normalizeRuntimeMcpEntry(provider, entry)
 			}
 		}
@@ -435,6 +443,10 @@ func listRuntimeLocalMcpServers(provider string) ([]runtimeLocalMcpServerSummary
 			path = filepath.Join(stateDir, "openclaw.json")
 		}
 		key, source, format = "mcp.servers", "User config", "json"
+	case "pi":
+		// Inventory only, same as omp. Pi already loads this file at startup,
+		// so loadRuntimeMcpServerConfigs must not merge it into the task.
+		path, key, source, format = filepath.Join(home, ".pi", "agent", "mcp.json"), "mcpServers", "User config", "json"
 	case "omp":
 		// Inventory scope: omp discovers servers from a multi-level precedence
 		// chain (.omp/mcp.json, .omp/.mcp.json, profile/user-level configs, and
@@ -457,7 +469,7 @@ func listRuntimeLocalMcpServers(provider string) ([]runtimeLocalMcpServerSummary
 		if err != nil {
 			return nil, true, err
 		}
-		if servers, ok := nestedRuntimeMcpMap(cfg, key); ok {
+		if servers, ok := runtimeMcpServersForProvider(provider, key, cfg); ok {
 			out = append(out, runtimeMcpSummaries(servers, source)...)
 		}
 	} else if !os.IsNotExist(err) {
@@ -536,6 +548,40 @@ func listClaudePluginMcpServers(home string) []runtimeLocalMcpServerSummary {
 		}
 	}
 	return out
+}
+
+// runtimeMcpServersForProvider resolves the user-scope MCP server map for a
+// provider. OpenCode is the only provider that stores the same field under two
+// shapes depending on which version wrote the config file, so it gets a
+// dedicated resolver; every other provider uses the dotted-key lookup.
+func runtimeMcpServersForProvider(provider, key string, cfg map[string]any) (map[string]any, bool) {
+	if provider == "opencode" {
+		return opencodeNativeMcpServers(cfg, key)
+	}
+	return nestedRuntimeMcpMap(cfg, key)
+}
+
+// opencodeNativeMcpServers returns the OpenCode user MCP server map. OpenCode
+// 1.x stores servers directly under "mcp" while 2.x nests them under
+// "mcp.servers"; the shape is decided by whichever version the user runs, so it
+// is detected from the content rather than a fixed key.
+func opencodeNativeMcpServers(cfg map[string]any, key string) (map[string]any, bool) {
+	mcp, ok := cfg[key].(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	if servers, ok := mcp["servers"].(map[string]any); ok {
+		// A flat server named "servers" has entry fields; a nested server
+		// with one of these names has an object as its value instead.
+		for _, field := range []string{"type", "url", "command", "enabled", "disabled"} {
+			switch servers[field].(type) {
+			case string, bool, []any:
+				return mcp, true
+			}
+		}
+		return servers, true
+	}
+	return mcp, true
 }
 
 func nestedRuntimeMcpMap(cfg map[string]any, path string) (map[string]any, bool) {

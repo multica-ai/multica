@@ -26,6 +26,9 @@ export function useCreateIssueView(wsId: string) {
               ? [...old, created]
               : old,
         );
+        queryClient.setQueryData<IssueView[]>(issueViewKeys.everywhere(wsId), (old) =>
+          old && !old.some((v) => v.id === created.id) ? [...old, created] : old,
+        );
       }
       void queryClient.invalidateQueries({ queryKey: issueViewKeys.all(wsId) });
     },

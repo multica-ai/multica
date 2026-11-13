@@ -29,7 +29,7 @@ describe("parseInlineLinks", () => {
 
 describe("trust pages copy", () => {
   const dicts = (["en", "zh-Hans", "ja", "ko"] as const).map((locale) =>
-    createLandingDict(locale, true),
+    createLandingDict(locale),
   );
 
   it("links the privacy consent to the privacy policy in every locale", () => {

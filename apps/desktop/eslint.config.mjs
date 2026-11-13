@@ -1,11 +1,13 @@
 import globals from "globals";
 import reactConfig from "@multica/eslint-config/react";
+import { ICON_LIBRARY_IMPORT_PATTERNS, REDUCED_MOTION_IMPORT } from "@multica/eslint-config/base";
+import { NO_ROUND_CONTROLS } from "@multica/eslint-config/control-shape";
 
 export default [
   ...reactConfig,
   { ignores: ["out/", "dist/"] },
   {
-    files: ["scripts/**/*.{mjs,js}"],
+    files: ["scripts/**/*.{mjs,js,cjs}"],
     languageOptions: {
       globals: { ...globals.node },
     },
@@ -62,7 +64,9 @@ export default [
               message:
                 "Direct navigation from application code breaks the Coordinator protocol (MUL-4741). Use the navigation adapter from src/platform instead.",
             },
+            REDUCED_MOTION_IMPORT,
           ],
+          patterns: ICON_LIBRARY_IMPORT_PATTERNS,
         },
       ],
       "no-restricted-syntax": [
@@ -73,6 +77,7 @@ export default [
           message:
             "Direct router.navigate from application code breaks the Coordinator protocol (MUL-4741). Route it through the navigation adapter in src/platform.",
         },
+        NO_ROUND_CONTROLS,
       ],
     },
   },

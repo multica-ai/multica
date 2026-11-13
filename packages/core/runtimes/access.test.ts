@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 import type { AgentRuntime } from "../types";
 import { isRuntimeUsableForUser } from "./access";
@@ -38,6 +40,14 @@ describe("isRuntimeUsableForUser", () => {
 
   it("refuses another member's private runtime", () => {
     expect(isRuntimeUsableForUser(makeRuntime(), OTHER)).toBe(false);
+  });
+
+  it("allows only selected members on a shared private runtime", () => {
+    const runtime = makeRuntime({ shared_with: [OTHER] });
+    expect(isRuntimeUsableForUser(runtime, OTHER)).toBe(true);
+    expect(isRuntimeUsableForUser(runtime, OWNER)).toBe(true);
+    expect(isRuntimeUsableForUser(runtime, "not-selected")).toBe(false);
+    expect(isRuntimeUsableForUser({ ...runtime, owner_id: null }, OTHER)).toBe(false);
   });
 
   it("lets anyone use a public runtime", () => {

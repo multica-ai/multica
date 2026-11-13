@@ -25,8 +25,16 @@ const testUserID = "test-user"
 // mockMembershipChecker always returns true.
 type mockMembershipChecker struct{}
 
-func (m *mockMembershipChecker) IsMember(_ context.Context, _, _ string) bool {
-	return true
+func (m *mockMembershipChecker) IsMember(_ context.Context, _, _ string) (bool, error) {
+	return true, nil
+}
+
+func (*mockMembershipChecker) Members(_ context.Context, identities []MembershipIdentity) (map[MembershipIdentity]bool, error) {
+	members := make(map[MembershipIdentity]bool, len(identities))
+	for _, identity := range identities {
+		members[identity] = true
+	}
+	return members, nil
 }
 
 func makeTestToken(t *testing.T) string {
@@ -89,6 +97,7 @@ func newTestHub(t *testing.T) (*Hub, *httptest.Server) {
 	go hub.Run()
 
 	mc := &mockMembershipChecker{}
+	hub.SetMembershipChecker(mc)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		HandleWebSocket(hub, mc, nil, nil, w, r)
@@ -171,6 +180,39 @@ func TestClientHandleSubscribeReportsLookupFailure(t *testing.T) {
 
 	if len(client.subscriptions) != 0 {
 		t.Fatalf("lookup failure must not subscribe client, got %d subscriptions", len(client.subscriptions))
+	}
+}
+
+// A workspace-member room carries one member's private content in one
+// workspace. A connection joins only its own room, at connect time, and no
+// subscribe frame can add another one.
+func TestWorkspaceMemberScopeReachesOnlyThatMembersWorkspaceConnection(t *testing.T) {
+	hub := NewHub()
+	newClient := func(userID, workspaceID string) *Client {
+		c := &Client{hub: hub, send: make(chan []byte, 4), userID: userID, workspaceID: workspaceID}
+		hub.registerClient(c)
+		return c
+	}
+	owner := newClient("owner", "ws-x")
+	ownerElsewhere := newClient("owner", "ws-y")
+	peer := newClient("peer", "ws-x")
+
+	peer.handleSubscribe(ScopeWorkspaceMember, WorkspaceMemberScopeID("ws-x", "owner"))
+	select {
+	case raw := <-peer.send:
+		if !strings.Contains(string(raw), "subscribe_error") {
+			t.Fatalf("peer subscribe reply = %s, want subscribe_error", raw)
+		}
+	default:
+		t.Fatal("peer subscribe to another member's room was not refused")
+	}
+
+	hub.BroadcastToScope(ScopeWorkspaceMember, WorkspaceMemberScopeID("ws-x", "owner"), []byte(`{"type":"chat:done"}`))
+	if len(owner.send) != 1 {
+		t.Fatalf("owner's ws-x connection got %d frames, want 1", len(owner.send))
+	}
+	if len(ownerElsewhere.send) != 0 || len(peer.send) != 0 {
+		t.Fatalf("frame reached ws-y owner (%d) or peer (%d)", len(ownerElsewhere.send), len(peer.send))
 	}
 }
 

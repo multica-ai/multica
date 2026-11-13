@@ -55,16 +55,22 @@ type IssueTriggerInput struct {
 	IsCreate        bool
 	AssigneeChanged bool
 	StatusChanged   bool
+	// EnteredHandoffStep marks a write that moved the issue into a project
+	// workflow column with a handler (MUL-7420). The step is new work even
+	// when its handler is the agent whose run made the move, so the
+	// self-assignment suppression does not apply.
+	EnteredHandoffStep bool
 }
 
 // IssueRunTrigger is the resolved decision shared by preview and the write
 // paths. AgentID is the agent that will actually run — the assignee for an
 // agent issue, the squad leader for a squad issue.
 type IssueRunTrigger struct {
-	IssueID      pgtype.UUID
-	AgentID      pgtype.UUID
-	AssigneeType string
-	Source       RunEnqueueSource
+	IssueID         pgtype.UUID
+	AgentID         pgtype.UUID
+	AssigneeType    string
+	Source          RunEnqueueSource
+	WorkflowHandoff bool
 }
 
 func allowAllAgents(db.Agent) bool { return true }
@@ -151,11 +157,13 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 		if !canAccess(agent) {
 			return IssueRunTrigger{}, false
 		}
-		if source == RunSourceAssign && !in.IsCreate && probe.SuppressActiveSelfAssignment != nil &&
+		if source == RunSourceAssign && !in.IsCreate && !in.EnteredHandoffStep && probe.SuppressActiveSelfAssignment != nil &&
 			probe.SuppressActiveSelfAssignment(issue.AssigneeID) {
 			return IssueRunTrigger{}, false
 		}
-		if source == RunSourceStatus && s.hasPendingRun(ctx, issue.ID, issue.AssigneeID) {
+		// A step entered under the agent's own run queues behind it; one
+		// already queued covers the new step too.
+		if (source == RunSourceStatus || in.EnteredHandoffStep) && s.hasPendingRun(ctx, issue.ID, issue.AssigneeID) {
 			return IssueRunTrigger{}, false
 		}
 		return IssueRunTrigger{
@@ -194,10 +202,11 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 			return IssueRunTrigger{}, false
 		}
 		return IssueRunTrigger{
-			IssueID:      issue.ID,
-			AgentID:      squad.LeaderID,
-			AssigneeType: "squad",
-			Source:       source,
+			IssueID:         issue.ID,
+			AgentID:         squad.LeaderID,
+			AssigneeType:    "squad",
+			Source:          source,
+			WorkflowHandoff: in.EnteredHandoffStep,
 		}, true
 	}
 	return IssueRunTrigger{}, false

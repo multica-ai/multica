@@ -1,0 +1,170 @@
+---
+title: 自動化
+description: 按時間或 Webhook 自動把重複工作交給 AI 代理。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { AutopilotDemo } from "@/components/demos/autopilot-demo";
+
+每天彙總進展、定期檢查依賴、外部系統發來事件時啟動 AI 代理，這類反覆發生的工作交給自動化。
+
+每條自動化儲存一份 Runbook、一個執行方和一個或多個觸發器。觸發後，Multica 建立任務或直接執行 AI 代理，每一次執行都留有記錄。
+
+## 自動化還是任務喚醒 [#vs-wakeups]
+
+自動化按時間表或 Webhook 開始新的工作，每次可以新建一條任務。如果是想讓 AI 代理在某個時間、或者等任務上發生某件事之後，回到一條已有的任務接著做，就給那條任務加[喚醒](/issue-wakeups)。自動化頁面的**任務喚醒**標籤列出整個工作區的喚醒。
+
+## 建立自動化
+
+在側邊欄開啟**自動化**，選擇模板或從空白開始，然後配置：
+
+- **名稱**：說明這條自動化負責什麼；
+- **Runbook**：AI 代理每次執行時讀取的目標、背景、約束和步驟；
+- **執行方**：一個 AI 代理或小隊；
+- **關聯專案**：可選，讓自動建立的任務進入指定專案；
+- **輸出模式**：建立任務，或僅執行；
+- **訂閱者**：自動建立任務後需要收到通知的成員；
+- **觸發方式**：時間表或 Webhook。
+
+儲存後自動化預設啟用。**立即執行**隨時手動執行一次完整流程，不用等時間表。
+
+下面是一條輸出模式為"建立任務"的自動化。點**立即執行**，或者快進到下次執行時間，看它建立任務、交給 AI 代理，再到這次執行完成。
+
+<AutopilotDemo />
+
+## 選擇輸出模式
+
+| 模式 | 行為 | 適合 |
+|---|---|---|
+| **建立任務** | 每次觸發先建立一條任務，再分配給執行方；討論、狀態和執行記錄都保留在任務中。 | 需要團隊檢視、確認或繼續處理的工作。 |
+| **僅執行** | 直接建立執行，不產生任務；結果只在自動化的執行歷史中檢視。 | 無需協作記錄的後臺執行。 |
+
+**建立任務**模式和普通任務用同一個執行佇列：執行時離線時照樣先建立任務，執行等執行時上線後開始。
+
+**僅執行**要求執行時在觸發時可用；否則本次執行會顯示為"已跳過"，不會留下一個等待中的任務。
+
+## 按時間執行
+
+時間表編輯器可以選擇執行時間、重複日期、時間視窗和時區，並預覽接下來的執行時間。一條自動化可以新增多個時間表；單獨啟停某個觸發器要用 CLI 的 `autopilot trigger-update`，引數見 [CLI 命令](/cli)。
+
+規則更復雜時，直接編輯標準 5 欄位 cron：
+
+```text
+分 時 日 月 星期
+```
+
+例如：
+
+| Cron | 時區 | 含義 |
+|---|---|---|
+| `0 9 * * 1-5` | `Asia/Shanghai` | 工作日 9:00 |
+| `*/30 * * * *` | `UTC` | 每 30 分鐘 |
+| `0 3 * * *` | `UTC` | 每天 3:00 |
+
+Cron 不包含秒，時區使用 `Asia/Shanghai` 這樣的 IANA 名稱。儲存前，用頁面顯示的"接下來"時間核對結果。
+
+![自動化編輯器：Runbook、時間表設定與接下來幾次執行的預覽](/images/docs/autopilot-schedule.webp)
+
+## 透過 Webhook 執行
+
+新增 Webhook 觸發器後，Multica 會生成一個唯一 URL。向它傳送 JSON 物件或陣列，即可觸發自動化：
+
+```bash
+curl -X POST "$MULTICA_WEBHOOK_URL" \
+ -H "Content-Type: application/json" \
+ -H "Idempotency-Key: demo-001" \
+ -d '{"event":"build.completed","eventPayload":{"status":"success"}}'
+```
+
+Payload 會儲存在投遞和執行記錄中，並交給 AI 代理。建立任務模式還會把事件內容附在任務描述中。
+
+Webhook 請求的約束：
+
+- Body 必須是有效的 JSON 物件或陣列，最大 256 KiB；
+- `Idempotency-Key` 可以避免傳送方重試時重複執行；GitHub 也會使用 `X-GitHub-Delivery` 去重；
+- 沒有穩定冪等鍵時，Multica 無法保證重複請求只執行一次；
+- 觸發器已禁用或事件不匹配時，投遞會記錄為"已忽略"，不會建立執行。
+
+### 過濾事件 [#事件過濾]
+
+同一個來源會傳送多種事件時，給觸發器加上事件過濾。每行一個事件名，加可選的 action 列表；任意一行命中就執行，全部留空則接收所有事件。
+
+例如，事件名填寫 `workflow_run`，Actions 填寫 `completed, failed`，只會接收這兩類 `workflow_run` 結果。Multica 會從常見請求頭和 payload 中識別事件與 action，包括 GitHub 的 `X-GitHub-Event` 和 body 中的 `action`。
+
+### 保護 Webhook URL
+
+<Callout type="warning">
+Webhook URL 中的 token 就是呼叫憑證。不要把完整 URL 放進公開倉庫、任務或截圖。URL 洩漏後，點選 URL 旁的**重新生成 URL**按鈕，並立即更新傳送方；舊 URL 會馬上失效。
+</Callout>
+
+只有自動化建立者、工作區 owner/admin 和獲得訪問權限的協作者可以檢視完整 URL。介面預設隱藏 URL 中的 token，複製不需要先顯示；點選 URL 或眼睛圖示可以檢視完整地址。
+
+### Webhook 響應速查
+
+除錯傳送方時，對照下表看 Multica 的響應：
+
+| HTTP 狀態 | 響應狀態 | 含義 |
+|---|---|---|
+| 200 | `accepted` | 已受理並建立執行，返回投遞和執行 ID。 |
+| 200 | `skipped` | 已受理，但本次執行被跳過（例如僅執行模式下執行時離線），附帶原因。 |
+| 200 | `ignored` | 未建立執行：觸發器已禁用、自動化已暫停或歸檔，或事件被過濾，`reason` 欄位說明原因。 |
+| 200 | `duplicate` | 冪等鍵命中已有投遞，返回原投遞 ID，不會重複執行。 |
+| 400 | 錯誤資訊 | Body 為空、不是有效 JSON，或不是 JSON 物件/陣列。 |
+| 401 | `rejected` | 觸發器配置了簽名金鑰，但請求缺少簽名或簽名不匹配。 |
+| 404 | 錯誤資訊 | URL 中的 token 無效或已被重新生成。 |
+| 413 | 錯誤資訊 | Body 超過 256 KiB。 |
+| 429 | 錯誤資訊 | 請求過於頻繁，按響應頭 `Retry-After` 稍後重試。 |
+| 500 | 錯誤資訊 | Multica 內部錯誤，傳送方可稍後重試。 |
+
+暫停、歸檔、事件過濾這類業務上的忽略返回 200，不返回 4xx，以免傳送方反覆重試。
+
+事件與 action 的推斷順序：
+
+1. body 中帶有字串 `event` 欄位時直接使用；
+2. 否則嘗試 `X-GitHub-Event` 請求頭，它會與 body 中的 `action` 拼成 `github.<event>.<action>`；
+3. 再嘗試 `X-Gitlab-Event` 請求頭；
+4. 再嘗試 `X-Event-Type` 請求頭；
+5. 再到 body 中的 `event`、`type`、`action` 欄位；
+6. 全部缺失時記為 `webhook.received`。
+
+## 檢視執行和投遞記錄
+
+執行歷史會顯示觸發來源、時間、狀態、關聯任務或執行，以及失敗或跳過的原因。Webhook 觸發器還會儲存單獨的投遞記錄，包括解析出的事件、響應、去重資訊和失敗原因。
+
+處理完成的 Webhook 投遞可以從詳情中重放。重放會建立一次新的投遞和執行，不會改寫原記錄；簽名校驗失敗或仍在排隊的投遞不能重放，重放也不參與去重。
+
+## 失敗、暫停和刪除
+
+僅執行模式中的執行失敗後不會自動重試；下一次時間表仍會按原計劃觸發。建立任務模式產生的是普通任務執行，基礎設施故障按照[執行](/tasks#失敗與自動重試)中的規則處理。
+
+Multica 定期檢查近期執行是否持續失敗：過去 7 天內已完成或失敗的執行不少於 50 次、且失敗率達到 90% 時，系統暫停這條自動化並通知建立者，修復原因後可以手動恢復。
+
+手動暫停會停止時間表、Webhook 和"立即執行"。刪除實際是歸檔：停止後續觸發，執行和投遞歷史保留。
+
+## 管理權限
+
+- 任何工作區成員都可以建立自動化；
+- 建立者和工作區 owner/admin 可以編輯、執行、刪除及管理觸發器；
+- 建立者和 owner/admin 可以把協作者加入"管理訪問"；
+- 協作者可以編輯、執行和管理觸發器，但不能繼續授予其他人權限；
+- 能管理自動化不代表一定能執行它使用的 AI 代理，AI 代理 Access 仍然生效。
+
+## 使用 CLI
+
+```bash
+multica autopilot get <autopilot-id> --output json
+multica autopilot trigger <autopilot-id>
+multica autopilot runs <autopilot-id>
+multica autopilot trigger-rotate-url <autopilot-id> <trigger-id>
+```
+
+`autopilot get` 預設把 `webhook_token`、`webhook_path` 和 `webhook_url` 設為 `null`，並返回 `has_webhook_token` 與 `webhook_token_hint`。確實需要拿到當前有效憑證時才加 `--show-secrets`；CLI 把警告輸出到 stderr，管道中的 JSON 不受影響。
+
+完整引數見[使用 CLI](/cli)。
+
+## 接下來
+
+- [分配任務給 AI 代理](/assigning-issues) — 分配與確認視窗。
+- [收件箱與訂閱](/inbox) — 執行通知的接收位置。
+- [執行](/tasks) — 執行狀態與失敗處理。
+- [任務喚醒](/issue-wakeups) — 讓 AI 代理之後回到已有任務接著做。

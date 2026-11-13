@@ -3,6 +3,7 @@ import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { Markdown } from "@tiptap/markdown";
 import { createEditorExtensions } from ".";
+import { preprocessMarkdown } from "../utils/preprocess";
 
 let editor: Editor | null = null;
 
@@ -121,4 +122,62 @@ describe("fenced code language", () => {
       ["```", "const answer = 42;", "```"].join("\n"),
     );
   });
+});
+
+it("preserves multiline inline code through preprocessing, save and reload", () => {
+  const source = "before ```https://example.com\ncontinuation``` after";
+  editor = makeProductionEditor();
+  editor.commands.setContent(source, { contentType: "markdown" });
+  const expected = editor.getJSON();
+  expect(editor.view.dom.querySelector("code")?.textContent).toBe(
+    "https://example.com continuation",
+  );
+
+  editor.commands.setContent(preprocessMarkdown(source, { cdnDomain: "" }), {
+    contentType: "markdown",
+  });
+  expect(editor.getJSON()).toEqual(expected);
+  const saved = editor.getMarkdown();
+  editor.commands.setContent(preprocessMarkdown(saved, { cdnDomain: "" }), {
+    contentType: "markdown",
+  });
+  expect(editor.getJSON()).toEqual(expected);
+  expect(editor.getMarkdown()).toBe(saved);
+});
+
+it.each([
+  "before ```first\nhttps://example.com\ncontinuation``` after",
+  "Intro\n\n- > ```text\n  > https://example.com\n  > ```\n\nOutro",
+  "Intro\n\n> - ```text\n>   https://example.com\n>   ```\n\nOutro",
+  "Intro\n\n- > - ```text\n  >   https://example.com\n  >   ```\n\nOutro",
+  "Intro\n\n> - > ```text\n>   > https://example.com\n>   > ```\n\nOutro",
+])("adds no preprocessing mutations to mixed-container or multiline code (%j)", (source) => {
+  editor = makeProductionEditor();
+  editor.commands.setContent(source, { contentType: "markdown" });
+  const expected = editor.getJSON();
+  const rawSaved = editor.getMarkdown();
+  let hasCode = false;
+  editor.state.doc.descendants((node) => {
+    if (node.type.name === "codeBlock" || node.marks.some((mark) => mark.type.name === "code")) {
+      hasCode = true;
+    }
+  });
+  expect(hasCode).toBe(true);
+  expect(editor.getText()).toContain("https://example.com");
+  // Compare with the raw parser at each phase: stock list/quote serialization
+  // can normalize container structure independently of link preprocessing.
+  editor.commands.setContent(rawSaved, { contentType: "markdown" });
+  const rawReloaded = editor.getJSON();
+  const rawSecondSave = editor.getMarkdown();
+  editor.commands.setContent(preprocessMarkdown(source, { cdnDomain: "" }), {
+    contentType: "markdown",
+  });
+  expect(editor.getJSON()).toEqual(expected);
+  const saved = editor.getMarkdown();
+  expect(saved).toBe(rawSaved);
+  editor.commands.setContent(preprocessMarkdown(saved, { cdnDomain: "" }), {
+    contentType: "markdown",
+  });
+  expect(editor.getJSON()).toEqual(rawReloaded);
+  expect(editor.getMarkdown()).toBe(rawSecondSave);
 });

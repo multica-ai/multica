@@ -1,10 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Copy } from "lucide-react";
+import { Copy } from "@multica/ui/icons";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Label } from "@multica/ui/components/ui/label";
 import {
   Dialog,
@@ -434,10 +435,10 @@ export function WorkspaceTab() {
           >
             <span className="flex items-center gap-1">
               <code className="font-mono text-label text-foreground">{workspace.slug}</code>
-              <Button
+              <IconButton
                 variant="ghost"
                 size="icon-xs"
-                aria-label={t(($) => $.workspace.copy_slug)}
+                label={t(($) => $.workspace.copy_slug)}
                 onClick={async () => {
                   if (!(await copyText(workspace.slug))) {
                     toast.error(t(($) => $.workspace.copy_failed));
@@ -445,7 +446,7 @@ export function WorkspaceTab() {
                 }}
               >
                 <Copy />
-              </Button>
+              </IconButton>
             </span>
           </SettingsRow>
 

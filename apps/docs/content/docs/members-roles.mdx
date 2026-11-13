@@ -4,6 +4,7 @@ description: Invite members and manage workspace permissions with the owner, adm
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { RolesDemo } from "@/components/demos/roles-demo";
 
 Everyone who joins a [workspace](/workspaces) is a member, and each member has one role: `owner`, `admin`, or `member`. Roles only control workspace settings and team management; day-to-day collaboration — creating issues, writing comments — is open to all members.
 
@@ -20,13 +21,15 @@ Everyone who joins a [workspace](/workspaces) is a member, and each member has o
 
 A workspace must always keep at least one `owner`: the last `owner` cannot be demoted, removed, or leave.
 
+<RolesDemo />
+
 <Callout type="info">
 Roles do not decide who can run an agent. Each agent has its own Access scope, and `owner` and `admin` cannot bypass it to run agents they were not granted. See [Agents](/agents#permissions-and-access).
 </Callout>
 
 ## Invite members
 
-`owner` and `admin` send invitations from Settings → Members by entering an email and picking a role. Invitations can only grant `admin` or `member`; an `owner` must join the workspace first and then be promoted by an existing `owner`.
+`owner` and `admin` open **Settings → Members**, click **Invite member**, enter an email, pick a role, and send. Invitations can only grant `admin` or `member`; an `owner` must join the workspace first and then be promoted by an existing `owner`.
 
 ![Member management: the invite form and the roster with roles](/images/docs/members-roster.webp)
 
@@ -34,11 +37,13 @@ The invitee accepts by logging in with that email — no prior signup is needed.
 
 The invitation link appears only in the email; there is no place in the product to view or copy it. If the email fails to send, the invitation record still exists — revoke it and send a new one.
 
+When you need a link you can pass along yourself, generate one under **Share links** in **Settings → Members** by choosing a role and an expiry. Anyone with the link can join with that role until it expires or is revoked.
+
 ## Change roles
 
-An `admin` can move roles between `admin` and `member`, and can remove members holding those two roles. Any change involving `owner` — promoting, changing, or removing — can only be performed by an `owner`.
+In the member list, open the actions menu at the right of a member's row and choose **Change role**. The new role takes effect immediately.
 
-Role changes take effect immediately.
+An `admin` can move roles between `admin` and `member`, and can remove members holding those two roles. Any change involving `owner` — promoting, changing, or removing — can only be performed by an `owner`.
 
 ## Remove a member
 

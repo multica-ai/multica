@@ -37,7 +37,8 @@ import type { Attachment } from "../../types";
 export type CommentDraftKey =
   | `new:${string}`              // top-level CommentInput, key = `new:${issueId}`
   | `reply:${string}:${string}`  // ReplyInput inside a thread, key = `reply:${issueId}:${rootCommentId}`
-  | `edit:${string}:${string}`;  // inline edit on existing comment, key = `edit:${issueId}:${commentId}`
+  | `edit:${string}:${string}`   // inline edit on existing comment, key = `edit:${issueId}:${commentId}`
+  | `chat:${string}`;            // chat composer annotations only, key = `chat:${sessionId}`; text lives in the chat store
 
 interface CommentDraft {
   content: string;
@@ -243,7 +244,7 @@ export const useCommentDraftStore = create<CommentDraftStore>()(
         }),
       getAnnotations: (key) => get().drafts[key]?.annotations ?? EMPTY_REPLY_ANNOTATIONS,
       addAnnotation: (key, annotation) => {
-        if ((!key.startsWith("reply:") && !key.startsWith("new:")) || !annotation.note.trim() || !annotation.quote.trim() || annotation.quote.length > MAX_ANNOTATION_QUOTE_LENGTH) return undefined;
+        if ((!key.startsWith("reply:") && !key.startsWith("new:") && !key.startsWith("chat:")) || !annotation.note.trim() || !annotation.quote.trim() || annotation.quote.length > MAX_ANNOTATION_QUOTE_LENGTH) return undefined;
         const current = get().getAnnotations(key);
         const duplicate = current.find((a) => a.sourceCommentId === annotation.sourceCommentId &&
           a.start === annotation.start && a.quote === annotation.quote && a.prefix === annotation.prefix && a.suffix === annotation.suffix);

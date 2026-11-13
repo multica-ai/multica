@@ -72,6 +72,17 @@ func (f *fakeMintQueries) FindLiveChannelBindingToken(_ context.Context, arg db.
 	return best, nil
 }
 
+func (f *fakeMintQueries) ConsumeChannelBindingToken(_ context.Context, tokenHash string) (db.ChannelBindingToken, error) {
+	for i := range f.rows {
+		r := &f.rows[i]
+		if r.TokenHash == tokenHash && !r.ConsumedAt.Valid && r.ExpiresAt.Time.After(f.now()) {
+			r.ConsumedAt = pgtype.Timestamptz{Time: f.now(), Valid: true}
+			return *r, nil
+		}
+	}
+	return db.ChannelBindingToken{}, pgx.ErrNoRows
+}
+
 func newThrottledService() (*BindingTokenService, *fakeMintQueries, *time.Time) {
 	clock := time.Now()
 	fake := &fakeMintQueries{now: func() time.Time { return clock }}
@@ -205,5 +216,41 @@ func TestMintIgnoresAConsumedToken(t *testing.T) {
 	}
 	if fake.creates != 2 {
 		t.Fatalf("%d rows written, want 2", fake.creates)
+	}
+}
+
+// TestWithdrawLetsTheNextMessageGetALink: a link WeCom refused to deliver must
+// not hold the throttle. Without Withdraw the second mint comes back Reused and
+// the user is pointed at a link they never received.
+func TestWithdrawLetsTheNextMessageGetALink(t *testing.T) {
+	svc, fake, _ := newThrottledService()
+	ws, inst := bindingUUID(1), bindingUUID(2)
+
+	first, err := svc.Mint(context.Background(), ws, inst, "T-alex")
+	if err != nil {
+		t.Fatalf("first mint: %v", err)
+	}
+	if err := svc.Withdraw(context.Background(), first.Raw); err != nil {
+		t.Fatalf("withdraw: %v", err)
+	}
+
+	again, err := svc.Mint(context.Background(), ws, inst, "T-alex")
+	if err != nil {
+		t.Fatalf("second mint: %v", err)
+	}
+	if again.Reused || again.Raw == "" || again.Raw == first.Raw {
+		t.Fatalf("mint after a withdrawal = %+v, want a fresh link", again)
+	}
+	if fake.creates != 2 {
+		t.Fatalf("%d rows written, want 2", fake.creates)
+	}
+}
+
+// TestWithdrawOfASpentTokenIsNotAnError: the user may have redeemed it, or it
+// may have expired, between the send and the withdrawal. Nothing is left to do.
+func TestWithdrawOfASpentTokenIsNotAnError(t *testing.T) {
+	svc, _, _ := newThrottledService()
+	if err := svc.Withdraw(context.Background(), "never-minted"); err != nil {
+		t.Fatalf("withdraw of an unknown token: %v", err)
 	}
 }

@@ -72,7 +72,7 @@ func seedMessageAttachment(t *testing.T, sessionID, messageID, filename, created
 // returns the response recorder wrapper asserting the wanted status.
 func claimForRuntimeExpecting(t *testing.T, h *Handler, runtimeID, daemonID string, want int) *testutil.Response {
 	t.Helper()
-	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil, testWorkspaceID, daemonID)
+	req := newOwnerDaemonRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil)
 	req = withURLParam(req, "runtimeId", runtimeID)
 	return testutil.Call(t, h.ClaimTaskByRuntime, req).Want(want)
 }

@@ -3,10 +3,14 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/testutil"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // claimAgentInstructionsForTest claims the next queued task for runtimeID and
@@ -18,8 +22,7 @@ func claimAgentInstructionsForTest(t *testing.T, runtimeID string) (taskID strin
 	t.Helper()
 
 	w := httptest.NewRecorder()
-	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
-		testWorkspaceID, "squad-briefing-claim")
+	req := newOwnerDaemonRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil)
 	req = withURLParam(req, "runtimeId", runtimeID)
 
 	testHandler.ClaimTaskByRuntime(w, req)
@@ -149,6 +152,54 @@ func TestClaim_LeaderTaskFromCommentMention_InjectsBriefing(t *testing.T) {
 	// injected briefing must arrive with the flag set.
 	if !isLeader {
 		t.Fatalf("claim injected the briefing but reported is_leader_task=false: %s", raw)
+	}
+}
+
+func TestClaim_LeaderTaskWithMovedStepLeavesStatusUnchanged(t *testing.T) {
+	seedTestCatalog(t)
+	for _, bound := range []string{"waiting_for_merge", "in_progress", ""} {
+		for _, legacy := range []bool{false, true} {
+			t.Run(fmt.Sprintf("bound=%s/legacy=%v", bound, legacy), func(t *testing.T) {
+				fx := newSquadBriefingClaimFixture(t, t.Context(), "Workflow leader")
+				projectID := deliveryProject(t, "Leader workflow project", fx.AgentID)
+				dbfx.Exec(t, `UPDATE issue SET project_id=$2,status='in_progress',assignee_type='squad',assignee_id=$3 WHERE id=$1`, fx.IssueID, projectID, fx.SquadID)
+				cols := testutil.Cols{
+					"runtime_id": fx.RuntimeID, "issue_id": fx.IssueID,
+					"is_leader_task": true, "squad_id": fx.SquadID,
+				}
+				if bound != "" {
+					cols["workflow_step"] = bound
+				}
+				taskID := dbfx.Task(t, fx.AgentID, cols)
+				req := withURLParam(newOwnerDaemonRequest(http.MethodPost, "/api/daemon/runtimes/"+fx.RuntimeID+"/tasks/claim", nil), "runtimeId", fx.RuntimeID)
+				if !legacy {
+					req.Header.Set("X-Client-Capabilities", protocol.DaemonCapabilityWorkflowStatusRulesV1)
+				}
+				var resp struct {
+					Task *AgentTaskResponse `json:"task"`
+				}
+				testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusOK).JSON(&resp)
+				if resp.Task == nil || resp.Task.ID != taskID || !resp.Task.IsLeaderTask || resp.Task.Agent == nil || resp.Task.ProjectWorkflow == nil {
+					t.Fatalf("missing workflow leader claim: %+v", resp.Task)
+				}
+				instructions := resp.Task.Agent.Instructions
+				if !strings.Contains(instructions, "## Squad Roster") {
+					t.Fatal("workflow restriction removed the leader's coordination briefing")
+				}
+				if bound == "waiting_for_merge" {
+					if !strings.Contains(instructions, "Leave the parent issue's status unchanged") || strings.Contains(instructions, "run that block's Step done command") {
+						t.Fatalf("stale leader's instructions contradict its workflow brief:\n%s", instructions)
+					}
+					for _, move := range builtInParentMoves {
+						if strings.Contains(strings.Join(strings.Fields(instructions), " "), move) {
+							t.Errorf("stale leader received built-in move %q", move)
+						}
+					}
+				} else if !strings.Contains(instructions, "run that block's Step done command") {
+					t.Fatalf("current or unbound leader lost its wrap-up instruction:\n%s", instructions)
+				}
+			})
+		}
 	}
 }
 

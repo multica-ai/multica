@@ -1,0 +1,217 @@
+---
+title: 參與開發
+description: 配置 Multica 本地開發環境，執行測試，並按倉庫約定提交改動。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica 是 Go backend 與 pnpm monorepo。最簡單的本地啟動方式是 `make dev`；它會為當前 checkout 準備環境、資料庫和 migration，再啟動 Web 與 API。
+
+## 環境要求
+
+- Node.js 22；
+- pnpm 10.28.2；
+- Go 1.26.6；
+- Docker Engine 或 Docker Desktop；
+- Git 和 Make。
+
+版本以根目錄 `package.json`、`server/go.mod` 和 CI workflow 為準。
+
+## 第一次啟動
+
+```bash
+git clone https://github.com/multica-ai/multica.git
+cd multica
+make dev
+```
+
+主 checkout 會使用 `.env`。檔案不存在時，`make dev` 會從 `.env.example` 建立；然後啟動共享 PostgreSQL、安裝依賴、執行 migration，並執行 API 與 Web。
+
+預設地址：
+
+```text
+Web: http://localhost:3000
+API: http://localhost:8080
+```
+
+本地固定驗證碼來自開發環境配置。不要把本地 `.env` 用到公網部署。
+
+## 在 worktree 中開發
+
+倉庫支援主 checkout 和多個 worktree 同時執行。它們共用一個 PostgreSQL 容器，但使用不同資料庫和連接埠。
+
+```bash
+git worktree add ../multica-feature -b feat/my-change main
+cd ../multica-feature
+make setup-worktree
+make start-worktree
+```
+
+`make setup-worktree` 會生成 `.env.worktree`，資料庫名和連接埠根據路徑確定。再次啟動：
+
+```bash
+make start-worktree
+```
+
+停止當前 worktree 的 Web 與 API：
+
+```bash
+make stop-worktree
+```
+
+也可以直接執行 `make dev`，腳本會透過 `.git` 檔案識別 worktree 並選擇 `.env.worktree`。
+
+<Callout type="info">
+不同 worktree 共用 PostgreSQL 容器，不共用資料庫。不要為每個 worktree 啟動新的 Compose project；先檢查 `.env.worktree` 中的 `POSTGRES_DB`、`PORT` 和 `FRONTEND_PORT`。
+</Callout>
+
+## 常用命令
+
+### 整體流程
+
+```bash
+make dev # 準備並啟動當前 checkout
+make start # 使用已有環境啟動 API 與 Web
+make stop # 停止當前 checkout 的程序
+make check # 完整本地驗證流程
+make build # 建構 server、CLI 和 migrate 二進位檔
+```
+
+### 前端
+
+```bash
+pnpm install
+pnpm dev:web
+pnpm dev:desktop
+pnpm build
+pnpm typecheck
+pnpm lint
+pnpm test
+```
+
+根命令預設排除 Mobile。移動端有獨立腳本和 CI，修改前先閱讀 `apps/mobile/AGENTS.md`。
+
+### Backend
+
+```bash
+make server
+make daemon
+make test
+make migrate-up
+make migrate-down
+make sqlc
+```
+
+從源碼執行某條 CLI 命令：
+
+```bash
+make cli ARGS="issue list"
+```
+
+## 修改前端功能
+
+Web 與 Desktop 都需要的功能按職責放置：
+
+1. API 類型、query、mutation 和平臺無關邏輯放在 `packages/core/`；
+2. 基礎 UI 放在 `packages/ui/`，不能依賴業務程式碼；
+3. 業務頁面和元件放在 `packages/views/`；
+4. Next.js、Electron 和路由適配留在對應 app；
+5. 共享頁面需要同時接入 Web 與 Desktop。
+
+服務端資料由 TanStack Query 管理，篩選、草稿和佈局等客戶端狀態由 Zustand 管理。具體邊界見[專案架構](/developers/architecture)和根目錄 `AGENTS.md`。
+
+新增或修改 API 時，要同步更新 `packages/core/api/` 中的 zod schema，併為缺失欄位、未知枚舉或格式錯誤增加解析測試。
+
+## 修改資料庫
+
+Migration 位於 `server/migrations/`，查詢位於 `server/pkg/db/queries/`。
+
+1. 使用下一個未佔用的數字前綴，同時建立 `.up.sql` 和 `.down.sql`；
+2. 不新增資料庫 foreign key、級聯刪除或級聯更新；關係檢查和清理由應用層完成；
+3. 每個新索引都使用 `CREATE INDEX CONCURRENTLY` 或 `CREATE UNIQUE INDEX CONCURRENTLY`；
+4. 一個 concurrent index 單獨放在只包含這一條語句的 migration 檔案中；
+5. 修改查詢後執行 `make sqlc`，提交生成的 `server/pkg/db/generated/` 變化；
+6. 不直接編輯 sqlc 產生的檔案。
+
+需要讓多項寫操作一起成功或回滾時，在 service 層使用應用事務。
+
+## 測試位置
+
+| 改動 | 測試位置 |
+| --- | --- |
+| 共享業務邏輯、query、store | `packages/core/*.test.ts` |
+| 共享頁面和元件 | `packages/views/*.test.tsx` |
+| Web 或 Desktop 平臺 wiring | 對應 `apps/*` 目錄 |
+| 端到端流程 | `e2e/*.spec.ts` |
+| Backend | 相關 Go package 的 `*_test.go` |
+
+先執行與改動最接近的檢查，再擴大範圍。例如只改 Docs：
+
+```bash
+pnpm --filter @multica/docs typecheck
+```
+
+共享前端改動：
+
+```bash
+pnpm typecheck
+pnpm test
+```
+
+Backend 改動：
+
+```bash
+make test
+```
+
+提交前執行：
+
+```bash
+make check
+```
+
+`make check` 會執行 TypeScript typecheck 與單元測試、Go 測試和 Playwright E2E。CI 還會按改動範圍構建、lint，並執行平臺或安裝器專項測試。
+
+## 重置當前開發資料庫
+
+需要乾淨資料時，可以重置**當前 checkout 在環境檔案中指定的資料庫**：
+
+```bash
+make stop
+make db-reset
+make start
+```
+
+`make db-reset` 會刪除並重建當前 `POSTGRES_DB`，且會拒絕連接遠程資料庫。操作前檢查 `.env` 或 `.env.worktree`，確認目標資料庫正確。
+
+## 提交 GitHub Issue
+
+- **[功能建議](https://github.com/multica-ai/multica/blob/main/.github/ISSUE_TEMPLATE/feature_request.yml)：** 說明**問題（Problem）**和**目標（Goal）**。高層方案（Proposal）、替代方案（Alternatives）和截圖（Screenshots）均為可選；無需先設計好解決方案。
+- **[Bug 報告](https://github.com/multica-ai/multica/blob/main/.github/ISSUE_TEMPLATE/bug_report.yml)：** 分別說明**問題**、**預期行為**和**重現步驟**。如果偶發，說明嘗試過的操作和發生頻率。截圖、日誌和環境資訊均為可選。
+
+選擇受影響的功能區域，方便分派報告；Bug 報告還需選擇部署方式。提交 Issue 時截圖可選，UI 或互動 PR 的強制截圖規則不適用於問題報告。
+
+## 提交前檢查
+
+- 閱讀根目錄 `AGENTS.md` 和相關子目錄說明；
+- 只修改當前 task 需要的範圍；
+- 程式碼註釋使用英文；
+- 不提交 `.env`、令牌、構建產物或本機路徑；
+- 使用 `feat(scope)`、`fix(scope)`、`docs` 等 conventional commit；
+
+### PR 提交要求
+
+使用 [PR 範本](https://github.com/multica-ai/multica/blob/main/.github/PULL_REQUEST_TEMPLATE.md)，並遵守[貢獻要求](https://github.com/multica-ai/multica/blob/main/CONTRIBUTING.md#pull-request-requirements)：
+
+1. **問題（Problem）：** 說明要解決的具體問題、受影響的人，以及問題為什麼重要。
+2. **目標（Goal）：** 說明變更希望達成的結果。
+3. **方案（Proposal）：** 說明高層設計，以及它為什麼能達成目標。讓沒有太多專案背景的讀者也能看懂，盡量少寫實作細節。
+4. **替代方案（Alternatives，可選）：** 有助於理解方案時，簡要說明其他方案和未選擇它們的原因。
+5. **截圖（Screenshots）：** UI 或互動變更必須附上實際執行應用程式的螢幕截圖或螢幕錄影，展示受影響的頁面和狀態，強烈建議提供 before/after 對比；新頁面展示變更後的狀態。不涉及 UI 或互動影響時，填寫 "N/A" 並說明原因。
+
+**涉及 UI 或互動變更卻沒有截圖或錄影的 PR，預設拒絕。** 在補齊截圖或錄影前，審查者應要求修改或關閉 PR。缺少問題、目標或高層方案說明的 PR，同樣不具備審查條件。
+
+## 接下來
+
+- [開發規範](/developers/conventions) — 命名、術語和中文文案的倉庫契約。
+- [專案架構](/developers/architecture) — 分層、共享包和一次執行的程式碼路徑。

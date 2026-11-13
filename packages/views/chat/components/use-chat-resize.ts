@@ -13,6 +13,17 @@ function clamp(v: number, min: number, max: number) {
   return Math.max(min, Math.min(max, v));
 }
 
+type Bounds = { maxW: number; maxH: number };
+
+function renderedSize(
+  { maxW, maxH }: Bounds,
+  { chatWidth, chatHeight, isExpanded }: { chatWidth: number; chatHeight: number; isExpanded: boolean },
+) {
+  const w = isExpanded ? maxW : clamp(chatWidth, CHAT_MIN_W, maxW);
+  const h = isExpanded ? maxH : clamp(chatHeight, CHAT_MIN_H, maxH);
+  return `${w}x${h}${w >= maxW && h >= maxH ? ":max" : ""}`;
+}
+
 export function useChatResize(
   windowRef: React.RefObject<HTMLDivElement | null>,
 ) {
@@ -23,7 +34,7 @@ export function useChatResize(
   const setExpanded = useChatStore((s) => s.setExpanded);
 
   // ── Container bounds via ResizeObserver ────────────────────────────────
-  const boundsRef = useRef({ maxW: FALLBACK_MAX_W, maxH: FALLBACK_MAX_H });
+  const boundsRef = useRef<Bounds>({ maxW: FALLBACK_MAX_W, maxH: FALLBACK_MAX_H });
   const [boundsReady, setBoundsReady] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [, setRevision] = useState(0);
@@ -36,7 +47,6 @@ export function useChatResize(
     const update = () => {
       const maxW = Math.floor(parent.clientWidth * MAX_RATIO);
       const maxH = Math.floor(parent.clientHeight * MAX_RATIO);
-      setBoundsReady(true); // idempotent once true
       // Only trigger a re-render if the bounds actually changed. Without this
       // guard, any spurious ResizeObserver notification (including sub-pixel
       // layout jitter during mount) schedules a setState that feeds back into
@@ -44,11 +54,17 @@ export function useChatResize(
       const prev = boundsRef.current;
       if (prev.maxW === maxW && prev.maxH === maxH) return;
       boundsRef.current = { maxW, maxH };
+      // The window stays mounted while closed and its container resizes on
+      // every frame of a nav panel toggle; re-render only when the size the
+      // bounds clamp to changes, not for every new bound.
+      const state = useChatStore.getState();
+      if (renderedSize(prev, state) === renderedSize(boundsRef.current, state)) return;
       setRevision((r) => r + 1);
     };
 
     // Measure immediately (parent is already in DOM at this point)
     update();
+    setBoundsReady(true);
 
     const ro = new ResizeObserver(update);
     ro.observe(parent);

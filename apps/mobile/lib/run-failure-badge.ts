@@ -22,6 +22,7 @@ import { RUNTIME_ACCESS_DENIED_BADGE } from "./runtime-access-copy";
 const FAILURE_REASON_BADGE: Record<string, string> = {
   queued_expired: "Queue expired",
   runtime_offline: "Runtime offline",
+  runtime_access_revoked: "Access revoked",
   runtime_recovery: "Runtime recovery",
   timeout: "Timeout",
   iteration_limit: "Iteration limit",

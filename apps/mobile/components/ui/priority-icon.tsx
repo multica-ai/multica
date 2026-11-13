@@ -25,7 +25,7 @@ const BARS: Record<IssuePriority, number> = {
 // Mirrors PRIORITY_CONFIG.color in packages/core/issues/config/priority.ts.
 const COLOR: Record<IssuePriority, string> = {
   urgent: "#dc2626", // destructive
-  high: "#eab308", // warning
+  high: "#f97316", // priority-high
   medium: "#eab308", // warning
   low: "#3b82f6", // info
   none: "#71717a", // muted-foreground

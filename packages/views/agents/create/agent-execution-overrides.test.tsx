@@ -68,6 +68,7 @@ function listResult(models: RuntimeModel[]): RuntimeModelListRequest {
 }
 
 const baseDraft: AgentDraft = {
+  qoderAgentId: "",
   name: "Fast Codex",
   description: "",
   instructions: "",
@@ -120,6 +121,51 @@ describe("AgentExecutionOverrides", () => {
   });
 
   afterEach(cleanup);
+
+  it("offers Kiro effort during agent creation", async () => {
+    const model: RuntimeModel = {
+      id: "claude-opus-4.7",
+      label: "claude-opus-4.7",
+      thinking: {
+        supported_levels: [
+          { value: "high", label: "High" },
+          { value: "max", label: "Max" },
+        ],
+        default_level: "high",
+      },
+    };
+    mockInitiateListModels.mockResolvedValue(listResult([model]));
+    const { onChange } = renderOverrides({
+      runtime: { ...ONLINE_RUNTIME, provider: "kiro" },
+      draft: { ...baseDraft, model: model.id },
+    });
+
+    await screen.findByText("Thinking");
+    fireEvent.click(screen.getByRole("button", { name: /thinking/i }));
+    fireEvent.click(await screen.findByText("Max"));
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ model: model.id, thinkingLevel: "max" }),
+    );
+  });
+
+  it("prefills ZCode's advertised reasoning level without changing other providers", async () => {
+    const model: RuntimeModel = {
+      id: "desktop/glm", label: "GLM",
+      thinking: {
+        default_level: "max",
+        supported_levels: [{ value: "high", label: "High" }, { value: "max", label: "Max" }],
+      },
+    };
+    mockInitiateListModels.mockResolvedValue(listResult([model]));
+    mockGetListModelsResult.mockResolvedValue(listResult([model]));
+    const { onChange } = renderOverrides({
+      runtime: { ...ONLINE_RUNTIME, provider: "zcode" },
+      draft: { ...baseDraft, model: model.id },
+    });
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ model: model.id, thinkingLevel: "max" }),
+    ));
+  });
 
   it("offers Speed for a model whose catalog advertises a tier", async () => {
     const { onChange } = renderOverrides();

@@ -19,7 +19,7 @@ import (
 // ownership must not ride along — a guest leader gets an explicit prohibition
 // instead of the grant, so the model never has to infer the boundary.
 func TestSquadOperatingProtocolScopesParentStatusOwnership(t *testing.T) {
-	guest := squadOperatingProtocolFor(false)
+	guest := squadOperatingProtocolFor(false, leaderNoWorkflow)
 	compactGuest := strings.Join(strings.Fields(guest), " ")
 
 	for _, want := range []string{
@@ -43,7 +43,7 @@ func TestSquadOperatingProtocolScopesParentStatusOwnership(t *testing.T) {
 
 	// Everything that is not the status responsibility is identical, so a
 	// guest leader still coordinates, delegates, and records activity.
-	owner := squadOperatingProtocolFor(true)
+	owner := squadOperatingProtocolFor(true, leaderNoWorkflow)
 	for _, shared := range []string{
 		"## Squad Operating Protocol",
 		"Delegate by @mention",
@@ -153,7 +153,7 @@ func seededHumanMember(t *testing.T) (memberID, userID, userName string) {
 // the prohibition, its exact scope, and the failure fallback.
 func TestSquadOperatingProtocolOwnsNoActionRule(t *testing.T) {
 	for _, ownsParentStatus := range []bool{true, false} {
-		protocol := squadOperatingProtocolFor(ownsParentStatus)
+		protocol := squadOperatingProtocolFor(ownsParentStatus, leaderNoWorkflow)
 		compact := strings.Join(strings.Fields(protocol), " ")
 
 		for _, want := range []string{
@@ -195,7 +195,7 @@ func TestBuildSquadLeaderBriefing_FullSquad(t *testing.T) {
 	_ = memberRowID
 	addHumanMember(t, squad.ID, userID, "reviewer")
 
-	out := buildSquadLeaderBriefing(ctx, testHandler.Queries, squad, true)
+	out := buildSquadLeaderBriefing(ctx, testHandler.Queries, squad, true, leaderNoWorkflow, false)
 
 	for _, want := range []string{
 		"## Squad Operating Protocol",
@@ -271,7 +271,7 @@ func TestBuildSquadLeaderBriefing_MemberSkillsInRoster(t *testing.T) {
 	_ = memberRowID
 	addHumanMember(t, squad.ID, userID, "reviewer")
 
-	out := buildSquadLeaderBriefing(ctx, testHandler.Queries, squad, true)
+	out := buildSquadLeaderBriefing(ctx, testHandler.Queries, squad, true, leaderNoWorkflow, false)
 
 	if !strings.Contains(out, "skills: polars, statistical-analysis") {
 		t.Errorf("expected skilled member skills in roster, got:\n%s", out)
@@ -290,7 +290,7 @@ func TestBuildSquadLeaderBriefing_OnlyLeader(t *testing.T) {
 	leaderID, _ := seededLeaderAgent(t)
 	squad := seedSquadForBriefing(t, leaderID, "Solo Squad", "")
 
-	out := buildSquadLeaderBriefing(ctx, testHandler.Queries, squad, true)
+	out := buildSquadLeaderBriefing(ctx, testHandler.Queries, squad, true, leaderNoWorkflow, false)
 	if !strings.Contains(out, "Members: (none — you are the only member of this squad)") {
 		t.Errorf("expected lone-leader fallback line, got:\n%s", out)
 	}
@@ -314,7 +314,7 @@ func TestBuildSquadLeaderBriefing_SkipsArchivedAgent(t *testing.T) {
 		t.Fatalf("archive agent: %v", err)
 	}
 
-	out := buildSquadLeaderBriefing(ctx, testHandler.Queries, squad, true)
+	out := buildSquadLeaderBriefing(ctx, testHandler.Queries, squad, true, leaderNoWorkflow, false)
 	if strings.Contains(out, "Retired Bot") {
 		t.Errorf("archived agent should not appear in roster:\n%s", out)
 	}
@@ -324,36 +324,42 @@ func TestBuildSquadLeaderBriefing_SkipsArchivedAgent(t *testing.T) {
 }
 
 // TestBuildSquadLeaderBriefing_MentionsRoundTrip is the contract test
-// guaranteeing every emitted mention markdown string parses back through
-// util.ParseMentions to its (type, id). If this ever breaks, the leader's
+// guaranteeing every roster mention is copyable inline code: the briefing
+// itself must not trigger ParseMentions, but pasting the unwrapped syntax
+// must round-trip to its (type, id). If this ever breaks, the leader's
 // dispatch comments will silently fail to trigger anyone.
 func TestBuildSquadLeaderBriefing_MentionsRoundTrip(t *testing.T) {
 	ctx := context.Background()
-	leaderID, _ := seededLeaderAgent(t)
+	leaderID, leaderName := seededLeaderAgent(t)
 	squad := seedSquadForBriefing(t, leaderID, "Mention Round Trip", "")
 
 	helper := createHandlerTestAgent(t, "Round Trip Bot", []byte("[]"))
 	addAgentMember(t, squad.ID, helper, "")
 
-	memberRowID, userID, _ := seededHumanMember(t)
+	memberRowID, userID, userName := seededHumanMember(t)
 	_ = memberRowID
 	addHumanMember(t, squad.ID, userID, "")
 
-	out := buildSquadLeaderBriefing(ctx, testHandler.Queries, squad, true)
-	mentions := util.ParseMentions(out)
+	out := buildSquadLeaderBriefing(ctx, testHandler.Queries, squad, true, leaderNoWorkflow, false)
+	if triggered := util.ParseMentions(out); len(triggered) != 0 {
+		t.Errorf("briefing code examples must not trigger ParseMentions, got %#v", triggered)
+	}
 
-	wantIDs := map[string]string{
-		leaderID: "agent",
-		helper:   "agent",
-		userID:   "member",
+	wants := []struct {
+		id, kind, name string
+	}{
+		{leaderID, "agent", leaderName},
+		{helper, "agent", "Round Trip Bot"},
+		{userID, "member", userName},
 	}
-	got := make(map[string]string, len(mentions))
-	for _, m := range mentions {
-		got[m.ID] = m.Type
-	}
-	for id, kind := range wantIDs {
-		if got[id] != kind {
-			t.Errorf("expected %s mention for id %s, got %q (all parsed: %#v)", kind, id, got[id], mentions)
+	for _, w := range wants {
+		md := formatMention(w.name, w.kind, w.id)
+		if !strings.Contains(out, "`"+md+"`") {
+			t.Errorf("expected copyable inline-code mention %s in roster:\n%s", md, out)
+		}
+		pasted := util.ParseMentions(md)
+		if len(pasted) != 1 || pasted[0].Type != w.kind || pasted[0].ID != w.id {
+			t.Errorf("pasted %s mention for id %s = %#v, want [{Type:%s ID:%s}]", w.kind, w.id, pasted, w.kind, w.id)
 		}
 	}
 }
@@ -371,7 +377,7 @@ func claimAndDecodeAgent(t *testing.T, runtimeID string) *TaskAgentData {
 		t.Fatalf("refresh runtime heartbeat: %v", err)
 	}
 	w := httptest.NewRecorder()
-	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil, testWorkspaceID, "test-claim-squad-briefing")
+	req := newOwnerDaemonRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil)
 	req = withURLParam(req, "runtimeId", runtimeID)
 	testHandler.ClaimTaskByRuntime(w, req)
 	if w.Code != http.StatusOK {

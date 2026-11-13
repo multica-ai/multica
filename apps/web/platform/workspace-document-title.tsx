@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { parseTabSubject } from "@multica/core/paths";
 import { useTabPresentation } from "@multica/views/layout";
@@ -38,14 +38,26 @@ export function WorkspaceDocumentTitle() {
   // tab strip needs: a browser tab has no other place to show the product name.
   const documentTitle =
     subject.kind === "unknown" ? SITE_TITLE : formatDocumentTitle(title);
+  const documentTitleRef = useRef(documentTitle);
+  documentTitleRef.current = documentTitle;
 
-  // `url` is a dependency even though `documentTitle` is what we write: an app
-  // router navigation re-renders the target route's metadata and resets
-  // document.title to the root default, so a move between two routes that
-  // happen to share a title (`/inbox` → `/inbox?view=archived`) has to
-  // re-assert it.
+  // Keep one observer for the dashboard lifetime and have it read the latest
+  // intended title from a ref. Recreating an observer per route leaves a window
+  // where a queued callback from the previous issue can restore its stale title.
   useEffect(() => {
-    document.title = documentTitle;
+    const applyLatestTitle = () => {
+      const latest = documentTitleRef.current;
+      if (document.title !== latest) document.title = latest;
+    };
+
+    const observer = new MutationObserver(applyLatestTitle);
+    observer.observe(document.head, { childList: true, subtree: true });
+
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (document.title !== documentTitle) document.title = documentTitle;
   }, [documentTitle, url]);
 
   // Leaving the dashboard entirely (logout, workspace switcher, landing) drops

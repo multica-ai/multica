@@ -119,11 +119,6 @@ func countPendingTasksForAgent(t *testing.T, issueID, agentID string) int {
 		WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued', 'dispatched', 'running')`, issueID, agentID)
 }
 
-func countInboxItems(t *testing.T, recipientUserID, issueID string) int {
-	t.Helper()
-	return dbfx.Count(t, `SELECT count(*) FROM inbox_item WHERE recipient_id = $1 AND issue_id = $2`, recipientUserID, issueID)
-}
-
 // childDoneEntry is one timeline entry the rule wrote on the parent.
 type childDoneEntry struct {
 	Stage      *int32 `json:"stage"`
@@ -299,6 +294,44 @@ func TestChildDoneHeldWhileParentInBacklog(t *testing.T) {
 	runWakeupTick(t)
 	if got := len(childDoneEntries(t, fx.parent.ID)); got != 1 {
 		t.Fatalf("parking again repeated the wake: %d entries", got)
+	}
+}
+
+// A pass on a parked parent evaluates nothing but still commits, so it clears
+// an earlier pass's error instead of holding it until the parent leaves backlog.
+func TestChildDoneParkedPassClearsEarlierError(t *testing.T) {
+	ctx := context.Background()
+	fx := newChildDoneFixture(t, "backlog")
+	setIssueAssigneeDirect(t, fx.parent.ID, "agent", handlerTestAgentID(t))
+	updateChildStatus(t, fx.child.ID, "done") // creates the parent's rule
+	runWakeupTick(t)
+	tag, err := testPool.Exec(ctx, `UPDATE issue_wakeup SET last_error = 'earlier failure'
+		WHERE issue_id = $1 AND system_rule IS NOT NULL`, fx.parent.ID)
+	if err != nil || tag.RowsAffected() != 1 {
+		t.Fatalf("seed the parent's rule error: %v (%d rows)", err, tag.RowsAffected())
+	}
+
+	receipts := func() (n int) {
+		t.Helper()
+		if err := testPool.QueryRow(ctx, `SELECT count(*) FROM issue_wakeup_receipt r JOIN issue_wakeup w ON w.id = r.wakeup_id
+			WHERE w.issue_id = $1 AND w.system_rule IS NOT NULL`, fx.parent.ID).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	before := receipts()
+	updateChildStatus(t, fx.child.ID, "in_progress") // its hint dispatches the parked pass inline
+	runWakeupTick(t)
+	if receipts() == before {
+		t.Fatal("reopening the sub-issue sent the parked parent's rule no hint")
+	}
+	var lastError *string
+	if err := testPool.QueryRow(ctx, `SELECT last_error FROM issue_wakeup
+		WHERE issue_id = $1 AND system_rule IS NOT NULL`, fx.parent.ID).Scan(&lastError); err != nil {
+		t.Fatal(err)
+	}
+	if lastError != nil {
+		t.Fatalf("the parked pass kept the earlier error %q", *lastError)
 	}
 }
 

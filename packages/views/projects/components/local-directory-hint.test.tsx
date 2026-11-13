@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
-import type { ProjectResource } from "@multica/core/types";
+import type { Agent, ProjectResource } from "@multica/core/types";
 import enCommon from "../../locales/en/common.json";
 import enProjects from "../../locales/en/projects.json";
 
@@ -23,26 +23,32 @@ vi.mock("@multica/core/hooks", () => ({
 }));
 
 const mockListResources = vi.hoisted(() => vi.fn());
+const mockListRuntimes = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/core/api", () => ({
   api: {
     listProjectResources: (...args: unknown[]) => mockListResources(...args),
+    listRuntimes: (...args: unknown[]) => mockListRuntimes(...args),
   },
 }));
 
 import { LocalDirectoryHint } from "./local-directory-hint";
 
-function renderHint(projectId: string | null | undefined) {
+function renderHint(
+  projectId: string | null | undefined,
+  assignedAgent?: Pick<Agent, "runtime_id" | "runtime_bound"> | null,
+) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  return render(
+  const result = render(
     <QueryClientProvider client={qc}>
       <I18nProvider locale="en" resources={TEST_RESOURCES}>
-        <LocalDirectoryHint projectId={projectId} />
+        <LocalDirectoryHint projectId={projectId} assignedAgent={assignedAgent} />
       </I18nProvider>
     </QueryClientProvider>,
   );
+  return { ...result, queryClient: qc };
 }
 
 function makeLocalDirectoryResource(overrides: {
@@ -77,6 +83,41 @@ describe("LocalDirectoryHint", () => {
     mockDaemonStatus.deviceName = null;
     mockDaemonStatus.running = false;
     mockListResources.mockReset();
+    mockListRuntimes.mockReset().mockResolvedValue([]);
+  });
+
+  it("shows the assigned agent's directory instead of the viewer's directory (#8861)", async () => {
+    mockDaemonStatus.daemonId = "daemon-A";
+    mockListRuntimes.mockResolvedValue([{ id: "runtime-vue", daemon_id: "daemon-B" }]);
+    mockListResources.mockResolvedValue({
+      resources: [
+        makeLocalDirectoryResource({ daemon_id: "daemon-A", local_path: "/repos/laravel", label: "Laravel" }),
+        makeLocalDirectoryResource({ daemon_id: "daemon-B", local_path: "/repos/vue", label: "VueJS", execution_mode: "worktree" }),
+      ],
+      total: 2,
+    });
+
+    renderHint("proj-1", { runtime_id: "runtime-vue" });
+
+    expect(await screen.findByText("VueJS")).toBeInTheDocument();
+    expect(screen.getByText(/\/repos\/vue/)).toBeInTheDocument();
+    expect(screen.getByText(/isolated worktree of/i)).toBeInTheDocument();
+    expect(screen.queryByText("Laravel")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    { name: "agent is missing", agent: null, runtimes: [] },
+    { name: "runtime is hidden or missing", agent: { runtime_id: "runtime-vue" }, runtimes: [] },
+  ])("does not substitute the viewer's directory when $name", async ({ agent, runtimes }) => {
+    mockDaemonStatus.daemonId = "daemon-A";
+    mockListRuntimes.mockResolvedValue(runtimes);
+    mockListResources.mockResolvedValue({
+      resources: [makeLocalDirectoryResource({ daemon_id: "daemon-A", local_path: "/repos/laravel", label: "Laravel" })],
+      total: 1,
+    });
+    const { container, queryClient } = renderHint("proj-1", agent);
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+    expect(container).toBeEmptyDOMElement();
   });
 
   it("renders nothing when project_id is null", () => {
@@ -199,7 +240,7 @@ describe("LocalDirectoryHint", () => {
     expect(screen.queryByText(/isolated worktree/i)).not.toBeInTheDocument();
   });
 
-  it("ignores resources pinned to a different daemon", async () => {
+  it("ignores other daemons when there is no agent assignee", async () => {
     mockDaemonStatus.daemonId = "daemon-A";
     mockDaemonStatus.running = true;
     mockListResources.mockResolvedValue({
@@ -212,10 +253,8 @@ describe("LocalDirectoryHint", () => {
       ],
       total: 1,
     });
-    const { container } = renderHint("proj-1");
-    // Allow the query to settle; the hint should still render nothing.
-    await Promise.resolve();
-    await Promise.resolve();
+    const { container, queryClient } = renderHint("proj-1");
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
     expect(container.querySelector("div[class*='rounded-md']")).toBeNull();
   });
 });

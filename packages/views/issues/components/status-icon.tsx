@@ -8,18 +8,14 @@ import type {
 } from "@multica/core/types";
 import { STATUS_CONFIG } from "@multica/core/issues/config";
 
-// ---------------------------------------------------------------------------
 // Geometry constants (viewBox 0 0 14 14, center 7,7)
-// ---------------------------------------------------------------------------
 
 const CX = 7;
 const CY = 7;
 const OUTER_R = 6;
 const FILL_R = 3.5;
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 /** Build a pie-wedge SVG path from 12 o'clock, clockwise */
 function piePath(cx: number, cy: number, r: number, progress: number): string {
@@ -30,9 +26,7 @@ function piePath(cx: number, cy: number, r: number, progress: number): string {
   return `M${cx},${cy} L${cx},${cy - r} A${r},${r} 0 ${largeArc},1 ${endX},${endY} Z`;
 }
 
-// ---------------------------------------------------------------------------
 // Base component — dashed outer ring + pie fill + optional center icon
-// ---------------------------------------------------------------------------
 
 function ProgressCircle({
   progress,
@@ -65,9 +59,7 @@ function ProgressCircle({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Per-status renderers
-// ---------------------------------------------------------------------------
 
 /** 16 small dots arranged in a ring */
 function BacklogIcon() {
@@ -146,9 +138,7 @@ function CancelledIcon() {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Renderer map
-// ---------------------------------------------------------------------------
 
 const STATUS_RENDERERS: Record<BuiltInIssueStatus, () => React.ReactNode> = {
   backlog: BacklogIcon,
@@ -178,18 +168,16 @@ const ICON_RENDERERS: Record<IssueStatusIcon, () => React.ReactNode> = {
 };
 
 const BUILT_IN_ICON_COLOR: Record<BuiltInIssueStatus, string> = {
-  backlog: "text-muted-foreground",
-  todo: "text-muted-foreground",
-  in_progress: "text-warning",
-  in_review: "text-success",
-  done: "text-info",
-  blocked: "text-destructive",
-  cancelled: "text-muted-foreground",
+  backlog: "text-status-backlog",
+  todo: "text-status-todo",
+  in_progress: "text-status-in-progress",
+  in_review: "text-status-in-review",
+  done: "text-status-done",
+  blocked: "text-status-blocked",
+  cancelled: "text-status-cancelled",
 };
 
-// ---------------------------------------------------------------------------
 // Public component
-// ---------------------------------------------------------------------------
 
 export function StatusIcon({
   status,
@@ -227,6 +215,7 @@ export function StatusIcon({
 
   return (
     <svg
+      data-mc="status-icon"
       viewBox="0 0 14 14"
       fill="none"
       style={useCustomColor ? { color: color ?? undefined } : undefined}

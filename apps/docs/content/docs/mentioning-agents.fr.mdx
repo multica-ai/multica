@@ -4,6 +4,8 @@ description: "@mentionnez un agent dans un commentaire de tâche, ou continuez �
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { MentionDemo } from "@/components/demos/mention-demo";
+import { SteerDemo } from "@/components/demos/steer-demo";
 
 @mentionnez un agent dans un commentaire lorsque vous voulez qu'il examine une nouvelle information, réponde à une question ou aide l'assigné actuel. Le commentaire devient le point de départ de l'exécution ; l'assigné et le statut de la tâche restent inchangés.
 
@@ -27,9 +29,9 @@ Après avoir choisi un agent ou un squad dans l'éditeur de commentaire, un aper
 - si chaque cible provient d'une @mention directe, de l'assigné de la tâche ou d'un chef de squad ;
 - si une cible est indisponible, ou si vous n'avez pas la permission de l'exécuter.
 
-Décocher un agent n'ignore que ce déclenchement-ci — inutile de supprimer son nom du commentaire, et le réglage Accès de l'agent n'est pas modifié.
+Décocher un agent n'ignore que ce déclenchement-ci : inutile de supprimer son nom du commentaire, et le réglage Accès de l'agent n'est pas modifié.
 
-![Aperçu des déclenchements avant l'envoi : liste des agents qui commenceront à travailler une fois le commentaire envoyé](/images/docs/mention-trigger-preview.webp)
+<MentionDemo />
 
 Une fois le commentaire publié, un runtime en ligne prend généralement l'exécution en charge immédiatement ; si le runtime est hors ligne, l'exécution attend dans la file d'attente.
 
@@ -45,15 +47,37 @@ Lorsqu'un commentaire @mentionne explicitement d'autres cibles (y compris des me
 
 Les réponses restent attribuées à l'agent ciblé même lorsque son runtime est hors ligne ou occupé. Multica ne démarre pas automatiquement l'assigné de la tâche après un délai. Pour impliquer un autre agent, @mentionnez-le explicitement.
 
+## Réorienter un agent en cours d'exécution
+
+Quand un agent part dans la mauvaise direction en plein travail, inutile de l'arrêter pour tout recommencer. Écrivez la correction dans la zone de commentaire et envoyez-la : le message rejoint son exécution en cours, l'agent le lit dès la fin de l'étape en cours et poursuit la tâche d'origine dans la nouvelle direction.
+
+<SteerDemo />
+
+Quand le destinataire est en cours d'exécution, une étiquette sous la zone de commentaire indique comment le message sera remis. Cliquez dessus pour changer :
+
+| Option | Effet |
+|---|---|
+| Ajouter à l'exécution en cours | Lu après l'étape en cours ; l'agent poursuit la tâche d'origine. |
+| Démarrer après cette exécution | N'interrompt pas l'exécution en cours ; traité ensuite dans une nouvelle exécution. |
+| Arrêter et recommencer | Arrête l'exécution en cours et recommence à partir de ce message. |
+| Ne démarrera pas cette fois | Publie le commentaire sans déclencher cet agent. |
+
+Après l'envoi, le commentaire affiche d'abord « En attente de lecture par … », puis « Lu par … » une fois le message lu. La liste des étapes du journal d'exécution indique aussi à quelle étape il a été lu. Si la remise échoue, vous pouvez réessayer ou l'envoyer comme nouvelle exécution.
+
+- Seul du texte peut rejoindre une exécution en cours. Un message avec des pièces jointes est traité après la fin de l'exécution.
+- La réorientation doit être prise en charge par l'outil de codage IA de l'agent. Sinon, « Ajouter à l'exécution en cours » n'est pas proposé.
+- Le choix par défaut se règle dans **Paramètres → Préférences**, sous **En répondant à un agent en cours d'exécution**. Vous pouvez toujours le modifier pour chaque message avant l'envoi.
+- Dans le chat, **Réorienter** sur un message en file d'attente fonctionne autrement : la réponse en cours s'arrête d'abord ; voir [Chat](/chat#envoyer-des-messages-pendant-une-réponse).
+
 ## Regroupement des commentaires consécutifs
 
-Lorsque le même agent a déjà une exécution en attente sur la tâche, les nouveaux commentaires consécutifs sont fusionnés dans cette exécution en attente ; si l'agent est déjà en cours d'exécution, les commentaires suivants attendent la fin de l'exécution en cours et sont fusionnés en une seule exécution de suivi. Vous pouvez continuer à ajouter des informations sans attendre la réponse de l'agent.
+Lorsque le même agent a déjà une exécution en attente sur la tâche, les nouveaux commentaires sont fusionnés dans cette exécution et traités ensemble à son démarrage. Si l'agent est déjà en cours d'exécution, chaque commentaire est traité selon le choix fait dans la zone de commentaire (voir la section précédente). Vous pouvez continuer à ajouter des informations sans attendre la réponse de l'agent.
 
 Lorsqu'un commentaire @mentionne plusieurs agents différents, chaque agent obtient sa propre exécution ; plusieurs mentions qui désignent le même agent n'en produisent qu'une seule.
 
 ## Commentaires qui ne déclenchent pas d'agent
 
-Deux possibilités :
+Il y a deux possibilités :
 
 - Commencez le commentaire par `/note` : il est publié comme une note entre membres et ne déclenche aucun agent.
 - Utilisez `@all` : cela notifie tous les membres de l'espace de travail et désactive, pour ce commentaire, le déclenchement automatique de l'assigné.
@@ -70,7 +94,7 @@ Une @mention ne peut pas contourner le réglage Accès d'un agent. Si vous n'ave
 
 ## Agents qui se mentionnent entre eux
 
-Les agents peuvent @mentionner d'autres agents dans leurs réponses. Lorsque A @mentionne B et que B @mentionne A en retour, le système fusionne les exécutions en double au même moment, mais il ne décide pas quand la collaboration doit prendre fin — inscrivez la condition d'arrêt dans les instructions de l'agent.
+Les agents peuvent @mentionner d'autres agents dans leurs réponses. Lorsque A @mentionne B et que B @mentionne A en retour, le système fusionne les exécutions en double au même moment, mais il ne décide pas si la collaboration doit prendre fin. Indiquez dans les instructions de l'agent quand s'arrêter.
 
 ## Étapes suivantes
 

@@ -21,7 +21,7 @@ func newTaskClaimRacePool(t *testing.T) *pgxpool.Pool {
 
 func TestClaimTaskConcurrentCapacityRespected(t *testing.T) {
 	ctx := context.Background()
-	pool := newTaskClaimRacePool(t)
+	pool := taskClaimTriggerPool(t)
 	queries := db.New(pool)
 
 	agentID := createClaimCapacityFixture(t, ctx, pool)

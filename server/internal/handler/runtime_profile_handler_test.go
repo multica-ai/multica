@@ -444,13 +444,15 @@ func TestCreateRuntimeProfile_RuntimeIdentity(t *testing.T) {
 		t.Skip("database not available")
 	}
 	for _, tc := range []struct {
-		name, target, family string
-		status               int
+		name, target, family, wantFamily string
+		status                           int
 	}{
-		{"omp", "omp", "", http.StatusCreated},
-		{"legacy pi", "", "pi", http.StatusCreated},
-		{"mismatch", "omp", "codex", http.StatusBadRequest},
-		{"unknown", "unknown", "", http.StatusBadRequest},
+		{"omp", "omp", "", "pi", http.StatusCreated},
+		{"amp", "amp", "", "amp", http.StatusCreated},
+		{"amp protocol", "", "amp", "amp", http.StatusCreated},
+		{"legacy pi", "", "pi", "pi", http.StatusCreated},
+		{"mismatch", "omp", "codex", "", http.StatusBadRequest},
+		{"unknown", "unknown", "", "", http.StatusBadRequest},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := withURLParam(newRequest("POST", "/", map[string]any{
@@ -474,7 +476,7 @@ func TestCreateRuntimeProfile_RuntimeIdentity(t *testing.T) {
 			if want == "" {
 				want = tc.family
 			}
-			if resp.RuntimeType != want || resp.ProtocolFamily != "pi" || resp.CommandName != "wrapper" || len(resp.FixedArgs) != 1 {
+			if resp.RuntimeType != want || resp.ProtocolFamily != tc.wantFamily || resp.CommandName != "wrapper" || len(resp.FixedArgs) != 1 {
 				t.Fatalf("incorrect identity: %+v", resp)
 			}
 		})

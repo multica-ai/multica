@@ -11,6 +11,7 @@ function useWritePullRequests(issueId: string) {
   const qc = useQueryClient();
   return (data: IssuePullRequestsResponse) => {
     qc.setQueryData(githubKeys.pullRequests(issueId), data);
+    qc.invalidateQueries({ queryKey: ["github", "pull-requests", "summaries"] });
   };
 }
 

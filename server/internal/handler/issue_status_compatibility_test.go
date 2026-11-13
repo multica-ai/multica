@@ -193,13 +193,13 @@ func TestStatusCompatibilityGCAfterContract(t *testing.T) {
 					}
 				}
 				var single result
-				req := withURLParam(newDaemonTokenRequest("GET", "/api/daemon/issues/"+id+"/gc-check", nil, testWorkspaceID, "compat-daemon"), "issueId", id)
+				req := withURLParam(newOwnerDaemonRequest("GET", "/api/daemon/issues/"+id+"/gc-check", nil), "issueId", id)
 				testutil.Call(t, testHandler.GetIssueGCCheck, req).Want(http.StatusOK).JSON(&single)
 				check(single)
 				var batch struct {
 					Issues []result `json:"issues"`
 				}
-				req = withURLParam(newDaemonTokenRequest("POST", "/api/daemon/workspaces/"+testWorkspaceID+"/issues/gc-check", map[string]any{"issue_ids": []string{id}}, testWorkspaceID, "compat-daemon"), "workspaceId", testWorkspaceID)
+				req = withURLParam(newOwnerDaemonRequest("POST", "/api/daemon/workspaces/"+testWorkspaceID+"/issues/gc-check", map[string]any{"issue_ids": []string{id}}), "workspaceId", testWorkspaceID)
 				testutil.Call(t, testHandler.BatchIssueGCCheck, req).Want(http.StatusOK).JSON(&batch)
 				if len(batch.Issues) != 1 {
 					t.Fatalf("GC results=%d", len(batch.Issues))

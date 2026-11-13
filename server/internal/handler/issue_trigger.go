@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/issueworkflow"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -89,7 +90,7 @@ func (h *Handler) dispatchIssueRun(ctx context.Context, issue db.Issue, trigger 
 		// member actor is threaded; otherwise attribution falls back to the chain.
 		_, _ = h.TaskService.EnqueueTaskForIssueWithHandoff(ctx, issue, handoffNote, memberActorUserID(actorType, actorID))
 	case "squad":
-		h.enqueueSquadLeaderTask(ctx, issue, pgtype.UUID{}, actorType, actorID, handoffNote)
+		h.enqueueSquadLeaderTask(ctx, issue, actorType, actorID, handoffNote, trigger.WorkflowHandoff)
 	}
 }
 
@@ -120,6 +121,9 @@ type IssueTriggerPreviewRequest struct {
 	AssigneeType *string `json:"assignee_type"`
 	AssigneeID   *string `json:"assignee_id"`
 	Status       *string `json:"status"`
+	// ProjectID places a create preview in a project, so its workflow's
+	// starting status and starting-step handoff apply. (MUL-7420)
+	ProjectID *string `json:"project_id,omitempty"`
 }
 
 // IssueTriggerPreviewItem is one issue that WILL start a run under the
@@ -161,6 +165,12 @@ func (h *Handler) PreviewIssueTrigger(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(req.IssueIDs) > maxPreviewTriggerIssues {
 		writeError(w, http.StatusBadRequest, "too many issue_ids")
+		return
+	}
+	// MUL-8472: an issue or project the caller cannot see previews like an
+	// unknown one.
+	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+	if !ok {
 		return
 	}
 
@@ -211,6 +221,20 @@ func (h *Handler) PreviewIssueTrigger(w http.ResponseWriter, r *http.Request) {
 			AssigneeType: newAssigneeType,
 			AssigneeID:   newAssigneeID,
 		}
+		// Mirror CreateIssue's workflow handling: the starting column's
+		// handoff when no assignee was picked. (MUL-7420)
+		if req.ProjectID != nil && *req.ProjectID != "" {
+			if projectUUID, err := util.ParseUUID(*req.ProjectID); err == nil && hidden.CanSeeProject(projectUUID) {
+				if def, project, err := issueworkflow.ForProject(r.Context(), h.Queries, wsUUID, projectUUID); err == nil && def != nil {
+					if step, ok := def.Step(candidate.Status); ok && step.HandsOff() && !hasNewAssignee {
+						if t, id, ok := issueworkflow.ResolveHandler(step, project, actorType, parseUUID(actorID)); ok {
+							candidate.AssigneeType = pgtype.Text{String: t, Valid: true}
+							candidate.AssigneeID = id
+						}
+					}
+				}
+			}
+		}
 		appendTrigger(candidate, service.IssueTriggerInput{Issue: candidate, IsCreate: true})
 		resp.TotalCount = len(resp.Triggers)
 		writeJSON(w, http.StatusOK, resp)
@@ -226,8 +250,8 @@ func (h *Handler) PreviewIssueTrigger(w http.ResponseWriter, r *http.Request) {
 			ID:          issueUUID,
 			WorkspaceID: parseUUID(workspaceID),
 		})
-		if err != nil {
-			continue // cross-workspace / unknown id contributes no trigger
+		if err != nil || !hidden.CanSeeProject(loaded.ProjectID) {
+			continue // cross-workspace / unknown / hidden id contributes no trigger
 		}
 
 		post := loaded
@@ -241,6 +265,22 @@ func (h *Handler) PreviewIssueTrigger(w http.ResponseWriter, r *http.Request) {
 		if req.Status != nil && *req.Status != "" {
 			post.Status = *req.Status
 			in.StatusChanged = loaded.Status != *req.Status
+			// A status that enters a workflow handoff step reassigns the
+			// issue, exactly as UpdateIssue will. (MUL-7420)
+			if !hasNewAssignee {
+				params := db.UpdateIssueParams{
+					ProjectID:    loaded.ProjectID,
+					Status:       pgtype.Text{String: *req.Status, Valid: true},
+					AssigneeType: loaded.AssigneeType,
+					AssigneeID:   loaded.AssigneeID,
+				}
+				if hand, err := h.applyIssueWorkflow(r.Context(), loaded, &params, true, false, false, nil); err == nil && hand != nil {
+					post.AssigneeType = params.AssigneeType
+					post.AssigneeID = params.AssigneeID
+					in.AssigneeChanged = true
+					in.EnteredHandoffStep = true
+				}
+			}
 		}
 		in.Issue = post
 		appendTrigger(post, in)

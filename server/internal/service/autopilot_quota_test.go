@@ -707,7 +707,7 @@ func TestAutopilotQuotaObserveToEnforceAndOffFinalization(t *testing.T) {
 	// under observe/enforce. Terminal finalization relies on the persisted slot.
 	fixture.setPolicy(entitlement.ActionOff, fixture.periodStart, fixture.periodEnd, 1)
 	for _, run := range runs {
-		if _, err := fixture.service.failAutopilotRun(ctx, db.UpdateAutopilotRunFailedParams{
+		if _, err := fixture.service.failAutopilotRun(ctx, autopilotRunFailure{
 			ID: run.ID, FailureReason: pgtype.Text{String: "test cleanup", Valid: true},
 		}); err != nil {
 			t.Fatalf("finalize while policy off: %v", err)
@@ -738,7 +738,7 @@ func TestAutopilotQuotaConsumedCreateIssueCannotBeRefunded(t *testing.T) {
 	if _, err := settleAutopilotQuota(ctx, fixture.queries, cancelled.QuotaReservationID, true); err != nil {
 		t.Fatalf("consume cancelled run: %v", err)
 	}
-	if _, err := fixture.service.failAutopilotRun(ctx, db.UpdateAutopilotRunFailedParams{
+	if _, err := fixture.service.failAutopilotRun(ctx, autopilotRunFailure{
 		ID: cancelled.ID, FailureReason: pgtype.Text{String: "issue cancelled", Valid: true},
 	}); err != nil {
 		t.Fatalf("fail consumed run: %v", err)
@@ -777,7 +777,7 @@ func TestAutopilotQuotaTerminalUpdateNeedsNoTransactionStarter(t *testing.T) {
 		t.Fatalf("create off-path run: %v", err)
 	}
 	serviceWithoutTx := &AutopilotService{Queries: fixture.queries}
-	updated, err := serviceWithoutTx.completeAutopilotRun(ctx, db.UpdateAutopilotRunCompletedParams{ID: run.ID})
+	updated, err := serviceWithoutTx.completeAutopilotRun(ctx, autopilotRunCompletion{ID: run.ID})
 	if err != nil {
 		t.Fatalf("complete off-path run: %v", err)
 	}
@@ -798,7 +798,7 @@ func TestAutopilotQuotaSettlementStaysInOriginalPeriod(t *testing.T) {
 	secondStart := fixture.periodEnd
 	secondEnd := secondStart.Add(19 * time.Hour)
 	fixture.setPolicy(entitlement.ActionEnforce, secondStart, secondEnd, 1)
-	if _, err := fixture.service.completeAutopilotRun(ctx, db.UpdateAutopilotRunCompletedParams{ID: run.ID}); err != nil {
+	if _, err := fixture.service.completeAutopilotRun(ctx, autopilotRunCompletion{ID: run.ID}); err != nil {
 		t.Fatalf("complete after period rollover: %v", err)
 	}
 
@@ -861,7 +861,9 @@ func TestAutopilotQuotaReconcilerSettlesTerminalOnlyOnce(t *testing.T) {
 	}
 	// Simulate a crash after the run reached terminal state but before the old
 	// two-step finalizer settled its reservation.
-	if _, err := fixture.queries.UpdateAutopilotRunCompleted(ctx, db.UpdateAutopilotRunCompletedParams{ID: terminal.ID}); err != nil {
+	if _, err := fixture.pool.Exec(ctx, `
+		UPDATE autopilot_run SET status = 'completed', completed_at = now() WHERE id = $1
+	`, terminal.ID); err != nil {
 		t.Fatalf("seed terminal crash window: %v", err)
 	}
 

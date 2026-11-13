@@ -1,0 +1,221 @@
+---
+title: GitHub 整合
+description: 把 pull request 與 Multica 任務關聯，並在任務中檢視開發進展。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { PrLinkDemo } from "@/components/demos/pr-link-demo";
+
+連線 GitHub 後，Multica 根據任務編號自動關聯 pull request。任務詳情中可直接檢視 PR 狀態、改動規模、CI 結果和合並衝突。
+
+GitHub 整合只讀取安裝時授權的倉庫，不會提交程式碼、評論或 status check。
+
+自部署的 Multica 還可以並行連線自託管的 Forgejo、Gitea 或 GitLab 例項，獲得同樣的 PR 自動關聯、合併後改狀態和 CI 展示，入口在 **設定 → 程式碼**，詳見[自託管 Git 程式碼託管](/vcs-integration)。Multica Cloud 不提供該入口。
+
+## 連線 GitHub
+
+工作區 owner 或 admin 可以完成連線：
+
+<Steps>
+<Step>
+開啟 **設定 → 程式碼**。
+</Step>
+<Step>
+在 **GitHub** 一行點選 **連線 GitHub**。
+</Step>
+<Step>
+在 GitHub 中選擇帳號或組織，並授權全部倉庫或指定倉庫。
+</Step>
+<Step>
+安裝完成後回到 Multica。
+</Step>
+</Steps>
+
+連線狀態會顯示在同一頁面。普通成員可以檢視狀態，但不能連線、斷開或修改開關。
+
+<Callout type="info">
+**GitHub 連線**決定 Multica 從哪些倉庫接收 PR 事件；**程式碼倉庫**設定決定 AI 代理執行時可以選擇哪些倉庫。兩者用途不同，需要分別配置。
+</Callout>
+
+## 功能開關
+
+**設定 → 程式碼** 的 **PR 與任務聯動** 中有以下設定。在 GitHub 一行的 **⋯** 選單中選擇 **暫停 GitHub 功能** 後，下面三項開關不再生效，但不會斷開 GitHub App。
+
+| 設定 | 作用 |
+|---|---|
+| PR 側欄 | 在任務詳情中顯示關聯的 pull request。 |
+| Co-authored-by | 在 AI 代理建立的 commit 中加入 `Co-authored-by: multica-agent <github@multica.ai>`。 |
+| 自動關聯 PR | 分支名或標題含任務編號、或正文中關閉語句後寫了任務編號的 PR，會關聯到對應任務。 |
+| PR 合併後，任務狀態改為 | 任務關聯的 PR 全部合併後，把任務改成某個狀態（預設 `Done`），或者不改。見[PR 合併後怎樣改狀態](#pr-合併後怎樣改狀態)。 |
+| PR 卡片 → CI 與可合併性 | 對每個關聯的 PR，Multica 以 App 身份從 GitHub API 拉取快照，把 CI 狀態和可合併性顯示在卡片上，見[在任務中檢視 PR](#在任務中檢視-pr)。 |
+
+**PR 合併後，任務狀態改為** 對所有程式碼託管平臺生效，包括[自託管 Git 程式碼託管](/vcs-integration)。
+
+## 讓 PR 關聯到任務
+
+最簡單的做法，是把任務編號寫進分支名或 PR 標題。例如任務為 `MUL-123`：
+
+```text
+mul-123-fix-login-redirect
+```
+
+```text
+MUL-123 修復登入後的跳轉
+```
+
+Multica 會忽略大小寫，並且只匹配當前工作區的任務字首。一個 PR 可以關聯多個任務。
+
+只在 PR 正文中寫編號時，需要使用 GitHub 的關閉語句：
+
+```text
+Closes MUL-123
+Fixes MUL-123
+Resolves MUL-123
+```
+
+正文中的普通提及，例如 `Related to MUL-123`，不會與該任務建立關聯。Commit message 和 PR 評論也不會觸發關聯。
+
+也可以手動關聯：在任務的 **Pull requests** 區塊點 **+**，貼上 PR 連結。要把 PR 從任務上移除，開啟這一行的 **⋯** 選單，選擇 **移除關聯**；之後 Multica 不會再根據標題或分支把它關聯回來。
+
+## 在任務中檢視 PR
+
+關聯成功後，PR 會出現在任務詳情的 **Pull requests** 區塊。每條記錄會顯示：
+
+- 倉庫、編號、標題和作者；
+- `Open`、`Draft`、`Merged` 或 `Closed` 狀態；
+- 新增、刪除行數和改動檔案數；
+- CI 狀態：全部透過（帶計數）、若干個失敗（點名失敗的 check），或若干個進行中；沒有配置任何 check 的 PR 不顯示這一項，"沒有 check"不會被當成透過；
+- 可合併性：可合併（僅當 GitHub 報告合併狀態為 clean）、有衝突、blocked 或 behind。
+
+CI 狀態和可合併性來自 Multica 從 GitHub API 拉取的快照，兩者互相獨立；已合併或已關閉的 PR 不再顯示這兩項。GitHub 暫時不可用時，卡片保留上一次的快照並標記為過期。
+
+列表下方有一行說明接下來會發生什麼，例如"等待 #19 合併後改為 已完成"，或者哪個 PR 已關閉、未合併。工作區設定為不改變、或者任務已經是目標狀態時，不顯示這行說明。
+
+點選記錄可以開啟 GitHub 上的 PR。關閉 **PR 側欄** 只會隱藏這個區塊，不會斷開連線。
+
+## PR 合併後怎樣改狀態
+
+PR 合併不一定代表任務已完成，所以由工作區決定合併後做什麼：**設定 → 程式碼 → PR 合併後，任務狀態改為**。可以選 `Done`（新工作區的預設值）、其他"已開始"或"已完成"類的狀態（也可以是自定義狀態，例如"待迴歸"），或者**不改變**。這項設定出現之前就已存在的工作區保持原來的行為：如果以前的合併並不總會完成任務，初始值就是**不改變**。
+
+以下條件同時成立時，任務會改為選定的狀態：
+
+1. 所有關聯 PR 都是 `Merged`。仍為 `Open` 或 `Draft` 的 PR 會讓任務繼續等待；關閉但未合併的 PR 也一樣，直到你把它從任務上移除；
+2. 任務當前不是 `done` 或 `cancelled`，不在 Triage 中，還不是目標狀態，也沒有單獨設定合併後不改狀態（**Pull requests → ⋯ → 此任務合併後不改狀態**）。
+
+<PrLinkDemo />
+
+PR 是怎麼關聯上的，不影響結果：標題、分支名和正文裡的 `Closes MUL-123` 只負責關聯。如果一個 PR 只交付了任務的一部分，或者合併後還要釋出、驗證，就在這個任務的 **Pull requests** 選單裡設定合併後不改狀態。
+
+只有 PR 事件會觸發判斷：關聯 PR 合併、新增關聯或移除關聯。重新開啟任務後，它不會被改回去，下一個關聯 PR 合併時才會。修改這項設定，也不會改動此前已合併的任務。
+
+狀態變化會以系統操作寫入時間線並列出相關 PR，訂閱該任務的成員會收到通知。
+
+## 多個工作區
+
+同一個 GitHub App installation 可以連線到多個 Multica 工作區。GitHub 事件會分別進入每個工作區，再按照各自的任務字首匹配。
+
+例如一個 PR 同時引用 `MUL-1` 和 `ENG-2`，它可以在兩個不同字首的工作區中分別關聯。工作區之間不會看到對方的任務。
+
+如果同一個編號在多個已連線的工作區中都對應到任務（字首相同時可能出現），Multica 不會在任何一個工作區自動關聯，避免合併時完成無關的任務。請在正確的工作區手動關聯。
+
+## 斷開連線
+
+在 **設定 → 程式碼** 的 GitHub 一行，從 **⋯** 選單選擇 **斷開**，只會移除當前 Multica 工作區與該 installation 的關係，不會替你從 GitHub 解除安裝 App。已有 PR 記錄會保留，新的事件不再進入該工作區。
+
+撤銷 GitHub 側的倉庫授權，需到個人或組織的 GitHub App installations 頁面解除安裝或調整倉庫範圍。解除安裝後，與該 installation 關聯的所有 Multica 工作區都會停止接收事件。
+
+## 自託管配置
+
+Multica Cloud 無需執行本節。自託管需要先建立自己的 GitHub App。
+
+<Steps>
+<Step>
+
+### 建立 GitHub App [#1-建立-github-app]
+
+在 GitHub 的 **Developer settings → GitHub Apps** 中建立 App，並填寫：
+
+| 欄位 | 值 |
+|---|---|
+| Homepage URL | Multica 前端地址，例如 `https://multica.example.com` |
+| Callback URL | 留空 |
+| Setup URL | `https://<api-host>/api/github/setup`，並啟用 **Redirect on update** |
+| Webhook URL | `https://<api-host>/api/webhooks/github` |
+| Webhook secret | 一段長期儲存的隨機字串 |
+
+Repository permissions：
+
+| 權限 | 級別 |
+|---|---|
+| Metadata | Read-only |
+| Pull requests | Read-only |
+| Checks | Read-only；用於顯示 CI 狀態 |
+| Commit statuses | Read-only；用於彙總 legacy status 形式的 CI |
+| Actions | 可選，Read-only；同一提交上，被同一工作流的新執行取代的已取消執行不再計入 CI 狀態 |
+
+訂閱以下事件：
+
+- **Pull request**；
+- **Check suite**、**Check run** 和 **Status**，用於觸發 CI 與可合併性重新整理。
+
+PR 快照透過 Pull requests、Checks 和 Commit statuses 的 REST API 獲取，不需要 Contents 權限。授予可選的 Actions 權限後，還會讀取該提交的工作流執行記錄；未授予時，即使同一工作流的新執行已通過，被取消的舊執行仍按失敗計算。
+
+<Callout type="warning">
+這裡需要的是 **Webhook secret**，不是 OAuth Client secret。兩邊填寫的 Webhook secret 不一致時，GitHub delivery 會返回 `401 invalid signature`。
+</Callout>
+
+</Step>
+<Step>
+
+### 配置環境變數 [#2-配置環境變數]
+
+從 App 的公開地址取得 slug。例如 `https://github.com/apps/multica-acme` 的 slug 是 `multica-acme`。
+
+```dotenv
+GITHUB_APP_SLUG=multica-acme
+GITHUB_WEBHOOK_SECRET=<建立 App 時填寫的 webhook secret>
+FRONTEND_ORIGIN=https://multica.example.com
+```
+
+`GITHUB_APP_SLUG` 和 `GITHUB_WEBHOOK_SECRET` 缺少任意一個時，連線按鈕會被禁用，webhook 介面也會拒絕處理事件。
+
+PR 卡片要顯示 CI 狀態與可合併性，還需要下面兩個變數，Multica 用它們以 App 身份鑑權並拉取快照：
+
+```dotenv
+GITHUB_APP_ID=<GitHub App 的數字 ID>
+GITHUB_APP_PRIVATE_KEY=<完整 PEM 私鑰，保留 BEGIN/END 行和換行>
+```
+
+私鑰在 GitHub App 的 **Private keys → Generate a private key** 中生成。不配置這兩個變數時，PR 照常映象，任務照常自動關聯並在合併時改狀態，只是 PR 卡片不顯示 CI 或合併狀態。
+
+</Step>
+<Step>
+
+### 更新資料庫並連線 [#3-更新資料庫並連線]
+
+升級已有部署時，先執行常規資料庫遷移：
+
+```bash
+make migrate-up
+```
+
+重啟 API 服務，再到 **設定 → 程式碼** 完成連線。
+
+</Step>
+</Steps>
+
+## 常見問題
+
+- **連線按鈕不可用**：檢查 `GITHUB_APP_SLUG` 和 `GITHUB_WEBHOOK_SECRET` 是否已進入 API 程序。
+- **Webhook 返回 401**：確認 GitHub App 與 API 使用同一個 Webhook secret，然後在 GitHub 的 **Recent Deliveries** 中重新投遞。
+- **PR 沒有關聯**：檢查倉庫是否在 App 授權範圍內、自動關聯是否開啟、編號是否屬於當前工作區，以及是否有人把它從任務上移除過。
+- **正文寫了編號但沒關聯**：改用 `Closes MUL-123`，或把編號放到分支名、PR 標題中，或者手動關聯。
+- **沒有 CI 狀態**：確認 `GITHUB_APP_ID` 和 `GITHUB_APP_PRIVATE_KEY` 已配置，App 具有 Pull requests、Checks 與 Commit statuses 的只讀權限並訂閱了對應事件。不需要 Contents 權限。給已安裝的 App 補加權限後，需要各 installation 的所有者在 GitHub 上批准才會生效。
+- **PR 合併後任務狀態沒變**：看任務 **Pull requests** 列表下方的說明，它會指出仍未合併或已關閉未合併的 PR，或者說明此任務合併後不改狀態。沒有這行說明，表示工作區設定為**不改變**，或者任務已經是目標狀態。
+
+## 接下來
+
+- [任務](/issues) — 狀態流轉與 PR 合併的關係。
+- [專案資源](/project-resources) — AI 代理執行時使用哪些倉庫。
+- [環境變數](/environment-variables) — 自託管 GitHub App 的完整配置。

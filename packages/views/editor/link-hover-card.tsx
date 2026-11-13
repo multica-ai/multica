@@ -12,14 +12,15 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import { computePosition, offset, flip, shift } from "@floating-ui/dom";
-import { ExternalLink, Copy } from "lucide-react";
+import { ExternalLink, Copy } from "@multica/ui/icons";
 import { toast } from "sonner";
-import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useWorkspaceSlug } from "@multica/core/paths";
 import { useAppOrigin } from "../navigation";
 import { useT } from "../i18n";
 import { openLink, isMentionHref } from "./utils/link-handler";
+import { useEditorOverlayOwner } from "./overlay-owner";
 
 function truncateUrl(url: string, max = 48): string {
   if (url.length <= max) return url;
@@ -34,9 +35,7 @@ function truncateUrl(url: string, max = 48): string {
   }
 }
 
-// ---------------------------------------------------------------------------
 // Hook — manages hover state with enter/leave delays
-// ---------------------------------------------------------------------------
 
 const SHOW_DELAY = 300;
 const HIDE_DELAY = 150;
@@ -123,9 +122,7 @@ function useLinkHover(containerRef: React.RefObject<HTMLElement | null>, disable
   return { ...state, cardRef, onCardEnter, onCardLeave };
 }
 
-// ---------------------------------------------------------------------------
 // Component
-// ---------------------------------------------------------------------------
 
 function LinkHoverCard({
   visible,
@@ -147,6 +144,7 @@ function LinkHoverCard({
   const slug = useWorkspaceSlug();
   const appOrigin = useAppOrigin();
   const { t } = useT("editor");
+  const overlayOwner = useEditorOverlayOwner();
 
   // Position the card when the portal div is mounted (ref callback).
   // Using useEffect would race with portal rendering — the div might
@@ -197,6 +195,7 @@ function LinkHoverCard({
     <div
       ref={setCardRef}
       className="link-hover-card"
+      data-editor-overlay-owner={overlayOwner}
       style={{
         position: "fixed",
         top: pos.top,
@@ -213,24 +212,24 @@ function LinkHoverCard({
       >
         {truncateUrl(href)}
       </span>
-      <Button
+      <IconButton
         size="icon-xs"
         variant="ghost"
         className="text-muted-foreground"
         onClick={handleCopy}
-        title={t(($) => $.link_hover.copy_link)}
+        label={t(($) => $.link_hover.copy_link)}
       >
         <Copy className="size-3.5" />
-      </Button>
-      <Button
+      </IconButton>
+      <IconButton
         size="icon-xs"
         variant="ghost"
         className="text-muted-foreground"
         onClick={handleOpen}
-        title={t(($) => $.link_hover.open_link)}
+        label={t(($) => $.link_hover.open_link)}
       >
         <ExternalLink className="size-3.5" />
-      </Button>
+      </IconButton>
     </div>,
     document.body,
   );

@@ -60,7 +60,21 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[cursor:stderr] "), agentStderrTailBytes)
 	cmd.Stderr = stderrBuf
 
+	var supplements *cursorSupplementSession
+	var supplementErr error
+	if opts.EnableTaskSupplement {
+		supplements, supplementErr = startCursorSupplementSession(runCtx, opts.Cwd, opts.CursorHookCommand, b.cfg.Logger)
+		if supplementErr != nil {
+			b.cfg.Logger.Warn("cursor additional messages unavailable for this run", "error", supplementErr)
+			supplements = nil
+		} else {
+			cmd.Env = append(cmd.Env, supplements.env()...)
+			prompt += supplements.promptNote()
+		}
+	}
+
 	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
+		supplements.close()
 		closeStdin()
 		cancel()
 		return nil, fmt.Errorf("start cursor-agent: %w", err)
@@ -90,6 +104,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		defer close(msgCh)
 		defer close(resCh)
 		defer background.Close()
+		defer supplements.close()
 
 		// Close stdout when the context is cancelled so scanner.Scan() unblocks.
 		// Closing stdin too releases a prompt write still blocked on a full pipe
@@ -161,6 +176,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 			if sid := evt.readSessionID(); sid != "" {
 				sessionID = sid
+				supplements.activate(sid)
 			}
 
 			switch evt.Type {
@@ -222,6 +238,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 					})
 				case "completed":
 					call := parseCursorToolCall(&evt)
+					supplements.receipt(call.CallID, call.HookContexts)
 					if call.Background {
 						background.Add(call)
 					} else {
@@ -253,6 +270,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 			case "result":
 				resultSeen = true
+				supplements.end()
 				// Publish the decided outcome BEFORE cleanup. Close() can block
 				// on the tracker lock behind a tool watchdog Interrupt already in
 				// progress, and that Interrupt can return false without moving
@@ -331,6 +349,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				}
 			}
 		}
+		supplements.end()
 		scanErr := scanner.Err()
 		if scanErr != nil {
 			// Scanner stopped consuming stdout. Close the pipe before Wait so a
@@ -348,6 +367,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		background.Close()
 		exitErr := cmd.Wait()
 		releaseProcessGroup(cmd)
+		supplements.close()
 		duration := time.Since(startTime)
 
 		// Wait has already closed the stdin pipe, so a prompt write still blocked
@@ -463,13 +483,27 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		}
 	}()
 
-	return &Session{
+	session := &Session{
 		Messages:                 msgCh,
 		Result:                   resCh,
 		ToolActivity:             background.Activity,
 		InterruptBackgroundTools: background.Interrupt,
 		TerminalObserved:         background.TerminalObserved,
-	}, nil
+	}
+	switch {
+	case supplements != nil:
+		session.Supplement = supplements.supplement
+		session.SupplementReady = supplements.ready
+	case supplementErr != nil:
+		// The daemon already offered steering for this run and there is no way
+		// to withdraw it, so settle each message as failed right away instead of
+		// leaving it pending until the turn ends.
+		session.Supplement = func(context.Context, string) error {
+			return fmt.Errorf("cursor hooks unavailable: %w", supplementErr)
+		}
+		session.SupplementReady = func() bool { return runCtx.Err() == nil }
+	}
+	return session, nil
 }
 
 const cursorIncompleteFinalizationWarning = "actions completed before finalization may already have taken effect"
@@ -693,6 +727,10 @@ type cursorToolCall struct {
 
 	Background bool
 	PID        int
+
+	// HookContexts are the additional_context values Cursor attached to the
+	// tool result, the receipt for hook-delivered guidance.
+	HookContexts []string
 }
 
 // cursorToolCallKeySuffix is how Cursor names the per-tool payload: the tool is
@@ -719,6 +757,14 @@ func parseCursorToolCall(evt *cursorStreamEvent) cursorToolCall {
 		var nestedID string
 		if err := json.Unmarshal(envelope["toolCallId"], &nestedID); err == nil {
 			call.CallID = cursorCallID(nestedID)
+		}
+	}
+	var hookContexts []struct {
+		Content string `json:"content"`
+	}
+	if raw, ok := envelope["hookAdditionalContexts"]; ok && json.Unmarshal(raw, &hookContexts) == nil {
+		for _, c := range hookContexts {
+			call.HookContexts = append(call.HookContexts, c.Content)
 		}
 	}
 

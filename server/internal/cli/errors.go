@@ -57,6 +57,7 @@ const (
 	KindNotFound    // 404
 	KindConflict    // 409
 	KindValidation  // 400 / 422
+	KindTooLarge    // 413
 	KindRateLimited // 429
 	KindServerError // 5xx
 
@@ -114,6 +115,8 @@ func (k ErrorKind) String() string {
 		return "conflict"
 	case KindValidation:
 		return "validation"
+	case KindTooLarge:
+		return "too_large"
 	case KindRateLimited:
 		return "rate_limited"
 	case KindServerError:
@@ -212,6 +215,8 @@ func (e *HTTPError) Kind() ErrorKind {
 		return KindConflict
 	case 400, 422:
 		return KindValidation
+	case 413:
+		return KindTooLarge
 	case 429:
 		return KindRateLimited
 	default:
@@ -444,6 +449,10 @@ var kindMessages = map[ErrorKind][2]string{
 		"The request was invalid. Check the values you provided; run the command with --help to see the expected format.",
 		"请求无效。请检查所填写的参数；可用 --help 查看期望的格式。",
 	},
+	KindTooLarge: {
+		"The request is larger than the server accepts. Reduce its size and try again. Re-run with --debug to see the raw server response.",
+		"请求超出服务器允许的大小。请缩小后重试。可加 --debug 查看服务器原始响应。",
+	},
 	KindRateLimited: {
 		"Too many requests. Please wait a moment and try again; if this keeps happening, reduce how frequently you call the API.",
 		"请求过于频繁。请稍候重试；若持续出现，请降低 API 调用频率。",
@@ -469,9 +478,15 @@ var kindMessages = map[ErrorKind][2]string{
 // already exists", "set parent_id (--parent) to <id>"). Agents took the retry
 // hint literally and burned hours re-sending an unchanged request (GH #6264,
 // GH #5948), and the server-side wording added in MUL-4417 never reached them.
+//
+// 413 belongs here because the server names the limit that was hit and the
+// size that hit it. Before 413 had a kind, a skill import over the file-count
+// cap printed "An unexpected error occurred." for a URL import while the same
+// bundle as a ZIP (rejected with 400) printed the limit (GH #9812).
 var serverMessagePrefixes = map[ErrorKind][2]string{
 	KindValidation: {"Invalid request: ", "请求无效："},
 	KindConflict:   {"Request conflict: ", "请求冲突："},
+	KindTooLarge:   {"Request too large: ", "请求过大："},
 }
 
 // messageFor returns the localized message for a kind.
@@ -603,6 +618,22 @@ func extractServerMessage(body string) string {
 		return s
 	}
 	return code
+}
+
+// ServerMessage returns the human-readable message a server error body
+// carries, or "" when err is not an HTTP failure or the body has none (an HTML
+// proxy page, an empty body).
+//
+// It exists for a command whose endpoint writes actionable prose on a status
+// whose generic copy is deliberately vague. A 5xx from most routes means "the
+// Multica service failed"; a 5xx from skill import means "the upstream source
+// failed", and the server names which one and why.
+func ServerMessage(err error) string {
+	var httpErr *HTTPError
+	if !errors.As(err, &httpErr) {
+		return ""
+	}
+	return extractServerMessage(httpErr.Body)
 }
 
 // ServerErrorCode returns the stable `code` a server error body carries, or ""

@@ -2,7 +2,7 @@
 
 import { useId, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Pencil } from "lucide-react";
+import { Pencil } from "@multica/ui/icons";
 import {
   issueWakeupsOptions,
   useEditWakeupInstruction,
@@ -48,8 +48,8 @@ export function WakeupInstructionEditor({
       render={
         <Button
           variant="ghost"
-          size={triggerStyle === "icon" ? "icon" : "sm"}
-          className={triggerStyle === "icon" ? "size-11 text-muted-foreground" : undefined}
+          size={triggerStyle === "icon" ? "icon-xs" : "sm"}
+          className={triggerStyle === "icon" ? "text-muted-foreground" : undefined}
           disabled={disabled}
           aria-label={label}
         />

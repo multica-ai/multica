@@ -1,0 +1,213 @@
+---
+title: 桌面應用
+description: 安裝 Multica Desktop，使用桌面標籤頁和內建守護程式，並連線自託管例項。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
+import { DesktopTabsDemo } from "@/components/demos/desktop-tabs-demo";
+
+Multica Desktop 提供 macOS、Windows 和 Linux 版本。它和 Web 版使用相同的帳號與工作區資料，但會在本機自動管理守護程式，併為不同工作區保留各自的標籤頁。
+
+## Desktop 與 Web
+
+| | Web | Desktop |
+| --- | --- | --- |
+| 開啟方式 | 瀏覽器 | 安裝桌面應用 |
+| 工作區標籤頁 | 使用瀏覽器標籤頁 | 每個工作區保留獨立的一組標籤頁 |
+| 守護程式 | 需要單獨安裝並啟動 CLI | 登入後由應用自動啟動 |
+| 更新 | 重新整理頁面 | 透過桌面應用更新 |
+
+臨時檢視或在公共電腦上使用時，Web 更方便。
+
+兩者可以同時登入。只要連線的是同一個 Multica 服務，看到的資料就是共享的。
+
+## 安裝
+
+<Steps>
+<Step>
+從 [Multica 下載頁](https://multica.ai/download) 選擇與系統和處理器架構對應的安裝包：
+
+| 平臺 | 安裝包 |
+| --- | --- |
+| macOS | `.dmg` |
+| Windows | `.exe` |
+| Linux | `.AppImage`、`.deb` 或 `.rpm` |
+</Step>
+<Step>
+安裝後使用和 Web 版相同的信箱登入。登入後，Desktop 會啟動自己內建的 Multica CLI，並檢測本機已有的 AI 程式設計工具。
+</Step>
+</Steps>
+
+<Callout type="info">
+Desktop 內建的 CLI 只供應用管理執行時使用。如果你還要在終端中執行 `multica issue` 等命令，按[快速上手第 2 步](/cloud-quickstart#2-連線一臺電腦)單獨安裝 CLI。
+</Callout>
+
+## 桌面標籤頁
+
+Desktop 會為每個工作區單獨儲存標籤頁。例如，你在工作區 A 開啟了三個任務，切到工作區 B 後會看到 B 自己的標籤頁；切回 A 時，之前的三個標籤頁仍然保留。
+
+<DesktopTabsDemo />
+
+同一資源只會在當前工作區開啟一次。標籤頁可以重新排序、固定、關閉，也會保留各自的前進、後退和捲動位置。固定的標籤頁排在最左邊，沒有關閉按鈕，要先取消固定才能關；在它裡面開啟別的頁面時會新開一個標籤頁，它自己停在原頁面。點選或貼上本部署的應用連結會直接在標籤頁中開啟，不會跳轉到瀏覽器。
+
+退出登入會清除本機儲存的所有標籤頁，避免下一位登入者看到上一個帳號留下的頁面。
+
+## 內建守護程式
+
+登入後，Desktop 會為當前 Multica 服務建立一個專用 CLI profile，並用它啟動守護程式。這個 profile 位於：
+
+```text
+~/.multica/profiles/desktop-<host>/
+```
+
+它不會讀取或覆蓋你在終端中使用的預設 profile。如果你同時手動啟動了另一個守護程式，Multica 會把它們顯示為不同的執行時。
+
+可以在 Desktop 的設定中檢視執行狀態和日誌。工具沒有被檢測到時，先確認它能在普通終端中執行並且已經登入，再重啟 Desktop 的守護程式。
+
+## 更新 Desktop
+
+自動更新預設開啟。應用在後臺檢查並下載新版本，下載完成後可以立即重啟安裝，也可以等下次退出時安裝。在 **設定 → 更新** 中可以關閉自動檢查，或手動檢查新版本。
+
+更新按作業系統和處理器架構分發：
+
+- Windows arm64 和 macOS x64（Intel）使用各自獨立的更新源；
+- 其餘架構使用預設更新源；
+- 應用會自動匹配更新源，無需手動選擇；
+- Linux 上自動更新只對 `.AppImage` 生效，`.deb` 和 `.rpm` 透過下載新安裝包覆蓋安裝；
+- 自動更新失敗時，同樣從下載頁獲取對應安裝包覆蓋安裝。
+
+## 連線自託管例項
+
+Desktop 預設連線 Multica Cloud。連線自託管例項時，在使用者目錄的 `.multica` 下建立 `desktop.json`，內容如下：
+
+```json
+{
+  "schemaVersion": 1,
+  "apiUrl": "https://api.example.com"
+}
+```
+
+<Tabs groupId="os" persist items={["macOS / Linux", "Windows"]}>
+<Tab value="macOS / Linux">
+
+| 平臺 | 路徑 |
+| --- | --- |
+| macOS | `/Users/<你>/.multica/desktop.json` |
+| Linux | `/home/<你>/.multica/desktop.json` |
+
+</Tab>
+<Tab value="Windows">
+
+檔案路徑是 `C:\Users\<你>\.multica\desktop.json`。
+
+記事本和 PowerShell 重定向容易生成 Desktop 讀不了的檔案（原因見[Windows：檢查檔名和編碼](#windows檢查檔名和編碼)），建議在 PowerShell 裡一步建立：
+
+```powershell
+$dir = "$env:USERPROFILE\.multica"
+New-Item -ItemType Directory -Force $dir | Out-Null
+$json = @'
+{
+  "schemaVersion": 1,
+  "apiUrl": "https://api.example.com"
+}
+'@
+[System.IO.File]::WriteAllText("$dir\desktop.json", $json)
+```
+
+</Tab>
+</Tabs>
+
+以上是預設位置。使用者目錄被遷移或重定向過的話，用實際路徑。
+
+<Callout type="warning">
+這個檔案**不是** CLI 的 `~/.multica/config.json`，欄位名也不同：CLI 用 `server_url`，Desktop 用 `apiUrl`。Desktop 不會讀取 CLI 的配置，它在 `~/.multica/profiles/desktop-<host>/` 下管理獨立的 daemon profile。改 `config.json` 不會影響 Desktop 連線哪個服務。
+</Callout>
+
+`apiUrl` 是 backend 的公開地址，必須填寫，且必須使用 `http` 或 `https`。另外兩個地址可以省略，Desktop 會自動推導：
+
+- `wsUrl`：把 `apiUrl` 的協議換成 `ws` 或 `wss`，並在路徑後追加 `/ws`；
+- `appUrl`：網域以 `api.` 開頭且至少三段時去掉 `api.` 字首（`api.example.com` → `example.com`），否則保持與 `apiUrl` 相同。
+
+通常只寫 `apiUrl` 即可。推導不符合預期時再顯式覆蓋，常見情況有三類：
+
+- Web 與 API 不同域；
+- WebSocket 單獨部署；
+- 網域不滿足剝字首的約定（`api.local` 這類兩段網域不會去掉字首）。
+
+```json
+{
+  "schemaVersion": 1,
+  "apiUrl": "https://api.example.com",
+  "appUrl": "https://app.example.com",
+  "wsUrl": "wss://ws.example.com/socket"
+}
+```
+
+儲存後重啟 Desktop，配置只在啟動時讀取一次。兩種失敗的表現不同：
+
+- **檔案沒找到**（目錄不對，或檔名不是 `desktop.json`）：Desktop 使用預設的 Cloud 配置，不報錯。所以如果 Desktop 仍然顯示 Cloud 地址且沒有任何配置錯誤，說明檔案不在 Desktop 查詢的位置。
+- **檔案找到但無效**（JSON、版本或 URL 有問題）：Desktop 顯示配置錯誤，不會自動回退到 Cloud。
+
+刪除該檔案並重啟即可恢復預設的 Cloud 配置。
+
+<Callout type="warning">
+Desktop 只能連線瀏覽器和執行電腦都能訪問的地址。遠端自託管例項未使用 HTTPS 或未代理 WebSocket 時，Desktop 無法建立連線；完整配置見[自託管快速上手](/self-host-quickstart#remote-access)。
+</Callout>
+
+### Windows：檢查檔名和編碼
+
+Windows 上兩種常見的寫檔案方式會生成 Desktop 讀不了的檔案：
+
+- **記事本會補 `.txt` 字尾**。存成 `desktop.json` 可能實際得到 `desktop.json.txt`，Desktop 會當作沒找到。在資源管理器裡開啟副檔名顯示，或在儲存對話方塊裡選*所有檔案*。想確認真實檔名，在 PowerShell 裡執行 `Get-ChildItem "$env:USERPROFILE\.multica" -Filter "desktop.json*"`，`Name` 一列必須正好是 `desktop.json`。
+- **PowerShell 重定向會寫成 UTF-16 或帶 BOM**。`> desktop.json` 和 `Out-File` 可能生成無法解析的編碼，表現為配置錯誤。
+
+上面 Windows 頁籤裡的 PowerShell 命令可以同時避開這兩個坑。
+
+## Windows Defender 把 Multica 報成病毒
+
+Windows 安全中心報出 `Trojan:Script/Wacatac.B!ml` 之類的威脅，並隔離 Desktop 安裝目錄裡的某個檔案。被隔離的通常是內建的 CLI，而不是應用主程式：
+
+```text
+C:\Users\<你>\AppData\Local\Programs\@multicadesktop\resources\app.asar.unpacked\resources\bin\multica.exe
+```
+
+這是誤報。`!ml` 字尾表示結論來自 Defender 的機器學習啟發式判斷，不是病毒特徵庫匹配。Multica 的 Windows 構建目前還沒有做 Authenticode 程式碼簽名，一個剛釋出、沒有簽名、又會拉起後臺程式並建立網路連線的二進位制，很容易被這類啟發式判為可疑。所有 Windows 產物都由 GitHub Actions 從本倉庫的公開原始碼構建。
+
+你可以自己校驗：每個 GitHub release 都發布了覆蓋全部 CLI 壓縮包的 `checksums.txt`。
+
+```powershell
+Get-FileHash .\multica-cli-<version>-windows-amd64.zip -Algorithm SHA256
+```
+
+把輸出的雜湊和[最新 release](https://github.com/multica-ai/multica/releases/latest) 裡 `checksums.txt` 對應那一行比對。
+
+按下面三步處理：
+
+<Steps>
+<Step>
+把隔離的檔案恢復回來：Windows 安全中心 → *病毒和威脅防護* → *保護歷史記錄* → 選中 Multica 那一條 → *操作* → *還原*。
+</Step>
+<Step>
+加排除項，避免再次被隔離：*病毒和威脅防護* → *管理設定* → *排除項* → *新增或刪除排除項* → *資料夾*，兩個都要加：
+
+- `%LOCALAPPDATA%\Programs\@multicadesktop`
+- `%APPDATA%\Multica`
+
+兩個路徑缺一不可：內建 CLI 被刪掉後，Desktop 會把替換版本下載到 `%APPDATA%\Multica\bin`，只排除安裝目錄的話，下載下來的副本還會再被隔離一次，陷入迴圈。
+</Step>
+<Step>
+把誤報提交給微軟：在 [Microsoft Security Intelligence 檔案提交頁](https://www.microsoft.com/en-us/wdsi/filesubmission)選擇 *Software developer* 和 *Incorrectly detected as malware*。只有這一步能讓檢測對所有使用者撤銷，一般幾天內生效。
+</Step>
+</Steps>
+
+<Callout type="warning">
+只有在你是從[下載頁](https://multica.ai/download)或 [GitHub releases](https://github.com/multica-ai/multica/releases) 安裝、且校驗和對得上的前提下，才加這些排除項。排除項會關閉該資料夾內所有檔案的實時保護。
+</Callout>
+
+## 接下來
+
+- [快速上手](/cloud-quickstart) — 首次連線流程。
+- [守護程式與執行時](/daemon-runtimes) — 內建守護程式的機制。
+- [故障排查](/troubleshooting) — 連線問題排查。

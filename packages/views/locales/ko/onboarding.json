@@ -106,10 +106,6 @@
       "other_placeholder": "예: 스터디 그룹 운영"
     }
   },
-  "option_card": {
-    "other_label": "기타",
-    "other_aria": "다른 내용 입력"
-  },
   "step_question": {
     "hint_pick": "건너뛸 수 있습니다."
   },
@@ -135,28 +131,7 @@
     "success_toast": "대기자 명단에 등록했습니다. 클라우드 런타임이 준비되면 이메일로 알려드릴게요.",
     "failed_toast": "대기자 명단에 등록하지 못했습니다"
   },
-  "welcome_after_onboarding": {
-    "skip": {
-      "loading": "워크스페이스 설정 중...",
-      "title": "Multica에 오신 것을 환영합니다!",
-      "subtitle": "런타임 연결을 돕는 태스크 하나를 추가했습니다. 준비되면 Runtimes에서 Mika와 시작하세요.",
-      "got_it": "알겠습니다",
-      "status_in_progress": "진행 중",
-      "error_title": "준비하지 못했습니다",
-      "error_body": "런타임 안내 태스크를 만들지 못했습니다. 다시 시도하거나, 준비되면 Runtimes에서 런타임을 연결하세요.",
-      "retry": "다시 시도",
-      "dismiss": "나중에",
-      "cards": {
-        "install_runtime": {
-          "title": "런타임 연결",
-          "subtitle": "Codex 또는 Kimi를 설치한 뒤 Runtimes에서 Mika 안내 채팅을 시작하세요."
-        }
-      }
-    }
-  },
   "step_workspace": {
-    "eyebrow_first": "첫 워크스페이스",
-    "eyebrow_resume": "이어 하거나 새로 시작",
     "headline_first": "워크스페이스 이름을 정하세요.",
     "headline_resume": "{{name}}에서 계속하거나 새로 시작하세요.",
     "lede_first": "워크스페이스는 태스크, 에이전트, 프로젝트가 모이는 곳입니다. 나중에 팀원을 초대하거나 워크스페이스를 더 만들 수 있습니다.",
@@ -186,11 +161,9 @@
     "slug_reserved_error": "예약된 워크스페이스 URL이라 사용할 수 없습니다.",
     "slug_conflict_toast": "다른 워크스페이스 URL을 선택하세요",
     "create_failed_toast": "워크스페이스를 만들지 못했습니다",
-    "creation_disabled_eyebrow": "워크스페이스 생성이 비활성화되었습니다",
     "creation_disabled_headline": "관리자에게 초대를 요청하세요.",
     "creation_disabled_lede": "이 Multica instance에서는 새 워크스페이스를 만들 수 없습니다. 관리자가 기존 워크스페이스로 초대하면 초대를 수락한 뒤 새로고침해 계속하세요.",
     "creation_disabled_logout": "로그아웃",
-    "creation_disabled_eyebrow_resume": "내 워크스페이스",
     "creation_disabled_headline_resume": "{{name}}에서 계속하세요.",
     "creation_disabled_lede_resume": "이 instance에서는 워크스페이스 생성이 비활성화되어 있으므로 기존 워크스페이스로 계속 이동합니다."
   },
@@ -203,8 +176,6 @@
     "status_all_online": "모두 온라인",
     "status_none_online": "온라인 없음",
     "status_n_online": "{{count}}개 온라인",
-    "online_label": "온라인",
-    "offline_label": "오프라인",
     "empty_headline": "아직 이 컴퓨터에서 에이전트 런타임을 찾지 못했습니다.",
     "empty_lede_prefix": "에이전트 런타임은 우리가 연결하는 AI 코딩 도구입니다. 예: ",
     "empty_lede_suffix": ". 하나 설치하고 새로고침하거나 아래 경로를 선택하세요.",
@@ -223,7 +194,6 @@
     "continue": "Mika와 시작"
   },
   "step_platform": {
-    "eyebrow": "컴퓨터 연결",
     "headline": "에이전트를 실행할 컴퓨터를 연결하세요.",
     "lede": "컴퓨터를 연결해 Mika가 작업을 시작하게 하세요.",
     "hint_default": "나중에 연결할 수 있습니다.",
@@ -238,7 +208,6 @@
     "cloud_action": "준비 중",
     "cli_dialog_title": "터미널에서 연결",
     "cli_dialog_pick_hint": "위에서 컴퓨터를 선택하세요.",
-    "cli_dialog_connect": "연결하고 계속",
     "runtimes_connected_other": "컴퓨터 {{count}}대 연결됨",
     "live_listening": "실시간 · 컴퓨터를 기다리는 중",
     "stage_normal_prefix": "위 명령을 실행하세요. ",
@@ -253,6 +222,7 @@
   },
   "errors": {
     "skip_failed": "온보딩을 마치지 못했습니다",
+    "guide_failed": "런타임 안내 태스크를 만들지 못했습니다. 다시 시도해 주세요.",
     "mika_setup_failed": "Mika 워크스페이스를 시작하지 못했습니다"
   },
   "mika_intro": {

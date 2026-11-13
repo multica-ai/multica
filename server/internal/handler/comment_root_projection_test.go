@@ -136,6 +136,52 @@ func TestConversationRootOwnersReadOnlyRoutingData(t *testing.T) {
 	if got, owned := h.routeConversationOwnersForRoot(ctx, issue, empty, testUserID, commentTriggerComputeOptions{}); owned || len(got) != 0 {
 		t.Fatal("invented empty root owner")
 	}
+	// A delivered top-level supplement retains its turn owner after completion
+	// even though the comment did not start a separate task (#9060).
+	supplementTask := dbfx.Task(t, agentA, testutil.Cols{
+		"issue_id": issueID, "trigger_comment_id": otherRootID,
+		"runtime_id": handlerTestRuntimeID(t), "status": "completed", "squad_id": newSquad,
+	})
+	dbfx.Exec(t, `INSERT INTO task_supplement
+		(task_id, workspace_id, issue_id, comment_id, author_id, client_request_id, status)
+		VALUES ($1,$2,$3,$4,$5,gen_random_uuid(),'pending')`,
+		supplementTask, testWorkspaceID, issueID, emptyID, testUserID)
+	dbfx.Cleanup(t, `DELETE FROM task_supplement WHERE task_id=$1`, supplementTask)
+	for _, status := range []string{"pending", "delivering", "failed", "delivered"} {
+		dbfx.Exec(t, `UPDATE task_supplement SET status=$1 WHERE task_id=$2`, status, supplementTask)
+		got, owned := h.routeConversationOwnersForRoot(ctx, issue, empty, testUserID, commentTriggerComputeOptions{})
+		if status == "delivered" {
+			if !owned || len(got) != 1 || uuidToString(got[0].Agent.ID) != agentA || got[0].Squad == nil || uuidToString(got[0].Squad.ID) != newSquad {
+				t.Fatalf("delivered supplement lost its terminal turn owner: owned=%t triggers=%d", owned, len(got))
+			}
+		} else if owned || len(got) != 0 {
+			t.Fatalf("%s supplement invented a root owner", status)
+		}
+	}
+	// A root folded into a queued task keeps its owner after the merge moved
+	// trigger_comment_id to the newer comment (MUL-8416).
+	foldedID := dbfx.Comment(t, issueID, "Root folded into a queued task")
+	followUpID := dbfx.Comment(t, issueID, "Follow-up that took over the trigger", testutil.Cols{"parent_id": foldedID})
+	folded, err := testHandler.Queries.GetComment(ctx, parseUUID(foldedID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, owned := h.routeConversationOwnersForRoot(ctx, issue, folded, testUserID, commentTriggerComputeOptions{}); owned || len(got) != 0 {
+		t.Fatal("unrouted root invented an owner")
+	}
+	dbfx.Task(t, agentA, testutil.Cols{
+		"issue_id": issueID, "trigger_comment_id": followUpID,
+		"coalesced_comment_ids": testutil.Raw(fmt.Sprintf("ARRAY['%s']::uuid[]", foldedID)),
+		"runtime_id":            handlerTestRuntimeID(t), "status": "completed",
+	})
+	if got, owned := h.routeConversationOwnersForRoot(ctx, issue, folded, testUserID, commentTriggerComputeOptions{}); !owned || len(got) != 1 || uuidToString(got[0].Agent.ID) != agentA {
+		t.Fatalf("folded root lost its owner: owned=%t triggers=%d", owned, len(got))
+	}
+	empty.Content = fmt.Sprintf("[@Other](mention://agent/%s)", otherAgent)
+	if got, owned := h.routeConversationOwnersForRoot(ctx, issue, empty, testUserID, commentTriggerComputeOptions{}); !owned || len(got) != 1 || uuidToString(got[0].Agent.ID) != otherAgent {
+		t.Fatal("delivered supplement overrode explicit owner")
+	}
+
 	observer.fail = true
 	if got, owned := h.routeConversationOwnersForRoot(ctx, issue, root, testUserID, commentTriggerComputeOptions{}); owned || len(got) != 0 {
 		t.Fatal("read failure routed an owner")

@@ -4,8 +4,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { SidebarProvider, useSidebar } from "@multica/ui/components/ui/sidebar";
 import { renderWithI18n } from "../test/i18n";
 
-// A width-driven `matchMedia`: the provider watches the `lg`–`xl` band and
-// `useIsCompact` watches `max-width: 1023px`, so both have to answer against
+// A width-driven `matchMedia`: the provider watches the `md`–`lg` band and
+// `useIsCompact` watches `max-width: 767px`, so both have to answer against
 // the same viewport and both have to be notified when it changes.
 type Listener = (e: MediaQueryListEvent) => void;
 
@@ -37,9 +37,9 @@ function setWidth(next: number) {
 }
 
 function Probe() {
-  const { state, toggleSidebar } = useSidebar();
+  const { state, isCompact, toggleSidebar } = useSidebar();
   return (
-    <button type="button" data-testid="state" onClick={toggleSidebar}>
+    <button type="button" data-testid="state" data-compact={isCompact} onClick={toggleSidebar}>
       {state}
     </button>
   );
@@ -49,7 +49,7 @@ function state() {
   return screen.getByTestId("state").textContent;
 }
 
-describe("sidebar auto-collapse between lg and xl", () => {
+describe("sidebar auto-collapse between md and lg", () => {
   beforeEach(() => {
     queries.clear();
     window.matchMedia = ((query: string) => {
@@ -87,8 +87,21 @@ describe("sidebar auto-collapse between lg and xl", () => {
     expect(state()).toBe("expanded");
   });
 
-  it("starts collapsed when the page opens inside the band", () => {
+  it("keeps the nav open in a laptop-sized window", () => {
+    // The rail stays on screen beside the panel, so a window just under the
+    // desktop default of 1280 has room for both.
     setWidth(1100);
+    renderWithI18n(
+      <SidebarProvider>
+        <Probe />
+      </SidebarProvider>,
+    );
+
+    expect(state()).toBe("expanded");
+  });
+
+  it("starts collapsed when the page opens inside the band", () => {
+    setWidth(900);
     renderWithI18n(
       <SidebarProvider>
         <Probe />
@@ -105,7 +118,7 @@ describe("sidebar auto-collapse between lg and xl", () => {
       </SidebarProvider>,
     );
 
-    setWidth(1100);
+    setWidth(900);
     expect(state()).toBe("collapsed");
 
     setWidth(1440);
@@ -122,16 +135,33 @@ describe("sidebar auto-collapse between lg and xl", () => {
       </SidebarProvider>,
     );
 
-    setWidth(1100);
+    setWidth(900);
     fireEvent.click(screen.getByTestId("state"));
     expect(state()).toBe("expanded");
 
-    setWidth(1200);
+    setWidth(1000);
+    expect(state()).toBe("expanded");
+  });
+
+  it("docks the nav on a foldable's inner screen held sideways", () => {
+    // 951px, iPhone Duo's inner screen in landscape: the nav is a column in
+    // the page rather than a sheet, starts collapsed, and the trigger docks it.
+    setWidth(951);
+    renderWithI18n(
+      <SidebarProvider>
+        <Probe />
+      </SidebarProvider>,
+    );
+
+    expect(screen.getByTestId("state")).toHaveAttribute("data-compact", "false");
+    expect(state()).toBe("collapsed");
+
+    fireEvent.click(screen.getByTestId("state"));
     expect(state()).toBe("expanded");
   });
 
   it("does not touch the collapsed state below the band", () => {
-    // Under 1024 the nav is a sheet, which has its own open state — the
+    // Under 768 the nav is a sheet, which has its own open state — the
     // in-flow state must be left where the user last put it.
     renderWithI18n(
       <SidebarProvider>
@@ -139,8 +169,9 @@ describe("sidebar auto-collapse between lg and xl", () => {
       </SidebarProvider>,
     );
 
-    setWidth(851);
+    setWidth(669);
 
+    expect(screen.getByTestId("state")).toHaveAttribute("data-compact", "true");
     expect(state()).toBe("expanded");
   });
 
@@ -161,7 +192,7 @@ describe("sidebar auto-collapse between lg and xl", () => {
     fireEvent.click(screen.getByTestId("state"));
     expect(document.cookie).not.toContain("sidebar_state");
 
-    setWidth(1100);
+    setWidth(900);
     expect(state()).toBe("collapsed");
     expect(document.cookie).not.toContain("sidebar_state");
   });

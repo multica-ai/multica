@@ -63,6 +63,11 @@ multica skill import --url github.com/owner/repo/blob/main/path/to/SKILL.md --ou
 - A bare ClawHub slug (no host) is accepted and routed to ClawHub.
 - Any other host is rejected with a 400 naming the supported sources.
 
+URL imports and refreshes require every directory listing and eligible
+supporting-file download to succeed before saving the bundle. A failed refresh
+leaves the existing content, supporting files, and agent-skill bindings unchanged;
+a failed listing is not treated as an empty directory.
+
 ## Local archive import
 
 `multica skill import --file <path> --output json` imports a skill from a local
@@ -78,7 +83,7 @@ skill folder works too. The server:
   wrapper directory name and then the uploaded filename;
 - carries the supporting files — dropping any `SKILL.md`, dotfiles, `__MACOSX`,
   license files, and binary assets — under the same per-file (1 MiB),
-  per-bundle (8 MiB), and file-count (256) caps as URL imports, and rejects path
+  per-bundle (8 MiB), and file-count (512) caps as URL imports, and rejects path
   traversal (zip-slip);
 - returns the same structured result envelope and honors the same
   `--on-conflict` strategies as URL imports.

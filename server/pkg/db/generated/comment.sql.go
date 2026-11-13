@@ -886,6 +886,54 @@ func (q *Queries) ListCommentAncestorPath(ctx context.Context, arg ListCommentAn
 	return items, nil
 }
 
+const listCommentOriginsForIssue = `-- name: ListCommentOriginsForIssue :many
+SELECT id, author_type, author_id, created_at FROM comment
+WHERE id = ANY($1::uuid[])
+  AND issue_id = $2
+  AND workspace_id = $3
+  AND deleted_at IS NULL
+`
+
+type ListCommentOriginsForIssueParams struct {
+	Ids         []pgtype.UUID `json:"ids"`
+	IssueID     pgtype.UUID   `json:"issue_id"`
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+}
+
+type ListCommentOriginsForIssueRow struct {
+	ID         pgtype.UUID        `json:"id"`
+	AuthorType string             `json:"author_type"`
+	AuthorID   pgtype.UUID        `json:"author_id"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
+// Author and time of the live comments in @ids, without their bodies: the
+// issue attachment list labels each file with the comment that delivered it.
+func (q *Queries) ListCommentOriginsForIssue(ctx context.Context, arg ListCommentOriginsForIssueParams) ([]ListCommentOriginsForIssueRow, error) {
+	rows, err := q.db.Query(ctx, listCommentOriginsForIssue, arg.Ids, arg.IssueID, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCommentOriginsForIssueRow{}
+	for rows.Next() {
+		var i ListCommentOriginsForIssueRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.AuthorType,
+			&i.AuthorID,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCommentThreadHistory = `-- name: ListCommentThreadHistory :many
 WITH RECURSIVE thread_history AS (
   SELECT root.id, root.issue_id, root.author_type, root.author_id, root.content, root.type, root.created_at, root.updated_at, root.parent_id, root.workspace_id, root.resolved_at, root.resolved_by_type, root.resolved_by_id, root.source_task_id, root.quick_action_id, root.via_plugin_id, root.revision, root.recovery_settled_at, root.deleted_at, root.suppressed_agent_ids
@@ -1353,25 +1401,55 @@ const listReconcilableCommentsForIssueSince = `-- name: ListReconcilableComments
 SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type, c.created_at, c.updated_at, c.parent_id, c.workspace_id, c.resolved_at, c.resolved_by_type, c.resolved_by_id, c.source_task_id, c.quick_action_id, c.via_plugin_id, c.revision, c.recovery_settled_at, c.deleted_at, c.suppressed_agent_ids FROM comment c
 WHERE c.issue_id = $1
   AND (c.id = ANY($2::uuid[])
-       OR comment_thread_root_id(c.id) = $3::uuid)
+       OR comment_thread_root_id(c.id) = $3::uuid
+       -- An agent comment that steered this run but was never read took the
+       -- place of the follow-up its mention would have queued; replay it.
+       OR (c.author_type = 'agent' AND EXISTS (
+           SELECT 1 FROM task_supplement steered
+           WHERE steered.comment_id = c.id AND steered.task_id = $4::uuid
+             AND steered.status <> 'delivered'
+       )))
   -- A deleted comment is no longer input, even when replies keep its row.
   AND c.deleted_at IS NULL
-  -- A comment that steered this agent's running turn belongs to that turn,
-  -- regardless of delivery status: failed delivery must not become an automatic
-  -- new run. The same comment still reconciles normally for any other agent
-  -- it addressed without steering.
+  -- A member comment that steered this agent's running turn belongs to that
+  -- turn, regardless of delivery status: failed delivery must not become an
+  -- automatic new run, because the member sees the failure and can retry or
+  -- send it as a new run. No one watches an agent's steering receipt, so an
+  -- agent comment belongs to the turn only once delivered; otherwise it is
+  -- replayed like any other mention. The same comment still reconciles
+  -- normally for any other agent it addressed without steering.
   AND NOT EXISTS (
       SELECT 1 FROM task_supplement s
       JOIN agent_task_queue bound ON bound.id = s.task_id
       WHERE s.comment_id = c.id AND s.workspace_id = c.workspace_id
-        AND bound.agent_id = $4
+        AND bound.agent_id = $5
+        AND (c.author_type <> 'agent' OR s.status = 'delivered')
+  )
+  -- An explicit member/agent cancellation acknowledges the planned input for
+  -- this agent only for completing tasks already in flight at cancellation;
+  -- automatic cancellations deliberately remain replayable.
+  AND NOT EXISTS (
+      SELECT 1
+      FROM agent_task_queue cancelled
+      WHERE cancelled.issue_id = c.issue_id
+        AND cancelled.agent_id = $5
+        AND cancelled.status = 'cancelled'
+        AND cancelled.cancelled_by_type IN ('member', 'agent')
+        AND cancelled.cancelled_by_id IS NOT NULL
+        AND cancelled.completed_at IS NOT NULL
+        AND cancelled.completed_at >= $6
+        AND c.updated_at <= cancelled.completed_at
+        AND (
+            cancelled.trigger_comment_id = c.id
+            OR c.id = ANY(cancelled.coalesced_comment_ids)
+        )
   )
   -- Nor does a comment whose author chose not to start this agent for it.
-  AND NOT COALESCE($4::uuid = ANY(c.suppressed_agent_ids), false)
+  AND NOT COALESCE($5::uuid = ANY(c.suppressed_agent_ids), false)
   AND (
       (
           c.author_type IN ('member', 'agent')
-          AND (c.created_at > $5 OR c.id = ANY($2::uuid[]))
+          AND (c.created_at > $6 OR c.id = ANY($2::uuid[]))
       )
       OR (
           c.author_type = 'system'
@@ -1387,6 +1465,7 @@ type ListReconcilableCommentsForIssueSinceParams struct {
 	IssueID           pgtype.UUID        `json:"issue_id"`
 	PlannedCommentIds []pgtype.UUID      `json:"planned_comment_ids"`
 	CommentThreadID   pgtype.UUID        `json:"comment_thread_id"`
+	TaskID            pgtype.UUID        `json:"task_id"`
 	AgentID           pgtype.UUID        `json:"agent_id"`
 	Since             pgtype.Timestamptz `json:"since"`
 }
@@ -1422,6 +1501,7 @@ func (q *Queries) ListReconcilableCommentsForIssueSince(ctx context.Context, arg
 		arg.IssueID,
 		arg.PlannedCommentIds,
 		arg.CommentThreadID,
+		arg.TaskID,
 		arg.AgentID,
 		arg.Since,
 	)
@@ -1490,16 +1570,30 @@ thread_stats AS (
            MAX(comment_created_at)::timestamptz AS last_activity_at
     FROM membership
     GROUP BY root_id
+),
+thread_resolutions AS (
+    SELECT DISTINCT ON (m.root_id)
+           m.root_id,
+           c.id AS resolution_id,
+           c.content AS resolution_content
+    FROM membership m
+    JOIN comment c ON c.id = m.id
+    WHERE m.id <> m.root_id
+      AND c.resolved_at IS NOT NULL
+    ORDER BY m.root_id, c.resolved_at DESC, c.created_at ASC, c.id ASC
 )
 SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
        c.created_at, c.updated_at, c.parent_id, c.workspace_id,
        c.resolved_at, c.resolved_by_type, c.resolved_by_id,
        c.source_task_id, c.quick_action_id, c.revision, c.deleted_at,
        ts.reply_count AS reply_count,
-       ts.last_activity_at AS last_activity_at
+       ts.last_activity_at AS last_activity_at,
+       tr.resolution_id AS resolution_id,
+       tr.resolution_content AS resolution_content
 FROM selected_roots sr
 JOIN comment c ON c.id = sr.id
 JOIN thread_stats ts ON ts.root_id = sr.id
+LEFT JOIN thread_resolutions tr ON tr.root_id = sr.id
 ORDER BY c.created_at ASC, c.id ASC
 `
 
@@ -1510,25 +1604,27 @@ type ListRootCommentsForIssueParams struct {
 }
 
 type ListRootCommentsForIssueRow struct {
-	ID             pgtype.UUID        `json:"id"`
-	IssueID        pgtype.UUID        `json:"issue_id"`
-	AuthorType     string             `json:"author_type"`
-	AuthorID       pgtype.UUID        `json:"author_id"`
-	Content        string             `json:"content"`
-	Type           string             `json:"type"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
-	ParentID       pgtype.UUID        `json:"parent_id"`
-	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
-	ResolvedAt     pgtype.Timestamptz `json:"resolved_at"`
-	ResolvedByType pgtype.Text        `json:"resolved_by_type"`
-	ResolvedByID   pgtype.UUID        `json:"resolved_by_id"`
-	SourceTaskID   pgtype.UUID        `json:"source_task_id"`
-	QuickActionID  pgtype.UUID        `json:"quick_action_id"`
-	Revision       int64              `json:"revision"`
-	DeletedAt      pgtype.Timestamptz `json:"deleted_at"`
-	ReplyCount     int32              `json:"reply_count"`
-	LastActivityAt pgtype.Timestamptz `json:"last_activity_at"`
+	ID                pgtype.UUID        `json:"id"`
+	IssueID           pgtype.UUID        `json:"issue_id"`
+	AuthorType        string             `json:"author_type"`
+	AuthorID          pgtype.UUID        `json:"author_id"`
+	Content           string             `json:"content"`
+	Type              string             `json:"type"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	ParentID          pgtype.UUID        `json:"parent_id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	ResolvedAt        pgtype.Timestamptz `json:"resolved_at"`
+	ResolvedByType    pgtype.Text        `json:"resolved_by_type"`
+	ResolvedByID      pgtype.UUID        `json:"resolved_by_id"`
+	SourceTaskID      pgtype.UUID        `json:"source_task_id"`
+	QuickActionID     pgtype.UUID        `json:"quick_action_id"`
+	Revision          int64              `json:"revision"`
+	DeletedAt         pgtype.Timestamptz `json:"deleted_at"`
+	ReplyCount        int32              `json:"reply_count"`
+	LastActivityAt    pgtype.Timestamptz `json:"last_activity_at"`
+	ResolutionID      pgtype.UUID        `json:"resolution_id"`
+	ResolutionContent pgtype.Text        `json:"resolution_content"`
 }
 
 // Top-level comments only, in issue chronological order, each annotated with
@@ -1572,6 +1668,8 @@ func (q *Queries) ListRootCommentsForIssue(ctx context.Context, arg ListRootComm
 			&i.DeletedAt,
 			&i.ReplyCount,
 			&i.LastActivityAt,
+			&i.ResolutionID,
+			&i.ResolutionContent,
 		); err != nil {
 			return nil, err
 		}
@@ -1610,16 +1708,30 @@ thread_stats AS (
            MAX(comment_created_at)::timestamptz AS last_activity_at
     FROM membership
     GROUP BY root_id
+),
+thread_resolutions AS (
+    SELECT DISTINCT ON (m.root_id)
+           m.root_id,
+           c.id AS resolution_id,
+           c.content AS resolution_content
+    FROM membership m
+    JOIN comment c ON c.id = m.id
+    WHERE m.id <> m.root_id
+      AND c.resolved_at IS NOT NULL
+    ORDER BY m.root_id, c.resolved_at DESC, c.created_at ASC, c.id ASC
 )
 SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
        c.created_at, c.updated_at, c.parent_id, c.workspace_id,
        c.resolved_at, c.resolved_by_type, c.resolved_by_id,
        c.source_task_id, c.quick_action_id, c.revision, c.deleted_at,
        ts.reply_count AS reply_count,
-       ts.last_activity_at AS last_activity_at
+       ts.last_activity_at AS last_activity_at,
+       tr.resolution_id AS resolution_id,
+       tr.resolution_content AS resolution_content
 FROM selected_roots sr
 JOIN comment c ON c.id = sr.id
 JOIN thread_stats ts ON ts.root_id = sr.id
+LEFT JOIN thread_resolutions tr ON tr.root_id = sr.id
 ORDER BY c.created_at ASC, c.id ASC
 `
 
@@ -1631,25 +1743,27 @@ type ListRootCommentsSinceForIssueParams struct {
 }
 
 type ListRootCommentsSinceForIssueRow struct {
-	ID             pgtype.UUID        `json:"id"`
-	IssueID        pgtype.UUID        `json:"issue_id"`
-	AuthorType     string             `json:"author_type"`
-	AuthorID       pgtype.UUID        `json:"author_id"`
-	Content        string             `json:"content"`
-	Type           string             `json:"type"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
-	ParentID       pgtype.UUID        `json:"parent_id"`
-	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
-	ResolvedAt     pgtype.Timestamptz `json:"resolved_at"`
-	ResolvedByType pgtype.Text        `json:"resolved_by_type"`
-	ResolvedByID   pgtype.UUID        `json:"resolved_by_id"`
-	SourceTaskID   pgtype.UUID        `json:"source_task_id"`
-	QuickActionID  pgtype.UUID        `json:"quick_action_id"`
-	Revision       int64              `json:"revision"`
-	DeletedAt      pgtype.Timestamptz `json:"deleted_at"`
-	ReplyCount     int32              `json:"reply_count"`
-	LastActivityAt pgtype.Timestamptz `json:"last_activity_at"`
+	ID                pgtype.UUID        `json:"id"`
+	IssueID           pgtype.UUID        `json:"issue_id"`
+	AuthorType        string             `json:"author_type"`
+	AuthorID          pgtype.UUID        `json:"author_id"`
+	Content           string             `json:"content"`
+	Type              string             `json:"type"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	ParentID          pgtype.UUID        `json:"parent_id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	ResolvedAt        pgtype.Timestamptz `json:"resolved_at"`
+	ResolvedByType    pgtype.Text        `json:"resolved_by_type"`
+	ResolvedByID      pgtype.UUID        `json:"resolved_by_id"`
+	SourceTaskID      pgtype.UUID        `json:"source_task_id"`
+	QuickActionID     pgtype.UUID        `json:"quick_action_id"`
+	Revision          int64              `json:"revision"`
+	DeletedAt         pgtype.Timestamptz `json:"deleted_at"`
+	ReplyCount        int32              `json:"reply_count"`
+	LastActivityAt    pgtype.Timestamptz `json:"last_activity_at"`
+	ResolutionID      pgtype.UUID        `json:"resolution_id"`
+	ResolutionContent pgtype.Text        `json:"resolution_content"`
 }
 
 // Top-level comments created strictly after @since, each annotated with the
@@ -1693,6 +1807,8 @@ func (q *Queries) ListRootCommentsSinceForIssue(ctx context.Context, arg ListRoo
 			&i.DeletedAt,
 			&i.ReplyCount,
 			&i.LastActivityAt,
+			&i.ResolutionID,
+			&i.ResolutionContent,
 		); err != nil {
 			return nil, err
 		}

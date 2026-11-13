@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Loader2, RotateCw } from "lucide-react";
+import { Loader2, RotateCw } from "@multica/ui/icons";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { Skill, SkillSummary } from "@multica/core/types";

@@ -1,7 +1,15 @@
 "use client";
 
+import type { CSSProperties } from "react";
 import { cn } from "@multica/ui/lib/utils";
 import { SidebarTrigger, useSidebarSafe } from "@multica/ui/components/ui/sidebar";
+import { ActionShortcutKeycaps } from "../common/shortcut-keycaps";
+import {
+  useWindowTitleBar,
+  WINDOW_TITLE_BAR_CLASS,
+  windowTitleBarStyle,
+} from "../platform/window-title-bar";
+import { useAppShell } from "./app-shell-context";
 
 /**
  * The left edge every page shares: the header, the toolbar under it, and any
@@ -48,9 +56,9 @@ export const PAGE_TOOLBAR = cn(
 
 /**
  * The way back to the nav wherever it is not a permanent column: a sheet below
- * the compact breakpoint, auto-collapsed from there up to `xl`.
+ * the compact breakpoint and, in the app shell, a collapsed space panel.
  *
- * Every surface below `xl` needs one of these — unless the shell around it
+ * Every surface needs one of these — unless the shell around it
  * already keeps one on screen. `PageHeader` supplies it for free, so this is
  * exported for the pages that build their own chrome instead; without it a
  * touch user has no way to reopen the nav at all.
@@ -64,8 +72,56 @@ export const PAGE_TOOLBAR = cn(
  */
 export function CollapsedNavTrigger() {
   const sidebar = useSidebarSafe();
+  const shell = useAppShell();
   if (!sidebar || sidebar.hasExternalTrigger) return null;
-  return <SidebarTrigger className="xl:hidden" />;
+  // In the app shell the rail is always on screen from `md` up, so the
+  // trigger only has a job there while the space panel or list column is
+  // collapsed. The `md:hidden` gate is CSS so the compact case is right
+  // before hydration.
+  const collapsed = shell
+    ? shell.hasPanel
+      ? sidebar.state === "collapsed"
+      : shell.listCollapsed
+    : false;
+  const className = shell ? (collapsed ? undefined : "md:hidden") : "lg:hidden";
+  return (
+    <SidebarTrigger
+      className={className}
+      shortcut={<ActionShortcutKeycaps action="toggleSidebar" />}
+      onClick={
+        shell
+          ? (event) => {
+              event.preventDefault();
+              shell.toggleNav();
+            }
+          : undefined
+      }
+    />
+  );
+}
+
+/**
+ * What a page's top row needs when the window has no title bar of its own
+ * (see `WindowTitleBarProvider`): the drag region, and a leading inset past
+ * the native window controls. Empty everywhere else.
+ *
+ * `PageHeader` applies it itself. A surface that draws its own header-shaped
+ * row in that slot (a loading or error state standing in for the page) spreads
+ * it too, and renders the row even when it has nothing to put in it, so the
+ * window stays draggable whichever state is on screen.
+ */
+export function usePageHeaderTitleBar(): {
+  active: boolean;
+  className?: string;
+  style?: CSSProperties;
+} {
+  const titleBar = useWindowTitleBar();
+  if (!titleBar) return { active: false };
+  return {
+    active: true,
+    className: WINDOW_TITLE_BAR_CLASS,
+    style: windowTitleBarStyle(titleBar),
+  };
 }
 
 interface PageHeaderProps {
@@ -89,8 +145,8 @@ interface PageHeaderProps {
  *
  * The leading slot below is a flex item too, so a header that reads as two
  * zones in source is three at runtime, and `justify-between` splits the free
- * space on BOTH sides of the title — parking it mid-header. Desktop windows
- * sit below `xl`, where the trigger renders, so that is where it surfaces.
+ * space on BOTH sides of the title — parking it mid-header. Narrow windows
+ * sit below `lg`, where the trigger renders, so that is where it surfaces.
  *
  * `gap-2` is the base for the same reason: it makes the header's own gap the
  * single source of the leading-slot spacing. When the trigger carried its own
@@ -102,13 +158,16 @@ interface PageHeaderProps {
  * every page, and the toolbar beneath the header reads the same constant.
  */
 export function PageHeader({ children, leading, className }: PageHeaderProps) {
+  const titleBar = usePageHeaderTitleBar();
   return (
     <header
       className={cn(
         "flex h-12 shrink-0 items-center gap-2 border-b",
         className,
         PAGE_GUTTER,
+        titleBar.className,
       )}
+      style={titleBar.style}
     >
       {leading ?? <CollapsedNavTrigger />}
       {children}

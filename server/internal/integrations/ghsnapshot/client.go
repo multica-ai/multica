@@ -5,8 +5,8 @@
 //
 // The package has three layers:
 //   - Client (this file): GitHub App auth — App JWT → installation access
-//     token (cached per installation, refreshed early) → GraphQL/REST calls.
-//   - snapshot.go: the single GraphQL query, contexts pagination, and
+//     token (cached per installation, refreshed early) → REST calls.
+//   - snapshot.go: PR / Checks / Statuses queries, pagination, and
 //     normalization into a flat per-check snapshot.
 //   - refresh.go: the outbound work queue (dedup, single in-flight per PR,
 //     bounded concurrency, Retry-After backoff), the head-SHA-guarded atomic
@@ -18,7 +18,6 @@
 package ghsnapshot
 
 import (
-	"bytes"
 	"context"
 	"crypto/rsa"
 	"encoding/json"
@@ -77,6 +76,8 @@ type Client struct {
 type cachedToken struct {
 	token  string
 	expiry time.Time
+	// permissions is what GitHub granted this token, e.g. {"checks": "read"}.
+	permissions map[string]string
 }
 
 // NewClientFromEnv builds a Client from GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY.
@@ -179,7 +180,7 @@ func (c *Client) mintInstallationToken(ctx context.Context, installationID int64
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests {
+	if isRateLimited(resp, body) {
 		return "", rateLimitFromResponse(resp, c.now())
 	}
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
@@ -188,8 +189,9 @@ func (c *Client) mintInstallationToken(ctx context.Context, installationID int64
 		return "", fmt.Errorf("github installation token: unexpected status %d", resp.StatusCode)
 	}
 	var parsed struct {
-		Token     string `json:"token"`
-		ExpiresAt string `json:"expires_at"`
+		Token       string            `json:"token"`
+		ExpiresAt   string            `json:"expires_at"`
+		Permissions map[string]string `json:"permissions"`
 	}
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		return "", errors.New("github installation token: malformed response")
@@ -204,69 +206,79 @@ func (c *Client) mintInstallationToken(ctx context.Context, installationID int64
 		}
 	}
 	c.mu.Lock()
-	c.tokens[installationID] = cachedToken{token: parsed.Token, expiry: expiry}
+	c.tokens[installationID] = cachedToken{token: parsed.Token, expiry: expiry, permissions: parsed.Permissions}
 	c.mu.Unlock()
 	return parsed.Token, nil
 }
 
-// graphQL runs a single GraphQL query as the given installation and returns the
-// raw `data` object. GitHub returns HTTP 200 even for query-level errors, so we
-// inspect the `errors` array too, mapping a RATE_LIMITED error type to a
-// RateLimitError.
-func (c *Client) graphQL(ctx context.Context, installationID int64, query string, variables map[string]any) (json.RawMessage, error) {
+// tokenCanRead reports whether the installation's cached token was granted at
+// least read access to permission. It answers false until a request on this
+// installation has minted a token, so callers ask after their first request.
+func (c *Client) tokenCanRead(installationID int64, permission string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	switch c.tokens[installationID].permissions[permission] {
+	case "read", "write", "admin":
+		return true
+	}
+	return false
+}
+
+// restGet authenticates against a fixed API path. Response bodies and tokens
+// never appear in errors; permission failures must not pause an installation.
+func (c *Client) restGet(ctx context.Context, installationID int64, path string) (json.RawMessage, error) {
 	token, err := c.installationToken(ctx, installationID)
 	if err != nil {
 		return nil, err
 	}
-	payload, err := json.Marshal(map[string]any{"query": query, "variables": variables})
-	if err != nil {
-		return nil, err
-	}
-	endpoint := strings.TrimRight(c.apiBase, "/") + "/graphql"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	endpoint := strings.TrimRight(c.apiBase, "/") + path
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
-
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
-	if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests {
+	const maxBody = 8 << 20
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody+1))
+	if err != nil {
+		return nil, errors.New("github REST: failed to read response")
+	}
+	if isRateLimited(resp, body) {
 		return nil, rateLimitFromResponse(resp, c.now())
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("github graphql: unexpected status %d", resp.StatusCode)
+		return nil, fmt.Errorf("github REST: unexpected status %d", resp.StatusCode)
 	}
-	var envelope struct {
-		Data   json.RawMessage `json:"data"`
-		Errors []struct {
-			Type    string `json:"type"`
-			Message string `json:"message"`
-		} `json:"errors"`
+	if len(body) > maxBody {
+		return nil, errors.New("github REST: response exceeds size limit")
 	}
-	if err := json.Unmarshal(body, &envelope); err != nil {
-		return nil, errors.New("github graphql: malformed response")
+	return body, nil
+}
+
+func isRateLimited(resp *http.Response, body []byte) bool {
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return true
 	}
-	if len(envelope.Errors) > 0 {
-		for _, e := range envelope.Errors {
-			if e.Type == "RATE_LIMITED" {
-				return nil, &RateLimitError{RetryAfter: time.Minute}
-			}
-		}
-		// Surface the message but nothing else; GraphQL error messages do not
-		// contain credentials.
-		return nil, fmt.Errorf("github graphql error: %s", envelope.Errors[0].Message)
+	if resp.StatusCode != http.StatusForbidden {
+		return false
 	}
-	if len(envelope.Data) == 0 {
-		return nil, errors.New("github graphql: empty data")
+	if resp.Header.Get("X-RateLimit-Remaining") == "0" || resp.Header.Get("Retry-After") != "" {
+		return true
 	}
-	return envelope.Data, nil
+	var failure struct {
+		Message string `json:"message"`
+	}
+	if json.Unmarshal(body, &failure) != nil {
+		return false
+	}
+	message := strings.ToLower(failure.Message)
+	return strings.Contains(message, "secondary rate limit") || strings.Contains(message, "abuse detection")
 }
 
 // rateLimitFromResponse builds a RateLimitError from GitHub's throttling

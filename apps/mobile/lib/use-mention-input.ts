@@ -17,7 +17,7 @@
  * without coupling the policy to the hook (comment-composer does rollback;
  * new-issue prefers Alert and no rollback — both are fine).
  */
-import { useCallback, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import type {
   NativeSyntheticEvent,
   TextInputSelectionChangeEventData,
@@ -96,12 +96,14 @@ export function useMentionInput(): UseMentionInputReturn {
   // applied value. Reading from React state via closures races with React's
   // batching: in the same native tick the first event would see stale text or
   // stale selection, and `tokenAtCursor` would miss the first `@` (cursor=0).
-  // Refs sidestep that — every render syncs them, and every mutator below
+  // Refs sidestep that — every commit syncs them, and every mutator below
   // writes through so handlers running in the same tick stay consistent.
   const textRef = useRef(text);
   const selectionRef = useRef(selection);
-  textRef.current = text;
-  selectionRef.current = selection;
+  useLayoutEffect(() => {
+    textRef.current = text;
+    selectionRef.current = selection;
+  }, [text, selection]);
 
   const recomputeMentioning = useCallback(
     (nextText: string, cursor: number) => {

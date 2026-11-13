@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 	"net/url"
+	"slices"
 	"testing"
 	"time"
 
@@ -67,6 +68,37 @@ func TestArchivedInboxPageBeyond200(t *testing.T) {
 	}
 }
 
+func TestArchivedInboxMatchedNotificationKeepsItsCommentAnchor(t *testing.T) {
+	ws := dbfx.Workspace(t, "Archive anchors", "archive-anchor-"+uuid.NewString())
+	dbfx.Member(t, ws, testUserID, "owner")
+	issue := dbfx.Issue(t, "Anchored", testutil.Cols{"workspace_id": ws})
+	c1, c2 := uuid.NewString(), uuid.NewString()
+	old := time.Now().UTC().Add(-time.Hour)
+	insert := func(kind string, created time.Time, comment string) string {
+		return dbfx.Insert(t, "inbox_item", testutil.Cols{
+			"workspace_id": ws, "recipient_type": "member", "recipient_id": testUserID,
+			"type": kind, "severity": "info", "title": "Anchored", "issue_id": issue,
+			"archived": true, "created_at": created, "details": `{"comment_id":"` + comment + `"}`,
+		})
+	}
+	mention := insert("mentioned", old, c1)
+	newest := insert("new_comment", old.Add(time.Minute), c2)
+	get := func(query string) archivedInboxPageResponse {
+		var page archivedInboxPageResponse
+		testutil.Call(t, inboxWorkspaceHandler(testHandler.ListArchivedInboxPage), inboxRequest(http.MethodGet, "/api/inbox/archived/page?"+query, ws)).Want(http.StatusOK).JSON(&page)
+		return page
+	}
+	for _, query := range []string{"types=mention", "group_id=" + issue + "&types=mention"} {
+		page := get(query)
+		if len(page.Items) != 1 || page.Items[0].ID != mention || string(page.Items[0].Details) != `{"comment_id":"`+c1+`"}` {
+			t.Fatalf("%s: mention lost its own comment: %+v", query, page.Items)
+		}
+	}
+	if page := get(""); len(page.Items) != 1 || page.Items[0].ID != newest || string(page.Items[0].Details) != `{"comment_id":"`+c2+`"}` {
+		t.Fatalf("unfiltered group did not show the newest comment: %+v", page.Items)
+	}
+}
+
 func TestArchivedInboxFiltersAndLookupUseLatestGroup(t *testing.T) {
 	ws := dbfx.Workspace(t, "Archive filters", "archive-filter-"+uuid.NewString())
 	dbfx.Member(t, ws, testUserID, "owner")
@@ -103,15 +135,20 @@ func TestArchivedInboxFiltersAndLookupUseLatestGroup(t *testing.T) {
 	if len(get("group_id="+issue+"&unread_only=true").Items) != 0 {
 		t.Fatal("older unread notification matched")
 	}
-	if len(get("group_id="+issue+"&actors=agent:"+actor).Items) != 0 {
-		t.Fatal("older actor matched")
+	// A sender filter matches any notification in the group and renders the
+	// newest one it matched.
+	if byActor := get("group_id=" + issue + "&actors=agent:" + actor); len(byActor.Items) != 1 || byActor.Items[0].ID == newest {
+		t.Fatalf("older actor did not select its own notification: %+v", byActor)
+	}
+	if len(get("group_id="+issue+"&actors=agent:"+actor+"&unread_only=true").Items) != 1 {
+		t.Fatal("unread did not test the notification the sender filter selected")
 	}
 	if len(get("group_id="+issue).Items) != 1 {
 		t.Fatal("deep link outside first page did not resolve")
 	}
 	var facets archivedInboxFacetsResponse
 	testutil.Call(t, inboxWorkspaceHandler(testHandler.GetArchivedInboxFacets), inboxRequest(http.MethodGet, "/api/inbox/archived/facets?actors=system", ws)).Want(http.StatusOK).JSON(&facets)
-	if facets.Statuses["in_review"] != 1 || facets.Priorities["high"] != 1 || facets.Actors["agent:"+actor] != 55 || facets.Actors["system"] != 1 || facets.UnreadCount != 0 {
+	if facets.Statuses["in_review"] != 1 || facets.Priorities["high"] != 1 || facets.Actors["agent:"+actor] != 56 || facets.Actors["system"] != 1 || facets.UnreadCount != 0 {
 		t.Fatalf("incorrect facets: %+v", facets)
 	}
 	insert(&issue, false, "system", nil, time.Now(), `{}`, false)
@@ -142,5 +179,96 @@ func TestArchivedInboxFiltersAndLookupUseLatestGroup(t *testing.T) {
 		req := inboxRequest(http.MethodGet, "/api/inbox/archived/page", ws)
 		req.Header.Set("X-User-ID", uuid.NewString())
 		testutil.Call(t, inboxWorkspaceHandler(handler), req).Want(http.StatusNotFound)
+	}
+}
+
+func TestArchivedInboxNotificationAndIssueFilters(t *testing.T) {
+	ws := dbfx.Workspace(t, "Archive extended filters", "archive-extended-"+uuid.NewString())
+	dbfx.Member(t, ws, testUserID, "owner")
+	today := time.Date(2026, 3, 11, 0, 0, 0, 0, time.UTC) // a Wednesday
+	project := dbfx.Project(t, "Filtered project", testutil.Cols{"workspace_id": ws})
+	label := dbfx.Insert(t, "issue_label", testutil.Cols{"workspace_id": ws, "name": "bug", "color": "#f00", "resource_type": "issue"})
+	tracked := dbfx.Issue(t, "Tracked", testutil.Cols{
+		"workspace_id": ws, "project_id": project, "assignee_type": "member", "assignee_id": testUserID,
+		"due_date": today.Format(time.DateOnly),
+	})
+	dbfx.Exec(t, `INSERT INTO issue_to_label (issue_id, label_id) VALUES ($1, $2)`, tracked, label)
+	bare := dbfx.Issue(t, "Bare", testutil.Cols{"workspace_id": ws})
+	base := time.Now().UTC().Add(-time.Hour)
+	insert := func(issueID *string, notifType string, created time.Time) string {
+		return dbfx.Insert(t, "inbox_item", testutil.Cols{
+			"workspace_id": ws, "recipient_type": "member", "recipient_id": testUserID,
+			"type": notifType, "severity": "info", "title": notifType, "issue_id": issueID,
+			"read": true, "actor_type": "system", "archived": true, "created_at": created,
+		})
+	}
+	mention := insert(&tracked, "mentioned", base)
+	change := insert(&tracked, "status_changed", base.Add(time.Minute))
+	comment := insert(&bare, "new_comment", base)
+	issueless := insert(nil, "quick_create_failed", base)
+
+	ids := func(query string) []string {
+		var page archivedInboxPageResponse
+		testutil.Call(t, inboxWorkspaceHandler(testHandler.ListArchivedInboxPage), inboxRequest(http.MethodGet, "/api/inbox/archived/page?"+query, ws)).Want(http.StatusOK).JSON(&page)
+		out := make([]string, len(page.Items))
+		for i, item := range page.Items {
+			out[i] = item.ID
+		}
+		slices.Sort(out)
+		return out
+	}
+	sorted := func(values ...string) []string {
+		slices.Sort(values)
+		return values
+	}
+	day := "today=" + today.Format(time.DateOnly)
+	for _, tc := range []struct {
+		query string
+		want  []string
+	}{
+		// The type filter picks the matching notification, not the newest one.
+		{"types=mention", []string{mention}},
+		{"types=comment,mention", sorted(mention, comment)},
+		{"types=change&negated=type", sorted(mention, comment, issueless)},
+		{"projects=" + project, []string{change}},
+		{"projects=none", []string{comment}},
+		// Issue filters, negated ones too, never match an issue-less notification.
+		{"projects=" + project + "&negated=project", []string{comment}},
+		{"assignees=member:" + testUserID, []string{change}},
+		{"assignees=none", []string{comment}},
+		{"labels=" + label, []string{change}},
+		{"labels=" + label + "&negated=label", []string{comment}},
+		{"due_dates=today&" + day, []string{change}},
+		{"due_dates=this_week,overdue&" + day, []string{change}},
+		{"due_dates=none&" + day, []string{comment}},
+		{"due_dates=today&negated=dueDate&" + day, []string{comment}},
+		{"received_after=" + url.QueryEscape(time.Now().UTC().Add(time.Hour).Format(time.RFC3339Nano)), []string{}},
+		{"types=mention&received_after=" + url.QueryEscape(base.Add(30*time.Second).Format(time.RFC3339Nano)), []string{}},
+	} {
+		if got := ids(tc.query); !slices.Equal(got, tc.want) {
+			t.Errorf("%s: got %v, want %v", tc.query, got, tc.want)
+		}
+	}
+
+	facets := func(query string) archivedInboxFacetsResponse {
+		var out archivedInboxFacetsResponse
+		testutil.Call(t, inboxWorkspaceHandler(testHandler.GetArchivedInboxFacets), inboxRequest(http.MethodGet, "/api/inbox/archived/facets?"+query, ws)).Want(http.StatusOK).JSON(&out)
+		return out
+	}
+	// Each count ignores its own dimension, and an issue filter drops the
+	// issue-less notification from every other count.
+	if got := facets("types=mention&projects=none"); got.Types["mention"] != 0 || got.Types["comment"] != 1 || got.Types["system"] != 0 ||
+		got.Projects[project] != 1 || got.Projects["none"] != 0 {
+		t.Fatalf("facets with type and project filters: %+v", got)
+	}
+	if got := facets("types=mention"); got.Labels[label] != 1 || got.Assignees["member:"+testUserID] != 1 || got.Projects["none"] != 0 {
+		t.Fatalf("facets with a type filter: %+v", got)
+	}
+	if got := facets(""); got.Types["mention"] != 1 || got.Types["change"] != 1 || got.Types["system"] != 1 || got.Projects["none"] != 1 || got.Assignees["none"] != 1 {
+		t.Fatalf("unfiltered facets: %+v", got)
+	}
+
+	for _, query := range []string{"types=bogus", "negated=creator", "due_dates=later&" + day, "due_dates=today", "today=03/11/2026", "received_after=yesterday"} {
+		testutil.Call(t, inboxWorkspaceHandler(testHandler.ListArchivedInboxPage), inboxRequest(http.MethodGet, "/api/inbox/archived/page?"+query, ws)).Want(http.StatusBadRequest)
 	}
 }

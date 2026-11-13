@@ -27,9 +27,9 @@
 // real `git describe` invocation against a throwaway repo.
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { rmSync } from "node:fs";
+import { realpathSync, rmSync } from "node:fs";
 import { delimiter, dirname, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const desktopRoot = resolve(here, "..");
@@ -350,9 +350,6 @@ export function builderArgsForTarget(
     builderArgs.push("-c.publish.channel=latest-arm64");
   }
   if (target.platform === "mac" && target.arch === "x64") {
-    // Scope the Electron 39 platform floor to the new Intel package so this
-    // change does not rewrite established Apple Silicon bundle metadata.
-    builderArgs.push("-c.mac.minimumSystemVersion=12.0.0");
     builderArgs.push("-c.publish.channel=latest-x64");
   }
   return builderArgs;
@@ -479,7 +476,7 @@ function main() {
 // Only run when invoked as a CLI, not when imported by a test file.
 if (
   process.argv[1] &&
-  import.meta.url === pathToFileURL(process.argv[1]).href
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
 ) {
   main();
 }

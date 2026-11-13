@@ -182,9 +182,7 @@ func init() {
 	autopilotTriggerUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 }
 
-// ---------------------------------------------------------------------------
 // Autopilot commands
-// ---------------------------------------------------------------------------
 
 func runAutopilotList(cmd *cobra.Command, _ []string) error {
 	client, err := newAPIClient(cmd)
@@ -1012,15 +1010,13 @@ func resolveAutopilotSubscriberInputs(ctx context.Context, client *cli.APIClient
 	return inputs, nil
 }
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 // uuidRegexp matches a canonical UUID (8-4-4-4-12 hex).
 var uuidRegexp = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
-// resolveAgent accepts either a UUID or an agent name (case-insensitive substring)
-// and returns the agent's UUID. Errors on no match or ambiguous match.
+// resolveAgent passes UUIDs through and otherwise resolves workspace agents
+// using the shared ID, exact-name, and substring matching rules.
 func resolveAgent(ctx context.Context, client *cli.APIClient, nameOrID string) (string, error) {
 	if uuidRegexp.MatchString(nameOrID) {
 		return nameOrID, nil
@@ -1035,26 +1031,13 @@ func resolveAgent(ctx context.Context, client *cli.APIClient, nameOrID string) (
 		return "", fmt.Errorf("fetch agents: %w", err)
 	}
 
-	nameLower := strings.ToLower(nameOrID)
-	type match struct{ ID, Name string }
-	var matches []match
+	candidates := make([]assigneeCandidate, 0, len(agents))
 	for _, a := range agents {
-		aName := strVal(a, "name")
-		if strings.Contains(strings.ToLower(aName), nameLower) {
-			matches = append(matches, match{ID: strVal(a, "id"), Name: aName})
-		}
+		candidates = append(candidates, assigneeCandidate{assigneeMatch: assigneeMatch{
+			Type: "agent", ID: strVal(a, "id"), Name: strVal(a, "name"),
+		}})
 	}
 
-	switch len(matches) {
-	case 0:
-		return "", fmt.Errorf("no agent found matching %q", nameOrID)
-	case 1:
-		return matches[0].ID, nil
-	default:
-		var parts []string
-		for _, m := range matches {
-			parts = append(parts, fmt.Sprintf("  %q (%s)", m.Name, truncateID(m.ID)))
-		}
-		return "", fmt.Errorf("ambiguous agent %q; matches:\n%s", nameOrID, strings.Join(parts, "\n"))
-	}
+	_, agentID, err := matchAssignee(nameOrID, assigneeKinds{agent: true}, candidates)
+	return agentID, err
 }
