@@ -39,3 +39,15 @@ func TestCombinedOutputKillsDescendantsHoldingOutput(t *testing.T) {
 		t.Fatalf("descendant survived process-tree cancellation, stat error = %v", err)
 	}
 }
+
+func TestCombinedOutputSucceedsWhileExitedDescendantsDrain(t *testing.T) {
+	t.Parallel()
+
+	// On darwin the group lingers with only exiting members for a few hundred
+	// microseconds; only a few runs per thousand signal it inside that window.
+	for i := 0; i < 1000; i++ {
+		if _, err := CombinedOutput(context.Background(), exec.Command("sh", "-c", "true & exit 0"), time.Second); err != nil {
+			t.Fatalf("run %d: CombinedOutput error = %v, want nil", i, err)
+		}
+	}
+}

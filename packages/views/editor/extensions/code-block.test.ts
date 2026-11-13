@@ -92,6 +92,37 @@ describe("code block Markdown save and reload", () => {
   });
 });
 
+describe("fence info string beyond the language", () => {
+  // The language is the info string's first word; the rest (a title, line
+  // marks) is metadata the editor keeps and writes back unchanged (#10255).
+  it.each([
+    ['mermaid title="Request flow"', "mermaid", 'title="Request flow"'],
+    ["ts title='client.ts' {1,3}", "ts", "title='client.ts' {1,3}"],
+    ["html title=Report", "html", "title=Report"],
+  ])("splits %j into language and metadata, and saves it verbatim", (info, language, meta) => {
+    const content = "graph LR\n  A --> B";
+    const source = `Intro\n\n\`\`\`${info}\n${content}\n\`\`\`\n\nOutro`;
+    const saved = roundTrip(source, content, language);
+    expect(load(source).state.doc.child(1).attrs.meta).toBe(meta);
+    expect(saved).toBe(`Edited ${source}`);
+  });
+
+  it("has no metadata for a bare language", () => {
+    const editor = load("Intro\n\n```ts\nconst a = 1;\n```\n\nOutro");
+    expect(editor.state.doc.child(1).attrs.meta).toBeNull();
+  });
+
+  it("keeps the metadata through the HTML clipboard path", () => {
+    const editor = load('Intro\n\n```mermaid title="Request flow"\ngraph LR\n```\n\nOutro');
+    const html = editor.getHTML();
+    const pasted = load("");
+    pasted.commands.setContent(html);
+    const block = pasted.state.doc.child(1);
+    expect(block.attrs.language).toBe("mermaid");
+    expect(block.attrs.meta).toBe('title="Request flow"');
+  });
+});
+
 describe("production preprocessing and large-document loading", () => {
   it("keeps a URL literal after serialization grows the outer fence", () => {
     const content = "https://example.com\nconst ticks = '`````';";

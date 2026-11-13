@@ -45,13 +45,17 @@ Les étapes d'installation se trouvent dans [Installer les outils de codage IA](
 | Qoder CN CLI | `qoderclicn` | ✓ | ✓ | ✓ | `.qoder/skills/` |
 | Qwen Code | `qwen` | ✓ | ✓ | ✓ | `.qwen/skills/` |
 | QwenPaw | `qwenpaw` | ✓ | ✓ | — | `skills/` de l'espace de travail propre à chaque exécution |
-| Amp | `amp` | ✓ | — | ✓ | `.agents/skills/` |
+| Amp | `amp` | ✓ | — | Mode | `.agents/skills/` |
 | Factory Droid | `droid` | ✓ | — | ✓ | `.factory/skills/` |
 | Reasonix | `reasonix` | ✓ | ✓ | ✓ | `.reasonix/skills/` |
 | Trae CLI | `traecli` | ✓ | ✓ | ✓ | `.traecli/skills/` |
 | Dim | `dim` | ✓ | ✓ | ✓ | — |
 | ZeroClaw | `zeroclaw` | ✓ | — | — | — |
 | ZCode | `zcode` / ZCode Desktop | ✓ | ✓ | ✓ | `.zcode/skills/` |
+
+Pour Amp, le champ du modèle sélectionne un **mode** Amp, comme `high`, et non l’identifiant du modèle sous-jacent. Laissez-le vide pour utiliser le mode par défaut d’Amp.
+
+Amp exige aussi `AMP_API_KEY` dans l’environnement du daemon ou de l’agent ; une connexion interactive enregistrée ne suffit pas.
 
 « MCP géré par Multica » signifie que vous pouvez définir des serveurs MCP dans la configuration de l'agent et que Multica les transmet à l'outil avant une exécution. Cette colonne indique seulement si Multica peut s'en charger, pas si l'outil dispose d'autres moyens de configurer MCP.
 
@@ -87,7 +91,7 @@ Les règles de relance et de reprise de session se trouvent dans [Exécutions](/
 
 ## Configuration MCP
 
-Antigravity, GitHub Copilot CLI, DevEco Code, Muse Code et ZeroClaw ne lisent pas encore la configuration MCP d'un agent ; le champ n'est donc pas affiché lors de la création d'agents pour ces outils.
+Amp, Factory Droid, Antigravity, GitHub Copilot CLI, DevEco Code, Muse Code et ZeroClaw ne lisent pas encore la configuration MCP d'un agent ; le champ n'est donc pas affiché lors de la création d'agents pour ces outils.
 
 La transmission d'une configuration MCP gérée à Pi nécessite Pi 0.99.0 ou une version ultérieure. Les versions antérieures de Pi continuent d'exécuter les agents sans configuration MCP.
 

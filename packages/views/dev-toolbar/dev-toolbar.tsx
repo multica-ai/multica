@@ -220,7 +220,19 @@ export function DevToolbar({ build, apiUrl, route, onNavigate }: DevToolbarProps
           label="Cache"
           value={String(queries.length)}
           wide
-          extra={fetching > 0 && <span className="text-brand">{`· ${fetching}↻`}</span>}
+          extra={
+            // Fetches start and settle many times a second; a slot that came and
+            // went would resize the chip and shift the whole bar each time.
+            <span
+              data-testid="dev-toolbar-cache-fetching"
+              className={cn(
+                "inline-block min-w-[3ch] tabular-nums",
+                fetching > 0 ? "text-brand" : "text-faint-foreground",
+              )}
+            >
+              {`↻${fetching}`}
+            </span>
+          }
         >
           <CachePanel now={now} />
         </Metric>
