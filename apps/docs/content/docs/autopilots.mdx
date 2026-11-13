@@ -4,10 +4,15 @@ description: Hand recurring work to agents automatically, on a schedule or from 
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { AutopilotDemo } from "@/components/demos/autopilot-demo";
 
-Autopilots run work that happens over and over — a daily progress summary, a periodic dependency check, or an agent kicked off by an event from an external system.
+A daily progress summary, a periodic dependency check, an agent kicked off by an event from an external system: work that happens over and over goes to an autopilot.
 
-Each autopilot stores a Runbook, an assignee, and one or more triggers. When triggered, Multica creates an issue or runs the agent directly, and keeps a record of every run.
+Each autopilot stores a Runbook, an assignee, and one or more triggers. When triggered, Multica creates an issue or runs the agent directly, and every run leaves a record.
+
+## Autopilots and issue wakeups [#vs-wakeups]
+
+An autopilot starts new work from a schedule or webhook, and can create a new issue each time. To have an agent come back to one existing issue later, at a set time or once something happens on it, add a [wakeup](/issue-wakeups) to that issue instead. The **Issue wakeups** tab on the Autopilot page lists every wakeup in the workspace.
 
 ## Create an autopilot
 
@@ -21,7 +26,11 @@ Open **Autopilot** in the sidebar, pick a template or start from scratch, then c
 - **Subscribers**: members to notify after an issue is auto-created;
 - **Triggers**: a schedule or a webhook.
 
-An autopilot is enabled by default after saving; **Run now** manually executes the full flow once at any time.
+An autopilot is enabled by default after saving. **Run now** executes the full flow once at any time, without waiting for the schedule.
+
+Below is an autopilot whose execution mode is Create issue. Click **Run now**, or skip ahead to the next scheduled time, and watch it create an issue, hand it to the agent, and complete the run.
+
+<AutopilotDemo />
 
 ## Choose an execution mode
 
@@ -30,15 +39,15 @@ An autopilot is enabled by default after saving; **Run now** manually executes t
 | **Create issue** | Each trigger first creates an issue, then assigns it to the assignee; discussion, status, and run records all live on the issue. | Work the team needs to review, confirm, or follow up on. |
 | **Run only** | Creates a run directly with no issue; results are visible only in the autopilot's run history. | Background runs that need no collaboration record. |
 
-**Create issue** mode uses the same run queue as regular issues: when the runtime is offline, the issue is still created and the run waits for the runtime to come online.
+**Create issue** mode uses the same run queue as regular issues: when the runtime is offline, the issue is still created, and the run starts once the runtime comes online.
 
 **Run only** requires the runtime to be available at trigger time; otherwise the run shows as skipped, and no waiting issue is left behind.
 
 ## Run on a schedule
 
-The schedule editor lets you pick the run time, repeat days, time window, and timezone, and previews the upcoming run times. One autopilot can have multiple schedules; enabling or disabling an individual trigger is done with the CLI's `autopilot trigger-update` — see [Using the CLI](/cli) for the parameters.
+The schedule editor lets you pick the run time, repeat days, time window, and timezone, and previews the upcoming run times. One autopilot can have multiple schedules; to enable or disable an individual trigger, use the CLI's `autopilot trigger-update` — see [Using the CLI](/cli) for the parameters.
 
-When you need more complex rules, edit the standard 5-field cron directly:
+For more complex rules, edit the standard 5-field cron directly:
 
 ```text
 minute hour day month weekday
@@ -76,7 +85,7 @@ Constraints on webhook requests:
 - without a stable idempotency key, Multica can't guarantee that repeated requests run only once;
 - when the trigger is disabled or the event doesn't match, the delivery is recorded as ignored and no run is created.
 
-### Filter events
+### Filter events [#event-filters]
 
 When one source sends several event types, add event filters to the trigger. Each row holds one event name plus an optional list of actions; a run fires if any row matches, and leaving all rows empty accepts every event.
 
@@ -92,7 +101,7 @@ Only the autopilot's creator, workspace owners/admins, and collaborators granted
 
 ### Webhook response reference
 
-When debugging a sender, use this table to interpret Multica's responses:
+When debugging a sender, check Multica's responses against this table:
 
 | HTTP status | Response status | Meaning |
 |---|---|---|
@@ -149,7 +158,7 @@ multica autopilot runs <autopilot-id>
 multica autopilot trigger-rotate-url <autopilot-id> <trigger-id>
 ```
 
-`autopilot get` sets `webhook_token`, `webhook_path`, and `webhook_url` to `null` by default, and returns `has_webhook_token` plus `webhook_token_hint` instead. Add `--show-secrets` only when you intentionally need the live credential; the CLI prints a warning to stderr so piped JSON stays valid.
+`autopilot get` sets `webhook_token`, `webhook_path`, and `webhook_url` to `null` by default, and returns `has_webhook_token` plus `webhook_token_hint` instead. Add `--show-secrets` only when you intentionally need the live credential; the CLI prints its warning to stderr, so piped JSON is unaffected.
 
 See [Using the CLI](/cli) for the full parameters.
 
@@ -158,3 +167,4 @@ See [Using the CLI](/cli) for the full parameters.
 - [Assign issues to agents](/assigning-issues) — assignment and the confirmation window.
 - [Inbox and subscriptions](/inbox) — where run notifications arrive.
 - [Runs](/tasks) — run states and failure handling.
+- [Issue wakeups](/issue-wakeups) — bring an agent back to an existing issue later.

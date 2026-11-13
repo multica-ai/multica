@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Play } from "lucide-react";
+import { Play } from "@multica/ui/icons";
 
 /**
  * VideoEmbed — provider-agnostic, click-to-load video embed for docs MDX.

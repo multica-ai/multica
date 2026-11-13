@@ -3,10 +3,13 @@ package agent
 import (
 	"context"
 	"log/slog"
+	"math"
 	"os/exec"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/awakeclock"
 )
 
 type cursorBackgroundTool struct {
@@ -48,6 +51,9 @@ func (b *cursorBackgroundTools) TerminalObserved() bool { return b.terminal.Load
 
 func newCursorBackgroundTools(ctx context.Context, cmd *exec.Cmd, messages chan<- Message, logger *slog.Logger) *cursorBackgroundTools {
 	b := &cursorBackgroundTools{ctx: ctx, cmd: cmd, messages: messages, logger: logger, stop: make(chan struct{}), done: make(chan struct{})}
+	// "No tool activity yet" must sort before every awakeclock reading. Those
+	// readings can be negative, so zero is not a safe sentinel.
+	b.lastToolActivity.Store(math.MinInt64)
 	go func() {
 		defer close(b.done)
 		// This only observes natural process exit; it never measures inactivity.
@@ -67,13 +73,15 @@ func newCursorBackgroundTools(ctx context.Context, cmd *exec.Cmd, messages chan<
 	return b
 }
 
-func (b *cursorBackgroundTools) Activity() (int32, time.Time) {
-	return b.inFlight.Load(), time.Unix(0, b.lastToolActivity.Load())
+// Activity reports in-flight tools and the awakeclock reading of the last
+// tool transition. It uses the same clock as the daemon's idle watchdog.
+func (b *cursorBackgroundTools) Activity() (int32, time.Duration) {
+	return b.inFlight.Load(), time.Duration(b.lastToolActivity.Load())
 }
 
 func (b *cursorBackgroundTools) Send(msg Message) {
 	if msg.Type == MessageToolUse || msg.Type == MessageToolResult {
-		now := time.Now().UnixNano()
+		now := int64(awakeclock.Now())
 		for {
 			previous := b.lastToolActivity.Load()
 			if now <= previous || b.lastToolActivity.CompareAndSwap(previous, now) {

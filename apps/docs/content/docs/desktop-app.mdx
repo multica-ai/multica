@@ -4,6 +4,9 @@ description: Install Multica Desktop, use desktop tabs and the built-in daemon, 
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
+import { DesktopTabsDemo } from "@/components/demos/desktop-tabs-demo";
 
 Multica Desktop is available for macOS, Windows, and Linux. It uses the same account and workspace data as the web app, but it manages the daemon on your machine automatically and keeps a separate set of tabs for each workspace.
 
@@ -22,6 +25,8 @@ You can be signed in to both at the same time. As long as they connect to the sa
 
 ## Installation
 
+<Steps>
+<Step>
 Pick the installer that matches your OS and CPU architecture from the [Multica downloads page](https://multica.ai/download):
 
 | Platform | Installer |
@@ -29,8 +34,11 @@ Pick the installer that matches your OS and CPU architecture from the [Multica d
 | macOS | `.dmg` |
 | Windows | `.exe` |
 | Linux | `.AppImage`, `.deb`, or `.rpm` |
-
+</Step>
+<Step>
 After installing, sign in with the same email you use on the web. Once signed in, Desktop starts its own bundled Multica CLI and detects the AI coding tools already installed on the machine.
+</Step>
+</Steps>
 
 <Callout type="info">
 The CLI bundled with Desktop only serves the app's managed runtime. If you also want to run commands like `multica issue` in a terminal, install the CLI separately following [step 2 of the quickstart](/cloud-quickstart#2-connect-a-computer).
@@ -40,7 +48,9 @@ The CLI bundled with Desktop only serves the app's managed runtime. If you also 
 
 Desktop saves tabs per workspace. For example, if you open three issues in workspace A and switch to workspace B, you see B's own tabs; switch back to A and the three earlier tabs are still there.
 
-A given resource opens only once in the current workspace. Tabs can be reordered, pinned, and closed, and each keeps its own forward/back history and scroll position. Clicking or pasting an app link for this deployment opens it directly in a tab instead of jumping to the browser.
+<DesktopTabsDemo />
+
+A given resource opens only once in the current workspace. Tabs can be reordered, pinned, and closed, and each keeps its own forward/back history and scroll position. Pinned tabs sit at the left end and have no close button; unpin a tab to close it. Opening another page from a pinned tab opens a new tab, and the pinned tab stays where it is. Clicking or pasting an app link for this deployment opens it directly in a tab instead of jumping to the browser.
 
 Logging out clears every tab saved on the machine, so the next person to sign in never sees pages left behind by the previous account.
 
@@ -58,27 +68,19 @@ You can check runtime status and logs in Desktop's settings. If a tool isn't det
 
 ## Updating Desktop
 
-Auto-update is on by default. The app checks for and downloads new versions in the background; once a download finishes you can restart to install immediately or let it install on the next quit. You can also turn off automatic checks or check for new versions manually under **Settings → Updates**.
+Auto-update is on by default. The app checks for and downloads new versions in the background; once a download finishes you can restart to install immediately or let it install on the next quit. Under **Settings → Updates** you can turn off automatic checks or check for new versions manually.
 
 Updates are distributed per OS and CPU architecture:
 
 - Windows arm64 and macOS x64 (Intel) each use their own update feed;
 - all other architectures use the default feed;
-- the app matches the update feed automatically — no manual selection needed;
+- the app matches the update feed automatically, so no manual selection is needed;
 - on Linux, auto-update only works for `.AppImage`; update `.deb` and `.rpm` by installing a new package over the old one;
 - if auto-update fails, likewise install over the top with the matching installer from the downloads page.
 
 ## Connecting to a self-hosted instance
 
-Desktop connects to Multica Cloud by default. To connect to a self-hosted instance, create `desktop.json` inside the `.multica` directory of your home directory:
-
-| Platform | Path |
-| --- | --- |
-| macOS | `/Users/<you>/.multica/desktop.json` |
-| Linux | `/home/<you>/.multica/desktop.json` |
-| Windows | `C:\Users\<you>\.multica\desktop.json` |
-
-These are the default locations — if your home directory has been moved or redirected, use its actual path.
+Desktop connects to Multica Cloud by default. To connect to a self-hosted instance, create `desktop.json` inside the `.multica` directory of your home directory with this content:
 
 ```json
 {
@@ -87,11 +89,43 @@ These are the default locations — if your home directory has been moved or red
 }
 ```
 
+<Tabs groupId="os" persist items={["macOS / Linux", "Windows"]}>
+<Tab value="macOS / Linux">
+
+| Platform | Path |
+| --- | --- |
+| macOS | `/Users/<you>/.multica/desktop.json` |
+| Linux | `/home/<you>/.multica/desktop.json` |
+
+</Tab>
+<Tab value="Windows">
+
+The file path is `C:\Users\<you>\.multica\desktop.json`.
+
+Notepad and PowerShell redirection easily produce a file Desktop can't read (see [Windows: check the filename and encoding](#windows-check-the-filename-and-encoding)), so create it from PowerShell in one step:
+
+```powershell
+$dir = "$env:USERPROFILE\.multica"
+New-Item -ItemType Directory -Force $dir | Out-Null
+$json = @'
+{
+  "schemaVersion": 1,
+  "apiUrl": "https://api.example.com"
+}
+'@
+[System.IO.File]::WriteAllText("$dir\desktop.json", $json)
+```
+
+</Tab>
+</Tabs>
+
+These are the default locations. If your home directory has been moved or redirected, use its actual path.
+
 <Callout type="warning">
-This is **not** the CLI's `~/.multica/config.json`, and the key names differ: the CLI uses `server_url`, Desktop uses `apiUrl`. Desktop never reads the CLI's config — it manages a separate daemon profile under `~/.multica/profiles/desktop-<host>/`. Editing `config.json` does not change which server Desktop connects to.
+This is **not** the CLI's `~/.multica/config.json`, and the key names differ: the CLI uses `server_url`, Desktop uses `apiUrl`. Desktop never reads the CLI's config; it manages a separate daemon profile under `~/.multica/profiles/desktop-<host>/`. Editing `config.json` does not change which server Desktop connects to.
 </Callout>
 
-`apiUrl` is the backend's public address; it is required and must use `http` or `https`. The other two URLs can be omitted — Desktop derives them automatically:
+`apiUrl` is the backend's public address; it is required and must use `http` or `https`. The other two URLs can be omitted, and Desktop derives them automatically:
 
 - `wsUrl`: swaps the `apiUrl` scheme to `ws` or `wss` and appends `/ws` to the path;
 - `appUrl`: strips the `api.` prefix when the host starts with `api.` and has at least three labels (`api.example.com` → `example.com`); otherwise it stays the same as `apiUrl`.
@@ -111,49 +145,37 @@ Usually `apiUrl` alone is enough. Override explicitly only when the derivation d
 }
 ```
 
-Restart Desktop after saving — the file is read once at startup. The two failure modes look different, which is the fastest way to tell them apart:
+Restart Desktop after saving; the file is read once at startup. The two failure modes look different:
 
-- **File not found** (wrong directory, or a filename that isn't exactly `desktop.json`) — Desktop uses the default Cloud configuration and shows no error. So if Desktop still reports a Cloud address and no configuration error, the file is not where Desktop is looking.
-- **File found but invalid** JSON, version, or URLs — Desktop shows a configuration error and does not fall back to Cloud.
+- **File not found** (wrong directory, or a filename that isn't exactly `desktop.json`): Desktop uses the default Cloud configuration and shows no error. So if Desktop still reports a Cloud address and no configuration error, the file is not where Desktop is looking.
+- **File found but invalid** (JSON, version, or URLs): Desktop shows a configuration error and does not fall back to Cloud.
 
 Delete the file and restart to return to the default Cloud configuration.
 
 <Callout type="warning">
-Desktop can only connect to addresses reachable from both the browser and the executing machine. If a remote self-hosted instance doesn't use HTTPS or doesn't proxy WebSocket, Desktop can't establish a connection; see the [self-host quickstart](/self-host-quickstart#3-choose-how-to-access) for the full configuration.
+Desktop can only connect to addresses reachable from both the browser and the executing machine. If a remote self-hosted instance doesn't use HTTPS or doesn't proxy WebSocket, Desktop can't establish a connection; see the [self-host quickstart](/self-host-quickstart#remote-access) for the full configuration.
 </Callout>
 
 ### Windows: check the filename and encoding
 
-Two Windows editor defaults silently produce a file Desktop can't use:
+Two common ways of writing the file on Windows produce one Desktop can't read:
 
-- **Notepad appends `.txt`.** Saving as `desktop.json` can produce `desktop.json.txt`, which Desktop treats as not found. Turn on file name extensions in Explorer, or pick *All files* in the save dialog. To see the real filename, run `Get-ChildItem "$env:USERPROFILE\.multica" -Filter "desktop.json*"` in PowerShell — the `Name` column must read exactly `desktop.json`.
+- **Notepad appends `.txt`.** Saving as `desktop.json` can produce `desktop.json.txt`, which Desktop treats as not found. Turn on file name extensions in Explorer, or pick *All files* in the save dialog. To see the real filename, run `Get-ChildItem "$env:USERPROFILE\.multica" -Filter "desktop.json*"` in PowerShell; the `Name` column must read exactly `desktop.json`.
 - **PowerShell redirection writes UTF-16 or a BOM.** `> desktop.json` and `Out-File` can produce an encoding that fails to parse, which surfaces as a configuration error.
 
-To avoid both, create the file from PowerShell in one step:
-
-```powershell
-$dir = "$env:USERPROFILE\.multica"
-New-Item -ItemType Directory -Force $dir | Out-Null
-$json = @'
-{
-  "schemaVersion": 1,
-  "apiUrl": "https://api.example.com"
-}
-'@
-[System.IO.File]::WriteAllText("$dir\desktop.json", $json)
-```
+The PowerShell command in the Windows tab above avoids both.
 
 ## Windows Defender flags Multica as a virus
 
-**Symptom**: Windows Security reports a threat such as `Trojan:Script/Wacatac.B!ml` and quarantines a file inside the Desktop installation. The affected item is normally the bundled CLI, not the app executable:
+Windows Security reports a threat such as `Trojan:Script/Wacatac.B!ml` and quarantines a file inside the Desktop installation. The affected item is normally the bundled CLI, not the app executable:
 
 ```text
 C:\Users\<you>\AppData\Local\Programs\@multicadesktop\resources\app.asar.unpacked\resources\bin\multica.exe
 ```
 
-**This is a false positive.** The `!ml` suffix means the verdict came from Defender's machine-learning heuristics rather than a malware signature. Multica's Windows builds are not Authenticode code-signed yet, and a freshly published unsigned binary that starts background processes and opens network connections is exactly the profile those heuristics score as suspicious. Every Windows artifact is built by GitHub Actions from the public source in this repository.
+This is a false positive. The `!ml` suffix means the verdict came from Defender's machine-learning heuristics rather than a malware signature. Multica's Windows builds are not Authenticode code-signed yet, and a freshly published unsigned binary that starts background processes and opens network connections is the kind of binary those heuristics readily score as suspicious. Every Windows artifact is built by GitHub Actions from the public source in this repository.
 
-**Verify it yourself** — each GitHub release publishes a `checksums.txt` covering every CLI archive:
+You can verify it yourself: each GitHub release publishes a `checksums.txt` covering every CLI archive.
 
 ```powershell
 Get-FileHash .\multica-cli-<version>-windows-amd64.zip -Algorithm SHA256
@@ -161,15 +183,24 @@ Get-FileHash .\multica-cli-<version>-windows-amd64.zip -Algorithm SHA256
 
 Compare the hash with the matching line in `checksums.txt` on the [latest release](https://github.com/multica-ai/multica/releases/latest).
 
-**How to fix**:
+Fix it in three steps:
 
-1. **Restore the quarantined file** — Windows Security → *Virus & threat protection* → *Protection history* → select the Multica item → *Actions* → *Restore*.
-2. **Add an exclusion** so it isn't quarantined again — *Virus & threat protection* → *Manage settings* → *Exclusions* → *Add an exclusion* → *Folder*, and add both:
-   - `%LOCALAPPDATA%\Programs\@multicadesktop`
-   - `%APPDATA%\Multica`
+<Steps>
+<Step>
+Restore the quarantined file: Windows Security → *Virus & threat protection* → *Protection history* → select the Multica item → *Actions* → *Restore*.
+</Step>
+<Step>
+Add an exclusion so it isn't quarantined again: *Virus & threat protection* → *Manage settings* → *Exclusions* → *Add an exclusion* → *Folder*, and add both:
 
-   Both paths matter: when the bundled CLI goes missing, Desktop downloads a replacement into `%APPDATA%\Multica\bin`, so excluding only the install folder leaves you in a loop where the replacement gets quarantined too.
-3. **Report the false positive to Microsoft** at [Microsoft Security Intelligence — submit a file](https://www.microsoft.com/en-us/wdsi/filesubmission), choosing *Software developer* and *Incorrectly detected as malware*. That is what gets the detection withdrawn for every user, usually within a few days.
+- `%LOCALAPPDATA%\Programs\@multicadesktop`
+- `%APPDATA%\Multica`
+
+Both paths matter: when the bundled CLI goes missing, Desktop downloads a replacement into `%APPDATA%\Multica\bin`, so excluding only the install folder leaves you in a loop where the replacement gets quarantined too.
+</Step>
+<Step>
+Report the false positive to Microsoft at [Microsoft Security Intelligence — submit a file](https://www.microsoft.com/en-us/wdsi/filesubmission), choosing *Software developer* and *Incorrectly detected as malware*. That is what gets the detection withdrawn for every user, usually within a few days.
+</Step>
+</Steps>
 
 <Callout type="warning">
 Only add these exclusions if you installed Multica from the [downloads page](https://multica.ai/download) or [GitHub releases](https://github.com/multica-ai/multica/releases) and the checksum matches. An exclusion disables real-time protection for everything in that folder.

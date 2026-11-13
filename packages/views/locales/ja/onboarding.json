@@ -106,10 +106,6 @@
       "other_placeholder": "例: スタディグループの運営"
     }
   },
-  "option_card": {
-    "other_label": "その他",
-    "other_aria": "別の内容を入力"
-  },
   "step_question": {
     "hint_pick": "スキップできます。"
   },
@@ -135,28 +131,7 @@
     "success_toast": "ウェイトリストに登録しました。クラウドランタイムが利用可能になったらメールでお知らせします。",
     "failed_toast": "ウェイトリストに登録できませんでした"
   },
-  "welcome_after_onboarding": {
-    "skip": {
-      "loading": "ワークスペースを準備中…",
-      "title": "Multica へようこそ!",
-      "subtitle": "ランタイム接続を案内するタスクを 1 つ追加しました。準備できたら Runtimes から Mika と始められます。",
-      "got_it": "了解",
-      "status_in_progress": "進行中",
-      "error_title": "準備できませんでした",
-      "error_body": "ランタイム案内のタスクを作成できませんでした。再試行するか、準備ができたら Runtimes からランタイムを接続してください。",
-      "retry": "再試行",
-      "dismiss": "後で",
-      "cards": {
-        "install_runtime": {
-          "title": "ランタイムを接続",
-          "subtitle": "Codex または Kimi をインストールし、Runtimes から Mika の案内チャットを始めてください。"
-        }
-      }
-    }
-  },
   "step_workspace": {
-    "eyebrow_first": "最初のワークスペース",
-    "eyebrow_resume": "続きから、または新規作成",
     "headline_first": "ワークスペースに名前を付けましょう。",
     "headline_resume": "{{name}} で続けるか、別のワークスペースを始めましょう。",
     "lede_first": "ワークスペースは、タスク、エージェント、プロジェクトが集まる場所です。あとでチームメイトを招待したり、ワークスペースを増やしたりできます。",
@@ -186,11 +161,9 @@
     "slug_reserved_error": "そのワークスペース URL は予約済みのため使用できません。",
     "slug_conflict_toast": "別のワークスペース URL を選んでください",
     "create_failed_toast": "ワークスペースを作成できませんでした",
-    "creation_disabled_eyebrow": "ワークスペースの作成は無効です",
     "creation_disabled_headline": "管理者に招待を依頼してください。",
     "creation_disabled_lede": "この Multica インスタンスでは新しいワークスペースを作成できません。管理者からワークスペースに招待されたら、招待を承諾して更新し、続けてください。",
     "creation_disabled_logout": "ログアウト",
-    "creation_disabled_eyebrow_resume": "あなたのワークスペース",
     "creation_disabled_headline_resume": "{{name}} で続けましょう。",
     "creation_disabled_lede_resume": "このインスタンスではワークスペースの作成が無効になっているため、既存のワークスペースへ続けて移動します。"
   },
@@ -203,8 +176,6 @@
     "status_all_online": "すべてオンライン",
     "status_none_online": "オンラインなし",
     "status_n_online": "{{count}} 個オンライン",
-    "online_label": "オンライン",
-    "offline_label": "オフライン",
     "empty_headline": "このコンピュータではまだエージェントランタイムが見つかりません。",
     "empty_lede_prefix": "エージェントランタイムとは、私たちが接続する AI コーディングツールです — たとえば ",
     "empty_lede_suffix": " など。1 つインストールして更新するか、下から進む方法を選んでください。",
@@ -223,7 +194,6 @@
     "continue": "Mika と始める"
   },
   "step_platform": {
-    "eyebrow": "コンピュータを接続",
     "headline": "エージェントを実行するコンピュータを接続しましょう。",
     "lede": "コンピュータに接続して Mika を使い始めましょう。",
     "hint_default": "後から接続できます。",
@@ -238,7 +208,6 @@
     "cloud_action": "近日公開",
     "cli_dialog_title": "ターミナルから接続",
     "cli_dialog_pick_hint": "上でコンピュータを選んでください。",
-    "cli_dialog_connect": "接続して続ける",
     "runtimes_connected_other": "コンピュータ {{count}} 台を接続済み",
     "live_listening": "ライブ · あなたのコンピュータを待っています",
     "stage_normal_prefix": "上のコマンドを実行してください。 ",
@@ -253,6 +222,7 @@
   },
   "errors": {
     "skip_failed": "オンボーディングを完了できませんでした",
+    "guide_failed": "ランタイム案内のタスクを作成できませんでした。もう一度お試しください。",
     "mika_setup_failed": "Mika ワークスペースを開始できませんでした"
   },
   "mika_intro": {

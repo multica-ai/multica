@@ -2,55 +2,15 @@ package metrics
 
 import "github.com/prometheus/client_golang/prometheus"
 
-// WecomMetrics is the production sink behind the WeCom adapter's Metrics
-// interface (server/internal/integrations/wecom/metrics.go).
+// WecomMetrics implements the adapter's production metrics sink.
+// Separate infrastructure connection failures from credential rejections so
+// operators can distinguish retryable outages from installations needing repair.
+// The adapter classifies acknowledgements; this sink records its verdict.
 //
-// The adapter is built to degrade quietly. A dial that fails and a handshake
-// the server refuses both yield the connection back to the Supervisor, which
-// backs off and tries again; an ingest queue the read loop has to wait on
-// yields nothing and simply stops draining the socket until the worker
-// catches up. None of the three changes anything an operator can see. A bot
-// that has been down since Tuesday and a bot nobody happened to message today
-// produce the same silence.
-//
-// The two connection counters are deliberately separate. A dial or a read that
-// fails is infrastructure and usually recovers on its own; a handshake the
-// server refuses on its merits is a wrong secret or a deleted bot, and it will
-// repeat identically on every backoff until a person fixes the installation.
-// Summed into one number the operator cannot tell "wait" from "rotate the
-// credential".
-//
-// Which side of that line an ack falls on is classifySubscribeAck's call, in
-// the adapter, and this package only counts the verdict. An ack it cannot
-// verify — a throttle, a platform-side failure — is a connect failure, on the
-// "wait" side, because rotating a credential that was fine costs a second
-// outage.
-//
-// No installation_id label anywhere. It is the same class of unbounded
-// identifier as workspace_id and session_id, which forbiddenMetricLabels
-// rejects outright. Attribution falls to the structured logs and is uneven
-// there: the two connection failures reach the Supervisor as a returned error
-// and are logged with installation_id, while a blocked ingest queue is
-// counted and nothing else — the counter says some bot is behind, not which.
-// The outbound counters answer a different question from the connection ones,
-// and it is the question GH #7215 and #6890 were filed as: a reply was
-// produced, the transcript has it, and the WeCom chat stayed quiet. Several
-// unrelated causes end that way and from the chat they are one symptom, so
-// each is counted where an operator can act on it: a frame the platform
-// refused, or no socket for this installation in this process, is a drop; a
-// turn that originated in the web UI, another platform's turn on the bus this
-// adapter shares, or an installation revoked between trigger and reply, was
-// never owed to WeCom and is a skip — as is a channel turn with no row saying
-// which chat, the one skip worth waking somebody for, because there a reply may
-// well be owed and nothing left can name the room; a frame whose verdict never
-// came back may already be on the user's screen and is unconfirmed, not a
-// drop. Delivered is the denominator: without it, a drop rate of zero and a bot
-// nobody messaged look identical, which is the same ambiguity the connection
-// counters exist to remove.
-//
-// reason is a closed set (wecom/outbound_outcome.go). It is the only label
-// here, and it stays bounded by construction — no installation, workspace or
-// session id, same rule as everywhere else in this package.
+// Outbound outcomes distinguish delivered, dropped, skipped, and unconfirmed
+// frames. A missing acknowledgement may already be visible to the user and is
+// not a confirmed drop. Reasons are bounded by wecom/outbound_outcome.go;
+// installation, workspace, and session IDs belong in logs, never metric labels.
 type WecomMetrics struct {
 	ConnectFailures       prometheus.Counter
 	AuthFailures          prometheus.Counter
@@ -59,6 +19,7 @@ type WecomMetrics struct {
 	StreamOpened          prometheus.Counter
 	StreamFinished        prometheus.Counter
 	StreamFellBack        prometheus.Counter
+	MediaFailures         *prometheus.CounterVec
 	OutboundDelivered     prometheus.Counter
 	OutboundDropped       *prometheus.CounterVec
 	OutboundSkipped       *prometheus.CounterVec
@@ -94,6 +55,10 @@ func NewWecomMetrics() *WecomMetrics {
 			"Answers that landed in the bubble the question opened."),
 		StreamFellBack: counter("stream_fell_back_total",
 			"Answers sent as a new message because the bubble refused the closing frame. The answer is not lost; the experience is the one the bubble was built to replace."),
+		MediaFailures: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "multica", Subsystem: "wecom", Name: "media_failures_total",
+			Help: "Attachments the media resolver took on that never reached the agent, by reason. 'unreadable' is a download, decrypt or upload that failed on its own; 'too_large' is past the size ceiling; 'blocked_address' means the media host resolved somewhere the SSRF guard refuses, which is either WeCom moving its CDN or somebody pointing us inward; 'budget_expired' is the media budget running out before the attachment was bound, whether it never started, was cut off or finished too late; 'shutdown' is the server draining while it was queued or in flight.",
+		}, []string{"reason"}),
 		OutboundDelivered: counter("outbound_delivered_total",
 			"Agent replies this adapter put in front of a WeCom user. The denominator the drop breakdown is read against."),
 		OutboundDropped: prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -132,6 +97,7 @@ func (m *WecomMetrics) Collectors() []prometheus.Collector {
 		m.ConnectFailures, m.AuthFailures,
 		m.CallbacksQueued, m.CallbackQueueBlocked,
 		m.StreamOpened, m.StreamFinished, m.StreamFellBack,
+		m.MediaFailures,
 		m.OutboundDelivered, m.OutboundDropped, m.OutboundSkipped,
 		m.AttachmentDelivered, m.AttachmentDropped, m.AttachmentSheds,
 		m.OutboundUnconfirmed, m.AttachmentUnconfirmed,
@@ -171,3 +137,6 @@ func (m *WecomMetrics) RecordRelayShed(kind string) {
 func (m *WecomMetrics) RecordStreamOpened()   { m.StreamOpened.Inc() }
 func (m *WecomMetrics) RecordStreamFinished() { m.StreamFinished.Inc() }
 func (m *WecomMetrics) RecordStreamFellBack() { m.StreamFellBack.Inc() }
+func (m *WecomMetrics) RecordMediaFailure(reason string) {
+	m.MediaFailures.WithLabelValues(reason).Inc()
+}

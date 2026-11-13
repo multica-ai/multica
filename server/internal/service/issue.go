@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/multica-ai/multica/server/internal/attribution"
 	"log/slog"
 	"sort"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/issueposition"
 	"github.com/multica-ai/multica/server/internal/issueproperty"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
+	"github.com/multica-ai/multica/server/internal/issueworkflow"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -26,12 +28,10 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
-// IssueService is the single service-layer entry point for creating issues.
-// Both the HTTP `POST /issues` handler and the future Lark `/issue` command
-// call into Create so that duplicate guard, issue numbering, attachment
-// linking, broadcast, analytics, and agent/squad enqueue stay aligned. The
-// service deliberately does NOT depend on http.Request — callers parse
-// their own transport and pass a fully-resolved IssueCreateParams.
+// IssueService is the shared issue-creation entry point for HTTP and channel
+// callers. It keeps numbering, duplicate guards, attachments, broadcasts,
+// analytics, and agent/squad enqueue aligned. Callers resolve transport inputs
+// into IssueCreateParams; the service does not depend on http.Request.
 type IssueService struct {
 	Queries   *db.Queries
 	TxStarter TxStarter
@@ -89,6 +89,8 @@ type IssueCreateParams struct {
 	// used by the standalone PUT path, then inserts the complete bag atomically.
 	Properties     map[pgtype.UUID]json.RawMessage
 	AllowDuplicate bool
+	// PRAutoCompleteDisabled is persisted before the issue becomes visible.
+	PRAutoCompleteDisabled bool
 	// Stage groups this issue into an ordered barrier group under its parent
 	// (NULL = unstaged). See issue_wakeup_system.go for the staged-barrier wake.
 	Stage pgtype.Int4
@@ -209,7 +211,48 @@ type IssueCreateResult struct {
 	DuplicateIssue *db.Issue
 }
 
-// Create runs the full issue-creation pipeline atomically end-to-end:
+// Create is the entry point every creator shares. It runs the pipeline below and
+// reacts to exactly one failure: a collision on uq_issue_workspace_number, which
+// proves workspace.issue_counter trails MAX(issue.number). On that collision it
+// heals the counter and runs the whole transaction again, once.
+//
+// A healthy create is byte-identical to before this existed — the allocation
+// query is untouched and nothing extra is read on the way through. The collision
+// is the signal: AllocateIssueNumber bumps the counter inside the same
+// transaction as the INSERT, so the unique violation rolls the increment back
+// too and every later create in that workspace retries the same taken number
+// forever. Moving the counter first is what makes the second attempt land on a
+// free number, and healIssueCounterAfterCollision logs the before and after so a
+// healed workspace leaves a trace instead of a silent numbering gap.
+//
+// The retry is the whole transaction, not a savepoint around the INSERT: a
+// savepoint has to be established before the statement that might fail, so every
+// successful create would pay for it too.
+func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts IssueCreateOpts) (IssueCreateResult, error) {
+	res, err := s.createOnce(ctx, p, opts)
+	if err == nil {
+		return res, nil
+	}
+	if !healIssueCounterAfterCollision(ctx, s.Queries, p.WorkspaceID, err) {
+		// Pass the result through: callers read fields alongside some of these
+		// errors, e.g. DuplicateIssue with ErrActiveDuplicate.
+		return res, err
+	}
+	res, err = s.createOnce(ctx, p, opts)
+	if err != nil {
+		var collision *IssueNumberCollisionError
+		if errors.As(err, &collision) {
+			slog.Error("issue number still collides after counter repair",
+				"workspace_id", util.UUIDToString(p.WorkspaceID),
+				"allocated", collision.Allocated,
+				"constraint", collision.Constraint)
+		}
+		return res, err
+	}
+	return res, nil
+}
+
+// createOnce runs the full issue-creation pipeline atomically end-to-end:
 //
 //  1. Begin transaction.
 //  2. Resolve & validate parent / project belong to the same workspace.
@@ -232,7 +275,7 @@ type IssueCreateResult struct {
 // MCP/API-key callers — shares the same workspace boundary semantics.
 // Caller-owned validation is limited to transport-shaped checks: title
 // required, RFC3339 date format, assignee pair sanity.
-func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts IssueCreateOpts) (IssueCreateResult, error) {
+func (s *IssueService) createOnce(ctx context.Context, p IssueCreateParams, opts IssueCreateOpts) (IssueCreateResult, error) {
 	issueCountPolicy := ResolveIssueCountPolicy(ctx, s.Entitlements, p.WorkspaceID)
 	tx, err := s.TxStarter.Begin(ctx)
 	if err != nil {
@@ -272,6 +315,19 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		if current.Digest != p.SourceContext.Digest {
 			return IssueCreateResult{}, ErrSourceContextChanged
 		}
+	}
+
+	// Project workflow (MUL-7420): an issue created with a status its
+	// workflow does not list — the project's, or the stored Default outside
+	// any project (MUL-8250) — starts on todo instead. The HTTP create path
+	// already rejects an explicit status outside the workflow; this keeps the
+	// other creators (channels, captured comments) inside it too. Resolved
+	// before the custom-status guard below so that guard checks the status
+	// actually written.
+	if def, err := s.createWorkflow(ctx, qtx, p); err != nil {
+		return IssueCreateResult{}, err
+	} else if def != nil && def.Limits() && !def.Has(p.Status) {
+		p.Status = issueworkflow.StartStatus
 	}
 
 	// A create landing on a CUSTOM status takes the shared catalog lock AND
@@ -363,27 +419,37 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	var issue db.Issue
 	var assignedTask db.AgentTaskQueue
 	if p.OriginType.Valid {
+		var requester pgtype.UUID
+		if p.CreatorType == "agent" && p.OriginID.Valid && (p.OriginType.String == "quick_create" || p.OriginType.String == "agent_create") {
+			requester, err = qtx.ResolveIssueRequester(ctx, db.ResolveIssueRequesterParams{
+				OriginID: p.OriginID, CreatorID: p.CreatorID, WorkspaceID: p.WorkspaceID, OriginType: p.OriginType.String,
+			})
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return IssueCreateResult{}, fmt.Errorf("resolve issue requester: %w", err)
+			}
+		}
 		issue, err = qtx.CreateIssueWithOrigin(ctx, db.CreateIssueWithOriginParams{
-			ID:            dbid.NewV7(),
-			WorkspaceID:   p.WorkspaceID,
-			Title:         p.Title,
-			Description:   p.Description,
-			Status:        p.Status,
-			Priority:      p.Priority,
-			AssigneeType:  p.AssigneeType,
-			AssigneeID:    p.AssigneeID,
-			CreatorType:   p.CreatorType,
-			CreatorID:     p.CreatorID,
-			ParentIssueID: p.ParentIssueID,
-			Position:      newPosition,
-			StartDate:     p.StartDate,
-			DueDate:       p.DueDate,
-			Number:        issueNumber,
-			ProjectID:     projectID,
-			OriginType:    p.OriginType,
-			OriginID:      p.OriginID,
-			Stage:         p.Stage,
-			Properties:    properties,
+			ID:              dbid.NewV7(),
+			WorkspaceID:     p.WorkspaceID,
+			Title:           p.Title,
+			Description:     p.Description,
+			Status:          p.Status,
+			Priority:        p.Priority,
+			AssigneeType:    p.AssigneeType,
+			AssigneeID:      p.AssigneeID,
+			CreatorType:     p.CreatorType,
+			CreatorID:       p.CreatorID,
+			ParentIssueID:   p.ParentIssueID,
+			Position:        newPosition,
+			StartDate:       p.StartDate,
+			DueDate:         p.DueDate,
+			Number:          issueNumber,
+			ProjectID:       projectID,
+			OriginType:      p.OriginType,
+			OriginID:        p.OriginID,
+			RequesterUserID: requester,
+			Stage:           p.Stage,
+			Properties:      properties,
 		})
 	} else {
 		issue, err = qtx.CreateIssue(ctx, db.CreateIssueParams{
@@ -412,7 +478,19 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		if errors.As(err, &pgErr) && pgErr.ConstraintName == "issue_properties_size_limit" {
 			return IssueCreateResult{}, ErrIssuePropertiesTooLarge
 		}
-		return IssueCreateResult{}, fmt.Errorf("create issue: %w", err)
+		// Typed before it is returned so both halves can act on it: Create decides
+		// whether to heal and retry, and the transport reports a board-integrity
+		// problem instead of a generic create failure.
+		return IssueCreateResult{}, classifyIssueNumberCollision(fmt.Errorf("create issue: %w", err), issueNumber)
+	}
+
+	if p.PRAutoCompleteDisabled {
+		if err := qtx.SetIssuePRAutoCompleteDisabled(ctx, db.SetIssuePRAutoCompleteDisabledParams{
+			IssueID: issue.ID, WorkspaceID: issue.WorkspaceID, AutoCompleteDisabled: true,
+			UpdatedByType: pgtype.Text{String: p.CreatorType, Valid: true}, UpdatedByID: p.CreatorID,
+		}); err != nil {
+			return IssueCreateResult{}, fmt.Errorf("set issue PR auto-complete: %w", err)
+		}
 	}
 
 	if p.SourceContext != nil {
@@ -538,6 +616,13 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	s.captureCreatedAnalytics(issue, p.CreatorType, actorID, opts)
 	if opts.AssignedAgentRunFireAt.IsZero() {
 		assignedTaskID = s.maybeEnqueueOnAssign(ctx, issue, p.CreatorType, actorID, opts.AssignedAgentRunFireAt)
+	}
+	// Creating an issue already assigned to an agent is the member delegating
+	// work. The run itself is attributed through the creator fallback, which
+	// system wakeups share, so record the action here, at the create, for both
+	// the immediate and the deferred (channel media) path.
+	if assignedTaskID.Valid && p.CreatorType == "member" {
+		s.TaskService.RecordHumanDelegation(ctx, attribution.DirectHumanRun(p.CreatorID, attribution.EvidenceIssueAssignment, issue.ID))
 	}
 
 	return IssueCreateResult{Issue: issue, Attachments: attachments, Labels: labels, AssignedTaskID: assignedTaskID}, nil
@@ -827,6 +912,26 @@ func classifyOrigin(issue db.Issue, opts IssueCreateOpts) (source, taskID, autop
 	}
 }
 
+// createWorkflow resolves the workflow whose statuses a new issue may take:
+// its own project's, its parent's project's when it names none, or the
+// stored Default when neither has a project.
+func (s *IssueService) createWorkflow(ctx context.Context, qtx *db.Queries, p IssueCreateParams) (*issueworkflow.Definition, error) {
+	projectID := p.ProjectID
+	if !projectID.Valid && p.ParentIssueID.Valid {
+		parent, err := qtx.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: p.ParentIssueID, WorkspaceID: p.WorkspaceID})
+		if err != nil {
+			// The parent check below reports a missing parent.
+			return nil, nil
+		}
+		projectID = parent.ProjectID
+	}
+	if !projectID.Valid {
+		return issueworkflow.OutsideProject(ctx, qtx, p.WorkspaceID)
+	}
+	def, _, err := issueworkflow.ForProject(ctx, qtx, p.WorkspaceID, projectID)
+	return def, err
+}
+
 func (s *IssueService) maybeEnqueueOnAssign(ctx context.Context, issue db.Issue, creatorType, actorID string, agentRunFireAt time.Time) pgtype.UUID {
 	if !issue.AssigneeType.Valid || !issue.AssigneeID.Valid {
 		return pgtype.UUID{}
@@ -876,9 +981,6 @@ func (s *IssueService) maybeEnqueueOnAssign(ctx context.Context, issue db.Issue,
 // path does the same test through agentAssigneeVerdict, which also tells it
 // WHY a refusal happened; this one runs inside the create transaction, where
 // there is nothing to tell anyone yet.
-//
-// Mirrors handler.shouldEnqueueAgentTask; kept here to make the service
-// self-contained, since both code paths must move together.
 func (s *IssueService) shouldEnqueueAgentTaskWithQueries(ctx context.Context, q *db.Queries, issue db.Issue) bool {
 	// Resolved through q, not s.Queries: this runs inside the create
 	// transaction and must see the same snapshot as the rest of it. (MUL-6243)
@@ -968,5 +1070,12 @@ func (s *IssueService) enqueueSquadLeaderTask(ctx context.Context, issue db.Issu
 			"squad_id", util.UUIDToString(squad.ID),
 			"leader_id", util.UUIDToString(squad.LeaderID),
 			"error", err)
+		return
+	}
+	// A member creating an issue assigned to a squad delegates the same way as
+	// one assigned to an agent (see Create). A trigger comment, when present,
+	// already recorded its author at enqueue.
+	if !triggerCommentID.Valid && authorType == "member" {
+		s.TaskService.RecordHumanDelegation(ctx, attribution.DirectHumanRun(issue.CreatorID, attribution.EvidenceIssueAssignment, issue.ID))
 	}
 }

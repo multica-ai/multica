@@ -1,8 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Keyboard, RotateCcw, Search, X } from "lucide-react";
+import { Keyboard, RotateCcw, Search, X } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Input } from "@multica/ui/components/ui/input";
 import {
   AlertDialog,
@@ -324,28 +325,26 @@ function ShortcutRow({
               </span>
             )}
           </button>
-          <Button
+          <IconButton
             type="button"
             variant="ghost"
             size="icon-sm"
             onClick={onReset}
             disabled={!customized}
-            aria-label={t(($) => $.shortcuts.reset_action, { action: label })}
-            title={t(($) => $.shortcuts.reset)}
+            label={t(($) => $.shortcuts.reset_action, { action: label })}
           >
             <RotateCcw className="size-3.5" />
-          </Button>
-          <Button
+          </IconButton>
+          <IconButton
             type="button"
             variant="ghost"
             size="icon-sm"
             onClick={onDisable}
             disabled={shortcut === null}
-            aria-label={t(($) => $.shortcuts.disable_action, { action: label })}
-            title={t(($) => $.shortcuts.disable)}
+            label={t(($) => $.shortcuts.disable_action, { action: label })}
           >
             <X className="size-3.5" />
-          </Button>
+          </IconButton>
         </div>
         {errorText ? (
           <span role="alert" className="max-w-72 text-right text-caption text-destructive">

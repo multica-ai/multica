@@ -15,7 +15,6 @@
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type {
-  AgentTask,
   CreateIssueRequest,
   Issue,
   IssueReaction,
@@ -696,27 +695,8 @@ export function useCreateIssue() {
 }
 
 /**
- * Cancel an in-flight agent task. Optimistically removes the task from the
- * active-tasks cache so the RunRow disappears immediately; the WS
- * `task:cancelled` event then invalidates both task queries (see
- * `use-issue-realtime.ts`) so the task reappears in the past list with the
- * authoritative server state. On error we restore the snapshot.
- */
-/**
- * Delete an issue. Mirrors `useDeleteProject` (mutations/projects.ts:103-128)
- * but the cache surface is wider:
- *   - issueKeys.list(wsId)             — workspace-wide flat list
- *   - issueKeys.myList(wsId, ...)      — three scopes × N filter combos
- *
- * Both are flat `Issue[]` caches. We use `setQueriesData` with the
- * `myAll(wsId)` prefix to filter the issue out of every `myList` key in one
- * pass, snapshot the previous data for rollback, and remove the detail /
- * timeline / tasks caches on settle so a stale return-trip can't surface
- * 404-y data.
- *
- * The WS `issue:deleted` event is already handled in `use-issue-realtime.ts`
- * (callers like the detail screen pass `() => router.back()`), so the other
- * tab/client case is covered.
+ * Keep the issue visible until the server confirms deletion. A rejected delete
+ * leaves list, detail, timeline and run caches intact for retry.
  */
 export function useDeleteIssue() {
   const qc = useQueryClient();
@@ -724,44 +704,25 @@ export function useDeleteIssue() {
 
   return useMutation({
     mutationFn: (id: string) => api.deleteIssue(id),
-    onMutate: async (id) => {
+    onSuccess: async (_data, id) => {
       const listKey = issueKeys.list(wsId);
       const myAllKey = issueKeys.myAll(wsId);
       await Promise.all([
         qc.cancelQueries({ queryKey: listKey }),
         qc.cancelQueries({ queryKey: myAllKey }),
       ]);
-
-      // Snapshot every matching cache (flat list + each my-issues scope×filter)
-      // so we can roll back per-key on error.
-      const prevList = qc.getQueryData<Issue[]>(listKey);
-      const prevMy = qc.getQueriesData<Issue[]>({ queryKey: myAllKey });
-
       qc.setQueryData<Issue[]>(listKey, (old) =>
-        old ? old.filter((i) => i.id !== id) : old,
+        old ? old.filter((issue) => issue.id !== id) : old,
       );
       qc.setQueriesData<Issue[]>({ queryKey: myAllKey }, (old) =>
-        old ? old.filter((i) => i.id !== id) : old,
+        old ? old.filter((issue) => issue.id !== id) : old,
       );
-
-      return { prevList, prevMy, listKey, myAllKey };
-    },
-    onError: (_err, _id, ctx) => {
-      if (!ctx) return;
-      if (ctx.prevList !== undefined) {
-        qc.setQueryData(ctx.listKey, ctx.prevList);
-      }
-      for (const [key, value] of ctx.prevMy) {
-        qc.setQueryData(key, value);
-      }
-    },
-    onSettled: (_data, _err, id) => {
-      qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
-      qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
       qc.removeQueries({ queryKey: issueKeys.detail(wsId, id) });
       qc.removeQueries({ queryKey: issueKeys.timeline(wsId, id) });
       qc.removeQueries({ queryKey: issueKeys.activeTasks(wsId, id) });
       qc.removeQueries({ queryKey: issueKeys.tasks(wsId, id) });
+      qc.invalidateQueries({ queryKey: listKey });
+      qc.invalidateQueries({ queryKey: myAllKey });
     },
   });
 }
@@ -772,21 +733,15 @@ export function useCancelTask(issueId: string) {
 
   return useMutation({
     mutationFn: (taskId: string) => api.cancelTaskById(taskId),
-    onMutate: async (taskId) => {
-      const activeKey = issueKeys.activeTasks(wsId, issueId);
-      await qc.cancelQueries({ queryKey: activeKey });
-      const prev = qc.getQueryData<AgentTask[]>(activeKey);
-      qc.setQueryData<AgentTask[]>(activeKey, (old) =>
-        old ? old.filter((t) => t.id !== taskId) : old,
-      );
-      return { prev, activeKey };
-    },
-    onError: (_err, _taskId, ctx) => {
-      if (ctx?.prev) qc.setQueryData(ctx.activeKey, ctx.prev);
-    },
-    onSettled: () => {
-      qc.invalidateQueries({ queryKey: issueKeys.activeTasks(wsId, issueId) });
-      qc.invalidateQueries({ queryKey: issueKeys.tasks(wsId, issueId) });
+    // Pending mutation options can change when the workspace changes.
+    onMutate: () => ({
+      activeKey: issueKeys.activeTasks(wsId, issueId),
+      tasksKey: issueKeys.tasks(wsId, issueId),
+    }),
+    onSettled: (_data, _err, _taskId, context) => {
+      if (!context) return;
+      qc.invalidateQueries({ queryKey: context.activeKey });
+      qc.invalidateQueries({ queryKey: context.tasksKey });
     },
   });
 }

@@ -7,6 +7,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,6 +17,30 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/integrations/wecom"
 )
+
+func TestWecomInstallationResponseIncludesDisplayNameWithoutCredentials(t *testing.T) {
+	inst := wecom.Installation{BotID: "bot-1", BotDisplayName: "Support Bot", SecretEncrypted: []byte("private-credential")}
+	response := wecomInstallationToResponse(inst)
+	if response.BotName != "Support Bot" {
+		t.Fatalf("bot name = %q, want Support Bot", response.BotName)
+	}
+	body, err := json.Marshal(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(body, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if fields["bot_name"] != "Support Bot" || fields["bot_id"] != "bot-1" {
+		t.Fatalf("missing public bot identity: %s", body)
+	}
+	for _, key := range []string{"secret", "secret_encrypted", "SecretEncrypted"} {
+		if _, ok := fields[key]; ok {
+			t.Fatalf("response exposed credential field %q", key)
+		}
+	}
+}
 
 // fakeRedeemer records whether the handler ever got as far as the service.
 // A body the ceiling rejects must never reach it.

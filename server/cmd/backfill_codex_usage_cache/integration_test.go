@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -232,12 +231,12 @@ func seedBackfillTaskUsageFixture(t *testing.T, ctx context.Context, pool *pgxpo
 }
 
 func testResolveMigrationsDir() (string, error) {
-	_, here, _, ok := runtime.Caller(0)
-	if !ok {
-		return "", fmt.Errorf("runtime.Caller(0) failed")
+	// Relative to the package directory go test runs in; runtime.Caller
+	// would return a module path under -trimpath.
+	dir, err := filepath.Abs(filepath.Join("..", "..", "migrations"))
+	if err != nil {
+		return "", err
 	}
-	dir := filepath.Join(filepath.Dir(here), "..", "..", "migrations")
-	dir = filepath.Clean(dir)
 	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
 		return "", fmt.Errorf("migrations dir not at %s", dir)
 	}

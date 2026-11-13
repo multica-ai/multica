@@ -22,6 +22,7 @@ func newCancelFinalizePool(t *testing.T) *pgxpool.Pool {
 type cancelFinalizeFixture struct {
 	pool          *pgxpool.Pool
 	workspaceID   string
+	creatorID     string
 	agentID       string
 	chatSessionID string
 	taskID        string
@@ -133,6 +134,7 @@ func createCancelFinalizeFixture(t *testing.T, ctx context.Context, pool *pgxpoo
 	return cancelFinalizeFixture{
 		pool:          pool,
 		workspaceID:   workspaceID,
+		creatorID:     userID,
 		agentID:       agentID,
 		chatSessionID: chatSessionID,
 		taskID:        taskID,
@@ -380,6 +382,9 @@ func TestFinalizeDeferredCancelledChat_StillEmpty_RestoresDraft(t *testing.T) {
 	}
 	if payload.ChatSessionID != f.chatSessionID {
 		t.Errorf("chat_session_id = %q, want %q", payload.ChatSessionID, f.chatSessionID)
+	}
+	if evts[0].ChatSessionOwnerID != f.creatorID {
+		t.Errorf("owner = %q, want session creator %q (realtime delivers only to the owner)", evts[0].ChatSessionOwnerID, f.creatorID)
 	}
 }
 

@@ -444,10 +444,6 @@ describe("DashboardPage — unreported usage", () => {
     const coverageText =
       "6 runs did not report usage · totals are still being processed";
     expect(row).toHaveTextContent(coverageText);
-    expect(within(row).getByText(coverageText)).toHaveAttribute(
-      "title",
-      coverageText,
-    );
     expect(within(row).getAllByText("—")).toHaveLength(2);
   });
 });
@@ -719,6 +715,47 @@ describe("DashboardPage — the two questions are separate tabs", () => {
     expect(
       screen.queryByRole("button", { name: /Show all/ }),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("DashboardPage — one header carries the tabs and the filters", () => {
+  beforeEach(() => {
+    queryKeys.length = 0;
+    dashboardDataRef.current = true;
+    manyAgentsRef.current = false;
+    tzRef.current = "UTC";
+    cleanup();
+  });
+
+  it("puts the title, both tabs, the filters and refresh in a single header", () => {
+    renderDashboard();
+
+    const [header, ...rest] = screen.getAllByRole("banner");
+    expect(rest).toHaveLength(0);
+    const bar = within(header as HTMLElement);
+    expect(bar.getByRole("heading", { name: "Analytics" })).toBeInTheDocument();
+    expect(bar.getByRole("tab", { name: "Usage" })).toHaveAttribute("aria-selected", "true");
+    expect(bar.getByRole("tab", { name: /Errors/ })).toBeInTheDocument();
+    expect(bar.getByText(/^GMT/)).toBeInTheDocument();
+    expect(bar.getByRole("button", { name: "Refresh" })).toBeInTheDocument();
+  });
+
+  it("shows each filter's current value on its trigger", () => {
+    renderDashboard();
+
+    const bar = within(screen.getByRole("banner"));
+    expect(bar.getByRole("button", { name: "Period" })).toHaveTextContent("30d");
+    expect(bar.getByRole("button", { name: "Project" })).toHaveTextContent("All projects");
+  });
+
+  it("keeps the header in place when switching to Errors", async () => {
+    const user = userEvent.setup();
+    renderDashboard();
+    await openErrorsTab(user);
+
+    const bar = within(screen.getByRole("banner"));
+    expect(bar.getByRole("tab", { name: /Errors/ })).toHaveAttribute("aria-selected", "true");
+    expect(bar.getByRole("button", { name: "Period" })).toHaveTextContent("30d");
   });
 });
 

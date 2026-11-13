@@ -1,60 +1,15 @@
-// Package wecom is the WeCom (企业微信) smart-bot ("智能机器人" / aibot)
-// adapter for the channel-agnostic inbound engine (MUL-3620). It plugs into the
-// same engine.Router / ResolverSet as Feishu and Slack.
+// Package wecom adapts WeCom smart bots to the shared channel engine.
+// Each installation owns a leased WebSocket authenticated by bot_id and secret;
+// inbound callbacks, replies, and media uploads use that connection.
 //
-// Unlike the internal customer-service ("内部客服号") flow which is HTTP-callback
-// based, the smart-bot flow is a client-initiated WebSocket long connection
-// against wss://openws.work.weixin.qq.com. Each installation carries a
-// (bot_id, secret) pair; after the WS handshake the client subscribes with
-// aibot_subscribe and thereafter receives aibot_msg_callback events and sends
-// aibot_send_msg / aibot_respond_msg / aibot_upload_media_* over the same
-// socket. No public callback URL is required.
+// Only the lease-holding replica can write. Redis Stream relay routes completions
+// from other replicas; without relay, a WeCom backend requires a single replica.
+// No live connection means delivery can still be lost. Per-chat quotas bound
+// outbound waits and retries. See SELF_HOSTING.md for deployment requirements.
 //
-// One installation = one bot = one WebSocket. WeCom allows only one active
-// connection per bot; a second connection kicks the first with a
-// disconnected_event. That single-active-connection guarantee lines up with
-// engine.Supervisor's WS lease, so the multi-replica invariant (at most one
-// active connection per installation across processes) already holds without
-// wecom-specific code.
-//
-// Maintenance: this package is COMMUNITY-MAINTAINED. Its maintainers, the
-// support boundary and the retirement rule are published at
-// https://multica.ai/docs/community-maintained
-// (apps/docs/content/docs/community-maintained.mdx, four locales). That page
-// is the single source of truth — record ownership changes there, not here.
-// Changing the shared channel engine? Keep this adapter building, and loop in
-// its maintainers for anything that changes WeCom-visible behavior.
-//
-// Inbound handles text, the transcript WeCom returns for a voice note,
-// photos, files, videos and 图文混排 (media_ingest.go downloads and decrypts
-// what a callback points at); a kind it cannot read still gets a short
-// receipt.
-//
-// Outbound file delivery cannot report back to the agent that produced the
-// file. `multica attachment upload` returns once the object is in storage and
-// bound to the reply, while the send into the room runs on EventChatDone —
-// after the run has ended. A delivery that is shed, refused by WeCom, or lost
-// with the socket is therefore told to the person in the chat
-// (outbound_media.go) and never to the agent, which has already exited.
-// Routing that outcome back into a later turn is its own piece of work.
-//
-// Outbound no longer requires a single backend replica. The only send path is
-// still the in-process WebSocket in sendersRegistry, held by whichever replica
-// owns that bot's lease, so a reply produced on another replica is routed to
-// the lease holder over the Redis Stream relay (relay_outbound.go). Where
-// there is no relay to route it — legacy relay mode, or no Redis at all — the
-// reply is dropped, and a WeCom-enabled backend has to run as a single
-// replica. In every mode, a reply produced while NO replica holds a live
-// connection (all of them mid-reconnect) is still lost. See SELF_HOSTING.md.
-//
-// Every aibot_send_msg leaves under a per-chat quota gate (rate_limit.go).
-// A chat slightly over WeCom's quota has its push delayed into the next free
-// slot; one that bursts past what the caller's budget can wait for is refused
-// before the write, with nothing on the wire — best effort, not lossless. A
-// frame WeCom throttles anyway is retried once, when the caller can still
-// afford the wait. The gate holds no shared state: the same lease that makes
-// one replica the only sender makes that replica's own count the platform's
-// count.
+// Files are delivered after the agent exits, so failures are reported to the chat
+// rather than the producing run. Community ownership and support boundaries live
+// at https://multica.ai/docs/community-maintained.
 package wecom
 
 import (

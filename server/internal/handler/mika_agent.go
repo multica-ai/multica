@@ -177,6 +177,26 @@ func (h *Handler) resolveMikaAgent(w http.ResponseWriter, r *http.Request, works
 		return db.Agent{}, false, false
 	}
 
+	// Existing Mika requests return above without changing a binding. A new
+	// Mika must serialize authorization and INSERT with runtime revocation.
+	if _, err := qtx.LockWorkspaceForChatSessionCreate(r.Context(), wsUUID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "workspace not found")
+		} else {
+			writeError(w, http.StatusInternalServerError, "failed to lock workspace")
+		}
+		return db.Agent{}, false, false
+	}
+	runtime, err = qtx.LockAgentRuntimeForAccessChange(r.Context(), runtimeID)
+	if err != nil || runtime.WorkspaceID != wsUUID {
+		writeError(w, http.StatusBadRequest, "runtime not found in this workspace")
+		return db.Agent{}, false, false
+	}
+	if !canUseRuntimeForAgent(member, runtime) {
+		writeError(w, http.StatusForbidden, "you cannot bind an agent to this runtime")
+		return db.Agent{}, false, false
+	}
+
 	created, err := qtx.CreateSystemUserAgent(r.Context(), db.CreateSystemUserAgentParams{
 		WorkspaceID:        wsUUID,
 		Name:               service.MikaDefaultName,

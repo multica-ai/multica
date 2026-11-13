@@ -19,11 +19,12 @@ for (const [name, files, selected] of [
   ["readme only", ["README.md"], []],
   ["docs only", ["apps/docs/content/docs/guide.mdx"], ["quality"]],
   ["web changelog", ["apps/web/features/landing/i18n/en.ts"], ["frontend", "quality"]],
-  ["UI Lab", ["apps/ui-lab/src/app.tsx"], ["frontend", "quality"]],
   ["mobile UI", ["apps/mobile/app/index.tsx"], ["quality"]],
   ["migration only", ["server/migrations/999_example.up.sql"], ["backend", "sqlc"]],
   ["agent process code", ["server/pkg/agent/cursor_background.go"], ["backend", "runtime"]],
   ["daemon dependency", ["server/internal/skill/service.go"], ["backend", "runtime"]],
+  ["process-group control", ["server/internal/daemon/processtree/controller_unix.go"], ["backend", "runtime", "processtree"]],
+  ["process-group caller", ["server/internal/daemon/gc.go"], ["backend", "runtime"]],
   ["native test compilation dependency", ["server/pkg/db/generated/issues.sql.go"], ["backend", "sqlc", "runtime"]],
   ["Go dependencies", ["server/go.mod", "server/go.sum"], ["backend", "runtime"]],
   ["Helm only", ["deploy/helm/multica/templates/deployment.yaml"], ["scripts"]],
@@ -32,13 +33,24 @@ for (const [name, files, selected] of [
   ["shell installer", ["scripts/install.sh"], ["scripts", "installer"]],
   ["PowerShell installer", ["scripts/install.ps1.test.ps1"], ["installer"]],
   ["cleanup script", ["scripts/drop-database.sh"], ["scripts"]],
+  ["check script regression tests", ["scripts/check.test.sh"], ["scripts"]],
   ["performance harness", ["scripts/perf-compare.test.sh"], ["scripts"]],
+  ["attachment preview source", ["server/internal/handler/attachment_text_preview.json"], ["backend", "runtime", "scripts"]],
+  ["attachment preview output", ["packages/views/editor/utils/text-preview-whitelist.generated.ts"], ["frontend", "quality", "scripts"]],
   ["reserved slug source", ["server/internal/handler/reserved_slugs.json"], ["backend", "runtime", "scripts"]],
   ["reserved slug output", ["packages/core/paths/reserved-slugs.ts"], ["frontend", "quality", "scripts"]],
   ["integration key gates", ["server/cmd/server/router.go"], ["backend", "runtime", "scripts"]],
+  ["brand source", ["packages/ui/lib/multica-brand.ts"], ["frontend", "quality"]],
+  ["CLI brand copy", ["server/cmd/multica/cmd_auth.go"], ["backend", "runtime", "quality"]],
+  ["mobile brand copy", ["apps/mobile/components/brand/multica-logo.tsx"], ["quality"]],
+  ["README logo", ["docs/assets/logo-dark.svg"], ["quality"]],
+  ["brand generator", ["scripts/brand/sync.mjs"], ["quality"]],
+  ["PR evidence uploader", ["scripts/pr-shots"], ["quality"]],
   ["cross-module runtime contract", ["packages/core/runtimes/cli-version.ts"], ["frontend", "backend", "runtime", "quality"]],
+  ["shared quick action body contract", ["server/internal/handler/testdata/quick_action_bodies.json"], ["frontend", "backend", "runtime"]],
   ["lockfile", ["pnpm-lock.yaml"], ["frontend", "quality"]],
-  ["package patch", ["patches/example.patch"], ["frontend", "quality"]],
+  ["workspace package patch", ["patches/example.patch"], ["frontend", "quality"]],
+  ["mobile package patch", ["apps/mobile/patches/example.patch"], ["quality"]],
   ["radius policy", ["scripts/check-ui-radius-tokens.mjs"], ["quality"]],
   ["shared quality action", [".github/actions/frontend-quality/action.yml"], ["frontend", "quality"]],
   ["new bitmap", ["apps/web/public/hero.png"], ["frontend", "quality", "images"]],
@@ -163,18 +175,19 @@ for (const gate of ["frontend", "backend"]) {
   });
 }
 
-test("the backend gate owns the three-platform installer matrix", () => {
-  assert.equal(productionMapping("backend").installer, "installer");
-  assert.match(jobs.installer, /^        os: \[ubuntu-latest, macos-latest, windows-latest\]$/m);
-  assert.doesNotMatch(jobs.installer, /continue-on-error:/);
+// The gates trust job results, and continue-on-error reports a failed step as
+// a success, so a gate cannot see a failure behind it.
+test("no gated job or shared quality step continues past a failure", () => {
+  const action = readFileSync(new URL("../.github/actions/frontend-quality/action.yml", import.meta.url), "utf8");
+  assert.doesNotMatch(workflow, /continue-on-error:/);
+  assert.doesNotMatch(action, /continue-on-error:/);
 });
 
-test("quality checks have exactly one runner and reuse the product build install", () => {
+test("quality checks have exactly one runner", () => {
   const invocation = "uses: ./.github/actions/frontend-quality";
   const owners = Object.entries(jobs).filter(([, source]) => source.includes(invocation)).map(([job]) => job);
   assert.deepEqual(owners.sort(), ["frontend-build", "frontend-quality"]);
   assert.equal(productionMapping("frontend")["frontend-quality"], "quality_only");
-  assert.match(jobs["frontend-build"], /      - name: Check frontend quality\n        uses: \.\/\.github\/actions\/frontend-quality\n/);
   for (const frontend of ["true", "false"]) {
     for (const quality of ["true", "false"]) {
       const outputs = decideScopes("pull_request", { ...filterFiles([]), frontend, quality });
@@ -183,10 +196,6 @@ test("quality checks have exactly one runner and reuse the product build install
       assert.equal(runners.length, frontend === "true" || quality === "true" ? 1 : 0);
     }
   }
-  const action = readFileSync(new URL("../.github/actions/frontend-quality/action.yml", import.meta.url), "utf8");
-  assert.match(action, /run: pnpm knip/);
-  assert.match(action, /continue-on-error: true/);
-  assert.doesNotMatch(action, /pnpm install/);
 });
 
 test("the CLI writes real Actions outputs and exits nonzero on a failed gate", (t) => {

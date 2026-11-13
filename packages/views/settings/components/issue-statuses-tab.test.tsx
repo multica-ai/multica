@@ -318,10 +318,10 @@ describe("IssueStatusesTab", () => {
     }).querySelector("svg")).not.toBeNull();
     const category = within(dialog).getByRole("combobox");
     // The chevron is a selector affordance, not a status glyph.
-    expect(category.querySelector("svg:not(.lucide-chevron-down)")).toBeNull();
+    expect(category.querySelector("svg:not(.icon-chevron-down)")).toBeNull();
     fireEvent.click(category);
     for (const option of await screen.findAllByRole("option")) {
-      expect(option.querySelector("svg:not(.lucide-check)")).toBeNull();
+      expect(option.querySelector("svg:not(.icon-check)")).toBeNull();
     }
   });
 

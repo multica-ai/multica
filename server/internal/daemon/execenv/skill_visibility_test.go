@@ -277,7 +277,7 @@ Hidden body.`,
 		},
 	}
 
-	if err := writeContextFiles(dir, "", ctx, nil); err != nil {
+	if _, err := writeContextFiles(dir, "", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 

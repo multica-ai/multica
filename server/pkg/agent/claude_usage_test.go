@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -437,6 +438,11 @@ func claudeUsageFixtureBackend(t *testing.T, events []json.RawMessage, result js
 
 func claudeUsageFixtureBackendWithEnv(t *testing.T, events []json.RawMessage, result json.RawMessage, fail bool, extraEnv map[string]string) Backend {
 	t.Helper()
+	return claudeUsageFixtureBackendWithExecutable(t, events, result, fail, extraEnv, "")
+}
+
+func claudeUsageFixtureBackendWithExecutable(t *testing.T, events []json.RawMessage, result json.RawMessage, fail bool, extraEnv map[string]string, executablePath string) Backend {
+	t.Helper()
 	var stream strings.Builder
 	for _, event := range events {
 		stream.Write(event)
@@ -454,9 +460,12 @@ func claudeUsageFixtureBackendWithEnv(t *testing.T, events []json.RawMessage, re
 	if fail {
 		failEnv = "1"
 	}
-	executable, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
+	if executablePath == "" {
+		resolved, err := os.Executable()
+		if err != nil {
+			t.Fatal(err)
+		}
+		executablePath = resolved
 	}
 	env := map[string]string{
 		"IS_SANDBOX": "1", "CLAUDE_FAKE_MODE": "usage_fixture", "CLAUDE_USAGE_FIXTURE": fixture, "CLAUDE_USAGE_FIXTURE_FAIL": failEnv,
@@ -464,7 +473,7 @@ func claudeUsageFixtureBackendWithEnv(t *testing.T, events []json.RawMessage, re
 	for key, value := range extraEnv {
 		env[key] = value
 	}
-	backend, err := New("claude", Config{ExecutablePath: executable, Logger: slog.Default(), Env: env})
+	backend, err := New("claude", Config{ExecutablePath: executablePath, Logger: slog.Default(), Env: env})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -501,4 +510,128 @@ func executeClaudeUsageFixtureWithOptions(t *testing.T, backend Backend, eventCo
 		t.Fatalf("forwarded text/tool events = %d/%d, want %d each", texts, tools, eventCount)
 	}
 	return result
+}
+
+// TestClaudeExecuteKeepsPerRunUsageWhenBaselineCaptureFails pins the #9564
+// behavior: when a resume's baseline capture fails — the daemon-visible
+// CLAUDE_CONFIG_DIR holds no transcript for the session, as when a custom
+// runtime profile's wrapper sets it internally — the result event's
+// modelUsage must not be stored as-is. Newer Claude Code restores the
+// session's cumulative counters on resume, so an unverifiable total would
+// re-create the #8781 inflation; the daemon keeps the per-run usage derived
+// from the stream instead.
+func TestClaudeExecuteKeepsPerRunUsageWhenBaselineCaptureFails(t *testing.T) {
+	const sessionID = "session-invisible-to-daemon"
+	const model = "claude-sonnet-4-6"
+	// The daemon-visible config dir exists and is readable, but holds no
+	// transcript for this session — Claude wrote it somewhere else.
+	configDir := t.TempDir()
+	writeClaudeUsageSession(t, configDir, "session-other-project",
+		[]byte(`{"type":"user","message":{"role":"user","content":"decoy"}}`+"\n"),
+	)
+	assistant := func(id string, u *claudeUsage) json.RawMessage {
+		return mustMarshal(t, map[string]any{
+			"type": "assistant", "parent_tool_use_id": "",
+			"message": map[string]any{"id": id, "role": "assistant", "model": model, "usage": u,
+				"content": []any{
+					map[string]any{"type": "text", "text": "visible text"},
+					map[string]any{"type": "tool_use", "id": "tool_" + id, "name": "Read", "input": map[string]string{"file_path": "fixture.txt"}},
+				}},
+		})
+	}
+	events := []json.RawMessage{
+		assistant("msg_a", &claudeUsage{InputTokens: 40, OutputTokens: 2, CacheReadInputTokens: 60, CacheCreationInputTokens: 5}),
+		assistant("msg_b", &claudeUsage{InputTokens: 30, OutputTokens: 1, CacheReadInputTokens: 20, CacheCreationInputTokens: 3}),
+	}
+	resultEvent := mustMarshal(t, map[string]any{
+		"type": "result", "subtype": "success", "session_id": sessionID, "result": "done",
+		"modelUsage": map[string]claudeResultModelUsage{
+			// What a restored session reports: the cumulative total across
+			// every prior task, far beyond this run's own usage.
+			model: {InputTokens: 700, OutputTokens: 30, CacheReadInputTokens: 800, CacheCreationInputTokens: 80},
+		},
+	})
+	backend := claudeUsageFixtureBackendWithEnv(t, events, resultEvent, false, map[string]string{
+		"CLAUDE_CONFIG_DIR": configDir,
+	})
+	result := executeClaudeUsageFixtureWithOptions(t, backend, len(events), ExecOptions{
+		Timeout:         5 * time.Second,
+		ResumeSessionID: sessionID,
+	})
+	// The stream fallback accumulates per-message input and cache tokens only
+	// (assistant output_tokens is a message_start placeholder), so the honest
+	// per-run figure is 70/0/80/8 — not the cumulative 700/30/800/80.
+	want := map[string]TokenUsage{
+		model: {InputTokens: 70, CacheReadTokens: 80, CacheWriteTokens: 8},
+	}
+	if !reflect.DeepEqual(result.Usage, want) {
+		t.Fatalf("usage = %#v, want %#v", result.Usage, want)
+	}
+}
+
+// TestClaudeExecuteResumesWithWrapperManagedConfigDir reproduces the #9564
+// report end to end: a custom runtime profile's command is a wrapper script
+// that sets CLAUDE_CONFIG_DIR for Claude Code only. The daemon's env never
+// sees it, so the baseline lookup searches under the daemon's own config root
+// and finds nothing; the reported cumulative session total must not be stored
+// as the task's usage.
+func TestClaudeExecuteResumesWithWrapperManagedConfigDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("sh-style wrapper script")
+	}
+	const sessionID = "session-wrapper-managed"
+	const model = "claude-sonnet-4-6"
+	// Where the wrapper's Claude Code actually writes the transcript.
+	wrapperConfigDir := t.TempDir()
+	writeClaudeUsageSession(t, wrapperConfigDir, sessionID,
+		claudeCostStateFixture(t, map[string]claudeResultModelUsage{
+			model: {InputTokens: 700, OutputTokens: 30, CacheReadInputTokens: 800, CacheCreationInputTokens: 80},
+		}),
+	)
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrapper := filepath.Join(t.TempDir(), "claude-wrapper.sh")
+	script := fmt.Sprintf("#!/bin/sh\nCLAUDE_CONFIG_DIR=%q exec %q \"$@\"\n", wrapperConfigDir, executable)
+	if err := os.WriteFile(wrapper, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Keep the daemon-side HOME away from any real ~/.claude so the lookup
+	// fails the way it does on a daemon whose env lacks CLAUDE_CONFIG_DIR.
+	isolatedHome := t.TempDir()
+	assistant := func(id string, u *claudeUsage) json.RawMessage {
+		return mustMarshal(t, map[string]any{
+			"type": "assistant", "parent_tool_use_id": "",
+			"message": map[string]any{"id": id, "role": "assistant", "model": model, "usage": u,
+				"content": []any{
+					map[string]any{"type": "text", "text": "visible text"},
+					map[string]any{"type": "tool_use", "id": "tool_" + id, "name": "Read", "input": map[string]string{"file_path": "fixture.txt"}},
+				}},
+		})
+	}
+	events := []json.RawMessage{
+		assistant("msg_a", &claudeUsage{InputTokens: 40, OutputTokens: 2, CacheReadInputTokens: 60, CacheCreationInputTokens: 5}),
+		assistant("msg_b", &claudeUsage{InputTokens: 30, OutputTokens: 1, CacheReadInputTokens: 20, CacheCreationInputTokens: 3}),
+	}
+	resultEvent := mustMarshal(t, map[string]any{
+		"type": "result", "subtype": "success", "session_id": sessionID, "result": "done",
+		"modelUsage": map[string]claudeResultModelUsage{
+			model: {InputTokens: 700, OutputTokens: 30, CacheReadInputTokens: 800, CacheCreationInputTokens: 80},
+		},
+	})
+	backend := claudeUsageFixtureBackendWithExecutable(t, events, resultEvent, false, map[string]string{
+		"HOME":        isolatedHome,
+		"USERPROFILE": isolatedHome,
+	}, wrapper)
+	result := executeClaudeUsageFixtureWithOptions(t, backend, len(events), ExecOptions{
+		Timeout:         5 * time.Second,
+		ResumeSessionID: sessionID,
+	})
+	want := map[string]TokenUsage{
+		model: {InputTokens: 70, CacheReadTokens: 80, CacheWriteTokens: 8},
+	}
+	if !reflect.DeepEqual(result.Usage, want) {
+		t.Fatalf("usage = %#v, want %#v", result.Usage, want)
+	}
 }

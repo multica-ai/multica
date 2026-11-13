@@ -4,10 +4,11 @@ description: An agent is a reusable set of identity, capabilities, and execution
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { AgentAccessDemo } from "@/components/demos/agent-access-demo";
 
 An agent is a collaborator in a [Multica workspace](/workspaces). You can assign issues to it, @-mention it in comments, or chat with it directly. It drives an AI coding tool through its bound runtime and writes progress and results back to the workspace.
 
-An agent is not a continuously running process. It is a reusable identity and configuration; it only produces concrete [runs](/tasks) when work arrives.
+An agent doesn't keep running in the background. It stores a reusable identity and configuration, and produces concrete [runs](/tasks) only when work arrives.
 
 ## Agent configuration
 
@@ -46,7 +47,7 @@ Agents can create issues, post comments, and change work status, but they have n
 
 ## Permissions and Access
 
-Every agent has one owner and an Access setting:
+Every agent has one owner and an Access setting. Access decides who can run the agent, meaning assign issues to it, @-mention it in comments, or chat with it:
 
 | Access | Who can run it |
 |---|---|
@@ -54,15 +55,23 @@ Every agent has one owner and an Access setting:
 | **Entire workspace** | Every member of the workspace. |
 | **Specific people** | The agent owner and the selected members. |
 
-New agents default to **Only me**.
+New agents default to **Only me**. The demo below starts at Only me, switches to the other two options in turn, and shows what each member then gets in the assignee picker and the @-mention menu.
+
+<AgentAccessDemo />
 
 <Callout type="info">
-Workspace `owner`s and `admin`s can see and manage every agent, but cannot bypass Access to run someone else's "Only me" agent. Regular members only see agents they own or are allowed to run.
+Workspace `owner`s and `admin`s can see and manage every agent, but cannot bypass Access to run someone else's "Only me" agent.
 </Callout>
 
-**Seeing** an agent is determined by ownership, workspace admin roles, and Access together; **modifying** is open to the agent owner and workspace owners/admins, except Access itself, which only the agent owner can change.
+Everything other than running it is split like this:
 
-Configuration that may contain credentials, such as environment variables and MCP, has stricter read rules — see [Create and configure an agent](/agents-create#environment-variables-and-credentials).
+| Action | Who can |
+|---|---|
+| See it in the agent list and pickers | The agent owner, workspace `owner`s and `admin`s, and members Access grants |
+| Edit its configuration | The agent owner and workspace `owner`s and `admin`s |
+| Change Access | Only the agent owner |
+
+Configuration that may contain credentials, such as environment variables and MCP, has stricter read rules. See [Create and configure an agent](/agents-create#environment-variables-and-credentials).
 
 ## Online, offline, and workload status
 
@@ -85,7 +94,7 @@ The agent owner and workspace `owner`s and `admin`s can archive or restore an ag
 
 ## Next steps
 
-- [Create and configure an agent](/agents-create) — start blank, or build with AI.
+- [Create and configure an agent](/agents-create) — fill in the configuration yourself, or let AI draft it.
 - [Skills](/skills) — add reusable methods and material to an agent.
 - [Squads](/squads) — let a leader pick the right member for the work.
 - [Daemon and runtimes](/daemon-runtimes) — where agents actually execute.

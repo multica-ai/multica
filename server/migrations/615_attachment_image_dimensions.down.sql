@@ -1,0 +1,3 @@
+ALTER TABLE attachment
+    DROP COLUMN IF EXISTS width,
+    DROP COLUMN IF EXISTS height;

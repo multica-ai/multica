@@ -4,40 +4,50 @@ description: Connect a computer, create your first agent, and have it complete i
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
 
 <Callout type="info">
 Before an agent can execute, the computer that runs it needs at least one [supported AI coding tool](/providers) installed and signed in — for example Claude Code, Codex, or Cursor. Multica does not ship these tools.
 </Callout>
 
-## 1. Sign in and open your workspace
+<Steps>
+<Step>
 
-Sign in on the web ([multica.ai](https://multica.ai)) or with [Multica Desktop](https://multica.ai/download). Email verification codes and Google are both supported.
+## Sign in and open your workspace [#1-sign-in-and-open-your-workspace]
 
-- **Desktop**: can connect this computer automatically.
-- **Web**: connect from the command line in the next step.
+Sign in on the web ([multica.ai](https://multica.ai)) or with [Multica Desktop](https://multica.ai/download). Email verification codes and Google are both supported. If you sign in with Desktop, the next step can connect this computer automatically; on the web, you connect it from the command line.
 
-## 2. Connect a computer
+</Step>
+<Step>
 
-Agents execute work on the computers you connect. Open **Configure → Runtimes** at the bottom of the sidebar:
+## Connect a computer [#2-connect-a-computer]
+
+Agents execute work on the computers you connect. Open **Runtimes** under **AI Team** in the sidebar:
 
 - **With Desktop**: Desktop automatically registers this computer as a runtime and detects the installed AI coding tools. For a tool you just installed, click **Refresh** to detect it again.
-- **With Web, or to add another computer**: click **Add a computer** in the top right, then run the two commands from the dialog in a terminal on the target computer:
+- **With Web, or to add another computer**: click **Add** in the top right, choose **Other machine or server**, then run the two commands from the dialog in a terminal on the target computer:
 
-  **macOS / Linux**
+<Tabs groupId="os" persist items={["macOS / Linux", "Windows"]}>
+<Tab value="macOS / Linux">
 
-  ```bash
-  curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
-  multica setup
-  ```
+```bash
+curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
+multica setup
+```
 
-  **Windows PowerShell**
+</Tab>
+<Tab value="Windows">
 
-  ```powershell
-  irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
-  multica setup
-  ```
+```powershell
+irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
+multica setup
+```
 
-  `multica setup` opens a browser to complete sign-in, then leaves the daemon running in the background. Once the daemon is online, the dialog usually detects the computer within a minute.
+</Tab>
+</Tabs>
+
+`multica setup` opens a browser to complete sign-in, then leaves the daemon running in the background. Once the daemon is online, the dialog usually detects the computer within a minute.
 
 **Success check**: an online computer appears in the runtime list.
 
@@ -47,20 +57,21 @@ Agents execute work on the computers you connect. Open **Configure → Runtimes*
 The connection commands differ slightly on self-hosted instances — see the [Self-host quickstart](/self-host-quickstart).
 </Callout>
 
-## 3. Create an agent
+</Step>
+<Step>
 
-Open **Workspace → Agents** in the sidebar, click **New agent**, and pick a path:
+## Create an agent [#3-create-an-agent]
 
-- **Start blank**: fill in the fields yourself. Only a name is strictly required — confirm the runtime and AI coding tool, then create.
-- **Build with AI**: describe what you want, and the Agent Builder asks questions and generates the configuration. This path needs an online runtime.
+Open **Agents** under **AI Team** in the sidebar and click **New agent**. Choose an AI coding tool on the computer you just connected, enter a name, and click **Create agent**. The runtime and the name are the only required fields.
 
-Everything else can be refined later — see [Create and configure agents](/agents-create).
+If you would rather not write the configuration yourself, click **Let AI write it** on the configuration page: the Agent Builder asks a few questions and fills it in. This needs the selected runtime to be online. Everything else can be refined later — see [Create and configure an agent](/agents-create).
 
 **Success check**: your agent appears in the agent list and shows as online.
 
-![Agent creation starting-point picker: Start blank and Build with AI](/images/docs/quickstart-new-agent.webp)
+</Step>
+<Step>
 
-## 4. Hand it your first issue
+## Hand it your first issue [#4-hand-it-your-first-issue]
 
 Click **New Issue** at the top of the sidebar (or press `C`). In the default agent mode:
 
@@ -70,13 +81,19 @@ Click **New Issue** at the top of the sidebar (or press `C`). In the default age
 
 ![New issue dialog in agent mode: Created by set to Multica Assistant](/images/docs/quickstart-new-issue.webp)
 
-## 5. Watch progress and results
+</Step>
+<Step>
+
+## Watch progress and results [#5-watch-progress-and-results]
 
 After submitting, open the issue: the execution log shows the run status, and the agent's progress and replies appear in the timeline.
 
 **Success check**: the execution log status changes to Completed and the agent's reply appears in the timeline. To see the full transcript, click **View transcript**.
 
 ![The agent's reply in the issue and a completed execution log](/images/docs/quickstart-run-result.webp)
+
+</Step>
+</Steps>
 
 ## Common problems
 
@@ -92,4 +109,4 @@ For more cases, see [Troubleshooting](/troubleshooting).
 
 - [Core concepts](/concepts) — meet all of Multica's core objects in three minutes.
 - [How Multica works](/how-multica-works) — how issues, agents, runtimes, and each run relate.
-- [Put agents to work](/triggering-agents) — beyond assignment: @-mentions, chat, and Autopilots.
+- [Put agents to work](/triggering-agents) — besides assignment, you can start an agent with an @mention, a chat, or an Autopilot.

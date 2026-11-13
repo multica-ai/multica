@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, lazy, useRef, useState } from "react";
-import { Bot, Camera, ImagePlus, Loader2, Users, X } from "lucide-react";
+import { Bot, Camera, ImagePlus, Loader2, Users, X } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
@@ -17,6 +17,8 @@ import {
   PopoverTrigger,
 } from "@multica/ui/components/ui/popover";
 import { Separator } from "@multica/ui/components/ui/separator";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
+import { DeferredTooltip } from "@multica/ui/components/common/deferred-tooltip";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../i18n";
 import { AvatarCropDialog } from "./avatar-crop-dialog";
@@ -147,6 +149,7 @@ export function AvatarUploadControl({
   const { t } = useT("common");
   const { upload } = useFileUpload(api);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const uploadPendingRef = useRef(false);
   const [pickedFile, setPickedFile] = useState<File | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -186,6 +189,8 @@ export function AvatarUploadControl({
   };
 
   const handleCropped = async (cropped: File) => {
+    // Block dismissal during the cropper handoff, before busy has committed.
+    uploadPendingRef.current = true;
     setBusy(true);
     try {
       const result = await upload(cropped);
@@ -200,6 +205,7 @@ export function AvatarUploadControl({
         err instanceof Error ? err.message : t(($) => $.avatar_upload.failed),
       );
     } finally {
+      uploadPendingRef.current = false;
       setBusy(false);
     }
   };
@@ -212,6 +218,8 @@ export function AvatarUploadControl({
   //
   // No success toast on purpose: the avatar swaps to the chosen emoji in place,
   // so the change is already visible.
+  const changeLabel = ariaLabel ?? t(($) => $.avatar_upload.change);
+
   const handleEmojiSelected = async (picked: string) => {
     closePicker();
     setPreviewError(false);
@@ -233,12 +241,13 @@ export function AvatarUploadControl({
       // file dialog, which is this control's original single-purpose shape.
       onClick={emojiEnabled ? undefined : openFileDialog}
       disabled={disabled || busy}
-      aria-label={ariaLabel ?? t(($) => $.avatar_upload.change)}
+      aria-label={changeLabel}
       className={cn(
         "group relative h-full w-full overflow-hidden bg-muted text-muted-foreground outline-none",
         "flex items-center justify-center",
         "focus-visible:ring-2 focus-visible:ring-ring",
         "disabled:cursor-not-allowed disabled:opacity-60",
+        // eslint-disable-next-line no-restricted-syntax -- avatar: the control is the avatar itself
         "rounded-full",
         className,
       )}
@@ -280,7 +289,10 @@ export function AvatarUploadControl({
     <div className="relative shrink-0" style={{ width: size, height: size }}>
       {emojiEnabled ? (
         <Popover open={pickerOpen} onOpenChange={handlePickerOpenChange}>
-          <PopoverTrigger render={avatarButton} />
+          <DeferredTooltip
+            content={changeLabel}
+            trigger={<PopoverTrigger render={avatarButton} />}
+          />
           <PopoverContent
             align="start"
             // The emoji-mart picker sizes itself; only the suggestion grid is
@@ -348,22 +360,25 @@ export function AvatarUploadControl({
           </PopoverContent>
         </Popover>
       ) : (
-        avatarButton
+        <DeferredTooltip content={changeLabel} trigger={avatarButton} />
       )}
 
       {onClear && hasAvatar && !busy && !disabled && (
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            setPreviewError(false);
-            onClear();
-          }}
-          className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-sm transition-colors hover:bg-muted hover:text-foreground"
-          aria-label={t(($) => $.avatar_upload.remove)}
-        >
-          <X className="h-3 w-3" />
-        </button>
+        <TooltipHint label={t(($) => $.avatar_upload.remove)}>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setPreviewError(false);
+              onClear();
+            }}
+            // eslint-disable-next-line no-restricted-syntax -- avatar: remove badge pinned to the avatar's corner
+            className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-sm transition-colors hover:bg-muted hover:text-foreground"
+            aria-label={t(($) => $.avatar_upload.remove)}
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </TooltipHint>
       )}
 
       <input
@@ -379,7 +394,7 @@ export function AvatarUploadControl({
         open={dialogOpen}
         busy={busy}
         onOpenChange={(next) => {
-          if (busy) return;
+          if (busy || uploadPendingRef.current) return;
           setDialogOpen(next);
           if (!next) setPickedFile(null);
         }}

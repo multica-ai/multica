@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -41,6 +42,13 @@ func (h *Handler) hydrateTaskSupplementMetadata(ctx context.Context, r *http.Req
 	}
 
 	userID := requestUserID(r)
+	// can_supplement answers for the caller: an agent is judged as its
+	// steering comment would be, never as the member it runs for.
+	actorType, actorID := h.resolveActor(r, userID, uuidToString(workspaceID))
+	originatorUserID := ""
+	if actorType == "agent" {
+		originatorUserID = h.invokeOriginatorFromRequest(r, actorType, actorID)
+	}
 	permission := make(map[string]bool)
 	for i, task := range tasks {
 		row, ok := byTask[uuidToString(task.ID)]
@@ -58,7 +66,14 @@ func (h *Handler) hydrateTaskSupplementMetadata(ctx context.Context, r *http.Req
 			agent, loadErr := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
 				ID: task.AgentID, WorkspaceID: workspaceID,
 			})
-			allowed = loadErr == nil && h.canInvokeAgent(ctx, agent, "member", userID, userID, uuidToString(workspaceID))
+			switch {
+			case loadErr != nil:
+				allowed = false
+			case actorType == "agent":
+				allowed = h.agentMaySteer(ctx, agent, actorID, originatorUserID, uuidToString(workspaceID))
+			default:
+				allowed = h.canInvokeAgent(ctx, agent, "member", userID, userID, uuidToString(workspaceID))
+			}
 			permission[agentID] = allowed
 		}
 		resp[i].CanSupplement = allowed
@@ -130,20 +145,53 @@ func applyCommentSupplements(resp *CommentResponse, receipts []CommentSupplement
 	resp.SupplementDeliveredAt = receipts[0].DeliveredAt
 }
 
-// steerCommentAgentTriggers binds a member comment to the turn its author
-// chose for each recipient. A bound agent leaves the enqueue list: that turn
-// receives the comment instead of a follow-up run. A chosen turn that has
-// ended, has not started, or cannot take additional input is never swapped
-// for another turn of the same agent; that recipient keeps its normal
+// Agent-authored steering is capped per running turn: in total, and per
+// authoring agent. Two agents mentioning each other mid-run can then only
+// add a bounded number of messages to each other's turns; past the cap the
+// comment is an ordinary trigger. Member steering is not capped.
+const (
+	maxAgentSteersPerTurn         = 10
+	maxAgentSteersPerAgentPerTurn = 3
+)
+
+// commentSteerRequest is how the author of a comment asked for it to reach
+// running turns. TaskIDs name exact turns; All asks for the current running
+// turn of every recipient that has no named turn.
+type commentSteerRequest struct {
+	TaskIDs []pgtype.UUID
+	All     bool
+}
+
+func (s commentSteerRequest) empty() bool { return len(s.TaskIDs) == 0 && !s.All }
+
+// agentMaySteer reports whether an agent author may add its comment to the
+// target agent's running turn: exactly when its comment could start that
+// agent. Steering only moves the comment into the turn the target is already
+// running, so it grants nothing an @mention does not. An agent never steers
+// itself.
+func (h *Handler) agentMaySteer(ctx context.Context, target db.Agent, actorID, originatorUserID, workspaceID string) bool {
+	if actorID == "" || uuidToString(target.ID) == actorID {
+		return false
+	}
+	return h.canInvokeAgent(ctx, target, "agent", actorID, originatorUserID, workspaceID)
+}
+
+// steerCommentAgentTriggers binds a member or agent comment to a running turn
+// of each recipient: the turn its author named, or with steer.All the
+// recipient's current running turn. A bound agent leaves the enqueue list:
+// that turn receives the comment instead of a follow-up run. A chosen turn
+// that has ended, has not started, or cannot take additional input is never
+// swapped for another turn of the same agent; that recipient keeps its normal
 // queued / coalesced / deferred handling, so losing a race never drops or
-// misdirects the comment.
-func (h *Handler) steerCommentAgentTriggers(ctx context.Context, issue db.Issue, comment db.Comment, actorType string, triggers []commentAgentTrigger, steerTaskIDs []pgtype.UUID) ([]commentAgentTrigger, map[string]commentEnqueueResult) {
-	if len(steerTaskIDs) == 0 || len(triggers) == 0 || actorType != "member" {
+// misdirects the comment. An agent author steers only agents it may invoke,
+// within the per-turn caps.
+func (h *Handler) steerCommentAgentTriggers(ctx context.Context, issue db.Issue, comment db.Comment, actorType, actorID, originatorUserID string, triggers []commentAgentTrigger, steer commentSteerRequest) ([]commentAgentTrigger, map[string]commentEnqueueResult) {
+	if steer.empty() || len(triggers) == 0 || (actorType != "member" && actorType != "agent") {
 		return triggers, nil
 	}
 	// Each chosen turn names its agent; only a turn of this issue counts.
-	chosen := make(map[string]pgtype.UUID, len(steerTaskIDs))
-	for _, taskID := range steerTaskIDs {
+	chosen := make(map[string]pgtype.UUID, len(steer.TaskIDs))
+	for _, taskID := range steer.TaskIDs {
 		task, err := h.Queries.GetAgentTask(ctx, taskID)
 		if err != nil || task.IssueID != issue.ID {
 			continue
@@ -155,13 +203,26 @@ func (h *Handler) steerCommentAgentTriggers(ctx context.Context, issue db.Issue,
 	for _, trigger := range triggers {
 		agentID := uuidToString(trigger.Agent.ID)
 		taskID, ok := chosen[agentID]
+		if !ok && steer.All {
+			running, err := h.Queries.GetRunningTaskForAgentOnIssue(ctx, db.GetRunningTaskForAgentOnIssueParams{
+				IssueID: issue.ID, AgentID: trigger.Agent.ID,
+			})
+			taskID, ok = running, err == nil
+		}
 		if !ok {
 			kept = append(kept, trigger)
 			continue
 		}
+		// Some trigger routes (a worker's reply reaching its assigned leader)
+		// do not pass the invoke gate, so an agent author is re-checked here.
+		if actorType == "agent" && !h.agentMaySteer(ctx, trigger.Agent, actorID, originatorUserID, uuidToString(issue.WorkspaceID)) {
+			kept = append(kept, trigger)
+			continue
+		}
 		// The comment is its own request id: it binds to a turn at most once.
-		bound, err := h.Queries.BindCommentTaskSupplement(ctx, db.BindCommentTaskSupplementParams{
+		bound, err := h.bindCommentSteer(ctx, db.BindCommentTaskSupplementParams{
 			TaskID: taskID, IssueID: issue.ID, AgentID: trigger.Agent.ID, WorkspaceID: issue.WorkspaceID,
+			AuthorType: comment.AuthorType, MaxAgentBindings: maxAgentSteersPerTurn, MaxBindingsPerAgent: maxAgentSteersPerAgentPerTurn,
 			CommentID: comment.ID, AuthorID: comment.AuthorID, ClientRequestID: comment.ID,
 		})
 		if err != nil {
@@ -181,6 +242,30 @@ func (h *Handler) steerCommentAgentTriggers(ctx context.Context, issue db.Issue,
 		h.publishCommentSupplementUpdate(ctx, issue.WorkspaceID, comment.ID)
 	}
 	return kept, steered
+}
+
+// bindCommentSteer locks the turn in one statement and binds in the next, in
+// one transaction, so the bind's cap count sees every binding committed by an
+// earlier lock holder (see LockTaskForSupplementBind). pgx.ErrNoRows means
+// nothing was bound.
+func (h *Handler) bindCommentSteer(ctx context.Context, params db.BindCommentTaskSupplementParams) (db.BindCommentTaskSupplementRow, error) {
+	if h.TxStarter == nil {
+		return h.Queries.BindCommentTaskSupplement(ctx, params)
+	}
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		return db.BindCommentTaskSupplementRow{}, err
+	}
+	defer tx.Rollback(ctx)
+	qtx := h.Queries.WithTx(tx)
+	if _, err := qtx.LockTaskForSupplementBind(ctx, params.TaskID); err != nil {
+		return db.BindCommentTaskSupplementRow{}, err
+	}
+	bound, err := qtx.BindCommentTaskSupplement(ctx, params)
+	if err != nil {
+		return db.BindCommentTaskSupplementRow{}, err
+	}
+	return bound, tx.Commit(ctx)
 }
 
 func (h *Handler) loadTaskSupplementTarget(w http.ResponseWriter, r *http.Request) (db.Issue, db.AgentTaskQueue, pgtype.UUID, bool) {
@@ -385,7 +470,17 @@ func (h *Handler) ClaimTaskSupplement(w http.ResponseWriter, r *http.Request) {
 	if _, ok := h.requireDaemonTaskAccess(w, r, taskID); !ok {
 		return
 	}
-	row, err := h.Queries.ClaimNextTaskSupplement(r.Context(), parseUUID(taskID))
+	var req struct {
+		Capabilities []string `json:"capabilities"`
+	}
+	// Older daemons send {} and frame every message as a human's, so they are
+	// never handed an agent's message (see ClaimNextTaskSupplement). A
+	// malformed body only loses the capability.
+	_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req)
+	rendersAuthorType := slices.Contains(req.Capabilities, protocol.DaemonCapabilityTaskSupplementAuthorV1)
+	row, err := h.Queries.ClaimNextTaskSupplement(r.Context(), db.ClaimNextTaskSupplementParams{
+		TaskID: parseUUID(taskID), IncludeAgentAuthored: rendersAuthorType,
+	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeJSON(w, http.StatusOK, map[string]any{})
 		return
@@ -395,7 +490,8 @@ func (h *Handler) ClaimTaskSupplement(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"comment_id": uuidToString(row.CommentID), "author_name": row.AuthorName, "content": row.Content,
+		"comment_id": uuidToString(row.CommentID), "author_type": row.AuthorType, "author_name": row.AuthorName,
+		"content": row.Content,
 	})
 }
 

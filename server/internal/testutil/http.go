@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -154,4 +156,65 @@ func Decode[T any](t TB, h http.HandlerFunc, req *http.Request, want int) T {
 	var out T
 	Call(t, h, req).Want(want).JSON(&out)
 	return out
+}
+
+type BlackholeConn struct {
+	net.Conn
+	Drop atomic.Bool
+}
+
+func (c *BlackholeConn) Read(buf []byte) (int, error) {
+	for {
+		n, err := c.Conn.Read(buf)
+		if err != nil || !c.Drop.Load() {
+			return n, err
+		}
+	}
+}
+
+func (c *BlackholeConn) Write(buf []byte) (int, error) {
+	if c.Drop.Load() {
+		return len(buf), nil
+	}
+	return c.Conn.Write(buf)
+}
+
+type blackholeListener struct {
+	net.Listener
+	accepted chan *BlackholeConn
+}
+
+func (l *blackholeListener) Accept() (net.Conn, error) {
+	conn, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	wrapped := &BlackholeConn{Conn: conn}
+	l.accepted <- wrapped
+	return wrapped, nil
+}
+
+func NewBlackholeHTTP2Server(t TB, handler http.Handler) (*httptest.Server, <-chan *BlackholeConn) {
+	t.Helper()
+	server := httptest.NewUnstartedServer(handler)
+	listener := &blackholeListener{Listener: server.Listener, accepted: make(chan *BlackholeConn, 16)}
+	server.Listener = listener
+	server.EnableHTTP2 = true
+	server.StartTLS()
+	t.Cleanup(server.Close)
+	return server, listener.accepted
+}
+
+func TrustHTTP2Server(t TB, client *http.Client, server *httptest.Server) {
+	t.Helper()
+	if client.Transport == nil {
+		client.Transport = http.DefaultTransport.(*http.Transport).Clone()
+	}
+	transport := client.Transport.(*http.Transport)
+	transport.TLSClientConfig = server.Client().Transport.(*http.Transport).TLSClientConfig.Clone()
+	if transport.HTTP2 != nil {
+		transport.HTTP2.SendPingTimeout /= 100
+		transport.HTTP2.PingTimeout /= 100
+	}
+	t.Cleanup(client.CloseIdleConnections)
 }

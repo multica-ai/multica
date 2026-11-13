@@ -1,0 +1,234 @@
+---
+title: 制作主题
+description: Multica 的主题格式（manifest、CSS 变量、选项和锚点），如何编写和检查主题，以及如何发布到主题商店。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+
+Multica 主题是一个文件夹，包含 `manifest.json`、`theme.css`，以及 CSS 用到的字体和图片。CSS 为浅色和深色模式设置公开变量，也可以重新设计一组稳定的锚点；manifest 给主题命名，还可以声明选项，让用户在 **设置 → 外观** 里调整。主题永远不会运行 JavaScript。
+
+<Callout type="warn">
+  主题格式是 Beta API。在宣布稳定之前，变量、锚点和 manifest 都可能变化。完整的、自动生成的变量和锚点列表在 [`docs/theming.md`](https://github.com/multica-ai/multica/blob/main/docs/theming.md)；本页讲它们怎么配合使用。
+</Callout>
+
+## 快速开始
+
+<Steps>
+<Step>
+
+### 从副本开始
+
+在 **设置 → 外观** 选一个最接近你想要的主题，然后选择 **制作自己的主题 → 导入主题 → 复制"…"为新主题**。副本有自己的 id（`pop-copy`、`pop-copy-2` …），带着原主题的选项，`theme.css` 每行一条声明。不做修改时，它和原主题一模一样。
+
+</Step>
+<Step>
+
+### 编辑
+
+- **桌面端** 把副本写进主题文件夹并打开它。用任何编辑器改 `theme.css`：保存后，所有打开的窗口约一秒内生效。
+- **网页端** 把副本下载为 `.zip`。解压、修改，再用 **导入主题 → 主题文件夹** 导入。相同的 `id` 会替换已安装的副本，并保留选项值。
+
+</Step>
+<Step>
+
+### 检查
+
+分享之前，在 [Multica 仓库](https://github.com/multica-ai/multica)的本地副本里运行检查（见[检查与预览](#检查与预览)）。
+
+</Step>
+</Steps>
+
+## 文件夹
+
+```text
+paper/
+├── manifest.json
+├── theme.css
+└── fonts/
+    └── serif.woff2
+```
+
+文件夹可以放在 `.zip` 的最顶层，也可以是 `.zip` 里唯一的文件夹。字体（`woff2`、`woff`、`ttf`、`otf`）和图片（`png`、`jpg`、`webp`、`gif`、`avif`、`svg`）以外的文件会被忽略。整个主题最大 1 MB。
+
+### manifest.json
+
+```json
+{
+  "apiVersion": 1,
+  "id": "paper",
+  "name": "Paper",
+  "author": "Someone",
+  "version": "1.2.0",
+  "description": "Warm paper, serif reading text.",
+  "options": [
+    { "id": "page", "type": "heading", "label": "Page" },
+    { "id": "paper-color", "type": "color", "label": "Paper", "default": { "light": "#f6efdf", "dark": "#1d1b16" } },
+    { "id": "hyphens", "type": "toggle", "label": "Hyphenate", "default": true }
+  ]
+}
+```
+
+| 字段 | 规则 |
+|---|---|
+| `apiVersion` | 必须是 `1`。 |
+| `id` | 1–40 个字符，只能是 `a-z`、`0-9` 和 `-`。内置 id（`default`、`pop`、`github`、`blueprint`、`notion`）保留不可用。导入 id 已安装的主题会替换它。 |
+| `name` | 必填，最多 40 个字符。 |
+| `author`、`version`、`description` | 可选，安装时显示。主题商店要求有 `version`。 |
+| `options` | 最多 24 个，见[选项](#选项)。 |
+
+### theme.css
+
+```css
+@font-face {
+  font-family: "Paper Serif";
+  src: url(fonts/serif.woff2);
+}
+
+.theme-light {
+  --page-canvas: var(--paper-color);
+  --brand: #8b4513;
+  --font-content-latin: "Paper Serif", Georgia;
+  --h1-style: italic;
+}
+
+.theme-dark {
+  --page-canvas: var(--paper-color);
+}
+
+:root[data-theme-option-hyphens] [data-mc="content"] p {
+  hyphens: auto;
+}
+```
+
+变量设置在 `.theme-light` 和 `.theme-dark` 上，它们都在 `<html>` 上。主题的 CSS 在应用自身样式之后加载，所以优先级相同时主题胜出：选择器保持这么简单，不要用 `!important`。
+
+用户自己在外观页的选择仍然优先于主题：提高对比度会替换次要文字和边框颜色，选了非默认的字体会替换字体变量。颜色完全由主题决定；想让用户自己选颜色，就声明一个选项。
+
+## 变量
+
+变量分为几层：
+
+- **基础**：颜色、表面、阴影、`--radius`、字号阶梯和字体，其他一切都建立在它们之上。改 `--surface` 或 `--radius` 会影响所有用到它的组件。
+- **组件与产品**：菜单、按钮、导航行、任务行、看板、状态颜色，默认取自某个基础变量。设置其中一个只改这个组件：`--menu-radius: 0` 只让菜单变成直角。
+- **编辑器内容**：标题、列表、表格、引用、链接、代码和语法高亮颜色，作用于任务描述、评论、聊天和文档。
+
+应用从不声明组件变量；组件读取它时自带默认值作为回退。所以组件变量可以设置在任意祖先元素上，不限于 `.theme-light`：
+
+```css
+.theme-light [data-mc="chat-window"] {
+  --code-block-background: transparent;
+}
+```
+
+[变量参考](https://github.com/multica-ai/multica/blob/main/docs/theming.md#variable-reference)列出了每个变量及其浅色和深色默认值。
+
+## 选项
+
+使用这个主题时，选项显示在外观页的 **主题选项** 下。`toggle` 和 `select` 在 `<html>` 上设置属性；其他类型总会在 `<html>` 上设置变量 `--<id>`，值为用户选的值或默认值，所以 `theme.css` 直接用 `var(--<id>)` 读取即可。
+
+| 类型 | 字段 | 结果 |
+|---|---|---|
+| `heading` | — | 开始一个分组；`description` 显示在标题下方。 |
+| `toggle` | `default`：`true` 或 `false` | 打开时为 `data-theme-option-<id>="on"`，关闭时没有这个属性。 |
+| `select` | `choices`：`[{ "value", "label", "swatch"? }]`，`default` | `data-theme-option-<id>="<value>"`。每个选项都有 `swatch` 时，显示为色点。 |
+| `color` | `default`：十六进制颜色，或 `{ "light", "dark" }` | `--<id>`：每个模式各一个十六进制颜色。 |
+| `number` | `default`，可选 `min`、`max`、`step`、`unit` | `--<id>`：数字加上 `unit`（`px`、`rem`、`%` …）。 |
+| `slider` | 同 `number`，`min` 和 `max` 必填 | 同 `number`。 |
+| `text` | `default`：一个 CSS 值 | `--<id>`：用户输入的值，前提是它安全。 |
+| `font` | `default`：字体栈 | `--<id>`：字体栈。 |
+| `variable-select` | `choices`：`[{ "value", "label" }]`，值为 CSS 值，`default` | `--<id>`：选中的值。 |
+
+选项 id 为 1–48 个字符，只能是 `a-z`、`0-9` 和 `-`，以字母开头。`label`、`description` 和选项标签可以是字符串，也可以是以语言为键的对象（`en`、`zh-Hans`、`zh-Hant`、`ja`、`ko`、`es`、`fr`），英文为回退。
+
+```json
+{ "id": "page-width", "type": "slider", "label": "Page width", "default": 46, "min": 30, "max": 60, "step": 2, "unit": "rem" }
+```
+
+```css
+[data-mc="content"] { max-width: var(--page-width); }
+```
+
+## 选择器
+
+选择锚点、slot 和状态钩子，不要选类名或 DOM 结构，后者随时会变。锚点、slot 和钩子会保持到下一个 `apiVersion`。
+
+- **锚点** 是应用主要部分上的 `data-mc` 属性：`app-rail`、`sidebar`、`nav-item`、`page`、`issue-row`、`board-card`、`content`（富文本）、`comment`、`chat-window`、`inbox-item` 等。很多锚点带有状态，比如任务行上的 `data-status` 和 `data-priority`。
+- **Slot** 是 UI 基础组件的 `data-slot` 属性：`button`（还有 `data-variant` 和 `data-size`）、`input`、`dialog-content`、`dropdown-menu-item` 等。
+- **`<html>` 上的状态**：`.theme-light` / `.theme-dark`、`.is-desktop` / `.is-web`、`.mod-macos` / `.mod-windows` / `.mod-linux`、`.is-focused`、`.is-sidebar-collapsed`、`[data-theme="<id>"]`，以及主题自己的 `[data-theme-option-<id>]`。
+
+```css
+.mod-macos.is-desktop:not(.is-focused) [data-mc="app-rail"] { opacity: 0.7; }
+.theme-dark [data-mc="issue-row"][data-priority="urgent"] { box-shadow: inset 2px 0 var(--priority-urgent); }
+```
+
+[选择器参考](https://github.com/multica-ai/multica/blob/main/docs/theming.md#selectors)列出了每个锚点、它的属性和每个 slot。
+
+## CSS 不能做什么
+
+任何会加载资源的写法都会被拒绝，因为 CSS 可以通过属性选择器读取页面内容，再通过请求把它发出去：
+
+- `url()` 只能指向主题文件夹里的文件（`url(fonts/serif.woff2)`）或片段（`url(#filter)`），并会被改写成文件的 `data:` URL。
+- `@import`、`image()`、`image-set()`、`cross-fade()`、`element()`、`src()` 和 `expression()` 都会被拒绝，`behavior` 和 `-moz-binding` 也是。
+
+转义、大小写和注释都绕不过检查，它按浏览器的方式读取 CSS。主题没通过检查时，什么都不会安装，并列出每个问题及其在 `theme.css` 中的行号。
+
+以下情况 `pnpm theme:check` 也会判定失败：
+
+- 使用了非公开变量，除非它是选项 id，或者主题自己用 `var()` 读取它；
+- 在 `.theme-light` 和 `.theme-dark` 以外的地方设置变量而没有后代选择器，主题选择器就读不出主题的颜色；
+- 在字体栈里写了通用字体族（`sans-serif`、`serif` …）或 `ui-*` 关键字，这会盖掉用户选的中文字体；
+- 任一模式下没达到 WCAG AA 对比度：`--foreground` 和 `--muted-foreground` 在每个表面上需要 4.5:1，`--brand` 在阅读表面上需要 4.5:1，主按钮文字在按钮上需要 4.5:1，`--faint-foreground` 需要 3:1。提示框文字在 `--tooltip` 上需要 4.5:1，按下状态的显示设置标签，文字在其底色上需要 4.5:1。提示框始终使用深色模式的文字颜色，要修改请设置 `--tooltip-foreground`；按下的标签默认用 `--input` 作底色，可以用 `--display-chip-pressed-background` 单独设置。
+
+## 检查与预览
+
+在 [Multica 仓库](https://github.com/multica-ai/multica)的本地副本里运行：
+
+```bash
+pnpm theme:check path/to/paper          # 文件夹
+pnpm theme:check paper.zip --json       # zip，输出 JSON 供 CI 使用
+pnpm theme:preview path/to/paper --out preview   # preview/light.png 和 preview/dark.png
+```
+
+`theme:check` 报告 manifest 错误、被拦截的 CSS、非公开变量、通用字体族和两种模式下的对比度，每条都带 `theme.css` 中的行号；有错误时以状态码 1 退出。警告（比如无法解析的颜色）不会导致失败。
+
+`theme:preview` 渲染主题商店展示的截图：任务列表旁边打开一个任务，用应用自己的样式搭建，主题选项取默认值。
+
+开发过程中如果主题隐藏或弄乱了界面，在地址后加 `?theme=default` 打开应用，或者加载后立刻按住 **Shift**；见[主题出问题时](/themes#主题出问题时)。
+
+## 发布到主题商店
+
+主题商店列出 [multica-ai/multica-themes](https://github.com/multica-ai/multica-themes) 仓库里的主题。详细说明见它的[贡献指南](https://github.com/multica-ai/multica-themes/blob/main/CONTRIBUTING.md)，简单来说：
+
+<Steps>
+<Step>
+
+### 给主题一个独立仓库
+
+把主题放在一个公开的 GitHub 仓库里。[multica-ai/multica-theme-sample](https://github.com/multica-ai/multica-theme-sample) 是一个带发布工作流的模板。
+
+</Step>
+<Step>
+
+### 发布一个 release
+
+用 manifest 里的 `version` 打 tag（`1.0.0` 或 `v1.0.0`），并把打包好的主题作为 `theme.zip` 附加到 release 上。
+
+</Step>
+<Step>
+
+### 加入仓库
+
+提一个 pull request，在仓库里新增文件 `themes/<id>.json`，文件名就是 manifest 的 `id`。每个主题一个文件，不同主题的 pull request 不会冲突。pull request 会对这个 release 运行 `theme:check` 和 `theme:preview`，并在评论里贴出结果；通过后由维护者合并。
+
+</Step>
+</Steps>
+
+新 release 通过同样的检查后，大约一小时内上架；装过这个主题的人会看到更新。没通过检查的 release 不会替换已上架的版本。应用只会安装通过检查的那个 `theme.zip`，并用与导入主题相同的解析器和 CSS 检查读取它。
+
+商店卡片会显示主题从这个 Multica 服务端被下载的次数。每次安装和每次更新都算一次，没装的主题按下载次数从多到少排列。
+
+## 接下来
+
+- [主题与外观](/themes) — 安装、更新和移除主题。
+- [`docs/theming.md`](https://github.com/multica-ai/multica/blob/main/docs/theming.md) — 自动生成的变量和选择器参考。

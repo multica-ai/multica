@@ -81,6 +81,17 @@ describe("RuntimePicker (creation studio)", () => {
   beforeEach(() => cleanup());
   afterEach(() => cleanup());
 
+  it("keeps an overlong runtime name ellipsized inside the trigger instead of overflowing", () => {
+    // Same flex-row truncation contract as ModelDropdown: the label needs
+    // min-w-0 or it overflows the picker when names grow long.
+    const longName = `Claude (${"very-long-host-name-".repeat(12)}.local)`;
+    const runtimes = [makeRuntime({ id: "rt-long", name: longName })];
+    const { container } = renderPicker({ runtimes, selectedRuntimeId: "rt-long" });
+    const label = trigger(container).querySelector("span.truncate");
+    expect(label?.textContent).toBe(longName);
+    expect(label?.className).toContain("min-w-0");
+  });
+
   it("opens the runtime list on click", () => {
     const { container } = renderPicker();
     fireEvent.click(trigger(container));

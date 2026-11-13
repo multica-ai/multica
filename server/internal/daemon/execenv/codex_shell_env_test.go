@@ -50,10 +50,12 @@ func TestCodexShellEnvAllowlistUsesExactTaskAndSafeInheritedNames(t *testing.T) 
 		"MULTICA_SERVER_URL=https://wrong.example",
 	}
 	explicit := map[string]string{
-		"MULTICA_TOKEN":      "mat_task",
-		"MULTICA_SERVER_URL": "https://task.example",
-		"CUSTOM_FLAG":        "enabled",
-		"ANTHROPIC_API_KEY":  "agent-secret",
+		"MULTICA_TOKEN": "mat_task",
+		"MULTICA_QUICK_CREATE_DEFAULT_ASSIGNEE_TYPE": "agent",
+		"MULTICA_QUICK_CREATE_DEFAULT_ASSIGNEE_ID":   "282bdf4e-b502-4ca9-8fae-0c842f973e63",
+		"MULTICA_SERVER_URL":                         "https://task.example",
+		"CUSTOM_FLAG":                                "enabled",
+		"ANTHROPIC_API_KEY":                          "agent-secret",
 	}
 	authorizedExplicit := []string{"ANTHROPIC_API_KEY"}
 
@@ -66,6 +68,8 @@ func TestCodexShellEnvAllowlistUsesExactTaskAndSafeInheritedNames(t *testing.T) 
 		"HTTPS_PROXY",
 		"LANG",
 		"LOCALAPPDATA",
+		"MULTICA_QUICK_CREATE_DEFAULT_ASSIGNEE_ID",
+		"MULTICA_QUICK_CREATE_DEFAULT_ASSIGNEE_TYPE",
 		"MULTICA_SERVER_URL",
 		"MULTICA_TOKEN",
 		"PATH",

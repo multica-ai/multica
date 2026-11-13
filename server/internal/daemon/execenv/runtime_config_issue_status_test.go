@@ -33,6 +33,21 @@ func TestBriefStatusCatalogAbsentUsesBuiltInLine(t *testing.T) {
 	}
 }
 
+// TestBriefTeachesDuplicateMark pins the duplicate-mark bullet with and
+// without a status catalog, so agents cancelling a duplicate record the mark.
+func TestBriefTeachesDuplicateMark(t *testing.T) {
+	t.Parallel()
+	base := TaskContextForEnv{IssueID: "issue-1", AgentID: "a-1", AgentName: "Eve"}
+	withCatalog := base
+	withCatalog.IssueStatuses = []IssueStatusForEnv{{Key: "later", Name: "Later", Category: "backlog"}}
+	for name, ctx := range map[string]TaskContextForEnv{"no catalog": base, "catalog": withCatalog} {
+		out := buildMetaSkillContent("claude", ctx)
+		if got := strings.Count(out, duplicateOfCommandLine); got != 1 {
+			t.Errorf("%s: duplicate-mark bullet appears %d times, want 1\n---\n%s", name, got, out)
+		}
+	}
+}
+
 func TestBriefStatusCatalogRendered(t *testing.T) {
 	t.Parallel()
 	ctx := TaskContextForEnv{

@@ -7,7 +7,7 @@ import {
   Plus,
   RefreshCw,
   Server,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import type { Agent, AgentRuntime, WorkspaceMcpServer } from "@multica/core/types";
 import { ApiError } from "@multica/core/api";

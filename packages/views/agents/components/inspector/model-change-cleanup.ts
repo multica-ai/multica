@@ -1,5 +1,8 @@
 import type { RuntimeModel } from "@multica/core/types";
-import { findModelCapabilityEntry } from "./model-capability";
+import {
+  findModelCapabilityEntry,
+  thinkingLevelRequiredForProvider,
+} from "./model-capability";
 
 /**
  * The exact per-model catalog for the agent's runtime, or `null` when it is not
@@ -34,6 +37,12 @@ export type ModelChangeUpdate = {
  * be checked here) leave the stored values untouched — they stay visible in the
  * inspector so the user can clear them explicitly.
  *
+ * Providers that require an explicit level (zcode) are the one exception to
+ * "clear and leave empty": an empty level is not a launchable state there, so
+ * the model's advertised `default_level` is what a cleared or never-set value
+ * resolves to, keeping the change runnable without inventing a preference the
+ * catalog did not state.
+ *
  * Both clears travel with the model in ONE request: a second follow-up write
  * would leave a window where the agent is persisted with a model/tier
  * combination the UI never intended.
@@ -46,7 +55,14 @@ export function buildModelChangeUpdate(input: {
   catalog: ModelCatalog;
 }): ModelChangeUpdate {
   const update: ModelChangeUpdate = { model: input.model };
-  if (!input.thinkingLevel && !input.serviceTier) return update;
+  const needsThinkingDefault = thinkingLevelRequiredForProvider(input.provider);
+  if (
+    !input.thinkingLevel &&
+    !input.serviceTier &&
+    !needsThinkingDefault
+  ) {
+    return update;
+  }
   if (input.catalog === null || !input.model) return update;
 
   const entry = findModelCapabilityEntry(
@@ -56,10 +72,20 @@ export function buildModelChangeUpdate(input: {
   );
   if (!entry) return update;
 
+  const thinkingDefault = needsThinkingDefault
+    ? entry.thinking?.default_level
+    : undefined;
+
   const supportsThinking = (entry.thinking?.supported_levels ?? []).some(
     (level) => level.value === input.thinkingLevel,
   );
-  if (input.thinkingLevel && !supportsThinking) update.thinking_level = "";
+  if (input.thinkingLevel && !supportsThinking) {
+    update.thinking_level = thinkingDefault ?? "";
+  } else if (!input.thinkingLevel && thinkingDefault) {
+    // No stored level: for providers that require one, the catalog default is
+    // the value "no override" actually resolves to.
+    update.thinking_level = thinkingDefault;
+  }
 
   const supportsTier =
     (entry.service_tiers ?? []).some((tier) => tier.id === input.serviceTier) ||

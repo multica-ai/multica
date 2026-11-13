@@ -4,7 +4,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup } from "@testing-library/react";
 import { renderWithI18n } from "../../test/i18n";
-import { useValidateNewFilePath } from "./skill-detail-page";
+import { useValidateNewFilePath } from "./skill-files-editor";
 
 afterEach(cleanup);
 

@@ -20,14 +20,15 @@ import (
 // InstallationService.DecryptAppSecret server-side). Likewise, the WS
 // lease columns are omitted; they are runtime state, not API surface.
 type LarkInstallationResponse struct {
-	ID              string  `json:"id"`
-	WorkspaceID     string  `json:"workspace_id"`
-	AgentID         string  `json:"agent_id"`
-	AppID           string  `json:"app_id"`
-	TenantKey       *string `json:"tenant_key,omitempty"`
-	BotOpenID       string  `json:"bot_open_id"`
-	InstallerUserID string  `json:"installer_user_id"`
-	Status          string  `json:"status"`
+	ID                     string     `json:"id"`
+	WorkspaceID            string     `json:"workspace_id"`
+	AgentID                string     `json:"agent_id"`
+	AppID                  string     `json:"app_id"`
+	TenantKey              *string    `json:"tenant_key,omitempty"`
+	BotOpenID              string     `json:"bot_open_id"`
+	InstallerUserID        string     `json:"installer_user_id"`
+	Status                 string     `json:"status"`
+	FirstMessageReceivedAt *time.Time `json:"first_message_received_at,omitempty"`
 	// Region is the Lark cloud this installation lives on: "feishu"
 	// (mainland) or "lark" (international). The UI uses it to render a
 	// badge and to build the correct "Manage in Lark" dev-console host.
@@ -39,17 +40,18 @@ type LarkInstallationResponse struct {
 
 func larkInstallationToResponse(row lark.Installation) LarkInstallationResponse {
 	resp := LarkInstallationResponse{
-		ID:              uuidToString(row.ID),
-		WorkspaceID:     uuidToString(row.WorkspaceID),
-		AgentID:         uuidToString(row.AgentID),
-		AppID:           row.AppID,
-		BotOpenID:       row.BotOpenID,
-		InstallerUserID: uuidToString(row.InstallerUserID),
-		Status:          row.Status,
-		Region:          row.Region,
-		InstalledAt:     row.InstalledAt.Time.UTC().Format(time.RFC3339),
-		CreatedAt:       row.CreatedAt.Time.UTC().Format(time.RFC3339),
-		UpdatedAt:       row.UpdatedAt.Time.UTC().Format(time.RFC3339),
+		FirstMessageReceivedAt: row.FirstMessageReceivedAt,
+		ID:                     uuidToString(row.ID),
+		WorkspaceID:            uuidToString(row.WorkspaceID),
+		AgentID:                uuidToString(row.AgentID),
+		AppID:                  row.AppID,
+		BotOpenID:              row.BotOpenID,
+		InstallerUserID:        uuidToString(row.InstallerUserID),
+		Status:                 row.Status,
+		Region:                 row.Region,
+		InstalledAt:            row.InstalledAt.Time.UTC().Format(time.RFC3339),
+		CreatedAt:              row.CreatedAt.Time.UTC().Format(time.RFC3339),
+		UpdatedAt:              row.UpdatedAt.Time.UTC().Format(time.RFC3339),
 	}
 	if row.TenantKey.Valid {
 		tk := row.TenantKey.String

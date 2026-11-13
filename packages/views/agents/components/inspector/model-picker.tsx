@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, Cpu, Loader2, Plus } from "lucide-react";
+import { ChevronDown, Cpu, Loader2, Plus } from "@multica/ui/icons";
 import {
   refreshRuntimeModels,
   runtimeModelsOptions,
@@ -16,6 +16,7 @@ import { CHIP_CLASS } from "./chip";
 import { useT } from "../../../i18n";
 import { UnavailableModelsNote } from "../unavailable-models-note";
 import { ModelSearchHeader } from "../model-search-header";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 
 /**
  * Inline model picker for the agent inspector. Lighter cousin of
@@ -57,6 +58,10 @@ export function ModelPicker({
     runtimeModelsOptions(runtimeOnline ? runtimeId : null),
   );
   const supported = modelsQuery.data?.supported ?? true;
+  const discoveryError =
+    modelsQuery.error instanceof Error
+      ? modelsQuery.error.message.trim() || null
+      : null;
   // Memoise the model list so every downstream useMemo gets a stable
   // reference; `?? []` would mint a fresh array on every render and
   // invalidate filters needlessly.
@@ -252,11 +257,30 @@ export function ModelPicker({
           </PickerItem>
         ))}
 
-      {!modelsQuery.isLoading && filtered.length === 0 && !canCreate && (
-        <p className="px-3 py-3 text-center text-caption text-muted-foreground">
-          {t(($) => $.pickers.model_empty)}
-        </p>
+      {!modelsQuery.isLoading && modelsQuery.isError && (
+        <div role="alert" className="px-3 py-3 text-caption text-muted-foreground">
+          <p className="font-medium text-foreground">
+            {t(($) => $.pickers.model_discovery_failed_title)}
+          </p>
+          {discoveryError && (
+            <p className="mt-1 whitespace-pre-wrap break-words select-text">
+              {discoveryError}
+            </p>
+          )}
+          <p className="mt-1.5">
+            {t(($) => $.pickers.model_discovery_failed_hint)}
+          </p>
+        </div>
       )}
+
+      {!modelsQuery.isLoading &&
+        !modelsQuery.isError &&
+        filtered.length === 0 &&
+        !canCreate && (
+          <p className="px-3 py-3 text-center text-caption text-muted-foreground">
+            {t(($) => $.pickers.model_empty)}
+          </p>
+        )}
 
       {!modelsQuery.isLoading && (
         <UnavailableModelsNote
@@ -279,14 +303,15 @@ export function ModelPicker({
       )}
 
       {value && (
-        <button
-          type="button"
-          onClick={() => void select("")}
-          className="mt-1 flex w-full items-center border-t px-3 py-2 text-left text-caption text-muted-foreground transition-colors hover:bg-accent/50"
-          title={t(($) => $.pickers.model_clear_title)}
-        >
-          {t(($) => $.pickers.model_clear)}
-        </button>
+        <TooltipHint label={t(($) => $.pickers.model_clear_title)}>
+          <button
+            type="button"
+            onClick={() => void select("")}
+            className="mt-1 flex w-full items-center border-t px-3 py-2 text-left text-caption text-muted-foreground transition-colors hover:bg-accent/50"
+          >
+            {t(($) => $.pickers.model_clear)}
+          </button>
+        </TooltipHint>
       )}
     </PropertyPicker>
   );

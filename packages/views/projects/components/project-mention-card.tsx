@@ -1,8 +1,19 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import { AppLink } from "../../navigation";
+import { useRowMenu, yieldsToTextMenu } from "../../common/point-menu";
+import {
+  ContextMenuScopeSubmenu,
+  findContextMenuScope,
+  useScopeSubmenuFocus,
+  type ResolvedContextMenuScope,
+} from "../../common/context-menu-scope";
+import { dropdownPrimitives } from "../../common/menu-primitives";
+import { CollectionRowContext } from "../../layout/collection-list/row-context";
+import { ProjectMenu } from "./project-row-actions";
 import { useWorkspacePaths } from "@multica/core/paths";
-import { ProjectChip } from "./project-chip";
+import { ProjectChip, useChipProject } from "./project-chip";
 
 interface ProjectMentionCardProps {
   projectId: string;
@@ -36,17 +47,53 @@ export function ProjectMentionCard({
   fallbackLabel,
 }: ProjectMentionCardProps) {
   const p = useWorkspacePaths();
+  const project = useChipProject(projectId);
+  // Right-click opens the projects page's row menu at the cursor; it mounts
+  // on the first right-click, so a page of mentions holds no menus.
+  const rowMenu = useRowMenu();
+  // The comment around the mention, read when the menu opens.
+  const [outer, setOuter] = useState<ResolvedContextMenuScope["submenu"]>(null);
+  const scope = useScopeSubmenuFocus(outer);
+  const rowMenuContext = useMemo(
+    () => ({ menu: rowMenu.menu, setMenu: rowMenu.setMenu }),
+    [rowMenu.menu, rowMenu.setMenu],
+  );
   return (
-    <AppLink
-      href={p.projectDetail(projectId)}
-      newTabTitle={fallbackLabel}
-      className="project-mention inline-flex"
-    >
-      <ProjectChip
-        projectId={projectId}
-        fallbackLabel={fallbackLabel}
-        className="cursor-pointer hover:bg-accent transition-colors"
-      />
-    </AppLink>
+    <>
+      <AppLink
+        href={p.projectDetail(projectId)}
+        newTabTitle={fallbackLabel}
+        className="project-mention inline-flex"
+        onContextMenu={
+          project
+            ? (event) => {
+                // The innermost object's menu wins; a row around the mention
+                // must not open its own as well. Selected text and an editor
+                // keep their text menu.
+                event.stopPropagation();
+                if (yieldsToTextMenu(event.target as Element)) return;
+                setOuter(findContextMenuScope(event.currentTarget.parentElement).submenu);
+                rowMenu.openAtPointer(event);
+              }
+            : undefined
+        }
+      >
+        <ProjectChip
+          projectId={projectId}
+          fallbackLabel={fallbackLabel}
+          className="cursor-pointer hover:bg-accent transition-colors"
+        />
+      </AppLink>
+      {project && rowMenu.menu.point && (
+        <CollectionRowContext.Provider value={rowMenuContext}>
+          <ProjectMenu
+            project={project}
+            triggerHidden
+            trailing={<ContextMenuScopeSubmenu submenu={scope.submenu} primitives={dropdownPrimitives} />}
+            finalFocus={scope.finalFocus}
+          />
+        </CollectionRowContext.Provider>
+      )}
+    </>
   );
 }
