@@ -55,6 +55,8 @@ Install steps are in [Install AI coding tools](/install-agent-runtime).
 
 For Amp, the model field selects an Amp **mode**, such as `high`, rather than an underlying model ID. Leave it empty to use Amp’s default.
 
+Amp also requires `AMP_API_KEY` in the daemon or agent environment; a saved interactive login alone is not enough.
+
 "Multica-managed MCP" means you can define MCP servers in the agent configuration and Multica passes them to the tool before a run. The column only says whether Multica can configure it for you, not whether the tool has other ways to configure MCP.
 
 Tools with — under "Model picked in Multica" take their model from their own configuration; see [Model sources](#model-sources).
