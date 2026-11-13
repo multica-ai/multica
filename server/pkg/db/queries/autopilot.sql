@@ -596,6 +596,26 @@ WHERE autopilot_run_id = $1
 ORDER BY created_at
 LIMIT 1;
 
+-- name: GetLastAutopilotTaskWorkDir :one
+-- GH #8532: the latest terminal task of this autopilot records the workdir
+-- the next run should be offered, so the daemon can reuse the path and the
+-- provider's prompt cache survives across runs. Mirrors the (agent, issue)
+-- follow-up lookup that backs GetLastTaskSession: only terminal rows, the
+-- same COALESCE ordering, and the claiming agent's own rows (a reassigned
+-- autopilot starts a new path rather than inheriting another agent's
+-- directory). The daemon still re-proves ownership on disk before reusing,
+-- so offering a stale or foreign path degrades to a fresh prepare, never to
+-- a wrong directory.
+SELECT t.work_dir
+FROM agent_task_queue t
+JOIN autopilot_run r ON r.id = t.autopilot_run_id
+WHERE r.autopilot_id = $1
+  AND t.agent_id = $2
+  AND t.status IN ('completed', 'failed', 'cancelled')
+  AND t.work_dir IS NOT NULL
+ORDER BY COALESCE(t.completed_at, t.started_at, t.dispatched_at, t.created_at) DESC
+LIMIT 1;
+
 -- =====================
 -- Run lookup by linked entities
 -- =====================
