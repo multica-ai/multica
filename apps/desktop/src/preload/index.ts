@@ -45,6 +45,19 @@ import type {
   LocalRuntimeProbe,
 } from "../shared/daemon-types";
 import {
+  VOICE_MODEL_CANCEL_CHANNEL,
+  VOICE_MODEL_DELETE_CHANNEL,
+  VOICE_MODEL_DOWNLOAD_CHANNEL,
+  VOICE_MODELS_CHANGED_CHANNEL,
+  VOICE_MODELS_LIST_CHANNEL,
+  VOICE_PREPARE_CHANNEL,
+  VOICE_TRANSCRIBE_CHANNEL,
+  type VoiceModelRequest,
+  type VoiceModelsSnapshot,
+  type VoiceTranscribeRequest,
+  type VoiceTranscribeResult,
+} from "../shared/voice";
+import {
   MAIN_RENDERER_CHANNEL_STATE_CHANNEL,
   NEW_WINDOW_SHORTCUT_CHANNEL,
   parseTabSelectionShortcutKey,
@@ -277,6 +290,24 @@ const desktopAPI = {
   /** Create a theme folder from files; never replaces an existing one. */
   writeThemeFolder: (name: string, files: ThemeFolderFile[]): Promise<ThemeFolderWriteResult> =>
     ipcRenderer.invoke(THEME_FOLDER_WRITE_CHANNEL, name, files),
+  /** On-device voice input: speech models and transcription in main. */
+  voice: {
+    listModels: (): Promise<VoiceModelsSnapshot> => ipcRenderer.invoke(VOICE_MODELS_LIST_CHANNEL),
+    onModelsChanged: (callback: (snapshot: VoiceModelsSnapshot) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, snapshot: VoiceModelsSnapshot) =>
+        callback(snapshot);
+      ipcRenderer.on(VOICE_MODELS_CHANGED_CHANNEL, handler);
+      return () => {
+        ipcRenderer.removeListener(VOICE_MODELS_CHANGED_CHANNEL, handler);
+      };
+    },
+    downloadModel: (id: string): Promise<void> => ipcRenderer.invoke(VOICE_MODEL_DOWNLOAD_CHANNEL, id),
+    cancelDownload: (id: string): Promise<void> => ipcRenderer.invoke(VOICE_MODEL_CANCEL_CHANNEL, id),
+    deleteModel: (id: string): Promise<void> => ipcRenderer.invoke(VOICE_MODEL_DELETE_CHANNEL, id),
+    prepare: (request: VoiceModelRequest) => ipcRenderer.send(VOICE_PREPARE_CHANNEL, request),
+    transcribe: (request: VoiceTranscribeRequest): Promise<VoiceTranscribeResult> =>
+      ipcRenderer.invoke(VOICE_TRANSCRIBE_CHANNEL, request),
+  },
   /** Listen for Cmd/Ctrl+W tab-close requests from the main process.
    *  The renderer should close the active tab; if it was the last tab,
    *  call `closeWindow()` to dismiss the window. Returns an unsubscribe fn. */
