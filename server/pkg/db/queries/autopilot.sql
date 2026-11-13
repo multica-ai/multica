@@ -596,6 +596,20 @@ WHERE autopilot_run_id = $1
 ORDER BY created_at
 LIMIT 1;
 
+-- name: HasQueuedAutopilotRunTask :one
+-- Reports whether an earlier run_only run of this autopilot still has its task
+-- waiting in the queue, unclaimed. The admission gate uses it to keep at most
+-- one waiting run per autopilot while the assignee's runtime is offline, so a
+-- frequent schedule does not stack up work that all lands at once on reconnect.
+SELECT EXISTS (
+    SELECT 1
+    FROM autopilot_run r
+    JOIN agent_task_queue t ON t.id = r.task_id
+    WHERE r.autopilot_id = $1
+      AND r.status = 'running'
+      AND t.status = 'queued'
+)::bool AS queued;
+
 -- =====================
 -- Run lookup by linked entities
 -- =====================

@@ -714,7 +714,8 @@ func TestWebhookHandler_ActiveSkippedRunReturnsLegacyContract(t *testing.T) {
 		INSERT INTO agent_runtime (
 			workspace_id, daemon_id, name, runtime_mode, provider, status,
 			device_info, metadata, owner_id, last_seen_at
-		) VALUES ($1, NULL, $2, 'cloud', $3, 'offline', $4, '{}'::jsonb, $5, now())
+		) VALUES ($1, NULL, $2, 'cloud', $3, 'offline', $4,
+			'{"offline_reason":{"code":"not_executable","detail":"agent CLI is not executable"}}'::jsonb, $5, now())
 		RETURNING id
 	`, testWorkspaceID, "Webhook Offline Runtime", "webhook_test_runtime", "Webhook test runtime", testUserID).Scan(&offlineRuntimeID); err != nil {
 		t.Fatalf("create offline runtime: %v", err)

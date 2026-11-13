@@ -727,52 +727,47 @@ func TestAutopilotCreateIssueDeliveryWithoutDispatchTask(t *testing.T) {
 	requireRunStatus(t, f, "completed")
 }
 
-// TestAutopilotDispatchSkipsWhenRuntimeOffline locks in the MUL-1899
-// admission gate: when the assignee agent's runtime is not online we must
-// record a `skipped` autopilot_run with a failure_reason and NOT enqueue an
-// agent_task_queue row. This is the fix for "活跃 schedule 持续给离线 local
-// agent 入队".
-func TestAutopilotDispatchSkipsWhenRuntimeOffline(t *testing.T) {
+// createAutopilotAdmissionAgent inserts a dedicated runtime + agent so a test
+// can control the runtime's status and metadata without touching the shared
+// fixture used by other tests.
+func createAutopilotAdmissionAgent(t *testing.T, provider, status, metadata string) (runtimeID, agentID string) {
+	t.Helper()
 	ctx := context.Background()
-	queries := db.New(testPool)
-	bus := events.New()
-	taskSvc := service.NewTaskService(queries, testPool, nil, bus)
-	autopilotSvc := service.NewAutopilotService(queries, testPool, bus, taskSvc)
-
-	// Spin up a dedicated runtime + agent so we can flip the runtime to
-	// offline without affecting the shared fixture used by other tests.
-	var runtimeID, agentID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO agent_runtime (
 			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at
 		)
-		VALUES ($1, NULL, 'Offline runtime', 'local', 'mul1899_offline_runtime', 'offline', '{}'::jsonb, '{}'::jsonb, now())
+		VALUES ($1, NULL, $2, 'local', $2, $3, '{}'::jsonb, $4::jsonb, now())
 		RETURNING id::text
-	`, parseUUID(testWorkspaceID)).Scan(&runtimeID); err != nil {
-		t.Fatalf("create offline runtime: %v", err)
+	`, parseUUID(testWorkspaceID), provider, status, metadata).Scan(&runtimeID); err != nil {
+		t.Fatalf("create runtime: %v", err)
 	}
 	t.Cleanup(func() {
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
 	})
-
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO agent (
 			workspace_id, name, description, runtime_mode, runtime_config,
 			runtime_id, visibility, max_concurrent_tasks, owner_id
 		)
-		VALUES ($1, 'mul1899-offline-agent', '', 'local', '{}'::jsonb, $2, 'workspace', 1, $3)
+		VALUES ($1, $2, '', 'local', '{}'::jsonb, $3, 'workspace', 1, $4)
 		RETURNING id::text
-	`, parseUUID(testWorkspaceID), runtimeID, parseUUID(testUserID)).Scan(&agentID); err != nil {
-		t.Fatalf("create offline agent: %v", err)
+	`, parseUUID(testWorkspaceID), provider+"-agent", runtimeID, parseUUID(testUserID)).Scan(&agentID); err != nil {
+		t.Fatalf("create agent: %v", err)
 	}
 	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE agent_id = $1`, agentID)
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)
 	})
+	return runtimeID, agentID
+}
 
-	ap, err := queries.CreateAutopilot(ctx, db.CreateAutopilotParams{
+func createRunOnlyAutopilot(t *testing.T, queries *db.Queries, agentID, title string) db.Autopilot {
+	t.Helper()
+	ap, err := queries.CreateAutopilot(context.Background(), db.CreateAutopilotParams{
 		WorkspaceID:        parseUUID(testWorkspaceID),
-		Title:              "Offline-runtime autopilot",
-		Description:        pgtype.Text{String: "MUL-1899 admission test", Valid: true},
+		Title:              title,
+		Description:        pgtype.Text{String: "admission test", Valid: true},
 		AssigneeType:       "agent",
 		AssigneeID:         parseUUID(agentID),
 		Status:             "active",
@@ -785,8 +780,100 @@ func TestAutopilotDispatchSkipsWhenRuntimeOffline(t *testing.T) {
 		t.Fatalf("CreateAutopilot: %v", err)
 	}
 	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM autopilot_run WHERE autopilot_id = $1`, ap.ID)
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, ap.ID)
 	})
+	return ap
+}
+
+// TestAutopilotRunOnlyQueuesWhenRuntimeOffline: a run_only autopilot whose
+// assignee runtime is merely offline queues its task for the daemon to claim
+// on reconnect, like a chat or comment trigger, instead of recording a
+// `skipped` run. While that task is still waiting, later fires are skipped as
+// already active so a schedule cannot stack up a backlog; once the task leaves
+// the queue the next fire queues again.
+func TestAutopilotRunOnlyQueuesWhenRuntimeOffline(t *testing.T) {
+	ctx := context.Background()
+	queries := db.New(testPool)
+	bus := events.New()
+	taskSvc := service.NewTaskService(queries, testPool, nil, bus)
+	autopilotSvc := service.NewAutopilotService(queries, testPool, bus, taskSvc)
+
+	runtimeID, agentID := createAutopilotAdmissionAgent(t, "offline_queue_runtime", "offline", "{}")
+	ap := createRunOnlyAutopilot(t, queries, agentID, "Offline-runtime autopilot")
+	trigger := seedAutopilotScheduleTrigger(t, queries, ap)
+
+	run, err := autopilotSvc.DispatchAutopilot(ctx, ap, trigger, "schedule", nil)
+	if err != nil {
+		t.Fatalf("DispatchAutopilot: %v", err)
+	}
+	if run == nil {
+		t.Fatal("expected a run, got nil")
+	}
+	if run.Status != "running" {
+		t.Fatalf("expected run status 'running', got %q (reason %+v)", run.Status, run.FailureReason)
+	}
+	if !run.TaskID.Valid {
+		t.Fatal("expected the run to link a queued task")
+	}
+	var taskStatus, taskRuntime string
+	if err := testPool.QueryRow(ctx,
+		`SELECT status, runtime_id::text FROM agent_task_queue WHERE id = $1`, run.TaskID,
+	).Scan(&taskStatus, &taskRuntime); err != nil {
+		t.Fatalf("load task: %v", err)
+	}
+	if taskStatus != "queued" || taskRuntime != runtimeID {
+		t.Fatalf("expected a queued task on runtime %s, got status=%q runtime=%s", runtimeID, taskStatus, taskRuntime)
+	}
+
+	second, err := autopilotSvc.DispatchAutopilot(ctx, ap, trigger, "schedule", nil)
+	if err != nil {
+		t.Fatalf("second DispatchAutopilot: %v", err)
+	}
+	if second.Status != "skipped" {
+		t.Fatalf("expected the second fire to be skipped while the first is queued, got %q", second.Status)
+	}
+	// Keep the "offline at dispatch time" phrasing the skip alerts group on.
+	if !strings.Contains(second.FailureReason.String, "offline at dispatch time") ||
+		!strings.Contains(second.FailureReason.String, "still queued") {
+		t.Fatalf("expected an offline, still-queued failure reason, got %q", second.FailureReason.String)
+	}
+	var taskCount int
+	if err := testPool.QueryRow(ctx,
+		`SELECT count(*) FROM agent_task_queue WHERE agent_id = $1`, agentID,
+	).Scan(&taskCount); err != nil {
+		t.Fatalf("count tasks: %v", err)
+	}
+	if taskCount != 1 {
+		t.Fatalf("expected exactly 1 task for the offline-runtime agent, got %d", taskCount)
+	}
+
+	// The daemon reconnected and claimed the first task: the next fire queues.
+	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status = 'dispatched', dispatched_at = now() WHERE id = $1`, run.TaskID); err != nil {
+		t.Fatalf("claim task: %v", err)
+	}
+	third, err := autopilotSvc.DispatchAutopilot(ctx, ap, trigger, "schedule", nil)
+	if err != nil {
+		t.Fatalf("third DispatchAutopilot: %v", err)
+	}
+	if third.Status != "running" || !third.TaskID.Valid {
+		t.Fatalf("expected the fire after the claim to queue a task, got status=%q task=%v", third.Status, third.TaskID)
+	}
+}
+
+// TestAutopilotDispatchSkipsWhenRuntimeUnusable keeps the MUL-1899 admission
+// skip for a runtime that cannot serve work until a human repairs it: the run
+// is `skipped` with a failure_reason and nothing is enqueued.
+func TestAutopilotDispatchSkipsWhenRuntimeUnusable(t *testing.T) {
+	ctx := context.Background()
+	queries := db.New(testPool)
+	bus := events.New()
+	taskSvc := service.NewTaskService(queries, testPool, nil, bus)
+	autopilotSvc := service.NewAutopilotService(queries, testPool, bus, taskSvc)
+
+	_, agentID := createAutopilotAdmissionAgent(t, "unusable_skip_runtime", "offline",
+		`{"offline_reason":{"code":"not_executable","detail":"agent CLI is not executable"}}`)
+	ap := createRunOnlyAutopilot(t, queries, agentID, "Unusable-runtime autopilot")
 
 	run, err := autopilotSvc.DispatchAutopilot(ctx, ap, seedAutopilotScheduleTrigger(t, queries, ap), "schedule", nil)
 	if err != nil {
@@ -798,23 +885,20 @@ func TestAutopilotDispatchSkipsWhenRuntimeOffline(t *testing.T) {
 	if run.Status != "skipped" {
 		t.Fatalf("expected run status 'skipped', got %q", run.Status)
 	}
-	if !run.FailureReason.Valid || !strings.Contains(run.FailureReason.String, "offline") {
-		t.Fatalf("expected failure reason mentioning 'offline', got %+v", run.FailureReason)
+	if !strings.Contains(run.FailureReason.String, "not executable") {
+		t.Fatalf("expected the failure reason to name the unusable runtime, got %q", run.FailureReason.String)
 	}
 	if run.TaskID.Valid {
 		t.Fatalf("expected no task to be enqueued, got task_id %v", run.TaskID)
 	}
-
-	// Defensive: confirm at the DB layer that nothing landed on the queue.
 	var taskCount int
 	if err := testPool.QueryRow(ctx,
-		`SELECT count(*) FROM agent_task_queue WHERE agent_id = $1`,
-		agentID,
+		`SELECT count(*) FROM agent_task_queue WHERE agent_id = $1`, agentID,
 	).Scan(&taskCount); err != nil {
 		t.Fatalf("count tasks: %v", err)
 	}
 	if taskCount != 0 {
-		t.Fatalf("expected 0 queued tasks for offline-runtime agent, got %d", taskCount)
+		t.Fatalf("expected 0 tasks for the unusable-runtime agent, got %d", taskCount)
 	}
 }
 
@@ -916,7 +1000,7 @@ func TestAutopilotCreateIssueDispatchCreatesIssueWhenRuntimeOffline(t *testing.T
 
 // TestManualTriggerDoesNotErrorOnPostAdmissionSkip locks in PR #2888 review
 // fix #2: if the dispatcher decides to skip after the admission gate has
-// already passed (e.g. the leader's runtime went offline between admission
+// already passed (e.g. the leader's runtime became unusable between admission
 // and task creation), DispatchAutopilot must return (run, nil) with
 // status='skipped' rather than (nil, err). Without this, manual trigger
 // surfaces a 500 to the user even though the work was correctly suppressed
@@ -924,13 +1008,13 @@ func TestAutopilotCreateIssueDispatchCreatesIssueWhenRuntimeOffline(t *testing.T
 //
 // We synthesise the race by:
 //  1. Creating an online runtime + agent so the admission gate passes.
-//  2. Flipping the runtime to offline.
+//  2. Marking the runtime unusable (an offline runtime now queues instead).
 //  3. Triggering the autopilot. Admission has already loaded the agent +
 //     runtime once with status='online' at row-fetch time, so the second
-//     check inside dispatchRunOnly is what catches the offline state.
+//     check inside dispatchRunOnly is what catches the unusable state.
 //
 // In this implementation the admission gate also re-reads the runtime, so
-// the same offline state actually fires the admission skip first. That is
+// the same unusable state actually fires the admission skip first. That is
 // fine for the assertion we care about: the manual trigger must not 500 and
 // the run must be `skipped`. The post-admission branch is exercised
 // separately by the errDispatchSkipped unwrap unit test in the service
@@ -947,7 +1031,8 @@ func TestManualTriggerDoesNotErrorOnPostAdmissionSkip(t *testing.T) {
 		INSERT INTO agent_runtime (
 			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at
 		)
-		VALUES ($1, NULL, 'Manual-trigger skip runtime', 'local', 'mul2429_manual_skip_runtime', 'offline', '{}'::jsonb, '{}'::jsonb, now())
+		VALUES ($1, NULL, 'Manual-trigger skip runtime', 'local', 'mul2429_manual_skip_runtime', 'offline', '{}'::jsonb,
+			'{"offline_reason":{"code":"not_executable","detail":"agent CLI is not executable"}}'::jsonb, now())
 		RETURNING id::text
 	`, parseUUID(testWorkspaceID)).Scan(&runtimeID); err != nil {
 		t.Fatalf("create runtime: %v", err)

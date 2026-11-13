@@ -1200,6 +1200,28 @@ func (q *Queries) GetWebhookTriggerByToken(ctx context.Context, webhookToken pgt
 	return i, err
 }
 
+const hasQueuedAutopilotRunTask = `-- name: HasQueuedAutopilotRunTask :one
+SELECT EXISTS (
+    SELECT 1
+    FROM autopilot_run r
+    JOIN agent_task_queue t ON t.id = r.task_id
+    WHERE r.autopilot_id = $1
+      AND r.status = 'running'
+      AND t.status = 'queued'
+)::bool AS queued
+`
+
+// Reports whether an earlier run_only run of this autopilot still has its task
+// waiting in the queue, unclaimed. The admission gate uses it to keep at most
+// one waiting run per autopilot while the assignee's runtime is offline, so a
+// frequent schedule does not stack up work that all lands at once on reconnect.
+func (q *Queries) HasQueuedAutopilotRunTask(ctx context.Context, autopilotID pgtype.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, hasQueuedAutopilotRunTask, autopilotID)
+	var queued bool
+	err := row.Scan(&queued)
+	return queued, err
+}
+
 const isAutopilotCollaborator = `-- name: IsAutopilotCollaborator :one
 SELECT EXISTS (
     SELECT 1 FROM autopilot_collaborator

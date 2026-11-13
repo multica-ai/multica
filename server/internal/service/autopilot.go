@@ -103,20 +103,20 @@ func RecordAutopilotRuleVersion(ctx context.Context, q *db.Queries, ap db.Autopi
 // It creates a run and either creates an issue or enqueues a direct agent task
 // depending on execution_mode.
 //
-// Before run_only work is queued we run an admission check against the assignee
-// agent's runtime: if it is not online, we record a `skipped` run with a
-// failure_reason and return without enqueueing. This is the "触发时准入" gate
-// from MUL-1899 — without it a paused laptop / offline daemon causes scheduled
-// autopilots to pile thousands of doomed tasks onto agent_task_queue.
+// Before work is queued we run an admission check against the assignee
+// agent's runtime (the MUL-1899 gate). An agent that cannot run until a human
+// acts — archived, no runtime bound, unusable or inaccessible runtime — records
+// a `skipped` run with a failure_reason and enqueues nothing.
 //
-// create_issue mode is different: its primary contract is a durable audit
-// trail. If the assignee has a runtime but that runtime is merely offline,
-// dispatch still creates the issue and issue task so the work is visible and
-// can be claimed when the runtime returns.
+// A runtime that is merely offline is not refused, in either execution mode:
+// the work is queued the same way a chat or comment trigger is, and the daemon
+// claims it when it reconnects (the queued-task sweeper expires it if the
+// runtime stays away past reconnect grace). To keep a paused laptop from
+// collecting a backlog, run_only admits at most one waiting run per autopilot;
+// a later fire while that run is still queued is skipped as already active.
 //
 // When assignee_type='squad' the gate runs against the squad leader (Path A
-// from MUL-2429: Autopilot-on-squad ≈ Autopilot-on-leader), with the same
-// create_issue audit-trail exception for a merely offline leader runtime.
+// from MUL-2429: Autopilot-on-squad ≈ Autopilot-on-leader).
 func (s *AutopilotService) DispatchAutopilot(
 	ctx context.Context,
 	autopilot db.Autopilot,
@@ -1058,7 +1058,7 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 	if err != nil {
 		return fmt.Errorf("check agent readiness: %w", err)
 	}
-	if !verdict.Ready() {
+	if !verdict.Ready() && verdict.Availability != AgentWaitable {
 		return &errDispatchSkipped{reason: formatAdmissionReason(ap, verdict.Detail), code: verdict.Reason}
 	}
 
@@ -1592,8 +1592,9 @@ func (s *AutopilotService) failRun(ctx context.Context, runID pgtype.UUID, reaso
 // shouldSkipDispatch is the pre-flight admission check from MUL-1899.
 // Returns (reason, true) when dispatching now would only enqueue a doomed
 // task — i.e. the assignee (or, for squad autopilots, the squad leader) is
-// gone, archived, has no runtime bound, or its runtime is not currently
-// online. Returns ("", false) on the happy path.
+// gone, archived, has no runtime bound, or its runtime cannot serve work until
+// a human repairs it — or when a run_only autopilot already has a run waiting
+// on an offline runtime. Returns ("", false) on the happy path.
 //
 // Errors are split into two classes:
 //   - pgx.ErrNoRows / errSquadArchived (the row truly doesn't exist or is
@@ -1652,19 +1653,35 @@ func (s *AutopilotService) shouldSkipDispatch(ctx context.Context, ap db.Autopil
 		return "", "", false
 	}
 	if !verdict.Ready() {
-		// A merely-offline machine still gets create_issue work: the issue is
-		// written server-side and the run waits for the laptop to come back. An
-		// unusable runtime does not qualify — nothing there can run until a
-		// human repairs it, so a doomed issue-create is not an improvement.
-		if ap.ExecutionMode == "create_issue" && verdict.Availability == AgentWaitable {
-			slog.Info("autopilot admission: allowing create_issue dispatch for offline runtime",
-				"autopilot_id", util.UUIDToString(ap.ID),
-				"runtime_id", util.UUIDToString(agent.RuntimeID),
-				"reason", verdict.Detail,
-			)
-		} else {
+		// An unusable runtime is refused: nothing there can run until a human
+		// repairs it, so queuing would only strand the work.
+		if verdict.Availability != AgentWaitable {
 			return formatAdmissionReason(ap, verdict.Detail), verdict.Reason, true
 		}
+		// A merely-offline machine still gets the work, the same as a chat or
+		// comment trigger: the task waits in the queue and the daemon claims it
+		// when it reconnects, or the queued-task sweeper expires it if the
+		// runtime stays away past reconnect grace. run_only keeps at most one
+		// such waiting run per autopilot, so a frequent schedule does not stack
+		// up a backlog that lands all at once. create_issue has its own
+		// recent-duplicate guard on the issue it files.
+		if ap.ExecutionMode == "run_only" {
+			queued, err := s.Queries.HasQueuedAutopilotRunTask(ctx, ap.ID)
+			if err != nil {
+				slog.Warn("autopilot admission: failed to check for a queued run",
+					"autopilot_id", util.UUIDToString(ap.ID),
+					"error", err,
+				)
+			} else if queued {
+				return formatAdmissionReason(ap, verdict.Detail) + "; an earlier run is still queued", dispatch.ReasonAlreadyActive, true
+			}
+		}
+		slog.Info("autopilot admission: queueing dispatch for offline runtime",
+			"autopilot_id", util.UUIDToString(ap.ID),
+			"execution_mode", ap.ExecutionMode,
+			"runtime_id", util.UUIDToString(agent.RuntimeID),
+			"reason", verdict.Detail,
+		)
 	}
 	// Invocation gate at the autopilot layer (MUL-3963 / MUL-4525). The
 	// admission principal depends on how the dispatch was triggered: a MANUAL
