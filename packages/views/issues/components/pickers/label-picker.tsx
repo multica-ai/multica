@@ -26,6 +26,7 @@ import {
   PickerEmpty,
 } from "./property-picker";
 import { useT } from "../../../i18n";
+import { paletteColor } from "@multica/core/appearance";
 
 interface LabelPickerProps {
   /**
@@ -306,7 +307,7 @@ export function LabelPicker({
             >
               <span
                 className="inline-block h-3 w-3 shrink-0 rounded-full"
-                style={{ backgroundColor: label.color }}
+                style={{ backgroundColor: paletteColor(label.color) }}
                 aria-hidden
               />
               <span className="truncate">{label.name}</span>
@@ -322,7 +323,7 @@ export function LabelPicker({
             </span>
             <span
               className="ml-auto inline-block h-3 w-3 shrink-0 rounded-full"
-              style={{ backgroundColor: pickInlineColor(query) }}
+              style={{ backgroundColor: paletteColor(pickInlineColor(query)) }}
               aria-hidden
             />
           </PickerItem>

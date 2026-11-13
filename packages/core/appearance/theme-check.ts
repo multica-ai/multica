@@ -2,6 +2,7 @@ import type { ArchiveFile } from "./theme-archive";
 import { parseTheme, readThemeFiles, type ThemePackageInput } from "./theme-package";
 import { THEME_VARIABLE_NAMES } from "./theme-variables";
 import { contrastRatio, paintOver, resolveColor, type BasePalette, type Rgba } from "./theme-contrast";
+import { LABEL_TEXT_COLORS, PALETTE_SLOTS } from "./palette";
 import {
   THEME_OPTION_ATTR_PREFIX,
   localizedText,
@@ -40,15 +41,18 @@ export interface ContrastCheck {
   mode: "light" | "dark";
   /**
    * Where the pair is painted: the page, the frame (rail, toolbar, tabs),
-   * a tooltip, or a pressed chip in a display popover.
+   * a tooltip, a pressed chip in a display popover, or a label in a colour
+   * slot the theme declares.
    */
-  area: "page" | "frame" | "tooltip" | "display chip";
+  area: "page" | "frame" | "tooltip" | "display chip" | "label";
   foreground: string;
   background: string;
   ratio: number;
   required: number;
   /** Set when one option was off its default for this measurement. */
   variant?: ContrastVariant;
+  /** Set when the foreground is the app's default, not a variable the theme set. */
+  defaulted?: boolean;
 }
 
 export interface ThemeCheckReport {
@@ -102,12 +106,15 @@ type Slot = "tooltip-content" | "popover-content";
 const SLOTS: readonly Slot[] = ["tooltip-content", "popover-content"];
 
 /** How to fix a pair the theme reaches only through a default. */
-function contrastHint({ area, foreground, background }: ContrastCheck): string {
+function contrastHint({ area, foreground, background, defaulted }: ContrastCheck): string {
   if (area === "tooltip" && foreground === "--foreground") {
     return " Tooltip text is the app's dark-mode --foreground in both modes; set --tooltip-foreground to choose it.";
   }
   if (area === "display chip" && background === "--input") {
     return " Pressed chips fill with --input, the input border colour; set --display-chip-pressed-background to colour them on their own.";
+  }
+  if (area === "label" && defaulted) {
+    return " Without --label-chip-color, label text is dark or light by the colour as picked, not the slot's, so either can land on any slot; set it to choose.";
   }
   return "";
 }
@@ -483,7 +490,7 @@ function measureContrast(
       backgrounds: readonly string[],
       required: number,
       /** Where the backgrounds are resolved, when not where the text is; and what a translucent one sits on. */
-      { surface = p, under }: { surface?: Map<string, string>; under?: string } = {},
+      { surface = p, under, defaulted }: { surface?: Map<string, string>; under?: string; defaulted?: boolean } = {},
     ) => {
       const fg = resolveColor(p, foreground);
       if ("unresolved" in fg) {
@@ -514,6 +521,7 @@ function measureContrast(
           ratio: Math.round(ratio * 100) / 100,
           required,
           ...(variant ? { variant } : {}),
+          ...(defaulted ? { defaulted } : {}),
         });
       }
     };
@@ -583,6 +591,26 @@ function measureContrast(
     const chipText = popover.has("--display-chip-pressed-color") ? "--display-chip-pressed-color" : "--foreground";
     const chipFill = popover.has("--display-chip-pressed-background") ? "--display-chip-pressed-background" : "--input";
     measure("display chip", popover, chipText, [chipFill], TEXT, { under: "--surface-raised" });
+
+    // A label paints its slot's colour behind --label-chip-color. When that is
+    // unset the app picks dark or light text by the colour as picked, and every
+    // slot holds both light and dark picks, so either text can land on it: the
+    // worse of the two is what some label shows.
+    const declaredSlots = PALETTE_SLOTS.filter((slot) => palette.has(`--palette-${slot}`));
+    if (palette.has("--label-chip-color")) {
+      const slots = declaredSlots.map((slot) => `--palette-${slot}`);
+      measure("label", palette, "--label-chip-color", slots, TEXT, { under: "--background" });
+    } else {
+      for (const slot of declaredSlots) {
+        const start = results.length;
+        for (const text of LABEL_TEXT_COLORS) {
+          const label = new ReadTracker(read, [...palette, ["--label-chip-color", text]]);
+          measure("label", label, "--label-chip-color", [`--palette-${slot}`], TEXT, { under: "--background", defaulted: true });
+        }
+        const measured = results.splice(start);
+        if (measured.length) results.push(measured.reduce((worse, next) => (next.ratio < worse.ratio ? next : worse)));
+      }
+    }
   }
 
   for (const [name, where] of unmodelled) {

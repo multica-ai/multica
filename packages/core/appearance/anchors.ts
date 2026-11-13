@@ -23,10 +23,11 @@ export const THEME_ANCHORS = {
   "board-column": "One column on a board.",
   "board-card":
     "One issue card on a board; `data-status`, `data-priority` and `data-assignee-type` as on `issue-row`.",
-  "status-icon": "The status glyph (an svg).",
+  "status-icon":
+    "The status glyph (an svg). A custom status adds `data-color`, its hex colour, and `data-palette`, its colour slot.",
   "priority-icon": "The priority glyph (an svg).",
   "label-chip":
-    "A label; `data-color` is its hex colour, also set as `--label-color` (and the text colour as `--label-foreground`).",
+    "A label; `data-color` is its hex colour and `data-palette` its colour slot. The chip paints with `--label-color` (the slot's colour when the theme declares one) and `--label-foreground`.",
   content:
     "Rich text: issue descriptions, comments, chat messages and documents, in both reading and editing; `data-density` is document or compact when reading.",
   comment: "A top-level comment card in an issue timeline; `data-author-type` is member, agent or system.",

@@ -35,6 +35,7 @@ import { AgentPresenceText, ActorRow, IssueResultRow } from "../result-rows";
 import { useActorDirectory } from "../use-actor-directory";
 import { useServerSearch } from "../use-server-search";
 import type { IssueTarget } from "../types";
+import { paletteColor } from "@multica/core/appearance";
 
 /** The value every target issue shares, or undefined when they differ. */
 function common<T>(issues: Issue[], pick: (issue: Issue) => T): T | undefined {
@@ -358,7 +359,7 @@ export function IssueLabelsPage({ target, query }: { target: IssueTarget; query:
           >
             <span
               className="mx-1 size-2.5 shrink-0 rounded-full"
-              style={{ backgroundColor: label.color }}
+              style={{ backgroundColor: paletteColor(label.color) }}
             />
             <span className="min-w-0 flex-1 truncate">
               <HighlightText text={label.name} query={query} />

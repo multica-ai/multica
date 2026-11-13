@@ -21,6 +21,7 @@ export * from "./theme-package";
 export * from "./installed-themes";
 export * from "./anchors";
 export * from "./theme-variables";
+export * from "./palette";
 export * from "./local-fonts";
 export * from "./theme-archive";
 export * from "./theme-export";

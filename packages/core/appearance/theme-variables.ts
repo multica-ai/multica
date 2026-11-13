@@ -14,9 +14,12 @@
  * until the next THEME_API_VERSION.
  */
 
+import { PALETTE_PRESETS, PALETTE_SLOTS } from "./palette";
+
 export type ThemeVariableSection =
   | "colors"
   | "status"
+  | "palette"
   | "shape"
   | "typography"
   | "controls"
@@ -42,6 +45,7 @@ export interface ThemeVariable {
 export const THEME_VARIABLE_SECTIONS: Record<ThemeVariableSection, string> = {
   colors: "Colours and surfaces",
   status: "Status and priority",
+  palette: "Label and custom status colours",
   shape: "Shape and depth",
   typography: "Typography",
   controls: "Controls and overlays",
@@ -63,6 +67,8 @@ const DEFAULT_TEXT: Record<string, string> = {
   "button-primary": "`--primary`",
   "button-primary-foreground": "`--primary-foreground`",
   "button-primary-border": "`--button-primary`",
+  ...Object.fromEntries(PALETTE_SLOTS.map((slot) => [`palette-${slot}`, "the colour as picked"])),
+  "label-chip-color": "dark or light, whichever reads on the picked colour",
 };
 
 function section(name: ThemeVariableSection, entries: readonly Entry[]): ThemeVariable[] {
@@ -132,6 +138,16 @@ const COLORS: Entry[] = [
   ["scrollbar-track", "Scrollbar track."],
   ["scrollbar-thumb", "Scrollbar thumb."],
   ["scrollbar-thumb-hover", "Scrollbar thumb on hover."],
+];
+
+const PALETTE: Entry[] = [
+  ...PALETTE_SLOTS.map(
+    (slot): Entry => [
+      `palette-${slot}`,
+      `Labels, custom statuses and select options whose colour is the ${slot} preset (\`${PALETTE_PRESETS[slot]}\`) or nearest to it.`,
+    ],
+  ),
+  ["label-chip-color", "Text on a label. Set it with the slots it has to read on; `[data-palette]` on the chip names its slot."],
 ];
 
 const STATUS: Entry[] = [
@@ -378,6 +394,7 @@ const CODE: Entry[] = [
 export const THEME_VARIABLES: readonly ThemeVariable[] = [
   ...section("colors", COLORS),
   ...section("status", STATUS),
+  ...section("palette", PALETTE),
   ...section("shape", SHAPE),
   ...section("typography", TYPOGRAPHY),
   ...section("controls", CONTROLS),

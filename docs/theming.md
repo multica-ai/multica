@@ -132,6 +132,33 @@ their default as a fallback. So it can be set on any ancestor, not only on
 Values that could load a resource are rejected anywhere in `theme.css`, see
 [What CSS may not do](#what-css-may-not-do).
 
+### Colour slots
+
+Labels, custom statuses and select options carry the colour someone picked,
+a `#rrggbb`. A theme recolours them through ten slots named after the
+colour picker's presets: `--palette-gray`, `-red`, `-orange`, `-yellow`,
+`-green`, `-teal`, `-blue`, `-indigo`, `-purple` and `-pink`. A preset lands
+on its own slot. Any other colour is placed in OKLab: one with little chroma
+on gray, the rest on the slot whose hue is nearest, so pale and dark shades
+stay with their hue. A slot the theme leaves unset keeps every colour in it
+as picked, so declare only the ones you want to change:
+
+```css
+.theme-dark {
+  --palette-red: oklch(0.7 0.14 25);
+  --palette-yellow: oklch(0.82 0.12 90);
+  --label-chip-color: oklch(0.2 0.02 260);
+}
+```
+
+Label text is dark or light by the colour as picked, so a slot shows both:
+a pale pick and a deep pick of red both land in `--palette-red`. Once slots
+change, set `--label-chip-color` too, per slot if needed:
+`[data-mc="label-chip"][data-palette="yellow"] { --label-chip-color: … }`.
+The label chip and a custom status's icon carry `data-color` (the hex) and
+`data-palette` (the slot). The built-in statuses keep their own variables,
+`--status-*`.
+
 ## Options
 
 Options render on the Appearance page while the theme is active. Their
@@ -188,9 +215,9 @@ those change without notice. Anchors, slots and hooks stay until the next
 | `[data-mc="issue-row"]` | One issue in a list; `data-status`, `data-priority` (`urgent`, `high`, `medium`, `low`, `none`), `data-assignee-type` (`member`, `agent`, `squad` or `none`), `data-parity` (`even` or `odd`, the row's index within its status group, so stripes survive virtual scrolling where `:nth-child` does not) and `data-selected` (`true` or `false`, ticked for bulk actions). |
 | `[data-mc="board-column"]` | One column on a board. |
 | `[data-mc="board-card"]` | One issue card on a board; `data-status`, `data-priority` and `data-assignee-type` as on `issue-row`. Cards have no `data-parity` or `data-selected`. |
-| `[data-mc="status-icon"]` | The status glyph (an `svg`). |
+| `[data-mc="status-icon"]` | The status glyph (an `svg`). A custom status adds `data-color`, its hex colour, and `data-palette`, its [colour slot](#colour-slots). |
 | `[data-mc="priority-icon"]` | The priority glyph (an `svg`). |
-| `[data-mc="label-chip"]` | A label; `data-color` is its hex colour. The chip paints with `var(--label-color)` and `var(--label-foreground)`, so a rule can restyle it without `!important`. |
+| `[data-mc="label-chip"]` | A label; `data-color` is its hex colour and `data-palette` its [colour slot](#colour-slots). The chip paints with `var(--label-color)` and `var(--label-foreground)`, so a rule can restyle it without `!important`. `--label-color` is the slot's colour when the theme declares one, else the colour as picked; `--label-foreground` is `--label-chip-color` when set, else dark or light text by the picked colour. |
 | `[data-mc="content"]` | Rich text: issue descriptions, comments, chat messages and documents, reading and editing. `data-density` is `document` or `compact` when reading. |
 | `[data-mc="comment"]` | A top-level comment card; `data-author-type` is `member`, `agent` or `system`. |
 | `[data-mc="comment-reply"]` | A reply inside a comment card; `data-author-type` as on `comment`. |
@@ -366,8 +393,12 @@ When a mode has frame rules, the rail takes the frame's colours and a failure
 reads `Contrast, dark mode (frame): …`; without them it takes the page's
 colours and reads `Contrast, light mode: …`, like the other page pairs.
 
-Contrast covers the page, the frame, and two places a theme reaches only
-indirectly:
+Contrast covers the page, the frame, labels and two places a theme reaches
+only indirectly. Labels are measured in each colour slot the theme
+declares: `--label-chip-color` on the slot, or, when it is not set, whichever
+of the dark and light text reads worse on it, since either can land there.
+A failure reads `Contrast, light mode (label): …`. The tooltip and display
+chips:
 
 - **Tooltips** are always drawn with dark-mode text: the tooltip is a
   `.dark` scope, so its `--foreground` is the app's dark value in both
@@ -513,6 +544,22 @@ and dark differ, both defaults are given.
 | `--pr-open` | `oklch(59.6% 0.145 163.225)` / `oklch(76.5% 0.177 163.223)` | Open pull request icon. |
 | `--pr-merged` | `oklch(54.1% 0.281 293.009)` / `oklch(70.2% 0.183 293.541)` | Merged pull request icon and pill. The pill's text defaults one shade darker in light mode. |
 | `--pr-closed` | `oklch(58.6% 0.253 17.585)` / `oklch(71.2% 0.194 13.428)` | Closed pull request icon. |
+
+### Label and custom status colours
+
+| Variable | Default (light / dark) | Use |
+| --- | --- | --- |
+| `--palette-gray` | the colour as picked | Labels, custom statuses and select options whose colour is the gray preset (`#6b7280`) or nearest to it. |
+| `--palette-red` | the colour as picked | Labels, custom statuses and select options whose colour is the red preset (`#ef4444`) or nearest to it. |
+| `--palette-orange` | the colour as picked | Labels, custom statuses and select options whose colour is the orange preset (`#f97316`) or nearest to it. |
+| `--palette-yellow` | the colour as picked | Labels, custom statuses and select options whose colour is the yellow preset (`#eab308`) or nearest to it. |
+| `--palette-green` | the colour as picked | Labels, custom statuses and select options whose colour is the green preset (`#22c55e`) or nearest to it. |
+| `--palette-teal` | the colour as picked | Labels, custom statuses and select options whose colour is the teal preset (`#14b8a6`) or nearest to it. |
+| `--palette-blue` | the colour as picked | Labels, custom statuses and select options whose colour is the blue preset (`#3b82f6`) or nearest to it. |
+| `--palette-indigo` | the colour as picked | Labels, custom statuses and select options whose colour is the indigo preset (`#6366f1`) or nearest to it. |
+| `--palette-purple` | the colour as picked | Labels, custom statuses and select options whose colour is the purple preset (`#a855f7`) or nearest to it. |
+| `--palette-pink` | the colour as picked | Labels, custom statuses and select options whose colour is the pink preset (`#ec4899`) or nearest to it. |
+| `--label-chip-color` | dark or light, whichever reads on the picked colour | Text on a label. Set it with the slots it has to read on; `[data-palette]` on the chip names its slot. |
 
 ### Shape and depth
 

@@ -36,6 +36,7 @@ import { VirtuosoSeed } from "../../common/virtuoso-seed";
 import { useBoardWorkflow } from "./board-workflow-context";
 import { ColumnHandoff } from "../../workflows/column-handoff";
 import type { IssueCreateDefaults } from "../surface/types";
+import { paletteColor } from "@multica/core/appearance";
 
 // Insertion-position prediction intentionally omitted. The server's
 // ORDER BY uses PostgreSQL's en_US.utf8 collation (glibc), which
@@ -420,7 +421,7 @@ function BoardGroupHeading({
       <div className="flex min-w-0 items-center gap-2">
         <span
           className="size-2.5 shrink-0 rounded-full bg-muted-foreground/30"
-          style={group.propertyOptionColor ? { backgroundColor: group.propertyOptionColor } : undefined}
+          style={group.propertyOptionColor ? { backgroundColor: paletteColor(group.propertyOptionColor) } : undefined}
         />
         <TruncatedTooltip content={group.title}>
           <span className="truncate text-body font-medium">
