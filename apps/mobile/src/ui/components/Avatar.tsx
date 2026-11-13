@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Image, StyleSheet, Text, View } from "react-native";
 import { Icon } from "../icons/Icon";
 import { useTheme } from "../theme";
+import { parseAvatarEmoji } from "./avatar-emoji";
 
 export interface AvatarActor {
   kind: "member" | "agent" | "system";
@@ -34,8 +35,15 @@ interface AvatarProps {
 export function Avatar({ actor, size = 36, badge, running = false }: AvatarProps) {
   const palette = useTheme();
   const round = { width: size, height: size, borderRadius: size / 2 };
+  const emoji = parseAvatarEmoji(actor.avatarUrl);
   let face: ReactNode;
-  if (actor.avatarUrl) {
+  if (emoji) {
+    face = (
+      <View style={[round, styles.center, { backgroundColor: palette.fill }]}>
+        <Text style={{ fontSize: Math.round(size * 0.58) }}>{emoji}</Text>
+      </View>
+    );
+  } else if (actor.avatarUrl) {
     face = <Image source={{ uri: actor.avatarUrl }} style={[round, { backgroundColor: palette.fill }]} />;
   } else if (actor.kind === "member") {
     face = (
@@ -51,7 +59,9 @@ export function Avatar({ actor, size = 36, badge, running = false }: AvatarProps
     );
   }
   return (
-    <View style={round} accessibilityLabel={actor.name}>
+    // Not collapsable: a flattened view loses its label, and the row around it
+    // would read the initials or emoji ("crescent moon") instead of the name.
+    <View style={round} accessibilityLabel={actor.name} collapsable={false}>
       {face}
       {badge ? <View style={[styles.badge, { backgroundColor: palette.background }]}>{badge}</View> : null}
       {running ? (
