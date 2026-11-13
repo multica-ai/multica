@@ -482,6 +482,17 @@ If the selected GHCR tag has not been published yet, fall back to `make selfhost
 
 > **Upgrading from `v0.3.4` to `v0.3.5+` fails with `refusing to drop legacy daily rollups: ...`?** That's migration `103`'s fail-closed guard: it requires `task_usage_hourly` to be seeded before the legacy daily rollups are dropped. As of MUL-2957 `migrate up` runs that backfill automatically right before applying `103`, so the upgrade completes in a single invocation. If you are still on a pre-MUL-2957 binary or the auto-hook fails, run `backfill_task_usage_hourly` manually first, then re-run the upgrade. Full instructions in [Advanced Configuration → Usage Dashboard Rollup](SELF_HOSTING_ADVANCED.md#usage-dashboard-rollup).
 
+> **Backend restarting with `password authentication failed for user "multica"` after an upgrade or a second `make selfhost`?** Installs first started by an older `make selfhost` or `make selfhost-build` initialized PostgreSQL with the default password instead of the generated `POSTGRES_PASSWORD` in `.env`, so the backend is rejected once the containers are recreated. Set the database password to the value in `.env`; this keeps your data:
+>
+> ```bash
+> docker compose -f docker-compose.selfhost.yml up -d --wait postgres
+> docker compose -f docker-compose.selfhost.yml exec -T postgres sh -c \
+>   'echo "ALTER USER :\"role\" WITH PASSWORD :'\''pw'\'';" | psql -v ON_ERROR_STOP=1 -v role="$POSTGRES_USER" -v pw="$POSTGRES_PASSWORD" -U "$POSTGRES_USER" -d postgres'
+> docker compose -f docker-compose.selfhost.yml up -d
+> ```
+>
+> The command connects as `POSTGRES_USER` from `.env`. If you changed that value after the first start, put the original user name back first: PostgreSQL keeps the role it was initialized with. Do not run `docker compose down -v` to fix this: it deletes the database volume.
+
 ---
 
 ## Manual Docker Compose Setup
