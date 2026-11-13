@@ -1081,6 +1081,31 @@ The CLI exposes cron-based `schedule` triggers via `trigger-add`, and `webhook`
 triggers via `trigger-add --kind webhook` plus `trigger-rotate-url`. The data model
 also defines an `api` kind, which is not surfaced here.
 
+## Quick Action Commands
+
+Quick actions are saved issue prompts that can optionally target an agent or
+squad. The CLI supports the operations available to agents: list, inspect, and
+run. Creating, editing, and deleting quick actions remain human-only.
+
+```bash
+multica quick-action list
+multica quick-action list --include-archived --full-id
+multica quick-action get "排查接口超时"
+multica quick-action run "排查接口超时" --issue MUL-123 --dry-run
+multica quick-action run "排查接口超时" --issue MUL-123
+```
+
+`get` and `run` accept a full UUID, a unique UUID prefix, or an exact name
+(case-insensitive). An exact name shared by multiple actions is rejected with
+their IDs so the caller can disambiguate. `list` omits archived actions unless
+`--include-archived` is set; `get` always searches archived actions too.
+
+`run` posts the configured prompt as a comment and then follows the normal
+comment-to-agent trigger path. Its JSON output includes the created comment and
+`trigger_outcomes`; table output summarizes each target's dispatch result.
+`--dry-run` calls the render endpoint instead, so it neither posts a comment nor
+starts an agent task.
+
 ## Other Commands
 
 ```bash
