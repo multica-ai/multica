@@ -68,6 +68,7 @@ test(`project Chats ${scenario} with synthetic HTTP and WS`, async ({ page, cont
       case "/api/projects": return { projects, total: projects.length };
       case `/api/projects/${projectId}`: return projects[0];
       case `/api/projects/${projectId}/resources`: return [];
+      case `/api/projects/${projectId}/subscription`: return { subscribed: false };
       case "/api/issues/table/groups": return { query_fingerprint: "fixture", total: 0, groups: [], next_cursor: null };
       case "/api/issues/table/rows": return { query_fingerprint: "fixture", total: 0, rows: [], branch_total: 0, next_cursor: null };
       case "/api/issues/table/facets": return { query_fingerprint: "fixture", total: 0, facets: [] };
