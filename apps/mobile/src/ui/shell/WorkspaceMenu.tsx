@@ -20,10 +20,18 @@ export interface MenuDestination {
   meta?: string;
 }
 
+export interface MenuViews {
+  items: readonly MenuDestination[];
+  onAll: () => void;
+}
+
 interface WorkspaceMenuBodyProps {
   workspace: MenuWorkspace;
   workspaces: readonly MenuWorkspace[];
-  destinations: readonly MenuDestination[];
+  /** Groups of destinations, split by a hairline. */
+  sections: readonly (readonly MenuDestination[])[];
+  /** Starred views, in a card of their own under the destinations. */
+  views?: MenuViews;
   active: string;
   onNavigate: (key: string) => void;
   onSwitch: (slug: string) => void;
@@ -76,7 +84,7 @@ function MenuRow({ icon, label, meta, checked = false, selected, onPress, leadin
 }
 
 /** The menu itself, without the modal, so the preview can render it in place. */
-export function WorkspaceMenuBody({ workspace, workspaces, destinations, active, onNavigate, onSwitch, onSettings, initialMode = "nav" }: WorkspaceMenuBodyProps) {
+export function WorkspaceMenuBody({ workspace, workspaces, sections, views, active, onNavigate, onSwitch, onSettings, initialMode = "nav" }: WorkspaceMenuBodyProps) {
   const strings = useStrings();
   const palette = useTheme();
   const [mode, setMode] = useState(initialMode);
@@ -101,8 +109,13 @@ export function WorkspaceMenuBody({ workspace, workspaces, destinations, active,
       </View>
       <FloatingSurface style={styles.card}>
         {mode === "nav"
-          ? destinations.map((item) => (
-              <MenuRow key={item.key} icon={item.icon} label={item.label} meta={item.meta} selected={item.key === active} onPress={() => onNavigate(item.key)} />
+          ? sections.map((section, index) => (
+              <View key={index}>
+                {index > 0 ? <View style={[styles.rule, { backgroundColor: palette.separator }]} /> : null}
+                {section.map((item) => (
+                  <MenuRow key={item.key} icon={item.icon} label={item.label} meta={item.meta} selected={item.key === active} onPress={() => onNavigate(item.key)} />
+                ))}
+              </View>
             ))
           : workspaces.map((item) => (
               <MenuRow
@@ -115,6 +128,23 @@ export function WorkspaceMenuBody({ workspace, workspaces, destinations, active,
               />
             ))}
       </FloatingSurface>
+      {mode === "nav" && views ? (
+        <FloatingSurface style={styles.card}>
+          <View style={styles.cardHead}>
+            <Txt variant="caption" tone="tertiary" style={styles.flex}>
+              {strings.nav.views}
+            </Txt>
+            <Pressable accessibilityRole="button" hitSlop={10} onPress={views.onAll}>
+              <Txt variant="caption" tone="tertiary">
+                {strings.nav.all}
+              </Txt>
+            </Pressable>
+          </View>
+          {views.items.map((item) => (
+            <MenuRow key={item.key} icon={item.icon} label={item.label} meta={item.meta} selected={item.key === active} onPress={() => onNavigate(item.key)} />
+          ))}
+        </FloatingSurface>
+      ) : null}
     </View>
   );
 }
@@ -150,6 +180,8 @@ const styles = StyleSheet.create({
   pillName: { flexShrink: 1 },
   mark: { width: 26, height: 26, borderRadius: 7, alignItems: "center", justifyContent: "center" },
   card: { borderRadius: 22, padding: 6 },
+  cardHead: { flexDirection: "row", paddingHorizontal: 12, paddingTop: 6, paddingBottom: 2 },
+  rule: { height: StyleSheet.hairlineWidth, marginHorizontal: 12, marginVertical: 4 },
   item: { height: 44, borderRadius: 14, flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 12 },
   flex: { flex: 1 },
 });

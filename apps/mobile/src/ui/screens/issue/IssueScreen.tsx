@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from "react";
-import { ActionSheetIOS, Alert, Linking, Platform, Share } from "react-native";
+import { Alert, Linking, Platform, Share } from "react-native";
 import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
 import { useQuery } from "@tanstack/react-query";
 import { ApiError } from "@multica/core/api";
@@ -14,6 +14,7 @@ import { paths } from "@multica/core/paths";
 import type { AgentTask, IssuePriority, TimelineEntry } from "@multica/core/types";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { endpoints } from "../../../platform/env";
+import { pick } from "../../components/action-sheet";
 import { useActorResolver, type ActorResolver } from "../../model/people";
 import { useStatusPresentation } from "../../model/status";
 import { runSteps } from "../../model/steps";
@@ -57,14 +58,6 @@ function timelineModels(entries: readonly TimelineEntry[], resolveActor: ActorRe
     return entry.type === "comment"
       ? { kind: "comment", id: entry.id, actor, body: entry.content ?? "", time, deleted: Boolean(entry.deleted_at) }
       : { kind: "activity", id: entry.id, actor, text: activityText(entry, strings, statusLabel), time };
-  });
-}
-
-function pick<T extends string>(title: string, options: readonly { value: T; label: string }[], cancel: string, onPick: (value: T) => void) {
-  if (Platform.OS !== "ios") return;
-  ActionSheetIOS.showActionSheetWithOptions({ title, options: [...options.map((o) => o.label), cancel], cancelButtonIndex: options.length }, (index) => {
-    const option = options[index];
-    if (option) onPick(option.value);
   });
 }
 
@@ -156,24 +149,26 @@ export function IssueScreen() {
       onShare={webUrl ? () => void Share.share({ url: webUrl, message: Platform.OS === "ios" ? undefined : webUrl }) : undefined}
       onStatusPress={
         issue
-          ? () =>
-              pick(
+          ? async () => {
+              const value = await pick(
                 strings.issue.statusTitle,
                 catalog.activeStatuses.map((entry) => ({ value: entry.key, label: status(entry.key).label })),
                 strings.common.cancel,
-                (value) => updateIssue.mutate({ id: issue.id, status: value }),
-              )
+              );
+              if (value) updateIssue.mutate({ id: issue.id, status: value });
+            }
           : undefined
       }
       onPriorityPress={
         issue
-          ? () =>
-              pick<IssuePriority>(
+          ? async () => {
+              const value = await pick<IssuePriority>(
                 strings.issue.priorityTitle,
                 PRIORITY_ORDER.map((value) => ({ value, label: strings.priority[value] })),
                 strings.common.cancel,
-                (value) => updateIssue.mutate({ id: issue.id, priority: value }),
-              )
+              );
+              if (value) updateIssue.mutate({ id: issue.id, priority: value });
+            }
           : undefined
       }
       onStop={task && live ? () => cancelRun.mutate(task.id) : undefined}

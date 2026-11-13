@@ -28,6 +28,7 @@ export function SettingsScreen() {
       serverHost={new URL(endpoints.apiUrl).host}
       version={Constants.expoConfig?.version ?? "—"}
       onBack={() => navigation.goBack()}
+      onNotifications={() => navigation.navigate("NotificationSettings")}
       onSignOut={confirmSignOut}
     />
   );

@@ -113,3 +113,5 @@ export const searchResults: IssueRowModel[] = [
   { id: "s2", identifier: "MUL-8810", title: "iOS 推送通知设置页", status: st("todo"), assignee: null, detail: "通知分组与 iOS 系统设置联动" },
   { id: "s3", identifier: "MUL-8432", title: "iOS 深链接打开任务", status: st("done"), assignee: lambda },
 ];
+
+export { savedViewName } from "./fixtures-workspace";

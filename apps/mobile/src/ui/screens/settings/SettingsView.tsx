@@ -1,6 +1,7 @@
 import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Avatar } from "../../components/Avatar";
+import { Group, GroupRow } from "../../components/Group";
 import { PushHeader } from "../../components/Header";
 import { Screen } from "../../components/Screen";
 import { Txt } from "../../components/Text";
@@ -13,6 +14,7 @@ interface SettingsViewProps {
   serverHost: string;
   version: string;
   onBack: () => void;
+  onNotifications: () => void;
   onSignOut: () => void;
 }
 
@@ -28,7 +30,7 @@ function Detail({ label, value, last = false }: { label: string; value: string; 
   );
 }
 
-export function SettingsView({ user, workspaceName, serverHost, version, onBack, onSignOut }: SettingsViewProps) {
+export function SettingsView({ user, workspaceName, serverHost, version, onBack, onNotifications, onSignOut }: SettingsViewProps) {
   const strings = useStrings();
   const palette = useTheme();
   const insets = useSafeAreaInsets();
@@ -47,6 +49,9 @@ export function SettingsView({ user, workspaceName, serverHost, version, onBack,
             </Txt>
           </View>
         </View>
+        <Group>
+          <GroupRow icon="Bell" label={strings.notifications.row} chevron onPress={onNotifications} last />
+        </Group>
         <View style={[styles.group, { backgroundColor: palette.grouped }]}>
           <Detail label={strings.more.workspace} value={workspaceName} />
           <Detail label={strings.more.server} value={serverHost} />

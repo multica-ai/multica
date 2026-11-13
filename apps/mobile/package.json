@@ -25,6 +25,7 @@
   },
   "dependencies": {
     "@multica/core": "workspace:*",
+    "@react-native-community/datetimepicker": "9.1.0",
     "@react-native-community/netinfo": "12.0.1",
     "@react-navigation/bottom-tabs": "^7.21.0",
     "@react-navigation/native": "^7.5.1",

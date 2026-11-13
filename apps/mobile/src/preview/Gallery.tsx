@@ -11,6 +11,7 @@ import { NewChatView } from "../ui/screens/chat/NewChatView";
 import { IssueView } from "../ui/screens/issue/IssueView";
 import { MyIssuesView } from "../ui/screens/my-issues/MyIssuesView";
 import { SearchView } from "../ui/screens/search/SearchView";
+import { NotificationSettingsView } from "../ui/screens/settings/NotificationSettingsView";
 import { SettingsView } from "../ui/screens/settings/SettingsView";
 import { WorkspaceMenuBody } from "../ui/shell/WorkspaceMenu";
 import { useTheme } from "../ui/theme";
@@ -19,6 +20,7 @@ import { InboxView } from "../ui/screens/inbox/InboxView";
 import { StringsContext, stringsFor, useStrings } from "../ui/strings";
 import * as fx from "./fixtures";
 import { PhoneFrame } from "./PhoneFrame";
+import { WORKSPACE_SCREENS } from "./workspace-screens";
 
 // Renders the app's real views with fixture data in iPhone-sized frames, so
 // screens can be reviewed in a browser without Xcode:
@@ -131,9 +133,14 @@ const SCREENS: Record<string, { caption: string; render: () => ReactNode }> = {
         serverHost="api.multica.ai"
         version="0.2.0"
         onBack={noop}
+        onNotifications={noop}
         onSignOut={noop}
       />
     ),
+  },
+  notifications: {
+    caption: "Notification settings",
+    render: () => <NotificationSettingsView state="ready" muted={new Set(["updates", "new_issues"])} onBack={noop} onRetry={noop} onToggle={noop} />,
   },
   "sign-in": {
     caption: "Sign in · email",
@@ -151,6 +158,7 @@ const SCREENS: Record<string, { caption: string; render: () => ReactNode }> = {
     caption: "Gate · no workspace",
     render: () => <GatePreview kind="none" />,
   },
+  ...WORKSPACE_SCREENS,
 };
 
 function MenuPreview({ mode }: { mode: "nav" | "workspaces" }) {
@@ -173,11 +181,26 @@ function MenuPreview({ mode }: { mode: "nav" | "workspaces" }) {
           workspaces={workspaces}
           active="inbox"
           initialMode={mode}
-          destinations={[
-            { key: "inbox", icon: "Inbox", label: strings.tabs.inbox, meta: "3" },
-            { key: "myIssues", icon: "CircleUser", label: strings.tabs.myIssues },
-            { key: "agents", icon: "Bot", label: strings.tabs.agents, meta: strings.more.running(2) },
+          sections={[
+            [
+              { key: "inbox", icon: "Inbox", label: strings.tabs.inbox, meta: "3" },
+              { key: "myIssues", icon: "CircleUser", label: strings.tabs.myIssues },
+              { key: "agents", icon: "Bot", label: strings.tabs.agents, meta: strings.more.running(2) },
+            ],
+            [
+              { key: "projects", icon: "FolderKanban", label: strings.nav.projects, meta: "5" },
+              { key: "squads", icon: "Users", label: strings.nav.squads },
+              { key: "autopilots", icon: "Zap", label: strings.nav.autopilots, meta: strings.autopilot.pausedCount(1) },
+            ],
           ]}
+          views={{
+            items: [
+              { key: "builtin:my_agents", icon: "Layers", label: strings.nav.builtin.my_agents },
+              { key: "builtin:all_issues", icon: "Layers", label: strings.nav.builtin.all_issues },
+              { key: "view:ios", icon: "Layers", label: fx.savedViewName },
+            ],
+            onAll: noop,
+          }}
           onNavigate={noop}
           onSwitch={noop}
           onSettings={noop}

@@ -6,7 +6,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const NAMES = [
-  "AlertCircle", "Archive", "ArrowUp", "AtSign", "Bell", "Bot", "Calendar", "Check", "CheckCircle2",
+  "AlertCircle", "Archive", "ArrowUp", "AtSign", "Bell", "Bot", "Calendar", "CalendarClock", "Check", "CheckCircle2", "CircleSlash",
+  "Copy", "Crown", "Folder", "FolderGit", "History", "Link2", "Minus", "Pause", "Pencil", "Play", "Trash2", "Upload", "UserPlus", "Webhook",
   "ChevronDown", "ChevronLeft", "ChevronRight", "ChevronsUpDown", "CircleUser", "Clock", "Filter",
   "FolderKanban", "GitMerge", "GitPullRequest", "GitPullRequestClosed", "GitPullRequestDraft", "Hash",
   "Inbox", "Layers", "ListTodo", "Loader2", "LogOut", "Mail", "MessageSquare", "MoreHorizontal",

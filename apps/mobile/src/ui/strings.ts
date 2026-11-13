@@ -1,5 +1,6 @@
 import { createContext, useContext } from "react";
 import type { SupportedLocale } from "@multica/core/i18n";
+import { workspaceEn, workspaceZh } from "./strings-workspace";
 
 const en = {
   tabs: { inbox: "Inbox", myIssues: "My issues", agents: "Agents", more: "More" },
@@ -130,6 +131,7 @@ const en = {
     version: "Version",
   },
   time: { now: "now", minutes: (n: number) => `${n}m`, hours: (n: number) => `${n}h`, days: (n: number) => `${n}d`, yesterday: "Yesterday" },
+  ...workspaceEn,
 };
 
 export type Strings = typeof en;
@@ -263,6 +265,7 @@ const zhHans: Strings = {
     version: "版本",
   },
   time: { now: "刚刚", minutes: (n: number) => `${n} 分钟`, hours: (n: number) => `${n} 小时`, days: (n: number) => `${n} 天`, yesterday: "昨天" },
+  ...workspaceZh,
 };
 
 export function stringsFor(locale: SupportedLocale): Strings {
