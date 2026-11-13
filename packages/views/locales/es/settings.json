@@ -490,6 +490,10 @@
       "goSettings": {
         "label": "Ir a Configuración",
         "description": "Abre la configuración del espacio de trabajo."
+      },
+      "voiceInput": {
+        "label": "Entrada de voz",
+        "description": "Dicta en el último editor que usaste. Mantén pulsado para hablar."
       }
     },
     "fixed": {
@@ -586,7 +590,8 @@
       "apps": "Apps conectadas",
       "channels": "Mensajería",
       "code": "Código",
-      "workflows": "Flujos de trabajo"
+      "workflows": "Flujos de trabajo",
+      "voice_input": "Entrada de voz"
     },
     "groups": {
       "personal": "Personal",
@@ -1852,6 +1857,60 @@
       "cancel": "Cancelar",
       "admin_required": "Un administrador puede restablecer el acceso.",
       "account_link": "Esta cuenta conserva restricciones. Restablece el acceso en Apps conectadas."
+    }
+  },
+  "voice_input": {
+    "description": "Dicta en el chat, los comentarios y las respuestas. La voz se transcribe en este ordenador y nunca sale de él.",
+    "model_title": "Modelo de voz",
+    "model_hint": "Los modelos se ejecutan en este ordenador. Descarga uno o cambia entre los que tienes.",
+    "engine_unavailable": "La transcripción en el dispositivo no está disponible en este ordenador.",
+    "input_title": "Entrada",
+    "shortcut": {
+      "title": "Atajo",
+      "hint": "Funciona siempre que haya un editor en pantalla, aunque no tenga el foco.",
+      "change": "Cambiar",
+      "unassigned": "Sin asignar"
+    },
+    "activation": {
+      "title": "Activación",
+      "auto": "Tocar o mantener",
+      "toggle": "Tocar",
+      "hold": "Mantener",
+      "hints": {
+        "auto": "Toca para empezar y vuelve a tocar para insertar. Mantén pulsado para hablar y suelta para insertar.",
+        "toggle": "Toca para empezar y vuelve a tocar para insertar.",
+        "hold": "Mantén pulsado para hablar y suelta para insertar."
+      }
+    },
+    "recognition_title": "Reconocimiento",
+    "language": {
+      "title": "Idioma hablado",
+      "hint": "La detección automática sirve para casi todo. Elige un idioma si las frases cortas salen en otro.",
+      "auto": "Detección automática"
+    },
+    "fillers": {
+      "title": "Quitar muletillas",
+      "hint": "Elimina “eh”, “em” y vacilaciones similares."
+    },
+    "vocabulary": {
+      "title": "Vocabulario",
+      "hint": "Nombres y términos que quieres escritos a tu manera, como productos o compañeros. Hasta {{max}}.",
+      "placeholder": "Añadir una palabra",
+      "remove": "Quitar {{word}}"
+    },
+    "microphone_title": "Micrófono",
+    "device": {
+      "title": "Dispositivo de entrada",
+      "default": "Predeterminado del sistema",
+      "unnamed": "Micrófono {{index}}",
+      "permission_hint": "Prueba el micrófono una vez para ver los nombres de los dispositivos."
+    },
+    "test": {
+      "title": "Probar micrófono",
+      "hint": "Habla para comprobar el nivel. No se graba nada.",
+      "blocked": "El acceso al micrófono está bloqueado. Permítelo en el navegador o en la configuración del sistema.",
+      "start": "Probar",
+      "stop": "Detener"
     }
   }
 }

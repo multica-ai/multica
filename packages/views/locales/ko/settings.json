@@ -484,6 +484,10 @@
       "goSettings": {
         "label": "설정으로 이동",
         "description": "워크스페이스 설정을 엽니다."
+      },
+      "voiceInput": {
+        "label": "음성 입력",
+        "description": "마지막으로 사용한 입력란에 받아쓰기합니다. 길게 눌러 말합니다."
       }
     },
     "fixed": {
@@ -580,7 +584,8 @@
       "code": "코드",
       "channels": "메신저",
       "apps": "연결된 앱",
-      "workflows": "워크플로"
+      "workflows": "워크플로",
+      "voice_input": "음성 입력"
     },
     "groups": {
       "personal": "개인",
@@ -1831,6 +1836,60 @@
       "cancel": "취소",
       "admin_required": "워크스페이스 관리자가 제한을 해제할 수 있습니다.",
       "account_link": "이 계정에 저장된 작업 제한이 있습니다. 연결된 앱에서 해제하세요."
+    }
+  },
+  "voice_input": {
+    "description": "채팅, 댓글, 답글을 말로 입력합니다. 음성은 이 컴퓨터에서 받아쓰며 외부로 나가지 않습니다.",
+    "model_title": "음성 모델",
+    "model_hint": "모델은 이 컴퓨터에서 실행됩니다. 하나를 다운로드하거나 받은 모델 사이에서 전환하세요.",
+    "engine_unavailable": "이 컴퓨터에서는 기기 내 받아쓰기를 사용할 수 없습니다.",
+    "input_title": "입력",
+    "shortcut": {
+      "title": "단축키",
+      "hint": "화면에 입력란이 있으면 포커스가 없어도 동작합니다.",
+      "change": "변경",
+      "unassigned": "설정 안 됨"
+    },
+    "activation": {
+      "title": "실행 방식",
+      "auto": "탭 또는 길게 누르기",
+      "toggle": "탭",
+      "hold": "길게 누르기",
+      "hints": {
+        "auto": "탭하면 시작, 다시 탭하면 삽입. 길게 눌러 말하고 손을 떼면 삽입.",
+        "toggle": "탭하면 시작, 다시 탭하면 삽입.",
+        "hold": "길게 눌러 말하고 손을 떼면 삽입."
+      }
+    },
+    "recognition_title": "인식",
+    "language": {
+      "title": "말하는 언어",
+      "hint": "대부분은 자동 감지로 충분합니다. 짧은 문장이 다른 언어로 인식되면 언어를 지정하세요.",
+      "auto": "자동 감지"
+    },
+    "fillers": {
+      "title": "군말 제거",
+      "hint": "“음”, “어” 같은 머뭇거림을 지웁니다."
+    },
+    "vocabulary": {
+      "title": "어휘",
+      "hint": "제품명이나 동료 이름처럼 원하는 표기로 적고 싶은 이름과 용어. 최대 {{max}}개.",
+      "placeholder": "단어 추가",
+      "remove": "{{word}} 삭제"
+    },
+    "microphone_title": "마이크",
+    "device": {
+      "title": "입력 장치",
+      "default": "시스템 기본값",
+      "unnamed": "마이크 {{index}}",
+      "permission_hint": "마이크를 한 번 테스트하면 장치 이름이 표시됩니다."
+    },
+    "test": {
+      "title": "마이크 테스트",
+      "hint": "말해서 음량을 확인하세요. 녹음되지 않습니다.",
+      "blocked": "마이크 접근이 차단되어 있습니다. 브라우저나 시스템 설정에서 허용하세요.",
+      "start": "테스트",
+      "stop": "중지"
     }
   }
 }

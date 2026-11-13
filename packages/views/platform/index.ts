@@ -24,6 +24,13 @@ export {
   type ThemeFolderWriteResult,
 } from "./theme-folder";
 export {
+  localVoiceAPI,
+  type LocalVoiceAPI,
+  type LocalVoiceModel,
+  type LocalVoiceModels,
+  type LocalVoiceResult,
+} from "./local-voice";
+export {
   useLocalDaemonStatus,
   type LocalDaemonStatus,
 } from "./use-local-daemon-status";
