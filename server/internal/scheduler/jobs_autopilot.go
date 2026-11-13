@@ -389,9 +389,11 @@ func autopilotHandler(
 			tz = trigger.Timezone.String
 		}
 		if next, ok := advancedNextRun(trigger.CronExpression.String, tz, in.PlanTime, time.Now()); ok {
+			// The zero time means the cron has no further occurrence the
+			// library can find; store NULL rather than year 0001.
 			_ = queries.AdvanceTriggerNextRun(ctx, db.AdvanceTriggerNextRunParams{
 				ID:        trigger.ID,
-				NextRunAt: pgtype.Timestamptz{Time: next, Valid: true},
+				NextRunAt: pgtype.Timestamptz{Time: next, Valid: !next.IsZero()},
 			})
 		} else {
 			_ = queries.TouchAutopilotTriggerFiredAt(ctx, trigger.ID)

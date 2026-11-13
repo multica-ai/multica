@@ -848,6 +848,9 @@
       "agent_activity": {
         "label": "エージェントのアクティビティ",
         "description": "エージェントの実行が失敗したとき"
+      },
+      "chat_replies": {
+        "label": "チャットの返信を含める"
       }
     },
     "system": {
@@ -856,7 +859,7 @@
     },
     "browser": {
       "label": "ブラウザ通知",
-      "hint": "このブラウザで新しいインボックス項目の通知バナーを表示できるようにします。",
+      "hint": "受信トレイの通知とチャットの返信のバナー表示を、このブラウザに許可します。",
       "enable": "有効にする",
       "granted": "このブラウザは通知バナーを表示できます。",
       "denied": "ブラウザによってブロックされています。ブラウザの設定でこのサイトの通知を許可してください。",
@@ -1605,7 +1608,40 @@
     "github_actions": "GitHub の操作"
   },
   "channels": {
-    "breadcrumb": "パンくずリスト"
+    "breadcrumb": "パンくずリスト",
+    "add": "メッセージチャネルを追加",
+    "connect": "接続",
+    "disconnect": "接続を解除",
+    "open": "開く",
+    "normal": "接続済み",
+    "waiting_message": "最初のメッセージを待機中",
+    "disconnected": "未接続",
+    "find_me": "{{platform}} で話す",
+    "manage": "{{platform}} を管理",
+    "last_message": "最終メッセージ：{{time}}",
+    "ask_admin": "管理者に依頼",
+    "unavailable": "接続できません",
+    "permissions_title": "接続できるユーザー",
+    "owner_or_admin": "エージェント所有者またはワークスペース管理者",
+    "admin_only": "ワークスペース管理者のみ",
+    "connect_title": "メッセージチャネルを接続",
+    "choose_description": "エージェントとプラットフォームを選択してください。",
+    "authorize_description": "{{agent}} を {{platform}} に接続します。",
+    "agent_label": "エージェント",
+    "choose_agent": "エージェントを選択",
+    "platform_label": "プラットフォーム",
+    "region_label": "地域",
+    "method_label": "接続方法",
+    "feishu": "Feishu（中国）",
+    "lark": "Lark（国際版）",
+    "setup_guide": "設定ガイド",
+    "connection_changed": "この接続は利用できなくなりました。閉じて再試行してください。",
+    "connect_failed": "ボットを接続できませんでした。",
+    "connect_success": "メッセージチャネルを接続しました。",
+    "disconnect_failed": "ボットの接続を解除できませんでした。",
+    "disconnect_title": "メッセージチャネルの接続を解除しますか？",
+    "disconnect_description": "このエージェントは {{platform}} からのメッセージを受信しなくなります。",
+    "agent_unavailable": "エージェントを利用できません"
   },
   "mcp_usage": {
     "agent_count_other": "{{count}} 個のエージェントが使用中",

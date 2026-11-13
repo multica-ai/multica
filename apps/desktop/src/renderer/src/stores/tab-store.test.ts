@@ -383,10 +383,31 @@ describe("useTabStore actions", () => {
       store.addTab("/acme/projects", "B");
       store.addTab("/acme/skills", "C");
 
-      store.openTab("/acme/skills", "C again"); // hits C, at the far end
+      store.openTab("/acme/skills", "C again", { activate: true }); // hits C, at the far end
       const s = useTabStore.getState();
       expect(urls()).toEqual(["/acme/issues", "/acme/projects", "/acme/skills"]);
       expect(getActiveTab(s)?.url).toBe("/acme/skills");
+    });
+
+    it("a background dedupe hit keeps the active tab and flags the existing one", () => {
+      const store = useTabStore.getState();
+      store.switchWorkspace("acme"); // A active
+      const activeId = useTabStore.getState().byWorkspace.acme.activeTabId;
+      const skillsId = store.addTab("/acme/skills", "C");
+      const before = useTabStore.getState().byWorkspace.acme;
+
+      expect(store.openTab("/acme/skills", "C again")).toBe(skillsId);
+      expect(store.openTab("/acme/skills", "C again")).toBe(skillsId);
+
+      const s = useTabStore.getState();
+      expect(s.byWorkspace.acme).toBe(before); // no switch, no history visit
+      expect(getActiveTab(s)?.id).toBe(activeId);
+      expect(s.tabAttention).toEqual({ tabId: skillsId, sequence: 2 });
+
+      store.clearTabAttention(1); // a stale flash finishing keeps the newer signal
+      expect(useTabStore.getState().tabAttention?.sequence).toBe(2);
+      store.clearTabAttention(2);
+      expect(useTabStore.getState().tabAttention).toBeNull();
     });
   });
 
@@ -516,6 +537,213 @@ describe("useTabStore actions", () => {
     const acmeTabId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
     store.setActiveTab(acmeTabId);
     expect(useTabStore.getState().activeWorkspaceSlug).toBe("acme");
+  });
+});
+
+// In-app issue links carry the UUID, and the issue page then replaces that
+// URL with the identifier URL. Opening the same issue again must find the tab
+// now showing it rather than add a second one.
+describe("issue UUID and identifier URLs share one tab", () => {
+  const ISSUE_UUID = "01a08a00-0000-7000-8000-000000000001";
+  const OTHER_UUID = "01a08a00-0000-7000-8000-000000000002";
+  const emptyState = (): {
+    activeWorkspaceSlug: string | null;
+    byWorkspace: Record<string, WorkspaceTabGroup>;
+  } => ({ activeWorkspaceSlug: null, byWorkspace: {} });
+
+  /** Open the issue from the list and let its page canonicalize the URL. */
+  function openCanonicalizedIssue(): { listTabId: string; issueTabId: string } {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const listTabId = useTabStore.getState().byWorkspace.acme.activeTabId;
+    const issueTabId = store.openTab(`/acme/issues/${ISSUE_UUID}`, "ACM-1", {
+      activate: true,
+    });
+    store.navigateActiveSession("/acme/issues/ACM-1", { replace: true });
+    store.setActiveTab(listTabId);
+    return { listTabId, issueTabId };
+  }
+
+  it("openTab with the UUID URL focuses the tab showing the identifier URL", () => {
+    const { issueTabId } = openCanonicalizedIssue();
+
+    const id = useTabStore
+      .getState()
+      .openTab(`/acme/issues/${ISSUE_UUID}`, "ACM-1", { activate: true });
+
+    const group = useTabStore.getState().byWorkspace.acme;
+    expect(id).toBe(issueTabId);
+    expect(group.tabs).toHaveLength(2);
+    expect(group.activeTabId).toBe(issueTabId);
+    expect(getActiveTab(useTabStore.getState())?.url).toBe("/acme/issues/ACM-1");
+  });
+
+  it("matches a deliverable link and a cross-workspace open of the same issue", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const issueTabId = store.openTab(
+      `/acme/issues/${ISSUE_UUID}/deliverables/report.pdf`,
+      "ACM-1",
+      { activate: true },
+    );
+    store.navigateActiveSession("/acme/issues/ACM-1/deliverables/report.pdf", {
+      replace: true,
+    });
+    store.switchWorkspace("butter");
+
+    store.switchWorkspace(
+      "acme",
+      `/acme/issues/${ISSUE_UUID}/deliverables/report.pdf`,
+    );
+
+    const group = useTabStore.getState().byWorkspace.acme;
+    expect(group.tabs).toHaveLength(2);
+    expect(group.activeTabId).toBe(issueTabId);
+  });
+
+  it("leaves other issues and identifier opens without a learned UUID alone", () => {
+    openCanonicalizedIssue();
+    const store = useTabStore.getState();
+
+    store.openTab(`/acme/issues/${OTHER_UUID}`, "ACM-2");
+    store.openTab("/acme/issues/ACM-3", "ACM-3");
+
+    expect(useTabStore.getState().byWorkspace.acme.tabs).toHaveLength(4);
+  });
+
+  it("does not learn an alias when a push moves the tab to another issue", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    store.navigateActiveSession(`/acme/issues/${ISSUE_UUID}`);
+    store.navigateActiveSession("/acme/issues/ACM-2");
+
+    store.openTab(`/acme/issues/${ISSUE_UUID}`, "ACM-1");
+
+    const group = useTabStore.getState().byWorkspace.acme;
+    expect(group.issueAliases).toEqual({});
+    expect(group.tabs).toHaveLength(2);
+  });
+
+  it("keeps the learned aliases across a restart", () => {
+    const { issueTabId } = openCanonicalizedIssue();
+    const { partialize } = useTabStore.persist.getOptions();
+    const persisted = JSON.parse(
+      JSON.stringify(partialize!(useTabStore.getState())),
+    );
+
+    useTabStore.getState().reset();
+    useTabStore.setState(
+      mergePersistedTabs(persisted, emptyState()),
+    );
+
+    expect(
+      useTabStore.getState().openTab(`/acme/issues/${ISSUE_UUID}`, "ACM-1"),
+    ).toBe(issueTabId);
+    expect(useTabStore.getState().byWorkspace.acme.tabs).toHaveLength(2);
+  });
+
+  it.each([false, true])("reuses a resolved identifier-first tab (restored: %s)", (restored) => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const listTabId = useTabStore.getState().byWorkspace.acme.activeTabId;
+    const issueTabId = store.openTab("/acme/issues/ACM-1", "ACM-1");
+    if (restored) {
+      const persisted = JSON.parse(JSON.stringify(
+        useTabStore.persist.getOptions().partialize!(useTabStore.getState()),
+      ));
+      // Pre-patch v5 payloads already contain identifier URLs, but no aliases.
+      delete persisted.byWorkspace.acme.issueAliases;
+      store.reset();
+      useTabStore.setState(mergePersistedTabs(persisted, emptyState()));
+    }
+
+    // The tab strip resolves background tabs without mounting their pages.
+    store.rememberIssueIdentity(issueTabId, ISSUE_UUID, "ACM-1");
+    expect(useTabStore.getState().byWorkspace.acme.activeTabId).toBe(listTabId);
+    expect(store.openTab(`/acme/issues/${ISSUE_UUID}`, "ACM-1", { activate: true })).toBe(issueTabId);
+    expect(useTabStore.getState().byWorkspace.acme.tabs).toHaveLength(2);
+  });
+
+  it("retains an open issue's alias after 200 other issue visits and a restart", () => {
+    const { listTabId, issueTabId } = openCanonicalizedIssue();
+    const store = useTabStore.getState();
+    store.setActiveTab(listTabId);
+    for (let i = 2; i <= 201; i++) {
+      store.navigateActiveSession(`/acme/issues/01a08a00-0000-7000-8000-${String(i).padStart(12, "0")}`);
+      store.navigateActiveSession(`/acme/issues/ACM-${i}`, { replace: true });
+    }
+    expect(Object.keys(useTabStore.getState().byWorkspace.acme.issueAliases!)).toHaveLength(200);
+    const persisted = JSON.parse(JSON.stringify(
+      useTabStore.persist.getOptions().partialize!(useTabStore.getState()),
+    ));
+    store.reset();
+    useTabStore.setState(mergePersistedTabs(persisted, emptyState()));
+
+    expect(store.openTab(`/acme/issues/${ISSUE_UUID}`, "ACM-1")).toBe(issueTabId);
+    expect(useTabStore.getState().byWorkspace.acme.tabs).toHaveLength(2);
+  });
+
+  it("retains identities for more than 200 open issues across a restart", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const issueTabIds: string[] = [];
+    for (let i = 1; i <= 201; i++) {
+      const uuid = `01a08a00-0000-7000-8000-${String(i).padStart(12, "0")}`;
+      issueTabIds.push(store.openTab(`/acme/issues/${uuid}`, `ACM-${i}`, { activate: true }));
+      store.navigateActiveSession(`/acme/issues/ACM-${i}`, { replace: true });
+    }
+    const persisted = JSON.parse(JSON.stringify(
+      useTabStore.persist.getOptions().partialize!(useTabStore.getState()),
+    ));
+    store.reset();
+    useTabStore.setState(mergePersistedTabs(persisted, emptyState()));
+
+    expect(store.openTab(`/acme/issues/${ISSUE_UUID}`, "ACM-1")).toBe(issueTabIds[0]);
+    expect(useTabStore.getState().byWorkspace.acme.tabs).toHaveLength(202);
+  });
+
+  it("ignores a resolved identity after its tab has navigated to another issue", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const tabId = store.openTab("/acme/issues/ACM-1", "ACM-1", { activate: true });
+    store.navigateActiveSession("/acme/issues/ACM-2");
+    store.rememberIssueIdentity(tabId, ISSUE_UUID, "ACM-1");
+
+    expect(useTabStore.getState().byWorkspace.acme.issueAliases).toEqual({});
+  });
+
+  it("drops persisted aliases that are not UUID → identifier pairs", () => {
+    const restored = mergePersistedTabs(
+      {
+        activeWorkspaceSlug: "acme",
+        byWorkspace: {
+          acme: {
+            activeTabId: "t1",
+            issueAliases: {
+              [ISSUE_UUID]: "ACM-1",
+              [OTHER_UUID]: ISSUE_UUID,
+              "ACM-9": "ACM-1",
+              constructor: "ACM-1",
+            },
+            tabs: [
+              {
+                id: "t1",
+                url: "/acme/issues",
+                title: "Issues",
+                pinned: false,
+                history: { stack: ["/acme/issues"], index: 0 },
+                memento: { scroll: {} },
+              },
+            ],
+          },
+        },
+      },
+      emptyState(),
+    );
+
+    expect(restored.byWorkspace.acme.issueAliases).toEqual({
+      [ISSUE_UUID]: "ACM-1",
+    });
   });
 });
 

@@ -380,6 +380,8 @@ export interface IssueTableFilters {
     end: string;
   };
   working_only?: boolean;
+  /** No visible running or queued work, matching the Inbox Idle filter. */
+  idle_only?: boolean;
   /** Match the running-task issue projection returned by
    *  `/api/working-agents`. An explicit empty list matches nothing. */
   working_issue_ids?: string[];

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { isImeComposing } from "@multica/core/utils";
+import { contextMenuOrigin } from "@multica/ui/lib/context-menu-origin";
 import { useT } from "../../i18n";
 
 /**
@@ -14,7 +15,7 @@ import { useT } from "../../i18n";
  * move focus to sibling rows and nested actions while the user is still
  * interacting with the panel. Instead a document-level `pointerdown`
  * listener commits only when the user actually clicks outside the input
- * (the input's own context menu is not outside).
+ * (a context menu opened on the input is not outside).
  */
 export function SessionRenameInput({
   initialValue,
@@ -36,9 +37,6 @@ export function SessionRenameInput({
   valueRef.current = value;
   const onSubmitRef = useRef(onSubmit);
   onSubmitRef.current = onSubmit;
-  // A right-click on the input opens its edit menu; picking Cut or Paste
-  // there is still editing, not a click outside.
-  const ownMenuOpenRef = useRef(false);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -47,9 +45,7 @@ export function SessionRenameInput({
     const handlePointerDown = (e: PointerEvent) => {
       const input = inputRef.current;
       if (!input) return;
-      if (input.contains(e.target as Node)) return;
-      if (ownMenuOpenRef.current && e.target instanceof Element && e.target.closest('[role="menu"]')) return;
-      ownMenuOpenRef.current = false;
+      if (input.contains(contextMenuOrigin(e.target) as Node)) return;
       onSubmitRef.current(valueRef.current);
     };
     // Capture phase — commit before outside-click handling can close the
@@ -70,9 +66,6 @@ export function SessionRenameInput({
       onChange={(e) => setValue(e.target.value)}
       onClick={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
-      onContextMenu={() => {
-        ownMenuOpenRef.current = true;
-      }}
       onKeyDown={(e) => {
         // Keep editing keys inside the input instead of letting the row
         // selection keyboard handler consume them.

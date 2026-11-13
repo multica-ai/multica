@@ -390,7 +390,7 @@ WHERE id = $1 AND workspace_id = $2;
 -- name: ListIssueRefsInWorkspace :many
 -- GetIssueRefInWorkspace for a page: every original the page's duplicates
 -- point at, in one read.
-SELECT id, number, title, status FROM issue
+SELECT id, number, title, status, project_id FROM issue
 WHERE workspace_id = sqlc.arg('workspace_id')
   AND id = ANY(sqlc.arg('ids')::uuid[]);
 
@@ -516,6 +516,11 @@ cleared_environment_commands AS (
 ),
 cleared_environment_configs AS (
     DELETE FROM issue_environment_config WHERE issue_id IN (SELECT target.id FROM target)
+),
+-- task_context_receipt has no FK; the issue's tasks go by the legacy cascade,
+-- so their receipts are swept here by the issue_id copied onto each row.
+cleared_task_context_receipts AS (
+    DELETE FROM task_context_receipt WHERE issue_id IN (SELECT target.id FROM target)
 )
 DELETE FROM issue WHERE issue.id IN (SELECT target.id FROM target);
 

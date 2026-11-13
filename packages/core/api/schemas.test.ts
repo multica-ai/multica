@@ -2072,6 +2072,11 @@ describe("SidebarProjectPrefsDocSchema", () => {
 // dialog, the "ask your operator" state, the revoked-vs-active badge), so a
 // malformed response must degrade to the safe state rather than a broken one.
 describe("WeCom installation schemas", () => {
+  it("accepts the bot display name while remaining compatible with older servers", () => {
+    expect(WecomInstallationSchema.parse({ id: "i1", bot_name: "Support Bot" }).bot_name).toBe("Support Bot");
+    expect(WecomInstallationSchema.parse({ id: "i1" }).bot_name).toBeUndefined();
+    expect(WecomInstallationSchema.safeParse({ id: "i1", bot_name: 42 }).success).toBe(false);
+  });
   it("parses a well-formed installation", () => {
     const parsed = WecomInstallationSchema.parse({
       id: "i1",

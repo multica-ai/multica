@@ -17,6 +17,7 @@ import {
   type ResolvedContextMenuScope,
   type RowActionItem,
 } from "@multica/views/common/context-menu-scope";
+import { contextMenuOriginRef } from "@multica/ui/lib/context-menu-origin";
 import { contextPrimitives } from "@multica/views/common/menu-primitives";
 import {
   contextMenuActions,
@@ -45,6 +46,8 @@ interface OpenMenu {
   /** Focus and selection when the menu opened; an edit command needs both back. */
   focus: HTMLElement | null;
   ranges: Range[];
+  /** The element the menu is for; overlays around it treat the menu as their own. */
+  origin: Element | null;
   page: PageItems | null;
 }
 
@@ -164,11 +167,13 @@ export function NativeContextMenu() {
       );
       if (!hasContextMenuItems(request) && !hasPageItems(page)) return;
       pending.current = null;
+      const focus = active instanceof HTMLElement && active !== document.body ? active : null;
       setMenu({
         request,
         point,
-        focus: active instanceof HTMLElement && active !== document.body ? active : null,
+        focus,
         ranges,
+        origin: (fresh ? last.target : null) ?? focus,
         page,
       });
       setOpen(true);
@@ -190,6 +195,8 @@ export function NativeContextMenu() {
         : undefined,
     [point],
   );
+  const origin = menu?.origin ?? null;
+  const originRef = useMemo(() => contextMenuOriginRef(origin), [origin]);
 
   if (!menu) return null;
 
@@ -318,6 +325,7 @@ export function NativeContextMenu() {
       }}
     >
       <ContextMenuContent
+        ref={originRef}
         anchor={anchor}
         side="bottom"
         align="start"

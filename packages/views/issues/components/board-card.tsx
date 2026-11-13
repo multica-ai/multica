@@ -30,6 +30,7 @@ import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { CustomStatusChip, useIsCustomStatus } from "./custom-status-chip";
 import { IssueDuplicateOfMarker } from "./issue-duplicates";
+import { IssuePullRequestChips, useIssuePullRequestSummaries } from "./pull-request-chips";
 import { useIssueSurfaceActionsOptional } from "../surface/actions-context";
 import {
   PEEK_TARGET_ATTR,
@@ -114,6 +115,8 @@ export const BoardCardContent = memo(function BoardCardContent({
     storeProperties.project && cardGrouping !== "project" && project;
   const showChildProgress = storeProperties.childProgress && childProgress;
   const showLabels = storeProperties.labels && labels.length > 0;
+  const pullRequests = useIssuePullRequestSummaries(issue.id, storeProperties.pullRequests);
+  const showPullRequests = storeProperties.pullRequests && pullRequests.length > 0;
   // Keeps the chip row from rendering an empty flex container when the status
   // chip is the only thing in it and it decides to render nothing.
   const showCustomStatus = useIsCustomStatus(issue.status);
@@ -229,10 +232,10 @@ export const BoardCardContent = memo(function BoardCardContent({
         );
       })()}
 
-      {/* Chip row: status + project + labels + custom property values.
+      {/* Chip row: status + project + labels + PRs + custom property values.
           The status chip renders only for a CUSTOM status — the column header
           already names the category. (MUL-6243) */}
-      {(showCustomStatus || showProject || showLabels || cardCustomProperties.length > 0) && (
+      {(showCustomStatus || showProject || showLabels || showPullRequests || cardCustomProperties.length > 0) && (
         <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
           <CustomStatusChip status={issue.status} />
           {showProject && (
@@ -248,6 +251,9 @@ export const BoardCardContent = memo(function BoardCardContent({
             <span className="text-micro text-muted-foreground">
               +{labels.length - 2}
             </span>
+          )}
+          {showPullRequests && (
+            <IssuePullRequestChips pullRequests={pullRequests} max={2} />
           )}
           {cardCustomProperties.map((property) => (
             <span

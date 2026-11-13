@@ -857,6 +857,9 @@
       "agent_activity": {
         "label": "Actividad de agentes",
         "description": "Cuando falla una ejecución de agente"
+      },
+      "chat_replies": {
+        "label": "Incluir respuestas del chat"
       }
     },
     "system": {
@@ -865,7 +868,7 @@
     },
     "browser": {
       "label": "Notificaciones del navegador",
-      "hint": "Permite que este navegador muestre avisos de notificación para nuevos elementos de la bandeja.",
+      "hint": "Permite que este navegador muestre avisos para las notificaciones de la bandeja de entrada y las respuestas del chat.",
       "enable": "Activar",
       "granted": "Este navegador puede mostrar avisos de notificación.",
       "denied": "Bloqueado por tu navegador. Activa las notificaciones para este sitio en la configuración del navegador.",
@@ -1595,7 +1598,40 @@
     "status_unknown": "Estado no disponible"
   },
   "channels": {
-    "breadcrumb": "Migas de pan"
+    "breadcrumb": "Migas de pan",
+    "add": "Añadir canal de mensajería",
+    "connect": "Conectar",
+    "disconnect": "Desconectar",
+    "open": "Abrir",
+    "normal": "Conectado",
+    "waiting_message": "Esperando el primer mensaje",
+    "disconnected": "Desconectado",
+    "find_me": "Encuéntrame en {{platform}}",
+    "manage": "Gestionar {{platform}}",
+    "last_message": "Último mensaje: {{time}}",
+    "ask_admin": "Pide ayuda a un administrador",
+    "unavailable": "Conexión no disponible",
+    "permissions_title": "Quién puede conectar",
+    "owner_or_admin": "Propietario del agente o administrador del espacio",
+    "admin_only": "Solo administradores del espacio",
+    "connect_title": "Conectar canal de mensajería",
+    "choose_description": "Elige un agente y una plataforma.",
+    "authorize_description": "Conectar {{agent}} a {{platform}}.",
+    "agent_label": "Agente",
+    "choose_agent": "Elegir agente",
+    "platform_label": "Plataforma",
+    "region_label": "Región",
+    "method_label": "Método de conexión",
+    "feishu": "Feishu (China)",
+    "lark": "Lark (internacional)",
+    "setup_guide": "Guía de configuración",
+    "connection_changed": "Esta conexión ya no está disponible. Cierra esta ventana y vuelve a intentarlo.",
+    "connect_failed": "No se pudo conectar el bot.",
+    "connect_success": "Canal de mensajería conectado.",
+    "disconnect_failed": "No se pudo desconectar el bot.",
+    "disconnect_title": "¿Desconectar el canal de mensajería?",
+    "disconnect_description": "Este agente dejará de recibir mensajes de {{platform}}.",
+    "agent_unavailable": "Agente no disponible"
   },
   "code": {
     "github_actions": "Acciones de GitHub",

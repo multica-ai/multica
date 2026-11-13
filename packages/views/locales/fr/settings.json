@@ -857,6 +857,9 @@
       "agent_activity": {
         "label": "Activité des agents",
         "description": "Lorsqu'une exécution d'agent échoue"
+      },
+      "chat_replies": {
+        "label": "Inclure les réponses du chat"
       }
     },
     "system": {
@@ -865,7 +868,7 @@
     },
     "browser": {
       "label": "Notifications du navigateur",
-      "hint": "Autoriser ce navigateur à afficher des bannières de notification pour les nouveaux éléments de la boîte de réception.",
+      "hint": "Autorisez ce navigateur à afficher des bannières pour les notifications de la boîte de réception et les réponses du chat.",
       "enable": "Activer",
       "granted": "Ce navigateur peut afficher des bannières de notification.",
       "denied": "Bloqué par votre navigateur. Activez les notifications pour ce site dans ses réglages.",
@@ -1620,7 +1623,40 @@
     "github_actions": "Actions GitHub"
   },
   "channels": {
-    "breadcrumb": "Fil d'Ariane"
+    "breadcrumb": "Fil d'Ariane",
+    "add": "Ajouter un canal de messagerie",
+    "connect": "Connecter",
+    "disconnect": "Déconnecter",
+    "open": "Ouvrir",
+    "normal": "Connecté",
+    "waiting_message": "En attente du premier message",
+    "disconnected": "Déconnecté",
+    "find_me": "Me trouver sur {{platform}}",
+    "manage": "Gérer {{platform}}",
+    "last_message": "Dernier message : {{time}}",
+    "ask_admin": "Contacter un administrateur",
+    "unavailable": "Connexion indisponible",
+    "permissions_title": "Qui peut connecter",
+    "owner_or_admin": "Propriétaire de l’agent ou administrateur de l’espace",
+    "admin_only": "Administrateurs de l’espace uniquement",
+    "connect_title": "Connecter un canal de messagerie",
+    "choose_description": "Choisissez un agent et une plateforme.",
+    "authorize_description": "Connecter {{agent}} à {{platform}}.",
+    "agent_label": "Agent",
+    "choose_agent": "Choisir un agent",
+    "platform_label": "Plateforme",
+    "region_label": "Région",
+    "method_label": "Méthode de connexion",
+    "feishu": "Feishu (Chine)",
+    "lark": "Lark (international)",
+    "setup_guide": "Guide de configuration",
+    "connection_changed": "Cette connexion n’est plus disponible. Fermez cette fenêtre et réessayez.",
+    "connect_failed": "Impossible de connecter le bot.",
+    "connect_success": "Canal de messagerie connecté.",
+    "disconnect_failed": "Impossible de déconnecter le bot.",
+    "disconnect_title": "Déconnecter le canal de messagerie ?",
+    "disconnect_description": "Cet agent ne recevra plus de messages de {{platform}}.",
+    "agent_unavailable": "Agent indisponible"
   },
   "mcp_usage": {
     "agent_count_one": "Utilisé par {{count}} agent",

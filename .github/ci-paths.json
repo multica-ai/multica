@@ -56,6 +56,13 @@
     "scripts/ci-scope.mjs",
     "scripts/ci-scope.test.mjs"
   ],
+  "processtree": [
+    "server/internal/daemon/processtree/**",
+    ".github/workflows/ci.yml",
+    ".github/ci-paths.json",
+    "scripts/ci-scope.mjs",
+    "scripts/ci-scope.test.mjs"
+  ],
   "quality": [
     ".github/actions/frontend-quality/**",
     "apps/**",

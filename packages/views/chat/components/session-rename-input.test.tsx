@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enChat from "../../locales/en/chat.json";
+import { contextMenuOriginRef } from "@multica/ui/lib/context-menu-origin";
 import { SessionRenameInput } from "./session-rename-input";
 
 const TEST_RESOURCES = { en: { chat: enChat } };
@@ -57,8 +58,8 @@ describe("SessionRenameInput", () => {
     const cut = menu.appendChild(document.createElement("div"));
     cut.setAttribute("role", "menuitem");
     document.body.appendChild(menu);
+    const release = contextMenuOriginRef(input)(menu);
 
-    fireEvent.contextMenu(input);
     fireEvent.pointerDown(cut);
     fireEvent.click(cut);
     expect(onSubmit).not.toHaveBeenCalled();
@@ -66,6 +67,7 @@ describe("SessionRenameInput", () => {
 
     fireEvent.pointerDown(document.body);
     expect(onSubmit).toHaveBeenCalledTimes(1);
+    release?.();
     menu.remove();
   });
 

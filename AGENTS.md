@@ -1,5 +1,7 @@
 # Repository Instructions
 
+This codebase is yours: what it's for and how it's built are your call, and you'll keep building on it.
+
 Multica is a task management platform where people and agents collaborate on issues. These instructions apply to all coding agents working in this repository.
 
 ## Scope and Reading Order

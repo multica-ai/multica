@@ -17,6 +17,7 @@ import { DesktopShell } from "./components/desktop-layout";
 import { UpdateNotification } from "./components/update-notification";
 import { NativeContextMenu } from "./components/native-context-menu";
 import { IssueWindow } from "./components/issue-window";
+import { DesktopDevToolbar } from "./components/desktop-dev-toolbar";
 import { useTabStore } from "./stores/tab-store";
 import { useWindowOverlayStore } from "./stores/window-overlay-store";
 import { useOpenSettingsShortcut } from "./hooks/use-open-settings-shortcut";
@@ -501,6 +502,12 @@ export default function App() {
           ) : (
             <AppContent />
           )}
+          {/* Opt-in dev status bar; see "Dev Toolbar" in CONTRIBUTING.md. */}
+          {import.meta.env.DEV &&
+            import.meta.env.VITE_DEV_TOOLBAR &&
+            windowContext.kind === "main" && (
+              <DesktopDevToolbar apiUrl={runtimeConfigResult.config.apiUrl} />
+            )}
         </CoreProvider>
       ) : (
         <BlockingRuntimeConfigError message={runtimeConfigResult.error.message} />

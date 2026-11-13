@@ -23,11 +23,12 @@ describe("settings location", () => {
       "tab=preferences&section=style",
       { tab: "appearance", section: "theme", integration: null },
     ],
-    ["tab=lark", { tab: "channels", section: null, integration: "lark" }],
+    ["tab=lark", { tab: "channels", section: null, integration: null }],
     [
       "tab=integrations&integration=slack",
-      { tab: "channels", section: null, integration: "slack" },
+      { tab: "channels", section: null, integration: null },
     ],
+    ["tab=channels&integration=telegram", { tab: "channels", section: null, integration: null }],
     ["tab=integrations", { tab: "channels", section: null, integration: null }],
     [
       "tab=integrations&integration=vcs",
