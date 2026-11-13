@@ -662,9 +662,11 @@ function ListPropertyEditor({
 export function CustomPropertyValueDisplay({
   property,
   value,
+  compact = false,
 }: {
   property: IssueProperty;
   value: IssuePropertyValue | undefined;
+  compact?: boolean;
 }) {
   const { t } = useT("issues");
   const locale = useLocale();
@@ -722,6 +724,7 @@ export function CustomPropertyValueDisplay({
       return (
         <ActorPropertyDisplay
           value={value}
+          compact={compact}
           emptyLabel={
             <span className="text-muted-foreground">
               {t(($) => $.pickers.custom_property.empty)}

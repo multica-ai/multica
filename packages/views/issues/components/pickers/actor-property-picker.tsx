@@ -12,6 +12,8 @@ import {
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { DeferredTooltip } from "@multica/ui/components/common/deferred-tooltip";
+import { isContentTruncated } from "@multica/ui/components/common/truncated-tooltip";
 import { ActorAvatar } from "../../../common/actor-avatar";
 import { useT } from "../../../i18n";
 import { matchesPinyin } from "../../../editor/extensions/pinyin-match";
@@ -151,9 +153,11 @@ export function ActorPropertyPicker({
 export function ActorPropertyDisplay({
   value,
   emptyLabel,
+  compact = false,
 }: {
   value: IssuePropertyValue | undefined;
   emptyLabel: React.ReactNode;
+  compact?: boolean;
 }) {
   const { t } = useT("issues");
   const { getActorName } = useActorName();
@@ -167,6 +171,31 @@ export function ActorPropertyDisplay({
       );
     }
     return <>{emptyLabel}</>;
+  }
+  if (compact) {
+    const first = refs[0]!;
+    const names = refs.map((ref) => getActorName(ref.kind, ref.id)).join(", ");
+    const hasOthers = refs.length > 1;
+    return (
+      <DeferredTooltip
+        content={names}
+        side="top"
+        openOnFocus
+        shouldOpen={hasOthers ? undefined : isContentTruncated}
+        trigger={
+          <span
+            role="group"
+            aria-label={names}
+            tabIndex={hasOthers ? 0 : undefined}
+            className="flex min-w-0 items-center gap-1 rounded-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+          >
+            <ActorAvatar actorType={first.kind} actorId={first.id} size="sm" />
+            <span className="truncate">{getActorName(first.kind, first.id)}</span>
+            {hasOthers && <span className="shrink-0">+{refs.length - 1}</span>}
+          </span>
+        }
+      />
+    );
   }
   return (
     <span className="flex min-w-0 flex-wrap items-center gap-1">
