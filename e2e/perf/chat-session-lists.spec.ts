@@ -13,7 +13,7 @@ const projectId = "55555555-5555-4555-8555-555555555555";
 const otherProjectId = "55555555-5555-4555-8555-555555555556";
 const projects = [projectId, otherProjectId].map((id, i) => ({
   id, workspace_id: wsId, title: `Project ${i === 0 ? "Alpha" : "Beta"}`,
-  description: null, status: "planned", priority: "none", lead_id: null,
+  description: null, icon: null, status: "planned", priority: "none", lead_id: null,
   lead_type: null, start_date: null, target_date: null,
   created_at: at, updated_at: at,
 }));
@@ -183,7 +183,7 @@ test("floating chat history scrolls to an offscreen session", async ({ page, bas
   await page.addInitScript(() => localStorage.setItem("multica:chat:isOpen", "true"));
   await page.goto("/perf/inbox");
   const started = Date.now();
-  await page.getByRole("button", { name: "New chat", exact: true }).click();
+  await page.getByRole("button", { name: "New chat", exact: true }).and(page.locator('[aria-haspopup="dialog"]')).click();
   const history = page.getByRole("group", { name: "Chat history" });
   await expect(history).toBeVisible();
   await record(page, "dropdown", started, history.getByText(/^Session \d{4}$/));
@@ -216,7 +216,7 @@ for (const size of [0, 1]) {
     const state = await setup(page, baseURL!, false, size);
     await page.addInitScript(() => localStorage.setItem("multica:chat:isOpen", "true"));
     await page.goto("/perf/inbox");
-    await page.getByRole("button", { name: "New chat", exact: true }).click();
+    await page.getByRole("button", { name: "New chat", exact: true }).and(page.locator('[aria-haspopup="dialog"]')).click();
     if (size === 0) {
       await expect(page.getByText("No previous chats", { exact: true })).toBeVisible();
     } else {
