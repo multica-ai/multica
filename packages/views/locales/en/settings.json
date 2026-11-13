@@ -341,7 +341,8 @@
     },
     "content_size": {
       "title": "Font size",
-      "description": "Only content text. Matches the interface by default."
+      "description": "Only content text. Matches the interface by default.",
+      "follow": "Match interface size"
     },
     "content_leading": {
       "title": "Line height",

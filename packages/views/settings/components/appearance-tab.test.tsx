@@ -162,23 +162,56 @@ describe("AppearanceTab", () => {
     expect(contentLatin).toHaveTextContent("Geist Mono");
   });
 
-  it("sizes content text with the same slider as the interface, following it by default", async () => {
-    const user = userEvent.setup();
-    useAppearanceStore.setState({ fontSize: 15 });
-    render(<AppearanceTab />, { wrapper: Wrapper });
+  describe("content font size", () => {
+    const sizeSliders = () =>
+      screen.getAllByLabelText("Font size").map((root) => within(root).getByRole("slider", { hidden: true }));
+    const follow = () => screen.getByRole("switch", { name: "Match interface size" });
+    const press = async (slider: HTMLElement, key: string) => {
+      act(() => slider.focus());
+      await userEvent.setup().keyboard(key);
+    };
 
-    const [, contentRow] = screen.getAllByLabelText("Font size");
-    const contentSize = within(contentRow!).getByRole("slider", { hidden: true });
-    expect(contentSize).toHaveValue("15");
-    expect(screen.getByText("15 px · Default")).toBeInTheDocument();
+    it("follows the interface by default, with the same slider", () => {
+      useAppearanceStore.setState({ fontSize: 15 });
+      render(<AppearanceTab />, { wrapper: Wrapper });
 
-    act(() => contentSize!.focus());
-    await user.keyboard("{ArrowRight}");
-    expect(state().contentSize).toBe(16);
-    expect(screen.getByText("16 px")).toBeInTheDocument();
+      const [, content] = sizeSliders();
+      expect(content).toHaveValue("15");
+      expect(follow()).toBeChecked();
+      expect(screen.getByText("15 px · Default")).toBeInTheDocument();
+    });
 
-    await user.keyboard("{ArrowLeft}");
-    expect(state().contentSize).toBe("ui");
+    it("keeps a size equal to the interface independent of later interface changes", async () => {
+      useAppearanceStore.setState({ fontSize: 14, contentSize: 15 });
+      render(<AppearanceTab />, { wrapper: Wrapper });
+      expect(follow()).not.toBeChecked();
+
+      await press(sizeSliders()[1]!, "{ArrowLeft}");
+      expect(state().contentSize).toBe(14);
+      expect(follow()).not.toBeChecked();
+
+      await press(sizeSliders()[0]!, "{ArrowRight}");
+      expect(state()).toMatchObject({ fontSize: 15, contentSize: 14 });
+      expect(sizeSliders()[1]).toHaveValue("14");
+    });
+
+    it("pins the current size when following is turned off, and follows again only when turned on", async () => {
+      const user = userEvent.setup();
+      useAppearanceStore.setState({ fontSize: 13 });
+      render(<AppearanceTab />, { wrapper: Wrapper });
+
+      await user.click(follow());
+      expect(state().contentSize).toBe(13);
+
+      await user.click(follow());
+      expect(state().contentSize).toBe("ui");
+      await press(sizeSliders()[0]!, "{ArrowRight}");
+      expect(sizeSliders()[1]).toHaveValue("14");
+
+      await press(sizeSliders()[1]!, "{ArrowRight}");
+      expect(state().contentSize).toBe(15);
+      expect(follow()).not.toBeChecked();
+    });
   });
 
   it("names the theme's fonts when the default choice keeps them", () => {

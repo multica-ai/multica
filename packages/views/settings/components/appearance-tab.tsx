@@ -983,7 +983,7 @@ function FontSizeSlider({
       <span aria-hidden="true" className="text-title-sm text-muted-foreground">
         A
       </span>
-      <span className="w-24 shrink-0 text-right text-caption tabular-nums text-muted-foreground">
+      <span className="min-w-24 shrink-0 whitespace-nowrap text-right text-caption tabular-nums text-muted-foreground">
         {isDefault
           ? t(($) => $.appearance.font_size.default, { size: value })
           : t(($) => $.appearance.font_size.value, { size: value })}
@@ -1008,6 +1008,7 @@ function ContentTextSection() {
     );
   const codeLabel = t(($) => $.appearance.code_font.title);
   const sizeLabel = t(($) => $.appearance.content_size.title);
+  const followSizeLabel = t(($) => $.appearance.content_size.follow);
   const leadingLabel = t(($) => $.appearance.content_leading.title);
   const themeCodeFont = useThemeSetsFont("font-mono");
   const themeFontLabel = t(($) => $.appearance.theme_font);
@@ -1078,13 +1079,19 @@ function ContentTextSection() {
           description={t(($) => $.appearance.content_size.description)}
           anchor="content-size"
         >
-          {/* Landing on the interface size follows it again, the way the interface slider returns to Default. */}
           <FontSizeSlider
             label={sizeLabel}
             sizes={CONTENT_SIZES}
             value={contentSize === FOLLOW_UI ? fontSize : contentSize}
             isDefault={contentSize === FOLLOW_UI}
-            onChange={(size) => set({ contentSize: size === fontSize ? FOLLOW_UI : (size as ContentSize) })}
+            onChange={(size) => set({ contentSize: size as ContentSize })}
+          />
+        </SettingsRow>
+        <SettingsRow label={followSizeLabel} anchor="content-size-follow">
+          <Switch
+            checked={contentSize === FOLLOW_UI}
+            onCheckedChange={(checked) => set({ contentSize: checked ? FOLLOW_UI : fontSize })}
+            aria-label={followSizeLabel}
           />
         </SettingsRow>
         <SettingsRow label={leadingLabel} anchor="content-leading">
