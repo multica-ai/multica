@@ -79,10 +79,11 @@ type Outbound struct {
 	q outboundQueries
 	// tasks is the retry-clone lookup behind rounds(): the same *db.Queries
 	// as q, narrowed to the one row the round matcher reads.
-	tasks   taskLookup
-	senders *sendersRegistry
-	streams *streamStore
-	logger  *slog.Logger
+	tasks        taskLookup
+	senders      *sendersRegistry
+	streams      *streamStore
+	logger       *slog.Logger
+	inboxWebhook *InboxWebhook
 
 	// objects is the deployment's object storage, or nil when there is none.
 	// Non-nil is what turns file delivery on (outbound_media.go).
@@ -844,6 +845,9 @@ func (o *Outbound) handleInboxNew(e events.Event) {
 	}
 	item, ok := payload["item"].(map[string]any)
 	if !ok {
+		return
+	}
+	if o.inboxWebhook.Matches(item) {
 		return
 	}
 	// Only member recipients — agents receive nothing via chat channels.

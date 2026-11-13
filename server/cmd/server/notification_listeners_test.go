@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/events"
@@ -282,6 +283,7 @@ func TestNotification_StatusChanged(t *testing.T) {
 				WorkspaceID: testWorkspaceID,
 				Title:       "status test issue",
 				Status:      "in_progress",
+				UpdatedAt:   "2026-11-10T05:00:18Z",
 				Priority:    "medium",
 				CreatorType: "member",
 				CreatorID:   testUserID,
@@ -308,6 +310,13 @@ func TestNotification_StatusChanged(t *testing.T) {
 	}
 	if sub1Items[0].Severity != "info" {
 		t.Fatalf("expected severity 'info', got %q", sub1Items[0].Severity)
+	}
+	var eventDetails map[string]string
+	if err := json.Unmarshal(sub1Items[0].Details, &eventDetails); err != nil {
+		t.Fatalf("decode saved status details: %v", err)
+	}
+	if eventDetails["from"] != "todo" || eventDetails["to"] != "in_progress" || eventDetails["changed_at"] != "2026-11-10T05:00:18Z" {
+		t.Fatalf("status notification must retain the actual transition and time: %v", eventDetails)
 	}
 	// Title is now just the issue title; details contain from/to
 	expectedTitle := "status test issue"

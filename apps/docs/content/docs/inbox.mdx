@@ -76,6 +76,53 @@ Open **Settings → Notifications** to toggle each group separately:
 
 Turning a group off doesn't stop the changes from being recorded on the issue — it only stops the inbox notifications. A few types, such as reactions, quick-create results, and autopilot pauses, sit outside these six groups and are always delivered. System and browser notifications control desktop banners and don't change the inbox itself.
 
+## WeCom group notifications (self-hosted)
+
+To move one member's **task notifications** out of their WeCom DM,
+set all three backend environment variables and restart the backend:
+
+| Variable | Value |
+|---|---|
+| `MULTICA_WECOM_NOTIFICATION_WEBHOOK_URL` | The group's `https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=…` URL; treat it as a secret |
+| `MULTICA_WECOM_NOTIFICATION_WORKSPACE_ID` | The workspace UUID |
+| `MULTICA_WECOM_NOTIFICATION_MEMBER_ID` | The member's user UUID (`recipient_id` in their inbox), not the workspace membership row ID |
+
+Set `WECOM_APP_URL`, `MULTICA_APP_URL`, or `FRONTEND_ORIGIN` to the user-reachable
+HTTP(S) web address for the card's task link. Localhost, loopback and unspecified
+listen addresses are rejected. Both the visible "View task" entry and the card
+itself open the same workspace-scoped issue URL. A complete, valid configuration
+replaces private-bot delivery of task notifications, including status changes,
+comments, assignments, unassignments, mentions, priority/date updates, reactions
+and run failures. Conversations with the smart bot keep their existing route. The group webhook does not require `MULTICA_WECOM_SECRET_KEY`.
+Cards separate the task title and paragraph-preserving excerpt from aligned priority, due date, actor and event/notification time fields. Missing due dates stay unavailable.
+Assignment cards name the person involved; assignee changes show the previous and new person. Mentions identify the comment or issue description and show readable names instead of internal mention links.
+Apply the same redirect configuration to every backend replica.
+Empty configuration leaves delivery unchanged; partial or invalid configuration
+logs an error and retains the original route. Remove all three variables and
+restart to roll back.
+
+The group receives only what this member's inbox would receive: subscriptions,
+mute preferences, membership and exclusion of their own actions still apply.
+This is not a broadcast of every workspace event. Check the group's audience
+before redirecting personal inbox content to it.
+
+Each event is one `text_notice` template card with task details, status before
+and after (when provided), author and time, and a task link. Long comments are
+summarized by truncation, not by a model; open the task for the full comment.
+Group webhooks send complete notifications; smart-bot conversation streaming
+continues independently.
+
+Delivery is best-effort, using the existing in-process inbox event bus. A bounded
+64-item queue and a single worker pace requests below 20/minute per process;
+replayed inbox IDs are deduplicated in a bounded 2048-ID memory window. There is
+no persistent outbox, restart replay, or cross-replica deduplication/rate limiter.
+Only explicit rate-limit rejections get one retry; an uncertain network result
+is not retried automatically. Queue overflow and failed or uncertain delivery
+are logged with an inbox ID and outcome, without message content or webhook
+credentials. Failures do not silently fall back to DM; the in-app inbox remains
+available. Monitor these logs; use a single sender process if the group requires
+the combined deployment to stay below the platform limit.
+
 ## Next steps
 
 - [Comments](/comments) — replies, mentions, and discussion threads.
