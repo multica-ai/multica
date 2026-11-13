@@ -400,6 +400,19 @@ func prepareHermesHome(hermesHome, sourceHome string, sourceMustExist bool, work
 	if err := writeHermesBoundSkills(hermesHome, workspaceSkills, logger); err != nil {
 		return hermesSessionMount{}, err
 	}
+	// A shared-mode task attaches to the container's one gateway, whose agent
+	// loop runs in the owner's process and writes the transcript to the owner's
+	// <hermes_home>/state.db, never to the conversation store mounted here. The
+	// store therefore stays empty, and answering from it would drop the session
+	// and restart the conversation on every follow-up. Ask the owner's database
+	// instead. This lives here, not in prepareHermesSessionHome, because only
+	// after the mode is known and the mirror has linked gateway.lock into the
+	// effective home can the owner be found. The owner's home is only read.
+	if sessions.Mounted && !isolatedGateway {
+		if owner, ok := hermesGatewayOwnerHome(hermesHome); ok {
+			sessions.HistoryPresent = hermesStoreHasSessionDB(owner)
+		}
+	}
 	return sessions, nil
 }
 
