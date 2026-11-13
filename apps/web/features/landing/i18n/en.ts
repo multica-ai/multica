@@ -345,7 +345,7 @@ export function createEnDict(): LandingDict {
           "Fixed Antigravity resume, Hermes detection, ZCode on Linux, mise-installed runtimes, and false failures when macOS runs exit.",
           "Claude execution logs keep thinking text, and Copilot reports usage for new sessions.",
           "Raising a runtime's concurrency limit starts waiting tasks right away, and repeat checkouts reuse the same folder, branch, and access.",
-          "Daemons connected to self-hosted servers now delete finished tasks' working folders after 14 days by default, as on Cloud. Set MULTICA_GC_COMPLETED_TASK_TTL=0 to keep them.",
+          "Daemons connected to self-hosted servers now delete finished tasks' working folders after 14 days by default, as on Cloud. To keep them, set MULTICA_GC_COMPLETED_TASK_TTL=0 before upgrading the daemon.",
           "Usage counts the right calendar days, accepts reports that arrive out of order, and prices newer models.",
           "Fixed smaller issues with cancelled uploads, failed installs, schedules that never run, deliverable links, file sizes, and environment variable editing.",
         ],

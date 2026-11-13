@@ -330,7 +330,7 @@ export function createZhDict(): LandingDict {
           "修复 Antigravity 续跑、Hermes 检测、Linux 上的 ZCode、mise 安装的运行时，以及 macOS 上运行结束时误报失败。",
           "Claude 执行日志保留思考内容，Copilot 会上报新会话的用量。",
           "提高运行时并发上限后会立即开始等待中的任务，重复 checkout 会复用同一目录、分支和权限。",
-          "连接自托管服务器的守护进程默认在任务完成 14 天后删除其工作目录，与 Cloud 一致。如需保留，请设置 MULTICA_GC_COMPLETED_TASK_TTL=0。",
+          "连接自托管服务器的守护进程默认在任务完成 14 天后删除其工作目录，与 Cloud 一致。如需保留，请在升级守护进程前设置 MULTICA_GC_COMPLETED_TASK_TTL=0。",
           "用量按准确的自然日统计，接受乱序上报，并补齐新模型的价格。",
           "修复了取消上传、安装失败、永不触发的计划、交付物链接、文件大小和环境变量编辑的一些小问题。",
         ],
