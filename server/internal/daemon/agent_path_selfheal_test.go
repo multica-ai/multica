@@ -209,12 +209,14 @@ func TestResolveAgentEntry_PrefersLivePathWhenVersionDetectFails(t *testing.T) {
 		t.Fatalf("unverified path was published as a healed pair: %+v", cached)
 	}
 
-	// Once version detection recovers, the same entry heals for real and adopts
-	// the verified {path, version} pair.
+	if _, _, err := d.resolveAgentEntryForLaunch(ctx, "codex", entry); err == nil {
+		t.Fatal("launch accepted the replacement before its version was verified")
+	}
+
 	detectVersionOK = true
-	if got, ver := d.resolveAgentEntry(ctx, "codex", entry); got.Path != v2 || ver != "0.144.3" {
-		t.Fatalf("heal did not complete after version detection recovered: got (%q, %q), want (%q, %q)",
-			got.Path, ver, v2, "0.144.3")
+	got, ver, err := d.resolveAgentEntryForLaunch(ctx, "codex", entry)
+	if err != nil || got.Path != v2 || ver != "0.144.3" {
+		t.Fatalf("launch after recovery: got (%q, %q, %v), want (%q, %q, nil)", got.Path, ver, err, v2, "0.144.3")
 	}
 }
 
