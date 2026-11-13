@@ -13,10 +13,12 @@ export type MulticaIconMode =
   | "static"
   /** The centre opens and the arms light up in turn: an agent at work, loading, waiting. */
   | "think"
-  /** Tile pops in, arms grow out of the centre as the star turns into place — app launch, sign-in. */
-  | "intro"
-  /** `intro`, then `think` until whatever is loading unmounts it. */
-  | "launch";
+  /**
+   * Tile pops in, arms grow out of the centre as the star turns into place.
+   * Sign-in only: loading screens use `think`, so the intro never plays twice
+   * or gets cut off when loading finishes early.
+   */
+  | "intro";
 
 interface MulticaIconProps extends Omit<React.ComponentProps<"svg">, "mode"> {
   mode?: MulticaIconMode;
@@ -32,8 +34,6 @@ interface MulticaIconProps extends Omit<React.ComponentProps<"svg">, "mode"> {
   title?: string;
 }
 
-/** When the launch sequence hands over from the settled star to the think loop. */
-const LAUNCH_THINK_AT = "1.5s";
 const INTRO_AT_S = 0.15;
 const ARM_STAGGER_MS = 55;
 /** Think: one lap of the eight arms. */
@@ -55,7 +55,7 @@ export function MulticaIcon({
   ...props
 }: MulticaIconProps) {
   const { scale, stroke } = iconStar(size, shape);
-  const intro = mode === "intro" || mode === "launch";
+  const intro = mode === "intro";
   const tileClass = "fill-multica-ink dark:fill-multica-paper";
   const starClass = "fill-multica-paper dark:fill-multica-ink";
   const delay = (ms: number | string): CSSProperties => ({
@@ -82,11 +82,6 @@ export function MulticaIcon({
         />
       </g>
     ));
-  const settled = (
-    <g className="multica-settle" style={delay(INTRO_AT_S * 1000)}>
-      {arms("grow")}
-    </g>
-  );
 
   return (
     <svg
@@ -106,12 +101,10 @@ export function MulticaIcon({
       <g transform={iconStarTransform(scale)}>
         {mode === "static" ? arms("static") : null}
         {mode === "think" ? arms("think") : null}
-        {mode === "intro" ? settled : null}
-        {mode === "launch" ? (
-          <>
-            <g className="multica-fade-out" style={delay(LAUNCH_THINK_AT)}>{settled}</g>
-            <g className="multica-fade-in" style={delay(LAUNCH_THINK_AT)}>{arms("think")}</g>
-          </>
+        {mode === "intro" ? (
+          <g className="multica-settle" style={delay(INTRO_AT_S * 1000)}>
+            {arms("grow")}
+          </g>
         ) : null}
       </g>
     </svg>

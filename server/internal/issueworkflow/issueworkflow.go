@@ -139,17 +139,6 @@ func keysOf(steps []Step) []string {
 	return keys
 }
 
-// MiddleKeys returns the workflow's own steps, without the fixed statuses.
-func MiddleKeys(keys []string) []string {
-	out := make([]string, 0, len(keys))
-	for _, key := range keys {
-		if !IsFixed(key) {
-			out = append(out, key)
-		}
-	}
-	return out
-}
-
 // BuiltInDefaultKeys is Default before a workspace stores its own.
 func BuiltInDefaultKeys() []string {
 	return ArrangeKeys([]string{issuestatus.Backlog, issuestatus.InProgress, issuestatus.InReview, issuestatus.Blocked})
@@ -508,14 +497,12 @@ func ValidateHandoff(s Step, def Definition) error {
 	}
 	switch s.Handler.Type {
 	case HandlerNone, HandlerProjectLead:
-	case HandlerAgent, HandlerMember:
+	case HandlerAgent, HandlerSquad, HandlerMember:
 		if s.Handler.ID == "" {
 			return invalid("choose a %s to hand off to", s.Handler.Type)
 		}
-	case HandlerSquad, HandlerCreator:
-		// A squad routes work itself, so a handoff to one would compete with
-		// its own assignment. (MUL-7420)
-		return invalid("hand off to an agent, a member or the project lead")
+	case HandlerCreator:
+		return invalid("hand off to an agent, a squad, a member or the project lead")
 	default:
 		return invalid("unknown handler type %q", s.Handler.Type)
 	}

@@ -7,8 +7,22 @@ import { cn } from "@multica/ui/lib/utils"
 import { Button } from "@multica/ui/components/ui/button"
 import { XIcon } from "@multica/ui/icons"
 
-function Dialog({ ...props }: DialogPrimitive.Root.Props) {
-  return <DialogPrimitive.Root data-slot="dialog" {...props} />
+function Dialog({ onOpenChange, modal = true, ...props }: DialogPrimitive.Root.Props) {
+  const handleOpenChange: NonNullable<DialogPrimitive.Root.Props["onOpenChange"]> = (open, details) => {
+    const target = details.event.target
+    // Extensions can hide a suggestion during a press, retargeting the click
+    // to body/html. A modal's outside click should land on its backdrop.
+    if (
+      !open && modal && details.reason === "outside-press" &&
+      target instanceof Element && target.matches("html, body")
+    ) {
+      details.cancel()
+      return
+    }
+    onOpenChange?.(open, details)
+  }
+
+  return <DialogPrimitive.Root data-slot="dialog" {...props} modal={modal} onOpenChange={handleOpenChange} />
 }
 
 function DialogTrigger({ ...props }: DialogPrimitive.Trigger.Props) {
@@ -62,7 +76,7 @@ function DialogContent({
           // fits is unaffected. `overflow-auto` shares tailwind-merge's
           // conflict group with `overflow-hidden`, so a dialog that manages
           // its own scrolling still opts out by passing that.
-          "fixed top-1/2 left-1/2 z-50 grid max-h-[calc(100dvh-2rem)] w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 overflow-auto rounded-xl bg-surface-raised p-4 text-body text-popover-foreground shadow-[var(--floating-shadow)] ring-1 ring-surface-border data-open:duration-[var(--dialog-enter-duration)] data-closed:duration-[var(--dialog-exit-duration)] data-open:ease-[var(--dialog-enter-easing)] data-closed:ease-[var(--dialog-exit-easing)] motion-reduce:animate-none! outline-none sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+          "fixed top-1/2 left-1/2 z-50 grid max-h-[calc(100dvh-2rem)] w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 overflow-auto rounded-dialog bg-surface-raised p-4 text-body text-popover-foreground shadow-[var(--floating-shadow)] ring-1 ring-surface-border data-open:duration-[var(--dialog-enter-duration)] data-closed:duration-[var(--dialog-exit-duration)] data-open:ease-[var(--dialog-enter-easing)] data-closed:ease-[var(--dialog-exit-easing)] motion-reduce:animate-none! outline-none sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
           className
         )}
         {...props}

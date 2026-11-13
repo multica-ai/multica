@@ -67,6 +67,10 @@ func readZcodeConfig(path string, into any) error {
 // crash leftovers do not linger.
 func prepareZcodeRuntimeEnv(executable string, env []string) ([]string, func(), error) {
 	noop := func() {}
+	env = zcodeRuntimeEnv(executable, env)
+	if script, desktop := zcodeDesktopScript(executable); desktop {
+		executable = script
+	}
 	if zcodeEnvValue(env, zcodePersonalConfigEnv) != "" {
 		return zcodeRuntimeEnv(executable, env), noop, nil
 	}

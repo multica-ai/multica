@@ -6,6 +6,16 @@ import {
 } from "./patch";
 
 describe("notification preference patches", () => {
+  it("persists, enables and rolls back chat replies independently of comments", () => {
+    const current = { comments: "muted" } as const;
+    const muted = { ...current, chat_replies: "muted" } as const;
+    expect(deriveNotificationPreferencePatch(current, muted)).toEqual({ chat_replies: "muted" });
+    expect(applyNotificationPreferencePatch(current, { chat_replies: "muted" })).toEqual(muted);
+    expect(deriveNotificationPreferencePatch(muted, current)).toEqual({ chat_replies: "all" });
+    expect(applyNotificationPreferencePatch(muted, { chat_replies: "all" })).toEqual(current);
+    expect(rollbackNotificationPreferencePatch(muted, { chat_replies: "muted" }, current)).toEqual(current);
+  });
+
   it("sends only the changed key when another muted preference is present", () => {
     expect(
       deriveNotificationPreferencePatch(

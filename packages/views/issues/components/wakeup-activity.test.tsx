@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { renderHook } from "@testing-library/react";
 import type { TimelineEntry } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
-import { RESOURCES } from "../../test/i18n";
+import { getTestResources } from "../../test/i18n";
 import { useT } from "../../i18n";
 import { useWakeupText } from "./wakeup-presentation";
 import { formatWakeupActivity, wakeupActivityChip } from "./wakeup-activity";
@@ -21,7 +21,7 @@ const reply = { id: "w", kind: "event", mode: "once", event_types: ["comment.cre
 function helpers() {
   const { result } = renderHook(() => ({ t: useT("issues").t, text: useWakeupText() }), {
     wrapper: ({ children }) => (
-      <I18nProvider locale="zh-Hans" resources={RESOURCES}>
+      <I18nProvider locale="zh-Hans" resources={getTestResources("zh-Hans")}>
         {children}
       </I18nProvider>
     ),

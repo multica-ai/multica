@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { renderWithI18n } from "../../test/i18n";
@@ -113,5 +113,34 @@ describe("NotificationsTab Google Chat settings", () => {
         google_chat_webhook: "",
       });
     });
+  });
+});
+
+describe("notification setting hierarchy", () => {
+  it.each([
+    { systemMuted: false, chatMuted: false },
+    { systemMuted: false, chatMuted: true },
+    { systemMuted: true, chatMuted: false },
+    { systemMuted: true, chatMuted: true },
+  ])("nests chat replies under system notifications: %j", ({ systemMuted, chatMuted }) => {
+    state.preferences = {
+      ...(systemMuted ? { system_notifications: "muted" } : {}),
+      ...(chatMuted ? { chat_replies: "muted" } : {}),
+    };
+    renderWithI18n(<NotificationsTab />);
+    expect(screen.queryByRole("region", { name: "Chat" })).toBeNull();
+    const system = screen.getByRole("region", { name: "System Notifications" });
+    if (systemMuted) {
+      expect(within(system).queryByRole("switch", { name: "Include chat replies" })).toBeNull();
+      expect(within(system).getAllByRole("switch")).toHaveLength(1);
+    } else {
+      const replies = within(system).getByRole("switch", { name: "Include chat replies" });
+      if (chatMuted) expect(replies).not.toBeChecked();
+      else expect(replies).toBeChecked();
+      expect(within(system).getAllByRole("switch")).toHaveLength(2);
+    }
+    expect(within(system).queryByText("When an agent finishes replying in a chat.")).toBeNull();
+    expect(within(system).queryByText("Enable system notifications first.")).toBeNull();
+    expect(within(system).queryByText("Applies to Inbox notifications and chat replies.")).toBeNull();
   });
 });

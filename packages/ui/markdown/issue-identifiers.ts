@@ -1,6 +1,7 @@
 import {
   detectLinks,
   findCodeRanges,
+  findHtmlTagRanges,
   findMarkdownLinkRanges,
   isInsideCode,
   rangesOverlap,
@@ -55,6 +56,7 @@ export function isIssueIdentifier(value: string): boolean {
  * Skipped contexts (never rewritten):
  *   - fenced code blocks, inline code, and math (findCodeRanges)
  *   - existing markdown links / images (findMarkdownLinkRanges)
+ *   - HTML tag attributes and `<a>` elements (findHtmlTagRanges)
  *   - detected URLs / emails / file paths (detectLinks)
  *   - dotted filename tails like `ABC-123.ts` and path segments like `FOO-1/bar`
  */
@@ -64,6 +66,7 @@ export function preprocessIssueIdentifiers(text: string): string {
 
   const codeRanges = findCodeRanges(text)
   const linkRanges = findMarkdownLinkRanges(text)
+  const htmlRanges = findHtmlTagRanges(text, codeRanges)
   const detectedLinks = detectLinks(text)
 
   IDENTIFIER_RE.lastIndex = 0
@@ -82,6 +85,8 @@ export function preprocessIssueIdentifiers(text: string): string {
     if (isInsideCode(start, codeRanges)) continue
     // Inside an existing markdown link/image (label OR destination).
     if (linkRanges.some((r) => rangesOverlap(range, r))) continue
+    // Inside an HTML tag's attributes or an `<a>` element.
+    if (htmlRanges.some((r) => rangesOverlap(range, r))) continue
     // Inside a detected URL / email / file path.
     if (detectedLinks.some((l) => rangesOverlap(range, l))) continue
 

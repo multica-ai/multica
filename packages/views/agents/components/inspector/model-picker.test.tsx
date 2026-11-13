@@ -87,6 +87,25 @@ describe("ModelPicker (inspector)", () => {
     expect(onChange).toHaveBeenCalledWith("claude-fable-5");
   });
 
+  it("shows the discovery failure and keeps manual model selection available", async () => {
+    const reason = "ACP model discovery session/new failed: provider unavailable";
+    discovery = async () => {
+      throw new Error(reason);
+    };
+    const { container, onChange } = renderPicker();
+    openPicker(container);
+
+    await screen.findByText(enAgents.pickers.model_discovery_failed_title);
+    expect(screen.getByText(reason)).toBeTruthy();
+    expect(screen.queryByText(enAgents.pickers.model_empty)).toBeNull();
+
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "openrouter:known-model" },
+    });
+    fireEvent.click(screen.getByText('Use "openrouter:known-model"'));
+    expect(onChange).toHaveBeenCalledWith("openrouter:known-model");
+  });
+
   it("shows an unavailable model with its reason and no way to select it", async () => {
     const { container, onChange } = renderPicker();
     openPicker(container);

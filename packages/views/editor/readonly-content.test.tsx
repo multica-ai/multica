@@ -748,6 +748,18 @@ describe("ReadonlyContent inline data-URI images", () => {
     // the <img>. AttachmentRenderer still mounts an <img>, but with an empty src.
     expect(container.querySelector("img")?.getAttribute("src") ?? "").toBe("");
   });
+
+  it("keeps the src of a raw HTML <img>", () => {
+    const { container } = renderWithQuery(
+      <ReadonlyContent
+        content={'Text\n\n<img src="https://host/a.png" width="400" />\n\nEnd'}
+      />,
+    );
+
+    expect(container.querySelector("img")?.getAttribute("src")).toBe(
+      "https://host/a.png",
+    );
+  });
 });
 
 describe("ReadonlyContent slash command rendering", () => {

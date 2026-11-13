@@ -1,6 +1,7 @@
 import { Extension } from "@tiptap/core";
 import { Plugin } from "@tiptap/pm/state";
 import {
+  createShortcutChord,
   getShortcut,
   isPlainShortcut,
   shortcutMatchesEvent,
@@ -52,6 +53,7 @@ export function shouldReplayNativeEnter(
  */
 export function createSubmitShortcutExtension(
   onSubmit: () => boolean,
+  getEnterAction?: () => (() => void) | undefined,
 ) {
   return Extension.create({
     name: "submitShortcut",
@@ -67,6 +69,18 @@ export function createSubmitShortcutExtension(
           props: {
             handleKeyDown(view, event) {
               if (replayingEnter) return false;
+              const enterAction = getEnterAction?.();
+              if (enterAction) {
+                if (event.repeat || view.composing || isImeComposing(event)) return false;
+                if (event.key === "Enter" && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
+                  enterAction();
+                  return true;
+                }
+                return shouldHandleSubmitShortcut(event, {
+                  configuredShortcut: createShortcutChord("Enter", { primary: true }),
+                  composing: view.composing,
+                }) ? onSubmit() : false;
+              }
               const shortcut = getShortcut("send");
 
               if (

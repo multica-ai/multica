@@ -3,7 +3,7 @@
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
-import { DEFAULT_LOCALE, SUPPORTED_LOCALES, type SupportedLocale } from "@multica/core/i18n";
+import { matchLocale, type SupportedLocale } from "@multica/core/i18n";
 import { useLocaleAdapter } from "@multica/core/i18n/react";
 import { useT } from "../i18n";
 
@@ -16,11 +16,7 @@ export function useLanguageSwitch() {
   // i18next.language can be a region-tagged BCP-47 string (e.g. "en-US",
   // "zh-Hans-CN") returned by intl-localematcher. Normalize to a supported
   // locale before comparing — otherwise the select shows neither option.
-  const currentLocale: SupportedLocale = SUPPORTED_LOCALES.includes(
-    i18n.language as SupportedLocale,
-  )
-    ? (i18n.language as SupportedLocale)
-    : DEFAULT_LOCALE;
+  const currentLocale = matchLocale([i18n.language]);
 
   const options: { value: SupportedLocale; label: string }[] = [
     { value: "en", label: t(($) => $.preferences.language.english) },
@@ -30,6 +26,7 @@ export function useLanguageSwitch() {
     { value: "ja", label: t(($) => $.preferences.language.japanese) },
     { value: "fr", label: t(($) => $.preferences.language.french) },
     { value: "es", label: t(($) => $.preferences.language.spanish) },
+    { value: "ru", label: t(($) => $.preferences.language.russian) },
   ];
 
   // Persist locally → sync to user.language → reload. Reload (vs in-place

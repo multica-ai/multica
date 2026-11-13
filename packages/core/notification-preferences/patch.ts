@@ -8,8 +8,10 @@ const NOTIFICATION_GROUP_KEYS: readonly NotificationGroupKey[] = [
   "assignments",
   "status_changes",
   "comments",
+  "chat_replies",
   "mentions",
   "updates",
+  "new_issues",
   "agent_activity",
   "system_notifications",
 ];

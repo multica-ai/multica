@@ -397,12 +397,12 @@ func TestCompleteCallback_SuccessAndIdempotent(t *testing.T) {
 		Exp:          time.Unix(1_700_000_000, 0).Add(time.Minute).Unix(),
 	})
 
-	slug, err := svc.CompleteCallback(context.Background(), state, "success", "ca_123")
+	res, err := svc.CompleteCallback(context.Background(), state, "success", "ca_123")
 	if err != nil {
 		t.Fatalf("CompleteCallback: %v", err)
 	}
-	if slug != "notion" {
-		t.Errorf("slug = %q", slug)
+	if res.ToolkitSlug != "notion" || res.Team() {
+		t.Errorf("result = %+v", res)
 	}
 	// Duplicate callback (same connected account) must not create a 2nd row.
 	if _, err := svc.CompleteCallback(context.Background(), state, "success", "ca_123"); err != nil {
@@ -452,12 +452,12 @@ func TestCompleteCallback_NonSuccessNoRow(t *testing.T) {
 		ToolkitSlug: "notion",
 		Exp:         time.Unix(1_700_000_000, 0).Add(time.Minute).Unix(),
 	})
-	slug, err := svc.CompleteCallback(context.Background(), state, "failed", "ca_x")
+	res, err := svc.CompleteCallback(context.Background(), state, "failed", "ca_x")
 	if !errors.Is(err, ErrConnectNotSuccessful) {
 		t.Fatalf("expected ErrConnectNotSuccessful, got %v", err)
 	}
-	if slug != "notion" {
-		t.Errorf("slug = %q (should still be returned for redirect)", slug)
+	if res.ToolkitSlug != "notion" {
+		t.Errorf("slug = %q (should still be returned for redirect)", res.ToolkitSlug)
 	}
 	if len(store.rows) != 0 {
 		t.Fatalf("expected no row written on non-success, got %d", len(store.rows))
@@ -693,11 +693,20 @@ func TestCreateMCPSession_PinsConnectedAccounts(t *testing.T) {
 func TestCallbackRedirect(t *testing.T) {
 	t.Parallel()
 	svc := newTestService(t, &fakeSDK{}, newFakeStore())
-	if got := svc.CallbackRedirect("notion", true); got != "https://multica.ai/settings?tab=integrations&connected=notion" {
+	if got := svc.CallbackRedirect(CallbackResult{ToolkitSlug: "notion"}, true); got != "https://multica.ai/settings?connected=notion&tab=apps" {
 		t.Errorf("success redirect = %q", got)
 	}
-	if got := svc.CallbackRedirect("notion", false); got != "https://multica.ai/settings?tab=integrations&error=composio_connect_failed" {
+	if got := svc.CallbackRedirect(CallbackResult{ToolkitSlug: "notion"}, false); got != "https://multica.ai/settings?error=composio_connect_failed&tab=apps" {
 		t.Errorf("failure redirect = %q", got)
+	}
+	if got := svc.CallbackRedirect(CallbackResult{ToolkitSlug: "notion", ReturnTo: "/acme/issues/MUL-1?tab=x"}, true); got != "https://multica.ai/acme/issues/MUL-1?app_connected=notion&tab=x" {
+		t.Errorf("return redirect = %q", got)
+	}
+	if got := svc.CallbackRedirect(CallbackResult{ToolkitSlug: "notion", ReturnTo: "//evil.example/x"}, false); got != "https://multica.ai/settings?error=composio_connect_failed&tab=apps" {
+		t.Errorf("unsafe return path not ignored: %q", got)
+	}
+	if got := svc.CallbackRedirect(CallbackResult{ToolkitSlug: "notion", WorkspaceID: "w"}, true); got != "https://multica.ai/settings?connected=notion&scope=team&tab=apps" {
+		t.Errorf("team redirect = %q", got)
 	}
 }
 
@@ -711,4 +720,21 @@ func seedActive(store *fakeStore, userID pgtype.UUID, slug, caID string) db.User
 		ComposioUserID:     util.UUIDToString(userID),
 	})
 	return row
+}
+
+func TestSafeReturnPath(t *testing.T) {
+	for path, want := range map[string]bool{
+		"/acme/issues/MUL-1":      true,
+		"/acme/chat?session=1":    true,
+		"":                        false,
+		"acme/issues":             false,
+		"//evil.example":          false,
+		"/\\evil.example":         false,
+		"https://evil.example":    false,
+		"/acme/\r\nSet-Cookie: x": false,
+	} {
+		if got := SafeReturnPath(path); got != want {
+			t.Errorf("SafeReturnPath(%q) = %v, want %v", path, got, want)
+		}
+	}
 }

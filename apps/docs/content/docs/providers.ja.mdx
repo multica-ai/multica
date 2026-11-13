@@ -45,10 +45,17 @@ Multica は、普段使っている AI コーディングツールの代わり�
 | Qoder CN CLI | `qoderclicn` | ✓ | ✓ | ✓ | `.qoder/skills/` |
 | Qwen Code | `qwen` | ✓ | ✓ | ✓ | `.qwen/skills/` |
 | QwenPaw | `qwenpaw` | ✓ | ✓ | — | 1 回の実行専用のワークスペース `skills/` |
+| Amp | `amp` | ✓ | — | モード | `.agents/skills/` |
+| Factory Droid | `droid` | ✓ | — | ✓ | `.factory/skills/` |
 | Reasonix | `reasonix` | ✓ | ✓ | ✓ | `.reasonix/skills/` |
 | Trae CLI | `traecli` | ✓ | ✓ | ✓ | `.traecli/skills/` |
 | Dim | `dim` | ✓ | ✓ | ✓ | — |
 | ZeroClaw | `zeroclaw` | ✓ | — | — | — |
+| ZCode | `zcode` / ZCode Desktop | ✓ | ✓ | ✓ | `.zcode/skills/` |
+
+Amp のモデル欄では、基盤モデルの ID ではなく `high` などの Amp の**モード**を指定します。空欄なら Amp の既定値を使います。
+
+Amp ではデーモンまたはエージェントの環境に `AMP_API_KEY` も必要で、保存済みの対話型ログインだけでは実行できません。
 
 「Multica による MCP 管理」とは、エージェント設定に MCP server を入力し、Multica が実行前にその設定を対応ツールへ渡せることを意味します。この列が示すのは Multica が代わりに設定できるかどうかで、ツール自体にほかの MCP 設定方法があるかどうかではありません。
 
@@ -84,7 +91,7 @@ Multica はツールから返されたセッション識別子を保存します
 
 ## MCP 設定
 
-Antigravity、GitHub Copilot CLI、DevEco Code、Muse Code、ZeroClaw は、現時点ではエージェントの MCP 設定を読み取らないため、これらのツールではエージェント作成画面にこの項目が表示されません。
+Amp、Factory Droid、Antigravity、GitHub Copilot CLI、DevEco Code、Muse Code、ZeroClaw は、現時点ではエージェントの MCP 設定を読み取らないため、これらのツールではエージェント作成画面にこの項目が表示されません。
 
 Pi への管理 MCP 設定の引き渡しには Pi 0.99.0 以降が必要です。それより古い Pi でも、MCP 設定のないエージェントは引き続き実行できます。
 
@@ -113,3 +120,9 @@ Codex、Hermes、OpenClaw の動作は少し異なります。
 - [エージェントを作成・設定する](/agents-create) — モデルと thinking level の設定
 - [AI コーディングツールをインストールする](/install-agent-runtime) — インストールと検出の手順
 - [デーモンとランタイム](/daemon-runtimes) — ランタイムの登録と同時実行
+
+## ZCode
+
+ZCode はネイティブの NDJSON `app-server` プロトコルで、セッションの作成・再開・キャンセル、モデル検出、推論レベル、MCP に対応します。タスクは yolo モードで実行され、対話的なツール承認は求められません。推論レベルの選択肢はランタイムのモデルカタログから取得し、エージェント作成時には選択したモデルの既定値が維持されます。
+
+macOS では ZCode Desktop に同梱された CLI も自動検出します。Node.js のインストールが必要です。Linux でも ZCode Desktop を自動検出し、デスクトップウィンドウを開かずに同梱 CLI を実行します。Node.js の追加インストールや環境変数の手動設定は不要です。デスクトップアプリで有効になっている API-key/Coding Plan 接続を、プロセス専用の一時設定へ取り込みます。この設定は終了時に削除され、元のファイルは変更されません。Start Plan の認証トークンは API キーではなく、このアカウント認証方式には対応していません。モデルが検出されない場合は、ZCode Desktop で利用可能な API 接続を設定してください。

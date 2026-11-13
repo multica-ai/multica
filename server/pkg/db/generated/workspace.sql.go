@@ -96,6 +96,9 @@ cleared_outbound_cards AS (
     DELETE FROM channel_outbound_card_message
     WHERE chat_session_id IN (SELECT chat_session_id FROM cleared_chat_sessions)
 ),
+cleared_chat_submission_receipts AS (
+    DELETE FROM chat_submission_receipt WHERE chat_submission_receipt.workspace_id = $1
+),
 cleared_draft_restores AS (
     -- chat_draft_restore is keyed by chat_session_id with no FK (MUL-3515) and has
     -- no reaper, while its chat_session rows cascade away with the workspace. Reach
@@ -292,6 +295,46 @@ func (q *Queries) GetWorkspaceBySlug(ctx context.Context, slug string) (Workspac
 		&i.AvatarUrl,
 		&i.AttributionFailClosed,
 	)
+	return i, err
+}
+
+const healIssueCounter = `-- name: HealIssueCounter :one
+WITH target AS (
+    SELECT w.id, w.issue_counter,
+           (SELECT COALESCE(MAX(i.number), 0)::int FROM issue i WHERE i.workspace_id = w.id) AS max_number
+    FROM workspace w
+    WHERE w.id = $1
+)
+UPDATE workspace w SET issue_counter = t.max_number
+FROM target t
+WHERE w.id = t.id AND w.issue_counter < t.max_number
+RETURNING w.issue_counter AS issue_counter,
+          t.issue_counter AS previous_counter,
+          t.max_number AS max_number
+`
+
+type HealIssueCounterRow struct {
+	IssueCounter    int32 `json:"issue_counter"`
+	PreviousCounter int32 `json:"previous_counter"`
+	MaxNumber       int32 `json:"max_number"`
+}
+
+// Operator-shaped repair for a workspace whose issue_counter sits below
+// MAX(issue.number): something persisted a numbered issue row without this
+// counter ever being advanced for it. Deliberately a separate statement from
+// IncrementIssueCounter so a healthy create pays nothing for it, and scoped to
+// one workspace.
+//
+// The WHERE guard is what makes a retry meaningful: no row is updated, and sqlc
+// returns no row, unless the counter really is behind — so a collision caused by
+// anything else is never retried against the same taken number. It returns the
+// value it wrote, the value it replaced and the highest number the workspace
+// holds, so a repair can be logged with its before and after instead of leaving
+// no trace for whoever debugs the next occurrence.
+func (q *Queries) HealIssueCounter(ctx context.Context, id pgtype.UUID) (HealIssueCounterRow, error) {
+	row := q.db.QueryRow(ctx, healIssueCounter, id)
+	var i HealIssueCounterRow
+	err := row.Scan(&i.IssueCounter, &i.PreviousCounter, &i.MaxNumber)
 	return i, err
 }
 

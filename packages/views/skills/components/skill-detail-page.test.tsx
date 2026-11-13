@@ -106,8 +106,8 @@ vi.mock("../../rich-content", () => ({
     <div data-testid="preview">{content}</div>
   ),
 }));
-vi.mock("../../labels/resource-label-picker", () => ({
-  ResourceLabelPicker: () => <div data-testid="labels" />,
+vi.mock("../../issues/components/pickers/label-picker", () => ({
+  LabelPicker: () => <div data-testid="labels" />,
 }));
 vi.mock("./skill-list-actions", () => ({
   AddToAgentDialog: ({ open }: { open: boolean }) =>

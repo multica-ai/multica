@@ -310,6 +310,17 @@ archived statuses remain readable via an explicit status filter.
 
 ## Who else is running right now
 
+The issue sidebar's **Include sub-issues** checkbox uses
+`GET /api/issues/{id}/task-runs?scope=subtree` to show the current issue and
+every descendant at any depth. This is full, uncapped execution history with
+per-run usage and owning issue labels, never ancestors or siblings. It drives
+the sidebar totals, status indicators, spend chart, and complete Runs timeline.
+The Runs dialog inherits the sidebar scope when opened and provides its own
+checkbox beside the issue title. Changing it updates only the dialog; reopening
+the dialog inherits the sidebar selection again.
+The default endpoint still returns only the current issue. The subtree scope
+is separate from the active-only family coordination read below.
+
 Nothing about concurrent runs is pushed into your prompt: the answer changes
 while a turn is running, and most turns never need it. Ask the server on the
 turns that do — before opening a PR against code a sibling issue also touches:
@@ -360,6 +371,11 @@ Where content goes decides how it shows:
   a file card that opens in the viewer, **HTML included**: an uploaded
   `report.html` is a deliverable to open, not an inline chart. Use it for
   something the reader keeps or downloads.
+- **An attached image at a specific spot** — reference the attached path in
+  the body, e.g. `![Option A](./a.png)` with `--attachment ./a.png` in the same
+  call. The CLI rewrites that link to the uploaded file before posting, so the
+  image shows right there instead of at the end. Code spans and blocks are left
+  alone.
 
 For HTML that follows light / dark mode, style it with `var(--background)`,
 `var(--foreground)`, `var(--muted)`, `var(--muted-foreground)`, `var(--border)`,

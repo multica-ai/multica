@@ -1,14 +1,18 @@
 import type { ReactNode } from "react";
-import { act, fireEvent, screen } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useRailOrderStore } from "@multica/core/navigation";
 import { SidebarProvider, useSidebar } from "@multica/ui/components/ui/sidebar";
 import { renderWithI18n } from "../test/i18n";
 import { AppRail } from "./app-rail";
 import { AppShellProvider, useAppShell } from "./app-shell-context";
+import type { InboxItem } from "@multica/core/types";
 
 const state = vi.hoisted(() => ({
   pathname: "/acme/issues",
+  search: "",
+  inboxItems: undefined as InboxItem[] | undefined,
   appForeground: true,
   inboxUnread: 0,
   chatSessions: [] as { id: string; unread_count?: number }[],
@@ -27,7 +31,11 @@ vi.mock("../navigation", () => ({
       {children}
     </a>
   ),
-  useNavigation: () => ({ pathname: state.pathname, push: vi.fn() }),
+  useNavigation: () => ({
+    pathname: state.pathname,
+    searchParams: new URLSearchParams(state.search),
+    push: vi.fn(),
+  }),
 }));
 vi.mock("@multica/core/paths", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@multica/core/paths")>();
@@ -37,9 +45,14 @@ vi.mock("@multica/core/paths", async (importOriginal) => {
     useWorkspacePaths: () => actual.paths.workspace("acme"),
   };
 });
-vi.mock("@multica/core/inbox/queries", () => ({
-  useInboxUnreadCount: () => state.inboxUnread,
-}));
+vi.mock("@multica/core/inbox/queries", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@multica/core/inbox/queries")>();
+  return {
+    deduplicateInboxItems: actual.deduplicateInboxItems,
+    inboxListOptions: actual.inboxListOptions,
+    useInboxUnreadCount: () => state.inboxUnread,
+  };
+});
 vi.mock("@multica/core/chat/queries", () => ({
   chatSessionsOptions: (wsId: string) => ({
     queryKey: ["chat", wsId, "sessions"],
@@ -81,7 +94,8 @@ function renderRail(children?: ReactNode, rail: ReactNode = <AppRail />) {
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   });
   client.setQueryData(["chat", "ws-1", "sessions"], state.chatSessions);
-  return renderWithI18n(
+  if (state.inboxItems) client.setQueryData(["inbox", "ws-1", "list"], state.inboxItems);
+  const tree = () => (
     <QueryClientProvider client={client}>
       <SidebarProvider>
         <AppShellProvider>
@@ -90,8 +104,15 @@ function renderRail(children?: ReactNode, rail: ReactNode = <AppRail />) {
           {children}
         </AppShellProvider>
       </SidebarProvider>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
+  const result = renderWithI18n(tree());
+  const visit = (pathname: string, search = "") => {
+    state.pathname = pathname;
+    state.search = search;
+    result.rerender(tree());
+  };
+  return { ...result, client, visit };
 }
 
 const link = (href: string) => document.querySelector<HTMLAnchorElement>(`a[href="${href}"]`);
@@ -99,12 +120,18 @@ const countBadge = (href: string) => link(href)?.querySelector("number-flow-reac
 
 beforeEach(() => {
   state.pathname = "/acme/issues";
+  state.search = "";
+  state.inboxItems = undefined;
   state.appForeground = true;
   state.inboxUnread = 0;
   state.chatSessions = [];
   state.chat = { activeSessionId: null, isOpen: false };
   state.stuck = [];
+  useRailOrderStore.setState({ order: null });
 });
+
+const railOrder = () =>
+  Array.from(document.querySelectorAll<HTMLElement>("[data-rail-item]"), (item) => item.dataset.railItem);
 
 describe("AppRail global actions", () => {
   it("carries New issue and search by default", () => {
@@ -117,6 +144,36 @@ describe("AppRail global actions", () => {
     renderRail(undefined, <AppRail globalActions={false} />);
     expect(screen.queryByRole("button", { name: /^new issue$/i })).toBeNull();
     expect(screen.queryByRole("button", { name: "Search..." })).toBeNull();
+  });
+});
+
+describe("AppRail order", () => {
+  it("lists the spaces in the default order", () => {
+    renderRail();
+    expect(railOrder()).toEqual(["inbox", "work", "team", "chat", "autopilots"]);
+  });
+
+  it("follows the saved order", () => {
+    const order = ["chat", "inbox", "work", "team", "autopilots"] as const;
+    useRailOrderStore.getState().setOrder(order);
+    renderRail();
+    expect(railOrder()).toEqual(order);
+  });
+
+  // dnd-kit stops the release's click at the document without cancelling
+  // it, so the link would navigate natively even though React never sees it.
+  it("does not open the space released at the end of a drag", async () => {
+    renderRail();
+    const chat = link("/acme/chat")!;
+    const pointer = { isPrimary: true, button: 0, clientX: 30, clientY: 300 };
+    fireEvent.pointerDown(chat, pointer);
+    fireEvent.pointerMove(document, { ...pointer, clientY: 310 });
+    fireEvent.pointerUp(document, { ...pointer, clientY: 310 });
+
+    expect(fireEvent.click(chat)).toBe(false);
+
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(fireEvent.click(chat)).toBe(true);
   });
 });
 
@@ -143,6 +200,85 @@ describe("AppRail spaces", () => {
     state.pathname = "/acme/runtimes";
     renderRail();
     expect(link("/acme/agents")).toHaveAttribute("aria-current", "page");
+  });
+});
+
+describe("AppRail label disclosure", () => {
+  const tooltip = () => document.querySelector("[data-slot=tooltip-content]");
+
+  // jsdom does not lay out the rail: model a label too long for the item.
+  function clipLabel(el: HTMLElement) {
+    el.style.overflowX = "hidden";
+    Object.defineProperties(el, {
+      scrollWidth: { configurable: true, value: 90 },
+      clientWidth: { configurable: true, value: 44 },
+    });
+  }
+
+  it("names a space whose label is cut off even when it is already the full name", async () => {
+    renderRail();
+    const inbox = link("/acme/inbox")!;
+    clipLabel(within(inbox).getByText("Inbox"));
+    await act(async () => inbox.focus());
+    expect(tooltip()).toHaveTextContent("Inbox");
+  });
+
+  it("stays quiet when the full-name label fits", async () => {
+    renderRail();
+    await act(async () => link("/acme/inbox")!.focus());
+    expect(tooltip()).toBeNull();
+  });
+});
+
+function inboxItem(issueId: string, archived = false): InboxItem {
+  return {
+    id: `inbox-${issueId}`, workspace_id: "ws-1", recipient_type: "member",
+    recipient_id: "member-1", actor_type: "agent", actor_id: "agent-1",
+    type: "new_comment", severity: "info", issue_id: issueId,
+    title: "Issue title", body: null, issue_status: "done", issue_priority: "none",
+    read: true, archived, created_at: "2026-11-01T08:00:00Z", details: null,
+  };
+}
+
+// Read by space: an href query string trips the attribute-selector lookup.
+const inboxHref = () => document.querySelector('a[data-space="inbox"]')?.getAttribute("href");
+
+describe("AppRail inbox return", () => {
+  it("returns to the notification last opened while it is still in the inbox", () => {
+    state.inboxItems = [inboxItem("issue-x")];
+    const { visit } = renderRail();
+    visit("/acme/inbox", "issue=issue-x");
+    visit("/acme/issues/issue-x");
+    expect(inboxHref()).toBe("/acme/inbox?issue=issue-x");
+  });
+
+  // Regression: the inbox page replaces an unknown ?issue= with the issue
+  // itself, so a remembered selection that was archived since turned the
+  // Inbox item into a flash back to the issue on every click.
+  it("drops a remembered notification that has left the inbox", async () => {
+    state.inboxItems = [inboxItem("issue-x")];
+    const { client, visit } = renderRail();
+    visit("/acme/inbox", "issue=issue-x");
+    visit("/acme/issues/issue-x");
+    act(() => {
+      client.setQueryData(["inbox", "ws-1", "list"], [inboxItem("issue-x", true), inboxItem("issue-y")]);
+    });
+    await waitFor(() => expect(inboxHref()).toBe("/acme/inbox"));
+  });
+
+  it("leaves the selection to the inbox page when its list is not cached", () => {
+    const { visit } = renderRail();
+    visit("/acme/inbox", "issue=issue-x");
+    visit("/acme/issues/issue-x");
+    expect(inboxHref()).toBe("/acme/inbox?issue=issue-x");
+  });
+
+  it("keeps an archived-view selection, which resolves against its own list", () => {
+    state.inboxItems = [];
+    const { visit } = renderRail();
+    visit("/acme/inbox", "view=archived&issue=issue-x");
+    visit("/acme/issues/issue-x");
+    expect(inboxHref()).toBe("/acme/inbox?view=archived&issue=issue-x");
   });
 });
 

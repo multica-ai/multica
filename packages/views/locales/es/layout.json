@@ -35,6 +35,7 @@
     "docs": "Documentación",
     "changelog": "Registro de cambios",
     "discord": "Discord",
+    "star_on_github": "Dar una estrella en GitHub",
     "feedback": "Comentarios",
     "server_version": "Versión del servidor {{version}}"
   },
@@ -47,9 +48,6 @@
     "workspaces_label": "Espacios de trabajo",
     "create_workspace": "Crear espacio de trabajo",
     "pending_invitations_label": "Invitaciones pendientes",
-    "invitation_workspace_fallback": "Espacio de trabajo",
-    "invitation_join": "Unirse",
-    "invitation_decline": "Rechazar",
     "log_out": "Cerrar sesión",
     "new_issue": "Nueva tarea",
     "pinned_label": "Fijados",
@@ -78,6 +76,15 @@
       "learn_more": "Más información"
     }
   },
+  "star_prompt": {
+    "title_one": "{{agent}} ha completado {{count}} tarea",
+    "title_other": "{{agent}} ha completado {{count}} tareas",
+    "body": "Si Multica te resulta útil, una estrella en GitHub ayuda a que otros equipos lo descubran.",
+    "star": "Star",
+    "star_label": "Dar una Star a Multica en GitHub",
+    "later": "Ahora no",
+    "close": "Cerrar"
+  },
   "spaces": {
     "work": "Trabajo",
     "team": "Equipo"
@@ -85,20 +92,33 @@
   "rail": {
     "label": "Navegación de la app",
     "sheet_description": "Cambia de sección y de espacio de trabajo.",
-    "inbox": "Bandeja de entrada",
+    "inbox": "Bandeja",
     "work": "Trabajo",
     "team": "Equipo",
     "chat": "Chat",
     "autopilots": "Auto",
     "switch_workspace": "Cambiar de espacio de trabajo",
-    "invitation_from": "{{name}} te ha invitado",
     "pin_workspace": "Fijar espacio de trabajo",
     "unpin_workspace": "Desfijar espacio de trabajo",
     "open_in_new_window": "Abrir en una ventana nueva",
     "open_in_new_window_click": "Clic",
     "open_in_other_window": "Ya está abierto en otra ventana",
     "in_other_window": "Otra ventana",
-    "all_workspaces_open": "Todos los espacios de trabajo ya están abiertos en una ventana"
+    "all_workspaces_open": "Todos los espacios de trabajo ya están abiertos en una ventana",
+    "copy_link": "Copiar enlace",
+    "link_copied": "Enlace copiado",
+    "workspace_settings": "Ajustes del espacio de trabajo",
+    "mark_all_read": "Marcar todo como leído",
+    "mark_all_read_failed": "No se pudo marcar todo como leído",
+    "reset_order": "Restablecer el orden predeterminado",
+    "copy_workspace_link": "Copiar enlace del espacio de trabajo",
+    "workspace_meta_one": "{{slug}} · {{count}} miembro",
+    "workspace_meta_other": "{{slug}} · {{count}} miembros"
+  },
+  "bottom_bar": {
+    "label": "Barra de estado",
+    "working_one": "{{count}} agente trabajando",
+    "working_other": "{{count}} agentes trabajando"
   },
   "panels": {
     "work": {
@@ -121,6 +141,7 @@
       "assignee_me": "Yo",
       "assignee_my_agents": "Mis agentes",
       "assignee_me_and_my_agents": "Yo y mis agentes",
+      "assignee_projects_only": "Solo se aplica a las tareas que se muestran en Proyectos",
       "reset": "Restablecer",
       "load_more": "Cargar más",
       "show_less": "Mostrar menos",
@@ -138,9 +159,11 @@
       "view_actions": "Acciones de {{name}}",
       "view_copy_link": "Copiar enlace",
       "view_remove": "Quitar de la barra lateral",
+      "view_edit": "Editar vista",
       "view_rename": "Renombrar",
       "view_duplicate": "Duplicar",
-      "view_delete": "Eliminar vista"
+      "view_delete": "Eliminar vista",
+      "new_issue_here": "Nueva tarea en este proyecto"
     },
     "team": {
       "new_agent": "Nuevo agente",
@@ -148,6 +171,8 @@
       "stuck_one": "{{count}} ejecución esperando un runtime desconectado",
       "stuck_other": "{{count}} ejecuciones esperando un runtime desconectado",
       "working_now": "Trabajando ahora",
+      "show_more_agents": "Mostrar {{count}} más…",
+      "show_fewer_agents": "Mostrar menos",
       "running_tasks_one": "{{count}} ejecución en curso",
       "running_tasks_other": "{{count}} ejecuciones en curso",
       "all_agents": "Todos los agentes",
@@ -158,7 +183,8 @@
       "resources": "Recursos",
       "runtimes_online_one": "{{count}} en línea",
       "runtimes_online_other": "{{count}} en línea",
-      "invite_member": "Invitar miembro"
+      "invite_member": "Invitar miembro",
+      "open_issue": "Abrir {{identifier}}"
     },
     "autopilots": {
       "all": "Todas las automatizaciones",
@@ -175,6 +201,8 @@
       "dark": "Oscuro",
       "system": "Sistema"
     },
+    "mode": "Modo",
+    "appearance_settings": "Ajustes de apariencia",
     "language": "Idioma",
     "shortcuts": "Atajos de teclado"
   },
@@ -212,5 +240,19 @@
     "go_to_slide": "Ir a la diapositiva {{index}}",
     "previous": "Anterior",
     "next": "Siguiente"
+  },
+  "context_menu": {
+    "cut": "Cortar",
+    "copy": "Copiar",
+    "paste": "Pegar",
+    "select_all": "Seleccionar todo",
+    "add_to_dictionary": "Añadir al diccionario",
+    "open_link": "Abrir enlace en el navegador",
+    "copy_link_address": "Copiar dirección del enlace",
+    "copy_image": "Copiar imagen",
+    "copy_code": "Copiar código",
+    "copy_table": "Copiar tabla",
+    "copied": "Copiado",
+    "copy_failed": "No se pudo copiar"
   }
 }

@@ -158,8 +158,7 @@ export interface ListIssuesParams {
   /**
    * Filter by lifecycle category rather than by exact key, so one bucket holds
    * all concrete and custom statuses in that phase. Task views use exact
-   * status keys for their columns instead. The web client's
-   * `ApiClient.listIssues` does not send it.
+   * status keys for their columns instead.
    */
   status_category?: IssueStatusCategory;
   /** Multi-value form of `status_category`. OR within the field. */
@@ -176,6 +175,7 @@ export interface ListIssuesParams {
    */
   assignee_types?: IssueAssigneeType[];
   creator_id?: string;
+  created_by_user_id?: string;
   project_id?: string;
   /** Actor-aware table facets. OR within each field. */
   assignee_filters?: IssueActorRef[];
@@ -249,6 +249,7 @@ export interface ListGroupedIssuesParams {
   assignee_id?: string;
   assignee_ids?: string[];
   creator_id?: string;
+  created_by_user_id?: string;
   project_id?: string;
   /** See `ListIssuesParams.involves_user_id` — same semantics. */
   involves_user_id?: string;
@@ -379,6 +380,8 @@ export interface IssueTableFilters {
     end: string;
   };
   working_only?: boolean;
+  /** No visible running or queued work, matching the Inbox Idle filter. */
+  idle_only?: boolean;
   /** Match the running-task issue projection returned by
    *  `/api/working-agents`. An explicit empty list matches nothing. */
   working_issue_ids?: string[];
