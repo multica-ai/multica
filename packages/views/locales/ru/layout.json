@@ -43,6 +43,11 @@
     "loading_workspace": "Загрузка рабочего пространства…",
     "loading_named_prefix": "Загрузка"
   },
+  "realtime": {
+    "disconnected": "Обновления в реальном времени отключены",
+    "reconnecting": "Восстанавливаем обновления в реальном времени…",
+    "reconnect": "Переподключиться"
+  },
   "window": {
     "go_back": "Назад",
     "go_forward": "Вперёд",

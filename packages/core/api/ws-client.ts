@@ -12,10 +12,27 @@ const UNPARSEABLE_LOG_MAX_CHARS = 200;
 // Reconnect backoff parameters. A flat delay causes a thundering herd when many
 // clients reconnect after a server restart; exponential backoff with jitter
 // spreads the reconnection attempts over time. The client retries indefinitely
-// (capped at RECONNECT_MAX_DELAY_MS) because the web/desktop UI does not yet
-// expose a visible disconnected state or manual retry action.
+// (capped at RECONNECT_MAX_DELAY_MS).
 const RECONNECT_BASE_DELAY_MS = 1_000;
 const RECONNECT_MAX_DELAY_MS = 30_000;
+
+// Half-open detection. A socket can die without the browser ever noticing:
+// a NAT/proxy silently drops the idle connection, the OS sleeps and wakes,
+// or the network path changes (Wi-Fi ↔ VPN ↔ LAN). In every one of those
+// cases readyState stays OPEN, no close frame ever arrives, `onclose` never
+// fires, and the reconnect backoff above never starts — the UI shows live
+// data that has secretly stopped updating. Browsers handle the
+// protocol-level ping/pong invisible to JS, so the only health signal
+// available to application code is inbound traffic. The client therefore
+// sends its own {"type":"ping"} app-level frame (the server replies
+// {"type":"pong"}, server/internal/realtime/hub.go) every
+// HEARTBEAT_INTERVAL_MS — short enough to also keep an idle socket fed
+// under the server's 60s pongWait read deadline — and force-closes a socket
+// from which nothing (pong or business event) has arrived for
+// HEARTBEAT_SILENCE_TIMEOUT_MS. The 3x multiplier tolerates two missed
+// heartbeat replies, avoiding reconnect churn on brief network stalls.
+const HEARTBEAT_INTERVAL_MS = 45_000;
+const HEARTBEAT_SILENCE_TIMEOUT_MS = 3 * HEARTBEAT_INTERVAL_MS;
 
 function summarizeUnparseable(data: unknown): string {
   const text = typeof data === "string" ? data : String(data);
@@ -33,8 +50,12 @@ export interface WSClientIdentity {
   os?: string;
 }
 
-/** `connecting` covers the first attempt; any later attempt is `reconnecting`. */
-export type WSConnectionStatus = "connecting" | "connected" | "reconnecting";
+/** `connecting` is the first attempt; later attempts use `reconnecting`. */
+export type WSConnectionStatus =
+  | "connecting"
+  | "connected"
+  | "disconnected"
+  | "reconnecting";
 
 export class WSClient {
   private ws: WebSocket | null = null;
@@ -51,9 +72,13 @@ export class WSClient {
   // times per session, so we log the first drop and suppress the rest. Reset
   // on each connect() so a fresh connection logs once again.
   private badFrameLogged = false;
+  /** Interval sending app-level pings and checking the silence window. */
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  /** Epoch ms of the last inbound frame — any frame, parseable or not. */
+  private lastFrameAt: number | null = null;
   private onReconnectCallbacks = new Set<() => void>();
   private anyHandlers = new Set<(msg: WSMessage) => void>();
-  private status: WSConnectionStatus = "connecting";
+  private status: WSConnectionStatus = "disconnected";
   private statusListeners = new Set<() => void>();
   private logger: Logger;
 
@@ -87,8 +112,22 @@ export class WSClient {
   }
 
   connect() {
+    if (
+      this.status === "connecting" ||
+      this.status === "reconnecting" ||
+      this.status === "connected"
+    ) {
+      return;
+    }
+
     this.badFrameLogged = false;
-    this.setStatus(this.reconnectAttempt > 0 ? "reconnecting" : "connecting");
+    this.stopHeartbeat();
+    this.setStatus(
+      this.reconnectAttempt > 0 || this.hasConnectedBefore
+        ? "reconnecting"
+        : "connecting",
+    );
+
     const url = new URL(this.baseUrl);
     // Token is never sent as a URL query parameter — it would be logged by
     // proxies, CDNs, and browser history.  In cookie mode the HttpOnly cookie
@@ -103,12 +142,14 @@ export class WSClient {
     if (this.identity?.os)
       url.searchParams.set("client_os", this.identity.os);
 
-    this.ws = new WebSocket(url.toString());
+    const socket = new WebSocket(url.toString());
+    this.ws = socket;
 
-    this.ws.onopen = () => {
+    socket.onopen = () => {
+      if (this.ws !== socket) return;
       const token = this.getToken?.() ?? this.token;
       if (!this.cookieAuth && token) {
-        this.ws!.send(
+        socket.send(
           JSON.stringify({ type: "auth", payload: { token } }),
         );
         return;
@@ -117,7 +158,12 @@ export class WSClient {
       this.onAuthenticated();
     };
 
-    this.ws.onmessage = (event) => {
+    socket.onmessage = (event) => {
+      if (this.ws !== socket) return;
+      // Update before any parsing: even an unparseable frame is proof the
+      // TCP path is alive, which is all the half-open detection cares about.
+      this.lastFrameAt = Date.now();
+
       let msg: WSMessage;
       try {
         msg = JSON.parse(event.data as string) as WSMessage;
@@ -160,11 +206,15 @@ export class WSClient {
       }
     };
 
-    this.ws.onclose = () => {
+    socket.onclose = () => {
+      if (this.ws !== socket) return;
+      this.stopHeartbeat();
+      this.ws = null;
+      this.setStatus("disconnected");
       this.scheduleReconnect();
     };
 
-    this.ws.onerror = () => {
+    socket.onerror = () => {
       // Suppress — onclose handles reconnect; errors during StrictMode
       // double-fire are expected in dev and harmless.
     };
@@ -184,10 +234,11 @@ export class WSClient {
 
   /**
    * Schedule a reconnection attempt with exponential backoff and jitter.
-   * Retries indefinitely with a capped delay because the web/desktop UI
-   * does not yet expose a visible disconnected state or manual retry action.
+   * Retries indefinitely with a capped delay.
    */
   private scheduleReconnect() {
+    if (this.reconnectTimer) return;
+
     const base = Math.min(
       RECONNECT_BASE_DELAY_MS * 2 ** this.reconnectAttempt,
       RECONNECT_MAX_DELAY_MS,
@@ -200,15 +251,18 @@ export class WSClient {
     );
 
     this.reconnectAttempt++;
-    this.setStatus("reconnecting");
     this.logger.warn(
       `ws: disconnected, reconnecting in ${delay}ms (attempt ${this.reconnectAttempt})`,
     );
-    this.reconnectTimer = setTimeout(() => this.connect(), delay);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect();
+    }, delay);
   }
 
   private onAuthenticated() {
     this.logger.info("connected");
+    this.startHeartbeat();
     const recoveredConnection = this.hasConnectedBefore || this.reconnectAttempt > 0;
     this.reconnectAttempt = 0;
     this.setStatus("connected");
@@ -229,12 +283,58 @@ export class WSClient {
     this.hasConnectedBefore = true;
   }
 
+  /**
+   * Runs the half-open detection cycle: send an application-level ping, then
+   * check the silence window.
+   */
+  private startHeartbeat() {
+    this.stopHeartbeat();
+    this.lastFrameAt = Date.now();
+    this.heartbeatTimer = setInterval(() => {
+      this.sendPing();
+      this.checkHealth();
+    }, HEARTBEAT_INTERVAL_MS);
+  }
+
+  private stopHeartbeat() {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+  }
+
+  private sendPing() {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: "ping" }));
+    }
+  }
+
+  /**
+   * Force-closes a socket silent past the heartbeat window so recovery reuses
+   * the normal onclose → backoff → connect path. Public for visibility/online
+   * probes in the provider.
+   */
+  checkHealth() {
+    if (this.lastFrameAt === null) return;
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    const silentFor = Date.now() - this.lastFrameAt;
+    if (silentFor < HEARTBEAT_SILENCE_TIMEOUT_MS) return;
+    this.logger.warn(
+      `ws: no inbound frames for ${Math.round(silentFor / 1000)}s` +
+        ` (>${Math.round(HEARTBEAT_SILENCE_TIMEOUT_MS / 1000)}s heartbeat window),` +
+        " closing suspected half-open connection",
+    );
+    this.ws.close();
+  }
+
   /** Close the socket the way a network drop would; the usual reconnect follows. */
   drop() {
     this.ws?.close();
   }
 
   disconnect() {
+    this.stopHeartbeat();
+    this.lastFrameAt = null;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -246,6 +346,7 @@ export class WSClient {
       this.ws.close();
       this.ws = null;
     }
+    this.setStatus("disconnected");
     this.hasConnectedBefore = false;
     this.reconnectAttempt = 0;
     this.handlers.clear();
@@ -269,6 +370,16 @@ export class WSClient {
     if (this.status === next) return;
     this.status = next;
     for (const listener of this.statusListeners) listener();
+  }
+
+  /** Cancel pending backoff and start a new connection attempt immediately. */
+  reconnect() {
+    if (this.status !== "disconnected") return;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.connect();
   }
 
   on(event: WSEventType, handler: EventHandler) {
