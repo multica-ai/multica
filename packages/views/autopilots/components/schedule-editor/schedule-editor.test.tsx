@@ -22,6 +22,7 @@ vi.setConfig({ testTimeout: 15_000 });
 const previewFailure = {
   transport: false,
   unreadable: false,
+  legacyRouteMismatch: false,
   badTimezone: false,
   // A 400 whose code the editor does not know. The endpoint only ever sends
   // invalid_cron and invalid_timezone today, but a rejection it cannot classify
@@ -52,6 +53,7 @@ vi.mock("@multica/core/autopilots/queries", () => ({
       tz,
       previewFailure.transport,
       previewFailure.unreadable,
+      previewFailure.legacyRouteMismatch,
       previewFailure.badTimezone,
       previewFailure.unknownCode,
       previewFailure.expired,
@@ -65,6 +67,11 @@ vi.mock("@multica/core/autopilots/queries", () => ({
       }
       if (previewFailure.transport) {
         throw new ApiError("API error: 500 Internal Server Error", 500, "Internal Server Error");
+      }
+      if (previewFailure.legacyRouteMismatch) {
+        throw new ApiError("invalid autopilot id", 400, "Bad Request", {
+          error: "invalid autopilot id",
+        });
       }
       if (previewFailure.badTimezone) {
         throw new ApiError(`invalid timezone "${tz}"`, 400, "Bad Request", {
@@ -495,6 +502,20 @@ describe("ScheduleEditor", () => {
       expect(screen.getByTestId("valid-out").textContent).toBe("true");
     } finally {
       previewFailure.transport = false;
+    }
+  });
+
+  it("explains an older backend cron-preview mismatch without rejecting a valid cron", async () => {
+    previewFailure.legacyRouteMismatch = true;
+    try {
+      renderEditor(cron("0 10 * * *"));
+      await waitFor(() =>
+        expect(screen.getByText(/backend does not support schedule preview/)).toBeInTheDocument(),
+      );
+      expect(screen.queryByText("This cron expression isn't valid.")).not.toBeInTheDocument();
+      expect(screen.getByTestId("valid-out").textContent).toBe("true");
+    } finally {
+      previewFailure.legacyRouteMismatch = false;
     }
   });
 
