@@ -7,6 +7,7 @@ import {
   type SetStateAction,
 } from "react";
 import {
+  applyDraftRuntimeChange,
   fromStoredAgentDraft,
   manualDraftOwner,
   setManualDraftEntry,
@@ -39,8 +40,11 @@ export function useManualDraftSync(options: {
   /** False until a duplicate has finished seeding; saving before then would
    *  persist the empty form the seed is about to replace. */
   ready: boolean;
+  /** The runtime chosen in step 1. It outranks the stored draft's, whose
+   *  per-runtime fields are dropped when the two differ. */
+  runtimeId?: string | null;
 }): void {
-  const { duplicateId, draft, setDraft, ready } = options;
+  const { duplicateId, draft, setDraft, ready, runtimeId } = options;
   const owner = manualDraftOwner(duplicateId);
 
   const setStored = useManualAgentDraftStore((state) => state.setDraft);
@@ -52,10 +56,15 @@ export function useManualDraftSync(options: {
     // subscription would re-fire it on every keystroke's own write.
     const persisted = useManualAgentDraftStore.getState().draft.byOwner[owner];
     if (persisted) {
-      setDraft(fromStoredAgentDraft(persisted.draft, persisted.runtimeId));
+      const stored = fromStoredAgentDraft(persisted.draft, persisted.runtimeId);
+      setDraft(
+        runtimeId && runtimeId !== stored.runtimeId
+          ? applyDraftRuntimeChange(stored, runtimeId)
+          : stored,
+      );
     }
     setRestored(true);
-  }, [owner, ready, restored, setDraft]);
+  }, [owner, ready, restored, runtimeId, setDraft]);
 
   useEffect(() => {
     if (!restored) return;

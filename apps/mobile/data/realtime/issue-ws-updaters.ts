@@ -1,29 +1,9 @@
 /**
- * Mobile-owned WS cache patchers for the issue domain. These are pure
- * functions over `QueryClient` — no React, no WS plumbing. The hooks in
- * `use-issue-realtime.ts` and `use-my-issues-realtime.ts` translate WS
- * events into calls into this module.
- *
- * Why mobile-owned (and not importing from packages/core/issues/ws-updaters):
- *   - Web's updaters reference `issueKeys` from `packages/core/issues/queries`,
- *     a different runtime instance than mobile's `data/queries/issue-keys.ts`.
- *     TanStack Query keys are compared structurally so this would *appear*
- *     to work, but binding cache mutation to a foreign key factory invites
- *     drift the moment either side adjusts its key shape.
- *   - Mobile cache shapes are simpler: no status-bucketed list, no children
- *     subtree, no childProgress, no label-byIssue cache. A direct mirror
- *     would be ~120 lines of conditional dead-code paths.
- *
- * Cache shapes (the design contract here):
- *   - Issue detail:    Issue                                  (keyed by detail(wsId, id))
- *   - Issue timeline:  TimelineEntry[]                        (keyed by timeline(wsId, id))
- *                      ASC oldest-first; new entries inserted at sorted position.
- *   - My Issues list:  Issue[]                                (keyed by myList(wsId, scope, filter))
- *                      Multiple list caches per wsId (one per scope/filter combo).
- *                      Patch ALL of them via setQueriesData on myAll(wsId).
- *   - Workspace list:  Issue[]                                (keyed by list(wsId))
- *                      Single cache per wsId (no scope/filter in the key —
- *                      filtering happens client-side off the same list).
+ * Mobile-owned issue cache patchers, called by record and listing subscriptions.
+ * Use mobile's key factories and cache shapes rather than web's bucketed caches.
+ * Detail stores an Issue; timelines store chronological TimelineEntry arrays;
+ * My Issues stores one Issue array per scope/filter and patches all matching keys;
+ * the workspace list stores a single client-filtered Issue array.
  */
 import type { QueryClient } from "@tanstack/react-query";
 import type {
@@ -122,9 +102,7 @@ function acceptsRevision(current: number | undefined, incoming: number | undefin
   return incoming !== undefined && incoming >= current;
 }
 
-// =====================================================
 // Issue detail cache (single Issue per id)
-// =====================================================
 
 export function patchIssueDetail(
   qc: QueryClient,
@@ -233,9 +211,7 @@ export function invalidateIssueAfterReconnect(
   qc.invalidateQueries({ queryKey: issueKeys.tasks(wsId, issueId) });
 }
 
-// =====================================================
 // Issue timeline (flat TimelineEntry[], ASC oldest-first)
-// =====================================================
 
 export function appendTimelineEntry(
   qc: QueryClient,
@@ -385,9 +361,7 @@ export function removeCommentCascade(
   );
 }
 
-// =====================================================
 // My Issues list (flat Issue[] across many keys)
-// =====================================================
 
 export function patchMyIssuesList(
   qc: QueryClient,
@@ -420,9 +394,7 @@ export function removeFromMyIssuesList(
   );
 }
 
-// =====================================================
 // Workspace Issues list (flat Issue[] under list(wsId))
-// =====================================================
 
 export function patchIssuesList(
   qc: QueryClient,
@@ -464,9 +436,7 @@ export function removeFromIssuesList(
   );
 }
 
-// =====================================================
 // Reactions
-// =====================================================
 
 export function addCommentReaction(
   qc: QueryClient,
@@ -599,9 +569,7 @@ export function removeIssueReaction(
   );
 }
 
-// =====================================================
 // Labels
-// =====================================================
 
 export function patchIssueLabels(
   qc: QueryClient,
@@ -637,9 +605,7 @@ export function patchIssueLabels(
   onIssueAuxiliaryRevision(qc, wsId, issueId, issueRevision, "labels");
 }
 
-// =====================================================
 // Helpers — payload normalization
-// =====================================================
 
 /**
  * Convert a Comment WS payload into a TimelineEntry. The two types share

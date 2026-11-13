@@ -6,6 +6,7 @@ import (
 	"context"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -140,6 +141,75 @@ func runClaudeCancellationTest(t *testing.T, script string) {
 
 	// The leader and the grandchild must both be gone — cancellation reaped the
 	// whole group, leaving no orphan spinning.
+	for _, pid := range pids {
+		waitProcessGone(t, pid)
+	}
+}
+
+// claudeErrorResultFakeScript impersonates claude after a spent session limit
+// while a background task is still running: it reports an error result, then
+// stays alive (as the CLI does until its background tasks end) with a
+// grandchild standing in for the never-ending background command.
+func claudeErrorResultFakeScript() string {
+	return "#!/bin/sh\n" + "trap 'exit 0' TERM\n" +
+		`( sleep 300 ) &
+child=$!
+if [ -n "$CLAUDE_PID_FILE" ]; then
+  printf '%s %s\n' "$$" "$child" > "$CLAUDE_PID_FILE"
+fi
+printf '{"type":"system","session_id":"ses_fake"}\n'
+printf '{"type":"result","subtype":"success","is_error":true,"result":"You'"'"'ve hit your session limit · resets 2pm (UTC)","session_id":"ses_fake"}\n'
+while true; do
+  sleep 0.1
+done
+`
+}
+
+// TestClaudeErrorResultTerminatesLingeringProcess verifies that a claude which
+// keeps running after an error result (it waits for a background task) is
+// stopped after the grace period: the run fails with the result's error
+// instead of hanging until the background task ends.
+func TestClaudeErrorResultTerminatesLingeringProcess(t *testing.T) {
+	claudeErrorResultGraceNanos.Store(int64(200 * time.Millisecond))
+	t.Cleanup(func() { claudeErrorResultGraceNanos.Store(0) })
+
+	tempDir := t.TempDir()
+	pidFile := filepath.Join(tempDir, "pids")
+	fakePath := filepath.Join(tempDir, "claude")
+	writeTestExecutable(t, fakePath, []byte(claudeErrorResultFakeScript()))
+
+	backend, err := New("claude", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env:            map[string]string{"CLAUDE_PID_FILE": pidFile},
+	})
+	if err != nil {
+		t.Fatalf("new claude backend: %v", err)
+	}
+
+	session, err := backend.Execute(context.Background(), "prompt-ignored", ExecOptions{Cwd: tempDir})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	pids := waitForPids(t, pidFile)
+
+	select {
+	case res := <-session.Result:
+		if res.Status != "failed" {
+			t.Errorf("status = %q, want failed", res.Status)
+		}
+		if !strings.Contains(res.Error, "hit your session limit") {
+			t.Errorf("error = %q, want the result's session limit text", res.Error)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Execute did not return after an error result while claude kept running")
+	}
+
 	for _, pid := range pids {
 		waitProcessGone(t, pid)
 	}

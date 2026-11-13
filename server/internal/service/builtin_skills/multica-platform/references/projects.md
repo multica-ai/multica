@@ -11,6 +11,8 @@ display metadata; it is context later injected into task briefs and
 - [When to add a resource](#when-to-add-a-resource)
 - [Debugging wrong context](#debugging-wrong-context)
 - [Side effects](#side-effects)
+- [Project workflows](#project-workflows)
+- [Reading and changing workflows](#reading-and-changing-workflows)
 
 ## Core model
 
@@ -153,3 +155,90 @@ is task-local checkout state.
 Project create/update/delete/status and project resource add/update/remove
 mutate durable workspace state and affect future tasks. Ask before changing
 `local_directory` unless the user explicitly requested that exact local path.
+
+## Project workflows
+
+A project can use a workflow: its ordered status columns, where a column may
+hand the issue off to a handler — a fixed agent, squad or member, the project
+lead, or the issue's creator. When the issue's project uses one, the per-turn
+prompt carries a `[Project workflow]` block. Its statuses and commands are
+the whole status contract for this issue: the built-in moves in the issues
+reference (`in_progress` on start, `in_review` on delivery) do not apply.
+
+- **The step's scope is its instructions.** A step that hands off carries the
+  instructions its owner wrote; that is the work for this run. A step
+  without them asks for nothing beyond the issue itself. Do not infer a stage
+  from a column's name — `todo` is not "research" and `in_progress` is not
+  "build" unless the instructions say so.
+
+- **Only the workflow's keys.** A named workflow accepts only its own
+  statuses; any other status write fails with `status_not_in_workflow`, and
+  the error lists the allowed keys. The workspace Default workflow accepts
+  every status, so issues on statuses it no longer lists keep working.
+- **Changing the status is the handoff.** Entering a column that hands off
+  reassigns the issue to that column's handler and starts their run; a member
+  handler is assigned and runs nothing. Nothing advances the status when a run
+  ends: finishing a step means moving the issue to the next status yourself,
+  with the command the block names. A column can also name a "needs changes"
+  status that sends the issue back.
+- **Entering a step you handle starts your run.** Even when your own run makes
+  the move, a run for the new step queues behind the current one, and the
+  write skips your own event wakeups so one change starts one run. Do not add
+  a wakeup to catch it.
+- **A step without a handler starts nothing.** Entering it keeps the
+  assignee and queues no run. If you move the issue into such a step and its
+  work is still yours, keep working in this run; ending the run there leaves
+  the issue waiting for someone to pick it up.
+- **A run works one step.** A run is bound to the status the issue was at when
+  it was queued, and moves along with your own status changes. If someone else
+  moves the issue while you work, your status changes are refused with
+  `workflow_step_moved`, naming who moved it. Do not retry; comment if
+  something still needs attention.
+- **The assignee owns the step.** Only the issue's assignee gets the step's
+  instructions and commands. Any other agent on the issue — mentioned in a
+  comment, say — sees the statuses and leaves them to the assignee unless
+  explicitly asked to change them.
+- **No `blocked` column.** When the workflow has none, comment why you cannot
+  proceed, then use the "needs changes" status if the step has one, or leave
+  the status as it is.
+
+## Reading and changing workflows
+
+Use these only when the task is about the workflow itself: who handles a
+status, a step's instructions, or which workflow a project uses. Working an
+issue inside a workflow needs none of them.
+
+- Read first: `multica workflow list`, `multica workflow get <workflow>`
+  (an ID, ID prefix, exact name, or `default`), and
+  `multica project workflow get <project-id>`, which returns the effective
+  workflow with `uses_default: true` when the project has none set.
+- One step: `multica workflow handoff set <workflow> <status-key>` with
+  `--handler` (`none`, `project_lead`, `creator`, or a member/agent/squad),
+  `--instructions` / `--instructions-file`, `--next`, `--back`. Flags you do
+  not pass keep their current value. The change applies to every project on
+  that workflow; `--copy-for-project <project-id>` saves it on a copy only that
+  project uses.
+- Whole workflow: `multica workflow create|update --steps-file <json>`
+  replaces all steps; `multica workflow delete` is refused for Default and for
+  a workflow a project still uses.
+- Status catalog: a step's `new_status` may carry `icon` (`dotted`, `circle`,
+  `half`, `three_quarters`, `check`, `slash`, `cross`; empty keeps the category
+  default), so a definition applied in a fresh workspace renders the glyph its
+  author declared. The field applies only when the status is created — a
+  status that already exists by name is reused unchanged. Repair an existing
+  catalog row, including on a workspace that synced before the field was
+  declared, with `multica issue-status update <key-or-name> --icon <value>`
+  (`--icon ""` resets it), and read the catalog with `multica issue-status
+  list`. These commands edit the workspace catalog, not a workflow, and need
+  workspace owner/admin.
+- Switching: `multica project workflow set <project-id> <workflow|default>`.
+  Run it with `--dry-run` first. Issues on statuses the target lacks need
+  `--map old=new`; a missing mapping fails with
+  `workflow_status_mapping_required` and the plan. Pick each target from the
+  plan or ask; never guess. The move neither reassigns issues nor starts runs.
+- Permissions are the server's: editing or deleting a workflow needs its owner
+  or a workspace admin, switching a project needs an admin or the project
+  lead. A 403 is the answer, not something to work around.
+
+All of these except the reads change what every later issue in those projects
+does. Ask before running one the user did not request.

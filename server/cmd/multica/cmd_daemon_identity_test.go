@@ -93,7 +93,13 @@ func serveHealthAsPID(t *testing.T, profile string, reports map[string]any, pid 
 	if err != nil {
 		t.Skipf("health port %d for profile %q is busy on this machine: %v", port, profile, err)
 	}
-	stub := &stubDaemon{port: port}
+	return serveStubDaemon(t, ln, reports, pid)
+}
+
+// serveStubDaemon serves the stub daemon on ln, which the stub then owns.
+func serveStubDaemon(t *testing.T, ln net.Listener, reports map[string]any, pid int) *stubDaemon {
+	t.Helper()
+	stub := &stubDaemon{port: ln.Addr().(*net.TCPAddr).Port}
 
 	body := map[string]any{"status": "running", "pid": pid, "uptime": "1h0m0s", "cli_version": "v0.4.23"}
 	for k, v := range reports {
@@ -180,7 +186,6 @@ func TestDaemonLifecycleRefusesForeignDaemon(t *testing.T) {
 	}{
 		{"stop", func(c *cobra.Command) error { return runDaemonStop(c, nil) }},
 		{"restart", func(c *cobra.Command) error { return runDaemonRestart(c, nil) }},
-		{"start", func(c *cobra.Command) error { return runDaemonBackground(c) }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -202,6 +207,18 @@ func TestDaemonLifecycleRefusesForeignDaemon(t *testing.T) {
 				t.Fatalf("mismatch = %+v, want got=collide-ab want=collide-ba", mismatch)
 			}
 		})
+	}
+}
+
+func TestDaemonStartCanFallBackFromForeignProfilePort(t *testing.T) {
+	clearDaemonTaskEnv(t)
+	mkProfiles(t, "collide-ab", "collide-ba")
+	serveHealthAs(t, "collide-ab", map[string]any{"profile": "collide-ab"})
+	cmd := daemonStatusCmdFor(t, "collide-ba", "")
+	cmd.Flags().Bool("foreground", false, "")
+	err := runDaemonBackground(cmd)
+	if err == nil || !strings.Contains(err.Error(), "not logged in") {
+		t.Fatalf("start error = %v, want auth check after allowing a fallback port", err)
 	}
 }
 
@@ -325,6 +342,59 @@ func TestDaemonStatusShowsWhoManagesTheDaemon(t *testing.T) {
 // so verifying identity would compare that empty profile against a named-
 // profile host and report a phantom conflict — breaking the standing contract
 // that `daemon status` in a task reports on the daemon hosting it.
+func TestDaemonStatusJSONPreservesServingCLICommitWithoutFallback(t *testing.T) {
+	// The command's embedded revision must not replace the serving process's value.
+	servingCommit := strings.Repeat("a", 40)
+	if servingCommit == buildCommit {
+		servingCommit = strings.Repeat("b", 40)
+	}
+	for _, tc := range []struct {
+		name    string
+		present bool
+		value   string
+	}{
+		{"serving revision", true, servingCommit},
+		{"unknown", true, "unknown"},
+		{"empty", true, ""},
+		{"older daemon", false, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			clearDaemonTaskEnv(t)
+			mkProfiles(t, "commit-test")
+			health := map[string]any{
+				"profile": "commit-test", "daemon_id": "daemon-test",
+				"server_url": "https://api.example.test", "cli_version": "v9.9.9",
+			}
+			if tc.present {
+				health["cli_commit"] = tc.value
+			}
+			serveHealthAs(t, "commit-test", health)
+			out, err := captureStdout(t, func() error {
+				return runDaemonStatus(daemonStatusCmdFor(t, "commit-test", "json"), nil)
+			})
+			if err != nil {
+				t.Fatalf("runDaemonStatus: %v", err)
+			}
+			var payload map[string]any
+			if err := json.Unmarshal([]byte(out), &payload); err != nil {
+				t.Fatalf("decode status JSON: %v", err)
+			}
+			got, present := payload["cli_commit"]
+			if present != tc.present || tc.present && got != tc.value {
+				t.Fatalf("cli_commit: got %v, present %v; want %q, present %v", got, present, tc.value, tc.present)
+			}
+			for key, want := range health {
+				if payload[key] != want {
+					t.Errorf("%s: got %v, want %v", key, payload[key], want)
+				}
+			}
+			if payload["status"] != "running" {
+				t.Fatalf("status: got %v, want running", payload["status"])
+			}
+		})
+	}
+}
+
 func TestDaemonStatusInTaskContextReportsNamedProfileHost(t *testing.T) {
 	setup := func(t *testing.T) {
 		t.Helper()

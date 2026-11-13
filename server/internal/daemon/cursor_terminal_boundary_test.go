@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/pkg/agent"
+	"github.com/multica-ai/multica/server/pkg/awakeclock"
 )
 
 // The ordering both tests below pin is the one that loses a completed run:
@@ -35,7 +36,7 @@ func TestIdleWatchdogYieldsToTerminalObservedDuringCleanup(t *testing.T) {
 		var last, threshold atomic.Int64
 		var fired atomic.Bool
 		var terminal atomic.Bool
-		last.Store(time.Now().UnixNano())
+		last.Store(int64(awakeclock.Now()))
 
 		// A held background tool: in flight, and its activity never moves.
 		tools := func() int32 { return 1 }
@@ -86,7 +87,7 @@ func (b *terminalRaceBackend) Execute(ctx context.Context, _ string, _ agent.Exe
 	var nativeCount atomic.Int32
 	var nativeActivity atomic.Int64
 	nativeCount.Store(1)
-	nativeActivity.Store(time.Now().UnixNano())
+	nativeActivity.Store(int64(awakeclock.Now()))
 	messages <- agent.Message{Type: agent.MessageToolUse, Tool: "shell", CallID: "bg"}
 
 	go func() {
@@ -105,7 +106,7 @@ func (b *terminalRaceBackend) Execute(ctx context.Context, _ string, _ agent.Exe
 	return &agent.Session{
 		Messages:         messages,
 		Result:           results,
-		ToolActivity:     func() (int32, time.Time) { return nativeCount.Load(), time.Unix(0, nativeActivity.Load()) },
+		ToolActivity:     func() (int32, time.Duration) { return nativeCount.Load(), time.Duration(nativeActivity.Load()) },
 		TerminalObserved: b.terminal.Load,
 		InterruptBackgroundTools: func() bool {
 			b.interrupts.Add(1)
@@ -188,7 +189,7 @@ func (b *lateTerminalBackend) Execute(ctx context.Context, _ string, _ agent.Exe
 	var nativeCount atomic.Int32
 	var nativeActivity atomic.Int64
 	nativeCount.Store(1)
-	nativeActivity.Store(time.Now().UnixNano())
+	nativeActivity.Store(int64(awakeclock.Now()))
 	messages <- agent.Message{Type: agent.MessageToolUse, Tool: "shell", CallID: "bg"}
 
 	go func() {
@@ -209,7 +210,7 @@ func (b *lateTerminalBackend) Execute(ctx context.Context, _ string, _ agent.Exe
 	return &agent.Session{
 		Messages:         messages,
 		Result:           results,
-		ToolActivity:     func() (int32, time.Time) { return nativeCount.Load(), time.Unix(0, nativeActivity.Load()) },
+		ToolActivity:     func() (int32, time.Duration) { return nativeCount.Load(), time.Duration(nativeActivity.Load()) },
 		TerminalObserved: b.terminal.Load,
 		// Nothing can be released: cleanup could not confirm ownership.
 		InterruptBackgroundTools: func() bool { return false },

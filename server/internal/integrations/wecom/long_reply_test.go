@@ -19,6 +19,7 @@ package wecom
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"regexp"
 	"strconv"
 	"strings"
@@ -29,6 +30,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -824,4 +826,301 @@ func visibleOnly(s string) string {
 		}
 	}
 	return b.String()
+}
+
+// readableInBubble is everything the person can read of a bubbled answer: what
+// the sealed bubble holds, then the messages underneath it, in order.
+func readableInBubble(t *testing.T, rig *bubbleRig) []string {
+	t.Helper()
+	var readable []string
+	for _, s := range rig.conn.streamFrames(t) {
+		if s["finish"] == true {
+			readable = append(readable, s["content"].(string))
+		}
+	}
+	if len(readable) == 0 {
+		t.Fatal("the bubble was never sealed, so it spins forever and the answer is nowhere")
+	}
+	for _, push := range rig.conn.pushes(t) {
+		readable = append(readable, pushText(push))
+	}
+	return readable
+}
+
+func assertWholeAnswer(t *testing.T, readable []string, answer string) {
+	t.Helper()
+	whole := reassemble(readable)
+	if strings.HasSuffix(readable[0], "…") {
+		t.Fatalf("the bubble was clipped to fit one frame and ends in an ellipsis; "+
+			"%d of %d bytes are readable", len(whole), len(answer))
+	}
+	if whole != answer {
+		t.Fatalf("the person can read %d bytes of a %d-byte answer", len(whole), len(answer))
+	}
+	for i, part := range readable {
+		if len(part) > sendMsgContentLimit {
+			t.Fatalf("part %d is %d bytes, past the %d-byte cap", i+1, len(part), sendMsgContentLimit)
+		}
+	}
+}
+
+// A closing stream frame is capped at the same 20480 bytes as a message and is
+// CLIPPED to fit rather than refused (truncateStreamContent): the answer looks
+// complete, ends in an ellipsis, and the rest exists nowhere the reader can get
+// to. The bubble holds what one frame can and the rest follows underneath.
+//
+// REVERSE VERIFICATION: seal the whole text in deliverAnswer instead of
+// splitting it, and this reads 20478 of the answer's 67584 bytes, ending in "…".
+func TestALongAnswerInABubbleIsReadableToTheEnd(t *testing.T) {
+	t.Parallel()
+	rig := newBubbleRig(t)
+	rig.ask(t, "REQ-LONG")
+	rig.queued(t, "task-1")
+
+	answer := aLongAnswer()
+	rig.answer(t, answer, "task-1")
+
+	assertWholeAnswer(t, readableInBubble(t, rig), answer)
+}
+
+// The common answer is still one sealed bubble and nothing else: a follow-up
+// message under a short reply would be a new defect, not a fix.
+func TestABubbleThatStillFitsIsNotSplit(t *testing.T) {
+	t.Parallel()
+	rig := newBubbleRig(t)
+	rig.ask(t, "REQ-SHORT")
+	rig.queued(t, "task-1")
+	rig.answer(t, "答案是 42", "task-1")
+
+	if n := len(rig.conn.pushes(t)); n != 0 {
+		t.Fatalf("a short answer produced %d message(s) under the bubble, want none", n)
+	}
+}
+
+// The relayed path seals the same bubble with the same answer, so it has to
+// make the same split: which replica produced the completion must not decide
+// whether the reader gets the end of it.
+//
+// REVERSE VERIFICATION: seal the whole text in deliverRelayed instead of
+// splitting it, and this reads one clipped frame of 20478 bytes.
+func TestALongRelayedAnswerInABubbleIsReadableToTheEnd(t *testing.T) {
+	t.Parallel()
+	rig := newBubbleRig(t)
+	rig.ran(t, "REQ-RELAY-LONG", "task-1")
+
+	answer := aLongAnswer()
+	res := rig.out.deliverRelayed(context.Background(), relayFrame{
+		Kind:           relayKindReply,
+		InstallationID: util.UUIDToString(rig.instID),
+		ChatID:         "CHAT_1",
+		ChatType:       chatTypeGroupInt,
+		Content:        answer,
+		TaskID:         taskUUID(t, "task-1"),
+		SessionID:      bubbleSession,
+	})
+	if res.outcome != outcomeDone {
+		t.Fatalf("outcome = %v, want outcomeDone", res.outcome)
+	}
+	assertWholeAnswer(t, readableInBubble(t, rig), answer)
+}
+
+// A piece under the bubble that cannot be sent leaves the reader with the head
+// of the answer, which is what sendTextCtx's own split reports as delivered
+// (errPartiallySent). The bubbled answer counts the same way: a drop tells an
+// operator to resend, and a resend prints the head twice.
+//
+// REVERSE VERIFICATION: record a drop when a piece under the bubble fails, and
+// this reports outbound_dropped = 1.
+func TestALongBubbledAnswerWhoseRestFailsStillCountsDelivered(t *testing.T) {
+	t.Parallel()
+	rig := newBubbleRig(t)
+	mx := newCountingMetrics()
+	rig.out.metrics = mx
+	rig.conn.failPushWrite = errors.New("broken pipe")
+	rig.ask(t, "REQ-LONG-FAIL")
+	rig.queued(t, "task-1")
+
+	rig.answer(t, aLongAnswer(), "task-1")
+
+	readable := readableInBubble(t, rig)
+	if strings.HasSuffix(readable[0], "…") {
+		t.Fatal("the bubble was clipped; the head is supposed to fit whole")
+	}
+	assertPartialCounted(t, mx, "a bubble whose second piece could not be sent")
+}
+
+// waitForChatWaiters returns once n callers hold or are queued on the chat's
+// lock. A caller counts from the moment it registers, which is before it waits.
+func waitForChatWaiters(t *testing.T, s *wsSender, chatID string, n int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		s.chats.mu.Lock()
+		got := 0
+		if l := s.chats.locks[chatID]; l != nil {
+			got = l.refs
+		}
+		s.chats.mu.Unlock()
+		if got >= n {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d caller(s) on chat %s's lock, want %d", got, chatID, n)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// The pieces under a bubble are one answer, so nothing else pushed to the same
+// chat may land between them: with two long answers, or a file or an inbox card
+// arriving while the rest goes out, the reader could no longer tell whose (2/4)
+// is whose. sendTextCtx holds the chat for every piece of a split answer;
+// sendRest has to hold it the same way.
+//
+// Another push is queued on the chat while the first piece under the bubble
+// waits for its verdict, which is the moment a lock taken piece by piece is
+// let go.
+//
+// REVERSE VERIFICATION: send the rest one sendTextCtx per piece, and the other
+// push reads second, between (2/4) and (3/4).
+func TestNothingLandsBetweenThePiecesUnderABubble(t *testing.T) {
+	t.Parallel()
+	rig := newBubbleRig(t)
+	rig.ask(t, "REQ-LONG-LOCK")
+	rig.queued(t, "task-1")
+
+	sender := rig.senders.get(rig.instID)
+	other := make(chan error, 1)
+	rig.conn.onPush = func(n int) {
+		if n != 1 {
+			return
+		}
+		go func() {
+			other <- rig.senders.sendTextCtx(context.Background(), rig.instID, "CHAT_1", chatTypeSingleInt, "another message")
+		}()
+		waitForChatWaiters(t, sender, "CHAT_1", 2)
+	}
+
+	answer := aLongAnswer()
+	rig.answer(t, answer, "task-1")
+	if err := <-other; err != nil {
+		t.Fatalf("the other push: %v", err)
+	}
+
+	var texts []string
+	for _, push := range rig.conn.pushes(t) {
+		texts = append(texts, pushText(push))
+	}
+	if len(texts) < 3 {
+		t.Fatalf("%d messages under the bubble, want the rest of the answer and the other push", len(texts))
+	}
+	if last := texts[len(texts)-1]; last != "another message" {
+		at := -1
+		for i, text := range texts {
+			if text == "another message" {
+				at = i
+			}
+		}
+		t.Fatalf("the other push landed as message %d of %d, inside the answer; want it after the last piece", at+1, len(texts))
+	}
+	assertWholeAnswer(t, readableInBubble(t, rig)[:len(texts)], answer)
+}
+
+// The pieces under a bubble are reply frames, and every reply frame asks again
+// before it is written (#9694): an installation revoked while the bubble is
+// being sealed gets no more of the answer. The head is on screen, so the reply
+// counts as delivered, as with a plain answer revoked after its first piece.
+//
+// REVERSE VERIFICATION: drop guardReply from sendRest and the three pieces
+// under the bubble go out after the revoke.
+func TestTheRestOfABubbledAnswerIsNotSentAfterTheRevoke(t *testing.T) {
+	t.Parallel()
+	r := newRevocableBubbleRig(t)
+	r.ran(t, "REQ-LONG-REVOKE", "task-1")
+	r.conn.onClosing = func() { r.rq.revoked.Store(true) }
+
+	if err := r.out.processEvent(context.Background(), r.answerEvent(t, "task-1", aLongAnswer())); err != nil {
+		t.Fatalf("processEvent: %v", err)
+	}
+	if n := r.closingFrames(t); n != 1 {
+		t.Fatalf("%d closing frames, want 1: the head was sealed before the revoke", n)
+	}
+	if n := len(r.conn.pushes(t)); n != 0 {
+		t.Fatalf("%d messages under the bubble, want 0: the rest went out after the revoke", n)
+	}
+	if got := r.mx.get("outbound_delivered"); got != 1 {
+		t.Errorf("outbound_delivered = %d, want 1: the head is on screen", got)
+	}
+}
+
+// assertRestUnderBubble checks that every piece after the head reached the
+// chat as a message, in order, with nothing missing.
+func assertRestUnderBubble(t *testing.T, rig *bubbleRig, answer string) {
+	t.Helper()
+	pieces := splitForWire(defuseThinkTags(answer))
+	pushes := rig.conn.pushes(t)
+	if len(pushes) != len(pieces)-1 {
+		t.Fatalf("%d messages under the bubble, want the %d pieces after the head", len(pushes), len(pieces)-1)
+	}
+	for i, push := range pushes {
+		if got := pushText(push); got != pieces[i+1] {
+			t.Fatalf("message %d under the bubble is not piece %d of the answer", i+1, i+2)
+		}
+	}
+}
+
+// A closing frame whose verdict never comes back may or may not have put the
+// head on screen. The rest was never sent, so sending it cannot print anything
+// twice, and holding it back leaves a bubble that ends at (1/n) if the head did
+// land. Its verdict is lost here until the turn's deadline is gone, which is
+// how an unknown seal usually ends, so the pieces also need a budget of their
+// own.
+//
+// REVERSE VERIFICATION: drop sendRest from the sealUnknown branch of
+// deliverAnswer and no piece follows; drop fallbackBudget from sendRest and the
+// pieces are attempted on the dead deadline and none is written.
+func TestARestFollowsABubbleWhoseSealIsUnknown(t *testing.T) {
+	t.Parallel()
+	rig := newBubbleRig(t)
+	mx := newCountingMetrics()
+	rig.out.metrics = mx
+	rig.conn.loseClosingAcks = 100
+	rig.ask(t, "REQ-LONG-UNKNOWN")
+	rig.queued(t, "task-1")
+
+	answer := aLongAnswer()
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	rig.answerWithContext(t, ctx, answer, "task-1")
+
+	assertRestUnderBubble(t, rig, answer)
+	if got := mx.get("outbound_delivered"); got != 0 {
+		t.Errorf("outbound_delivered = %d, want 0: the head's seal never answered", got)
+	}
+}
+
+// The relayed path seals the same bubble and has to make the same call.
+//
+// REVERSE VERIFICATION: drop sendRest from the sealUnknown branch of
+// deliverRelayed and no piece follows; drop fallbackBudget from sendRest and
+// none is written.
+func TestARestFollowsARelayedBubbleWhoseSealIsUnknown(t *testing.T) {
+	t.Parallel()
+	rig := newBubbleRig(t)
+	rig.conn.loseClosingAcks = 100
+	rig.ran(t, "REQ-RELAY-UNKNOWN", "task-1")
+
+	answer := aLongAnswer()
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	rig.out.deliverRelayed(ctx, relayFrame{
+		Kind:           relayKindReply,
+		InstallationID: util.UUIDToString(rig.instID),
+		ChatID:         "CHAT_1",
+		ChatType:       chatTypeGroupInt,
+		Content:        answer,
+		TaskID:         taskUUID(t, "task-1"),
+		SessionID:      bubbleSession,
+	})
+	assertRestUnderBubble(t, rig, answer)
 }

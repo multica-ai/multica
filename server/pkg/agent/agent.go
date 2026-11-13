@@ -1,7 +1,7 @@
 // Package agent provides a unified interface for executing prompts via
 // coding agents (Claude Code, CodeBuddy, Codex, Copilot, OpenCode, DevEco Code,
 // OpenClaw, Hermes, Pi, Oh-My-Pi, Cursor, Kimi, Reasonix, Kiro, Antigravity, Qoder,
-// Trae, Grok, Qwen Code, QwenPaw, MiniMax Code). It
+// Trae, Grok, Qwen Code, QwenPaw, MiniMax Code, Meta Muse Code). It
 // mirrors the happy-cli AgentBackend pattern, translated to idiomatic Go.
 package agent
 
@@ -29,6 +29,9 @@ type ExecOptions struct {
 	EnableTaskSupplement bool
 	Cwd                  string
 	Model                string
+	// PiSkillPaths contains only the SKILL.md files written for this task by
+	// the daemon. Pi loads them explicitly without trusting other project files.
+	PiSkillPaths []string
 	// SystemPrompt carries the Multica runtime brief for the few providers
 	// that cannot pick it up from disk. The daemon leaves it empty for every
 	// other provider (see daemon.providerNeedsInlineSystemPrompt), because the
@@ -94,6 +97,20 @@ type ExecOptions struct {
 	// knows the resume is gone, and the backend covers only the case the daemon
 	// cannot see — a live resume RPC rejected mid-run.
 	ResumeContinuityNotice string
+	// TaskToken is the task-scoped Multica API credential (mat_...) the server
+	// mints at claim time. CLI backends receive it as MULTICA_TOKEN in the
+	// subprocess environment. Backends that delegate remotely (museapp) forward
+	// it in their wire request so the remote worker can call the Multica API
+	// with the same scoped identity. Empty when the server did not provide one.
+	TaskToken string
+	// MulticaServerURL is the Multica API base URL (e.g.
+	// https://multica.example.com). Remote backends forward it so the worker
+	// knows where to call; CLI backends get it as MULTICA_SERVER_URL.
+	MulticaServerURL string
+	// MulticaWorkspaceID is the workspace UUID for this task. Remote backends
+	// forward it so the worker can pass it as a query param; CLI backends get
+	// it as MULTICA_WORKSPACE_ID.
+	MulticaWorkspaceID string
 	// ExtraArgs is honoured only by backends that opt in by reading it; the
 	// rest ignore it. Deliberately not enumerated here — the previous list
 	// went stale as backends were added, which is how MULTICA_QWENPAW_ARGS
@@ -129,10 +146,35 @@ type ExecOptions struct {
 	// ignore this field, mirroring ThinkingLevel's renderer-side fall-through
 	// pattern. See issue #3260.
 	OpenclawMode string
+	// OpenclawModelOverride is the claim-time snapshot of the agent's persistent
+	// underlying-model override. The setting applies to all newly claimed runs
+	// until changed or cleared. OpenClaw receives it as `--model <id>` alongside
+	// `--agent <id>`, preserving the identity, workspace, sessions, and memory
+	// selected by Model. Other backends ignore this field.
+	OpenclawModelOverride string
 	// ClaudeSettingsPath is a daemon-owned, task-local settings file passed
 	// through Claude Code's --settings flag. It currently carries restrictive
 	// runtime-skill overrides only; other providers ignore it.
 	ClaudeSettingsPath string
+	// CursorHookCommand is the argv of the multica hook relay (the daemon's own
+	// binary followed by CursorHookHelperArg). The cursor backend needs it, with
+	// EnableTaskSupplement, to accept additional messages; other providers
+	// ignore it.
+	CursorHookCommand []string
+	// OnUsage optionally receives the backend's cumulative usage snapshot while
+	// the run is still live, keyed exactly like Result.Usage so a mid-run flush
+	// and the terminal report upsert the same (task, provider, model) rows
+	// instead of adding a second row the rollup would charge twice. Backends
+	// that cannot meter mid-run never call it.
+	//
+	// The callback runs on the backend's protocol reader goroutine and MUST NOT
+	// block: a daemon that reports from here holds the agent's stdout open and
+	// can trip its idle watchdog. Take the snapshot and report on your own
+	// goroutine.
+	OnUsage func(map[string]TokenUsage)
+	// piMcpExtensionPath is set by piBackend.Execute after it writes the
+	// temporary MCP extension. The daemon does not fill it.
+	piMcpExtensionPath string
 }
 
 // runContext derives the execution context for an agent subprocess from the
@@ -150,6 +192,10 @@ func runContext(ctx context.Context, timeout time.Duration) (context.Context, co
 
 // Session represents a running agent execution.
 type Session struct {
+	// CleanupRequired means Result is also the acknowledgement that the
+	// backend's bounded process cleanup finished. A missing acknowledgement
+	// must prevent automatic continuation, even after upstream cancellation.
+	CleanupRequired bool
 	// Supplement delivers an additional human instruction to the currently
 	// active provider turn. Nil means the backend cannot safely do so.
 	// Adapters bound their own transport calls; a hook-based adapter may wait
@@ -165,7 +211,9 @@ type Session struct {
 	// transition time, independent of the best-effort transcript. Nil uses the
 	// daemon's message-based accounting. The timestamp gives completed tools a
 	// fresh idle budget even when their transcript message has not drained yet.
-	ToolActivity func() (int32, time.Time)
+	// The timestamp is an awakeclock reading (see package awakeclock), the same
+	// clock the idle watchdog measures, so host sleep never counts as silence.
+	ToolActivity func() (int32, time.Duration)
 	// InterruptBackgroundTools stops owned background tools at the daemon's
 	// tool watchdog boundary without cancelling the agent. True means at least
 	// one tool completed/was stopped and released from accounting; the watchdog
@@ -307,7 +355,7 @@ type Result struct {
 
 // Config configures a Backend instance.
 type Config struct {
-	ExecutablePath string            // path to CLI binary (claude, codebuddy, codex, copilot, opencode, codearts, openclaw, hermes, pi, cursor, kimi, reasonix, dsh, kiro-cli, agy, qodercli, qoderclicn, traecli, grok, qwen, qwenpaw, mcode, dim, zeroclaw)
+	ExecutablePath string            // path to CLI binary (claude, codebuddy, codex, copilot, opencode, codearts, openclaw, hermes, pi, cursor, kimi, reasonix, dsh, kiro-cli, agy, qodercli, qoderclicn, traecli, grok, qwen, qwenpaw, mcode, muse, dim, zeroclaw)
 	CLIVersion     string            // detected version paired with ExecutablePath; vendor-specific usage semantics also require BuiltinRuntime
 	Env            map[string]string // extra environment variables
 	Logger         *slog.Logger
@@ -342,7 +390,7 @@ type Config struct {
 }
 
 // New creates a Backend for the given agent type.
-// Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "codearts", "deveco", "openclaw", "hermes", "pi", "cursor", "kimi", "reasonix", "dsh", "kiro", "antigravity", "qoder", "qoderclicn", "traecli", "grok", "qwen", "qwenpaw", "mcode".
+// Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "codearts", "deveco", "openclaw", "hermes", "pi", "cursor", "kimi", "reasonix", "dsh", "kiro", "antigravity", "qoder", "qoderclicn", "traecli", "grok", "qwen", "qwenpaw", "mcode", "muse".
 //
 // SupportedTypes is the canonical whitelist of agent types eligible to back a
 // custom runtime profile. It MUST stay in lockstep with the
@@ -384,9 +432,15 @@ var SupportedTypes = []string{
 	"grok",
 	"qwen",
 	"qwenpaw",
+	"droid",
+	"amp",
 	"mcode",
+	"muse",
 	"dim",
+	"devin",
 	"zeroclaw",
+	"museapp",
+	"zcode",
 }
 
 // IsSupportedType reports whether agentType is in the SupportedTypes whitelist.
@@ -419,6 +473,8 @@ var resumeRejectionUndetectable = map[string]bool{
 	"deveco":      true,
 	"opencode":    true,
 	"codearts":    true,
+	"droid":       true,
+	"amp":         true,
 }
 
 // ResumeRejectionUndetectable reports whether agentType is a backend that
@@ -488,10 +544,22 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &qwenBackend{cfg: cfg}, nil
 	case "qwenpaw":
 		return &qwenpawBackend{cfg: cfg}, nil
+	case "droid":
+		return &droidBackend{cfg: cfg}, nil
+	case "amp":
+		return &ampBackend{cfg: cfg}, nil
 	case "mcode":
 		return &mcodeBackend{cfg: cfg}, nil
+	case "devin":
+		return &devinBackend{cfg: cfg}, nil
+	case "muse":
+		return &museBackend{cfg: cfg}, nil
 	case "zeroclaw":
 		return &zeroclawBackend{cfg: cfg}, nil
+	case "museapp":
+		return &museappBackend{cfg: cfg}, nil
+	case "zcode":
+		return &zcodeBackend{cfg: cfg}, nil
 	default:
 		return nil, fmt.Errorf("unknown agent type: %q (supported: %s)", agentType, strings.Join(SupportedTypes, ", "))
 	}
@@ -536,9 +604,15 @@ var launchHeaders = map[string]string{
 	"grok":        "grok agent stdio",
 	"qwen":        "qwen -p (stream-json)",
 	"qwenpaw":     "qwenpaw acp",
+	"droid":       "droid exec (stream-json)",
+	"amp":         "amp --execute (stream-json)",
 	"dim":         "dim acp",
+	"devin":       "devin acp",
 	"mcode":       "mcode acp",
+	"muse":        "muse serve (msp)",
 	"zeroclaw":    "zeroclaw acp",
+	"museapp":     "museapp (remote receptionist)",
+	"zcode":       "zcode app-server",
 }
 
 // LaunchHeader returns the user-visible launch skeleton for agentType, or an

@@ -294,6 +294,14 @@ func TestParseCodexModelCatalog(t *testing.T) {
 				"display_name": "GPT-6-Astra",
 				"visibility": "list",
 				"supported_reasoning_levels": []
+			},
+			{
+				"slug": "gpt-6.1-sol",
+				"display_name": "GPT-6.1-Sol",
+				"visibility": "list",
+				"default_reasoning_level": "low",
+				"supported_reasoning_levels": [{"effort": "low"}, {"effort": "max"}, {"effort": "ultra"}],
+				"service_tiers": [{"id": "priority", "name": "Fast", "description": "2x speed, increased usage"}]
 			}
 		]
 	}`)
@@ -301,8 +309,8 @@ func TestParseCodexModelCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseCodexModelCatalog: %v", err)
 	}
-	if len(got) != 5 {
-		t.Fatalf("expected five visible models, got %+v", got)
+	if len(got) != 6 {
+		t.Fatalf("expected six visible models, got %+v", got)
 	}
 	if got[0].ID != "gpt-5.6-sol" || got[0].Label != "GPT-5.6 Sol" || !got[0].Default {
 		t.Errorf("unexpected first model: %+v", got[0])
@@ -315,6 +323,7 @@ func TestParseCodexModelCatalog(t *testing.T) {
 		{"gpt-5.6-terra", "GPT-5.6 Terra"},
 		{"gpt-5.6-luna", "GPT-5.6 Luna"},
 		{"gpt-6-astra", "GPT-6 Astra"},
+		{"gpt-6.1-sol", "GPT-6.1 Sol"},
 	} {
 		var found *Model
 		for i := range got {
@@ -340,6 +349,9 @@ func TestParseCodexModelCatalog(t *testing.T) {
 	if got[3].ID != "no-reasoning" || got[3].Thinking != nil {
 		t.Errorf("model without reasoning should remain selectable without a thinking picker: %+v", got[3])
 	}
+	if got[5].Thinking == nil || got[5].Thinking.DefaultLevel != "low" || !hasThinkingLevel(got[5].Thinking, "ultra") || len(got[5].ServiceTiers) != 1 || got[5].ServiceTiers[0].ID != "priority" {
+		t.Errorf("GPT-6.1 Sol must preserve runtime capabilities: %+v", got[5])
+	}
 }
 
 // Codex reports the GPT-6 family as "GPT-6-Sol" and so on (codex-cli 0.155.1
@@ -350,11 +362,21 @@ func TestNormalizeCodexModelLabelMatchesStaticGPT6Family(t *testing.T) {
 	static := map[string]string{}
 	for _, m := range codexStaticModels() {
 		static[m.ID] = m.Label
+		if m.ID == "gpt-6.1-sol" || m.ID == "gpt-6.1-terra" {
+			if m.Thinking == nil || m.Thinking.DefaultLevel != "low" || len(m.Thinking.SupportedLevels) != 6 || !hasThinkingLevel(m.Thinking, "max") || !hasThinkingLevel(m.Thinking, "ultra") {
+				t.Errorf("%s fallback must match the observed live efforts: %+v", m.ID, m.Thinking)
+			}
+			if m.Default || len(m.ServiceTiers) != 0 {
+				t.Errorf("new fallback must not change the default or guess service tiers: %+v", m)
+			}
+		}
 	}
 	for id, reported := range map[string]string{
-		"gpt-6-astra": "GPT-6-Astra",
-		"gpt-6-sol":   "GPT-6-Sol",
-		"gpt-6-luna":  "GPT-6-Luna",
+		"gpt-6-astra":   "GPT-6-Astra",
+		"gpt-6.1-sol":   "GPT-6.1-Sol",
+		"gpt-6.1-terra": "GPT-6.1 Terra",
+		"gpt-6-sol":     "GPT-6-Sol",
+		"gpt-6-luna":    "GPT-6-Luna",
 	} {
 		if static[id] == "" {
 			t.Errorf("%s missing from the static Codex catalog", id)
@@ -726,6 +748,12 @@ func TestIsKnownThinkingValue(t *testing.T) {
 		{"kimi", "future-level", true}, // exact support is checked against the daemon catalog
 		{"kimi", ".hidden", false},
 		{"kimi", "bad value", false},
+		{"kiro", "", true},
+		{"kiro", "none", true},
+		{"kiro", "max", true},
+		{"kiro", "future-level", true},
+		{"kiro", ".hidden", false},
+		{"kiro", "bad value", false},
 		{"hermes", "", true},
 		// jcode runs under this provider and applies an advertised effort;
 		// Hermes Agent advertises none. The per-session catalog decides, so the
@@ -769,6 +797,7 @@ func TestThinkingControlSupported(t *testing.T) {
 		{"omp", true},      // pi backend identity; per-model subset from `omp models --json`
 		{"hermes", true},   // jcode applies it; Hermes Agent gets an empty catalog
 		{"kimi", true},     // dynamic catalog; ACP session/set_config_option applies it
+		{"kiro", true},     // native model options and session effort command
 		{"qwenpaw", false},
 		{"", false},
 		{"not-a-runtime", false},
@@ -787,7 +816,7 @@ func TestThinkingControlSupported(t *testing.T) {
 // reject a level while claiming the runtime supports one, or vice versa.
 func TestThinkingControlSupportedMatchesTokenGate(t *testing.T) {
 	t.Parallel()
-	providers := []string{"claude", "codebuddy", "grok", "codex", "opencode", "pi", "omp", "hermes", "kimi", "cursor"}
+	providers := []string{"claude", "codebuddy", "grok", "codex", "opencode", "pi", "omp", "hermes", "kimi", "kiro", "cursor"}
 	// "medium" is in every fixed enum and is a well-formed dynamic token, so a
 	// provider with any reasoning control accepts it.
 	for _, provider := range providers {
@@ -941,8 +970,11 @@ func TestValidateThinkingLevel_ExplicitModel(t *testing.T) {
 	// Sonnet does not advertise xhigh.
 	check("claude-sonnet-4-6[1m]", "xhigh", false)
 
-	// A model a verified catalog does not list still fails closed (no guess).
-	check("claude-nonexistent", "high", false)
+	// Claude's picker may omit runnable explicit models. An unlisted model is
+	// unknown, rather than evidence that its saved effort is unsupported.
+	if ok, err := ValidateThinkingLevelWith(claudeVerifiedCatalog, "claude", "claude-nonexistent", "high"); ok || !errors.Is(err, errUnverifiedCatalog) {
+		t.Errorf("unlisted Claude model = (%v, %v), want unknown capability", ok, err)
+	}
 }
 
 // TestValidateThinkingLevel_CodexEmptyModelFailsClosed pins the MUL-4347

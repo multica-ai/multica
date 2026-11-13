@@ -21,7 +21,7 @@
  * mirrors web's `pickStageKeys` exactly — same priority order, same
  * fallback. Differences are visual-only.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { View, type TextStyle } from "react-native";
 import Animated, {
   cancelAnimation,
@@ -130,24 +130,29 @@ export function StatusPill({
   taskMessages = [],
   availability,
 }: Props) {
-  const taskId = pendingTask?.task_id;
-  const createdAt = pendingTask?.created_at;
+  if (!pendingTask?.task_id) return null;
+  return (
+    <ActiveStatusPill
+      key={pendingTask.task_id}
+      pendingTask={pendingTask}
+      taskMessages={taskMessages}
+      availability={availability}
+    />
+  );
+}
+
+function ActiveStatusPill({ pendingTask, taskMessages = [], availability }: Props) {
   const { t } = useT("chat");
-
-  // Anchor — locked per task. Reset on task_id change so a new run
-  // restarts the timer from 0; mid-run we never reassign, otherwise the
-  // counter would visibly snap backwards when a server `created_at`
-  // arrives a few hundred ms before the optimistic `Date.now()` anchor.
-  // (Stored in a `useEffect`-driven mutable; useRef would also work but
-  // we already touch state on tick, so a tiny extra hook is fine.)
-  const anchorMs = useTaskAnchor(taskId, createdAt);
-
-  // 1Hz tick — the only reason this hook exists is to force a re-render
-  // every second. We don't read the tick value; we read Date.now() at
-  // render time.
-  useTick(!!taskId, 1000);
-
-  if (!taskId) return null;
+  // Remount per task, keeping its initial anchor even if created_at arrives later.
+  const [anchorMs] = useState(() => {
+    const created = pendingTask?.created_at ? Date.parse(pendingTask.created_at) : NaN;
+    return Number.isFinite(created) ? created : Date.now();
+  });
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
 
   // Deferred retries retain task messages from the earlier attempt, so the
   // newer server status must win over those stale running hints.
@@ -157,7 +162,7 @@ export function StatusPill({
       : taskMessages.length > 0
         ? "running"
         : pendingTask?.status;
-  const elapsedSec = Math.max(0, Math.floor((Date.now() - anchorMs) / 1000));
+  const elapsedSec = Math.max(0, Math.floor((now - anchorMs) / 1000));
   const stage = pickStage(status, taskMessages, availability, t);
 
   return (
@@ -175,35 +180,6 @@ export function StatusPill({
       </Text>
     </View>
   );
-}
-
-// ─── helpers ──────────────────────────────────────────────────────────────
-
-function useTaskAnchor(
-  taskId: string | undefined,
-  createdAt: string | undefined,
-): number {
-  const ref = useRef<{ id: string | undefined; ms: number }>({
-    id: undefined,
-    ms: Date.now(),
-  });
-  if (ref.current.id !== taskId) {
-    const t = createdAt ? Date.parse(createdAt) : NaN;
-    ref.current = {
-      id: taskId,
-      ms: Number.isFinite(t) ? t : Date.now(),
-    };
-  }
-  return ref.current.ms;
-}
-
-function useTick(enabled: boolean, intervalMs: number) {
-  const [, setN] = useState(0);
-  useEffect(() => {
-    if (!enabled) return;
-    const id = setInterval(() => setN((n) => n + 1), intervalMs);
-    return () => clearInterval(id);
-  }, [enabled, intervalMs]);
 }
 
 // Three small dots, fading in/out on a staggered phase — same "in

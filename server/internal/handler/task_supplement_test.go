@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -70,10 +71,10 @@ func TestTaskSupplementClaimStartReplay(t *testing.T) {
 	generation := time.Date(2026, 9, 23, 0, 0, 0, 0, time.UTC)
 	dbfx.Exec(t, `UPDATE agent_task_queue SET dispatched_at=$2 WHERE id=$1`, f.taskID, generation)
 	for range 2 {
-		req := withURLParam(newDaemonTokenRequest(http.MethodPost, "/start", map[string]any{
+		req := withURLParam(newOwnerDaemonRequest(http.MethodPost, "/start", map[string]any{
 			"runtime_id": f.runtimeID, "dispatched_at": generation.Format(time.RFC3339Nano),
 			"capabilities": []string{protocol.DaemonCapabilityTaskSupplementV1},
-		}, testWorkspaceID, "start-claim-test"), "taskId", f.taskID)
+		}), "taskId", f.taskID)
 		var started AgentTaskResponse
 		testutil.Call(t, testHandler.StartTask, req).Want(http.StatusOK).JSON(&started)
 		if started.SupplementCapability != protocol.DaemonCapabilityTaskSupplementV1 {
@@ -89,7 +90,7 @@ func TestTaskSupplementLateDeliveryAndDeletion(t *testing.T) {
 	f := newSupplementFixture(t, "claude", "running", true)
 	var sent, pending CommentResponse
 	supplementRequest(t, f, "0199a4e8-22ce-7b01-bba5-111111111111", "already injected").Want(http.StatusCreated).JSON(&sent)
-	if _, err := testHandler.Queries.ClaimNextTaskSupplement(t.Context(), parseUUID(f.taskID)); err != nil {
+	if _, err := testHandler.Queries.ClaimNextTaskSupplement(t.Context(), db.ClaimNextTaskSupplementParams{TaskID: parseUUID(f.taskID), IncludeAgentAuthored: true}); err != nil {
 		t.Fatal(err)
 	}
 	supplementRequest(t, f, "0199a4e8-22ce-7b01-bba5-222222222222", "never injected").Want(http.StatusCreated).JSON(&pending)
@@ -101,7 +102,7 @@ func TestTaskSupplementLateDeliveryAndDeletion(t *testing.T) {
 		t.Fatalf("complete task: status %d: %s", w.Code, w.Body.String())
 	}
 	for _, c := range []CommentResponse{sent, pending} {
-		req := withURLParams(newDaemonTokenRequest(http.MethodPost, "/ack", map[string]any{"delivered": true}, testWorkspaceID, "legit-daemon"), "taskId", f.taskID, "commentId", c.ID)
+		req := withURLParams(newOwnerDaemonRequest(http.MethodPost, "/ack", map[string]any{"delivered": true}), "taskId", f.taskID, "commentId", c.ID)
 		want := http.StatusOK
 		if c.ID == pending.ID {
 			want = http.StatusConflict
@@ -180,9 +181,14 @@ func TestTaskSupplementNegotiationFailsClosed(t *testing.T) {
 		{name: "codex negotiated", provider: "codex", daemonAdvertises: true, wantCapabilityRow: true},
 		{name: "claude negotiated", provider: "claude", daemonAdvertises: true, wantCapabilityRow: true},
 		{name: "grok negotiated", provider: "grok", daemonAdvertises: true, wantCapabilityRow: true},
+		{name: "cursor negotiated", provider: "cursor", daemonAdvertises: true, wantCapabilityRow: true},
+		{name: "kiro negotiated", provider: "kiro", daemonAdvertises: true, wantCapabilityRow: true},
+		{name: "pi negotiated", provider: "pi", daemonAdvertises: true, wantCapabilityRow: true},
+		{name: "pi old daemon", provider: "pi", daemonAdvertises: false, wantCapabilityRow: false},
 		{name: "claude old daemon", provider: "claude", daemonAdvertises: false, wantCapabilityRow: false},
 		{name: "old daemon", provider: "codex", daemonAdvertises: false, wantCapabilityRow: false},
 		{name: "unsupported runtime", provider: "kimi", daemonAdvertises: true, wantCapabilityRow: false},
+		{name: "omp is not pi", provider: "omp", daemonAdvertises: true, wantCapabilityRow: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fixture := newSupplementFixture(t, tc.provider, "dispatched", false)
@@ -212,12 +218,12 @@ func TestTaskSupplementCapabilityDoesNotBreakNonIssueStarts(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	for _, provider := range []string{"codex", "claude", "grok"} {
+	for _, provider := range []string{"codex", "claude", "grok", "cursor", "kiro", "pi"} {
 		t.Run(provider, func(t *testing.T) {
 			runtimeID := dbfx.Runtime(t, "supplement-no-issue", testutil.Cols{"provider": provider})
 			agentID := dbfx.Agent(t, "Supplement no issue", runtimeID)
 			taskID := dbfx.Task(t, agentID, testutil.Cols{"runtime_id": runtimeID, "issue_id": nil, "status": "dispatched"})
-			started, err := testHandler.TaskService.StartTask(t.Context(), parseUUID(taskID), true)
+			started, err := testHandler.TaskService.StartTask(t.Context(), parseUUID(taskID), service.TaskStartCapabilities{Supplement: true})
 			if err != nil || started.Status != "running" {
 				t.Fatalf("non-issue start = %#v: %v", started, err)
 			}
@@ -228,8 +234,70 @@ func TestTaskSupplementCapabilityDoesNotBreakNonIssueStarts(t *testing.T) {
 	}
 }
 
+func TestPiTaskSupplementLifecycle(t *testing.T) {
+	f := newSupplementFixture(t, "pi", "dispatched", false)
+	generation := time.Now().UTC().Truncate(time.Microsecond)
+	dbfx.Exec(t, `UPDATE agent_task_queue SET dispatched_at = $2 WHERE id = $1`, f.taskID, generation)
+	dbfx.Exec(t, `UPDATE comment SET content = $2 WHERE id = $1`, f.triggerID,
+		agentMention("Pi", f.agentID)+" original objective")
+	dbfx.Exec(t, `UPDATE agent_task_queue SET delivered_comment_ids = ARRAY[trigger_comment_id] WHERE id = $1`, f.taskID)
+	dbfx.Cleanup(t, `DELETE FROM agent_task_queue WHERE issue_id = $1`, f.issueID)
+
+	for range 2 {
+		var started AgentTaskResponse
+		req := withURLParam(newOwnerDaemonRequest(http.MethodPost, "/start", map[string]any{
+			"runtime_id": f.runtimeID, "dispatched_at": generation.Format(time.RFC3339Nano),
+			"capabilities": []string{protocol.DaemonCapabilityTaskSupplementV1},
+		}), "taskId", f.taskID)
+		testutil.Call(t, testHandler.StartTask, req).Want(http.StatusOK).JSON(&started)
+		if started.ID != f.taskID || started.SupplementCapability != protocol.DaemonCapabilityTaskSupplementV1 {
+			t.Fatalf("start/replay did not negotiate Pi: %+v", started)
+		}
+	}
+
+	var runs []AgentTaskResponse
+	testutil.Call(t, testHandler.ListTasksByIssue, withURLParam(
+		newRequest(http.MethodGet, "/tasks", nil), "id", f.issueID)).Want(http.StatusOK).JSON(&runs)
+	if len(runs) != 1 || runs[0].ID != f.taskID || !runs[0].CanSupplement {
+		t.Fatalf("composer cannot offer the Pi run: %+v", runs)
+	}
+
+	var bound, submitted CommentResponse
+	postSteeredComment(t, f.issueID, f.triggerID, "Steer this Pi run.", f.taskID).
+		Want(http.StatusCreated).JSON(&bound)
+	supplementRequest(t, f, "0199a4e8-22ce-7b01-bba5-888888888888", "Also keep the original objective.").
+		Want(http.StatusCreated).JSON(&submitted)
+	for _, comment := range []CommentResponse{bound, submitted} {
+		if comment.SupplementTaskID != f.taskID || comment.SupplementStatus != "pending" {
+			t.Fatalf("message did not bind to the original run: %+v", comment)
+		}
+		var claimed struct {
+			CommentID string `json:"comment_id"`
+			Content   string `json:"content"`
+		}
+		testutil.Call(t, testHandler.ClaimTaskSupplement, withURLParam(
+			newOwnerDaemonRequest(http.MethodPost, "/claim", nil), "taskId", f.taskID)).Want(http.StatusOK).JSON(&claimed)
+		if claimed.CommentID != comment.ID || claimed.Content != comment.Content {
+			t.Fatalf("claim = %+v, want comment %s: %s", claimed, comment.ID, comment.Content)
+		}
+		testutil.Call(t, testHandler.AckTaskSupplement, withURLParams(
+			newOwnerDaemonRequest(http.MethodPost, "/ack", map[string]any{"delivered": true}),
+			"taskId", f.taskID, "commentId", comment.ID)).Want(http.StatusOK)
+		receipt, err := testHandler.Queries.GetTaskSupplementForRun(t.Context(), db.GetTaskSupplementForRunParams{
+			TaskID: parseUUID(f.taskID), CommentID: parseUUID(comment.ID), WorkspaceID: parseUUID(testWorkspaceID),
+		})
+		if err != nil || receipt.Status != "delivered" || !receipt.DeliveredAt.Valid {
+			t.Fatalf("acknowledged receipt = %+v, err %v", receipt, err)
+		}
+	}
+	completeTaskViaDaemon(t, f.taskID)
+	if n := dbfx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE issue_id = $1`, f.issueID); n != 1 {
+		t.Fatalf("messages restarted the run: got %d runs", n)
+	}
+}
+
 func TestTaskSupplementCompletionDoesNotReplayBoundComments(t *testing.T) {
-	for _, provider := range []string{"codex", "claude", "grok"} {
+	for _, provider := range []string{"codex", "claude", "grok", "cursor", "kiro", "pi"} {
 		for _, status := range []string{"pending", "delivering", "delivered", "failed"} {
 			for _, ordinary := range []string{"none", "unhandled", "queued"} {
 				t.Run(provider+"/"+status+"/"+ordinary, func(t *testing.T) {
@@ -262,8 +330,8 @@ func TestTaskSupplementCompletionDoesNotReplayBoundComments(t *testing.T) {
 
 					// Drive the real completion handler: a direct SQL status update skips
 					// the reconciliation that previously replayed the supplement.
-					req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/tasks/"+fixture.taskID+"/complete",
-						map[string]any{"output": "done"}, testWorkspaceID, "legit-daemon")
+					req := newOwnerDaemonRequest(http.MethodPost, "/api/daemon/tasks/"+fixture.taskID+"/complete",
+						map[string]any{"output": "done"})
 					testutil.Call(t, testHandler.CompleteTask, withURLParam(req, "taskId", fixture.taskID)).Want(http.StatusOK)
 					if status == "pending" || status == "delivering" {
 						receipt, err := testHandler.Queries.GetTaskSupplementForRun(t.Context(), db.GetTaskSupplementForRunParams{
@@ -320,7 +388,7 @@ func TestTaskSupplementConcurrentClaimsKeepUniqueReceipts(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			row, err := testHandler.Queries.ClaimNextTaskSupplement(context.Background(), parseUUID(fixture.taskID))
+			row, err := testHandler.Queries.ClaimNextTaskSupplement(context.Background(), db.ClaimNextTaskSupplementParams{TaskID: parseUUID(fixture.taskID), IncludeAgentAuthored: true})
 			claims <- claimResult{row, err}
 		}()
 	}
@@ -343,7 +411,7 @@ func TestTaskSupplementConcurrentClaimsKeepUniqueReceipts(t *testing.T) {
 	if len(seen) != additions {
 		t.Fatalf("claimed %d unique comments, want %d", len(seen), additions)
 	}
-	if _, err := testHandler.Queries.ClaimNextTaskSupplement(context.Background(), parseUUID(fixture.taskID)); !errors.Is(err, pgx.ErrNoRows) {
+	if _, err := testHandler.Queries.ClaimNextTaskSupplement(context.Background(), db.ClaimNextTaskSupplementParams{TaskID: parseUUID(fixture.taskID), IncludeAgentAuthored: true}); !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("extra claim = %v, want no rows", err)
 	}
 	if delivered := dbfx.Count(t, `SELECT count(*) FROM task_supplement WHERE task_id = $1 AND status = 'delivered'`, fixture.taskID); delivered != additions {
@@ -389,7 +457,7 @@ func TestTaskSupplementConcurrentDuplicateSubmissionsAndRetries(t *testing.T) {
 	if n := dbfx.Count(t, `SELECT count(*) FROM comment WHERE issue_id = $1 AND content = 'duplicate addition'`, fixture.issueID); n != 1 {
 		t.Fatalf("duplicate submissions left %d comments", n)
 	}
-	claim, err := testHandler.Queries.ClaimNextTaskSupplement(context.Background(), parseUUID(fixture.taskID))
+	claim, err := testHandler.Queries.ClaimNextTaskSupplement(context.Background(), db.ClaimNextTaskSupplementParams{TaskID: parseUUID(fixture.taskID), IncludeAgentAuthored: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -414,11 +482,11 @@ func TestTaskSupplementConcurrentDuplicateSubmissionsAndRetries(t *testing.T) {
 	for response := range responses {
 		response.Want(http.StatusOK)
 	}
-	retried, err := testHandler.Queries.ClaimNextTaskSupplement(context.Background(), parseUUID(fixture.taskID))
+	retried, err := testHandler.Queries.ClaimNextTaskSupplement(context.Background(), db.ClaimNextTaskSupplementParams{TaskID: parseUUID(fixture.taskID), IncludeAgentAuthored: true})
 	if err != nil || retried.CommentID != claim.CommentID || retried.AttemptCount != 2 {
 		t.Fatalf("retry claim = %#v: %v", retried, err)
 	}
-	if _, err := testHandler.Queries.ClaimNextTaskSupplement(context.Background(), parseUUID(fixture.taskID)); !errors.Is(err, pgx.ErrNoRows) {
+	if _, err := testHandler.Queries.ClaimNextTaskSupplement(context.Background(), db.ClaimNextTaskSupplementParams{TaskID: parseUUID(fixture.taskID), IncludeAgentAuthored: true}); !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("duplicate retry left another claim: %v", err)
 	}
 	ack := db.AckTaskSupplementDeliveredParams{TaskID: parseUUID(fixture.taskID), CommentID: claim.CommentID}
@@ -463,7 +531,7 @@ func TestTaskSupplementTimestampOrderAndCommentIDTieBreak(t *testing.T) {
 				t.Fatalf("metadata order=%v, want %v", got, want)
 			}
 			for _, id := range want {
-				claim, err := testHandler.Queries.ClaimNextTaskSupplement(context.Background(), parseUUID(fixture.taskID))
+				claim, err := testHandler.Queries.ClaimNextTaskSupplement(context.Background(), db.ClaimNextTaskSupplementParams{TaskID: parseUUID(fixture.taskID), IncludeAgentAuthored: true})
 				if err != nil || uuidToString(claim.CommentID) != id {
 					t.Fatalf("claim=%s, want %s: %v", uuidToString(claim.CommentID), id, err)
 				}
@@ -590,7 +658,16 @@ func TestTaskSupplementTerminalWriteRollsBackWhenSettlementFails(t *testing.T) {
 }
 
 func TestTaskSupplementPermissionAndTenantIsolation(t *testing.T) {
-	fixture := newSupplementFixture(t, "codex", "running", true)
+	for _, provider := range []string{"codex", "pi"} {
+		t.Run(provider, func(t *testing.T) {
+			assertTaskSupplementPermissionAndTenantIsolation(t, provider)
+		})
+	}
+}
+
+func assertTaskSupplementPermissionAndTenantIsolation(t *testing.T, provider string) {
+	t.Helper()
+	fixture := newSupplementFixture(t, provider, "running", true)
 	otherUser := dbfx.Insert(t, "user", testutil.Cols{"name": "No Invoke", "email": "no-invoke-supplement@example.test"})
 	dbfx.Member(t, testWorkspaceID, otherUser, "member")
 	req := newRequestAs(otherUser, http.MethodPost, "/supplements", map[string]any{
@@ -598,6 +675,14 @@ func TestTaskSupplementPermissionAndTenantIsolation(t *testing.T) {
 	})
 	testutil.Call(t, testHandler.CreateTaskSupplement,
 		withURLParams(req, "id", fixture.issueID, "taskId", fixture.taskID)).Want(http.StatusForbidden)
+	var runs []AgentTaskResponse
+	listReq := withURLParam(newRequestAs(otherUser, http.MethodGet, "/tasks", nil), "id", fixture.issueID)
+	testutil.Call(t, testHandler.ListTasksByIssue, listReq).Want(http.StatusOK).JSON(&runs)
+	for _, run := range runs {
+		if run.ID == fixture.taskID && run.CanSupplement {
+			t.Fatal("caller without invocation permission can supplement the run")
+		}
+	}
 
 	foreignIssueID, foreignTaskID := setupForeignWorkspaceFixture(t)
 	crossTenant := newRequest(http.MethodPost, "/api/issues/"+foreignIssueID+"/tasks/"+foreignTaskID+"/supplements", map[string]any{

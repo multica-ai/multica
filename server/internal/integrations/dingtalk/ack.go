@@ -57,7 +57,7 @@ func NewAckNotifier(client *Client, decrypt Decrypter, logger *slog.Logger, inpu
 	return &ackNotifier{client: client, decrypt: decrypt, logger: logger, inputs: inputs, active: make(map[string][]*ackState)}
 }
 
-func (n *ackNotifier) OnIngested(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, sessionID pgtype.UUID) {
+func (n *ackNotifier) OnIngested(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, sessionID pgtype.UUID, chatMessageID pgtype.UUID) {
 	if !sessionID.Valid || msg.MessageID == "" || msg.Source.ChatID == "" {
 		return
 	}
@@ -96,7 +96,7 @@ func (n *ackNotifier) OnIngested(ctx context.Context, inst engine.ResolvedInstal
 // session ID, so it cannot distinguish overlapping failed/pending generations.
 // Task terminal events instead use onInputsSettled with their owned input IDs.
 // This hook never marks input Done.
-func (n *ackNotifier) OnSettled(ctx context.Context, sessionID pgtype.UUID) {
+func (n *ackNotifier) OnSettled(ctx context.Context, sessionID pgtype.UUID, scope engine.TypingSettlement) {
 	key := util.UUIDToString(sessionID)
 	n.mu.Lock()
 	states := n.active[key]

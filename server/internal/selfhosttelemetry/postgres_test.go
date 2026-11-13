@@ -303,6 +303,8 @@ func TestSQLCollectorUsesOneBoundaryAndWindowIndexes(t *testing.T) {
 		CREATE TABLE agent (archived_at timestamptz);
 		CREATE TABLE agent_runtime (daemon_id text, last_seen_at timestamptz);
 		CREATE TABLE agent_task_queue (status text, started_at timestamptz, completed_at timestamptz);
+		CREATE TABLE client_usage_daily (user_id uuid NOT NULL, activity_date date NOT NULL);
+		CREATE TABLE member_delegation_day (user_id uuid NOT NULL, activity_date date NOT NULL);
 		CREATE INDEX idx_agent_task_queue_telemetry_started
 			ON agent_task_queue (started_at) WHERE started_at IS NOT NULL;
 		CREATE INDEX idx_agent_task_queue_terminal_completed_at_v2
@@ -413,5 +415,106 @@ func TestSQLCollectorUsesOneBoundaryAndWindowIndexes(t *testing.T) {
 		if !strings.Contains(plan, index) {
 			t.Errorf("EXPLAIN ANALYZE did not use %s:\n%s", index, plan)
 		}
+	}
+}
+
+func TestSQLCollectorCountsMemberActivityByCompleteUTCDays(t *testing.T) {
+	pool := telemetryTestPool(t)
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `
+		CREATE TABLE workspace (id uuid PRIMARY KEY);
+		CREATE TABLE member (user_id uuid NOT NULL);
+		CREATE TABLE agent (archived_at timestamptz);
+		CREATE TABLE agent_runtime (daemon_id text, last_seen_at timestamptz);
+		CREATE TABLE agent_task_queue (status text, started_at timestamptz, completed_at timestamptz);
+		CREATE TABLE client_usage_daily (
+			user_id uuid NOT NULL, client_type text NOT NULL, install_id uuid NOT NULL,
+			activity_date date NOT NULL);
+		CREATE INDEX client_usage_daily_activity_client_user_idx
+			ON client_usage_daily (activity_date, client_type, user_id);
+		CREATE TABLE member_delegation_day (
+			user_id uuid NOT NULL, activity_date date NOT NULL,
+			PRIMARY KEY (user_id, activity_date))`); err != nil {
+		t.Fatal(err)
+	}
+	// Snapshot day 2026-09-10; the 1d window is all of 09-09, 7d starts 09-03,
+	// 28d starts 08-13. Anything on 09-10 itself is outside every window.
+	at := time.Date(2026, 9, 10, 3, 0, 0, 0, time.UTC)
+	const (
+		a = "10000000-0000-0000-0000-00000000000a" // member, active yesterday
+		b = "10000000-0000-0000-0000-00000000000b" // member, active 5 / 7 days ago
+		c = "10000000-0000-0000-0000-00000000000c" // member, active 20 / 28 days ago
+		d = "10000000-0000-0000-0000-00000000000d" // member, only today / too old
+		x = "10000000-0000-0000-0000-0000000000ff" // former member, not in member
+	)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO member VALUES ($1), ($1), ($2), ($3), ($4)`, a, b, c, d); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO client_usage_daily VALUES
+			($1, 'web',     gen_random_uuid(), '2026-09-09'),
+			($1, 'desktop', gen_random_uuid(), '2026-09-09'),
+			($2, 'web',     gen_random_uuid(), '2026-09-05'),
+			($3, 'web',     gen_random_uuid(), '2026-08-21'),
+			($4, 'web',     gen_random_uuid(), '2026-09-10'),
+			($4, 'web',     gen_random_uuid(), '2026-08-12'),
+			($5, 'web',     gen_random_uuid(), '2026-09-09')`, a, b, c, d, x); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO member_delegation_day VALUES
+			($1, '2026-09-09'), ($1, '2026-09-01'),
+			($2, '2026-09-03'),
+			($3, '2026-08-13'),
+			($4, '2026-09-10'), ($4, '2026-08-12'),
+			($5, '2026-09-09')`, a, b, c, d, x); err != nil {
+		t.Fatal(err)
+	}
+
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Release()
+	counts, err := (SQLCollector{}).Collect(ctx, conn.Conn(), at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := ActivityCounts{
+		Visiting1d: 1, Visiting7d: 2, Visiting28d: 3,
+		Delegating1d: 1, Delegating7d: 2, Delegating28d: 3,
+	}
+	if counts.Activity != want {
+		t.Fatalf("activity = %#v, want %#v", counts.Activity, want)
+	}
+}
+
+// Member activity is part of the snapshot, not an optional add-on: a failed
+// read fails collection so the worker's collection retry applies, instead of
+// sending a partial snapshot.
+func TestSQLCollectorFailsWhenActivityCannotBeRead(t *testing.T) {
+	pool := telemetryTestPool(t)
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `
+		CREATE TABLE workspace (id uuid PRIMARY KEY);
+		CREATE TABLE member (user_id uuid NOT NULL);
+		CREATE TABLE agent (archived_at timestamptz);
+		CREATE TABLE agent_runtime (daemon_id text, last_seen_at timestamptz);
+		CREATE TABLE agent_task_queue (status text, started_at timestamptz, completed_at timestamptz);
+		CREATE TABLE client_usage_daily (user_id uuid NOT NULL, activity_date date NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Release()
+	if _, err := (SQLCollector{}).Collect(ctx, conn.Conn(), time.Date(2026, 9, 10, 3, 0, 0, 0, time.UTC)); err == nil {
+		t.Fatal("collection succeeded without member_delegation_day")
+	}
+	var timeout string
+	if err := conn.QueryRow(ctx, "SHOW statement_timeout").Scan(&timeout); err != nil {
+		t.Fatalf("connection unusable after failed collection: %v", err)
 	}
 }

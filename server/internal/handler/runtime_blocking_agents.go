@@ -9,21 +9,21 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// agentBuilderSystemKeyPrefix marks the hidden execution carrier behind an
-// unfinished AI agent-creation flow. The suffix is the flow id.
-const agentBuilderSystemKeyPrefix = "agent_builder:"
-
-// A runtime or profile delete is refused while agents are still bound. Telling
-// the user to "reassign or archive them" is only true for agents they can
-// actually reach: the archive endpoint rejects anything carrying a system_key
-// outright, and a builder carrier is not in the agent list at all. Naming one
-// remedy for every blocker therefore hands some users an instruction that
-// cannot be carried out — the same class of defect this whole change set exists
-// to remove, so the refusals classify their blockers instead.
+// A runtime or profile delete is refused while user agents are still bound.
+// Telling the user to "reassign or archive them" is only true for agents they
+// can actually reach: the archive endpoint rejects anything carrying a
+// system_key outright. Naming one remedy for every blocker therefore hands some
+// users an instruction that cannot be carried out — the same class of defect
+// this whole change set exists to remove, so the refusals classify their
+// blockers instead.
+//
+// Hidden kind='system' agents (the Agent Builder carriers) are never blockers:
+// both delete guards list kind='user' only, and TeardownRuntime deletes the
+// carriers with their runtime (GH #9762).
 //
 // system_key, not kind, is the discriminator. Mika is deliberately kind='user'
 // (it must stay visible and assignable) while still being product-owned and
-// unarchivable; builder carriers are kind='system'.
+// unarchivable.
 type blockingAgentClass int
 
 const (
@@ -34,9 +34,6 @@ const (
 	// takes runtime_id for it like any other manageable agent. Those two halves
 	// have to be stated separately or the remedy is wrong in one direction.
 	blockingAgentMika
-	// blockingAgentBuilderCarrier is the hidden carrier behind an unfinished
-	// Agent Builder flow. It is released through that session, not the agent list.
-	blockingAgentBuilderCarrier
 	// blockingAgentOtherSystem is any future product-owned agent. Unarchivable
 	// like the rest, with no remedy this code can name specifically.
 	blockingAgentOtherSystem
@@ -50,7 +47,6 @@ const (
 const (
 	blockingAgentClassKeyUser        = "user"
 	blockingAgentClassKeyMika        = "mika"
-	blockingAgentClassKeyBuilder     = "agent_builder"
 	blockingAgentClassKeyOtherSystem = "other_system"
 )
 
@@ -65,8 +61,6 @@ func blockingAgentClassFromKey(key string) blockingAgentClass {
 		return blockingAgentUser
 	case blockingAgentClassKeyMika:
 		return blockingAgentMika
-	case blockingAgentClassKeyBuilder:
-		return blockingAgentBuilderCarrier
 	default:
 		return blockingAgentOtherSystem
 	}
@@ -77,14 +71,10 @@ func classifyBlockingAgent(systemKey pgtype.Text) blockingAgentClass {
 	if !systemKey.Valid || key == "" {
 		return blockingAgentUser
 	}
-	switch {
-	case key == service.MikaSystemKey:
+	if key == service.MikaSystemKey {
 		return blockingAgentMika
-	case strings.HasPrefix(key, agentBuilderSystemKeyPrefix):
-		return blockingAgentBuilderCarrier
-	default:
-		return blockingAgentOtherSystem
 	}
+	return blockingAgentOtherSystem
 }
 
 // blockingAgentLabel renders one blocker for a refusal sentence. Product-owned
@@ -92,8 +82,6 @@ func classifyBlockingAgent(systemKey pgtype.Text) blockingAgentClass {
 // does not apply to them.
 func blockingAgentLabel(name, runtimeName, runtimeStatus string, class blockingAgentClass) string {
 	switch class {
-	case blockingAgentBuilderCarrier:
-		return fmt.Sprintf("an unfinished Agent Builder session on %q (%s)", runtimeName, runtimeStatus)
 	case blockingAgentMika, blockingAgentOtherSystem:
 		return fmt.Sprintf("%q on %q (%s, built into Multica)", name, runtimeName, runtimeStatus)
 	default:
@@ -121,7 +109,6 @@ func blockingAgentRemedies(classes map[blockingAgentClass]bool, scope blockingAg
 	// blockers listed beside them, which is exactly the instruction they cannot
 	// follow. When both are present the clause names which ones it applies to.
 	mixed := classes[blockingAgentMika] ||
-		classes[blockingAgentBuilderCarrier] ||
 		classes[blockingAgentOtherSystem]
 
 	var out []string
@@ -129,15 +116,6 @@ func blockingAgentRemedies(classes map[blockingAgentClass]bool, scope blockingAg
 		out = append(out, "The agents above that are not marked as built into Multica can be reassigned or archived.")
 	} else if classes[blockingAgentUser] {
 		out = append(out, "Reassign or archive them first.")
-	}
-	if classes[blockingAgentBuilderCarrier] {
-		// Addressed to the creator, not to whoever hit this error. Builder
-		// sessions are creator-scoped: ListAgentBuilderSessions returns 200 but
-		// omits other members' sessions, and switch/discard go through
-		// loadChatSessionForUser and return 403. So an admin who is not the
-		// creator cannot even see the session to act on it, and telling them to
-		// reopen it would be another instruction that cannot be carried out.
-		out = append(out, "The unfinished Agent Builder session(s) here are hidden from the agent list, and only their creator can open them — ask the member who started the session to switch its runtime or discard it; another admin cannot do that for them.")
 	}
 	if classes[blockingAgentMika] {
 		// Mika is unarchivable but NOT immovable: UpdateAgent takes runtime_id

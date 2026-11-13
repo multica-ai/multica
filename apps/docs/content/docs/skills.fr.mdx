@@ -4,6 +4,7 @@ description: Regroupez des instructions, des étapes et des supports de référe
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { SkillDemo } from "@/components/demos/skill-demo";
 
 Un skill est un ensemble réutilisable de méthodes de travail au sein d'un espace de travail. Son fichier principal est `SKILL.md`, éventuellement accompagné de scripts, de modèles et de supports de référence.
 
@@ -48,10 +49,10 @@ multica skill refresh <skill-id>
 
 Le skill est retéléchargé depuis sa source et remplacé sur place :
 
-- **Conservé** : l'identité du skill — rattachements aux agents, étiquettes, créateur et date de création. Les agents conservent le skill sans avoir à le rajouter.
+- **Conservé** : l'identité du skill, c'est-à-dire les rattachements aux agents, les étiquettes, le créateur et la date de création. Les agents conservent le skill sans avoir à le rajouter.
 - **Remplacé** : le nom (si la source l'a renommé), la description, `SKILL.md` et tous les fichiers annexes. Les modifications locales du skill sont écrasées.
 
-Le créateur du skill ainsi que les `owner` et `admin` de l'espace de travail peuvent mettre à jour depuis la source. Les skills créés manuellement, importés depuis un fichier d'archive ou copiés depuis un runtime n'ont pas de source hébergée et ne peuvent pas être mis à jour de cette façon — réimportez-les.
+Le créateur du skill ainsi que les `owner` et `admin` de l'espace de travail peuvent mettre à jour depuis la source. Les skills créés manuellement, importés depuis un fichier d'archive ou copiés depuis un runtime n'ont pas de source hébergée et ne peuvent pas être mis à jour de cette façon : réimportez-les.
 
 Pour mettre à jour plusieurs skills à la fois, sélectionnez-les dans la liste des skills et choisissez **Mettre à jour** dans la barre d'outils de sélection. Chaque skill sélectionné disposant d'une source hébergée est retéléchargé depuis celle-ci ; les autres sont ignorés.
 
@@ -78,7 +79,9 @@ scripts/check.sh
 
 ## Rattacher un skill à un agent
 
-Après sa création ou son import, un skill doit encore être ajouté à des agents précis. Choisissez les agents depuis la page du skill, ou gérez les rattachements depuis l'onglet **Skills** de l'agent.
+Après sa création ou son import, un skill doit encore être ajouté à des agents précis : choisissez **Ajouter à un agent** sur la page du skill, ou ouvrez l'onglet **Skills** de l'agent et cliquez sur **Ajouter un skill**. L'agent s'appuie sur la description du skill pour décider quand le charger.
+
+<SkillDemo />
 
 - Un agent peut utiliser plusieurs skills ;
 - un skill peut servir plusieurs agents ;

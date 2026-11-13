@@ -4,8 +4,10 @@ description: How a single agent run is queued, executed, stopped, and retried.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
+import { RunLifecycleDemo } from "@/components/demos/run-lifecycle-demo";
 
-Every time an agent starts working, Multica creates a **run**. It records what triggered the work, which agent it went to, how far it has progressed, and whether it ultimately succeeded.
+Every time an agent starts working, Multica creates a **run** that records what triggered the work, which agent it went to, how far it has got, and whether it succeeded.
 
 ## Issues and runs
 
@@ -17,18 +19,19 @@ An issue holds the goal, discussion, assignee, and final status of a piece of wo
 | How long it lasts | Can be discussed, amended, and reassigned repeatedly | From trigger until completion, failure, or cancellation |
 | Cardinality | One issue can span many runs | Every run gets its own record |
 
-So the same issue can be handed to different agents in turn, or run again after a failure. Each execution produces a new run record; earlier records are never overwritten.
+The same issue can be handed to different agents in turn, or run again after a failure. Each execution produces a new run record; earlier records are never overwritten.
 
 ## Trigger sources
 
-Any of the following can trigger a run:
+Each of the following triggers a run:
 
 - Assigning an issue to an agent or a squad.
 - Mentioning an agent in a comment.
 - Sending a message to an agent in chat.
 - An Autopilot firing on a schedule or from an external event.
+- An [issue wakeup](/issue-wakeups) firing on its event, time, or condition.
 
-Different entry points provide different context, but execution works the same way: Multica creates a run, a runtime claims it, and the runtime invokes the AI coding tool the agent is configured with.
+The agent gets different context depending on the entry point, but execution works the same way: Multica creates a run, a runtime claims it, and the runtime invokes the AI coding tool the agent is configured with.
 
 ## Execution lifecycle
 
@@ -45,7 +48,7 @@ A run typically moves through these states:
 | `failed` | The run errored or was interrupted |
 | `cancelled` | The run was stopped manually |
 
-When the runtime is online, a new run usually starts quickly; if the runtime goes offline after the run enters the queue, the run stays queued until it recovers. Queued work is not expired for waiting too long — a runtime that keeps heartbeating is busy, not gone, so its backlog is allowed to drain however long that takes. A queued run fails only when **both** are true: its runtime has been silent past the reconnect grace, **and** the run itself has been queued that long. The second condition matters when you assign work to a machine that is already asleep — the run still gets a full grace for you to bring it back, rather than failing straight away.
+When the runtime is online, a new run usually starts quickly; if the runtime goes offline after the run enters the queue, the run stays queued until it recovers. Waiting a long time does not expire a queued run: a runtime that keeps heartbeating is busy, not gone, so its backlog can drain however long that takes. A queued run fails only when **both** are true: its runtime has been silent past the reconnect grace, **and** the run itself has been queued that long. The second condition covers work assigned to a machine that is already asleep: instead of failing straight away, the run gets a full grace period for you to wake the machine.
 
 <Callout type="info">
 If the system already knows the target runtime is offline before triggering, some immediate actions report that the run cannot start right now instead of creating a run nothing can claim.
@@ -55,31 +58,35 @@ A runtime with a healthy heartbeat can execute long runs; the server never force
 
 ## Viewing run history
 
-Every run an issue produces is listed in the **Execution log** section of the issue's right sidebar — not on a separate page or tab. The section is expanded by default: active runs stay pinned at the top, and finished ones sit behind **Show past runs (N)**. Each row shows the trigger source, the executing agent, the state, and timing. If you don't see the section, open the sidebar with the panel button in the issue header; on narrow screens it starts collapsed.
+Every run an issue produces is listed in the **Execution log** section of the issue's right sidebar. The section is expanded by default: active runs stay pinned at the top, followed by the 3 most recent finished runs under **Latest**; click **Open timeline** for older ones. Each row shows the trigger source, the executing agent, and the state. If you don't see the section, open the sidebar with the panel button in the issue header; on narrow screens it starts collapsed.
 
-The log updates over the realtime connection while the page stays open — new runs, status changes, and the agent's comments appear without a manual reload.
+While the page is open, the log updates over the realtime connection: new runs, status changes, and the agent's comments appear without a reload.
 
 While an agent is working, the issue header also carries a live chip such as "Engineer is working". Hovering it shows the same active runs, so you can check progress without leaving the page.
 
-From here you can:
+In the execution log you can:
 
 - Click **View transcript** on a row to see the agent's messages, tool calls, and error output. For a run still in progress the transcript keeps streaming while the dialog stays open, and a **Newest first** toggle flips the event order.
-- Stop runs that are deferred, queued, starting, waiting for a local directory, or running.
+- Stop runs that are queued, starting, waiting for a local directory, or working.
 - Retry a failed or cancelled run.
 
-![Execution log in the issue sidebar: active runs above past runs](/images/docs/quickstart-run-result.webp)
+The demo below walks through a full cycle: a run queues, starts, and fails; you retry it and the new run completes. Once the new run starts, you can also try stopping it midway.
+
+<RunLifecycleDemo />
 
 ![Run record: status timeline, agent summary, and individual tool calls](/images/docs/task-transcript.webp)
 
 <Callout type="warning">
-Changing an issue's assignee or status does not stop a run that has already started. To interrupt one, stop the corresponding run in the execution log. Active runs are cancelled along with an issue only when the issue is deleted.
+Changing an issue's assignee or status does not stop a run that has already started; to interrupt one, stop it in the execution log. Deleting an issue cancels its active runs.
 </Callout>
+
+The execution log also totals the issue's **Spent**, **Tokens**, and **Agent time**, with one cost bar per run. Clicking the total, a bar, or **Open timeline** opens the **Runs** dialog, which charts cost per run or cumulatively, splits it by agent and by model, and counts failed and cancelled runs. Costs are estimates; see [Analytics](/analytics#issue-cost) for how they are calculated and for workspace-wide usage.
 
 ## Failures and automatic retries
 
 Transient faults — a runtime going briefly offline, a daemon restart, an execution timeout, or a network interruption in the AI coding tool — can trigger an automatic retry. A regular run executes at most twice by default; tool network interruptions get up to three attempts.
 
-Errors returned by the agent itself are usually not retried automatically. Expired credentials, exhausted quota, misconfiguration, or a model unable to complete the request all need the cause fixed first, followed by a manual retry.
+Errors returned by the agent itself are usually not retried automatically. Expired credentials, exhausted quota, misconfiguration, or a model unable to complete the request all need the cause fixed first, then a manual retry.
 
 An Autopilot's **run only** mode does not retry automatically, to avoid overlapping with the next scheduled run. The **create issue** mode produces regular issue runs, so infrastructure failures still retry under the rules above. Both modes show their final result in the Autopilot run history.
 
@@ -87,9 +94,10 @@ When an issue has no other active run and no new retry waiting to run, a failure
 
 ## Failure reason reference
 
-The failure reasons shown in the execution log and usage stats fall into two groups: unprefixed reason codes are recorded by the platform; `agent_error.*` codes are classified from the AI coding tool's own errors.
+The failure reasons shown in the execution log and [Analytics](/analytics#errors-tab) fall into two groups: unprefixed reason codes are recorded by the platform; `agent_error.*` codes are classified from the AI coding tool's own errors.
 
-**Platform side**
+<Tabs items={["Platform side", "Tool side (agent_error.*)"]}>
+<Tab value="Platform side" id="platform-reasons">
 
 | Reason | Meaning | What to do |
 | --- | --- | --- |
@@ -104,7 +112,10 @@ The failure reasons shown in the execution log and usage stats fall into two gro
 | `api_invalid_request` | The platform API rejected an invalid request | Retry; report the problem if it recurs |
 | `codex_semantic_inactivity` | Codex produced no meaningful output for too long and was judged stalled | Retry, or adjust the Codex inactivity timeout |
 
-**Tool side (`agent_error.*`, prefix omitted)**
+</Tab>
+<Tab value="Tool side (agent_error.*)" id="agent-error-reasons">
+
+The `agent_error.` prefix is omitted in this table.
 
 | Reason | Meaning | What to do |
 | --- | --- | --- |
@@ -123,29 +134,33 @@ The failure reasons shown in the execution log and usage stats fall into two gro
 | `agent_timeout` | The tool was terminated after going unresponsive for too long | Retry or narrow the issue scope |
 | `unknown` | Unclassified failure | Check the raw error in the run record |
 
+</Tab>
+</Tabs>
+
 ## Manual retry
 
 Clicking the retry button on a row in the execution log invokes **the agent that handled that run at the time**. Even if the issue has since been reassigned, the retry does not switch to the new assignee.
 
-A retry keeps the files the previous run already wrote to the local directory whenever possible. If the original session is still safe and the same runtime claims the retry, it also continues the previous session. Errors that poison the session, such as context overflow or invalid requests, start a new session on top of the original working directory instead. When the original directory no longer exists, a fresh working directory is used.
+A retry keeps the files the previous run already wrote to the local directory whenever possible. If the original session is still safe and the same runtime claims the retry, it continues that session. Errors that poison the session, such as context overflow or invalid requests, start a new session on top of the original working directory instead. When the original directory no longer exists, a fresh working directory is used.
 
-You can also rerun the current issue from the CLI:
+Find the source run and retry it from the CLI:
 
 ```bash
-multica issue rerun <issue-id>
+multica issue runs <issue-id> --full-id
+multica issue rerun-task <run-id>
 ```
 
-This form does not point at a specific past run, so it uses the issue's current agent assignee and starts with a fresh session and working directory.
+A full run UUID works without `--issue`; short prefixes require `--issue` to select the issue. This repeats the original agent and trigger context with the same continuity rules as the retry button. Add `--fresh` to start a new session and working directory.
+
+The old `multica issue rerun <issue-id>` command is deprecated and hidden from help. It remains available for existing scripts and still starts the current assignee with a fresh session and working directory.
 
 ## Run completion and issue completion
 
-`completed` only means this particular run ended normally — it does not confirm the issue's goal has been met. You can still review the result, keep discussing, add requirements, or trigger the agent again.
-
-Whether an issue is done is judged by the actual progress of the work and the issue's status.
+`completed` only means this particular run ended normally; it does not confirm the issue's goal has been met. After a run ends you can still review the result, keep discussing, add requirements, or trigger the agent again. Whether the issue is done is shown by its status.
 
 ## State and timeout quick reference
 
-The numbers below reflect the server's default configuration, for quick cross-checking while troubleshooting.
+The numbers below are the server's defaults.
 
 | State | Meaning | Timeout and consequence |
 | --- | --- | --- |
@@ -153,7 +168,7 @@ The numbers below reflect the server's default configuration, for quick cross-ch
 | `queued` | Waiting for a runtime to claim it | Waits as long as its runtime keeps heartbeating, and in every case for at least one reconnect grace after being queued; fails only when both windows have passed, and is not retried automatically |
 | `dispatched` | Claimed; the tool is starting | Treated as failed after more than **5 minutes** in this state |
 | `waiting_local_directory` | Waiting for the local directory lock to release | No timeout of its own; returns to the startup flow once the directory is released |
-| `running` | The AI coding tool is executing | No fixed duration cap; liveness follows the runtime heartbeat — one every 15 seconds; a runtime that loses its heartbeat is marked offline within about 3 minutes at the latest, and its runs fail with it |
+| `running` | The AI coding tool is executing | No fixed duration cap; liveness follows the runtime heartbeat — one every 15 seconds; a runtime that loses its heartbeat is marked offline within about 3 minutes at the latest. Its runs fail only once the heartbeat has been missing longer than the reconnect grace (`MULTICA_RUNTIME_RECONNECT_GRACE`, 3 hours by default); a daemon restart reclaims them directly |
 
 Automatic retry covers only the transient faults below, and only applies to runs attached to an issue or a chat (excluding the Autopilot **run only** mode):
 

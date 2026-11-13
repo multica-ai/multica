@@ -5,6 +5,7 @@ import { api } from "../api";
 import { defaultStorage } from "../platform/storage";
 import { clearWorkspaceStorage } from "../platform/storage-cleanup";
 import { workspaceKeys } from "./queries";
+import { sortWorkspaces } from "./sort-workspaces";
 import {
   markWorkspaceDeletePending,
   unmarkWorkspaceDeletePending,
@@ -167,4 +168,31 @@ export function useSetAgentMcpServerEnabled(agentId: string) {
 export function useRemoveAgentMcpServer(agentId: string) {
   return useAgentMcpMutation(agentId, (serverId: string) =>
     api.removeAgentMcpServer(agentId, serverId));
+}
+
+export function useSetWorkspacePinned() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ workspaceId, pinned }: { workspaceId: string; pinned: boolean }) =>
+      api.setWorkspacePinned(workspaceId, pinned),
+    onMutate: async ({ workspaceId, pinned }) => {
+      await qc.cancelQueries({ queryKey: workspaceKeys.list() });
+      const previous = qc.getQueryData<Workspace[]>(workspaceKeys.list());
+      qc.setQueryData<Workspace[]>(workspaceKeys.list(), (old) => old && sortWorkspaces(
+        old.map((ws) => ws.id === workspaceId
+          ? { ...ws, pinned_at: pinned ? ws.pinned_at ?? new Date().toISOString() : null }
+          : ws),
+      ));
+      return { previous };
+    },
+    onSuccess: (data, { workspaceId }) => {
+      qc.setQueryData<Workspace[]>(workspaceKeys.list(), (old) => old && sortWorkspaces(
+        old.map((ws) => ws.id === workspaceId ? { ...ws, pinned_at: data.pinned_at } : ws),
+      ));
+    },
+    onError: (_error, _vars, context) => {
+      if (context?.previous) qc.setQueryData(workspaceKeys.list(), context.previous);
+    },
+    onSettled: () => { void qc.invalidateQueries({ queryKey: workspaceKeys.list() }); },
+  });
 }

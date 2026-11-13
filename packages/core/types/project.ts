@@ -1,17 +1,37 @@
+
 export type ProjectStatus = "planned" | "in_progress" | "paused" | "completed" | "cancelled";
 
 export type ProjectPriority = "urgent" | "high" | "medium" | "low" | "none";
+
+export type ProjectVisibility = "workspace" | "private";
+
+export interface ProjectMember {
+  project_id: string;
+  user_id: string;
+  name: string;
+  email: string;
+  avatar_url: string | null;
+}
+
+export interface ListProjectMembersResponse {
+  members: ProjectMember[];
+  total: number;
+}
 
 export interface Project {
   id: string;
   workspace_id: string;
   title: string;
+  visibility?: ProjectVisibility;
   description: string | null;
   icon: string | null;
   status: ProjectStatus;
   priority: ProjectPriority;
   lead_type: "member" | "agent" | null;
   lead_id: string | null;
+  // Older backends omit these; null means the creator is unknown.
+  creator_type?: "member" | "agent" | null;
+  creator_id?: string | null;
   // Calendar days ("YYYY-MM-DD"), no time-of-day or timezone — same contract as
   // issue.start_date / issue.due_date.
   start_date: string | null;
@@ -21,10 +41,17 @@ export interface Project {
   issue_count: number;
   done_count: number;
   resource_count: number;
+  /**
+   * The workflow this project uses; null for the workspace Default workflow.
+   * Optional because older servers do not send it. (MUL-7420)
+   */
+  workflow_id?: string | null;
 }
 
 export interface CreateProjectRequest {
   title: string;
+  visibility?: ProjectVisibility;
+  member_ids?: string[];
   description?: string;
   icon?: string;
   status?: ProjectStatus;
@@ -33,6 +60,8 @@ export interface CreateProjectRequest {
   lead_id?: string;
   start_date?: string;
   due_date?: string;
+  /** Workflow to use from the start; omitted uses the Default workflow. */
+  workflow_id?: string | null;
   // Resources to attach in the same transaction as the project. Server returns
   // 4xx (and rolls back) if any one is invalid or duplicate.
   resources?: CreateProjectResourceRequest[];
@@ -40,6 +69,8 @@ export interface CreateProjectRequest {
 
 export interface UpdateProjectRequest {
   title?: string;
+  visibility?: ProjectVisibility;
+  member_ids?: string[];
   description?: string | null;
   icon?: string | null;
   status?: ProjectStatus;

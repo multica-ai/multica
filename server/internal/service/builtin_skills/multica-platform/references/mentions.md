@@ -11,6 +11,7 @@ that and do not re-derive it here.
 - [@all is the broadcast type](#all-is-the-broadcast-type)
 - [What does NOT happen](#what-does-not-happen)
 - [Who the invoke gate judges](#who-the-invoke-gate-judges)
+- [Steering another agent's running turn](#steering-another-agents-running-turn)
 - [Incorrect to correct](#incorrect-to-correct)
 
 ## A mention link is built from a real UUID
@@ -26,8 +27,22 @@ The parser accepts exactly four `<type>` values plus the `all` sentinel, and the
     (member|agent|squad|issue|all)/([0-9a-fA-F-]+|all)
 
 So the link target is a real entity UUID (or `all`), never a display name. The
-label between the brackets is free text — that is where the human-readable name
-goes.
+label between the brackets must contain visible text. Put the human-readable
+name there. The `@` prefix is optional; issue references commonly omit it:
+
+    [MUL-123](mention://issue/<uuid>)
+
+Only canonical inline links with visible label text count as mentions. Empty
+or invisible labels, reference links, images, autolinks, titles, and
+angle-bracket destinations are not mention triggers. Use the shape above.
+Text removed by HTML sanitization, such as script contents, and inert template
+contents do not make a label visible; neither does an `@` prefix on its own.
+
+Code examples are inert as mentions. This includes inline code, multiline code
+spans, indented code, and backtick or tilde fenced blocks inside lists,
+blockquotes, or `<details>`. A fenced `diff` of agent instructions cannot invoke
+its mention targets. Copy the mention syntax out of code and paste it into
+ordinary prose to trigger it. Prose mentions in blockquotes still count.
 
 One `mention://` form deliberately sits OUTSIDE this parser:
 `[Label](mention://project/<uuid>)`. `project` is absent from the type group
@@ -97,12 +112,13 @@ is a no-op; a malformed UUID is rejected at the request boundary.
 
     [@all](mention://all/all)
 
-It addresses everyone on the issue. It does NOT make any specific agent run.
-And it is special at trigger time: a comment that carries an `@all` mention is
-treated as a broadcast that SUPPRESSES the issue assignee's automatic
-on-comment trigger (and the other implicit routing fallbacks — thread parent /
-conversation owner). Use `@all` to announce, not to request work from the
-assignee.
+It notifies every human member of the workspace except the author, not just
+people on this issue; notification preferences and private-project access
+still apply. It does NOT make any specific agent run. And it is special at
+trigger time: a comment that carries an `@all` mention is treated as a
+broadcast that SUPPRESSES the issue assignee's automatic on-comment trigger
+(and the other implicit routing fallbacks — thread parent / conversation
+owner). Use `@all` to announce, not to request work from the assignee.
 
 `@all` only suppresses those IMPLICIT routes. An EXPLICIT `@agent` / `@squad`
 mention in the same comment still fires normally: a comment reading
@@ -218,6 +234,51 @@ an unrelated issue, or an admin editing an agent's comment (manage rights, not
 invoke rights), fails closed at the deferred completion-reconcile instead of
 reusing the original run's authority.
 
+## Steering another agent's running turn
+
+A comment to an agent that is already running reaches it only after that run
+ends. You can put the comment into the run instead:
+
+```bash
+multica issue comment add <issue-id> --parent <your trigger comment> \
+  --content-file ./note.md --steer <run-id>
+multica issue comment add <issue-id> --parent <your trigger comment> \
+  --content-file ./note.md --steer-active
+```
+
+`--steer` takes a run id from `multica issue runs <issue-id> --active`
+(repeatable; short prefixes resolve on this issue). `--steer-active` steers
+every running run on the issue that reports `can_supplement: true` for you,
+plus any other recipient of the comment that is running when it is posted. The
+CLI mentions each steered agent in the comment.
+
+Steer when the other agent is mid-task and your input changes what it is doing
+now: a correction, a missing fact, a narrower scope. Delegate new work, and
+reply to finished work, the normal way.
+
+Rules:
+
+- you can steer an agent exactly when your mention could start it (same
+  invoke check, judged on the human who started your chain);
+- never your own run;
+- at most 3 of your messages per run, and 10 from all agents; past that the
+  comment takes its normal trigger;
+- only runs that are running now and accept additional messages
+  (`can_supplement: true` in `multica issue runs <issue-id> --active --output json`);
+- no attachments. The CLI refuses `--steer` with `--attachment`.
+- a CLI that answers `unknown flag: --steer` predates steering: post the
+  comment without the flag.
+
+The CLI prints one line per run on stderr. `Steered run …` means the comment
+was added to the running turn. If that turn ends before reading it, the comment
+is handled in a follow-up run, so do not re-post it. `queued`, `coalesced`,
+`deferred` or `blocked` means the comment went through the normal mention path.
+
+The other agent sees your message labelled as coming from an agent, not a
+human. A run on an older daemon, which cannot show that label, does not read it
+mid-run; it gets the comment in a follow-up run instead. It cannot cancel or replace that agent's objective or override a human's
+instructions, so write it as input, not as a command.
+
 ## Incorrect to correct
 
 Incorrect: `@alice please review`
@@ -232,8 +293,8 @@ Correct:
   2. `[@Alice](mention://member/7f3a…) please review`
      → a real `user_id` parses; the link renders and resolves to Alice.
 
-@all broadcast: `[@all](mention://all/all) heads up` — addresses everyone,
-runs no specific agent, and suppresses the assignee auto-trigger.
+@all broadcast: `[@all](mention://all/all) heads up` — notifies human workspace
+members, runs no specific agent, and suppresses the assignee auto-trigger.
 
 Using the wrong `type` for a real UUID still parses — it just resolves to the
 wrong entity, or to nothing. That is why the type must match the id source.

@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import type { WSEventType } from "../types";
-import { useWS } from "./provider";
+import { useWS, type WSStatus } from "./provider";
 
 type EventHandler = (payload: unknown, actorId?: string, actorType?: string) => void;
 
@@ -30,4 +30,10 @@ export function useWSReconnect(callback: () => void) {
     const unsub = onReconnect(callback);
     return unsub;
   }, [callback, onReconnect]);
+}
+
+/** Live connection state of the workspace WebSocket. */
+export function useWSStatus(): WSStatus {
+  const { subscribeStatus, getStatus } = useWS();
+  return useSyncExternalStore(subscribeStatus, getStatus, () => "offline");
 }

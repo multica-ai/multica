@@ -23,6 +23,12 @@ Text sizes: `xs`, `sm`, `default`, `lg`. Icon sizes: `icon-xs`, `icon-sm`, `icon
 
 Use `disabled` when an action is unavailable. For pending actions, compose a spinner with `disabled` and `aria-busy`; Button has no `loading` prop. Icon-only buttons need an accessible name. Keep visible keyboard focus.
 
+## Shape
+
+Buttons, links and clickable chips are rounded rectangles. Each size already carries its radius: `rounded-md` up to 28px (`xs`, `sm`, `icon-xs`, `icon-sm`) and `rounded-lg` for 32–36px. A chip next to a Button takes the Button's shape, not a pill.
+
+`rounded-full` is reserved for avatars, status dots and counts, switches, radios, sliders, color swatches, the floating chat launcher and the composer send/stop button. Lint rejects it on any other button-like element; an exception carries an inline disable that names it.
+
 ## Correct
 
 ```tsx
@@ -44,4 +50,4 @@ Use `disabled` when an action is unavailable. For pending actions, compose a spi
 
 `--button-height-*`, `--button-padding-*` and `--button-gap-*` control each size. Theme colors come from semantic tokens. Geometry changes affect every Button using that size; local class overrides can take precedence.
 
-UI Lab exports a CSS patch for `packages/ui/styles/tokens.css`. Review the original and edited previews in both themes, merge declarations into the matching blocks, then review the source diff. Saving a browser design does not apply it to product code.
+Edit these declarations in `packages/ui/styles/tokens.css`, check the result in both themes, then review the source diff.

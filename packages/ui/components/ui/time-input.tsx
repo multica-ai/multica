@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Clock } from "lucide-react";
+import { Clock } from "@multica/ui/icons";
 
 import { cn } from "@multica/ui/lib/utils";
 
@@ -83,6 +83,7 @@ const SegmentInput = React.forwardRef<HTMLInputElement, SegmentInputProps>(funct
   }, [pendingFirst]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.key === "Tab") return;
     if (e.key === "ArrowRight") {
       e.preventDefault();

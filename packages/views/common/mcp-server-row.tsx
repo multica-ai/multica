@@ -11,8 +11,9 @@ import {
   SquareTerminal,
   Trash2,
   X,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Input } from "@multica/ui/components/ui/input";
 import {
   Tooltip,
@@ -185,31 +186,31 @@ export function McpServerRow({
                   </p>
                 ) : null}
               </div>
-              <Button
+              <IconButton
                 type="submit"
                 variant="secondary"
                 size="icon-sm"
                 className="mt-0.5"
                 disabled={rename.pending}
-                aria-label={labels.renameSave}
+                label={labels.renameSave}
               >
                 {rename.pending ? (
                   <Loader2 className="animate-spin motion-reduce:animate-none" />
                 ) : (
                   <Check />
                 )}
-              </Button>
-              <Button
+              </IconButton>
+              <IconButton
                 type="button"
                 variant="ghost"
                 size="icon-sm"
                 className="mt-0.5 text-muted-foreground"
                 disabled={rename.pending}
                 onClick={rename.onCancel}
-                aria-label={labels.renameCancel}
+                label={labels.renameCancel}
               >
                 <X />
-              </Button>
+              </IconButton>
             </form>
           ) : (
             <span className="truncate text-body font-medium">{name}</span>

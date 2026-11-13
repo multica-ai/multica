@@ -1,8 +1,9 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { MessageSquare, X } from "lucide-react";
+import { MessageSquare, X } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Popover, PopoverContent, PopoverTrigger } from "@multica/ui/components/ui/popover";
 import { useCommentDraftStore, type CommentDraftKey } from "@multica/core/issues/stores";
 import type { ReplyAnnotation } from "@multica/core/drafts/reply-annotation";
@@ -36,7 +37,7 @@ export function ReplyAnnotations({ draftKey, annotations, disabled, onEditAnnota
         onClick={(event) => event.stopPropagation()}>
         <div className="flex max-h-64 flex-col gap-2 overflow-y-auto">
           {annotations.map((annotation, index) => <div key={annotation.id} className="flex items-start gap-1">
-            <span aria-hidden="true" className="mt-1 flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-caption tabular-nums">{index + 1}</span>
+            <span aria-hidden="true" className="mt-1 flex size-6 shrink-0 items-center justify-center rounded-md bg-muted text-caption tabular-nums">{index + 1}</span>
             <div className="min-w-0 flex-1">
               <button type="button" disabled={disabled}
                 aria-label={t(($) => $.reply.annotations.edit, { number: index + 1 })}
@@ -57,9 +58,9 @@ export function ReplyAnnotations({ draftKey, annotations, disabled, onEditAnnota
                 {t(($) => $.reply.annotations.source_changed)}
               </p>}
             </div>
-            <Button variant="ghost" size="icon-sm" disabled={disabled}
-              aria-label={t(($) => $.reply.annotations.remove, { number: index + 1 })}
-              onClick={() => useCommentDraftStore.getState().removeAnnotation(draftKey, annotation.id)}><X /></Button>
+            <IconButton variant="ghost" size="icon-sm" disabled={disabled}
+              label={t(($) => $.reply.annotations.remove, { number: index + 1 })}
+              onClick={() => useCommentDraftStore.getState().removeAnnotation(draftKey, annotation.id)}><X /></IconButton>
           </div>)}
         </div>
       </PopoverContent>

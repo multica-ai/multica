@@ -1,24 +1,8 @@
 /**
- * Top-level navigation hardening for renderer windows.
- *
- * Scope note (MUL-4899) — this is origin hardening ONLY, and deliberately NOT
- * the mechanism that handles in-app links.
- *
- * Client-side routing never fires `will-navigate`: React Router pushes history
- * entries without a document load. So an in-app path — a good one like
- * `/acme/issues/1` or a bad one like `/Users/me/shot.png` pasted by an agent —
- * never reaches this guard at all. Bad in-app paths are a routing concern,
- * answered by the renderer's 404 page. Trying to police application paths here
- * would be both ineffective (the hook does not see them) and wrong (it would
- * break legitimate reloads).
- *
- * What it does catch is a real document-level navigation away from the trusted
- * renderer: `window.location = 'https://evil.example'`, an anchor Chromium
- * resolves to a remote URL in the same window, a dropped file URL. These windows
- * run with `webSecurity: false` (the process sandbox is enabled), so a
- * foreign document landing in one would inherit privileged context. New
- * windows and external links already route through `setWindowOpenHandler` →
- * `openExternalSafely`; this closes the same-window path.
+ * Guard document-level renderer navigation to trusted origins or the packaged
+ * entry file. Same-window foreign documents must not inherit renderer privileges.
+ * Client-side route changes do not fire will-navigate and remain the router's
+ * responsibility. New windows and external links use openExternalSafely.
  */
 
 /** The subset of BrowserWindow this module needs — keeps it unit-testable. */

@@ -26,8 +26,8 @@ func TestAckNotifierCredentialFailuresAreOptional(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			d := newDingtalkSendServer(t)
 			n := NewAckNotifier(NewClient(nil, d.srv.URL), tc.decrypt, nil, nil)
-			n.OnIngested(context.Background(), engine.ResolvedInstallation{Platform: tc.platform}, groupReactionMessage("source"), sessionUUID(91))
-			n.OnSettled(context.Background(), sessionUUID(91))
+			n.OnIngested(context.Background(), engine.ResolvedInstallation{Platform: tc.platform}, groupReactionMessage("source"), sessionUUID(91), sessionUUID(91))
+			n.OnSettled(context.Background(), sessionUUID(91), engine.TypingSettlement{})
 			if len(d.sendBodies) != 0 || len(n.active) != 0 {
 				t.Fatal("unusable credentials sent a reaction or prevented local cleanup")
 			}

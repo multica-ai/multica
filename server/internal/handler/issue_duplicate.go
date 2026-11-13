@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/logger"
@@ -71,6 +72,32 @@ func parseDuplicateMark(w http.ResponseWriter, req *UpdateIssueRequest, rawField
 	cancelled := issuestatus.Cancelled
 	req.Status = &cancelled
 	return targetID, true
+}
+
+// requireDuplicateTarget answers a target that is missing, in another
+// workspace, or in a private project the caller cannot see (MUL-8472) with
+// the same 400, before any other field of the request is validated. Checking
+// visibility alone is not enough: a missing target would pass it and fail on
+// a later field (an invalid assignee, say), while a hidden one stops here, so
+// the two answers would tell the caller the hidden issue exists.
+// lockAndCheckDuplicateMark still re-checks the target under lock.
+func (h *Handler) requireDuplicateTarget(w http.ResponseWriter, r *http.Request, workspaceID pgtype.UUID, targetID pgtype.UUID) bool {
+	if !targetID.Valid {
+		return true
+	}
+	_, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+		ID:          targetID,
+		WorkspaceID: workspaceID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusBadRequest, errDuplicateTargetNotFound.Error())
+		return false
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load duplicate target")
+		return false
+	}
+	return h.requireIssueIDVisible(w, r, uuidToString(workspaceID), targetID, http.StatusBadRequest, errDuplicateTargetNotFound.Error())
 }
 
 // lockAndCheckDuplicateMark validates a mark inside the update transaction.
@@ -142,8 +169,12 @@ func (h *Handler) ListIssueDuplicates(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	hidden, ok := h.requestHiddenProjects(w, r, uuidToString(issue.WorkspaceID))
+	if !ok {
+		return
+	}
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
-	fill := h.newStatusCategoryFiller(r.Context(), issue.WorkspaceID)
+	fill := h.newStatusCategoryFiller(r.Context(), issue.WorkspaceID, hidden)
 
 	var duplicateOf *IssueResponse
 	if issue.Status == issuestatus.Cancelled && issue.DuplicateOfIssueID.Valid {
@@ -152,6 +183,7 @@ func (h *Handler) ListIssueDuplicates(w http.ResponseWriter, r *http.Request) {
 			WorkspaceID: issue.WorkspaceID,
 		})
 		switch {
+		case err == nil && !hidden.CanSeeProject(original.ProjectID):
 		case err == nil:
 			resp := issueToResponse(original, prefix)
 			fill(&resp)
@@ -172,6 +204,7 @@ func (h *Handler) ListIssueDuplicates(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list duplicates")
 		return
 	}
+	rows = filterVisibleIssues(hidden, rows)
 	duplicates := make([]IssueResponse, 0, len(rows))
 	for _, row := range rows {
 		resp := issueToResponse(row, prefix)

@@ -1,8 +1,12 @@
+import {
+  parseWorkspaceSlug,
+  readWorkspaceWindowSlug,
+} from "./workspace-window";
+
 export const ISSUE_WINDOW_ARGUMENT_PREFIX = "--multica-issue-window=";
 
 const MAX_ISSUE_WINDOW_PATH_LENGTH = 2_048;
 const MAX_ISSUE_WINDOW_TITLE_LENGTH = 256;
-const WORKSPACE_SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const ISSUE_REF_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 
 export type IssueWindowRequest = {
@@ -16,9 +20,13 @@ export type IssueWindowContext = IssueWindowRequest & {
   issueId: string;
 };
 
-export type DesktopWindowContext =
-  | { kind: "main" }
-  | IssueWindowContext;
+/**
+ * A tabbed main window. `workspaceSlug` is the workspace it was opened or
+ * restored for; without it the window resumes the persisted active workspace.
+ */
+export type MainWindowContext = { kind: "main"; workspaceSlug?: string };
+
+export type DesktopWindowContext = MainWindowContext | IssueWindowContext;
 
 /**
  * Validate renderer-controlled input before it can become a BrowserWindow
@@ -79,7 +87,7 @@ export function parseIssueWindowPath(
     return null;
   }
 
-  if (!WORKSPACE_SLUG_PATTERN.test(workspaceSlug)) return null;
+  if (!parseWorkspaceSlug(workspaceSlug)) return null;
   if (!ISSUE_REF_PATTERN.test(issueId)) return null;
 
   const path = `/${workspaceSlug}/issues/${encodeURIComponent(issueId)}${url.search}${url.hash}`;
@@ -101,16 +109,20 @@ export function encodeIssueWindowArgument(request: IssueWindowRequest): string {
 export function readDesktopWindowContext(
   argv: readonly string[],
 ): DesktopWindowContext {
+  const workspaceSlug = readWorkspaceWindowSlug(argv);
+  const main: MainWindowContext = workspaceSlug
+    ? { kind: "main", workspaceSlug }
+    : { kind: "main" };
   const argument = argv.find((item) =>
     item.startsWith(ISSUE_WINDOW_ARGUMENT_PREFIX),
   );
-  if (!argument) return { kind: "main" };
+  if (!argument) return main;
 
   try {
     const encoded = argument.slice(ISSUE_WINDOW_ARGUMENT_PREFIX.length);
     const decoded = JSON.parse(decodeURIComponent(encoded)) as unknown;
-    return parseIssueWindowRequest(decoded) ?? { kind: "main" };
+    return parseIssueWindowRequest(decoded) ?? main;
   } catch {
-    return { kind: "main" };
+    return main;
   }
 }

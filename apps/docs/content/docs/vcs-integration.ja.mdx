@@ -4,17 +4,19 @@ description: ワークスペースごとにセルフホストの Forgejo、Gitea
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
 
 <Callout type="warn">
-**セルフホスト版 Multica 専用です。** この連携は Multica を**自分でデプロイしている**場合のみ利用でき、Multica Cloud では提供されません。ここでの「セルフホスト」は **Multica 自体**のセルフホストを意味します。通常は独自ネットワーク内の Git インスタンスへアクセスするために使用します。サーバー運用者が `MULTICA_VCS_INTEGRATION_ENABLED=true` を設定して機能を有効にし、`MULTICA_VCS_SECRET_KEY` も設定する必要があります。それまでは、設定 → コードにこの行は表示されません。
+**セルフホスト版 Multica 専用です。** この連携は Multica を自分でデプロイしている場合のみ利用でき、Multica Cloud では提供されません。セルフホストするのは、通常は Multica から社内ネットワークの Git インスタンスにアクセスするためです。サーバー側で `MULTICA_VCS_INTEGRATION_ENABLED=true` を有効にし、`MULTICA_VCS_SECRET_KEY` を設定する必要があります。設定するまで、**設定 → コード** にこの行は表示されません。
 </Callout>
 
-Multica はワークスペースごとにセルフホストの Git ホスティング、**Forgejo**、**Gitea**、**GitLab** のいずれかへ接続します。接続後、ブランチ名かタイトルにタスク番号（例: `MUL-123`）を含む Pull Request（GitLab では Merge Request）、または本文で終了キーワードの直後にタスク番号を置いた PR は、対応する[タスク](/issues)へ**自動的に紐づけられ**、タスクサイドバーの **Pull requests** に表示されます。タスクに紐づく PR がすべてマージされると、タスクはワークスペースが選んだステータス（既定は「完了」）へ移動します。head commit の CI はカード上のチェックバーとして表示されます。
+Multica はワークスペースごとにセルフホストの Git ホスティング、Forgejo、Gitea、GitLab のいずれかへ接続します。接続後、ブランチ名かタイトルにタスク番号（例: `MUL-123`）を含む Pull Request（GitLab では Merge Request）、または本文で終了キーワードの直後にタスク番号を置いた PR は、対応する[タスク](/issues)へ自動的に紐づけられ、タスクサイドバーの **Pull requests** に表示されます。タスクに紐づく PR がすべてマージされると、タスクはワークスペースが選んだステータス（既定は「完了」）へ移動します。head commit の CI はカード上のチェックバーとして表示されます。
 
-これらの Git ホスティングは GitHub と並行して利用でき、1 つのワークスペースで任意に組み合わせられます。
+これらの Git ホスティングは GitHub と並行して利用でき、1 つのワークスペースで複数を接続できます。
 
 <Callout type="info">
-GitHub と異なり、これらの Git ホスティングには「App」モデルがありません。各ワークスペースが独自のインスタンス URL とアクセストークンを保存し、リポジトリまたは組織へ Webhook を登録します。トークンと Webhook secret はどちらも暗号化して保存されます。
+GitHub と異なり、これらの Git ホスティングには App モデルがありません。各ワークスペースが独自のインスタンス URL とアクセストークンを保存し、リポジトリまたは組織へ Webhook を登録します。トークンと Webhook secret はどちらも暗号化して保存されます。
 </Callout>
 
 ## 前提条件（サーバー）
@@ -43,12 +45,23 @@ MULTICA_VCS_SECRET_KEY=<base64 32 バイト鍵>
 
 ## ワークスペースを接続
 
-1. Git ホスティング側で、リポジトリの読み取り権限を持つアクセストークンを作成します。
-   - **Forgejo / Gitea**: 設定 → アプリケーション。
-   - **GitLab**: `read_api` 権限を持つ個人（またはグループ/プロジェクト）アクセストークン。
-2. Multica で **設定 → コード**を開き、**セルフホスト Git** の行で **接続** をクリックします。
-3. **プロバイダー**を選択し、インスタンス URL（例: `https://forgejo.example.com`）とアクセストークンを入力して **接続**をクリックします。Multica は保存前に、そのトークンでインスタンスへアクセスして検証します。
-4. 接続後に表示される **Webhook URL** と **Webhook secret** をコピーします。
+<Steps>
+<Step>
+Git ホスティング側で、リポジトリの読み取り権限を持つアクセストークンを作成します。
+
+- **Forgejo / Gitea**: 設定 → アプリケーション。
+- **GitLab**: `read_api` 権限を持つ個人（またはグループ/プロジェクト）アクセストークン。
+</Step>
+<Step>
+Multica で **設定 → コード**を開き、**セルフホスト Git** の行で **接続** をクリックします。
+</Step>
+<Step>
+**プロバイダー**を選択し、インスタンス URL（例: `https://forgejo.example.com`）とアクセストークンを入力して **接続**をクリックします。Multica は保存前に、そのトークンでインスタンスへアクセスして検証します。
+</Step>
+<Step>
+接続後に表示される **Webhook URL** と **Webhook secret** をコピーします。
+</Step>
+</Steps>
 
 <Callout type="warn">
 Webhook secret は一度しか表示されません。ページを離れる前にコピーしてください。同じインスタンスへ再接続すると、トークンと secret がローテーションされます。
@@ -56,26 +69,35 @@ Webhook secret は一度しか表示されません。ページを離れる前�
 
 ### プライベート CA を使うインスタンス
 
-**接続**で、プロバイダーの証明書が "is signed by a certificate authority this server does not trust" と表示された場合、インスタンスの HTTPS 証明書は Multica サーバーが信頼していない社内 CA で発行されている（または自己署名である）ということです。サーバー管理者がその CA をバックエンドの信頼ストアに追加してください。Helm では `backend.extraCACerts.configMap` を設定し、Docker Compose では CA をマウントして `SSL_CERT_DIR` を設定します。手順は [Private CA certificates](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING_ADVANCED.md#private-ca-certificates-optional) を参照してください。
+**接続**で、プロバイダーの証明書が "is signed by a certificate authority this server does not trust" と表示された場合、インスタンスの HTTPS 証明書は Multica サーバーが信頼していない社内 CA で発行されている（または自己署名である）ということです。サーバー管理者がその CA をバックエンドの信頼ストアに追加してください。Helm では `backend.extraCACerts.configMap` を設定し、Docker Compose では CA をマウントして `SSL_CERT_DIR` を設定します。手順は [Private CA certificates](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING_ADVANCED.md#private-ca-certificates-optional) を参照してください。バックエンドはこの CA をデーモンにも渡すため、デーモンの git も同じインスタンスのリポジトリをクローンできます。
 
 接続リクエストにはアクセストークンが含まれるため、Multica には証明書の検証をスキップするオプションはありません。証明書がホスト名と一致しない、または検証に失敗した（例: 有効期限切れ）と表示された場合は、証明書そのものを修正してください。CA を信頼しても解決しません。
 
 ## Webhook を登録
 
-リポジトリ（または全リポジトリを対象にする組織/グループ）で設定します。
+リポジトリに登録します。すべてのリポジトリを対象にするには、組織またはグループに登録します。
 
-**Forgejo / Gitea** — 設定 → Webhook → Webhook を追加 → Forgejo/Gitea:
+<Tabs items={["Forgejo / Gitea", "GitLab"]}>
+<Tab value="Forgejo / Gitea" id="forgejo-gitea">
+
+設定 → Webhook → Webhook を追加 → Forgejo/Gitea:
 
 - **送信先 URL**: 前の手順で取得した Webhook URL。
 - **HTTP メソッド** `POST`、**コンテンツタイプ** `application/json`。
 - **secret**: Webhook secret（`X-Gitea-Signature` HMAC の検証に使用）。
 - **トリガーイベント**: **Pull Request** を選び、CI をミラーするには **Commit Status** も選択。
 
-**GitLab** — 設定 → Webhooks:
+</Tab>
+<Tab value="GitLab" id="gitlab">
+
+設定 → Webhooks:
 
 - **URL**: Webhook URL。
 - **Secret token**: Webhook secret（`X-Gitlab-Token` として送信され、文字列をそのまま比較）。
 - **トリガー**: **Merge request events** を有効にし、CI をミラーするには **Pipeline events** も有効化。
+
+</Tab>
+</Tabs>
 
 Multica は保存済みの secret で各 delivery を検証するため、一致する secret がない Webhook は拒否されます。
 

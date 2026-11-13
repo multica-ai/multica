@@ -70,6 +70,7 @@ export type PRAutoCompleteState =
   | "issue_disabled"
   | "terminal"
   | "triage"
+  | "not_in_workflow"
   | "at_target"
   | "waiting"
   | "not_merged"
@@ -156,6 +157,26 @@ export interface GitHubPullRequest {
   changed_files?: number;
 }
 
+/** One issue -> PR link as issue cards, list rows and table cells render it.
+ * The CI / merge snapshot stays on the issue's own PR list. */
+export interface IssuePullRequestSummary {
+  issue_id: string;
+  id: string;
+  provider: string;
+  repo_owner: string;
+  repo_name: string;
+  number: number;
+  title: string;
+  /** Unknown future states are kept as strings; chips fall back to "open". */
+  state: GitHubPullRequestState | (string & {});
+  html_url: string;
+}
+
+export interface IssuePullRequestSummariesResponse {
+  /** Newest first. */
+  pull_requests: IssuePullRequestSummary[];
+}
+
 export interface ListGitHubInstallationsResponse {
   installations: GitHubInstallation[];
   /** Whether the deployment has GitHub App credentials configured. When false, the Connect button is hidden / disabled. */
@@ -171,6 +192,7 @@ export interface ListGitHubInstallationsResponse {
 }
 
 export interface GitHubConnectResponse {
+  connection_id?: string;
   /** The GitHub App install URL the browser should open. Empty when `configured` is false. */
   url?: string;
   configured: boolean;
@@ -188,6 +210,7 @@ export interface GitHubRepository {
 }
 
 export interface ListGitHubRepositoriesResponse {
+  repository_selection?: "all" | "selected" | "unknown";
   repositories: GitHubRepository[];
   total_count: number;
   next_page: number | null;

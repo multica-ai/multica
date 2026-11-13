@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enProjects from "../../locales/en/projects.json";
@@ -108,6 +108,36 @@ describe("ProjectPicker", () => {
     await user.type(await screen.findByPlaceholderText(SEARCH_PLACEHOLDER), "mobile");
     expect(screen.getAllByRole("button", { name: /no project/i })).toHaveLength(2);
     expect(screen.getByRole("button", { name: /mobile web/i })).toBeInTheDocument();
+  });
+
+  it("shows a truncated project name on keyboard focus, not a fitting one", async () => {
+    const user = userEvent.setup();
+    renderPicker();
+    await user.click(screen.getByRole("button", { name: /launch command center/i }));
+    await screen.findByPlaceholderText(SEARCH_PLACEHOLDER);
+    const rows = Array.from(document.querySelectorAll<HTMLButtonElement>("button[data-picker-item]"));
+    const longRow = rows.find((row) => row.textContent === "Launch Command Center")!;
+    const shortRow = rows.find((row) => row.textContent === "Mobile Web")!;
+
+    // jsdom has no layout: clip the long row's label the way `truncate` would.
+    const label = within(longRow).getByText("Launch Command Center");
+    label.style.overflowX = "hidden";
+    Object.defineProperties(label, {
+      scrollWidth: { configurable: true, value: 240 },
+      clientWidth: { configurable: true, value: 120 },
+    });
+
+    await act(async () => {
+      shortRow.focus();
+    });
+    expect(document.querySelector("[data-slot='tooltip-content']")).toBeNull();
+
+    await act(async () => {
+      longRow.focus();
+    });
+    expect(document.querySelector("[data-slot='tooltip-content']")).toHaveTextContent(
+      "Launch Command Center",
+    );
   });
 
   it("locks every mutation path when disabled", async () => {

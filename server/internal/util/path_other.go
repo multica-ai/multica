@@ -35,3 +35,15 @@ func absNoClean(p string) string {
 func evalPath(p string) (string, error) {
 	return filepath.EvalSymlinks(p)
 }
+
+// evalPathStrict is evalPath on Unix: filepath.EvalSymlinks already walks every
+// component and has no namespace it returns unwalked.
+func evalPathStrict(p string) (string, error) {
+	return evalPath(p)
+}
+
+// canonicalSpelling is the identity on Unix: evalPath is filepath.EvalSymlinks
+// here, so its result is already the spelling callers compare against.
+func canonicalSpelling(resolved string) string {
+	return resolved
+}

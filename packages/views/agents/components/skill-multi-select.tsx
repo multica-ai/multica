@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, Plus, X } from "lucide-react";
+import { ChevronDown, Plus, X } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import type { SkillSummary } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";

@@ -28,12 +28,14 @@ vi.mock("@multica/core/paths", () => ({
 }));
 
 vi.mock("../../issues/components/issue-chip", () => ({
+  useChipIssue: () => undefined,
   IssueChip: ({ fallbackLabel }: { fallbackLabel?: string }) => (
     <span data-testid="issue-chip">{fallbackLabel}</span>
   ),
 }));
 
 vi.mock("../../projects/components/project-chip", () => ({
+  useChipProject: () => undefined,
   ProjectChip: ({ fallbackLabel }: { fallbackLabel?: string }) => (
     <span data-testid="project-chip">{fallbackLabel}</span>
   ),

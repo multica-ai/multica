@@ -242,9 +242,10 @@ func TestRepoCheckoutSummary(t *testing.T) {
 	t.Parallel()
 	const repoURL = "https://github.com/org/repo.git"
 	for _, tc := range []struct {
-		name   string
-		result repoCheckoutResult
-		want   []string
+		name    string
+		result  repoCheckoutResult
+		want    []string
+		notWant []string
 	}{
 		{
 			name:   "new branch",
@@ -256,7 +257,7 @@ func TestRepoCheckoutSummary(t *testing.T) {
 			result: repoCheckoutResult{Path: "/work/repo", BranchName: "agent/test/old", Kept: "local_work", UncommittedFiles: 2, UnpushedCommits: 1},
 			want: []string{
 				"Kept the existing checkout of " + repoURL + " at /work/repo (branch: agent/test/old; 2 uncommitted files, 1 unpushed commit)",
-				"nothing was reset, cleaned, or switched",
+				"nothing was reset, cleaned, or switched; only remote refs were fetched.",
 				"re-run with --fresh",
 			},
 		},
@@ -270,6 +271,21 @@ func TestRepoCheckoutSummary(t *testing.T) {
 			result: repoCheckoutResult{Path: "/work/repo", Kept: "local_work", UnpushedCommits: 3},
 			want:   []string{"(branch: detached HEAD; 0 uncommitted files, 3 unpushed commits)"},
 		},
+		{
+			name:   "fetch failed",
+			result: repoCheckoutResult{Path: "/work/repo", BranchName: "agent/test/task", FetchError: "git fetch: fatal: unable to access remote"},
+			want: []string{
+				"Checked out " + repoURL + " → /work/repo (branch: agent/test/task)",
+				"\nWarning: fetching the remote failed, so this checkout comes from the cached copy and may be behind the remote.",
+				"Fetch error: git fetch: fatal: unable to access remote",
+			},
+		},
+		{
+			name:    "kept after a failed fetch",
+			result:  repoCheckoutResult{Path: "/work/repo", BranchName: "agent/test/task", Kept: "task_branch", FetchError: "git fetch: boom"},
+			want:    []string{"nothing was reset, cleaned, or switched.\n", "Warning: fetching the remote failed", "Fetch error: git fetch: boom"},
+			notWant: []string{"only remote refs were fetched"},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := repoCheckoutSummary(repoURL, tc.result)
@@ -278,8 +294,16 @@ func TestRepoCheckoutSummary(t *testing.T) {
 					t.Fatalf("summary missing %q:\n%s", want, got)
 				}
 			}
+			for _, notWant := range tc.notWant {
+				if strings.Contains(got, notWant) {
+					t.Fatalf("summary contains %q:\n%s", notWant, got)
+				}
+			}
 			if kept := strings.HasPrefix(got, "Kept "); kept != (tc.result.Kept != "") {
 				t.Fatalf("summary reads kept=%v for Kept=%q:\n%s", kept, tc.result.Kept, got)
+			}
+			if warned := strings.Contains(got, "Warning:"); warned != (tc.result.FetchError != "") {
+				t.Fatalf("summary warns=%v for FetchError=%q:\n%s", warned, tc.result.FetchError, got)
 			}
 		})
 	}

@@ -6,18 +6,29 @@ export {
 } from "../shared/auth-session";
 
 /**
- * Keeps dedicated issue windows bound to the main window's authenticated
- * account. Tokens never cross renderer boundaries: only the resolved user id
- * is compared, and stale issue windows are closed on logout/account switch.
+ * Keeps every window bound to one authenticated account. Tokens never cross
+ * renderer boundaries: only the resolved user id is compared. Main windows
+ * share the session token through storage, so the latest main-window report
+ * is the account; a logout or account switch reported by any main window
+ * closes every other window instead of leaving it signed in to the old one.
  */
 export class AuthSessionCoordinator<T> {
-  private mainUserId: AuthSessionUserId | undefined;
+  private accountUserId: AuthSessionUserId | undefined;
+  private readonly mainUserIds = new Map<T, AuthSessionUserId | undefined>();
   private readonly issueUserIds = new Map<
     T,
     AuthSessionUserId | undefined
   >();
 
-  constructor(private readonly closeIssueWindow: (window: T) => void) {}
+  constructor(private readonly closeWindow: (window: T) => void) {}
+
+  registerMainWindow(window: T): void {
+    this.mainUserIds.set(window, undefined);
+  }
+
+  unregisterMainWindow(window: T): void {
+    this.mainUserIds.delete(window);
+  }
 
   registerIssueWindow(window: T): void {
     this.issueUserIds.set(window, undefined);
@@ -27,31 +38,39 @@ export class AuthSessionCoordinator<T> {
     this.issueUserIds.delete(window);
   }
 
-  hasActiveMainSession(): boolean {
-    return typeof this.mainUserId === "string";
+  hasActiveMainSession(window: T): boolean {
+    const userId = this.mainUserIds.get(window);
+    return typeof userId === "string" && userId === this.accountUserId;
   }
 
   isCurrentIssueSession(window: T): boolean {
     return (
-      typeof this.mainUserId === "string" &&
-      this.issueUserIds.get(window) === this.mainUserId
+      typeof this.accountUserId === "string" &&
+      this.issueUserIds.get(window) === this.accountUserId
     );
   }
 
-  reportMain(userId: AuthSessionUserId): boolean {
-    const becameLoggedOut = userId === null && this.mainUserId !== null;
+  reportMain(window: T, userId: AuthSessionUserId): boolean {
+    if (!this.mainUserIds.has(window)) return false;
+    const becameLoggedOut = userId === null && this.accountUserId !== null;
     const accountChanged =
-      this.mainUserId !== undefined && this.mainUserId !== userId;
-    this.mainUserId = userId;
+      this.accountUserId !== undefined && this.accountUserId !== userId;
+    this.accountUserId = userId;
+    this.mainUserIds.set(window, userId);
 
     if (userId === null || accountChanged) {
-      this.closeAllIssueWindows();
+      this.closeAllExcept(window);
       return becameLoggedOut || accountChanged;
     }
 
-    for (const [window, issueUserId] of this.issueUserIds) {
+    for (const [other, otherUserId] of [...this.mainUserIds]) {
+      if (other !== window && otherUserId !== undefined && otherUserId !== userId) {
+        this.close(other);
+      }
+    }
+    for (const [issueWindow, issueUserId] of [...this.issueUserIds]) {
       if (issueUserId !== undefined && issueUserId !== userId) {
-        this.closeIssue(window);
+        this.close(issueWindow);
       }
     }
     return false;
@@ -62,20 +81,21 @@ export class AuthSessionCoordinator<T> {
     this.issueUserIds.set(window, userId);
     if (
       userId === null ||
-      (this.mainUserId !== undefined && this.mainUserId !== userId)
+      (this.accountUserId !== undefined && this.accountUserId !== userId)
     ) {
-      this.closeIssue(window);
+      this.close(window);
     }
   }
 
-  private closeAllIssueWindows(): void {
-    for (const window of [...this.issueUserIds.keys()]) {
-      this.closeIssue(window);
+  private closeAllExcept(keep: T): void {
+    for (const window of [...this.mainUserIds.keys(), ...this.issueUserIds.keys()]) {
+      if (window !== keep) this.close(window);
     }
   }
 
-  private closeIssue(window: T): void {
+  private close(window: T): void {
+    this.mainUserIds.delete(window);
     this.issueUserIds.delete(window);
-    this.closeIssueWindow(window);
+    this.closeWindow(window);
   }
 }

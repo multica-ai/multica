@@ -12,6 +12,7 @@
     "FRONTEND_ORIGIN",
     "NEXT_PUBLIC_API_URL",
     "NEXT_PUBLIC_WS_URL",
+    "NEXT_PUBLIC_SITE_PREVIEW",
     "MULTICA_SERVER_URL",
     "DOCS_URL",
     "COMPOSE_PROJECT_NAME",
@@ -46,11 +47,23 @@
     },
     "dev": {
       "cache": false,
-      "persistent": true
+      "persistent": true,
+      // scripts/dev-env.sh opens a Desktop DevTools port (read by
+      // electron-vite) and signs the dev Desktop in (read by its main process).
+      // Desktop's bundled CLI finds a custom dev-env registry through
+      // MULTICA_DEV_HOME, or refuses its daemon inside an agent task.
+      // VITE_DEV_TOOLBAR turns on the web/desktop dev status bar.
+      "passThroughEnv": [
+        "REMOTE_DEBUGGING_PORT",
+        "MULTICA_DEV_AUTH_TOKEN",
+        "MULTICA_DEV_HOME",
+        "VITE_DEV_TOOLBAR"
+      ]
     },
     "dev:staging": {
       "cache": false,
-      "persistent": true
+      "persistent": true,
+      "passThroughEnv": ["VITE_DEV_TOOLBAR"]
     },
     "typecheck": {
       "dependsOn": ["^typecheck", "mdx"]

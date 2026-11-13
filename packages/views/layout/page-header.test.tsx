@@ -1,14 +1,25 @@
-import { ListTodo, Plus, Zap } from "lucide-react";
-import { within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { ListTodo, Zap } from "@multica/ui/icons";
+import { act, within } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 
-import { SidebarProvider } from "@multica/ui/components/ui/sidebar";
+import { SidebarProvider, useSidebar } from "@multica/ui/components/ui/sidebar";
 import { renderWithI18n } from "../test/i18n";
+import { AppShellProvider } from "./app-shell-context";
 import {
+  CollectionCreateButton,
   CollectionPageHeader,
-  CollectionPageHeaderAction,
 } from "./collection-page";
 import { CollapsedNavTrigger, PAGE_GUTTER, PageHeader } from "./page-header";
+import {
+  WINDOW_TITLE_BAR_CLASS,
+  WindowTitleBarProvider,
+} from "../platform/window-title-bar";
+
+const navigation = vi.hoisted(() => ({ pathname: "/acme/issues" }));
+vi.mock("../navigation", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../navigation")>()),
+  useNavigation: () => ({ pathname: navigation.pathname }),
+}));
 
 // The layout rules under test are documented on `PageHeader` itself; each
 // test here pins one of them against the rendered output.
@@ -23,7 +34,7 @@ function renderHeader(
   return within(container).getByRole("banner");
 }
 
-// Below `xl` the collapsed-nav trigger renders as a third flex item, so the
+// Below `lg` the collapsed-nav trigger renders as a third flex item, so the
 // title stays left only while nothing distributes the free space: the content
 // group grows and the header never uses `justify-between`.
 function expectTitleLeftOfFreeSpace(header: HTMLElement) {
@@ -39,10 +50,7 @@ describe("PageHeader title alignment", () => {
       <CollectionPageHeader
         icon={Zap}
         title="Autopilot"
-        count={2}
-        actions={
-          <CollectionPageHeaderAction icon={Plus} label="New autopilot" />
-        }
+        actions={<CollectionCreateButton label="New autopilot" />}
       />,
     );
 
@@ -106,10 +114,85 @@ describe("PageHeader base chrome", () => {
     expect(container.querySelector("[data-slot='sidebar-trigger']")).toBeNull();
   });
 
+  // A frameless window (the Desktop issue window) hands its title bar to the
+  // page header, which then has to clear the native window controls and
+  // carve its controls out of the drag region.
+  it("becomes the window's title bar under a WindowTitleBarProvider", () => {
+    const header = renderHeader(
+      <WindowTitleBarProvider value={{ leadingInset: 88 }}>
+        <PageHeader>
+          <h1>MUL-1</h1>
+        </PageHeader>
+      </WindowTitleBarProvider>,
+    );
+
+    expect(header.style.paddingLeft).toBe("88px");
+    expect(header).toHaveClass(WINDOW_TITLE_BAR_CLASS);
+  });
+
+  it("stays a plain header where the window has its own title bar", () => {
+    const header = renderHeader(
+      <WindowTitleBarProvider value={null}>
+        <PageHeader>
+          <h1>MUL-1</h1>
+        </PageHeader>
+      </WindowTitleBarProvider>,
+    );
+
+    expect(header.style.paddingLeft).toBe("");
+    expect(header).not.toHaveClass(WINDOW_TITLE_BAR_CLASS);
+  });
+
   // Outside a `SidebarProvider` there is no nav to reopen at all.
   it("renders nothing when no sidebar is mounted", () => {
     const { container } = renderWithI18n(<CollapsedNavTrigger />);
 
     expect(container.querySelector("[data-slot='sidebar-trigger']")).toBeNull();
+  });
+});
+
+// In the app shell the rail is always on screen from `md` up, so the trigger
+// only has a job there while the space panel is collapsed (and below `md`,
+// where the rail lives in the sheet).
+describe("CollapsedNavTrigger in the app shell", () => {
+  let sidebar: ReturnType<typeof useSidebar> | null = null;
+  function Reader() {
+    sidebar = useSidebar();
+    return null;
+  }
+  function renderInShell(pathname: string) {
+    navigation.pathname = pathname;
+    const { container } = renderWithI18n(
+      <SidebarProvider>
+        <AppShellProvider>
+          <Reader />
+          <CollapsedNavTrigger />
+        </AppShellProvider>
+      </SidebarProvider>,
+    );
+    return () => container.querySelector("[data-slot='sidebar-trigger']");
+  }
+
+  it("is a compact-only trigger while the panel is open", () => {
+    const trigger = renderInShell("/acme/issues");
+    expect(trigger()).toHaveClass("md:hidden");
+  });
+
+  it("shows at every width once the panel is collapsed", () => {
+    const trigger = renderInShell("/acme/issues");
+    act(() => sidebar!.setOpen(false));
+    expect(trigger()).not.toHaveClass("md:hidden");
+  });
+
+  // Inbox brings its own list column, so the panel's open state is not what
+  // the trigger reopens there; the collapsed list column is.
+  it("follows the list column in spaces without a shell panel", () => {
+    const trigger = renderInShell("/acme/inbox");
+    act(() => sidebar!.setOpen(false));
+    expect(trigger()).toHaveClass("md:hidden");
+
+    act(() => (trigger() as HTMLButtonElement).click());
+    expect(trigger()).not.toHaveClass("md:hidden");
+    expect(sidebar!.state).toBe("collapsed");
   });
 });

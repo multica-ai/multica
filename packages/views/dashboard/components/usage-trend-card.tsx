@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { BarChart3 } from "lucide-react";
+import { BarChart3 } from "@multica/ui/icons";
 import {
   DailyCostChart,
   DailyTokensChart,

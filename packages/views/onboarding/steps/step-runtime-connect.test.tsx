@@ -1,3 +1,4 @@
+import { api } from "@multica/core/api";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { act, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -6,7 +7,13 @@ import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enOnboarding from "../../locales/en/onboarding.json";
 
-const TEST_RESOURCES = { en: { common: enCommon, onboarding: enOnboarding } };
+import enAgents from "../../locales/en/agents.json";
+vi.mock("@multica/core/api", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@multica/core/api")>(),
+  api: { initiateListModels: vi.fn() },
+}));
+
+const TEST_RESOURCES = { en: { common: enCommon, onboarding: enOnboarding, agents: enAgents } };
 
 // Drive the runtime picker via a hoisted mock so the step renders without a
 // live daemon. (The onboarding_runtime_detected PostHog event this file used
@@ -37,7 +44,7 @@ function makeRuntime(overrides: Partial<AgentRuntime> = {}): AgentRuntime {
   } as AgentRuntime;
 }
 
-function renderStep(props: { runtimesPending?: boolean } = {}) {
+function renderStep(props: { runtimesPending?: boolean; wsSlug?: string } = {}) {
   const onNext = vi.fn();
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -47,6 +54,7 @@ function renderStep(props: { runtimesPending?: boolean } = {}) {
       <I18nProvider locale="en" resources={TEST_RESOURCES}>
         <StepRuntimeConnect
           wsId="ws_test"
+          wsSlug={props.wsSlug}
           onNext={onNext}
           runtimesPending={props.runtimesPending}
         />
@@ -57,6 +65,22 @@ function renderStep(props: { runtimesPending?: boolean } = {}) {
 }
 
 describe("StepRuntimeConnect", () => {
+  it("passes the onboarding workspace through the model chooser", async () => {
+    const initiate = vi.spyOn(api, "initiateListModels").mockResolvedValue({
+      id: "request-1", runtime_id: "rt_1", status: "completed", models: [],
+      supported: true, created_at: "2026-10-30T00:00:00Z", updated_at: "2026-10-30T00:00:00Z",
+    });
+    const rt = makeRuntime();
+    mocks.pickerState.runtimes = [rt];
+    mocks.pickerState.selected = rt;
+    mocks.pickerState.selectedId = rt.id;
+    mocks.pickerState.hasRuntimes = true;
+    renderStep({ wsSlug: "new-workspace" });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(initiate).toHaveBeenCalledWith(rt.id, undefined, "new-workspace");
+    initiate.mockRestore();
+  });
+
   beforeEach(() => {
     mocks.pickerState.runtimes = [];
     mocks.pickerState.selected = null;

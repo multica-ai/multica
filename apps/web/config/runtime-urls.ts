@@ -22,11 +22,11 @@ function cleanHttpUrl(raw: string | undefined): string | undefined {
 
 // The API base names the backend ORIGIN, never its `/api` endpoint: every
 // caller already carries its own prefix (`packages/core/api/client.ts` sends
-// `/api/**`, avatars resolve `/uploads/**`, realtime connects `/ws`), and the
-// backend serves all three at the root (server/cmd/server/router.go). A base
-// ending in `/api` therefore yields `/api/api/**` requests and 404s every
-// upload — the most common self-hosting mistake (#6619, MUL-5922). Strip that
-// one suffix instead of honouring it. Any other path is preserved: a reverse
+// `/api/**`, avatars resolve `/api/avatars/**`, realtime connects `/ws`), and
+// the backend serves these at the root (server/cmd/server/router.go). A base
+// ending in `/api` therefore yields `/api/api/**` requests — the most common
+// self-hosting mistake (#6619, MUL-5922). Strip that one suffix instead of
+// honouring it. Any other path is preserved: a reverse
 // proxy may legitimately mount the whole backend under a prefix such as
 // `https://host/multica`.
 function stripApiPathSuffix(value: string): string {
@@ -92,7 +92,7 @@ export function resolveDevDocsUrl(env: RuntimeEnv): string {
 
 // Same strictness as the server-side resolver above. A relative or otherwise
 // non-http value used to pass through untouched and became the XHR base, so
-// `NEXT_PUBLIC_API_URL=/api` produced `/api/api/**` and `/api/uploads/**`
+// `NEXT_PUBLIC_API_URL=/api` produced `/api/api/**`
 // (#6619). Returning undefined instead makes the browser fall back to
 // same-origin relative paths, which is what an unset value already does.
 export function resolveBrowserApiBaseUrl(env: RuntimeEnv): string | undefined {
@@ -126,9 +126,6 @@ export function runtimeRewriteDestination(
     return appendPath(remoteApiUrl, pathname);
   }
   if (pathname === "/api" || pathname.startsWith("/api/")) {
-    return appendPath(remoteApiUrl, pathname);
-  }
-  if (pathname === "/uploads" || pathname.startsWith("/uploads/")) {
     return appendPath(remoteApiUrl, pathname);
   }
   if (pathname === "/ws") {

@@ -25,7 +25,8 @@ export class NotificationGate {
 export interface NativeNotificationPayload {
   slug: string;
   itemId: string;
-  issueKey: string;
+  issueKey?: string;
+  chatSessionId?: string;
   title: string;
   body: string;
 }
@@ -35,15 +36,14 @@ export function parseNativeNotificationPayload(
 ): NativeNotificationPayload | null {
   if (!value || typeof value !== "object") return null;
   const candidate = value as Record<string, unknown>;
-  const limits: Record<keyof NativeNotificationPayload, number> = {
+  const limits = {
     slug: 256,
     itemId: 256,
-    issueKey: 256,
     title: 512,
     body: 2_000,
   };
   const result = {} as NativeNotificationPayload;
-  for (const key of Object.keys(limits) as (keyof NativeNotificationPayload)[]) {
+  for (const key of Object.keys(limits) as (keyof typeof limits)[]) {
     const field = candidate[key];
     const mayBeEmpty = key === "slug" || key === "body";
     if (
@@ -55,5 +55,9 @@ export function parseNativeNotificationPayload(
     }
     result[key] = field;
   }
+  const targetKey = candidate.chatSessionId === undefined ? "issueKey" : "chatSessionId";
+  const target = candidate[targetKey];
+  if (typeof target !== "string" || !target.trim() || target.length > 256) return null;
+  result[targetKey] = target;
   return result;
 }

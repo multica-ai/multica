@@ -1,0 +1,112 @@
+---
+title: 自託管 Git 程式碼託管
+description: 為每個工作區連線自託管的 Forgejo、Gitea 或 GitLab 例項，使分支名或標題中帶有任務編號、或正文中在關閉關鍵字後帶有任務編號的 Pull Request / Merge Request 自動關聯到對應任務，在 PR 合併後將任務改為工作區選定的狀態，並展示 CI 狀態。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
+
+<Callout type="warn">
+**僅適用於自部署的 Multica。** 此整合只在你自己部署 Multica 時可用，Multica 雲端不提供；自部署通常是為了讓 Multica 能訪問你內網裡的 Git 例項。服務端需要開啟 `MULTICA_VCS_INTEGRATION_ENABLED=true` 並設定 `MULTICA_VCS_SECRET_KEY`，否則 **設定 → 程式碼** 裡不會出現這一行。
+</Callout>
+
+Multica 按工作區連線自託管的 Git 程式碼託管：Forgejo、Gitea 或 GitLab。連線後，分支名或標題中包含任務編號（例如 `MUL-123`）、或正文中在關閉關鍵字後寫出該編號（`Closes MUL-123`）的 Pull Request（GitLab 為 Merge Request）會自動關聯到對應的[任務](/issues)，出現在任務側欄的 **Pull requests** 中。任務的所有關聯 PR 都合併後，任務改為工作區選定的狀態（預設為"已完成"）。head commit 的 CI 以檢查條的形式顯示在卡片上。
+
+這些程式碼託管與 GitHub 並行工作，一個工作區可以同時連線多個。
+
+<Callout type="info">
+與 GitHub 不同，這些程式碼託管沒有 App 模型。每個工作區儲存自己的例項地址和訪問令牌，並在其倉庫或組織上註冊 Webhook。令牌和 Webhook 金鑰均加密儲存。
+</Callout>
+
+## 前置條件（服務端）
+
+先為該部署開啟此整合。它預設關閉，未開啟時該板塊不會出現：
+
+```sh
+MULTICA_VCS_INTEGRATION_ENABLED=true
+```
+
+官方自部署 `docker compose` 檔案（`docker-compose.selfhost.yml`）已經設定了這一項。
+
+再設定一個 base64 編碼的 32 位元組金鑰，供服務端加密儲存的憑據。未設定時，連線表單將不可用。
+
+```sh
+openssl rand -base64 32
+```
+
+```sh
+MULTICA_VCS_SECRET_KEY=<base64 32 位元組金鑰>
+```
+
+兩者都必需：開關決定是否提供該功能，金鑰用於加密儲存的令牌與 Webhook 金鑰。連線、Webhook、輪換都要求兩者同時滿足。
+
+設定 `MULTICA_PUBLIC_URL` 為服務端的公網基礎地址，Multica 即可直接給出可貼上的 Webhook 地址；否則介面只顯示 Webhook 路徑，需自行拼接來源地址。
+
+## 連線工作區
+
+<Steps>
+<Step>
+在程式碼託管中建立具備倉庫讀取權限的訪問令牌：
+
+- **Forgejo / Gitea**：設定 → 應用。
+- **GitLab**：具備 `read_api` 權限的個人（或群組/專案）訪問令牌。
+</Step>
+<Step>
+在 Multica 中開啟 **設定 → 程式碼**，在 **自託管 Git** 一行點選 **連線**。
+</Step>
+<Step>
+選擇**提供方**，填寫例項地址（例如 `https://forgejo.example.com`）和訪問令牌，點選 **連線**。Multica 會先用該令牌訪問例項進行校驗，再儲存。
+</Step>
+<Step>
+複製連線後顯示的 **Webhook 地址** 與 **Webhook 金鑰**。
+</Step>
+</Steps>
+
+<Callout type="warn">
+Webhook 金鑰只顯示一次，請在離開頁面前複製。重新連線同一例項會輪換令牌與金鑰。
+</Callout>
+
+### 例項使用私有 CA
+
+如果點選 **連線** 後提示提供方的憑證 "is signed by a certificate authority this server does not trust"，說明例項的 HTTPS 憑證由內部 CA 簽發（或是自簽名憑證），而 Multica 服務端不信任這個 CA。需要由服務端管理員把該 CA 加入後端的信任庫：使用 Helm 時設定 `backend.extraCACerts.configMap`；使用 Docker Compose 時掛載 CA 並設定 `SSL_CERT_DIR`。具體步驟見 [Private CA certificates](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING_ADVANCED.md#private-ca-certificates-optional)。後端還會把該 CA 下發給守護程序，使守護程序的 git 也能克隆同一例項上的倉庫。
+
+Multica 不提供跳過憑證校驗的選項，因為連線請求會攜帶你的訪問令牌。如果提示憑證與主機名不匹配，或憑證校驗失敗（例如已過期），需要修復憑證本身，信任 CA 解決不了。
+
+## 註冊 Webhook
+
+在倉庫上註冊；要覆蓋所有倉庫，就註冊在組織或群組上。
+
+<Tabs items={["Forgejo / Gitea", "GitLab"]}>
+<Tab value="Forgejo / Gitea" id="forgejo-gitea">
+
+設定 → Webhook → 新增 Webhook → Forgejo/Gitea：
+
+- **目標 URL**：上一步的 Webhook 地址。
+- **HTTP 方法** `POST`，**內容型別** `application/json`。
+- **金鑰**：Webhook 金鑰（用於校驗 `X-Gitea-Signature` HMAC）。
+- **觸發事件**：勾選 **Pull Request**，並勾選 **Commit Status** 以映象 CI。
+
+</Tab>
+<Tab value="GitLab" id="gitlab">
+
+設定 → Webhooks：
+
+- **URL**：Webhook 地址。
+- **Secret token**：Webhook 金鑰（作為 `X-Gitlab-Token` 傳送並逐字比對）。
+- **觸發器**：啟用 **Merge request events**，並啟用 **Pipeline events** 以映象 CI。
+
+</Tab>
+</Tabs>
+
+Multica 會用儲存的金鑰校驗每次投遞，因此沒有匹配金鑰的 Webhook 會被拒絕。
+
+## 映象的內容
+
+- **Pull / Merge Request** —— open、closed、merged、draft 狀態，以及作者、分支和（在程式碼託管提供時）diff 統計。
+- **任務關聯** —— 標題或分支中的編號會將 PR 關聯到任務，正文中的編號只有緊跟關閉關鍵字時才會關聯；正文中的普通提及不會建立任何關聯。任務的所有關聯 PR（包括 GitHub 與自託管平臺上的）都合併後，任務會改為工作區選定的狀態，遵循與 [GitHub](/github-integration) 相同的設定和規則。連線平臺後，本頁也會顯示同一項 **PR 合併後，任務狀態改為** 設定。
+- **CI** —— Forgejo/Gitea 的提交狀態與 GitLab 的流水線會彙總為 head commit 的透過/失敗/進行中檢查條。
+
+## AI 代理建立 Pull Request
+
+AI 代理建立 PR 不需要在 Multica 中做任何程式碼託管配置。AI 代理在執行時中檢出倉庫，用執行時主機自己的 Git 憑據推送分支和建立 PR。要讓 AI 代理在某個程式碼託管上工作，只要守護程序所在的主機能透過它的認證（例如 SSH 部署金鑰，或主機 Git 憑據助手裡的令牌），再像往常一樣新增倉庫地址。倉庫檢出支援任意 Git URL，不需要按提供方單獨配置。

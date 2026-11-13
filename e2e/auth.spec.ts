@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { createTestApi, loginAsDefault, openWorkspaceMenu, waitForPageText } from "./helpers";
+import { createTestApi, loginAsDefault, openAccountMenu, waitForPageText } from "./helpers";
 
 test.describe("Authentication", () => {
   test("login page renders correctly", async ({ page }) => {
@@ -16,7 +16,7 @@ test.describe("Authentication", () => {
     const workspaceSlug = await loginAsDefault(page);
 
     await expect(page).toHaveURL(new RegExp(`/${workspaceSlug}/issues$`));
-    await expect(page.getByRole("button", { name: "New Issue" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "New Issue" }).first()).toBeVisible();
   });
 
   test("unauthenticated user is redirected to /login", async ({ page }) => {
@@ -35,7 +35,7 @@ test.describe("Authentication", () => {
     await loginAsDefault(page);
 
     // Open the workspace dropdown menu
-    await openWorkspaceMenu(page);
+    await openAccountMenu(page);
 
     await page.getByRole("menuitem", { name: "Log out" }).click();
 

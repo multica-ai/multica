@@ -151,7 +151,7 @@ describe("DaemonRecoveryPolicy", () => {
 });
 
 describe("recovery orchestration guards", () => {
-  const profile = { name: "desktop-api.multica.ai", port: 19_999 };
+  const profile = { name: "desktop-api.multica.ai" };
 
   it("allows first-start recovery for a Desktop-owned profile", () => {
     expect(
@@ -285,7 +285,6 @@ describe("recovery orchestration guards", () => {
     { externalDaemonObserved: true },
     { current: null },
     { current: { ...profile, name: "desktop-other" } },
-    { current: { ...profile, port: profile.port + 1 } },
   ])("rejects a superseded recovery: %o", (override) => {
     expect(
       recoveryStartAllowed({

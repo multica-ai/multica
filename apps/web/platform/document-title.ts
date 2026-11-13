@@ -54,7 +54,9 @@ function clipTitle(title: string): string {
  * rendering a bare ` | Multica`.
  */
 export function formatDocumentTitle(pageTitle: string | null | undefined): string {
-  const trimmed = pageTitle?.trim();
+  // Match document.title's ASCII whitespace folding so the title observer
+  // compares the same value the browser reads back after a write.
+  const trimmed = pageTitle?.replace(/[\t\n\f\r ]+/g, " ").trim();
   if (!trimmed) return SITE_TITLE;
   return `${clipTitle(trimmed)}${TITLE_SUFFIX}`;
 }

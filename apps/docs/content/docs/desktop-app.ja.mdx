@@ -4,6 +4,9 @@ description: Multica Desktop をインストールし、デスクトップタブ
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
+import { DesktopTabsDemo } from "@/components/demos/desktop-tabs-demo";
 
 Multica Desktop は macOS、Windows、Linux で利用できます。Web 版と同じアカウントとワークスペースデータを使いますが、ローカルマシンのデーモンを自動で管理し、ワークスペースごとに独立したタブのセットを保持します。
 
@@ -22,6 +25,8 @@ Multica Desktop は macOS、Windows、Linux で利用できます。Web 版と�
 
 ## インストール
 
+<Steps>
+<Step>
 [Multica ダウンロードページ](https://multica.ai/download)から、OS と CPU アーキテクチャに合ったインストーラーを選びます:
 
 | プラットフォーム | インストーラー |
@@ -29,8 +34,11 @@ Multica Desktop は macOS、Windows、Linux で利用できます。Web 版と�
 | macOS | `.dmg` |
 | Windows | `.exe` |
 | Linux | `.AppImage`、`.deb` または `.rpm` |
-
+</Step>
+<Step>
 インストール後、Web 版と同じメールアドレスでサインインします。サインインすると、Desktop は内蔵の Multica CLI を起動し、マシンにすでにインストールされている AI コーディングツールを検出します。
+</Step>
+</Steps>
 
 <Callout type="info">
 Desktop に内蔵された CLI は、アプリが管理するランタイム専用です。ターミナルで `multica issue` などのコマンドも実行したい場合は、[クイックスタートのステップ 2](/cloud-quickstart#2-コンピュータを接続する)に従って CLI を別途インストールしてください。
@@ -40,7 +48,9 @@ Desktop に内蔵された CLI は、アプリが管理するランタイム専�
 
 Desktop はワークスペースごとにタブを保存します。たとえば、ワークスペース A でタスクを 3 つ開いてからワークスペース B に切り替えると、B 自身のタブが表示されます。A に戻ると、先ほどの 3 つのタブがそのまま残っています。
 
-同じリソースは現在のワークスペースで一度しか開きません。タブは並べ替え、ピン留め、クローズができ、それぞれが進む・戻るの履歴とスクロール位置を保持します。このデプロイのアプリリンクをクリックまたは貼り付けると、ブラウザに移動せずタブ内で直接開きます。
+<DesktopTabsDemo />
+
+同じリソースは現在のワークスペースで一度しか開きません。タブは並べ替え、ピン留め、クローズができ、それぞれが進む・戻るの履歴とスクロール位置を保持します。ピン留めしたタブは左端に並び、閉じるボタンがありません。閉じるにはピン留めを解除します。ピン留めしたタブから別のページを開くと新しいタブで開き、ピン留めしたタブは元のページにとどまります。このデプロイのアプリリンクをクリックまたは貼り付けると、ブラウザに移動せずタブ内で直接開きます。
 
 サインアウトすると、このマシンに保存されたすべてのタブが消去されるため、次にサインインした人が前のアカウントの残したページを見ることはありません。
 
@@ -70,15 +80,7 @@ Desktop はワークスペースごとにタブを保存します。たとえば
 
 ## セルフホストインスタンスへの接続
 
-Desktop はデフォルトで Multica Cloud に接続します。セルフホストインスタンスに接続するには、ホームディレクトリの `.multica` の中に `desktop.json` を作成します:
-
-| プラットフォーム | パス |
-| --- | --- |
-| macOS | `/Users/<you>/.multica/desktop.json` |
-| Linux | `/home/<you>/.multica/desktop.json` |
-| Windows | `C:\Users\<you>\.multica\desktop.json` |
-
-これらはデフォルトの場所です。ホームディレクトリを移動またはリダイレクトしている場合は、実際のパスを使ってください。
+Desktop はデフォルトで Multica Cloud に接続します。セルフホストインスタンスに接続するには、ホームディレクトリの `.multica` の中に `desktop.json` を作成し、次の内容を書きます:
 
 ```json
 {
@@ -86,6 +88,38 @@ Desktop はデフォルトで Multica Cloud に接続します。セルフホス
   "apiUrl": "https://api.example.com"
 }
 ```
+
+<Tabs groupId="os" persist items={["macOS / Linux", "Windows"]}>
+<Tab value="macOS / Linux">
+
+| プラットフォーム | パス |
+| --- | --- |
+| macOS | `/Users/<you>/.multica/desktop.json` |
+| Linux | `/home/<you>/.multica/desktop.json` |
+
+</Tab>
+<Tab value="Windows">
+
+ファイルのパスは `C:\Users\<you>\.multica\desktop.json` です。
+
+メモ帳や PowerShell のリダイレクトでは Desktop が読めないファイルになりやすいため（理由は[Windows: ファイル名とエンコーディングを確認する](#windows-ファイル名とエンコーディングを確認する)を参照）、PowerShell で一度に作成することをおすすめします:
+
+```powershell
+$dir = "$env:USERPROFILE\.multica"
+New-Item -ItemType Directory -Force $dir | Out-Null
+$json = @'
+{
+  "schemaVersion": 1,
+  "apiUrl": "https://api.example.com"
+}
+'@
+[System.IO.File]::WriteAllText("$dir\desktop.json", $json)
+```
+
+</Tab>
+</Tabs>
+
+これらはデフォルトの場所です。ホームディレクトリを移動またはリダイレクトしている場合は、実際のパスを使ってください。
 
 <Callout type="warning">
 これは CLI の `~/.multica/config.json` と**別のファイル**で、キー名も異なります: CLI は `server_url`、Desktop は `apiUrl` を使います。Desktop は CLI の設定を読みません。`~/.multica/profiles/desktop-<host>/` の下に専用の daemon プロファイルを管理します。`config.json` を編集しても、Desktop の接続先は変わりません。
@@ -111,7 +145,7 @@ Desktop はデフォルトで Multica Cloud に接続します。セルフホス
 }
 ```
 
-保存後に Desktop を再起動します。この設定は起動時に一度だけ読み込まれます。2 つの失敗の現れ方は異なるため、これが切り分けの手がかりになります:
+保存後に Desktop を再起動します。この設定は起動時に一度だけ読み込まれます。2 つの失敗は現れ方が異なります:
 
 - **ファイルが見つからない**（ディレクトリが違う、またはファイル名が `desktop.json` ではない）: Desktop はデフォルトの Cloud 設定を使い、エラーは表示しません。つまり Desktop が Cloud のアドレスを表示したままで設定エラーも出ない場合、ファイルは Desktop が探している場所にありません。
 - **ファイルは見つかったが無効**（JSON、バージョン、URL のいずれかに問題がある）: Desktop は設定エラーを表示し、自動では Cloud にフォールバックしません。
@@ -119,41 +153,29 @@ Desktop はデフォルトで Multica Cloud に接続します。セルフホス
 そのファイルを削除して再起動すれば、デフォルトの Cloud 設定に戻ります。
 
 <Callout type="warning">
-Desktop が接続できるのは、ブラウザと実行マシンの両方から到達できるアドレスだけです。リモートのセルフホストインスタンスが HTTPS を使っていない、または WebSocket をプロキシしていない場合、Desktop は接続を確立できません。完全な設定は[セルフホストクイックスタート](/self-host-quickstart#3-アクセス方法を選ぶ)を参照してください。
+Desktop が接続できるのは、ブラウザと実行マシンの両方から到達できるアドレスだけです。リモートのセルフホストインスタンスが HTTPS を使っていない、または WebSocket をプロキシしていない場合、Desktop は接続を確立できません。完全な設定は[セルフホストクイックスタート](/self-host-quickstart#remote-access)を参照してください。
 </Callout>
 
 ### Windows: ファイル名とエンコーディングを確認する
 
-Windows では、エディタの 2 つのデフォルト動作が Desktop の読めないファイルを気づかないうちに作ってしまいます:
+Windows でよく使う 2 つの書き方では、Desktop が読めないファイルができてしまいます:
 
 - **メモ帳は `.txt` を付け足します。** `desktop.json` として保存したつもりでも実際には `desktop.json.txt` になることがあり、Desktop はファイルが見つからないものとして扱います。エクスプローラーでファイル名拡張子の表示を有効にするか、保存ダイアログで*すべてのファイル*を選んでください。実際のファイル名を確認するには、PowerShell で `Get-ChildItem "$env:USERPROFILE\.multica" -Filter "desktop.json*"` を実行します。`Name` 列がちょうど `desktop.json` になっている必要があります。
 - **PowerShell のリダイレクトは UTF-16 や BOM 付きで書き込みます。** `> desktop.json` や `Out-File` はパースできないエンコーディングを生成することがあり、設定エラーとして現れます。
 
-どちらも避けるには、PowerShell で一度に作成します:
-
-```powershell
-$dir = "$env:USERPROFILE\.multica"
-New-Item -ItemType Directory -Force $dir | Out-Null
-$json = @'
-{
-  "schemaVersion": 1,
-  "apiUrl": "https://api.example.com"
-}
-'@
-[System.IO.File]::WriteAllText("$dir\desktop.json", $json)
-```
+上の Windows タブにある PowerShell のコマンドなら、この 2 つをどちらも避けられます。
 
 ## Windows Defender が Multica をウイルスとして検出する
 
-**症状**: Windows セキュリティが `Trojan:Script/Wacatac.B!ml` のような脅威を報告し、Desktop のインストール先にあるファイルを隔離します。対象になるのは通常、アプリ本体の実行ファイルではなく同梱の CLI です。
+Windows セキュリティが `Trojan:Script/Wacatac.B!ml` のような脅威を報告し、Desktop のインストール先にあるファイルを隔離します。対象になるのは通常、アプリ本体の実行ファイルではなく同梱の CLI です。
 
 ```text
 C:\Users\<ユーザー名>\AppData\Local\Programs\@multicadesktop\resources\app.asar.unpacked\resources\bin\multica.exe
 ```
 
-**これは誤検知です。** `!ml` というサフィックスは、この判定がマルウェアのシグネチャ一致ではなく Defender の機械学習ヒューリスティックによるものであることを示します。Multica の Windows ビルドはまだ Authenticode コード署名を行っておらず、公開されたばかりで署名がなく、バックグラウンドプロセスを起動してネットワーク接続を張るバイナリは、この種のヒューリスティックが最も疑わしいと判定するプロファイルそのものです。Windows 向けの成果物はすべて、このリポジトリの公開ソースから GitHub Actions でビルドされています。
+これは誤検知です。`!ml` というサフィックスは、この判定がマルウェアのシグネチャ一致ではなく Defender の機械学習ヒューリスティックによるものであることを示します。Multica の Windows ビルドはまだ Authenticode コード署名を行っておらず、公開されたばかりで署名がなく、バックグラウンドプロセスを起動してネットワーク接続を張るバイナリは、この種のヒューリスティックで疑わしいと判定されやすいのです。Windows 向けの成果物はすべて、このリポジトリの公開ソースから GitHub Actions でビルドされています。
 
-**自分で検証できます** — 各 GitHub リリースには、すべての CLI アーカイブを網羅した `checksums.txt` が公開されています。
+自分で検証することもできます。各 GitHub リリースには、すべての CLI アーカイブを網羅した `checksums.txt` が公開されています。
 
 ```powershell
 Get-FileHash .\multica-cli-<version>-windows-amd64.zip -Algorithm SHA256
@@ -161,15 +183,24 @@ Get-FileHash .\multica-cli-<version>-windows-amd64.zip -Algorithm SHA256
 
 出力されたハッシュを、[最新リリース](https://github.com/multica-ai/multica/releases/latest)の `checksums.txt` の該当行と照合してください。
 
-**対処方法**:
+次の 3 つの手順で対処します。
 
-1. **隔離されたファイルを復元する** — Windows セキュリティ → *ウイルスと脅威の防止* → *保護の履歴* → Multica の項目を選択 → *操作* → *復元*。
-2. **除外を追加する**（再び隔離されないように）— *ウイルスと脅威の防止* → *設定の管理* → *除外* → *除外の追加または削除* → *フォルダー* で、次の両方を追加します。
-   - `%LOCALAPPDATA%\Programs\@multicadesktop`
-   - `%APPDATA%\Multica`
+<Steps>
+<Step>
+隔離されたファイルを復元する：Windows セキュリティ → *ウイルスと脅威の防止* → *保護の履歴* → Multica の項目を選択 → *操作* → *復元*。
+</Step>
+<Step>
+除外を追加する（再び隔離されないように）：*ウイルスと脅威の防止* → *設定の管理* → *除外* → *除外の追加または削除* → *フォルダー* で、次の両方を追加します。
 
-   両方が必要です。同梱の CLI が失われると Desktop は代替バイナリを `%APPDATA%\Multica\bin` にダウンロードするため、インストール先だけを除外してもダウンロードした代替バイナリが再び隔離され、同じことの繰り返しになります。
-3. **誤検知を Microsoft に報告する** — [Microsoft Security Intelligence のファイル送信ページ](https://www.microsoft.com/en-us/wdsi/filesubmission)で *Software developer* と *Incorrectly detected as malware* を選択します。すべてのユーザーに対して検出を取り下げてもらうにはこの手順が必要で、通常は数日で反映されます。
+- `%LOCALAPPDATA%\Programs\@multicadesktop`
+- `%APPDATA%\Multica`
+
+両方が必要です。同梱の CLI が失われると Desktop は代替バイナリを `%APPDATA%\Multica\bin` にダウンロードするため、インストール先だけを除外してもダウンロードした代替バイナリが再び隔離され、同じことの繰り返しになります。
+</Step>
+<Step>
+誤検知を Microsoft に報告する：[Microsoft Security Intelligence のファイル送信ページ](https://www.microsoft.com/en-us/wdsi/filesubmission)で *Software developer* と *Incorrectly detected as malware* を選択します。すべてのユーザーに対して検出を取り下げてもらうにはこの手順が必要で、通常は数日で反映されます。
+</Step>
+</Steps>
 
 <Callout type="warning">
 これらの除外を追加してよいのは、[ダウンロードページ](https://multica.ai/download)または [GitHub リリース](https://github.com/multica-ai/multica/releases)からインストールし、チェックサムが一致している場合だけです。除外を設定すると、そのフォルダー内のすべてのファイルでリアルタイム保護が無効になります。

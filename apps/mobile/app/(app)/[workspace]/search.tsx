@@ -65,9 +65,7 @@ const SEARCH_HEADER_LABELS: Record<string, string> = {
   "h-cancelled": "issues:status.cancelled",
 };
 
-// =====================================================
 // HighlightText — mobile port of web's HighlightText
-// =====================================================
 // Web uses an HTML <mark> which doesn't exist in RN, so we segment the
 // string ourselves and wrap matched parts in a styled <Text>. Same regex
 // escape + case-insensitive substring match as
@@ -125,9 +123,7 @@ function HighlightText({
   );
 }
 
-// =====================================================
 // Row item types — drives the single FlatList render
-// =====================================================
 // RowItem + buildSearchRows live in lib/search-rows.ts so the ordering rules
 // (including the cancelled partition) are testable without mounting the screen.
 
@@ -304,9 +300,7 @@ function RecentRow({ item, slug }: RecentRowProps) {
   );
 }
 
-// =====================================================
 // Screen
-// =====================================================
 
 interface SearchResultsState {
   issues: SearchIssueResult[];

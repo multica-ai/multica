@@ -3,7 +3,7 @@
 import { useId, useMemo, useState } from "react";
 import type { FormEvent, HTMLAttributes } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Cloud, Loader2, RefreshCw, Rocket, Trash2 } from "lucide-react";
+import { Cloud, Loader2, RefreshCw, Rocket, Trash2 } from "@multica/ui/icons";
 import { toast } from "sonner";
 import type { CloudRuntimeNode } from "@multica/core/runtimes";
 import {

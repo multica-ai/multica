@@ -5,9 +5,10 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
   plugins: [react()],
   resolve: {
-    alias: {
-      "@": resolve(__dirname, "src/renderer/src"),
-    },
+    alias: [
+      { find: "@", replacement: resolve(__dirname, "src/renderer/src") },
+      { find: /^electron$/, replacement: resolve(__dirname, "test/electron-guard.ts") },
+    ],
   },
   test: {
     globals: true,
