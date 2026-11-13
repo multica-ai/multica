@@ -4534,8 +4534,8 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 }
 
 // shouldEnqueueAssigneeFallback returns true when comment routing can fall back
-// to the issue's assigned agent. Fires for any status — comments are
-// conversational and can happen at any stage, including after completion
+// to the issue's assigned agent. Backlog parks implicit wakeups; comments
+// remain conversational at other stages, including after completion
 // (e.g. follow-up questions on a done issue).
 //
 // Mirrors the private-agent gate that resolveMentionedAgentCommentTriggers applies on the
@@ -4549,6 +4549,10 @@ func (h *Handler) shouldEnqueueAssigneeFallback(ctx context.Context, issue db.Is
 }
 
 func (h *Handler) assigneeFallbackAgent(ctx context.Context, issue db.Issue, actorType, actorID string, opts commentTriggerComputeOptions) (db.Agent, bool, bool) {
+	// Match assignment parking without blocking explicit mention/thread routes.
+	if issuestatus.Effective(ctx, h.Queries, issue.WorkspaceID, issue.Status) == issuestatus.Backlog {
+		return db.Agent{}, false, false
+	}
 	if !issue.AssigneeType.Valid || issue.AssigneeType.String != "agent" || !issue.AssigneeID.Valid {
 		return db.Agent{}, false, false
 	}
