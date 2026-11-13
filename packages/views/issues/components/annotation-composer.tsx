@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState, type ReactNode, type RefObject } from "react";
-import { Loader2, Trash2 } from "@multica/ui/icons";
+import { ArrowUp, Loader2, Trash2 } from "@multica/ui/icons";
 import { createShortcutChord } from "@multica/core/shortcuts";
 import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
@@ -41,7 +41,7 @@ export function AnnotationComposer({
   issueId, owner, annotation, existing, number, editorRef, controls,
   sourceMissing, sourceChanged, canSave, onChange, onSave, onRemove, onBusyChange,
 }: {
-  issueId: string;
+  issueId?: string;
   owner: string;
   annotation: ReplyAnnotation;
   existing: boolean;
@@ -64,6 +64,7 @@ export function AnnotationComposer({
   const otherAnnotations = controls?.annotations.filter((a) => a.id !== annotation.id).length ?? 0;
   const hasBody = !!controls?.draftContent.trim();
   const sendAll = otherAnnotations > 0 || hasBody;
+  const sendDisabled = !annotation.note.trim() || !canSave || busy || !!controls?.uploading || !!controls?.targetMissing;
   const save = () => {
     if (busy || inFlight.current || !canSave) return;
     const note = editorRef.current?.getMarkdown() ?? "";
@@ -87,7 +88,7 @@ export function AnnotationComposer({
   };
 
   return <EditorOverlayOwnerContext.Provider value={owner}>
-    <div className="flex w-[30rem] max-w-[calc(100vw-26px)] flex-col gap-1" aria-busy={busy || undefined}>
+    <div className="flex w-80 max-w-[calc(100vw-26px)] flex-col gap-1" aria-busy={busy || undefined}>
       <div className={busy ? "pointer-events-none opacity-60" : undefined} inert={busy || undefined}>
         <ContentEditor ref={editorRef} defaultValue={initialNote}
           ariaLabel={t(($) => $.reply.annotations.note_label)}
@@ -113,14 +114,21 @@ export function AnnotationComposer({
           disabled={busy} onClick={onRemove}><Trash2 /></IconButton>}
         <div className="min-w-0 flex-1">{controls?.recipients}</div>
         <div className="ml-auto flex items-center gap-1">
-          {controls && <Button size="sm" variant={controls.restart ? "destructive" : "ghost"}
-            disabled={!annotation.note.trim() || !canSave || busy || controls.uploading || controls.targetMissing} onClick={send} aria-busy={busy || undefined}>
-            {busy && <Loader2 className="animate-spin" />}
-            {t(($) => controls.restart ? $.comment.restart_send : sendAll ? $.reply.annotations.send_all : $.comment.send_tooltip)}
-            <ShortcutKeycaps shortcut={SEND} decorative />
-          </Button>}
-          <Button size="sm" disabled={!annotation.note.trim() || !canSave || busy} onClick={save}>
-            {t(($) => existing ? $.reply.annotations.save : $.reply.annotations.confirm_add)}
+          {controls && (controls.restart
+            // Stopping a run must stay spelled out, never an unlabeled icon.
+            ? <Button size="sm" variant="destructive" disabled={sendDisabled} onClick={send} aria-busy={busy || undefined}>
+              {busy && <Loader2 className="animate-spin" />}
+              {t(($) => $.comment.restart_send)}
+              <ShortcutKeycaps shortcut={SEND} decorative />
+            </Button>
+            : <IconButton label={t(($) => sendAll ? $.reply.annotations.send_all : $.comment.send_tooltip)}
+              shortcut={<ShortcutKeycaps shortcut={SEND} decorative />}
+              disabled={sendDisabled} onClick={send} aria-busy={busy || undefined}>
+              {busy ? <Loader2 className="animate-spin" /> : <ArrowUp />}
+            </IconButton>)}
+          <Button size="sm" disabled={!annotation.note.trim() || !canSave || busy} onClick={save}
+            aria-label={t(($) => existing ? $.reply.annotations.save : $.reply.annotations.confirm_add)}>
+            {t(($) => existing ? $.reply.annotations.save_short : $.reply.annotations.confirm_add_short)}
             <ShortcutKeycaps shortcut={ENTER} decorative />
           </Button>
         </div>

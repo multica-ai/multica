@@ -258,12 +258,6 @@ func (f *fakeMedia) HasMedia(_ channel.InboundMessage) bool {
 	return !f.noMedia
 }
 
-func (f *fakeMedia) resolvedMessageID() pgtype.UUID {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.lastMessageID
-}
-
 func (f *fakeMedia) ResolveMedia(ctx context.Context, _ ResolvedInstallation, _ ResolvedIdentity, _ pgtype.UUID, chatMessageID pgtype.UUID, msg channel.InboundMessage) channel.InboundMessage {
 	f.mu.Lock()
 	f.count++

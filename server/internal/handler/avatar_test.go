@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/multica-ai/multica/server/internal/storage"
+	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
 // withAvatarStorage swaps the handler's storage/config for one test and
@@ -79,18 +80,38 @@ func TestResolveAvatarURL_CloudFrontSignedRewrites(t *testing.T) {
 	}
 }
 
-// TestResolveAvatarURL_LocalStorageUnchanged — LocalStorage objects are served
-// by the public /uploads/* route, so they are already loadable as-is.
-func TestResolveAvatarURL_LocalStorageUnchanged(t *testing.T) {
-	local := storage.NewLocalStorageFromEnv()
-	if local == nil {
-		t.Skip("local storage unavailable")
-	}
-	withAvatarStorage(t, local, "")
-
-	raw := local.ObjectURL(testAvatarKey)
-	if got := testHandler.resolveAvatarURL(raw); got != raw {
-		t.Fatalf("resolveAvatarURL = %q, want unchanged %q", got, raw)
+func TestResolveAvatarURL_LocalStorageUsesSignedEndpoint(t *testing.T) {
+	for _, baseURL := range []string{"", "https://files.example.test"} {
+		t.Run("storage base="+baseURL, func(t *testing.T) {
+			t.Setenv("LOCAL_UPLOAD_DIR", t.TempDir())
+			t.Setenv("LOCAL_UPLOAD_BASE_URL", baseURL)
+			local := storage.NewLocalStorageFromEnv()
+			if local == nil {
+				t.Fatal("local storage unavailable")
+			}
+			withAvatarStorage(t, local, "https://api.example.test")
+			id := uuid.NewString()
+			key := "workspaces/" + testWorkspaceID + "/" + id + ".png"
+			const body = "AVATAR BYTES"
+			raw, err := local.Upload(context.Background(), key, []byte(body), "image/png", "avatar.png")
+			if err != nil {
+				t.Fatal(err)
+			}
+			dbfx.Insert(t, "attachment", testutil.Cols{
+				"id": id, "workspace_id": testWorkspaceID,
+				"uploader_type": "member", "uploader_id": testUserID,
+				"filename": "avatar.png", "url": raw,
+				"content_type": "image/png", "size_bytes": len(body),
+			})
+			want := "https://api.example.test" + avatarURLPath(key)
+			if got := testHandler.resolveAvatarURL(raw); got != want {
+				t.Fatalf("resolveAvatarURL = %q, want %q", got, want)
+			}
+			w := serveAvatarRequest(t, signAvatarKey(key), key)
+			if w.Code != http.StatusOK || w.Body.String() != body {
+				t.Fatalf("signed avatar: status=%d body=%q, want 200 %q", w.Code, w.Body.String(), body)
+			}
+		})
 	}
 }
 

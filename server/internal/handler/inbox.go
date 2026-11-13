@@ -195,10 +195,18 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Notifications about private-project issues are not written for
+	// outsiders (CreateInboxItem); this read filter also drops older rows once
+	// the reader loses access.
+	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+	if !ok {
+		return
+	}
 	items, err := h.Queries.ListInboxItems(r.Context(), db.ListInboxItemsParams{
-		WorkspaceID:   wsUUID,
-		RecipientType: "member",
-		RecipientID:   parseUUID(userID),
+		WorkspaceID:      wsUUID,
+		RecipientType:    "member",
+		RecipientID:      parseUUID(userID),
+		HiddenProjectIds: hidden.Param(),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list inbox")
@@ -233,10 +241,15 @@ func (h *Handler) ListArchivedInbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+	if !ok {
+		return
+	}
 	items, err := h.Queries.ListArchivedInboxItems(r.Context(), db.ListArchivedInboxItemsParams{
-		WorkspaceID:   wsUUID,
-		RecipientType: "member",
-		RecipientID:   parseUUID(userID),
+		WorkspaceID:      wsUUID,
+		RecipientType:    "member",
+		RecipientID:      parseUUID(userID),
+		HiddenProjectIds: hidden.Param(),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list archived inbox")
@@ -305,6 +318,31 @@ func (h *Handler) MarkInboxUnread(w http.ResponseWriter, r *http.Request) {
 
 	resp := h.enrichInboxResponse(r.Context(), inboxToResponse(item), item.IssueID)
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) DeleteInboxItem(w http.ResponseWriter, r *http.Request) {
+	item, ok := h.loadInboxItemForUser(w, r, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	if !h.requireIssueIDVisible(w, r, uuidToString(item.WorkspaceID), item.IssueID, http.StatusNotFound, "inbox item not found") {
+		return
+	}
+	count, err := h.Queries.DeleteInboxGroup(r.Context(), db.DeleteInboxGroupParams{
+		ID:          item.ID,
+		WorkspaceID: item.WorkspaceID,
+		RecipientID: item.RecipientID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete notification")
+		return
+	}
+	h.publish(protocol.EventInboxDeleted, uuidToString(item.WorkspaceID), "member", requestUserID(r), map[string]any{
+		"item_id":      uuidToString(item.ID),
+		"recipient_id": uuidToString(item.RecipientID),
+		"count":        count,
+	})
+	writeJSON(w, http.StatusOK, map[string]any{"count": count})
 }
 
 func (h *Handler) ArchiveInboxItem(w http.ResponseWriter, r *http.Request) {
@@ -394,10 +432,15 @@ func (h *Handler) CountUnreadInbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+	if !ok {
+		return
+	}
 	count, err := h.Queries.CountUnreadInbox(r.Context(), db.CountUnreadInboxParams{
-		WorkspaceID:   wsUUID,
-		RecipientType: "member",
-		RecipientID:   parseUUID(userID),
+		WorkspaceID:      wsUUID,
+		RecipientType:    "member",
+		RecipientID:      parseUUID(userID),
+		HiddenProjectIds: hidden.Param(),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to count unread inbox")

@@ -48,7 +48,7 @@ When an agent runs an issue inside a project, the project's name and description
 Project resources tell agents which code and working directories to use:
 
 - **GitHub repositories**: provide a repo the runtime can check out, with an optional ref.
-- **Local directories**: let the runtime on a specific computer work in an existing directory, whose contents the agent modifies directly.
+- **Local directories**: let the runtime on a specific computer use an existing directory; the agent either edits it directly or works in an isolated git worktree of it.
 
 See [Project resources](/project-resources) for how to choose and for the safety boundaries.
 

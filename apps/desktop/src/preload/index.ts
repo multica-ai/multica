@@ -20,6 +20,26 @@ import {
   type IssueWindowRequest,
 } from "../shared/issue-window";
 import { AUTH_SESSION_STATE_CHANNEL } from "../shared/auth-session";
+import {
+  DEV_TOOLBAR_VISIBLE_CHANGED_CHANNEL,
+  DEV_TOOLBAR_VISIBLE_GET_CHANNEL,
+} from "../shared/dev-toolbar";
+import {
+  CONTEXT_MENU_COMMAND_CHANNEL,
+  CONTEXT_MENU_REQUEST_CHANNEL,
+  isContextMenuRequest,
+  type ContextMenuCommand,
+  type ContextMenuRequest,
+} from "../shared/context-menu";
+import {
+  THEME_FOLDER_CHANGED_CHANNEL,
+  THEME_FOLDER_OPEN_CHANNEL,
+  THEME_FOLDER_READ_CHANNEL,
+  THEME_FOLDER_WRITE_CHANNEL,
+  type ThemeFolderFile,
+  type ThemeFolderSnapshot,
+  type ThemeFolderWriteResult,
+} from "../shared/theme-folder";
 import type {
   DaemonStatus,
   LocalRuntimeProbe,
@@ -170,21 +190,26 @@ const desktopAPI = {
   setImmersiveMode: (immersive: boolean) =>
     ipcRenderer.invoke("window:setImmersive", immersive),
   /**
-   * Show a native OS notification for a new inbox item. Fired from the
-   * renderer only when the app is unfocused — in-focus feedback is the
-   * inbox sidebar's unread styling. `slug`, `itemId`, and `issueKey` are
-   * all round-tripped on click: slug pins routing to the source workspace
-   * (the user may switch workspaces before clicking the banner), itemId
-   * lets the renderer mark the row read, issueKey maps to the inbox URL
-   * param.
+   * Show a native OS notification. The source workspace and either the inbox
+   * selector or chat session are round-tripped on click. Main owns focus
+   * gating and deduplication across windows.
    */
   showNotification: (payload: {
     slug: string;
     itemId: string;
-    issueKey: string;
+    issueKey?: string;
+    chatSessionId?: string;
     title: string;
     body: string;
   }) => ipcRenderer.send("notification:show", payload),
+  getWindowForeground: (): Promise<boolean> => ipcRenderer.invoke("window:foreground"),
+  onWindowForegroundChanged: (callback: (foreground: boolean) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, foreground: unknown) => {
+      if (typeof foreground === "boolean") callback(foreground);
+    };
+    ipcRenderer.on("window:foreground-changed", handler);
+    return () => ipcRenderer.removeListener("window:foreground-changed", handler);
+  },
   /**
    * Update the OS dock / taskbar unread badge. Pass 0 to clear. Values
    * above 99 render as "99+" (capping is handled in the main process).
@@ -192,16 +217,15 @@ const desktopAPI = {
   setUnreadBadge: (count: number) =>
     ipcRenderer.send("badge:set", Math.max(0, Math.floor(count))),
   /**
-   * Subscribe to "open this inbox row" requests sent by the main process
-   * when the user clicks an OS notification banner. Returns an unsubscribe
-   * function. The payload echoes the `slug`, `itemId`, and `issueKey` that
-   * were passed to `showNotification`.
+   * Subscribe to inbox/chat navigation from an OS notification click.
+   * The existing channel also carries direct chat targets.
    */
   onInboxOpen: (
     callback: (payload: {
       slug: string;
       itemId: string;
-      issueKey: string;
+      issueKey?: string;
+      chatSessionId?: string;
     }) => void,
   ) => subscribeToMainRendererChannel("inbox:open", callback),
   /** Listen for native macOS back/forward swipe gestures. */
@@ -214,6 +238,19 @@ const desktopAPI = {
       ipcRenderer.removeListener(NAVIGATION_GESTURE_CHANNEL, handler);
     };
   },
+  /** Listen for right-clicks the page left unhandled, to draw their menu. */
+  onContextMenu: (callback: (request: ContextMenuRequest) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, request: unknown) => {
+      if (isContextMenuRequest(request)) callback(request);
+    };
+    ipcRenderer.on(CONTEXT_MENU_REQUEST_CHANNEL, handler);
+    return () => {
+      ipcRenderer.removeListener(CONTEXT_MENU_REQUEST_CHANNEL, handler);
+    };
+  },
+  /** Run the item picked in that menu. */
+  runContextMenuCommand: (command: ContextMenuCommand) =>
+    ipcRenderer.send(CONTEXT_MENU_COMMAND_CHANNEL, command),
   /** Report the renderer's memory-router path for recovery diagnostics. */
   setRendererRouteContext: (context: RendererRouteContextInput) =>
     ipcRenderer.send(RENDERER_ROUTE_CONTEXT_CHANNEL, context),
@@ -223,6 +260,23 @@ const desktopAPI = {
   /** Validate that a path is an existing readable+writable directory. */
   validateLocalDirectory: (path: string) =>
     ipcRenderer.invoke("local-directory:validate", path),
+  /** Read every theme in the themes folder, and start watching it. */
+  readThemeFolder: (): Promise<ThemeFolderSnapshot> =>
+    ipcRenderer.invoke(THEME_FOLDER_READ_CHANNEL),
+  /** Called once a change in the themes folder settles. Returns an unsubscribe fn. */
+  onThemeFolderChange: (callback: () => void) => {
+    const handler = () => callback();
+    ipcRenderer.on(THEME_FOLDER_CHANGED_CHANNEL, handler);
+    return () => {
+      ipcRenderer.removeListener(THEME_FOLDER_CHANGED_CHANNEL, handler);
+    };
+  },
+  /** Open the themes folder, or one theme's folder in it, in the file manager. */
+  openThemeFolder: (name?: string): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke(THEME_FOLDER_OPEN_CHANNEL, name),
+  /** Create a theme folder from files; never replaces an existing one. */
+  writeThemeFolder: (name: string, files: ThemeFolderFile[]): Promise<ThemeFolderWriteResult> =>
+    ipcRenderer.invoke(THEME_FOLDER_WRITE_CHANNEL, name, files),
   /** Listen for Cmd/Ctrl+W tab-close requests from the main process.
    *  The renderer should close the active tab; if it was the last tab,
    *  call `closeWindow()` to dismiss the window. Returns an unsubscribe fn. */
@@ -306,12 +360,35 @@ const desktopAPI = {
   /** Listen for Cmd/Ctrl+Shift+N new-window requests. */
   onNewWindowShortcut: (callback: () => void) =>
     subscribeToMainRendererChannel(NEW_WINDOW_SHORTCUT_CHANNEL, () => callback()),
+  /** Whether View → Show Dev Toolbar is checked. Always false unless the
+   *  dev build was started with VITE_DEV_TOOLBAR. */
+  getDevToolbarVisible: (): boolean => {
+    try {
+      return ipcRenderer.sendSync(DEV_TOOLBAR_VISIBLE_GET_CHANNEL) === true;
+    } catch {
+      return false;
+    }
+  },
+  /** Listen for View → Show Dev Toolbar being toggled. Returns an unsubscribe fn. */
+  onDevToolbarVisibleChange: (callback: (visible: boolean) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, visible: unknown) => {
+      if (typeof visible === "boolean") callback(visible);
+    };
+    ipcRenderer.on(DEV_TOOLBAR_VISIBLE_CHANGED_CHANNEL, handler);
+    return () => {
+      ipcRenderer.removeListener(DEV_TOOLBAR_VISIBLE_CHANGED_CHANNEL, handler);
+    };
+  },
 };
 
 type DaemonReauthResult =
   | { ok: true }
   | { ok: false; reason: "session_invalid" }
   | { ok: false; reason: "transient"; message: string };
+
+type FocusEnvironmentResult =
+  | { ok: true }
+  | { ok: false; reason: "gone" | "unsupported" | "unavailable" | "failed"; error?: string };
 
 const daemonAPI = {
   start: (): Promise<{ success: boolean; error?: string }> =>
@@ -326,6 +403,8 @@ const daemonAPI = {
     ipcRenderer.invoke("daemon:probe-runtimes"),
   getHostName: (): Promise<string> =>
     ipcRenderer.invoke("daemon:get-host-name"),
+  focusEnvironment: (key: string): Promise<FocusEnvironmentResult> =>
+    ipcRenderer.invoke("daemon:focus-environment", key),
   onStatusChange: (callback: (status: DaemonStatus) => void) => {
     const handler = (_: unknown, status: DaemonStatus) => callback(status);
     ipcRenderer.on("daemon:status", handler);

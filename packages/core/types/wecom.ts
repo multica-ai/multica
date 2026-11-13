@@ -11,6 +11,8 @@ export interface WecomInstallation {
   agent_id: string;
   /** The smart-bot identifier assigned by the WeCom admin console. */
   bot_id: string;
+  /** Chat display name; absent on older backends. */
+  bot_name?: string;
   installer_user_id: string;
   status: "active" | "revoked" | string;
 }

@@ -54,6 +54,7 @@ import { useT } from "../i18n";
 import {
   AttachmentPreviewModal,
   PreviewImagePrefetch,
+  type PreviewCopyLinkAction,
   type PreviewLocateAction,
   type PreviewSource,
 } from "./attachment-preview-modal";
@@ -82,6 +83,8 @@ export interface PreviewItemDetails {
   info?: ReactNode;
   /** Take the reader to where the file was posted. The viewer closes first. */
   locate?: PreviewLocateAction;
+  /** Copy a link to the file. Unlike `locate`, the viewer stays open. */
+  copyLink?: PreviewCopyLinkAction;
 }
 
 /** Handed to `describeItem` so its controls can move within the session. */
@@ -105,7 +108,16 @@ interface PreviewSequenceApi {
    * Returns false when no provider is mounted or the key is not part of this
    * surface's sequence, so callers can fall back to a single-file preview.
    */
-  openAt: (key: string) => boolean;
+  openAt: (key: string, options?: OpenAtOptions) => boolean;
+}
+
+export interface OpenAtOptions {
+  /**
+   * The reader asked for this exact file (a link that names it), so a load
+   * failure must not quietly show them a different one: stay on it and say
+   * it failed, instead of skipping to the next loadable image.
+   */
+  stayOnError?: boolean;
 }
 
 const NO_SEQUENCE: PreviewSequenceApi = { openAt: () => false };
@@ -144,12 +156,16 @@ interface Session {
   /** Snapshot taken at open time — see the freeze note in the file header. */
   items: ImageSequenceItem[];
   index: number;
+  /** The file opened with `stayOnError`; a load failure keeps it on screen. */
+  pinnedKey?: string;
 }
 
 export function PreviewSequenceProvider({
   items,
   describeItem,
   onOpenOverview,
+  onOpened,
+  onClosed,
   children,
 }: {
   items: ReadonlyArray<ImageSequenceItem>;
@@ -162,6 +178,13 @@ export function PreviewSequenceProvider({
    * showing, so the overview can offer a way back to it.
    */
   onOpenOverview?: (currentKey: string) => void;
+  /**
+   * `openAt` opened the viewer. Called synchronously, inside `openAt`, so a
+   * host can tell a handoff into the viewer from the reader leaving.
+   */
+  onOpened?: () => void;
+  /** The viewer finished closing, by any means. */
+  onClosed?: () => void;
   children: ReactNode;
 }) {
   const { t } = useT("editor");
@@ -169,6 +192,8 @@ export function PreviewSequenceProvider({
   // context value (and re-render every image) on every incoming message.
   const itemsRef = useRef(items);
   itemsRef.current = items;
+  const onOpenedRef = useRef(onOpened);
+  onOpenedRef.current = onOpened;
 
   const [session, setSession] = useState<Session | null>(null);
   const [open, setOpen] = useState(false);
@@ -188,15 +213,20 @@ export function PreviewSequenceProvider({
 
   const api = useMemo<PreviewSequenceApi>(
     () => ({
-      openAt: (key: string) => {
+      openAt: (key: string, options?: OpenAtOptions) => {
         const snapshot = [...itemsRef.current];
         const index = indexOfImageKey(snapshot, key);
         if (index < 0) return false;
         directionRef.current = 1;
         brokenRef.current = new Set();
         setBroken(brokenRef.current);
-        setSession({ items: snapshot, index });
+        setSession({
+          items: snapshot,
+          index,
+          pinnedKey: options?.stayOnError ? key : undefined,
+        });
         setOpen(true);
+        onOpenedRef.current?.();
         return true;
       },
     }),
@@ -235,6 +265,9 @@ export function PreviewSequenceProvider({
 
     brokenRef.current = new Set(brokenRef.current).add(failed.key);
     setBroken(brokenRef.current);
+    // The file the reader asked for by name: stay and show the failure on the
+    // stage rather than swapping in a different image.
+    if (failed.key === session.pinnedKey) return;
     toast.error(t(($) => $.image.unavailable));
 
     const forward = directionRef.current;
@@ -276,8 +309,12 @@ export function PreviewSequenceProvider({
         source={toPreviewSource(current)}
         open={open}
         onClose={() => setOpen(false)}
-        onExitComplete={() => setSession(null)}
+        onExitComplete={() => {
+          setSession(null);
+          onClosed?.();
+        }}
         onImageError={handleImageError}
+        imageFailed={current.key === session.pinnedKey && broken.has(current.key)}
         titleAccessory={details?.titleAccessory}
         info={
           details?.info
@@ -295,6 +332,7 @@ export function PreviewSequenceProvider({
               }
             : undefined
         }
+        copyLink={details?.copyLink}
         onOpenOverview={
           onOpenOverview
             ? () => {

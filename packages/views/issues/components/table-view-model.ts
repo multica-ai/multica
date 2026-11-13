@@ -118,6 +118,7 @@ function columnValue(
     case "updated_at":
       return issue.updated_at;
     case "child_progress":
+    case "pull_requests":
       return undefined;
     case "creator":
       return issue.creator_id;

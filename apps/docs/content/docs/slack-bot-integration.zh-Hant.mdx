@@ -111,11 +111,11 @@ Bot 使用 Socket Mode 主動連線 Slack，不需要配置公網 Request URL �
 ### 連線到 AI 代理 [#3-連線到 AI 代理]
 
 1. 在 Multica 中開啟 **AI 代理**，選擇要接入 Slack 的 AI 代理。
-2. 進入 **整合**，點選 **連線 Slack**。
+2. 進入 **訊息渠道**，點選 **新增訊息管道**，再選擇 **Slack**。
 3. 填入 Bot token 和 App-level token。
 4. 點選 **連線**。
 
-Multica 會驗證兩個 token 是否來自同一個 app。連線成功後，頁面會顯示 **已連線到 Slack**。
+Multica 會驗證兩個 token 是否來自同一個 app。連線成功後，頁面會顯示 **正常**。
 
 <Callout type="warning">
 兩個 token 會加密儲存在 Multica 伺服器上。Token 即憑據，不要寫進任務、評論或程式碼倉庫。已連線到其他 AI 代理或工作區的 app 不能直接重複使用，需先斷開原連線。
@@ -176,7 +176,7 @@ Bot 只會響應明確 @ 它的頻道訊息。執行時，它會在權限允許�
 
 ## 管理連線
 
-開啟 **設定 → 訊息渠道 → Slack** 可以檢視所有已連線的 Slack Bot。工作區 owner 和 admin 可以斷開連線。
+開啟 **設定 → 訊息渠道**，按平台檢視已連接的 AI 代理。點選 AI 代理，進入其詳細頁面的 **訊息渠道**。工作區 owner/admin 可以在這裡開啟 Bot 的管理選單，斷開連線。
 
 斷開後，Socket Mode 連線會停止，Bot 不再接收新訊息。已有的對話和審計記錄不會隨之刪除。
 

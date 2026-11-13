@@ -5,6 +5,7 @@ import {
   registerSystemNotificationClickHandler,
   requestWebNotificationPermission,
   showWebNotification,
+  systemNotificationPath,
   type SystemNotificationPayload,
 } from "./system-notification";
 
@@ -95,6 +96,24 @@ describe("requestWebNotificationPermission", () => {
 });
 
 describe("showWebNotification", () => {
+  it("opens a chat alert directly in Chat while preserving inbox routing", () => {
+    expect(systemNotificationPath({ slug: "workspace-a", chatSessionId: "session-1" })).toBe("/workspace-a/chat?session=session-1");
+    expect(systemNotificationPath({ slug: "workspace-a", issueKey: "issue-1" })).toBe("/workspace-a/inbox?issue=issue-1");
+    expect(systemNotificationPath({ slug: "", chatSessionId: "session-1" })).toBeNull();
+    expect(systemNotificationPath({ slug: "workspace-a" })).toBeNull();
+  });
+
+  it("routes browser chat notification clicks without an inbox selector", () => {
+    installWindow(FakeNotification);
+    const onClick = vi.fn();
+    registerSystemNotificationClickHandler(onClick);
+    const chat = { slug: "workspace-a", itemId: "chat:message-1", chatSessionId: "session-1", title: "Review changes", body: "Done" };
+    showWebNotification(chat);
+    created[0]?.instance.onclick?.();
+    expect(onClick).toHaveBeenCalledWith(chat);
+    expect(systemNotificationPath(onClick.mock.calls[0]![0])).toBe("/workspace-a/chat?session=session-1");
+  });
+
   it("does nothing when the API is unavailable", () => {
     expect(() => showWebNotification(payload())).not.toThrow();
     expect(created).toHaveLength(0);

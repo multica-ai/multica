@@ -8,9 +8,10 @@
  * set from the active locale. */
 @custom-variant cjk (&:is(:lang(zh), :lang(ja), :lang(ko)));
 
-/* The chat launcher overlays the dashboard's bottom-right corner on every
- * workspace page, so anything that runs to that corner has to stop short of
- * it. Named rather than spelled out at each site: the intent is legible, every
+/* Below `md` the chat launcher overlays the dashboard's bottom-right corner on
+ * every workspace page, so anything that runs to that corner has to stop short
+ * of it. From `md` up quick chat is in the bottom bar and the clearance is
+ * zero. Named rather than spelled out at each site: the intent is legible, every
  * site that yields to the launcher is findable by these classes, and the
  * distance stays derived from the launcher's own geometry.
  *
@@ -34,6 +35,32 @@
 
 @utility above-chat-launcher {
   bottom: calc(var(--chat-launcher-clearance) + var(--chat-launcher-inset));
+}
+
+/* The 6px ::-webkit-scrollbar below is ignored by Chromium (Chrome 121+, so
+ * every Electron build we ship) on any element whose scrollbar-width or
+ * scrollbar-color is set, which the base layer does for all elements; with
+ * always-on macOS scrollbars that leaves the native `thin`, 11px wide. This
+ * resets both so the 6px bar applies. A styled scrollbar is never an overlay,
+ * so the thumb only shows while the pointer is over the scroller — trackpad
+ * users would otherwise get a permanent bar where they had none. The thumb
+ * colour goes through a custom property because Chromium does not repaint
+ * scrollbar pseudo-elements on the scroller's own :hover. Firefox keeps the
+ * standard properties. */
+@utility scrollbar-slim {
+  @supports selector(::-webkit-scrollbar) {
+    scrollbar-width: auto;
+    scrollbar-color: auto;
+  }
+  &:hover {
+    --scrollbar-slim-thumb: var(--scrollbar-thumb);
+  }
+  &::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-slim-thumb, transparent);
+  }
+  &::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
+  }
 }
 
 /* Shiki dual themes: CSS-only light/dark switching via CSS variables */
@@ -242,7 +269,7 @@
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  padding: 1px;
+  padding: var(--border-beam-width, 1px);
   overflow: hidden;
   pointer-events: none;
   container-type: size;

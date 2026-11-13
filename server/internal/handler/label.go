@@ -144,8 +144,12 @@ func (h *Handler) ListLabels(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+	if !ok {
+		return
+	}
 	labels, err := h.Queries.ListLabels(r.Context(), db.ListLabelsParams{
-		WorkspaceID: parseUUID(workspaceID), ResourceType: resourceType,
+		WorkspaceID: parseUUID(workspaceID), ResourceType: resourceType, HiddenProjectIds: hidden.Param(),
 	})
 	if err != nil {
 		slog.Warn("ListLabels failed", append(logger.RequestAttrs(r), "error", err)...)

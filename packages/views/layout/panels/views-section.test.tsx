@@ -11,8 +11,9 @@ import type { IssueViewActions } from "../../issue-views/use-view-actions";
 const actions = vi.hoisted(() => ({
   sidebar: { items: [] as unknown[], reorder: vi.fn(), unstar: vi.fn() },
   create: vi.fn(),
+  edit: vi.fn(),
   remove: vi.fn(),
-  canManage: () => true,
+  canManage: vi.fn(() => true),
 }));
 
 vi.mock("../../issue-views/use-view-actions", () => ({ useIssueViewActions: () => actions }));
@@ -80,6 +81,8 @@ const SAVED_VIEW = {
 
 beforeEach(() => {
   actions.create.mockReset();
+  actions.edit.mockReset();
+  actions.canManage.mockImplementation(() => true);
   actions.sidebar.items = [];
   useSidebarTreeStore.setState({ viewsCollapsed: false });
   useActiveIssueViewStore.setState({ active: {} });
@@ -113,6 +116,25 @@ describe("ViewsSection", () => {
     renderSection();
     expect(screen.getByRole("button", { name: "Issues in All issues" })).toHaveAttribute("aria-expanded", "false");
     expect(screen.getByRole("button", { name: "Issues in Not done" })).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("edits a saved view from its right-click menu", async () => {
+    actions.sidebar.items = [{ id: "view:v1", kind: "view", view: SAVED_VIEW }];
+    renderSection();
+
+    fireEvent.contextMenu(screen.getByRole("link", { name: "Not done" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Edit view" }));
+    expect(actions.edit).toHaveBeenCalledWith(SAVED_VIEW);
+  });
+
+  it("offers no Edit view on a view the user cannot manage", async () => {
+    actions.canManage.mockImplementation(() => false);
+    actions.sidebar.items = [{ id: "view:v1", kind: "view", view: SAVED_VIEW }];
+    renderSection();
+
+    fireEvent.contextMenu(screen.getByRole("link", { name: "Not done" }));
+    expect(await screen.findByRole("menuitem", { name: "Duplicate" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Edit view" })).toBeNull();
   });
 
   // dnd-kit stops the release's click at the document without cancelling

@@ -33,6 +33,7 @@
   },
   "commands": {
     "current_theme_aria": "當前主題",
+    "current_mode_aria": "當前模式",
     "new_issue": "新建任務",
     "new_project": "新建專案",
     "new_autopilot": "新建自動化",
@@ -103,7 +104,6 @@
     "project": "專案",
     "parent": "父任務",
     "quick_actions": "快捷操作",
-    "theme": "主題",
     "project_status": "專案狀態",
     "no_project": "無專案",
     "current": "目前"
@@ -133,14 +133,8 @@
     "type_to_find_people": "輸入關鍵詞查找成員和 AI 代理"
   },
   "delegate": {
-    "heading": "交給 AI 代理",
-    "create_and_assign": "新建任務並指派給 {{name}}",
-    "squad": "小隊",
-    "context_aria": "附帶上下文",
-    "parent": "掛在 {{identifier}} 下",
-    "pick_crumb": "選擇",
-    "pick_another": "換一個 AI 代理或小隊...",
-    "detected": "識別為指令"
+    "row": "交給 AI 代理：「{{prompt}}」",
+    "hint": "快速建立"
   },
   "best": {
     "assign": "把 {{subject}} 指派給 {{name}}",
@@ -159,8 +153,6 @@
     "navigate": "選擇",
     "select": "執行",
     "open_in_new_tab": "在新分頁開啟",
-    "delegate": "新建並交給 {{name}}",
-    "search_instead": "僅作為關鍵詞搜尋",
     "back": "返回",
     "prefix_commands": "命令",
     "prefix_issues": "任務",

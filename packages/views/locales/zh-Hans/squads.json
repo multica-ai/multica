@@ -27,13 +27,7 @@
     "success": "已归档小队"
   },
   "name_editor": {
-    "title": "重命名小队",
-    "placeholder": "小队名称",
-    "required": "名称不能为空",
-    "cancel": "取消",
-    "save": "保存",
-    "saved": "已保存",
-    "save_failed": "保存失败"
+    "placeholder": "小队名称"
   },
   "add_member_dialog": {
     "title": "添加成员",
@@ -53,12 +47,9 @@
     "empty": "添加角色…",
     "placeholder": "角色（例如：审查者）"
   },
-  "description_dialog": {
-    "title": "编辑描述",
-    "placeholder_empty": "添加描述",
-    "cancel": "取消",
-    "responsibility_placeholder": "这个小队负责什么？",
-    "save": "保存"
+  "description_editor": {
+    "empty": "添加描述",
+    "placeholder": "这个小队负责什么？"
   },
   "members_tab": {
     "section_title": "成员",
@@ -112,7 +103,8 @@
     "leader_updated": "队长已更新",
     "leader_update_failed": "更新队长失败",
     "archive_failed": "归档小队失败",
-    "instructions_saved": "指引已保存"
+    "instructions_saved": "指引已保存",
+    "update_failed": "保存失败"
   },
   "profile_card": {
     "unavailable": "小队不可用",

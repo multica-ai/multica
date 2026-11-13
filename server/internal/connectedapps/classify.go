@@ -79,7 +79,7 @@ var sendObjects = map[string]bool{
 var fillerWords = map[string]bool{"A": true, "AN": true, "THE": true, "NEW": true}
 
 // Argument names that address other people. A write carrying one of them
-// reaches those people, so it is confirmed like a send.
+// reaches those people, so it is classified as a send.
 var recipientArgs = map[string]bool{
 	"to": true, "cc": true, "bcc": true, "recipient": true, "recipients": true,
 	"recipient_email": true, "recipient_emails": true, "attendees": true, "invitees": true,
@@ -103,8 +103,7 @@ var deleteArgs = map[string]bool{
 // Classify returns the action class of a tool. Curated overrides win; then the
 // first verb in the tool slug decides, with nouns upgrading a write to share or
 // delete. MCP annotations break the tie for slugs without a known verb. A tool
-// nothing recognizes is "send": unknown effects get the confirmation default
-// rather than silently running.
+// nothing recognizes is "send", so account rules for outward actions apply.
 func Classify(toolkitSlug, toolSlug string, tags []string) string {
 	upper := strings.ToUpper(strings.TrimSpace(toolSlug))
 	if app, ok := Curated(toolkitSlug); ok {

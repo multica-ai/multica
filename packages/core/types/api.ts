@@ -175,6 +175,7 @@ export interface ListIssuesParams {
    */
   assignee_types?: IssueAssigneeType[];
   creator_id?: string;
+  created_by_user_id?: string;
   project_id?: string;
   /** Actor-aware table facets. OR within each field. */
   assignee_filters?: IssueActorRef[];
@@ -248,6 +249,7 @@ export interface ListGroupedIssuesParams {
   assignee_id?: string;
   assignee_ids?: string[];
   creator_id?: string;
+  created_by_user_id?: string;
   project_id?: string;
   /** See `ListIssuesParams.involves_user_id` — same semantics. */
   involves_user_id?: string;
@@ -378,6 +380,8 @@ export interface IssueTableFilters {
     end: string;
   };
   working_only?: boolean;
+  /** No visible running or queued work, matching the Inbox Idle filter. */
+  idle_only?: boolean;
   /** Match the running-task issue projection returned by
    *  `/api/working-agents`. An explicit empty list matches nothing. */
   working_issue_ids?: string[];

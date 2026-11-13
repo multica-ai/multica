@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
 import { performance } from 'node:perf_hooks'
-import { findCodeRanges, findBlockCodeRanges, preprocessLinks } from './linkify'
+import { findCodeRanges, findBlockCodeRanges, findHtmlTagRanges, preprocessLinks } from './linkify'
 
 describe('fenced code boundaries used by preprocessing and chunked loading', () => {
   it.each([
@@ -167,6 +167,54 @@ it.each(['x', ''])('scans repeated list prefixes without backtracking (%j)', (su
     '-  '.repeat(25) + suffix + '\n\n[https://example.com](https://example.com)',
   )
   expect(performance.now() - start).toBeLessThan(250)
+})
+
+describe('raw HTML during linkification', () => {
+  it.each([
+    '<img src="https://host/a.png" width="400" />',
+    "<img src='https://host/a.png'>",
+    '<img src=https://host/a.png>',
+    '<img\n  src="https://host/a.png"\n  alt="www.example.com"\n/>',
+    '<IMG SRC="https://host/a.png">',
+    '<a href="https://example.com">docs</a>',
+    '<a href="https://example.com">https://example.com</a>',
+    '<A HREF="https://example.com"><img src="https://host/a.png"></A>',
+    '<source srcset="https://host/a.webp 2x" />',
+  ])('leaves %j untouched', (html) => {
+    const source = `Text\n\n${html}\n\nEnd`
+    expect(preprocessLinks(source)).toBe(source)
+  })
+
+  it('still links prose URLs around and between HTML tags', () => {
+    expect(
+      preprocessLinks('see https://a.example <img src="https://host/a.png"> and https://b.example'),
+    ).toBe(
+      'see [https://a.example](https://a.example) <img src="https://host/a.png"> and [https://b.example](https://b.example)',
+    )
+    expect(preprocessLinks('<br>https://a.example<br/>')).toBe(
+      '<br>[https://a.example](https://a.example)<br/>',
+    )
+    expect(preprocessLinks('<details><summary>Logs</summary>\n\nhttps://a.example\n</details>')).toBe(
+      '<details><summary>Logs</summary>\n\n[https://a.example](https://a.example)\n</details>',
+    )
+  })
+
+  it('does not treat autolinks, escaped tags, or tags in code as HTML', () => {
+    expect(findHtmlTagRanges('<https://a.example> <user@example.com>')).toEqual([])
+    expect(preprocessLinks('\\<img src="https://host/a.png">')).toBe(
+      '\\<img src="[https://host/a.png](https://host/a.png)">',
+    )
+    expect(preprocessLinks('`<a href="x">` then https://a.example </a>')).toBe(
+      '`<a href="x">` then [https://a.example](https://a.example) </a>',
+    )
+  })
+
+  it('scans an unterminated tag with many attributes without backtracking', () => {
+    const source = '<img' + ' a=b/c/d'.repeat(2000) + ' https://a.example'
+    const start = performance.now()
+    expect(preprocessLinks(source)).toContain('[https://a.example](https://a.example)')
+    expect(performance.now() - start).toBeLessThan(250)
+  })
 })
 
 describe('reference definitions during linkification', () => {

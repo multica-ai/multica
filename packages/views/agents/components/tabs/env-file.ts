@@ -128,7 +128,7 @@ export function parseEnvFile(text: string): EnvAssignment[] | null {
 
 export type EnvFormatResult =
   | { ok: true; text: string }
-  | { ok: false; reason: "unrepresentable" | "duplicate"; key: string };
+  | { ok: false; reason: "invalid_key" | "unrepresentable" | "duplicate"; key: string };
 
 const KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
@@ -156,7 +156,10 @@ function encodeValue(key: string, value: string): string | null {
 /**
  * Serialize entries back into text `parseEnvFileResult` reads identically, or
  * name the first entry that cannot be represented so the caller can refuse to
- * enter bulk editing without touching any data.
+ * enter bulk editing without touching any data. A key outside the dotenv
+ * identifier grammar (`invalid_key`) is reported apart from a value with no
+ * text form (`unrepresentable`): the API stores both, and the user has to
+ * know which field to change.
  *
  * Success means the whole text round-trips, which is why duplicate keys are a
  * refusal rather than a formatting detail: two entries sharing a key can only
@@ -168,7 +171,7 @@ export function formatEnvFile(assignments: EnvAssignment[]): EnvFormatResult {
 
   for (const { key, value } of assignments) {
     if (!KEY_PATTERN.test(key)) {
-      return { ok: false, reason: "unrepresentable", key };
+      return { ok: false, reason: "invalid_key", key };
     }
     if (keys.has(key)) return { ok: false, reason: "duplicate", key };
 

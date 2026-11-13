@@ -28,6 +28,7 @@ export interface UseIssueActionsResult {
   ) => void;
   openInNewTab: () => void;
   openInDesktop?: () => void;
+  openInNewWindow?: () => void;
   togglePin: () => void;
   copyLink: () => Promise<void>;
   copyCommentLink: (commentId: string) => Promise<void>;
@@ -151,6 +152,14 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
       "noopener,noreferrer",
     );
   }, [issueId, issueIdentifier, navigation, paths]);
+
+  const openInNewWindow = useCallback(() => {
+    if (!issueId) return;
+    navigation.openIssueInNewWindow?.(
+      paths.issueDetail(issueIdentifier || issueId),
+      issueIdentifier ? `${issueIdentifier} ${issueTitle}` : issueTitle,
+    );
+  }, [issueId, issueIdentifier, issueTitle, navigation, paths]);
 
   const openInDesktop = useCallback(() => {
     if (!issueId) return;
@@ -310,6 +319,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     updateField,
     openInNewTab,
     openInDesktop: navigation.openInDesktop ? openInDesktop : undefined,
+    openInNewWindow: navigation.openIssueInNewWindow ? openInNewWindow : undefined,
     togglePin,
     copyLink,
     copyCommentLink,

@@ -133,31 +133,6 @@ func TestStarPromptStarredRetiresThePrompt(t *testing.T) {
 	}
 }
 
-func TestClaimStarPromptShowingHonoursDeploymentSwitch(t *testing.T) {
-	userID := starPromptUser(t, "star-prompt-disabled@multica.ai", 4)
-	prev := testHandler.cfg.DisableStarPrompt
-	t.Cleanup(func() { testHandler.cfg.DisableStarPrompt = prev })
-	testHandler.cfg.DisableStarPrompt = true
-
-	if w := callStarPrompt(t, userID, "claim"); w.Code != http.StatusConflict {
-		t.Fatalf("claim while disabled: expected 409, got %d", w.Code)
-	}
-	if n := storedStarPromptShownCount(t, userID); n != 0 {
-		t.Fatalf("refused claim must not write, got count %d", n)
-	}
-
-	req := httptest.NewRequest("GET", "/api/config", nil)
-	rec := httptest.NewRecorder()
-	testHandler.GetConfig(rec, req)
-	var cfg AppConfig
-	if err := json.Unmarshal(rec.Body.Bytes(), &cfg); err != nil {
-		t.Fatalf("decode config: %v", err)
-	}
-	if !cfg.StarPromptDisabled {
-		t.Fatal("config should report the star prompt as disabled")
-	}
-}
-
 func TestGetMeAlwaysSerializesStarPromptCount(t *testing.T) {
 	userID := newWaitlistTestUser(t, "star-prompt-getme@multica.ai")
 

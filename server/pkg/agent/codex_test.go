@@ -2196,31 +2196,27 @@ func TestCodexRequestFailsImmediatelyAfterProcessExit(t *testing.T) {
 func TestCodexRequestPrefersContextCancellationOverProcessExit(t *testing.T) {
 	t.Parallel()
 
-	c, fs, _ := newTestCodexClient(t)
-	processExitMarked := make(chan error, 1)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go func() {
-		deadline := time.Now().Add(2 * time.Second)
-		for {
-			if len(fs.Lines()) >= 1 {
-				cancel()
-				c.markProcessExited(errCodexProcessExited)
-				processExitMarked <- nil
-				return
-			}
-			if time.Now().After(deadline) {
-				processExitMarked <- fmt.Errorf("timed out waiting for request write")
-				return
-			}
-			time.Sleep(5 * time.Millisecond)
-		}
-	}()
+	// Both endings land after the write and before request waits, so it sees
+	// them together and has to choose.
+	var c *codexClient
+	fs := &fakeStdinWithHook{}
+	fs.afterWrite = func() {
+		cancel()
+		c.markProcessExited(errCodexProcessExited)
+	}
+	c = &codexClient{
+		cfg:         Config{Logger: slog.Default()},
+		stdin:       fs,
+		pending:     make(map[int]*pendingRPC),
+		processDone: make(chan struct{}),
+	}
 
 	_, err := c.request(ctx, "thread/start", map[string]any{})
-	if markErr := <-processExitMarked; markErr != nil {
-		t.Fatal(markErr)
+	if len(fs.Lines()) != 1 {
+		t.Fatalf("request wrote %d lines, want 1", len(fs.Lines()))
 	}
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("request error = %v, want context.Canceled", err)
@@ -3676,9 +3672,9 @@ func TestCodexExecuteCleansUpWhenScannerOverflowsOnResume(t *testing.T) {
 	// Post-fix, drainAndWait does graceful-then-cancel in two bounded phases
 	// (see codex.go), and cmd.Cancel group-SIGKILLs the codex tree so the
 	// process exits even when stdin EOF isn't sufficient. We verify the
-	// failed Result reaches the caller within a small bound and carries an
-	// empty SessionID so the outer daemon's PriorSessionID-with-empty-
-	// SessionID fallback can retry a fresh session.
+	// failed Result reaches the caller and carries an empty SessionID so the
+	// outer daemon's PriorSessionID-with-empty-SessionID fallback can retry a
+	// fresh session.
 	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
 	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
 
@@ -3698,20 +3694,38 @@ func TestCodexExecuteCleansUpWhenScannerOverflowsOnResume(t *testing.T) {
 		// hangs cmd.Wait() because codex never sees stdin EOF (it isn't
 		// in a read syscall) and the stdout pipe stays full. Cleanup must
 		// fall back to the group-SIGKILL path to make progress.
-		`sleep 30`+"\n")
+		`sleep 300`+"\n")
 
-	start := time.Now()
-	result := executeFakeCodex(t, fakePath, ExecOptions{
+	backend, err := New("codex", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Neither the caller nor the run timeout may end this run, so the Result
+	// can only come from the overflow cleanup itself. Pre-fix it never came.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt", ExecOptions{
 		Cwd:                       t.TempDir(),
 		ResumeSessionID:           "thr_prior",
-		Timeout:                   30 * time.Second,
-		SemanticInactivityTimeout: 5 * time.Second,
+		Timeout:                   10 * testFallbackTimeout,
+		SemanticInactivityTimeout: 10 * testFallbackTimeout,
 	})
-	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	var result Result
+	select {
+	case result = <-session.Result:
+	case <-time.After(testFallbackTimeout):
+		t.Fatal("cleanup never completed without the caller cancelling (bug regressed?)")
+	}
 
 	if result.Status != "failed" {
-		t.Fatalf("expected status=failed, got %q (error=%q, elapsed=%s)",
-			result.Status, result.Error, elapsed)
+		t.Fatalf("expected status=failed, got %q (error=%q)", result.Status, result.Error)
 	}
 	if !strings.Contains(result.Error, "token too long") {
 		t.Fatalf("expected error to surface scanner overflow cause, got %q",
@@ -3742,15 +3756,6 @@ func TestCodexExecuteCleansUpWhenScannerOverflowsOnResume(t *testing.T) {
 	if !CodexResumeOverflowError(result.Error) {
 		t.Fatalf("predicate missed the error the backend actually produced: %q", result.Error)
 	}
-	// With the shrunken 100 ms grace, pushing the oversized line plus two
-	// bounded phases and the SIGKILL round-trip should complete in ~1 s.
-	// Pre-fix this test would block until the executeFakeCodex 10 s outer
-	// timeout and fail with "timeout waiting for result". We assert a much
-	// tighter bound so a future regression cannot quietly slip back up to 10 s.
-	if elapsed > 5*time.Second {
-		t.Fatalf("cleanup took %s, expected < 5s with shrunken grace (bug regressed?)",
-			elapsed)
-	}
 }
 
 func TestCodexExecuteDoesNotClaimResumeRejectedWhenOverflowIsNotAResume(t *testing.T) {
@@ -3778,13 +3783,13 @@ func TestCodexExecuteDoesNotClaimResumeRejectedWhenOverflowIsNotAResume(t *testi
 		`printf '{"jsonrpc":"2.0","id":2,"result":{"big":"'`+"\n"+
 		fmt.Sprintf(`head -c %d /dev/zero | tr '\0' 'x'`, agentStreamMaxLineBytes+1024*1024)+"\n"+
 		`printf '"}}\n'`+"\n"+
-		`sleep 30`+"\n")
+		`sleep 300`+"\n")
 
-	result := executeFakeCodex(t, fakePath, ExecOptions{
+	result, _ := executeFakeCodexCollectingMessages(t, fakePath, ExecOptions{
 		Cwd:                       t.TempDir(),
-		Timeout:                   30 * time.Second,
-		SemanticInactivityTimeout: 5 * time.Second,
-	})
+		Timeout:                   testFallbackTimeout,
+		SemanticInactivityTimeout: testFallbackTimeout,
+	}, testFallbackTimeout)
 
 	if result.Status != "failed" {
 		t.Fatalf("expected status=failed, got %q (error=%q)", result.Status, result.Error)
@@ -4881,30 +4886,35 @@ func executeFakeCodexCollectingMessagesWithConfig(t *testing.T, fakePath string,
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	var (
-		mu       sync.Mutex
-		messages []Message
-	)
+	var messages []Message
+	messagesDone := make(chan struct{})
 	go func() {
+		defer close(messagesDone)
 		for msg := range session.Messages {
-			mu.Lock()
 			messages = append(messages, msg)
-			mu.Unlock()
 		}
 	}()
+	deadline := time.After(budget)
+	var result Result
 	select {
-	case result, ok := <-session.Result:
+	case r, ok := <-session.Result:
 		if !ok {
 			t.Fatal("result channel closed without a value")
 		}
-		mu.Lock()
-		collected := append([]Message(nil), messages...)
-		mu.Unlock()
-		return result, collected
-	case <-time.After(budget):
+		result = r
+	case <-deadline:
 		t.Fatal("timeout waiting for result")
 		return Result{}, nil
 	}
+	// The backend sends Result before it closes Messages, so messages already
+	// sent may still be buffered when Result arrives.
+	select {
+	case <-messagesDone:
+	case <-deadline:
+		t.Fatal("timeout waiting for message stream to close")
+		return Result{}, nil
+	}
+	return result, messages
 }
 
 func TestWithAgentStderrAppendsHint(t *testing.T) {

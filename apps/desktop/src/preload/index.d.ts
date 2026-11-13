@@ -1,6 +1,7 @@
 import { ElectronAPI } from "@electron-toolkit/preload";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
 import type { NavigationGesture } from "../shared/navigation-gestures";
+import type { ContextMenuCommand, ContextMenuRequest } from "../shared/context-menu";
 import type { RendererRouteContextInput } from "../shared/renderer-route-context";
 import type { FreezeBreadcrumb } from "../shared/freeze-breadcrumb";
 import type {
@@ -17,6 +18,11 @@ import type {
   LocalRuntimeProbe,
 } from "../shared/daemon-types";
 import type { TabSelectionShortcutKey } from "../shared/main-renderer-messages";
+import type {
+  ThemeFolderFile,
+  ThemeFolderSnapshot,
+  ThemeFolderWriteResult,
+} from "../shared/theme-folder";
 import type {
   WorkspacePathOptions,
   WorkspacePathRequest,
@@ -58,26 +64,34 @@ interface DesktopAPI {
   downloadURL: (url: string) => Promise<void>;
   /** Hide macOS traffic lights for full-screen modals; restore when false. */
   setImmersiveMode: (immersive: boolean) => Promise<void>;
-  /** Show a native OS notification for a new inbox item. */
+  /** Show a native OS notification for an inbox item or chat reply. */
   showNotification: (payload: {
     slug: string;
     itemId: string;
-    issueKey: string;
+    issueKey?: string;
+    chatSessionId?: string;
     title: string;
     body: string;
   }) => void;
+  getWindowForeground: () => Promise<boolean>;
+  onWindowForegroundChanged: (callback: (foreground: boolean) => void) => () => void;
   /** Update the OS dock / taskbar unread badge. Pass 0 to clear. */
   setUnreadBadge: (count: number) => void;
-  /** Listen for "open inbox row" requests from notification clicks. Returns an unsubscribe function. */
+  /** Listen for inbox/chat navigation from notification clicks. Returns an unsubscribe function. */
   onInboxOpen: (
     callback: (payload: {
       slug: string;
       itemId: string;
-      issueKey: string;
+      issueKey?: string;
+      chatSessionId?: string;
     }) => void,
   ) => () => void;
   /** Listen for native macOS back/forward swipe gestures. Returns an unsubscribe function. */
   onNavigationGesture: (callback: (gesture: NavigationGesture) => void) => () => void;
+  /** Listen for right-clicks the page left unhandled, to draw their menu. */
+  onContextMenu: (callback: (request: ContextMenuRequest) => void) => () => void;
+  /** Run the item picked in that menu. */
+  runContextMenuCommand: (command: ContextMenuCommand) => void;
   /** Report the renderer's memory-router path for recovery diagnostics. */
   setRendererRouteContext: (context: RendererRouteContextInput) => void;
   /** Open the OS folder picker and return the chosen absolute path.
@@ -109,6 +123,14 @@ interface DesktopAPI {
      *  Drives the worktree execution-mode option in the resource UI. */
     is_git_repo?: boolean;
   }>;
+  /** Read every theme in the themes folder in user data, and start watching it. */
+  readThemeFolder: () => Promise<ThemeFolderSnapshot>;
+  /** Called once a change in the themes folder settles. Returns an unsubscribe function. */
+  onThemeFolderChange: (callback: () => void) => () => void;
+  /** Open the themes folder, or one theme's folder in it, in the file manager. */
+  openThemeFolder: (name?: string) => Promise<{ ok: boolean; error?: string }>;
+  /** Create a theme folder from files; never replaces an existing one. */
+  writeThemeFolder: (name: string, files: ThemeFolderFile[]) => Promise<ThemeFolderWriteResult>;
   /** Listen for Cmd/Ctrl+W tab-close requests from the main process.
    *  Returns an unsubscribe function. */
   onCloseActiveTab: (callback: () => void) => () => void;
@@ -145,12 +167,20 @@ interface DesktopAPI {
   /** Listen for Cmd/Ctrl+Shift+N new-window requests. Returns an
    *  unsubscribe function. */
   onNewWindowShortcut: (callback: () => void) => () => void;
+  /** Whether View → Show Dev Toolbar is checked; false unless VITE_DEV_TOOLBAR is set. */
+  getDevToolbarVisible: () => boolean;
+  /** Listen for View → Show Dev Toolbar being toggled. Returns an unsubscribe function. */
+  onDevToolbarVisibleChange: (callback: (visible: boolean) => void) => () => void;
 }
 
 type DaemonReauthResult =
   | { ok: true }
   | { ok: false; reason: "session_invalid" }
   | { ok: false; reason: "transient"; message: string };
+
+type FocusEnvironmentResult =
+  | { ok: true }
+  | { ok: false; reason: "gone" | "unsupported" | "unavailable" | "failed"; error?: string };
 
 interface DaemonAPI {
   start: () => Promise<{ success: boolean; error?: string }>;
@@ -159,6 +189,8 @@ interface DaemonAPI {
   getStatus: () => Promise<DaemonStatus>;
   probeRuntimes: () => Promise<LocalRuntimeProbe>;
   getHostName: () => Promise<string>;
+  /** Brings forward a desktop app environment the local daemon detected. */
+  focusEnvironment: (key: string) => Promise<FocusEnvironmentResult>;
   onStatusChange: (callback: (status: DaemonStatus) => void) => () => void;
   setTargetApiUrl: (url: string) => Promise<void>;
   syncToken: (token: string, userId: string) => Promise<void>;

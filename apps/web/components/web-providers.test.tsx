@@ -1,6 +1,7 @@
 import { renderToString } from "react-dom/server";
 import { render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { LocaleBundleProps } from "./i18n/locale-bundle";
 
 const installUserTimingCap = vi.hoisted(() => vi.fn());
 
@@ -18,11 +19,14 @@ vi.mock("@/platform/scroll-restoration", () => ({
   WebScrollRestorationProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 vi.mock("@/platform/user-locale-sync", () => ({ useUserLocaleSyncEnabled: () => false }));
+vi.mock("@/components/i18n/locale-bundle", () => ({
+  LocaleBundle: ({ children }: LocaleBundleProps) => children({}),
+}));
 
 import { WebProviders } from "./web-providers";
 
 const tree = (
-  <WebProviders locale="en" resources={{}}>
+  <WebProviders locale="en">
     <span />
   </WebProviders>
 );
