@@ -313,6 +313,11 @@ export function McpTab() {
         open={editorOpen}
         server={dialogServer}
         existingNames={existingNames}
+        createPreset={{
+          label: t(($) => $.mcp.microsoft_learn_preset),
+          name: "microsoft-learn",
+          config: { type: "http", url: "https://learn.microsoft.com/api/mcp" },
+        }}
         replacementMode={editingServer !== null}
         onOpenChange={setEditorOpen}
         onSave={handleSaveServer}

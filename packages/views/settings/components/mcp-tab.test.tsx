@@ -118,6 +118,47 @@ describe("McpTab", () => {
     expect(screen.getByLabelText(label)).toHaveAttribute("placeholder", example);
   });
 
+  it("starts an editable workspace draft from the Microsoft Learn preset", async () => {
+    const user = userEvent.setup();
+    render(<McpTab />, { wrapper: Wrapper });
+    await user.click(screen.getByRole("button", { name: /Add server/ }));
+    await user.click(screen.getByRole("button", { name: "Use Microsoft Learn preset" }));
+
+    expect(screen.getByLabelText("Server name")).toHaveValue("microsoft-learn");
+    const url = screen.getByLabelText("Server URL");
+    expect(url).toHaveValue("https://learn.microsoft.com/api/mcp");
+    expect(mockCreate).not.toHaveBeenCalled();
+    expect(mockUpdate).not.toHaveBeenCalled();
+
+    fireEvent.change(url, { target: { value: "https://docs.example/mcp" } });
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledWith({
+      name: "microsoft-learn",
+      config: { type: "http", url: "https://docs.example/mcp" },
+    }));
+  });
+
+  it("cannot replace a saved server by applying its preset again", async () => {
+    data.servers = [server({ name: "microsoft-learn" })];
+    const user = userEvent.setup();
+    render(<McpTab />, { wrapper: Wrapper });
+    await user.click(screen.getByRole("button", { name: /Add server/ }));
+    await user.click(screen.getByRole("button", { name: "Use Microsoft Learn preset" }));
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    expect(screen.getByText("A server with this name already exists.")).toBeVisible();
+    expect(mockCreate).not.toHaveBeenCalled();
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it("protects a manually entered workspace draft from preset replacement", async () => {
+    const user = userEvent.setup();
+    render(<McpTab />, { wrapper: Wrapper });
+    await user.click(screen.getByRole("button", { name: /Add server/ }));
+    await user.type(screen.getByLabelText("Command"), "my-server");
+    expect(screen.getByRole("button", { name: "Use Microsoft Learn preset" })).toBeDisabled();
+    expect(screen.getByLabelText("Command")).toHaveValue("my-server");
+  });
+
   it("adds a server to the library", async () => {
     const user = userEvent.setup();
     render(<McpTab />, { wrapper: Wrapper });
