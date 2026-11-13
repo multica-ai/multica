@@ -2,7 +2,7 @@
 
 import { useId, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Globe, Lock, Shield, UserPlus, X } from "@multica/ui/icons";
+import { Bot, Globe, Lock, Shield, UserPlus, X } from "@multica/ui/icons";
 import type { MemberWithUser, Project, ProjectVisibility } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -101,7 +101,12 @@ function AccessFields({ visibility, onVisibilityChange, members, selected, leadI
           </div>
         </div>
       ) : null}
-      <p className="flex items-start gap-2 text-caption text-muted-foreground"><Shield className="mt-0.5 size-4 shrink-0" aria-hidden="true" />{t(($) => $.access.admin_notice)}</p>
+      {visibility === "private" ? (
+        <div className="space-y-2">
+          <p className="flex items-start gap-2 text-caption text-muted-foreground"><Shield className="mt-0.5 size-4 shrink-0" aria-hidden="true" />{t(($) => $.access.admin_notice)}</p>
+          <p className="flex items-start gap-2 text-caption text-muted-foreground"><Bot className="mt-0.5 size-4 shrink-0" aria-hidden="true" />{t(($) => $.access.agent_notice)}</p>
+        </div>
+      ) : null}
     </div>
   );
 }

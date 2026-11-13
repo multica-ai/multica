@@ -117,7 +117,7 @@ type Config struct {
 	GCEnabled                      bool                  // enable periodic workspace garbage collection (default: true)
 	GCInterval                     time.Duration         // how often the GC loop runs (default: 2h)
 	GCTTL                          time.Duration         // clean dirs whose issue is done/cancelled and updated_at < now()-TTL (default: 24h)
-	GCCompletedTaskTTL             time.Duration         // fully clean inactive issue-task envs completed at least this long ago, regardless of parent issue status (default: 14d; 0 disables; local_directory envs are never fully removed)
+	GCCompletedTaskTTL             time.Duration         // fully clean inactive issue-task envs; local_directory envs expire only codex-home, preserving daemon logs/output and externally stored sessions (default: 14d; 0 disables)
 	GCOrphanTTL                    time.Duration         // clean orphan dirs with no meta, or dirs whose issue gc-check returns 404, once they exceed this age (default: 72h). The 404 path uses the same TTL — a scoped-down token can't instantly wipe live workspaces.
 	GCArtifactTTL                  time.Duration         // once a task has been completed for at least this long, drop regenerable artifacts: pattern-matched build outputs when the parent record keeps the directory (an open issue), and the exact daemon-managed Codex cache for every task kind (default: 12h, set 0 to disable both)
 	GCArtifactPatterns             []string              // basename patterns whose subtrees are removed during artifact cleanup (default: node_modules, .next, .turbo)
@@ -578,6 +578,8 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// time main has usually moved far enough that a fresh checkout beats a
 	// stale worktree. Operators who want the old keep-until-terminal behavior
 	// set MULTICA_GC_COMPLETED_TASK_TTL=0.
+	// Local-directory tasks keep their daemon logs and output; this TTL removes
+	// only their Codex home, and only when session history is stored elsewhere.
 	gcCompletedTaskTTL, err := durationFromEnv("MULTICA_GC_COMPLETED_TASK_TTL", DefaultGCCompletedTaskTTL)
 	if err != nil {
 		return Config{}, err

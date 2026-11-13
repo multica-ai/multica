@@ -279,6 +279,8 @@ The daemon auto-detects these AI CLIs on your PATH:
 | [Codex](https://github.com/openai/codex) | `codex` | OpenAI's coding agent |
 | [GitHub Copilot CLI](https://docs.github.com/en/copilot) | `copilot` | GitHub's coding agent (model routed by your GitHub entitlement) |
 | OpenCode | `opencode` | Open-source coding agent |
+| Muse Code | `muse` | Muse Session Protocol via `muse serve` |
+| ZeroClaw | `zeroclaw` | ACP via `zeroclaw acp`; model is managed by ZeroClaw |
 | [ZCode](https://zcode.z.ai/) | `zcode` / ZCode Desktop | Native NDJSON app-server, sessions, model discovery, thinking levels, MCP and yolo execution |
 | OpenClaw | `openclaw` | Open-source coding agent |
 | Hermes | `hermes` | Nous Research coding agent |
@@ -721,6 +723,22 @@ multica issue update <id> --attachment revised.png
 
 `--position` sets the raw ordering value within the board column (lower sorts first). For relative moves, `issue reorder` is easier because it works out the value for you.
 `--attachment` uploads a local file and appends its Markdown reference to the end of the issue description. Repeat the flag to attach multiple files. To replace an existing image, also use `--description-file` to remove the old reference from the description.
+
+### Delete Issue
+
+```bash
+multica issue delete <id>                 # prompts before deleting
+multica issue delete <id> --yes           # no prompt
+multica issue delete MUL-101 MUL-102 --yes --output json
+```
+
+Deletion is permanent and removes the issue's comments and attachments, cancels its in-flight runs, fails linked autopilot runs, clears duplicate marks that pointed at it, and detaches its child issues without deleting them.
+
+Ids may be issue keys or full UUIDs. Every id is resolved with a read before the prompt, full UUIDs included, so an unknown, stale or invisible issue aborts the whole command instead of leaving a partial batch; several ids go to one batch request whose permission check covers the whole selection.
+
+`--yes` skips the confirmation. Without it the command reads stdin; if stdin closes without an answer (a non-interactive run) the command fails without deleting, while answering `n` declines and deletes nothing.
+
+With `--output json`, one id prints `{"id": "<uuid>", "deleted": true}` and several print `{"ids": ["<uuid>", ...], "deleted": true}`, always with canonical UUIDs whatever spelling was passed. If the server deletes only part of a batch, the command prints `{"ids": ["<uuid>", ...], "deleted": false, "deleted_count": N}` and exits non-zero.
 
 ### Reorder Issue
 

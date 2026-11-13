@@ -19,10 +19,10 @@ export const PULL_REQUEST_STATE_ICON: Record<
   GitHubPullRequestState,
   { icon: React.ComponentType<{ className?: string }>; className: string }
 > = {
-  open: { icon: GitPullRequestArrow, className: "text-emerald-600 dark:text-emerald-400" },
+  open: { icon: GitPullRequestArrow, className: "text-pr-open dark:text-pr-open-dark" },
   draft: { icon: GitPullRequestDraft, className: "text-muted-foreground" },
-  merged: { icon: GitMerge, className: "text-violet-600 dark:text-violet-400" },
-  closed: { icon: GitPullRequestClosed, className: "text-rose-600 dark:text-rose-400" },
+  merged: { icon: GitMerge, className: "text-pr-merged dark:text-pr-merged-dark" },
+  closed: { icon: GitPullRequestClosed, className: "text-pr-closed dark:text-pr-closed-dark" },
 };
 
 const EMPTY: readonly IssuePullRequestSummary[] = [];
