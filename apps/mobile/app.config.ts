@@ -50,7 +50,8 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     name,
     slug: "multica-mobile",
     version: "0.2.0",
-    platforms: ["ios"],
+    // The web target only serves the screen preview (src/boot.web.ts).
+    platforms: process.env.MULTICA_WEB_PREVIEW === "1" ? ["ios", "web"] : ["ios"],
     // No over-the-air update channel; every release ships through a native build.
     updates: { enabled: false },
     orientation: "portrait",
