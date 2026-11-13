@@ -1,12 +1,19 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import type { DevRequest } from "@multica/core/diagnostics";
+import type { DevRealtimeEvent, DevRequest } from "@multica/core/diagnostics";
+import type { AgentTask } from "@multica/core/types";
 import {
+  activeTasks,
   apiHost,
   blockedRatio,
+  cacheEffectSummary,
   curlCommand,
+  eventMatches,
+  eventsInLastMinute,
   firstStackFrame,
+  formatAge,
   formatBytes,
+  issueIdsForKey,
   jankTone,
   memoryTone,
   navDuration,
@@ -14,6 +21,24 @@ import {
   percentile,
   requestFailed,
 } from "./metrics";
+
+function event(overrides: Partial<DevRealtimeEvent>): DevRealtimeEvent {
+  return {
+    id: 1,
+    at: 0,
+    kind: "frame",
+    type: "issue:updated",
+    issueId: null,
+    issueKey: null,
+    payload: null,
+    payloadNote: null,
+    actor: null,
+    workspaceId: "ws-1",
+    cache: { written: [], invalidated: [], removed: [], refetched: [] },
+    downMs: null,
+    ...overrides,
+  };
+}
 
 const MB = 1024 * 1024;
 
@@ -151,5 +176,77 @@ describe("firstStackFrame", () => {
   it("skips the message line", () => {
     expect(firstStackFrame("Error: boom\n    at save (issue.tsx:12:3)\n    at run")).toBe("at save (issue.tsx:12:3)");
     expect(firstStackFrame(null)).toBeNull();
+  });
+});
+
+describe("eventsInLastMinute", () => {
+  it("sums the per-second frame counts from the last minute only", () => {
+    const counts = [
+      { at: 0, count: 7 },
+      { at: 50_000, count: 400 },
+      { at: 60_000, count: 101 },
+    ];
+    expect(eventsInLastMinute(counts, 61_000)).toBe(501);
+  });
+});
+
+describe("cacheEffectSummary", () => {
+  it("lists each kind of change with its count", () => {
+    expect(cacheEffectSummary({ written: ["a"], invalidated: ["b", "c"], removed: [], refetched: ["b"] })).toBe(
+      "1 written · 2 invalidated · 1 refetched",
+    );
+    expect(cacheEffectSummary(event({}).cache)).toBe("");
+  });
+});
+
+describe("issueIdsForKey", () => {
+  it("resolves an issue key through events and cached issues that carry both", () => {
+    const events = [event({ issueId: "issue-1", issueKey: "MUL-1" })];
+    const cached = [{ id: "issue-9", identifier: "mul-1" }, { id: "issue-2", identifier: "MUL-2" }, null, []];
+    expect(issueIdsForKey(" mul-1 ", events, cached)).toEqual(["issue-1", "issue-9"]);
+  });
+
+  it("does nothing for a search that is not an issue key", () => {
+    expect(issueIdsForKey("issue:updated", [event({ issueId: "issue-1", issueKey: "MUL-1" })], [])).toEqual([]);
+  });
+});
+
+describe("eventMatches", () => {
+  const comment = event({ type: "comment:created", issueId: "issue-1", payload: '{"comment":{"body":"Looks good"}}' });
+
+  it("matches type, issue ID and payload text, case-insensitively", () => {
+    expect(eventMatches(comment, "COMMENT:", [])).toBe(true);
+    expect(eventMatches(comment, "issue-1", [])).toBe(true);
+    expect(eventMatches(comment, "looks good", [])).toBe(true);
+    expect(eventMatches(comment, "MUL-1", [])).toBe(false);
+  });
+
+  it("matches an issue key through the IDs it resolved to", () => {
+    expect(eventMatches(comment, "MUL-1", ["issue-1"])).toBe(true);
+  });
+});
+
+describe("activeTasks", () => {
+  it("keeps tasks that have not finished, oldest first", () => {
+    const task = (id: string, status: AgentTask["status"], created_at: string) =>
+      ({ id, status, created_at }) as AgentTask;
+    const tasks = [
+      task("done", "completed", "2026-01-01T00:00:00Z"),
+      task("later", "running", "2026-01-01T00:02:00Z"),
+      task("first", "queued", "2026-01-01T00:01:00Z"),
+      task("parked", "waiting_local_directory", "2026-01-01T00:03:00Z"),
+    ];
+    expect(activeTasks(tasks).map((t) => t.id)).toEqual(["first", "later", "parked"]);
+  });
+});
+
+describe("formatAge", () => {
+  it("rounds down to the largest whole unit", () => {
+    expect([formatAge(400), formatAge(12_900), formatAge(4 * 60_000 + 5), formatAge(2 * 3_600_000)]).toEqual([
+      "now",
+      "12s",
+      "4m",
+      "2h",
+    ]);
   });
 });

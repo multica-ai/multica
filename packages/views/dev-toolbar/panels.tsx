@@ -44,42 +44,53 @@ function longTaskTone(ms: number): MetricTone {
   return "normal";
 }
 
-async function copy(text: string, what: string) {
+export async function copy(text: string, what: string) {
   if (await copyText(text)) toast.success(`Copied ${what}`);
   else toast.error(`Could not copy ${what}`);
 }
 
-function PanelHeader({ title, children }: { title: string; children?: ReactNode }) {
+export function PanelHeader({
+  title,
+  note = `last ${DEV_RECORDING_WINDOW_MS / 60_000} min`,
+  children,
+}: {
+  title: string;
+  /** What the panel covers; recorded history by default. */
+  note?: string;
+  children?: ReactNode;
+}) {
   return (
     <div className="flex items-center gap-2 border-b border-border px-3 py-2">
       <span className="font-medium text-foreground">{title}</span>
-      <span className="text-micro text-muted-foreground">last {DEV_RECORDING_WINDOW_MS / 60_000} min</span>
+      <span className="text-micro text-muted-foreground">{note}</span>
       <div className="ml-auto flex items-center gap-1">{children}</div>
     </div>
   );
 }
 
-function Stats({ items }: { items: { label: string; value: string; tone?: MetricTone }[] }) {
+export function Stats({ items }: { items: { label: string; value: string; tone?: MetricTone }[] }) {
   return (
     <div className="grid grid-flow-col auto-cols-fr border-b border-border">
       {items.map((item) => (
-        <div key={item.label} className="flex flex-col gap-0.5 px-3 py-2">
+        <div key={item.label} className="flex min-w-0 flex-col gap-0.5 px-3 py-2">
           <span className="text-micro text-muted-foreground">{item.label}</span>
-          <span className={cn("font-mono tabular-nums", TONE_CLASS[item.tone ?? "normal"])}>{item.value}</span>
+          <span className={cn("truncate font-mono tabular-nums", TONE_CLASS[item.tone ?? "normal"])} title={item.value}>
+            {item.value}
+          </span>
         </div>
       ))}
     </div>
   );
 }
 
-function Rows({ children, empty }: { children: ReactNode[]; empty: string }) {
+export function Rows({ children, empty }: { children: ReactNode[]; empty: string }) {
   if (children.length === 0) {
     return <div className="px-3 py-6 text-center text-muted-foreground">{empty}</div>;
   }
   return <div className="max-h-80 overflow-y-auto py-1">{children}</div>;
 }
 
-function SmallButton({
+export function SmallButton({
   onClick,
   children,
   active,

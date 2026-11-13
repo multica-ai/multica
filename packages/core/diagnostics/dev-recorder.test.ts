@@ -140,6 +140,36 @@ describe("dev recorder", () => {
     expect(console.error).toBe(patched);
     expect(getApiRequestObserver()).toBeNull();
   });
+
+  it("removes its hooks and drops the recording when stopped, so a restart begins empty", () => {
+    const patched = console.error;
+    const stop = installDevRecorder();
+    recordDevRoute("/acme/issues");
+    console.error("before stop");
+    expect(getDevRecording().errors).toHaveLength(1);
+
+    stop();
+    expect(console.error).toBe(patched);
+    expect(getApiRequestObserver()).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+    console.error("while stopped");
+    window.dispatchEvent(new ErrorEvent("error", { message: "boom" }));
+    expect(getDevRecording().errors).toEqual([]);
+    expect(getDevRecording().navigations).toEqual([]);
+
+    installDevRecorder();
+    recordDevRoute("/acme/issues");
+    expect(getDevRecording().navigations.map((n) => n.route)).toEqual(["/acme/issues"]);
+    expect(getDevRecording().errors).toEqual([]);
+  });
+
+  it("leaves a running recording alone when a second install is stopped", () => {
+    installDevRecorder();
+    const stopSecond = installDevRecorder();
+    stopSecond();
+    console.error("still recording");
+    expect(getDevRecording().errors).toHaveLength(1);
+  });
 });
 
 describe("formatConsoleArgs", () => {

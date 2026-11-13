@@ -600,9 +600,15 @@ Set `VITE_DEV_TOOLBAR=1` to pin a status bar to the bottom of the Web and Deskto
 VITE_DEV_TOOLBAR=1 make up          # or: VITE_DEV_TOOLBAR=1 pnpm dev:web / pnpm dev:desktop
 ```
 
-To keep it on, add the line to the env file `make` loads (`.env` / `.env.worktree`), or to `apps/web/.env.local` / `apps/desktop/.env.development.local` for a direct `pnpm dev:*`. The minimize button at its right end collapses it to a small handle.
+To keep it on, add the line to the env file `make` loads (`.env` / `.env.worktree`), or to `apps/web/.env.local` / `apps/desktop/.env.development.local` for a direct `pnpm dev:*`. The minimize button at its right end collapses it to a small handle. In Desktop, **View → Show Dev Toolbar** turns it off and on without a restart, and the choice is remembered; while it is off, nothing is recorded, and turning it back on starts a new recording.
 
 Each reading opens the last five minutes behind it, kept in memory in that tab only: the heap curve and Query cache size (Mem), route changes and their timings (Nav), long tasks and the route they hit (Jank), every API request with its status, `X-Request-ID`, body and a copyable curl (Net), WebSocket state changes (Sync), and console errors, uncaught exceptions and unhandled rejections (Errors).
+
+For realtime and agent bugs:
+
+- **Events** lists WebSocket events, filterable by type and searchable by issue key, ID or payload text. Each event shows which query keys its handling wrote, invalidated, removed or refetched, including the refreshes realtime sync debounces onto a timer (work after an `await` is not followed). A reconnect shows how long the socket was down and how many queries it refetched; **Drop connection** closes the socket to try it. **Replay locally** runs a recorded event through realtime sync's handlers again, without other subscribers, and any write request made while handling it is refused.
+- **Cache** lists the TanStack Query cache, stale and fetching entries, searchable by key, with a button to invalidate one query.
+- **Runtimes** shows each runtime's status and CLI version; **Tasks** lists the workspace's queued and running agent tasks, and clicking one opens its issue.
 
 ## How Database Creation Works
 
