@@ -14,6 +14,7 @@ import type { GitHubPullRequestState, IssuePullRequestSummary } from "@multica/c
 import { cn } from "@multica/ui/lib/utils";
 import { useSingleRowFit } from "../../common/single-row-fit";
 import { useT } from "../../i18n";
+import { openExternal } from "../../platform/open-external";
 
 export const PULL_REQUEST_STATE_ICON: Record<
   GitHubPullRequestState,
@@ -52,10 +53,57 @@ const CHIP_GAP = 4;
 // Room for "+N" (up to "+99" at text-micro) beside the chips that fit.
 const OVERFLOW_RESERVE = 24;
 
+const stopPress = (e: React.SyntheticEvent) => e.stopPropagation();
+
+/**
+ * A chip inside the issue link. An anchor cannot nest in an anchor, so this
+ * is a `role="link"` span that opens the PR itself, the way
+ * IssueDuplicateOfMarker's in-row control does. The PR is always external, so
+ * click, modifier click, middle click and Enter all open it outside the app
+ * and none of them reach the row: not its navigation, peek or drag.
+ */
+function NestedChipLink({
+  href,
+  title,
+  className,
+  children,
+}: {
+  href: string;
+  title: string;
+  className: string;
+  children: React.ReactNode;
+}) {
+  const open = (e: React.SyntheticEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    openExternal(href);
+  };
+  return (
+    <span
+      role="link"
+      tabIndex={0}
+      title={title}
+      data-testid="issue-pull-request-chip"
+      className={className}
+      onMouseDown={stopPress}
+      onPointerDown={stopPress}
+      onClick={open}
+      onAuxClick={(e) => {
+        if (e.button === 1) open(e);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") open(e);
+      }}
+    >
+      {children}
+    </span>
+  );
+}
+
 /**
  * Compact "state icon + #number" chips for issue cards, rows and table cells.
- * Board cards and list rows sit inside the issue link, so their chips stay
- * plain text; the table cell has no wrapping link and opens the PR instead.
+ * Every chip opens its PR: a plain anchor where nothing wraps it (table
+ * cells), a NestedChipLink inside the issue link of board cards and list rows.
  *
  * The group fits whatever width its slot gives it: the newest PRs that fit at
  * their natural width are shown and "+N" counts every PR that is not. At
@@ -65,14 +113,14 @@ const OVERFLOW_RESERVE = 24;
 export function IssuePullRequestChips({
   pullRequests,
   max,
-  linked = false,
+  insideLink = false,
   className,
 }: {
   pullRequests: readonly IssuePullRequestSummary[];
   /** Most chips to show even when more would fit. */
   max: number;
-  /** Render each chip as a link to the PR. Never inside another link. */
-  linked?: boolean;
+  /** The chips sit inside the issue's own link (board cards, list rows). */
+  insideLink?: boolean;
   className?: string;
 }) {
   const { t } = useT("issues");
@@ -106,6 +154,11 @@ export function IssuePullRequestChips({
 
   const chipClass =
     "inline-flex min-w-0 max-w-[140px] items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 text-micro text-muted-foreground tabular-nums";
+  const linkClass = cn(
+    chipClass,
+    // Inset: the chip row clips overflow, which would cut an outer ring.
+    "cursor-pointer transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
+  );
   const chipContent = (pr: IssuePullRequestSummary, label: string) => {
     const cfg = isKnownState(pr.state)
       ? PULL_REQUEST_STATE_ICON[pr.state]
@@ -139,7 +192,11 @@ export function IssuePullRequestChips({
         {visible.map((pr) => {
           const label = stateLabel(pr.state);
           const title = `${pr.repo_owner}/${pr.repo_name}#${pr.number} · ${label}${pr.title ? `\n${pr.title}` : ""}`;
-          return linked ? (
+          return insideLink ? (
+            <NestedChipLink key={pr.id} href={pr.html_url} title={title} className={linkClass}>
+              {chipContent(pr, label)}
+            </NestedChipLink>
+          ) : (
             <a
               key={pr.id}
               href={pr.html_url}
@@ -147,21 +204,12 @@ export function IssuePullRequestChips({
               rel="noreferrer noopener"
               title={title}
               data-testid="issue-pull-request-chip"
-              className={cn(chipClass, "hover:bg-accent hover:text-foreground")}
+              className={linkClass}
               onClick={(event) => event.stopPropagation()}
               onAuxClick={(event) => event.stopPropagation()}
             >
               {chipContent(pr, label)}
             </a>
-          ) : (
-            <span
-              key={pr.id}
-              title={title}
-              data-testid="issue-pull-request-chip"
-              className={chipClass}
-            >
-              {chipContent(pr, label)}
-            </span>
           );
         })}
         {hidden > 0 && (

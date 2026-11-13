@@ -155,6 +155,7 @@ function ListRowContent({
               <IssuePullRequestChips
                 pullRequests={pullRequests}
                 max={2}
+                insideLink
                 className="max-w-[40%]"
               />
             )}
