@@ -141,6 +141,16 @@
     "toast_saved": "Cambios guardados"
   },
   "preferences": {
+    "workspaces": {
+      "title": "Espacios de trabajo",
+      "hint": "Arrastra dentro de cada grupo para cambiar el orden. Fija o desfija un espacio para cambiarlo de grupo.",
+      "pinned": "Fijados",
+      "other": "Otros espacios de trabajo",
+      "drag_handle": "Reordenar {{name}}",
+      "save_failed": "No se pudieron guardar las preferencias. Recarga la página e inténtalo de nuevo.",
+      "loading": "Cargando espacios de trabajo...",
+      "load_failed": "No se pudieron cargar los espacios de trabajo."
+    },
     "language": {
       "title": "Idioma",
       "english": "English",

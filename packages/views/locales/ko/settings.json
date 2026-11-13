@@ -140,6 +140,16 @@
     "toast_saved": "변경사항을 저장했습니다"
   },
   "preferences": {
+    "workspaces": {
+      "title": "워크스페이스",
+      "hint": "그룹 안에서 드래그하여 순서를 바꾸세요. 고정하거나 고정을 해제하면 그룹이 변경됩니다.",
+      "pinned": "고정됨",
+      "other": "다른 워크스페이스",
+      "drag_handle": "{{name}} 순서 변경",
+      "save_failed": "워크스페이스 설정을 저장하지 못했습니다. 새로고침 후 다시 시도하세요.",
+      "loading": "워크스페이스 불러오는 중...",
+      "load_failed": "워크스페이스를 불러오지 못했습니다."
+    },
     "language": {
       "title": "언어",
       "english": "English",

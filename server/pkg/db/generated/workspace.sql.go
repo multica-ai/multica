@@ -391,11 +391,12 @@ func (q *Queries) ListDaemonWorkspaces(ctx context.Context, userID pgtype.UUID) 
 const listWorkspaces = `-- name: ListWorkspaces :many
 SELECT w.id, w.name, w.slug, w.description, w.settings,
        w.created_at, w.updated_at, w.context, w.repos,
-       w.issue_prefix, w.issue_counter, w.avatar_url, w.attribution_fail_closed, m.pinned_at
+       w.issue_prefix, w.issue_counter, w.avatar_url, w.attribution_fail_closed, m.pinned_at, m.workspace_position
 FROM member m
 JOIN workspace w ON w.id = m.workspace_id
 WHERE m.user_id = $1
-ORDER BY m.pinned_at DESC NULLS LAST, w.created_at ASC
+ORDER BY (m.pinned_at IS NOT NULL) DESC, m.workspace_position ASC NULLS LAST,
+         m.pinned_at DESC NULLS LAST, w.created_at ASC
 `
 
 type ListWorkspacesRow struct {
@@ -413,6 +414,7 @@ type ListWorkspacesRow struct {
 	AvatarUrl             pgtype.Text        `json:"avatar_url"`
 	AttributionFailClosed bool               `json:"attribution_fail_closed"`
 	PinnedAt              pgtype.Timestamptz `json:"pinned_at"`
+	WorkspacePosition     pgtype.Int4        `json:"workspace_position"`
 }
 
 func (q *Queries) ListWorkspaces(ctx context.Context, userID pgtype.UUID) ([]ListWorkspacesRow, error) {
@@ -439,6 +441,7 @@ func (q *Queries) ListWorkspaces(ctx context.Context, userID pgtype.UUID) ([]Lis
 			&i.AvatarUrl,
 			&i.AttributionFailClosed,
 			&i.PinnedAt,
+			&i.WorkspacePosition,
 		); err != nil {
 			return nil, err
 		}

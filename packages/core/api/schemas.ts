@@ -4545,7 +4545,7 @@ export const EMPTY_TEAM_APP_IMPACT: TeamAppImpact = {
   pending_requests: 0,
 };
 
-// Only `pinned_at` is new here; every other field keeps its pre-schema
+// Member preferences are optional; every other field keeps its pre-schema
 // leniency so one odd workspace can never empty the whole switcher.
 export const WorkspaceListItemSchema = z.object({
   id: z.string(),
@@ -4553,6 +4553,7 @@ export const WorkspaceListItemSchema = z.object({
   slug: z.string(),
   created_at: z.string(),
   pinned_at: z.iso.datetime({ offset: true }).nullable().optional().catch(null).default(null),
+  workspace_position: z.number().int().nonnegative().nullable().optional().catch(null).default(null),
 }).loose();
 
 export const WorkspacePinnedSchema = z.object({

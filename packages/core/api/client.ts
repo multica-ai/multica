@@ -3338,6 +3338,13 @@ export class ApiClient {
     return parseWithFallback(raw, WorkspacePinnedSchema, { pinned_at: null }, { endpoint: "PUT /api/workspaces/{id}/pin" });
   }
 
+  async setWorkspaceOrder(workspaceIds: string[]): Promise<void> {
+    await this.fetch<void>("/api/workspaces/order", {
+      method: "PUT",
+      body: JSON.stringify({ workspace_ids: workspaceIds }),
+    });
+  }
+
   async getWorkspace(id: string): Promise<Workspace> {
     return this.fetch(`/api/workspaces/${id}`);
   }

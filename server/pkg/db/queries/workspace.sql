@@ -1,11 +1,12 @@
 -- name: ListWorkspaces :many
 SELECT w.id, w.name, w.slug, w.description, w.settings,
        w.created_at, w.updated_at, w.context, w.repos,
-       w.issue_prefix, w.issue_counter, w.avatar_url, w.attribution_fail_closed, m.pinned_at
+       w.issue_prefix, w.issue_counter, w.avatar_url, w.attribution_fail_closed, m.pinned_at, m.workspace_position
 FROM member m
 JOIN workspace w ON w.id = m.workspace_id
 WHERE m.user_id = $1
-ORDER BY m.pinned_at DESC NULLS LAST, w.created_at ASC;
+ORDER BY (m.pinned_at IS NOT NULL) DESC, m.workspace_position ASC NULLS LAST,
+         m.pinned_at DESC NULLS LAST, w.created_at ASC;
 
 -- name: ListDaemonWorkspaces :many
 -- Daemons only need the membership set and display name to discover which

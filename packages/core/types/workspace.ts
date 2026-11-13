@@ -18,6 +18,7 @@ export interface Workspace {
   created_at: string;
   updated_at: string;
   pinned_at?: string | null;
+  workspace_position?: number | null;
 }
 
 /**

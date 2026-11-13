@@ -64,6 +64,7 @@ vi.mock("@multica/core/chat", () => ({
 
 // Reads the workspace's agents; covered by its own test.
 vi.mock("./quick-chat-agent-row", () => ({ QuickChatAgentRow: () => null }));
+vi.mock("./workspace-order-section", () => ({ WorkspaceOrderSection: () => <div>Workspace order section</div> }));
 
 vi.mock("@multica/core/paths", () => ({
   useCurrentWorkspace: () => ({ id: "ws-1", name: "Acme" }),

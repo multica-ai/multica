@@ -1376,12 +1376,13 @@ type MaintenanceJob struct {
 }
 
 type Member struct {
-	ID          pgtype.UUID        `json:"id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	UserID      pgtype.UUID        `json:"user_id"`
-	Role        string             `json:"role"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	PinnedAt    pgtype.Timestamptz `json:"pinned_at"`
+	ID                pgtype.UUID        `json:"id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	UserID            pgtype.UUID        `json:"user_id"`
+	Role              string             `json:"role"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	PinnedAt          pgtype.Timestamptz `json:"pinned_at"`
+	WorkspacePosition pgtype.Int4        `json:"workspace_position"`
 }
 
 type MemberDelegationDay struct {
