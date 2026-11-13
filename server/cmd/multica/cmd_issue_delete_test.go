@@ -4,9 +4,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/multica-ai/multica/server/internal/cli"
 )
@@ -335,6 +338,87 @@ func TestRunIssueDeletePromptAcceptsYes(t *testing.T) {
 	}
 	if deleteCalls != 1 {
 		t.Fatalf("delete calls = %d, want 1", deleteCalls)
+	}
+}
+
+func TestRunIssueDeletePromptWaitDoesNotConsumeDeleteTimeout(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"single", []string{"MUL-1"}},
+		{"batch", []string{"MUL-1", "MUL-2"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("MULTICA_HTTP_TIMEOUT", "1s")
+			resolved := make(chan struct{})
+			var reads, writes atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch r.Method {
+				case http.MethodGet:
+					id := issueDeleteTestID1
+					if r.URL.Path == "/api/issues/MUL-2" {
+						id = issueDeleteTestID2
+					}
+					json.NewEncoder(w).Encode(map[string]any{"id": id, "identifier": strings.TrimPrefix(r.URL.Path, "/api/issues/")})
+					if int(reads.Add(1)) == len(tc.args) {
+						close(resolved)
+					}
+				case http.MethodDelete:
+					writes.Add(1)
+					w.WriteHeader(http.StatusNoContent)
+				case http.MethodPost:
+					writes.Add(1)
+					json.NewEncoder(w).Encode(map[string]any{"deleted": len(tc.args)})
+				default:
+					t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+					http.NotFound(w, r)
+				}
+			}))
+			defer srv.Close()
+			setIssueDeleteTestEnv(t, srv.URL)
+			setIssueDeleteFlags(t, false, "json")
+
+			r, w, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer r.Close()
+			defer w.Close()
+			originalStdin := os.Stdin
+			os.Stdin = r
+			defer func() { os.Stdin = originalStdin }()
+			answered := make(chan struct{})
+			go func() {
+				defer close(answered)
+				<-resolved
+				// Let the entire resolution budget expire while the user reads the prompt.
+				time.Sleep(cli.APITimeout() + 100*time.Millisecond)
+				if _, err := w.WriteString("y\n"); err != nil {
+					t.Errorf("confirm deletion: %v", err)
+				}
+			}()
+
+			stderr := captureStderr(t)
+			out, err := captureStdout(t, func() error {
+				return runIssueDelete(issueDeleteCmd, tc.args)
+			})
+			<-answered
+			stderr.read()
+			if err != nil {
+				t.Fatalf("delete after delayed confirmation: %v", err)
+			}
+			if got := writes.Load(); got != 1 {
+				t.Fatalf("delete requests = %d, want 1", got)
+			}
+			var result struct {
+				Deleted bool `json:"deleted"`
+			}
+			if err := json.Unmarshal([]byte(out), &result); err != nil || !result.Deleted {
+				t.Fatalf("output = %q, error = %v; want deleted:true", out, err)
+			}
+		})
 	}
 }
 

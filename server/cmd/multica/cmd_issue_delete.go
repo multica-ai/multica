@@ -50,10 +50,9 @@ func runIssueDelete(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := cli.APIContext(context.Background())
-	defer cancel()
-
-	refs, err := resolveIssueDeleteRefs(ctx, client, args)
+	resolveCtx, cancelResolve := cli.APIContext(context.Background())
+	refs, err := resolveIssueDeleteRefs(resolveCtx, client, args)
+	cancelResolve()
 	if err != nil {
 		return err
 	}
@@ -71,6 +70,10 @@ func runIssueDelete(cmd *cobra.Command, args []string) error {
 			return nil
 		}
 	}
+
+	// Waiting for confirmation must not consume the deletion request's timeout.
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
 
 	output, _ := cmd.Flags().GetString("output")
 
