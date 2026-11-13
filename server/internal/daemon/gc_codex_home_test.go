@@ -72,7 +72,7 @@ func TestGC_LocalCodexHomeRetentionAndResume(t *testing.T) {
 }
 
 func TestGC_LocalCodexHomeRetentionGuards(t *testing.T) {
-	for _, name := range []string{"expired", "recent", "disabled", "no completion", "active", "unowned", "linked home", "local sessions", "archived sessions"} {
+	for _, name := range []string{"expired", "recent", "disabled", "no completion", "active", "unowned", "linked home", "local sessions", "archived sessions", "sessions inside root"} {
 		t.Run(name, func(t *testing.T) {
 			d := newGCTestDaemon(t, chatGCMux("chat", "active"))
 			d.cfg.GCCompletedTaskTTL = DefaultGCCompletedTaskTTL
@@ -104,6 +104,13 @@ func TestGC_LocalCodexHomeRetentionGuards(t *testing.T) {
 			}
 			if name == "archived sessions" {
 				writeFile(t, filepath.Join(taskDir, "codex-home/archived_sessions/rollout.jsonl"), 8)
+			}
+			if name == "sessions inside root" {
+				store := filepath.Join(taskDir, "conversation")
+				writeFile(t, filepath.Join(store, "rollout.jsonl"), 8)
+				if err := os.Symlink(store, filepath.Join(taskDir, "codex-home/sessions")); err != nil {
+					t.Skipf("symlink unavailable: %v", err)
+				}
 			}
 			if name == "linked home" {
 				outside := t.TempDir()

@@ -1,11 +1,14 @@
 package daemon
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
+	"github.com/multica-ai/multica/server/internal/util"
 )
 
 func (d *Daemon) localCodexHomeEligible(taskDir string, meta *execenv.GCMeta) bool {
@@ -23,7 +26,7 @@ func localCodexHomeTarget(taskDir string) string {
 	if !ok {
 		return ""
 	}
-	resolvedRoot, err := filepath.EvalSymlinks(root)
+	resolvedRoot, err := util.ResolveSymlinks(root)
 	if err != nil {
 		return ""
 	}
@@ -33,14 +36,14 @@ func localCodexHomeTarget(taskDir string) string {
 	for _, name := range []string{"sessions", "archived_sessions"} {
 		path := filepath.Join(home, name)
 		info, err := os.Lstat(path)
-		if os.IsNotExist(err) {
+		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
 		if err != nil || info.Mode()&linkedDirModes == 0 {
 			return ""
 		}
-		target, err := filepath.EvalSymlinks(path)
-		if os.IsNotExist(err) {
+		target, err := util.ResolveSymlinks(path)
+		if errors.Is(err, fs.ErrNotExist) {
 			// The independent session-store TTL can leave a dangling link.
 			// No transcript remains behind that link for home GC to destroy.
 			continue
