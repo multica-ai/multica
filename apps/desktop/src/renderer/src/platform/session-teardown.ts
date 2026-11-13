@@ -45,15 +45,17 @@ export async function tearDownOnLogout(t: SessionTeardown): Promise<void> {
   t.reportAuthSession(null);
   t.resetTabs();
   t.closeOverlay();
-  try {
-    await t.clearDaemonToken();
-  } catch {
-    // Best-effort — clearing is followed by stop, which also hardens state.
-  }
+  // Stop while the main process still has the authenticated owner and token.
+  // Clearing first would make its own daemon look like another account's.
   try {
     await t.stopDaemon();
   } catch {
-    // Daemon may already be stopped.
+    // Daemon may already be stopped; credentials still need clearing.
+  }
+  try {
+    await t.clearDaemonToken();
+  } catch {
+    // Credential cleanup remains best-effort even if stopping failed.
   }
 }
 

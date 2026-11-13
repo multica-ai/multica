@@ -34,9 +34,10 @@ describe("tearDownOnLogout", () => {
     expect(t.closeOverlay).toHaveBeenCalledOnce();
     expect(t.clearDaemonToken).toHaveBeenCalledOnce();
     expect(t.stopDaemon).toHaveBeenCalledOnce();
+    expect(vi.mocked(t.stopDaemon).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(t.clearDaemonToken).mock.invocationCallOrder[0]);
   });
 
-  it("still stops the daemon when clearing its token fails", async () => {
+  it("stops before attempting credential cleanup even if cleanup fails", async () => {
     const t = makeTeardown({
       clearDaemonToken: vi.fn(async () => {
         throw new Error("profile locked");
@@ -55,6 +56,7 @@ describe("tearDownOnLogout", () => {
     });
 
     await expect(tearDownOnLogout(t)).resolves.toBeUndefined();
+    expect(t.clearDaemonToken).toHaveBeenCalledOnce();
   });
 });
 
