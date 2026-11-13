@@ -1,5 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { InlineWaveform } from "./concepts/inline-waveform";
+import { ChatComposer } from "./composer/surfaces";
+import { VoiceProvider } from "./composer/voice-provider";
+import type { VoiceSessionOptions } from "./voice-session";
 import { useStoryEnv } from "./env";
 import { label, type StateLabel } from "./labels";
 
@@ -10,12 +12,12 @@ const meta = {
 export default meta;
 
 /**
- * The failure paths, shown on direction A. They read the same in every
- * direction: the error sits inside the composer, the draft is never touched.
+ * The failure paths on the shared composer. The error sits inside whichever
+ * composer was dictated into; the draft is never touched.
  */
 function Case({ state, simulate, note }: {
   state: StateLabel;
-  simulate: Parameters<typeof InlineWaveform>[0]["simulate"];
+  simulate: Pick<VoiceSessionOptions, "failWith" | "permission">;
   note: { en: string; zh: string };
 }) {
   const { lang } = useStoryEnv();
@@ -25,7 +27,11 @@ function Case({ state, simulate, note }: {
         <h1 className="text-title-sm font-semibold">{label(state, lang)}</h1>
         <p className="mt-1 text-caption text-muted-foreground">{note[lang]}</p>
       </div>
-      <InlineWaveform framed={false} simulate={simulate} />
+      <VoiceProvider primaryId="chat" simulate={simulate}>
+        <div className="pt-14">
+          <ChatComposer onSend={() => {}} />
+        </div>
+      </VoiceProvider>
     </div>
   );
 }

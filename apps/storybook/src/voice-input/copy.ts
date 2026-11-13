@@ -31,31 +31,32 @@ export const CHAT_SCRIPT: Record<Lang, VoiceScript> = {
   },
 };
 
-export const ISSUE_SCRIPT: Record<Lang, VoiceScript> = {
+export const COMMENT_SCRIPT: Record<Lang, VoiceScript> = {
   en: {
     phrases: [
-      "New issue: on narrow screens",
-      " the board view columns overflow and you can't scroll to the last one.",
-      " It's high priority,",
-      " assign it to Lambda, and put it in the Web project.",
+      "Um, I just reproduced it in the Design workspace,",
+      " switching back still shows 3,",
+      " a page refresh fixes it,",
+      " so it's the cache key.",
     ],
     polished:
-      "On narrow screens the board view columns overflow and you can't scroll to the last one.",
+      "I just reproduced it in the Design workspace: switching back still shows 3 and a page refresh fixes it, so it's the cache key.",
   },
   zh: {
-    phrases: [
-      "新建一个 issue：窄屏下",
-      "看板视图的列会溢出，最后一列滚动不到。",
-      "优先级高，",
-      "指派给 Lambda，放到 Web 项目里。",
-    ],
-    polished: "窄屏下看板视图的列会溢出，最后一列无法滚动到。",
+    phrases: ["嗯，我刚在 Design 工作区复现了，", "切回来以后角标还是 3，", "刷新一下页面就好了，", "应该就是缓存 key 的问题。"],
+    polished: "我刚在 Design 工作区复现了：切回来以后角标还是 3，刷新页面后恢复正常，应该就是缓存 key 的问题。",
   },
 };
 
-export const ISSUE_FIELDS: Record<Lang, { title: string; priority: string; assignee: string; project: string }> = {
-  en: { title: "Board columns overflow on narrow screens", priority: "High", assignee: "Lambda", project: "Web" },
-  zh: { title: "窄屏下看板列溢出", priority: "高", assignee: "Lambda", project: "Web" },
+export const REPLY_SCRIPT: Record<Lang, VoiceScript> = {
+  en: {
+    phrases: ["Yes, it's the same one,", " have Lambda fix both."],
+    polished: "Yes, it's the same one. Have Lambda fix both.",
+  },
+  zh: {
+    phrases: ["对，是同一个，", "让 Lambda 顺便把那边也改了。"],
+    polished: "对，是同一个。让 Lambda 顺便把那边也改了。",
+  },
 };
 
 export const COPY = {
@@ -95,22 +96,24 @@ export const COPY = {
     deniedBody: "Allow microphone access in your browser's site settings, then try again.",
     noSpeech: "Didn't catch that. Try speaking closer to the microphone.",
     network: "Couldn't transcribe. Your recording is kept.",
-    limitWarning: "Recording stops in 0:30",
-    newIssue: "New issue",
-    createIssue: "Create issue",
-    issueTitle: "Title",
-    issueDescription: "Description",
-    understood: "From your voice note",
-    priority: "Priority",
-    assignee: "Assignee",
-    project: "Project",
-    status: "Todo",
     you: "You",
     userMessage: "The inbox badge still shows 3 after I switched to the Design workspace.",
     agentReply:
       "I can reproduce it. The unread count query is cached per user, not per workspace, so the old value sticks until a refetch. Want me to fix it?",
     microphone: "MacBook Pro Microphone",
     language: "Language",
+    voiceInput: "Voice input",
+    micTooltip: "Click to dictate, hold to talk",
+    replyPlaceholder: "Reply…",
+    activity: "Activity",
+    issueKey: "MUL-1342",
+    issueBody: "After switching from Multica to Design, the inbox badge keeps showing 3 until the page is refreshed.",
+    humanName: "Jiayuan",
+    humanComment: "Is this the same cache bug we fixed for issue counts?",
+    minutesAgo: "2m ago",
+    justNow: "just now",
+    willStart: "Starts after sending",
+    attach: "Attach file",
   },
   zh: {
     agentName: "Lambda",
@@ -148,22 +151,24 @@ export const COPY = {
     deniedBody: "请在浏览器的网站设置中允许麦克风，然后重试。",
     noSpeech: "没有听清，请靠近麦克风再说一次。",
     network: "转写失败，录音已保留。",
-    limitWarning: "30 秒后停止录音",
-    newIssue: "新建 Issue",
-    createIssue: "创建 Issue",
-    issueTitle: "标题",
-    issueDescription: "描述",
-    understood: "从语音中识别",
-    priority: "优先级",
-    assignee: "负责人",
-    project: "项目",
-    status: "待办",
     you: "你",
     userMessage: "我切到 Design 工作区之后，收件箱角标还显示 3。",
     agentReply:
       "已复现。未读数的查询按用户缓存而不是按工作区缓存，所以在重新拉取之前旧值会一直保留。需要我修复吗？",
     microphone: "MacBook Pro 麦克风",
     language: "语言",
+    voiceInput: "语音输入",
+    micTooltip: "点按听写，按住说话",
+    replyPlaceholder: "回复…",
+    activity: "动态",
+    issueKey: "MUL-1342",
+    issueBody: "从 Multica 切到 Design 工作区后，收件箱角标一直显示 3，刷新页面才恢复。",
+    humanName: "Jiayuan",
+    humanComment: "这和之前 issue 计数那个缓存问题是同一个吗？",
+    minutesAgo: "2 分钟前",
+    justNow: "刚刚",
+    willStart: "发送后开始",
+    attach: "添加附件",
   },
 } satisfies Record<Lang, Record<string, string>>;
 
