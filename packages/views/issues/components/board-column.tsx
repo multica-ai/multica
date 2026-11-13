@@ -183,10 +183,10 @@ export const BoardColumn = memo(function BoardColumn({
 
   const computeItemKey = (_index: number, issue: Issue) => issue.id;
   const itemContent = (index: number, issue: Issue) => (
-    // pt-2 on every card but the first reproduces the previous `space-y-2`
+    // Top padding on every card but the first reproduces the previous `space-y-2`
     // gap; padding (not margin) is inside Virtuoso's measured item box so its
     // height math stays correct.
-    <div className={index === 0 ? undefined : "pt-2"}>
+    <div className={index === 0 ? undefined : "pt-[var(--board-card-gap,var(--space-xs,0.5rem))]"}>
       <DraggableBoardCard
         issue={issue}
         childProgress={childProgressMap?.get(issue.id)}

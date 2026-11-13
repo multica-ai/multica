@@ -34,7 +34,8 @@ import {
 import { BreadcrumbHeader, type BreadcrumbSegment } from "./breadcrumb-header";
 
 /** The reading column of an object page; the header above it stays full width. */
-export const OBJECT_PAGE_BODY = "mx-auto w-full max-w-[760px] px-6 py-8";
+export const OBJECT_PAGE_BODY =
+  "mx-auto w-full max-w-[var(--object-page-max-width,760px)] px-[var(--space-lg,1.5rem)] py-[var(--space-xl,2rem)]";
 
 /** What an object page shows, as themes see it on `data-type`. */
 export type ObjectPageType = "project" | "agent" | "squad" | "runtime" | "member" | "autopilot" | "skill";

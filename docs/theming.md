@@ -94,9 +94,11 @@ Set variables on `.theme-light` and `.theme-dark` (both on `<html>`). The
 CSS loads after the app's own styles while the theme is active, so at equal
 specificity the theme wins; keep selectors that simple and avoid
 `!important`. What the person picks on the Appearance page still wins over a
-theme: high contrast replaces the muted and border colours, and font choices
-other than the defaults replace the font variables. Colour is the theme's
-alone; to let people pick one, declare an option.
+theme: high contrast replaces the muted and border colours, font choices
+other than the defaults replace the font variables, and Compact or
+Comfortable density replaces the issue row and group header heights, board
+card padding and gap, and the space panel's row height and padding. Colour
+is the theme's alone; to let people pick one, declare an option.
 
 ## Variables
 
@@ -109,6 +111,11 @@ at the end, with its default. They come in layers:
 - **Components and product** (menus, buttons, nav rows, issue rows, the
   board, status colours) default to a foundation. Set one to change just
   that component: `--menu-radius: 0` squares menus and nothing else.
+- **Layout and spacing** (a spacing scale `--space-xs` to `--space-xl`, the
+  page's side padding, the navigation panel's starting width, the widest the
+  reading column and object pages get) sets the room around everything.
+  Board card and page paddings read the scale, so changing `--space-sm`
+  moves each of them that has no variable of its own set.
 - **Editor content** (headings, lists, tables, quotes, links, code and
   syntax colours) styles issue descriptions, comments, chat and documents.
 
@@ -603,12 +610,27 @@ and dark differ, both defaults are given.
 | `--rail-item-active-background` | `var(--sidebar-accent)` | The current space. |
 | `--rail-item-active-color` | `var(--sidebar-accent-foreground)` | Icon and label of the current space. |
 | `--nav-item-height` | `2rem` | Minimum height of a row in the space panel. |
+| `--nav-item-padding-y` | `0.375rem` | Top and bottom padding of a row in the space panel; with the text, it sets the row's height when that is above the minimum. |
 | `--nav-item-radius` | `var(--radius)` | Rows in the space panel. |
 | `--nav-item-color` | `var(--muted-foreground)` | Row text. |
 | `--nav-item-hover-background` | `var(--surface-hover)` | Row hover. |
 | `--nav-item-hover-color` | `var(--foreground)` | Row text on hover. |
 | `--nav-item-active-background` | `var(--surface-selected)` | The current row. |
 | `--nav-item-active-color` | `var(--surface-selected-foreground)` | Text of the current row. |
+
+### Layout and spacing
+
+| Variable | Default (light / dark) | Use |
+| --- | --- | --- |
+| `--space-xs` | `0.5rem` | Spacing step: the gap between board cards. |
+| `--space-sm` | `0.75rem` | Spacing step: board card padding, the issue page's side padding on phones. |
+| `--space-md` | `1rem` | Spacing step: the page's side padding. |
+| `--space-lg` | `1.5rem` | Spacing step: an object page's side padding, the issue page's top padding on phones. |
+| `--space-xl` | `2rem` | Spacing step: an object page's top padding, the issue page's padding. |
+| `--page-padding-x` | `var(--space-md, 1rem)` | Side padding of page headers, the toolbars under them and full-width lists. |
+| `--sidebar-panel-width` | `240px` | Starting width of the navigation panel, kept between 200px and 320px. Once the person drags its edge, their width wins. |
+| `--content-max-width` | `clamp(56rem, 70cqi, 70rem)` | Widest the reading column gets on an issue page and in chat. |
+| `--object-page-max-width` | `760px` | Widest the body of a project, agent, squad, runtime or other object page gets. |
 
 ### Issues
 
@@ -630,6 +652,9 @@ and dark differ, both defaults are given.
 | `--board-card-hover-background` | `var(--surface-hover)` | Board card hover. |
 | `--board-card-border-color` | `var(--surface-border)` | Board card border. |
 | `--board-card-shadow` | `var(--surface-shadow)` | Board card shadow. |
+| `--board-card-padding-y` | `var(--space-sm, 0.75rem)` | Top and bottom padding of a board card. |
+| `--board-card-padding-x` | `0.625rem` | Side padding of a board card. |
+| `--board-card-gap` | `var(--space-xs, 0.5rem)` | Space between cards in a board column. |
 
 ### Editor content
 

@@ -349,7 +349,7 @@
     },
     "density": {
       "title": "表示密度",
-      "description": "課題リストと検索結果の行の高さ。",
+      "description": "課題リスト、検索結果、サイドバーの行の高さと、ボードの余白。",
       "compact": "コンパクト",
       "default": "標準",
       "comfortable": "ゆったり"

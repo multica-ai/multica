@@ -1428,7 +1428,7 @@ export function IssueDetailSkeleton({
           {/* Width and gutters match the loaded column exactly (see its
               comment), so the skeleton doesn't reflow sideways when real
               content mounts. */}
-          <div className={cn(READING_COLUMN, "px-3 py-6 space-y-6 md:px-8 md:py-8")}>
+          <div className={cn(READING_COLUMN, "px-[var(--space-sm,0.75rem)] py-[var(--space-lg,1.5rem)] space-y-6 md:px-[var(--space-xl,2rem)] md:py-[var(--space-xl,2rem)]")}>
             <Skeleton className="h-8 w-3/4" />
             <div className="space-y-2">
               <Skeleton className="h-4 w-full" />
@@ -3629,7 +3629,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             // and never reaches the chat launcher's corner (see IssuePeekHost).
             isPeek
               ? "mx-auto w-full px-6 py-5"
-              : cn(READING_COLUMN, "px-3 py-6 max-md:pb-chat-launcher md:px-8 md:py-8"),
+              : cn(READING_COLUMN, "px-[var(--space-sm,0.75rem)] py-[var(--space-lg,1.5rem)] max-md:pb-chat-launcher md:px-[var(--space-xl,2rem)] md:py-[var(--space-xl,2rem)]"),
           )}
         >
           <IssueDuplicateBanner

@@ -21,6 +21,7 @@ export type ThemeVariableSection =
   | "typography"
   | "controls"
   | "navigation"
+  | "layout"
   | "issues"
   | "editor"
   | "code";
@@ -45,6 +46,7 @@ export const THEME_VARIABLE_SECTIONS: Record<ThemeVariableSection, string> = {
   typography: "Typography",
   controls: "Controls and overlays",
   navigation: "Navigation and page",
+  layout: "Layout and spacing",
   issues: "Issues",
   editor: "Editor content",
   code: "Code",
@@ -237,12 +239,25 @@ const NAVIGATION: Entry[] = [
   ["rail-item-active-background", "The current space.", "var(--sidebar-accent)"],
   ["rail-item-active-color", "Icon and label of the current space.", "var(--sidebar-accent-foreground)"],
   ["nav-item-height", "Minimum height of a row in the space panel.", "2rem"],
+  ["nav-item-padding-y", "Top and bottom padding of a row in the space panel; with the text, it sets the row's height when that is above the minimum.", "0.375rem"],
   ["nav-item-radius", "Rows in the space panel.", "var(--radius)"],
   ["nav-item-color", "Row text.", "var(--muted-foreground)"],
   ["nav-item-hover-background", "Row hover.", "var(--surface-hover)"],
   ["nav-item-hover-color", "Row text on hover.", "var(--foreground)"],
   ["nav-item-active-background", "The current row.", "var(--surface-selected)"],
   ["nav-item-active-color", "Text of the current row.", "var(--surface-selected-foreground)"],
+];
+
+const LAYOUT: Entry[] = [
+  ["space-xs", "Spacing step: the gap between board cards.", "0.5rem"],
+  ["space-sm", "Spacing step: board card padding, the issue page's side padding on phones.", "0.75rem"],
+  ["space-md", "Spacing step: the page's side padding.", "1rem"],
+  ["space-lg", "Spacing step: an object page's side padding, the issue page's top padding on phones.", "1.5rem"],
+  ["space-xl", "Spacing step: an object page's top padding, the issue page's padding.", "2rem"],
+  ["page-padding-x", "Side padding of page headers, the toolbars under them and full-width lists.", "var(--space-md, 1rem)"],
+  ["sidebar-panel-width", "Starting width of the navigation panel, kept between 200px and 320px. Once the person drags its edge, their width wins.", "240px"],
+  ["content-max-width", "Widest the reading column gets on an issue page and in chat.", "clamp(56rem, 70cqi, 70rem)"],
+  ["object-page-max-width", "Widest the body of a project, agent, squad, runtime or other object page gets.", "760px"],
 ];
 
 const ISSUES: Entry[] = [
@@ -262,6 +277,9 @@ const ISSUES: Entry[] = [
   ["board-card-hover-background", "Board card hover.", "var(--surface-hover)"],
   ["board-card-border-color", "Board card border.", "var(--surface-border)"],
   ["board-card-shadow", "Board card shadow.", "var(--surface-shadow)"],
+  ["board-card-padding-y", "Top and bottom padding of a board card.", "var(--space-sm, 0.75rem)"],
+  ["board-card-padding-x", "Side padding of a board card.", "0.625rem"],
+  ["board-card-gap", "Space between cards in a board column.", "var(--space-xs, 0.5rem)"],
 ];
 
 const HEADING_SIZES = [
@@ -364,6 +382,7 @@ export const THEME_VARIABLES: readonly ThemeVariable[] = [
   ...section("typography", TYPOGRAPHY),
   ...section("controls", CONTROLS),
   ...section("navigation", NAVIGATION),
+  ...section("layout", LAYOUT),
   ...section("issues", ISSUES),
   ...section("editor", EDITOR),
   ...section("code", CODE),

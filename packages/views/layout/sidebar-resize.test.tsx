@@ -9,6 +9,9 @@ import {
 } from "@multica/ui/components/ui/sidebar";
 import { renderWithI18n } from "../test/i18n";
 
+/** No stored width: the theme's, or 240px when it sets none. */
+const UNSTORED_SIDEBAR_WIDTH = "clamp(200px, var(--sidebar-panel-width, 240px), 320px)";
+
 describe("left sidebar resizing", () => {
   beforeEach(() => {
     localStorage.clear();
@@ -85,7 +88,7 @@ describe("left sidebar resizing", () => {
     expect(
       liveWidthConsumer.style.getPropertyValue("--sidebar-live-width"),
     ).toBe("300px");
-    expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe("240px");
+    expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe(UNSTORED_SIDEBAR_WIDTH);
     expect(localStorage.getItem("sidebar_width")).toBeNull();
     expect(stableConsumerRender).toHaveBeenCalledTimes(1);
 
@@ -157,7 +160,7 @@ describe("left sidebar resizing", () => {
     expect(
       liveWidthConsumer.style.getPropertyValue("--sidebar-live-width"),
     ).toBe("");
-    expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe("240px");
+    expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe(UNSTORED_SIDEBAR_WIDTH);
     expect(localStorage.getItem("sidebar_width")).toBeNull();
     expect(wrapper).not.toHaveAttribute("data-sidebar-resizing");
     expect(document.documentElement).not.toHaveAttribute("data-sidebar-resizing");

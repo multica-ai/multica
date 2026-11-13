@@ -355,7 +355,7 @@
     },
     "density": {
       "title": "Densidad",
-      "description": "Altura de las filas en listas de incidencias y búsqueda.",
+      "description": "Altura de las filas en listas de incidencias, búsqueda y la barra lateral, y espaciado en el tablero.",
       "compact": "Compacta",
       "default": "Predeterminada",
       "comfortable": "Amplia"
