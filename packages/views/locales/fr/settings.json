@@ -341,8 +341,7 @@
     },
     "content_size": {
       "title": "Taille du texte",
-      "description": "Seulement le texte du contenu ; l’interface garde sa taille.",
-      "follow": "Comme l’interface ({{size}} px)"
+      "description": "Seulement le texte du contenu. Par défaut, comme l’interface."
     },
     "content_leading": {
       "title": "Interligne",

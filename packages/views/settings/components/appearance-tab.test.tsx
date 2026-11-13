@@ -162,6 +162,25 @@ describe("AppearanceTab", () => {
     expect(contentLatin).toHaveTextContent("Geist Mono");
   });
 
+  it("sizes content text with the same slider as the interface, following it by default", async () => {
+    const user = userEvent.setup();
+    useAppearanceStore.setState({ fontSize: 15 });
+    render(<AppearanceTab />, { wrapper: Wrapper });
+
+    const [, contentRow] = screen.getAllByLabelText("Font size");
+    const contentSize = within(contentRow!).getByRole("slider", { hidden: true });
+    expect(contentSize).toHaveValue("15");
+    expect(screen.getByText("15 px · Default")).toBeInTheDocument();
+
+    act(() => contentSize!.focus());
+    await user.keyboard("{ArrowRight}");
+    expect(state().contentSize).toBe(16);
+    expect(screen.getByText("16 px")).toBeInTheDocument();
+
+    await user.keyboard("{ArrowLeft}");
+    expect(state().contentSize).toBe("ui");
+  });
+
   it("names the theme's fonts when the default choice keeps them", () => {
     useAppearanceStore.setState({ theme: "github" });
     const { unmount } = render(<AppearanceTab />, { wrapper: Wrapper });

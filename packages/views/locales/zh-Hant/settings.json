@@ -335,8 +335,7 @@
     },
     "content_size": {
       "title": "字級",
-      "description": "只改內容文字，介面不變。",
-      "follow": "跟隨介面（{{size}} px）"
+      "description": "只改內容文字，預設跟隨介面。"
     },
     "content_leading": {
       "title": "行高",
