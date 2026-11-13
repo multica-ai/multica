@@ -178,5 +178,29 @@
     "clear_filter": "清除筛选",
     "no_matches": "没有匹配的行",
     "close": "关闭"
+  },
+  "voice": {
+    "dictate": "语音输入",
+    "hold_to_talk": "按住说话",
+    "tap_or_hold": "语音输入（点按，或按住说话）",
+    "cancel": "取消",
+    "insert": "插入",
+    "send": "发送",
+    "retry": "重试",
+    "dismiss": "关闭",
+    "requesting": "正在等待麦克风…",
+    "transcribing": "正在转写…",
+    "release_to_insert": "松开插入",
+    "recording": "录音中",
+    "errors": {
+      "permission_denied": "麦克风权限被阻止。请在浏览器或系统设置中允许后重试。",
+      "no_microphone": "未找到麦克风。连接后重试。",
+      "microphone_failed": "无法启动麦克风。",
+      "no_speech": "没有听到说话声。靠近麦克风再试一次。",
+      "too_long": "录音太长，无法转写。请控制在两分钟以内。",
+      "rate_limited": "短时间内录音次数过多。请稍等后重试。",
+      "unavailable": "此服务器未开启语音输入。",
+      "transcription_failed": "转写失败。录音已保留，可以重试。"
+    }
   }
 }

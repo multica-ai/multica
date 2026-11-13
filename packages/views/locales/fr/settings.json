@@ -490,6 +490,10 @@
       "goSettings": {
         "label": "Aller aux paramètres",
         "description": "Ouvrir les paramètres de l'espace de travail."
+      },
+      "voiceInput": {
+        "label": "Saisie vocale",
+        "description": "Dictez dans le dernier éditeur utilisé. Maintenez pour parler."
       }
     },
     "fixed": {
@@ -586,7 +590,8 @@
       "code": "Code",
       "channels": "Messagerie",
       "apps": "Applications connectées",
-      "workflows": "Workflows"
+      "workflows": "Workflows",
+      "voice_input": "Saisie vocale"
     },
     "groups": {
       "personal": "Personnel",
@@ -1852,6 +1857,57 @@
       "cancel": "Annuler",
       "admin_required": "Un administrateur peut rétablir l’accès.",
       "account_link": "Ce compte conserve des restrictions. Rétablissez l’accès dans les apps connectées."
+    }
+  },
+  "voice_input": {
+    "description": "Dictez dans le chat, les commentaires et les réponses. Les enregistrements sont envoyés à votre serveur Multica pour transcription et ne sont pas conservés.",
+    "input_title": "Saisie",
+    "shortcut": {
+      "title": "Raccourci",
+      "hint": "Fonctionne dès qu’un éditeur est à l’écran, même sans le focus.",
+      "change": "Modifier",
+      "unassigned": "Non défini"
+    },
+    "activation": {
+      "title": "Activation",
+      "auto": "Appui ou maintien",
+      "toggle": "Appui",
+      "hold": "Maintien",
+      "hints": {
+        "auto": "Appuyez pour commencer, appuyez à nouveau pour insérer. Maintenez pour parler, relâchez pour insérer.",
+        "toggle": "Appuyez pour commencer, appuyez à nouveau pour insérer.",
+        "hold": "Maintenez pour parler, relâchez pour insérer."
+      }
+    },
+    "recognition_title": "Reconnaissance",
+    "language": {
+      "title": "Langue parlée",
+      "hint": "La détection automatique convient dans la plupart des cas. Choisissez une langue si de courtes phrases sortent dans une autre.",
+      "auto": "Détection automatique"
+    },
+    "fillers": {
+      "title": "Supprimer les hésitations",
+      "hint": "Retire « euh », « hum » et les hésitations similaires."
+    },
+    "vocabulary": {
+      "title": "Vocabulaire",
+      "hint": "Noms et termes à écrire à votre façon, comme des produits ou des collègues. Jusqu’à {{max}}.",
+      "placeholder": "Ajouter un mot",
+      "remove": "Retirer {{word}}"
+    },
+    "microphone_title": "Micro",
+    "device": {
+      "title": "Périphérique d’entrée",
+      "default": "Par défaut du système",
+      "unnamed": "Micro {{index}}",
+      "permission_hint": "Testez le micro une fois pour voir le nom des périphériques."
+    },
+    "test": {
+      "title": "Tester le micro",
+      "hint": "Parlez pour vérifier le niveau. Rien n’est enregistré.",
+      "blocked": "L’accès au micro est bloqué. Autorisez-le dans le navigateur ou les réglages système.",
+      "start": "Tester",
+      "stop": "Arrêter"
     }
   }
 }

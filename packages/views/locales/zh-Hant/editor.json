@@ -178,5 +178,29 @@
     "clear_filter": "清除篩選",
     "no_matches": "沒有匹配的行",
     "close": "關閉"
+  },
+  "voice": {
+    "dictate": "語音輸入",
+    "hold_to_talk": "按住說話",
+    "tap_or_hold": "語音輸入（點按，或按住說話）",
+    "cancel": "取消",
+    "insert": "插入",
+    "send": "傳送",
+    "retry": "重試",
+    "dismiss": "關閉",
+    "requesting": "正在等待麥克風…",
+    "transcribing": "正在轉寫…",
+    "release_to_insert": "放開插入",
+    "recording": "錄音中",
+    "errors": {
+      "permission_denied": "麥克風權限被封鎖。請在瀏覽器或系統設定中允許後重試。",
+      "no_microphone": "找不到麥克風。連接後重試。",
+      "microphone_failed": "無法啟動麥克風。",
+      "no_speech": "沒有聽到說話聲。靠近麥克風再試一次。",
+      "too_long": "錄音太長，無法轉寫。請控制在兩分鐘以內。",
+      "rate_limited": "短時間內錄音次數過多。請稍候再重試。",
+      "unavailable": "此伺服器未開啟語音輸入。",
+      "transcription_failed": "轉寫失敗。錄音已保留，可以重試。"
+    }
   }
 }

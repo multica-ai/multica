@@ -14,6 +14,7 @@ import { composeAnnotatedReply, hasReplyIntent } from "@multica/core/drafts/repl
 import { annotationsWithPending, type AnnotationComposerSlot } from "./annotation-composer";
 import { ReplyAnnotations } from "./reply-annotations";
 import { useT } from "../../i18n";
+import { useComposerVoice, VoiceErrorRow, VoiceHud, VoiceMicButton, VoiceStrip } from "../../voice";
 import { CommentTriggerChips } from "./comment-trigger-chips";
 import { commentTriggerPreviewSignature, useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
 import { useRecipientActions } from "../hooks/use-recipient-actions";
@@ -223,6 +224,14 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation, annotat
     },
   });
 
+  const voice = useComposerVoice({
+    insert: (text) => editorRef.current?.insertText(text) ?? false,
+    // Sending while a run would be restarted stays an explicit click on the
+    // destructive button.
+    submit: routing.restartTaskIds.length === 0 ? () => void submit() : undefined,
+    activate: () => lazy.activate(),
+  });
+
   return (<>
     {annotationComposer?.render({
       submit, submitting, uploading: gate.uploading, restart: routing.restartTaskIds.length > 0,
@@ -234,6 +243,7 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation, annotat
       data-mc="comment-composer"
       {...dropZoneProps}
       className="relative flex flex-col rounded-lg bg-card pb-8 ring-1 ring-border"
+      onFocusCapture={voice.onFocusCapture}
     >
       {attachmentsBlockSteer && <div className="px-3 pt-2">
         <SteerAttachmentNotice />
@@ -311,7 +321,14 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation, annotat
           </div>
         </div>
       )}
-      <div className="absolute bottom-1 left-2 right-28 min-w-0">
+      <VoiceHud voice={voice} />
+      <VoiceErrorRow voice={voice} className="mx-2 mb-1" />
+      {voice.showStrip && (
+        <div className="absolute inset-x-1.5 bottom-1 flex items-center">
+          <VoiceStrip voice={voice} />
+        </div>
+      )}
+      <div className={cn("absolute bottom-1 left-2 min-w-0", voice.available ? "right-36" : "right-28", voice.showStrip && "hidden")}>
         <CommentTriggerChips
           recipients={recipients}
           blocked={triggerPreview.blocked}
@@ -320,7 +337,8 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation, annotat
           onActionChange={setAction}
         />
       </div>
-      <div className="absolute bottom-1 right-1.5 flex items-center gap-1">
+      <div className={cn("absolute bottom-1 right-1.5 flex items-center gap-1", voice.showStrip && "hidden")}>
+        <VoiceMicButton voice={voice} />
         <FileUploadButton
           size="sm"
           multiple

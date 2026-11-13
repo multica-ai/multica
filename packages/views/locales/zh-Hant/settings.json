@@ -484,6 +484,10 @@
       "goSettings": {
         "label": "前往設定",
         "description": "開啟工作區設定。"
+      },
+      "voiceInput": {
+        "label": "語音輸入",
+        "description": "向最近使用的輸入框口述。按住說話。"
       }
     },
     "fixed": {
@@ -580,7 +584,8 @@
       "code": "程式碼",
       "channels": "訊息渠道",
       "apps": "已連線應用",
-      "workflows": "工作流"
+      "workflows": "工作流",
+      "voice_input": "語音輸入"
     },
     "groups": {
       "personal": "個人",
@@ -1831,6 +1836,57 @@
       "cancel": "取消",
       "admin_required": "請工作區管理員解除限制。",
       "account_link": "此帳號仍有舊操作限制。請在已連接應用中解除。"
+    }
+  },
+  "voice_input": {
+    "description": "在對話、留言和回覆中口述輸入。錄音會傳送到你的 Multica 伺服器轉寫，不會被保存。",
+    "input_title": "輸入",
+    "shortcut": {
+      "title": "快捷鍵",
+      "hint": "只要頁面上有輸入框就能使用，不需要先聚焦。",
+      "change": "修改",
+      "unassigned": "未設定"
+    },
+    "activation": {
+      "title": "觸發方式",
+      "auto": "點按或按住",
+      "toggle": "點按",
+      "hold": "按住",
+      "hints": {
+        "auto": "點按開始，再點一次插入。按住說話，放開插入。",
+        "toggle": "點按開始，再點一次插入。",
+        "hold": "按住說話，放開插入。"
+      }
+    },
+    "recognition_title": "辨識",
+    "language": {
+      "title": "說話語言",
+      "hint": "自動偵測適用於大多數情況。如果短句被辨識成其他語言，可以指定語言。",
+      "auto": "自動偵測"
+    },
+    "fillers": {
+      "title": "移除語助詞",
+      "hint": "去掉「嗯」「呃」等停頓詞。"
+    },
+    "vocabulary": {
+      "title": "詞彙表",
+      "hint": "希望按你的寫法輸出的名稱和術語，例如產品名稱或同事名字。最多 {{max}} 個。",
+      "placeholder": "新增詞語",
+      "remove": "移除 {{word}}"
+    },
+    "microphone_title": "麥克風",
+    "device": {
+      "title": "輸入裝置",
+      "default": "系統預設",
+      "unnamed": "麥克風 {{index}}",
+      "permission_hint": "測試一次麥克風後即可看到裝置名稱。"
+    },
+    "test": {
+      "title": "測試麥克風",
+      "hint": "說幾句話查看音量。不會錄音。",
+      "blocked": "麥克風權限被封鎖。請在瀏覽器或系統設定中允許。",
+      "start": "測試",
+      "stop": "停止"
     }
   }
 }

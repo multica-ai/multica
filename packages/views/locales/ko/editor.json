@@ -178,5 +178,29 @@
     "clear_filter": "필터 지우기",
     "no_matches": "일치하는 행이 없습니다",
     "close": "닫기"
+  },
+  "voice": {
+    "dictate": "음성 입력",
+    "hold_to_talk": "누르고 말하기",
+    "tap_or_hold": "음성 입력 (탭하거나 길게 눌러 말하기)",
+    "cancel": "취소",
+    "insert": "삽입",
+    "send": "보내기",
+    "retry": "다시 시도",
+    "dismiss": "닫기",
+    "requesting": "마이크를 기다리는 중…",
+    "transcribing": "받아쓰는 중…",
+    "release_to_insert": "손을 떼면 삽입",
+    "recording": "녹음 중",
+    "errors": {
+      "permission_denied": "마이크 접근이 차단되어 있습니다. 브라우저나 시스템 설정에서 허용한 뒤 다시 시도하세요.",
+      "no_microphone": "마이크를 찾을 수 없습니다. 연결한 뒤 다시 시도하세요.",
+      "microphone_failed": "마이크를 시작할 수 없습니다.",
+      "no_speech": "말소리를 듣지 못했습니다. 마이크에 조금 더 가까이에서 다시 시도하세요.",
+      "too_long": "녹음이 너무 길어 받아쓸 수 없습니다. 2분 이내로 녹음하세요.",
+      "rate_limited": "짧은 시간에 녹음이 너무 많습니다. 잠시 후 다시 시도하세요.",
+      "unavailable": "이 서버에서는 음성 입력을 사용할 수 없습니다.",
+      "transcription_failed": "받아쓰기에 실패했습니다. 녹음은 보관되어 있으니 다시 시도할 수 있습니다."
+    }
   }
 }

@@ -182,5 +182,29 @@
     "clear_filter": "Borrar filtro",
     "no_matches": "Ninguna fila coincide",
     "close": "Cerrar"
+  },
+  "voice": {
+    "dictate": "Dictar",
+    "hold_to_talk": "Mantén pulsado para hablar",
+    "tap_or_hold": "Dictar (toca, o mantén pulsado para hablar)",
+    "cancel": "Cancelar",
+    "insert": "Insertar",
+    "send": "Enviar",
+    "retry": "Reintentar",
+    "dismiss": "Cerrar",
+    "requesting": "Esperando el micrófono…",
+    "transcribing": "Transcribiendo…",
+    "release_to_insert": "Suelta para insertar",
+    "recording": "Grabando",
+    "errors": {
+      "permission_denied": "El acceso al micrófono está bloqueado. Permítelo en el navegador o en la configuración del sistema y vuelve a intentarlo.",
+      "no_microphone": "No se encontró ningún micrófono. Conecta uno y vuelve a intentarlo.",
+      "microphone_failed": "No se pudo iniciar el micrófono.",
+      "no_speech": "No se detectó voz. Vuelve a intentarlo un poco más cerca del micrófono.",
+      "too_long": "La grabación es demasiado larga para transcribirla. Mantenla por debajo de dos minutos.",
+      "rate_limited": "Demasiadas grabaciones en poco tiempo. Espera un momento y vuelve a intentarlo.",
+      "unavailable": "La entrada de voz no está disponible en este servidor.",
+      "transcription_failed": "La transcripción falló. La grabación se conserva, así que puedes reintentarlo."
+    }
   }
 }

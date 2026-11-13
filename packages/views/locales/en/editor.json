@@ -182,5 +182,29 @@
     "clear_filter": "Clear filter",
     "no_matches": "No matching rows",
     "close": "Close"
+  },
+  "voice": {
+    "dictate": "Dictate",
+    "hold_to_talk": "Hold to talk",
+    "tap_or_hold": "Dictate (tap, or hold to talk)",
+    "cancel": "Cancel",
+    "insert": "Insert",
+    "send": "Send",
+    "retry": "Retry",
+    "dismiss": "Dismiss",
+    "requesting": "Waiting for the microphone…",
+    "transcribing": "Transcribing…",
+    "release_to_insert": "Release to insert",
+    "recording": "Recording",
+    "errors": {
+      "permission_denied": "Microphone access is blocked. Allow it in your browser or system settings, then retry.",
+      "no_microphone": "No microphone found. Connect one, then retry.",
+      "microphone_failed": "Couldn't start the microphone.",
+      "no_speech": "Didn't catch any speech. Try again a little closer to the mic.",
+      "too_long": "That recording is too long to transcribe. Keep it under two minutes.",
+      "rate_limited": "Too many recordings in a short time. Wait a moment, then retry.",
+      "unavailable": "Voice input isn't available on this server.",
+      "transcription_failed": "Transcription failed. Your recording is kept, so you can retry."
+    }
   }
 }
