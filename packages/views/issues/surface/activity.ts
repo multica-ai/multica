@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { useWorkspaceId } from "@multica/core/hooks";
-import type { AgentTask } from "@multica/core/types";
+import type { AgentTask, IssueStatusCategory } from "@multica/core/types";
 
 export interface IssueActivityState {
   isWorking: boolean;
@@ -22,13 +22,34 @@ function isQueuedTaskStatus(status: AgentTask["status"], wakeupId?: string) {
   return (
     status === "queued" ||
     status === "dispatched" ||
-    status === "waiting_local_directory" || (status === "deferred" && !!wakeupId)
+    status === "waiting_local_directory" ||
+    (status === "deferred" && !!wakeupId)
   );
 }
 
 export interface IssueTaskGroups {
   running: AgentTask[];
   queued: AgentTask[];
+}
+
+export type IssueExecutionState = "working" | "queued" | "waiting";
+
+export function deriveIssueExecutionState(
+  groups: IssueTaskGroups,
+  statusCategory?: IssueStatusCategory | null,
+  childProgress?: { done: number; total: number } | null,
+): IssueExecutionState | null {
+  if (groups.running.length > 0) return "working";
+  if (groups.queued.length > 0) return "queued";
+  if (
+    statusCategory === "started" &&
+    childProgress &&
+    childProgress.total > 0 &&
+    childProgress.done < childProgress.total
+  ) {
+    return "waiting";
+  }
+  return null;
 }
 
 /**
