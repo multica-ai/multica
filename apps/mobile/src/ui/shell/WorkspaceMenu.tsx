@@ -64,8 +64,9 @@ function MenuRow({ icon, label, meta, checked = false, selected, onPress, leadin
   const palette = useTheme();
   return (
     <Pressable
-      accessibilityRole="menuitem"
-      accessibilityState={{ selected }}
+      // "menuitem" has no iOS trait; VoiceOver would not announce the row as tappable.
+      accessibilityRole="button"
+      accessibilityState={{ selected: selected || checked }}
       onPress={onPress}
       style={({ pressed }) => [styles.item, (selected || pressed) && { backgroundColor: palette.fill }]}
     >

@@ -34,6 +34,7 @@ export function SearchView({ query, onQueryChange, state, results, onRetry, onOp
             placeholderTextColor={palette.label3}
             autoFocus
             autoCorrect={false}
+            autoCapitalize="none"
             returnKeyType="search"
             clearButtonMode="while-editing"
             style={[styles.input, { color: palette.label }]}

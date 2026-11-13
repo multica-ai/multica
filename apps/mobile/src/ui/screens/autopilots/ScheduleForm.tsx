@@ -47,6 +47,7 @@ function DayToggles({ days, onToggle }: { days: readonly number[]; onToggle: (da
           <Pressable
             key={name}
             accessibilityRole="button"
+            accessibilityLabel={name}
             accessibilityState={{ selected: on }}
             onPress={() => onToggle(day)}
             style={[styles.day, { backgroundColor: on ? palette.label : palette.fill }]}

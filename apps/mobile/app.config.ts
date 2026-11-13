@@ -67,7 +67,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       appleTeamId: process.env.EXPO_APPLE_TEAM_ID,
     },
     plugins: [
-      "expo-localization",
+      // Declaring the app's languages is what lets system UI inside it (edit
+      // menus, clear buttons, picker labels) follow the device language.
+      ["expo-localization", { supportedLocales: ["en", "zh-Hans"] }],
       "expo-secure-store",
       "expo-sqlite",
       [

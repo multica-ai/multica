@@ -205,7 +205,7 @@ export function IssueView(props: IssueViewProps) {
             </Txt>
             <ChipGroup>
               <Chip icon={<StatusIcon status={issue.status.key} color={issue.status.color} icon={issue.status.icon} size={14} />} label={issue.status.label} onPress={onStatusPress} />
-              <Chip icon={<PriorityIcon priority={issue.priority} size={14} />} onPress={onPriorityPress} />
+              <Chip icon={<PriorityIcon priority={issue.priority} size={14} />} label={strings.priority[issue.priority]} onPress={onPriorityPress} />
               <Chip icon={issue.assignee ? <Avatar actor={issue.assignee} size={18} /> : <Icon name="CircleUser" size={16} color={palette.label2} />} label={issue.assignee?.name ?? strings.issue.unassigned} />
               {issue.project ? <Chip icon={<Icon name="FolderKanban" size={15} color={palette.label2} />} label={issue.project} /> : null}
             </ChipGroup>
