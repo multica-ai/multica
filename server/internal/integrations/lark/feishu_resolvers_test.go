@@ -169,6 +169,41 @@ func TestLarkSessionRouting(t *testing.T) {
 	}
 }
 
+func TestSnapshotFeishuIssueDeliveryPreservesTriggerRoute(t *testing.T) {
+	inst := engine.ResolvedInstallation{ID: binderUUID(1)}
+	plain := channel.InboundMessage{
+		MessageID: "om_trigger",
+		Source: channel.Source{
+			ChannelType: channel.TypeFeishu,
+			ChatID:      "oc_group",
+			ChatType:    channel.ChatTypeGroup,
+			SenderID:    "ou_sender",
+		},
+	}
+	delivery := snapshotFeishuIssueDelivery(inst, plain, binderUUID(2), binderUUID(3), 9)
+	if delivery.ChannelChatID != "oc_group" || delivery.ChannelMessageID.String != "om_trigger" ||
+		delivery.ChannelSenderID.String != "ou_sender" || delivery.ChannelThreadID.Valid || delivery.RouteRevision != 9 {
+		t.Fatalf("plain group route snapshot lost trigger fields: %+v", delivery)
+	}
+	if delivery.ChannelType != string(channel.TypeFeishu) || delivery.InstallationID != inst.ID || delivery.BindingID != binderUUID(3) {
+		t.Fatalf("plain group route snapshot identity mismatch: %+v", delivery)
+	}
+	if string(delivery.Config) != `{}` {
+		t.Fatalf("plain group route config = %q, want non-null empty JSON object", delivery.Config)
+	}
+
+	topic := plain
+	topic.Source.ThreadID = "omt_topic"
+	topicDelivery := snapshotFeishuIssueDelivery(inst, topic, binderUUID(2), binderUUID(3), 10)
+	var cfg larkBindingConfig
+	if err := json.Unmarshal(topicDelivery.Config, &cfg); err != nil {
+		t.Fatalf("decode topic route config %q: %v", topicDelivery.Config, err)
+	}
+	if topicDelivery.ChannelChatID != "oc_group:omt_topic" || topicDelivery.ChannelThreadID.String != "omt_topic" || cfg.ChatID != "oc_group" {
+		t.Fatalf("topic route snapshot lost thread isolation: delivery=%+v config=%+v", topicDelivery, cfg)
+	}
+}
+
 func TestFeishuSessionBinder_AppendUsesUnenrichedCommandBody(t *testing.T) {
 	f := &fakeChatSession{}
 	b := &feishuSessionBinder{session: f}
