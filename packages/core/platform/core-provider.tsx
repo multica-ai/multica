@@ -151,6 +151,8 @@ export function CoreProvider({
   resources,
   localeAdapter,
   syncUserLocale = true,
+  subscribeAppActivity,
+  onWorkspaceLost,
 }: CoreProviderProps) {
   // Initialize singletons on first render only. Dependencies are read-once:
   // apiBaseUrl, storage, and callbacks are set at app boot and never change at runtime.
@@ -184,12 +186,16 @@ export function CoreProvider({
     const renewal = sessionRenewal;
     if (!renewal) return;
     const unsubscribe = authStore.subscribe(() => renewal.maybeRenew());
-    const stopWatching = watchSessionActivity(renewal);
+    const stopWatching = subscribeAppActivity
+      ? subscribeAppActivity(() => renewal.maybeRenew())
+      : watchSessionActivity(renewal);
     renewal.maybeRenew();
     return () => {
       unsubscribe();
       stopWatching();
     };
+  // Read once, like the rest of the boot configuration above.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // I18nProvider wraps everything else: server and client must use the same
@@ -214,6 +220,8 @@ export function CoreProvider({
           storage={storage}
           cookieAuth={cookieAuth}
           identity={identity}
+          onWorkspaceLost={onWorkspaceLost}
+          subscribeAppActivity={subscribeAppActivity}
         >
           {children}
         </WSProvider>

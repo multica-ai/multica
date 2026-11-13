@@ -187,6 +187,7 @@
     "./feature-flags": "./feature-flags/index.ts",
     "./feature-flags/keys": "./feature-flags/keys.ts",
     "./platform": "./platform/index.ts",
+    "./platform/storage": "./platform/storage.ts",
     "./drafts": "./drafts/index.ts",
     "./drafts/*": "./drafts/*.ts",
     "./shortcuts": "./shortcuts/index.ts",
