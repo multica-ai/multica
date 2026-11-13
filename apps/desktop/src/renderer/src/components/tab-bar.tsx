@@ -163,13 +163,25 @@ function SortableTabItem({
   const { getShareableUrl } = useNavigation();
   const togglePin = useTabStore((s) => s.togglePin);
   const updateTab = useTabStore((s) => s.updateTab);
+  const rememberIssueIdentity = useTabStore((s) => s.rememberIssueIdentity);
+  const attentionSequence = useTabStore((s) =>
+    s.tabAttention?.tabId === tab.id ? s.tabAttention.sequence : 0,
+  );
+  const clearTabAttention = useTabStore((s) => s.clearTabAttention);
   const issueWindowPath = parseIssueWindowPath(tab.url);
 
   // The tab's leading visual and title are derived live from its URL and the
   // query cache — a resource's own icon/status/avatar and its real title,
   // updated as the cache updates. `tab.title` is only a persisted first-frame
   // fallback. See @multica/views useTabPresentation.
-  const { visual, title, titleResolved } = useTabPresentation(tab.url, tab.title, { fetch: true });
+  const { visual, title, titleResolved, issueIdentity } = useTabPresentation(tab.url, tab.title, { fetch: true });
+  const issueUuid = issueIdentity?.id;
+  const issueIdentifier = issueIdentity?.identifier;
+  useEffect(() => {
+    if (issueUuid && issueIdentifier) {
+      rememberIssueIdentity(tab.id, issueUuid, issueIdentifier);
+    }
+  }, [tab.id, issueUuid, issueIdentifier, rememberIssueIdentity]);
   const pinLabel = tab.pinned
     ? t(($) => $.desktop.tab_bar.unpin)
     : t(($) => $.desktop.tab_bar.pin);
@@ -414,6 +426,19 @@ function SortableTabItem({
             onAnimationComplete={() => setShowAddedHighlight(false)}
           />
         )}
+        {attentionSequence > 0 && (
+          // Keyed so each background open of this tab replays the flash.
+          <motion.span
+            key={attentionSequence}
+            aria-hidden
+            data-tab-attention
+            className="pointer-events-none absolute inset-x-0 inset-y-1.5 rounded-lg bg-brand/20 ring-2 ring-inset ring-brand/70"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: shouldReduceMotion ? [0.5, 0] : [0, 1, 0, 1, 0] }}
+            transition={{ duration: shouldReduceMotion ? 0.2 : 0.9, ease: "easeOut" }}
+            onAnimationComplete={() => clearTabAttention(attentionSequence)}
+          />
+        )}
       </motion.div>
     </div>
   );
@@ -589,6 +614,16 @@ export function TabBar() {
     tabLayoutKey,
     tabOrder,
   ]);
+
+  const tabAttention = useTabStore((s) => s.tabAttention);
+  useEffect(() => {
+    if (!tabAttention) return;
+    keepTabVisible(
+      tabScrollRef.current,
+      tabAttention.tabId,
+      shouldReduceMotion ? "auto" : "smooth",
+    );
+  }, [tabAttention, shouldReduceMotion]);
 
   useEffect(() => {
     const scroller = tabScrollRef.current;
