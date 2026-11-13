@@ -32,7 +32,8 @@ export function SignInView(props: SignInViewProps) {
   const palette = useTheme();
   const insets = useSafeAreaInsets();
   const isEmail = step === "email";
-  const valid = isEmail ? /\S+@\S+\.\S+/.test(email.trim()) : code.length === CODE_LENGTH;
+  // No dot required: self-hosted and local servers sign in addresses like dev@localhost.
+  const valid = isEmail ? /^[^\s@]+@[^\s@]+$/.test(email.trim()) : code.length === CODE_LENGTH;
 
   return (
     <Screen>
