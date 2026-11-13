@@ -118,6 +118,8 @@ Each team member who wants to run AI agents locally needs to:
 brew install multica-ai/tap/multica
 ```
 
+Amp and Factory Droid support was added on `main` after `v0.8.2` and is not available in that release.
+
 You also need at least one AI agent CLI installed:
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude` on PATH)
 - [Antigravity CLI](https://antigravity.google/docs/cli-install) (`agy` on PATH)
