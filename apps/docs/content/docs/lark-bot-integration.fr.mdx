@@ -76,6 +76,12 @@ Safari reste sur la page de connexion après une connexion réussie.
 
 La première ligne devient le titre et le reste la description. Envoyer `/issue` seul ne crée rien ; le bot répond alors en indiquant le format attendu.
 
+### Cartes interactives
+
+<Callout type="warning">
+Multica affiche les réponses de l'agent contenant du Markdown sous forme de cartes interactives Feishu, mais il ne traite pas aujourd'hui les actions de ces cartes. L'intégration Feishu en connexion longue ne gère que `im.message.receive_v1` ; les événements `card.action.trigger` sont acquittés puis ignorés, donc les boutons et formulaires d'une carte n'atteignent jamais l'agent. Utilisez une commande texte ou une automatisation externe. N'ouvrez pas un second client en connexion longue sur la même application Feishu : Feishu ne livre chaque événement qu'à l'une des connexions de l'application, donc ce second client peut silencieusement détourner une partie des événements `im.message.receive_v1` de Multica.
+</Callout>
+
 ## Images et fichiers produits par l’agent
 
 Lorsque l’envoi de pièces jointes est activé, le texte et les images prises en charge d’une réponse apparaissent dans un même message Feishu. Les images mettent ce message à jour une fois importées ; les fichiers arrivent séparément dans la même conversation. Une réponse composée uniquement d’images peut utiliser un message image. La limite est de 10 Mo par image ; les formats non pris en charge, les images plus grandes ou explicitement refusées sont envoyés comme fichiers, dans la limite de 30 Mo. Le stockage objet et l’autorisation d’importer des ressources de l’application sont nécessaires. En cas d’échec ou de livraison incertaine, les pièces jointes restent disponibles dans la réponse Multica. Vérifiez la conversation avant de demander un nouvel envoi.
