@@ -30,9 +30,10 @@ import { useWorkspaceId } from "@multica/core/hooks";
  * `onSwitchMode`; the shell stores it as the next panel's `data` so seeding
  * works exactly like a fresh open.
  *
- * Manual-mode `isExpanded` is lifted up because it drives `DialogContent`'s
- * className — the className lives here in the shell since the Popup is here,
- * but the toggle for that state lives in the manual panel body.
+ * `isExpanded` is lifted up because it drives `DialogContent`'s className —
+ * the className lives here in the shell since the Popup is here, but the
+ * toggle for that state lives in the panel bodies. It is persisted in the
+ * create-mode store, so the dialog reopens at the size it was last left at.
  */
 export function CreateIssueDialog({
   onClose,
@@ -122,7 +123,9 @@ function CreateIssueDialogBody({
   const [mode, setMode] = useState<CreateMode>(initialMode);
   const [manualOpened, setManualOpened] = useState(initialMode === "manual");
   const [panelData, setPanelData] = useState(data ?? null);
-  const [isExpanded, setIsExpanded] = useState(false);
+  // Remembered across opens: the dialog reopens at the size it was left at.
+  const isExpanded = useCreateModeStore((s) => s.expanded);
+  const setIsExpanded = useCreateModeStore((s) => s.setExpanded);
   const effectiveData = {
     ...(panelData ?? {}),
     ...sourceContextData,
