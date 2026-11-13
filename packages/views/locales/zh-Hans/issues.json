@@ -196,6 +196,7 @@
     "relation_subscribed": "我订阅的",
     "section_agent_status": "智能体状态",
     "agent_status_running": "运行中",
+    "agent_status_idle": "空闲",
     "section_read_state": "阅读状态",
     "read_state_unread": "未读",
     "operator_label": "关系",
@@ -315,6 +316,7 @@
     "card_project": "项目",
     "card_labels": "标签",
     "card_child_progress": "子任务进度",
+    "card_pull_requests": "Pull Request",
     "show_sub_issues": "显示子任务",
     "layout_options": "{{layout}}选项"
   },
@@ -386,6 +388,7 @@
       "created_at": "创建时间",
       "updated_at": "更新时间",
       "child_progress": "子任务进度",
+      "pull_requests": "Pull Request",
       "creator": "创建者"
     },
     "calculation": {
@@ -510,6 +513,7 @@
     "quick_action_blocked_body": "\"{{name}}\"由一个你无权触发的智能体执行。可以请工作区管理员把该智能体开放给团队，或把这条操作改绑一个共享的智能体。",
     "quick_action_blocked_ok": "知道了",
     "pull_requests_loading": "加载中...",
+    "pull_request_state_open": "Open",
     "pull_request_state_draft": "Draft",
     "pull_request_state_merged": "Merged",
     "pull_request_state_closed": "Closed",
@@ -547,6 +551,8 @@
     "unsubscribe": "取消订阅",
     "delegated_subscription_badge": "由智能体代你关注",
     "delegated_subscription_hint": "你的智能体代你创建了这个任务，因此你在关注它。待评审、完成或受阻时会通知你。",
+    "project_subscription_badge": "通过项目订阅",
+    "project_subscription_hint": "你订阅了这个项目的全部任务。在这里取消订阅只会停止这个任务的通知。",
     "unsubscribe_this": "取消订阅此任务",
     "unsubscribe_subtree": "取消订阅此任务及其子任务",
     "unsubscribe_subtree_failed": "取消订阅子任务失败，请重试。",
@@ -595,6 +601,7 @@
   },
   "activity": {
     "created": "创建了这个任务",
+    "created_on_behalf_of": "代表 {{name}} 创建了这个任务",
     "self_assigned": "把这个任务分配给了自己",
     "assigned_to": "分配给 {{name}}",
     "removed_assignee": "移除了负责人",
@@ -746,7 +753,10 @@
     "recipient_count_other": "{{count}} 个智能体会收到",
     "steer_attachment_notice": "插话只支持文字，带附件的消息会在本轮结束后处理。",
     "restart_send": "停止并发送",
-    "restart_failed": "没能停止当前运行，消息还没有发送。"
+    "restart_failed": "没能停止当前运行，消息还没有发送。",
+    "reply_action": "回复",
+    "actions_label": "评论操作",
+    "create_issue_from_selection": "用选中内容创建子任务"
   },
   "reply": {
     "recipients_changed": "回复目标已变化。请重新确认接收者后再发送。",
@@ -947,7 +957,10 @@
     "delete_failed": "删除任务失败",
     "delete_dialog_title_other": "删除 {{count}} 个任务？",
     "delete_dialog_desc_other": "此操作无法撤销，所选任务及其全部关联数据都会被永久删除。",
-    "cancel": "取消"
+    "cancel": "取消",
+    "copy_links": "复制链接",
+    "links_copied_other": "已复制 {{count}} 个链接",
+    "delete_count_other": "删除 {{count}} 个任务"
   },
   "card": {
     "update_failed": "更新任务失败",
@@ -984,12 +997,14 @@
     "stop_agent_run": "停止 {{name}} 的运行",
     "relations": "关系",
     "create_sub_issue": "创建子任务",
+    "quick_actions": "快捷操作",
     "set_parent_issue": "设置父任务...",
     "remove_parent_issue": "移除父任务",
     "remove_parent_issue_success": "已移除父任务",
     "add_sub_issue": "添加子任务...",
     "delete_issue": "删除任务",
-    "mark_duplicate": "标记为重复..."
+    "mark_duplicate": "标记为重复...",
+    "open_in_new_window": "在新窗口中打开"
   },
   "pickers": {
     "custom_property": {

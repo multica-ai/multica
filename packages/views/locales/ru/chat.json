@@ -159,6 +159,7 @@
     "restore_tooltip": "Восстановить",
     "expand_tooltip": "Развернуть",
     "minimize_tooltip": "Свернуть",
+    "close_tooltip": "Закрыть",
     "another_running": "Выполняется другой чат",
     "another_unread": "В другом чате есть непрочитанные ответы",
     "running": "Выполняется",

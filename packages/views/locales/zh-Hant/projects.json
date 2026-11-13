@@ -62,6 +62,10 @@
     "icon_tooltip": "更換圖示",
     "pin_tooltip": "固定到側邊欄",
     "unpin_tooltip": "從側邊欄取消固定",
+    "subscribe_action": "訂閱全部任務",
+    "unsubscribe_action": "取消訂閱專案",
+    "toast_subscribed": "已訂閱。此專案中任務的變更都會通知你。",
+    "toast_subscription_failed": "更新訂閱失敗",
     "sidebar_tooltip": "切換右側邊欄",
     "rename_action": "重新命名專案",
     "copy_link": "複製連結",
@@ -200,6 +204,7 @@
     }
   },
   "access": {
+    "agent_notice": "AI 代理的權限跟隨其擁有者。",
     "label": "存取權限",
     "title": "{{title}}的存取權限",
     "description": "控制誰能查看專案及其中的任務、評論和附件。",

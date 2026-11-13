@@ -1,4 +1,18 @@
-import { useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
+
+interface NativeForegroundAPI {
+  getWindowForeground: () => Promise<boolean>;
+  onWindowForegroundChanged: (callback: (foreground: boolean) => void) => () => void;
+}
+
+function nativeForegroundAPI(): NativeForegroundAPI | undefined {
+  if (typeof window === "undefined") return undefined;
+  const api = (window as unknown as { desktopAPI?: Partial<NativeForegroundAPI> }).desktopAPI;
+  if (typeof api?.getWindowForeground === "function" && typeof api.onWindowForegroundChanged === "function") {
+    return api as NativeForegroundAPI;
+  }
+  return undefined;
+}
 
 /**
  * Whether the app window is actually in front of the user right now: the
@@ -13,8 +27,10 @@ import { useSyncExternalStore } from "react";
  * consistent: while backgrounded the active session both counts toward the
  * badge and keeps its unread; on return the badge clears and mark-read fires.
  *
- * In the browser the value is always measured from the real DOM. The `true`
- * fallbacks below only apply where there is no window to measure — SSR and
+ * Desktop uses the native window signal because Electron's DOM focus can
+ * remain true after the application loses OS focus. Until the initial native
+ * query resolves, keep replies unread. In a browser the DOM is authoritative.
+ * The `true` fallbacks below only apply where there is no window — SSR and
  * other non-DOM contexts — which also have no live surface or WS traffic to act
  * on. `true` (foreground) is chosen there only so the SSR snapshot matches the
  * first client snapshot of a freshly opened, focused window and hydration
@@ -46,5 +62,21 @@ function getServerSnapshot(): boolean {
 }
 
 export function useAppForeground(): boolean {
-  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  const domForeground = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  const api = nativeForegroundAPI();
+  const [nativeForeground, setNativeForeground] = useState(false);
+  useEffect(() => {
+    if (!api) return;
+    let live = true;
+    let receivedEvent = false;
+    const unsubscribe = api.onWindowForegroundChanged((foreground) => {
+      receivedEvent = true;
+      setNativeForeground(foreground);
+    });
+    void api.getWindowForeground().then((foreground) => {
+      if (live && !receivedEvent) setNativeForeground(foreground);
+    }).catch(() => { /* Keep unread until native focus can be confirmed. */ });
+    return () => { live = false; unsubscribe(); };
+  }, [api]);
+  return api ? nativeForeground : domForeground;
 }

@@ -174,6 +174,7 @@ export function viewSidebarRequest(
         ...(advanced ? { advanced } : {}),
         ...(Object.keys(fields.propertyFilters).length > 0 ? { properties: fields.propertyFilters } : {}),
         ...(fields.agentRunningFilter ? { working_only: true } : {}),
+        ...(fields.agentIdleFilter ? { idle_only: true } : {}),
         ...(fields.unreadFilter ? { unread_issue_ids: [...unreadIssueIds].sort() } : {}),
         include_sub_issues: display.showSubIssues !== false,
       },

@@ -54,9 +54,9 @@ type AppConfig struct {
 	VCSIntegrationAvailable bool `json:"vcs_integration_available,omitempty"`
 
 	// ThemeStoreEnabled tells the app it can browse and install community
-	// themes through /api/theme-store. Self-hosted operators turn it off with
-	// MULTICA_THEME_STORE=off. Omitted when off, and older servers omit it
-	// too, so the app shows no Browse entry and makes no store requests.
+	// themes through /api/theme-store. Omitted when the store could not start
+	// (an invalid MULTICA_THEME_REGISTRY_URL), and older servers omit it too,
+	// so the app shows no Browse entry and makes no store requests.
 	ThemeStoreEnabled bool `json:"theme_store_enabled,omitempty"`
 
 	// PostHog public config for the frontend. The key is the same Project

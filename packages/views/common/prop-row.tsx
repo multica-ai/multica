@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { cn } from "@multica/ui/lib/utils";
 
 /**
  * Two-column property row used in detail-page sidebars: a muted label on the
@@ -32,16 +33,20 @@ export function PropRow({
   label,
   children,
   interactive = true,
+  className,
 }: {
   label: ReactNode;
   children: ReactNode;
   interactive?: boolean;
+  className?: string;
 }) {
   return (
     <div
-      className={`-mx-2 col-span-2 grid min-h-8 grid-cols-subgrid items-center rounded-md px-2 ${
-        interactive ? "transition-colors hover:bg-accent/50" : ""
-      }`}
+      className={cn(
+        "-mx-2 col-span-2 grid min-h-8 grid-cols-subgrid items-center rounded-md px-2",
+        interactive && "transition-colors hover:bg-accent/50",
+        className,
+      )}
     >
       <span className="flex min-w-0 items-center gap-1.5 text-label text-muted-foreground">
         {label}

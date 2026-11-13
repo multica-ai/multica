@@ -1,6 +1,9 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { Editor } from "@tiptap/core";
+import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ContextMenu, ContextMenuContent, ContextMenuItem } from "@multica/ui/components/ui/context-menu";
+import { contextMenuOriginRef } from "@multica/ui/lib/context-menu-origin";
 
 const formatState = vi.hoisted(() => ({ codeBlock: false }));
 
@@ -162,6 +165,61 @@ describe("EditorBubbleMenu accessibility", () => {
         screen.getByLabelText(name, { selector: "button" }),
       ).toBeInTheDocument();
     }
+  });
+
+  function showOver(editor: Editor) {
+    Object.defineProperty(editor, "isInitialized", { value: true });
+    document.body.appendChild(editor.view.dom).textContent = "selected text";
+    render(<EditorBubbleMenu editor={editor} />);
+    const handler = (event: string) =>
+      vi.mocked(editor.on).mock.calls.find(([name]) => name === event)?.[1] as () => void;
+    act(() => handler("transaction")());
+    return { blur: handler("blur") };
+  }
+
+  it("stays up while a context menu opened in the editor takes focus and runs an item", async () => {
+    const editor = createEditor();
+    const { blur } = showOver(editor);
+    const copy = vi.fn();
+    function EditMenu() {
+      const [open, setOpen] = useState(true);
+      return (
+        <ContextMenu open={open} onOpenChange={setOpen}>
+          <ContextMenuContent ref={contextMenuOriginRef(editor.view.dom)}>
+            <ContextMenuItem onClick={copy}>Copy</ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
+      );
+    }
+    render(<EditMenu />);
+
+    const menu = await screen.findByRole("menu");
+    await waitFor(() => expect(menu.contains(document.activeElement)).toBe(true));
+    await act(async () => {
+      blur();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    const item = screen.getByRole("menuitem", { name: "Copy" });
+    fireEvent.pointerDown(item, { button: 0 });
+    fireEvent.mouseDown(item, { button: 0 });
+    fireEvent.click(item);
+
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    expect(copy).toHaveBeenCalledTimes(1);
+    expect(screen.getByLabelText("Bold", { selector: "button" })).toBeVisible();
+    editor.view.dom.remove();
+  });
+
+  it("hides on a press outside the editor", () => {
+    const editor = createEditor();
+    showOver(editor);
+    const outside = document.body.appendChild(document.createElement("button"));
+
+    fireEvent.mouseDown(outside);
+
+    expect(screen.getByLabelText("Bold", { selector: "button" })).not.toBeVisible();
+    outside.remove();
+    editor.view.dom.remove();
   });
 
   it("gives every icon-only link editing control an accessible name", () => {

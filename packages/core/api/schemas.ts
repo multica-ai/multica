@@ -59,6 +59,7 @@ import type {
   GitHubConnectResponse,
   IssuePullRequestsResponse,
   IssueEnvironmentsResponse,
+  IssuePullRequestSummariesResponse,
   InboxItem,
   InboxWorkspaceUnread,
   IssueUnread,
@@ -378,6 +379,7 @@ export const EMPTY_LIST_GITHUB_INSTALLATIONS_RESPONSE: ListGitHubInstallationsRe
 };
 
 export const GitHubConnectResponseSchema = z.object({
+  connection_id: z.string().optional().catch(undefined),
   url: z.string().optional(),
   configured: z.boolean().optional().default(false),
 }).loose();
@@ -398,6 +400,7 @@ export const GitHubRepositorySchema = z.object({
 }).loose();
 
 export const ListGitHubRepositoriesResponseSchema = z.object({
+  repository_selection: z.enum(["all", "selected", "unknown"]).catch("unknown").optional(),
   repositories: z.array(GitHubRepositorySchema).default([]),
   total_count: z.number().optional().default(0),
   next_page: z.number().nullable().optional().default(null),
@@ -565,6 +568,28 @@ export const EMPTY_ISSUE_ENVIRONMENTS_RESPONSE: IssueEnvironmentsResponse = {
   configs: [],
   pending_starts: [],
   failed_starts: [],
+};
+
+// A malformed row is dropped rather than failing the whole workspace read, so
+// one bad link never blanks the PR chips on every card.
+const IssuePullRequestSummarySchema = z.object({
+  issue_id: z.string(),
+  id: z.string(),
+  provider: z.string().optional().default("github"),
+  repo_owner: z.string(),
+  repo_name: z.string(),
+  number: z.number(),
+  title: z.string().optional().default(""),
+  state: z.string(),
+  html_url: z.string(),
+}).loose();
+
+export const IssuePullRequestSummariesResponseSchema = z.object({
+  pull_requests: lenientArray(IssuePullRequestSummarySchema),
+}).loose();
+
+export const EMPTY_ISSUE_PULL_REQUEST_SUMMARIES_RESPONSE: IssuePullRequestSummariesResponse = {
+  pull_requests: [],
 };
 
 // Label responses are consumed by settings tables and resource pickers. Keep
@@ -1814,6 +1839,12 @@ export const ListProjectMembersResponseSchema = z.object({
   total: z.number(),
 }).loose();
 
+// The viewer's own project subscription (`/api/projects/:id/subscription`).
+// Anything but an explicit `true` reads as not subscribed.
+export const ProjectSubscriptionSchema = z.object({
+  subscribed: z.boolean().catch(false),
+}).loose();
+
 const SearchProjectResultSchema = ProjectSchema.extend({
   match_source: z.string(),
   matched_snippet: z.string().optional(),
@@ -2387,6 +2418,48 @@ export const TaskMessagePayloadSchema = z.object({
 }).loose();
 
 export const TaskMessageListSchema = z.array(TaskMessagePayloadSchema).default([]);
+
+// Context receipt (`GET /api/tasks/:id/context-receipt`, MUL-9013). Lenient:
+// unknown enum values pass through as strings, and a malformed row is dropped
+// rather than failing the whole receipt.
+const ContextReceiptSourceSchema = z.object({
+  kind: z.string(),
+  name: z.string().optional(),
+  bytes: z.number().catch(0),
+  sha256: z.string().optional(),
+  delivery: z.string().catch(""),
+  path: z.string().optional(),
+  load: z.string().catch("unverified"),
+  verified_version: z.string().optional(),
+  parent: z.string().optional(),
+}).loose();
+
+const ContextReceiptSchema = z.object({
+  schema_version: z.number().catch(1),
+  runtime: z.string().catch(""),
+  runtime_version: z.string().optional(),
+  model: z.string().optional(),
+  prompt_bytes: z.number().catch(0),
+  brief_bytes: z.number().catch(0),
+  brief_delivery: z.string().catch(""),
+  resumed_session: z.boolean().catch(false),
+  fresh_retry: z.boolean().optional().catch(undefined),
+  mcp_servers: z.array(z.string()).catch([]),
+  sources: z
+    .array(z.unknown())
+    .catch([])
+    .transform((rows) =>
+      rows.flatMap((row) => {
+        const parsed = ContextReceiptSourceSchema.safeParse(row);
+        return parsed.success ? [parsed.data] : [];
+      }),
+    ),
+}).loose();
+
+export const TaskContextReceiptResponseSchema = z.object({
+  receipt: ContextReceiptSchema.nullable().catch(null),
+  recorded_at: z.string().optional(),
+}).loose();
 
 // Task cancellation (`POST /api/tasks/:id/cancel`) is consumed directly by
 // chat recovery. Its optional message payload must be well-formed before the
@@ -3043,6 +3116,11 @@ export const IssueInboxReadSchema = z
   .object({
     count: z.number().int().nonnegative(),
   })
+  .loose();
+
+// Deletion returns the number of notifications removed from the selected view.
+export const InboxDeleteSchema = z
+  .object({ count: z.number().int().nonnegative() })
   .loose();
 
 // The viewer's subscribed issue ids (`/api/issues/subscribed` GET), behind the
@@ -3775,6 +3853,7 @@ export const WecomInstallationSchema = z.object({
   workspace_id: z.string().default(""),
   agent_id: z.string().default(""),
   bot_id: z.string().default(""),
+  bot_name: z.string().optional(),
   installer_user_id: z.string().default(""),
   status: z.string().default("revoked"),
 }).loose();

@@ -7,7 +7,6 @@ const i18n = createI18n("ru", RESOURCES);
 
 const countedMessages = [
   ["schedule interval", (count: number) => i18n.t(($) => $.plugins.schedule.frequency_minutes, { ns: "settings", count })],
-  ["workspace invitations", (count: number) => i18n.t(($) => $.batch.submit_join, { ns: "invite", count })],
   ["automation deletion", (count: number) => i18n.t(($) => $.actions.delete_dialog.description, { ns: "autopilots", count, name: "Example" })],
   ["skill deletion", (count: number) => i18n.t(($) => $.actions.delete_dialog_desc, { ns: "skills", count })],
   ["issue deletion", (count: number) => i18n.t(($) => $.batch.delete_dialog_desc, { ns: "issues", count })],

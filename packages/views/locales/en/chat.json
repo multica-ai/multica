@@ -149,6 +149,7 @@
     "restore_tooltip": "Restore",
     "expand_tooltip": "Expand",
     "minimize_tooltip": "Minimize",
+    "close_tooltip": "Close",
     "another_running": "Another chat is running",
     "another_unread": "Another chat has unread replies",
     "running": "Running",

@@ -5,13 +5,13 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@multica/ui/components/ui/sonner";
 import { cn } from "@multica/ui/lib/utils";
 import { WebProviders } from "@/components/web-providers";
-import { RESOURCES } from "@multica/views/locales";
 import { getRequestLocale } from "@/lib/request-locale";
 import { HTML_LANG } from "@/lib/html-lang";
 import { SITE_TITLE, TITLE_TEMPLATE } from "@/platform/document-title";
 import {
   resolveBrowserApiBaseUrl,
   resolveBrowserWsUrl,
+  resolveDevRemoteApiUrl,
 } from "@/config/runtime-urls";
 import { resolveGoogleAnalyticsId } from "@/config/google-analytics";
 import { GoogleAnalytics } from "@/components/google-analytics";
@@ -135,11 +135,19 @@ export default async function RootLayout({
   children: React.ReactNode;
 }) {
   const locale = await getRequestLocale();
-  const resources = { [locale]: RESOURCES[locale] };
   const apiBaseUrl = resolveBrowserApiBaseUrl(process.env);
   const wsUrl = resolveBrowserWsUrl(process.env);
   // Opt-in Google Analytics: omitted entirely unless GOOGLE_ANALYTICS_ID is set.
   const googleAnalyticsId = resolveGoogleAnalyticsId(process.env);
+  // Dev toolbar: a status bar pinned to the bottom of the window. Opt-in per
+  // developer with VITE_DEV_TOOLBAR=1, the same convention and var prefix as
+  // react-grab below, so one variable enables it on web and desktop. Without
+  // an explicit API URL the browser goes through the dev proxy, so the
+  // toolbar reports the proxy's upstream.
+  const devToolbarApiUrl =
+    process.env.NODE_ENV === "development" && process.env.VITE_DEV_TOOLBAR
+      ? apiBaseUrl || resolveDevRemoteApiUrl(process.env)
+      : undefined;
 
   return (
     <html
@@ -169,9 +177,9 @@ export default async function RootLayout({
         <ThemeProvider>
           <WebProviders
             locale={locale}
-            resources={resources}
             apiBaseUrl={apiBaseUrl}
             wsUrl={wsUrl}
+            devToolbarApiUrl={devToolbarApiUrl}
           >
             {children}
           </WebProviders>

@@ -60,6 +60,10 @@
     "icon_tooltip": "Cambiar icono",
     "pin_tooltip": "Fijar en la barra lateral",
     "unpin_tooltip": "Dejar de fijar de la barra lateral",
+    "subscribe_action": "Suscribirse a todas las tareas",
+    "unsubscribe_action": "Cancelar suscripción al proyecto",
+    "toast_subscribed": "Suscrito. Recibirás avisos de cada tarea de este proyecto.",
+    "toast_subscription_failed": "No se pudo actualizar la suscripción",
     "sidebar_tooltip": "Mostrar u ocultar la barra lateral derecha",
     "rename_action": "Renombrar proyecto",
     "copy_link": "Copiar enlace",
@@ -200,6 +204,7 @@
     }
   },
   "access": {
+    "agent_notice": "Los agentes tienen el mismo acceso que su propietario.",
     "label": "Acceso",
     "title": "Acceso a {{title}}",
     "description": "Define quién puede ver este proyecto, sus tareas, comentarios y archivos adjuntos.",

@@ -62,6 +62,10 @@
     "icon_tooltip": "Changer d'icône",
     "pin_tooltip": "Épingler à la barre latérale",
     "unpin_tooltip": "Détacher de la barre latérale",
+    "subscribe_action": "S'abonner à toutes les tâches",
+    "unsubscribe_action": "Se désabonner du projet",
+    "toast_subscribed": "Abonné. Vous serez notifié de chaque tâche de ce projet.",
+    "toast_subscription_failed": "Échec de la mise à jour de l'abonnement",
     "sidebar_tooltip": "Afficher ou masquer la barre latérale droite",
     "rename_action": "Renommer le projet",
     "copy_link": "Copier le lien",
@@ -200,6 +204,7 @@
     }
   },
   "access": {
+    "agent_notice": "Les agents suivent les droits d’accès de leur propriétaire.",
     "label": "Accès",
     "title": "Accès à {{title}}",
     "description": "Définit qui peut voir ce projet, ses tâches, commentaires et pièces jointes.",

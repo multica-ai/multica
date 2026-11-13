@@ -58,22 +58,32 @@ other_component() {
 # An atomic mkdir, as in dev-env.sh: flock is not on a stock macOS. A lock
 # whose holder is gone is taken over, so a killed stop cannot wedge the next.
 acquire_lock() {
-  local holder waited=0
+  local holder marker waited=0
   mkdir -p "$STATE_DIR"
   while ! mkdir "$LOCK_DIR" 2>/dev/null; do
-    holder="$(cat "$LOCK_DIR/pid" 2>/dev/null || true)"
-    if [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; then
-      rm -rf "$LOCK_DIR"
-      continue
-    fi
+    # Removing a PID-specific marker is the reaper's atomic claim. Only
+    # its winner may rmdir the old lock; another stale observer cannot
+    # remove a new holder's marker (or its directory).
+    for marker in "$LOCK_DIR"/owner-* "$LOCK_DIR/pid"; do
+      [ -f "$marker" ] || continue
+      case "$marker" in
+        */pid) holder="$(cat "$marker" 2>/dev/null || true)" ;;
+        *) holder="${marker##*/owner-}" ;;
+      esac
+      if [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null && rm "$marker" 2>/dev/null; then
+        rmdir "$LOCK_DIR" 2>/dev/null || true
+      fi
+    done
     waited=$((waited + 1))
     [ "$waited" -lt 3000 ] || { echo "Timed out waiting for $LOCK_DIR." >&2; exit 1; }
     sleep 0.1
   done
-  printf '%s\n' "$$" > "$LOCK_DIR/pid"
+  : > "$LOCK_DIR/owner-$$"
 }
 
-release_lock() { rm -rf "$LOCK_DIR"; }
+release_lock() {
+  rm "$LOCK_DIR/owner-$$" && rmdir "$LOCK_DIR"
+}
 
 claim_file() { printf '%s/%s.claim' "$STATE_DIR" "$1"; }
 

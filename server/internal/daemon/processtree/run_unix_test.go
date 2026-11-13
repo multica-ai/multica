@@ -26,7 +26,10 @@ func TestCombinedOutputKillsDescendantsHoldingOutput(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 	started := time.Now()
-	_, err := CombinedOutput(ctx, exec.Command(script, marker), 250*time.Millisecond)
+	// Exec'ing the freshly written script directly fails with ETXTBSY when a
+	// parallel test forks while the write descriptor is open (golang/go#22315);
+	// sh only reads it.
+	_, err := CombinedOutput(ctx, exec.Command("/bin/sh", script, marker), 250*time.Millisecond)
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("CombinedOutput error = %v, want deadline exceeded", err)
 	}
@@ -37,5 +40,17 @@ func TestCombinedOutputKillsDescendantsHoldingOutput(t *testing.T) {
 	time.Sleep(600 * time.Millisecond)
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
 		t.Fatalf("descendant survived process-tree cancellation, stat error = %v", err)
+	}
+}
+
+func TestCombinedOutputSucceedsWhileExitedDescendantsDrain(t *testing.T) {
+	t.Parallel()
+
+	// On darwin the group lingers with only exiting members for a few hundred
+	// microseconds; only a few runs per thousand signal it inside that window.
+	for i := 0; i < 1000; i++ {
+		if _, err := CombinedOutput(context.Background(), exec.Command("sh", "-c", "true & exit 0"), time.Second); err != nil {
+			t.Fatalf("run %d: CombinedOutput error = %v, want nil", i, err)
+		}
 	}
 }

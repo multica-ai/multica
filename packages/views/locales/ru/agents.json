@@ -322,13 +322,8 @@
     "duplicate_title": "Дублировать {{name}}",
     "step_ai": "Создание через диалог",
     "modes": {
-      "template": {
-        "title": "Использовать шаблон",
-        "description": "Начните с готовых инструкций и навыков, а затем подстройте каждую деталь под своё рабочее пространство."
-      },
       "ai": {
-        "title": "Создать с помощью ИИ",
-        "description": "Создайте редактируемую конфигурацию в диалоге."
+        "title": "Создать с помощью ИИ"
       }
     },
     "sections": {
@@ -356,10 +351,6 @@
       }
     },
     "builder": {
-      "setup_title": "Выберите среду выполнения для Agent Builder",
-      "setup_description": "Выбранная онлайн-среда выполнения обеспечивает диалог настройки и по умолчанию становится средой выполнения нового агента.",
-      "start": "Начать диалог",
-      "connect_runtime": "Подключить среду выполнения",
       "draft_parse_failed": "Не удалось заполнить форму из этого ответа. Попросите помощника создать черновик заново или заполните форму вручную.",
       "start_failed": "Не удалось запустить Agent Builder.",
       "send_failed": "Не удалось отправить сообщение.",
@@ -590,6 +581,7 @@
       "bulk_placeholder": "API_KEY=значение\nBASE_URL=https://example.com",
       "bulk_plaintext_notice": "При массовом редактировании значения показываются открытым текстом.",
       "bulk_unsupported_toast": "«{{key}}» нельзя показать как текст — отредактируйте как строку",
+      "bulk_invalid_key_toast": "Массовое редактирование поддерживает только имена вида API_KEY — отредактируйте «{{key}}» как строку",
       "parse_error_malformed": "Строка {{line}} не является присвоением вида KEY=value",
       "parse_error_duplicate": "Повторяющийся ключ «{{key}}» в строке {{line}}",
       "paste_invalid_toast": "Не удалось разобрать вставленные переменные окружения",
@@ -798,7 +790,7 @@
       "add_dialog_confirm_many": "Добавить навыков: {{count}}"
     },
     "integrations": {
-      "members_note": "Управлять этим подключением могут только владельцы и администраторы рабочего пространства. Просмотреть подключённых ботов можно в настройках → Интеграции."
+      "members_note": "Просматривайте каналы сообщений и управляйте ими на странице агента."
     },
     "activity": {
       "status": {
@@ -1032,7 +1024,42 @@
     "group_calls_few": "Вызовов: {{count}}",
     "group_calls_many": "Вызовов: {{count}}",
     "steps_count_few": "Шагов: {{count}}",
-    "steps_count_many": "Шагов: {{count}}"
+    "steps_count_many": "Шагов: {{count}}",
+    "context_receipt_title": "Полученный контекст",
+    "context_receipt_summary_one": "{{count}} источник · {{size}}",
+    "context_receipt_summary_few": "{{count}} источника · {{size}}",
+    "context_receipt_summary_many": "{{count}} источников · {{size}}",
+    "context_receipt_summary_other": "{{count}} источника · {{size}}",
+    "context_receipt_model": "Модель",
+    "context_receipt_session": "Сессия",
+    "context_receipt_session_resumed": "Продолжена прежняя сессия (её история тоже в контексте)",
+    "context_receipt_session_new": "Новая сессия",
+    "context_receipt_session_fresh_retry": "Новая сессия после отказа в продолжении",
+    "context_receipt_mcp": "MCP-серверы",
+    "context_receipt_mcp_none": "Нет",
+    "context_receipt_warning": "{{source}}: {{status}}",
+    "context_receipt_col_source": "Источник",
+    "context_receipt_col_size": "Размер",
+    "context_receipt_col_delivery": "Способ передачи",
+    "context_receipt_col_load": "Загрузка",
+    "context_receipt_same_as_brief": "Как у инструкций запуска",
+    "context_receipt_footnote": "Записано daemon до запуска агента. Только размеры и короткие хеши, содержимое не сохраняется. «Проверено» значит, что эта версия среды выполнения проверена и загружает файл. Размеры и хеши навыков охватывают весь записанный пакет.",
+    "context_source_runtime_brief": "Инструкции запуска",
+    "context_source_agent_instructions": "Инструкции агента",
+    "context_source_project_description": "Описание проекта",
+    "context_source_existing_instructions": "Инструкции репозитория",
+    "context_source_task_prompt": "Промпт хода",
+    "context_source_skill": "Навык: {{name}}",
+    "context_delivery_file": "Файл",
+    "context_delivery_inline": "Системный промпт",
+    "context_delivery_prompt": "Ввод хода",
+    "context_delivery_embedded": "Внутри инструкций запуска",
+    "context_delivery_none": "Нет канала",
+    "context_load_delivered": "Передано",
+    "context_load_verified": "Проверено",
+    "context_load_verified_other_version": "Проверено только на {{version}}",
+    "context_load_unverified": "Не проверено",
+    "context_load_not_delivered": "Не передано"
   },
   "task_failure": {
     "cancelled_by_system": "Отменено системой",

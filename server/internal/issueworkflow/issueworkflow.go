@@ -139,17 +139,6 @@ func keysOf(steps []Step) []string {
 	return keys
 }
 
-// MiddleKeys returns the workflow's own steps, without the fixed statuses.
-func MiddleKeys(keys []string) []string {
-	out := make([]string, 0, len(keys))
-	for _, key := range keys {
-		if !IsFixed(key) {
-			out = append(out, key)
-		}
-	}
-	return out
-}
-
 // BuiltInDefaultKeys is Default before a workspace stores its own.
 func BuiltInDefaultKeys() []string {
 	return ArrangeKeys([]string{issuestatus.Backlog, issuestatus.InProgress, issuestatus.InReview, issuestatus.Blocked})

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Tag, Plus, Settings2 } from "@multica/ui/icons";
 import { toast } from "sonner";
@@ -10,11 +10,15 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import {
   labelListOptions,
   issueLabelsOptions,
+  resourceLabelsOptions,
   useAttachLabel,
   useDetachLabel,
+  useAttachResourceLabel,
+  useDetachResourceLabel,
   useCreateLabel,
 } from "@multica/core/labels";
 import { LabelChip } from "../../../labels/label-chip";
+import type { LabelScope } from "../../../labels/label-manager";
 import { useNavigation } from "../../../navigation";
 import {
   PropertyPicker,
@@ -31,9 +35,14 @@ interface LabelPickerProps {
    * issue once it's created.
    */
   issueId?: string;
-  /** Draft-mode selection. Ignored when `issueId` is set. */
+  /**
+   * The skill whose labels are edited. Switches the picker to the skill label
+   * catalog; skill labels never draft, so this always runs in attached mode.
+   */
+  skillId?: string;
+  /** Draft-mode selection. Ignored when `issueId` or `skillId` is set. */
   selectedIds?: string[];
-  /** Draft-mode change handler. Ignored when `issueId` is set. */
+  /** Draft-mode change handler. Ignored when `issueId` or `skillId` is set. */
   onSelectedIdsChange?: (ids: string[]) => void;
   /** Optional controlled open state (for tests / cmd+k integration). */
   open?: boolean;
@@ -74,8 +83,8 @@ function pickInlineColor(name: string): string {
  * on the trigger and lets the user toggle any label in the workspace.
  *
  * Two modes:
- * - **Attached mode** (`issueId` set): attach/detach hit the server
- *   optimistically — the UI updates before the server confirms.
+ * - **Attached mode** (`issueId` or `skillId` set): attach/detach hit the
+ *   server right away; issue attaches update optimistically.
  * - **Draft mode** (`issueId` omitted): selection is held by the caller via
  *   `selectedIds` / `onSelectedIdsChange`; nothing is persisted until the
  *   caller attaches the labels itself. Used by the create-issue dialog.
@@ -86,11 +95,12 @@ function pickInlineColor(name: string): string {
  * label is a real workspace label in both modes; only the attach step differs.
  *
  * A "Manage labels" item at the bottom opens the workspace Labels settings
- * page, which is the single management surface for issue, agent, and skill
- * label catalogs.
+ * page on the picker's catalog — the single management surface for issue and
+ * skill labels.
  */
 export function LabelPicker({
   issueId,
+  skillId,
   selectedIds = [],
   onSelectedIdsChange,
   open: controlledOpen,
@@ -115,20 +125,37 @@ export function LabelPicker({
   // for an error the user didn't cause. A ref closes the window cleanly.
   const creatingRef = useRef(false);
 
+  // A create request may finish after the user edits the controlled draft
+  // selection. Read the latest committed props when that response arrives.
+  const draftSelectionRef = useRef({ selectedIds, onSelectedIdsChange });
+  useLayoutEffect(() => {
+    draftSelectionRef.current = { selectedIds, onSelectedIdsChange };
+  }, [selectedIds, onSelectedIdsChange]);
+
+  const resourceType: LabelScope = skillId !== undefined ? "skill" : "issue";
   // Draft mode when no issue exists yet: hold selection in the caller instead
   // of hitting the attach/detach endpoints.
-  const isDraft = issueId === undefined;
+  const isDraft = issueId === undefined && skillId === undefined;
 
   const wsId = useWorkspaceId();
-  const { data: allLabels = [] } = useQuery(labelListOptions(wsId));
-  // `issueLabelsOptions` disables itself for an empty id, so the draft path
-  // never fires the by-issue read.
-  const { data: attachedLabels = [] } = useQuery(issueLabelsOptions(wsId, issueId ?? ""));
+  const { data: allLabels = [] } = useQuery(labelListOptions(wsId, resourceType));
+  // Both by-resource reads disable themselves for an empty id, so only the
+  // one matching this picker's resource ever fires.
+  const { data: issueLabels = [] } = useQuery(issueLabelsOptions(wsId, issueId ?? ""));
+  const { data: skillLabels = [] } = useQuery(
+    resourceLabelsOptions(wsId, "skill", skillId ?? ""),
+  );
+  const attachedLabels = resourceType === "skill" ? skillLabels : issueLabels;
 
-  // Hooks must run unconditionally; in draft mode the empty id is never used
-  // because toggle/create route through onSelectedIdsChange instead.
-  const attach = useAttachLabel(issueId ?? "");
-  const detach = useDetachLabel(issueId ?? "");
+  // Hooks must run unconditionally; an empty id is never used because the
+  // mutation is picked by resource type, and draft mode routes toggle/create
+  // through onSelectedIdsChange instead.
+  const attachIssue = useAttachLabel(issueId ?? "");
+  const detachIssue = useDetachLabel(issueId ?? "");
+  const attachSkill = useAttachResourceLabel("skill", skillId ?? "");
+  const detachSkill = useDetachResourceLabel("skill", skillId ?? "");
+  const attach = resourceType === "skill" ? attachSkill : attachIssue;
+  const detach = resourceType === "skill" ? detachSkill : detachIssue;
   const create = useCreateLabel();
 
   // The selected set drives both the trigger chips and the list checkmarks.
@@ -179,11 +206,14 @@ export function LabelPicker({
     creatingRef.current = true;
     const name = query;
     create.mutate(
-      { name, color: pickInlineColor(name) },
+      { name, color: pickInlineColor(name), resource_type: resourceType },
       {
         onSuccess: (label) => {
           if (isDraft) {
-            onSelectedIdsChange?.([...selectedIds, label.id]);
+            const latest = draftSelectionRef.current;
+            if (!latest.selectedIds.includes(label.id)) {
+              latest.onSelectedIdsChange?.([...latest.selectedIds, label.id]);
+            }
           } else {
             attach.mutate(label.id);
           }
@@ -201,7 +231,9 @@ export function LabelPicker({
 
   const openManage = () => {
     setOpen(false);
-    navigation.push(`${paths.settings()}?tab=labels`);
+    navigation.push(
+      `${paths.settings()}?tab=labels${resourceType === "skill" ? "&scope=skill" : ""}`,
+    );
   };
 
   const hasLabels = selectedLabels.length > 0;

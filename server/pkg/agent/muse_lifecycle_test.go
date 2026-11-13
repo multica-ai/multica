@@ -5,7 +5,6 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
 )
 
 func rewriteFakeMuseServe(t *testing.T, path, old, replacement string) {
@@ -26,7 +25,7 @@ func TestMuseHostExitAfterTurnStart(t *testing.T) {
 	t.Parallel()
 	bin, _, _ := writeFakeMuseServe(t, false)
 	rewriteFakeMuseServe(t, bin, "      sleep 0.02", "      exit 17")
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testFallbackTimeout)
 	defer cancel()
 	session, err := newFakeMuseBackend(t, bin).Execute(ctx, "work", ExecOptions{Cwd: t.TempDir()})
 	if err != nil {
@@ -45,7 +44,7 @@ func TestMuseTerminalSurvivesSessionCloseAndEOF(t *testing.T) {
       printf '{"jsonrpc":"2.0","method":"session/closed","params":{}}\n'
       exit 0
       #`)
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testFallbackTimeout)
 	defer cancel()
 	session, err := newFakeMuseBackend(t, bin).Execute(ctx, "work", ExecOptions{Cwd: t.TempDir()})
 	if err != nil {
@@ -69,7 +68,7 @@ func TestMuseResumeAppliesSelectedModel(t *testing.T) {
 			if reject {
 				rewriteFakeMuseServe(t, bin, `"result":{"sessionId":"`+fakeMuseSessionID+`","modelId":"new-model"}`, `"error":{"code":-32602,"message":"model unavailable"}`)
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), testFallbackTimeout)
 			defer cancel()
 			session, err := newFakeMuseBackend(t, bin).Execute(ctx, "continue", ExecOptions{
 				Cwd: t.TempDir(), ResumeSessionID: fakeMuseSessionID, Model: "new-model",

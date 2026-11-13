@@ -12,6 +12,7 @@ const NOTIFICATION_GROUPS = [
   "comments",
   "mentions",
   "updates",
+  "new_issues",
   "agent_activity",
 ] as const;
 
@@ -180,6 +181,11 @@ export function useSettingsSearchIndex(
         title: t(($) => $.notifications.groups[group].label),
         description: t(($) => $.notifications.groups[group].description),
       })),
+      {
+        tab: "notifications",
+        anchor: "chat_replies",
+        title: t(($) => $.notifications.groups.chat_replies.label),
+      },
       {
         tab: "notifications",
         anchor: "system",

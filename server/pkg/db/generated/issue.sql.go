@@ -531,6 +531,9 @@ cleared_environment_commands AS (
 ),
 cleared_environment_configs AS (
     DELETE FROM issue_environment_config WHERE issue_id IN (SELECT target.id FROM target)
+),
+cleared_task_context_receipts AS (
+    DELETE FROM task_context_receipt WHERE issue_id IN (SELECT target.id FROM target)
 )
 DELETE FROM issue WHERE issue.id IN (SELECT target.id FROM target)
 `
@@ -556,6 +559,8 @@ type DeleteIssueParams struct {
 // when a caller passes a foreign issue_id with its own workspace_id (the issue
 // itself is correctly untouched, but the links are already gone) — the exact
 // cross-tenant leak the #1661 guard above exists to prevent.
+// task_context_receipt has no FK; the issue's tasks go by the legacy cascade,
+// so their receipts are swept here by the issue_id copied onto each row.
 func (q *Queries) DeleteIssue(ctx context.Context, arg DeleteIssueParams) error {
 	_, err := q.db.Exec(ctx, deleteIssue, arg.ID, arg.WorkspaceID)
 	return err
@@ -1371,7 +1376,7 @@ func (q *Queries) ListIssueGCStatuses(ctx context.Context, arg ListIssueGCStatus
 }
 
 const listIssueRefsInWorkspace = `-- name: ListIssueRefsInWorkspace :many
-SELECT id, number, title, status FROM issue
+SELECT id, number, title, status, project_id FROM issue
 WHERE workspace_id = $1
   AND id = ANY($2::uuid[])
 `
@@ -1382,10 +1387,11 @@ type ListIssueRefsInWorkspaceParams struct {
 }
 
 type ListIssueRefsInWorkspaceRow struct {
-	ID     pgtype.UUID `json:"id"`
-	Number int32       `json:"number"`
-	Title  string      `json:"title"`
-	Status string      `json:"status"`
+	ID        pgtype.UUID `json:"id"`
+	Number    int32       `json:"number"`
+	Title     string      `json:"title"`
+	Status    string      `json:"status"`
+	ProjectID pgtype.UUID `json:"project_id"`
 }
 
 // GetIssueRefInWorkspace for a page: every original the page's duplicates
@@ -1404,6 +1410,7 @@ func (q *Queries) ListIssueRefsInWorkspace(ctx context.Context, arg ListIssueRef
 			&i.Number,
 			&i.Title,
 			&i.Status,
+			&i.ProjectID,
 		); err != nil {
 			return nil, err
 		}

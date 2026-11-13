@@ -3,7 +3,7 @@
 import { composeAnnotatedReply, EMPTY_REPLY_ANNOTATIONS, hasReplyIntent } from "@multica/core/drafts/reply-annotation";
 import { annotationsWithPending, type AnnotationComposerSlot } from "./annotation-composer";
 import { ReplyAnnotations } from "./reply-annotations";
-import { useRef, useState, useEffect, useMemo } from "react";
+import { useRef, useState, useEffect, useImperativeHandle, useMemo, type Ref } from "react";
 import { toast } from "sonner";
 import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor, useUploadGate, useComposerSubmit } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
@@ -27,7 +27,13 @@ import { useQuickActionMenu } from "../hooks/use-quick-action-menu";
 
 // Types
 
+/** Lets the thread around the box move the caret into it, e.g. from a menu. */
+interface ReplyInputHandle {
+  focus: () => void;
+}
+
 interface ReplyInputProps {
+  handleRef?: Ref<ReplyInputHandle>;
   issueId: string;
   parentId: string;
   placeholder?: string;
@@ -56,6 +62,7 @@ const NEVER_STEER_BY_DEFAULT = () => false;
 // ReplyInput
 
 function ReplyInput({
+  handleRef,
   issueId,
   parentId,
   placeholder,
@@ -133,6 +140,7 @@ function ReplyInput({
       (draftKey ? useCommentDraftStore.getState().getUploads(draftKey).length > 0 : false),
     editorRef,
   });
+  useImperativeHandle(handleRef, () => ({ focus: () => lazy.activate() }), [lazy]);
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: lazy.uploadOrQueue,
   });
@@ -380,4 +388,4 @@ function ReplyInput({
   </>);
 }
 
-export { ReplyInput, type ReplyInputProps };
+export { ReplyInput, type ReplyInputHandle, type ReplyInputProps };

@@ -62,6 +62,10 @@
     "icon_tooltip": "Change icon",
     "pin_tooltip": "Pin to sidebar",
     "unpin_tooltip": "Unpin from sidebar",
+    "subscribe_action": "Subscribe to all issues",
+    "unsubscribe_action": "Unsubscribe from project",
+    "toast_subscribed": "Subscribed. You'll be notified about every issue in this project.",
+    "toast_subscription_failed": "Failed to update subscription",
     "sidebar_tooltip": "Toggle right sidebar",
     "rename_action": "Rename project",
     "copy_link": "Copy link",
@@ -200,6 +204,7 @@
     }
   },
   "access": {
+    "agent_notice": "Agents follow their owner's access.",
     "label": "Access",
     "title": "Access to {{title}}",
     "description": "Controls who can see this project and its issues, comments, and attachments.",

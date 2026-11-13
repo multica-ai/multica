@@ -8,7 +8,10 @@ import {
 } from "react";
 import { motion } from "motion/react";
 import { useReducedMotion } from "@multica/core/appearance";
-import { X, Plus, Pin, PinOff, ListX, AppWindow } from "@multica/ui/icons";
+import { toast } from "sonner";
+import { X, Plus, Pin, PinOff, ListX, ListEnd, AppWindow, Link2 } from "@multica/ui/icons";
+import { copyText } from "@multica/ui/lib/clipboard";
+import { useNavigation } from "@multica/views/navigation";
 import {
   DndContext,
   PointerSensor,
@@ -135,6 +138,7 @@ function SortableTabItem({
   isActive,
   isOnly,
   canCloseOthers,
+  canCloseRight,
   isNew,
   shouldReduceMotion,
 }: {
@@ -147,6 +151,7 @@ function SortableTabItem({
    */
   isOnly: boolean;
   canCloseOthers: boolean;
+  canCloseRight: boolean;
   isNew: boolean;
   shouldReduceMotion: boolean;
 }) {
@@ -154,6 +159,8 @@ function SortableTabItem({
   const setActiveTab = useTabStore((s) => s.setActiveTab);
   const closeTab = useTabStore((s) => s.closeTab);
   const closeOtherTabs = useTabStore((s) => s.closeOtherTabs);
+  const closeTabsToRight = useTabStore((s) => s.closeTabsToRight);
+  const { getShareableUrl } = useNavigation();
   const togglePin = useTabStore((s) => s.togglePin);
   const updateTab = useTabStore((s) => s.updateTab);
   const issueWindowPath = parseIssueWindowPath(tab.url);
@@ -220,6 +227,12 @@ function SortableTabItem({
 
   const stopDragOnAction = (e: React.PointerEvent) => {
     e.stopPropagation();
+  };
+
+  const handleCopyLink = () => {
+    void copyText(getShareableUrl(tab.url)).then((ok) => {
+      if (ok) toast.success(t(($) => $.desktop.tab_bar.link_copied));
+    });
   };
 
   const handleOpenAsWindow = () => {
@@ -360,6 +373,10 @@ function SortableTabItem({
                 </>
               )}
             </ContextMenuItem>
+            <ContextMenuItem onClick={handleCopyLink}>
+              <Link2 />
+              {t(($) => $.desktop.tab_bar.copy_link)}
+            </ContextMenuItem>
             <ContextMenuSeparator />
             <ContextMenuItem
               variant="destructive"
@@ -376,6 +393,14 @@ function SortableTabItem({
             >
               <ListX />
               {closeOthersLabel}
+            </ContextMenuItem>
+            <ContextMenuItem
+              variant="destructive"
+              disabled={!canCloseRight}
+              onClick={() => closeTabsToRight(tab.id)}
+            >
+              <ListEnd />
+              {t(($) => $.desktop.tab_bar.close_right)}
             </ContextMenuItem>
           </ContextMenuContent>
         </ContextMenu>
@@ -503,7 +528,12 @@ export function TabBar() {
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
-      activationConstraint: { distance: 5 },
+      // `tolerance` cancels a press whose first move already lands far away,
+      // so it stays a click. In macOS native full screen on a secondary
+      // display, Electron sends exactly such a move right after a press near
+      // the top of the window (electron/electron#55100); started as a drag,
+      // it would swallow the tab click.
+      activationConstraint: { distance: 5, tolerance: 100 },
     }),
   );
 
@@ -607,6 +637,9 @@ export function TabBar() {
                     isOnly={tabs.length === 1}
                     canCloseOthers={tabs.some(
                       (candidate) => candidate.id !== tab.id && !candidate.pinned,
+                    )}
+                    canCloseRight={tabs.some(
+                      (candidate, i) => i > index && !candidate.pinned,
                     )}
                     isNew={addedTabIdSet.has(tab.id)}
                     shouldReduceMotion={shouldReduceMotion}
