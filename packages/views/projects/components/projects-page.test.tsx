@@ -325,6 +325,28 @@ describe("ProjectsPage deletion permissions", () => {
   });
 });
 
+describe("ProjectsPage rename", () => {
+  // The row menu is shared by the table's ⋯ button, its right-click menu and
+  // the cards, so one assertion per view mode covers every list entry point.
+  it.each(["compact", "comfortable"])(
+    "opens the rename dialog with the current name from the %s row menu",
+    async (mode) => {
+      mocks.projectViewState.viewMode = mode;
+      const user = userEvent.setup();
+      const push = vi.fn();
+      renderProjects(makeAdapter({ push }));
+
+      await user.click(screen.getByRole("button", { name: "Rename" }));
+
+      expect(mocks.openModal).toHaveBeenCalledWith("project-rename", {
+        projectId: "project-1",
+        title: "Launch Plan",
+      });
+      expect(push).not.toHaveBeenCalled();
+    },
+  );
+});
+
 describe("ProjectsPage compact row navigation", () => {
   it("renders the project name as text, not a title link", () => {
     renderProjects();

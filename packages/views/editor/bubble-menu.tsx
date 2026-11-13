@@ -37,6 +37,7 @@ import { useCreateIssue } from "@multica/core/issues/mutations";
 import { useT } from "../i18n";
 import { createShortcutChord, type ShortcutChord } from "@multica/core/shortcuts";
 import { ShortcutKeycaps } from "../common/shortcut-keycaps";
+import { contextMenuOrigin } from "@multica/ui/lib/context-menu-origin";
 import { Toggle, toggleVariants } from "@multica/ui/components/ui/toggle";
 import { Separator } from "@multica/ui/components/ui/separator";
 import {
@@ -547,8 +548,9 @@ function EditorBubbleMenu({
       setTimeout(() => {
         if (editor.isDestroyed) return;
         const el = floatingRef.current;
-        if (el && el.contains(document.activeElement)) return;
-        if (editor.view.hasFocus()) return;
+        const active = contextMenuOrigin(document.activeElement);
+        if (el && el.contains(active)) return;
+        if (editor.view.hasFocus() || editor.view.dom.contains(active)) return;
         setVisible(false);
       }, 0);
     };
@@ -585,7 +587,7 @@ function EditorBubbleMenu({
   useEffect(() => {
     if (!visible) return;
     const handle = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
+      const target = contextMenuOrigin(e.target) as HTMLElement;
       if (editor.view.dom.contains(target)) return;
       if (floatingRef.current?.contains(target)) return;
       setVisible(false);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useId, useRef, useSyncExternalStore } from "react";
+import { useCallback, useId, useMemo, useRef, useSyncExternalStore, type MouseEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
@@ -9,6 +9,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { Folder, Plus } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { IconButton } from "@multica/ui/components/common/icon-button";
+import { DropdownMenuItem } from "@multica/ui/components/ui/dropdown-menu";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { issueKeys, sidebarIssuesOptions } from "@multica/core/issues/queries";
 import { filterDependencyState, statusCatalogSource } from "@multica/core/issues/surface/filter-dependency";
@@ -35,6 +36,11 @@ import {
   isPathWithin,
   panelRowStateClass,
 } from "../panel-nav";
+import { ProjectIcon } from "../../projects/components/project-icon";
+import { ProjectMenu } from "../../projects/components/project-row-actions";
+import { shouldOpenRowMenu, useRowMenu } from "../../common/point-menu";
+import { CollectionRowContext } from "../collection-list/row-context";
+import { useDragClickGuard } from "../use-drag-click-guard";
 import { ProjectsSectionSettings } from "./sidebar-settings";
 import { SidebarIssueList, TreeRow } from "./sidebar-tree";
 
@@ -53,12 +59,20 @@ function usePrefetch(wsId: string, source: string, request: SidebarIssuesRequest
   };
 }
 
+export interface IssueInTree {
+  /** `null` when no expanded row lists the issue. */
+  issueId: string | null;
+  /** The sidebar sources of the expanded rows that list or keep it. */
+  sources: readonly string[];
+}
+
+const NOT_IN_TREE: IssueInTree = { issueId: null, sources: [] };
+
 /**
- * The id of the issue an expanded row lists or keeps under `ref` — its UUID,
- * or an identifier like `MUL-123` matched case-insensitively as the server
- * does — or `null` when no expanded row lists it.
+ * Where the expanded rows list or keep the issue under `ref` — its UUID, or
+ * an identifier like `MUL-123` matched case-insensitively as the server does.
  */
-export function useIssueIdInTree(wsId: string, ref: string | null): string | null {
+export function useIssueInTree(wsId: string, ref: string | null): IssueInTree {
   const qc = useQueryClient();
   const cache = qc.getQueryCache();
   const subscribe = useCallback(
@@ -72,23 +86,36 @@ export function useIssueIdInTree(wsId: string, ref: string | null): string | nul
     },
     [cache],
   );
-  return useSyncExternalStore(subscribe, () => {
-    if (!ref) return null;
+  // The snapshot is a string so an unchanged answer compares equal.
+  const snapshot = useSyncExternalStore(subscribe, () => {
+    if (!ref) return "";
     const identifier = ref.toUpperCase();
     const matches = (issue: Issue) => issue.id === ref || issue.identifier.toUpperCase() === identifier;
+    const sourceAt = issueKeys.sidebarAll(wsId).length;
     const shown = (queryKey: readonly unknown[]) =>
       cache.findAll({ queryKey }).filter((query) => query.getObserversCount() > 0);
+    let issueId: string | null = null;
+    const sources = new Set<string>();
     for (const query of shown(issueKeys.sidebarAll(wsId))) {
       const issue = (query.state.data as ListIssuesResponse | undefined)?.issues?.find(matches);
-      if (issue) return issue.id;
+      if (!issue) continue;
+      issueId = issue.id;
+      sources.add(String(query.queryKey[sourceAt]));
     }
     // A shown list keeps the open issue its query dropped (`useKeptActiveItem`).
     for (const [list, held] of Object.entries(useSidebarKeptStore.getState().held)) {
       const issue = qc.getQueryData<Issue>(issueKeys.detail(wsId, held.id));
-      if (issue && matches(issue) && shown([...issueKeys.sidebarAll(wsId), list]).length > 0) return issue.id;
+      if (!issue || !matches(issue) || shown([...issueKeys.sidebarAll(wsId), list]).length === 0) continue;
+      issueId = issue.id;
+      sources.add(list);
     }
-    return null;
+    return issueId ? [issueId, ...sources].join("\n") : "";
   });
+  return useMemo(() => {
+    if (!snapshot) return NOT_IN_TREE;
+    const [issueId, ...sources] = snapshot.split("\n");
+    return { issueId: issueId!, sources };
+  }, [snapshot]);
 }
 
 interface ProjectsSectionProps {
@@ -96,10 +123,14 @@ interface ProjectsSectionProps {
   userId: string | undefined;
   pathname: string;
   /** Already filtered and ordered by the section's settings. */
-  projects: Project[];
+  projects: readonly Project[];
   totalProjects: number;
   plainRowsLit: boolean;
   activeIssueId: string | null;
+  /** The one list that lights the open issue. */
+  litSource: string | null;
+  /** The project whose row marks the open issue no list shows. */
+  locatedProjectId: string | null;
 }
 
 export function ProjectsSection({
@@ -110,6 +141,8 @@ export function ProjectsSection({
   totalProjects,
   plainRowsLit,
   activeIssueId,
+  litSource,
+  locatedProjectId,
 }: ProjectsSectionProps) {
   const { t } = useT("layout");
   const p = useWorkspacePaths();
@@ -118,9 +151,11 @@ export function ProjectsSection({
   const { projectSettings, issueSettings, projectOrder } = useSidebarProjectPrefs(wsId);
   const updatePrefs = useUpdateSidebarProjectPrefs(wsId);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  const { arm: armClickGuard, release: releaseClickGuard } = useDragClickGuard();
 
   const onDragEnd = useCallback(
     ({ active, over }: DragEndEvent) => {
+      releaseClickGuard();
       if (!over || active.id === over.id) return;
       const ids = projects.map((project) => project.id);
       const from = ids.indexOf(String(active.id));
@@ -133,7 +168,7 @@ export function ProjectsSection({
         projectSettings: { ordering: "manual" },
       });
     },
-    [projects, projectOrder, updatePrefs],
+    [projects, projectOrder, releaseClickGuard, updatePrefs],
   );
 
   return (
@@ -155,7 +190,14 @@ export function ProjectsSection({
         </>
       }
     >
-      <DndContext sensors={sensors} collisionDetection={closestCenter} modifiers={DRAG_MODIFIERS} onDragEnd={onDragEnd}>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        modifiers={DRAG_MODIFIERS}
+        onDragStart={armClickGuard}
+        onDragEnd={onDragEnd}
+        onDragCancel={releaseClickGuard}
+      >
         <SortableContext items={projects.map((project) => project.id)} strategy={verticalListSortingStrategy}>
           <PanelList>
             {projects.map((project) => (
@@ -167,7 +209,9 @@ export function ProjectsSection({
                 active={plainRowsLit && isPathWithin(pathname, p.projectDetail(project.id))}
                 showCount={projectSettings.showCount}
                 issueSettings={issueSettings}
-                activeIssueId={activeIssueId}
+                activeIssueId={litSource === projectSidebarSource(project.id) ? activeIssueId : null}
+                openIssueId={activeIssueId}
+                located={locatedProjectId === project.id}
               />
             ))}
           </PanelList>
@@ -213,6 +257,8 @@ function ProjectTreeItem({
   showCount,
   issueSettings,
   activeIssueId,
+  openIssueId,
+  located,
 }: {
   wsId: string;
   userId: string | undefined;
@@ -221,6 +267,8 @@ function ProjectTreeItem({
   showCount: boolean;
   issueSettings: SidebarIssueSettings;
   activeIssueId: string | null;
+  openIssueId: string | null;
+  located: boolean;
 }) {
   const { t } = useT("layout");
   const p = useWorkspacePaths();
@@ -236,10 +284,13 @@ function ProjectTreeItem({
   const prefetch = usePrefetch(wsId, source, params);
 
   const { listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: project.id });
-  const wasDragged = useRef(false);
-  useEffect(() => {
-    if (isDragging) wasDragged.current = true;
-  }, [isDragging]);
+  // Right-click opens the projects page's row menu at the cursor. It mounts on
+  // the first right-click, so idle rows hold no menu or its queries.
+  const rowMenu = useRowMenu();
+  const rowMenuContext = useMemo(
+    () => ({ menu: rowMenu.menu, setMenu: rowMenu.setMenu }),
+    [rowMenu.menu, rowMenu.setMenu],
+  );
 
   return (
     <li
@@ -256,17 +307,18 @@ function ProjectTreeItem({
         {...listeners}
         href={p.projectDetail(project.id)}
         label={project.title}
-        icon={<Folder className="size-4 shrink-0" />}
+        icon={
+          project.icon ? <ProjectIcon project={project} size="md" /> : <Folder className="size-4 shrink-0" />
+        }
         active={active}
+        located={located}
         expanded={expanded}
         onExpandedChange={setExpanded}
         listId={listId}
         toggleLabel={t(($) => $.panels.work.project_issues, { name: project.title })}
         onPrefetch={prefetch}
-        onNavigate={(event) => {
-          if (!wasDragged.current) return;
-          wasDragged.current = false;
-          event.preventDefault();
+        onContextMenu={(event: MouseEvent) => {
+          if (shouldOpenRowMenu(event)) rowMenu.openAtPointer(event);
         }}
         trailing={
           // The button takes the count's place on hover, so the row never reflows.
@@ -289,6 +341,20 @@ function ProjectTreeItem({
           </span>
         }
       />
+      {rowMenu.menu.point && (
+        <CollectionRowContext.Provider value={rowMenuContext}>
+          <ProjectMenu
+            project={project}
+            triggerHidden
+            leading={
+              <DropdownMenuItem onClick={() => openCreateIssueWithPreference({ project_id: project.id })}>
+                <Plus />
+                {t(($) => $.panels.work.new_issue_here)}
+              </DropdownMenuItem>
+            }
+          />
+        </CollectionRowContext.Provider>
+      )}
       {expanded && (
         <SidebarIssueList
           id={listId}
@@ -298,6 +364,8 @@ function ProjectTreeItem({
           paramsError={catalogDependency.error}
           onRetry={catalogDependency.retry}
           activeIssueId={activeIssueId}
+          openIssueId={openIssueId}
+          ownsOpen={(issue) => issue.project_id === project.id}
           onCollapse={() => {
             setExpanded(false);
             linkRef.current?.focus();

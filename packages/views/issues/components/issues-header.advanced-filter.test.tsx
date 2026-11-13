@@ -37,10 +37,17 @@ function renderFilterMenu(setup?: (store: StoreApi<IssueViewState>) => void, wit
     listMembers: async () => [],
     listAgents: async () => [
       { id: "agent-lambda", name: "Lambda", archived_at: null, owner_id: "u-1" },
+      { id: "agent-eve", name: "Eve", archived_at: null, owner_id: "u-1" },
     ],
     listSquads: async () => [],
-    listProjects: async () => ({ projects: [], total: 0 }),
-    listLabels: async () => ({ labels: [{ id: "label-bug", name: "Bug", color: "#f00" }], total: 1 }),
+    listProjects: async () => ({ projects: [
+      { id: "project-launch", title: "Launch Plan" },
+      { id: "project-maintenance", title: "Maintenance" },
+    ], total: 2 }),
+    listLabels: async () => ({ labels: [
+      { id: "label-bug", name: "Bug", color: "#f00" },
+      { id: "label-feature", name: "Feature", color: "#00f" },
+    ], total: 2 }),
   } as unknown as ApiClient);
   registerAuthStore(
     createAuthStore({
@@ -68,6 +75,45 @@ afterEach(() => {
 });
 
 describe("IssueFilterMenu search", () => {
+  it.each([
+    { field: "Assignee", query: "Lam", match: "Lambda", other: "Eve", key: "assigneeFilters", value: { type: "agent", id: "agent-lambda" } },
+    { field: "Creator", query: "Lam", match: "Lambda", other: "Eve", key: "creatorFilters", value: { type: "agent", id: "agent-lambda" } },
+    { field: "Project", query: "Launch Pl", match: "Launch Plan", other: "Maintenance", key: "projectFilters", value: "project-launch" },
+    { field: "Label", query: "Bu", match: "Bug", other: "Feature", key: "labelFilters", value: "label-bug" },
+  ] as const)("keeps typed search and editing keys in the $field submenu", async ({ field, query, match, other, key, value }) => {
+    const user = userEvent.setup();
+    const store = renderFilterMenu();
+    fireEvent.click(screen.getByRole("button", { name: "Filter" }));
+    const trigger = await screen.findByRole("menuitem", { name: field });
+    fireEvent.click(trigger);
+    const search = await screen.findByPlaceholderText("Filter...");
+    await screen.findByRole("menuitemcheckbox", { name: other });
+
+    await user.type(search, query);
+    expect(search).toHaveValue(query);
+    expect(search).toHaveFocus();
+    expect(screen.queryByRole("menuitemcheckbox", { name: other })).not.toBeInTheDocument();
+
+    // Left/right edit the query instead of closing the submenu.
+    await user.keyboard("{ArrowLeft}{ArrowRight}{Backspace}");
+    expect(search).toHaveValue(query.slice(0, -1));
+    expect(search).toHaveFocus();
+    expect(store.getState()[key]).toEqual([]);
+
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getByRole("menuitemradio", { name: "is not" })).toHaveFocus();
+    await user.keyboard("{ArrowDown}");
+    const option = screen.getByRole("menuitemcheckbox", { name: match });
+    expect(option).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(store.getState()[key]).toEqual([value]);
+
+    await user.click(search);
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByPlaceholderText("Filter...")).not.toBeInTheDocument());
+    expect(trigger).toHaveFocus();
+  });
+
   it("offers values as conditions and toggles them", async () => {
     const store = renderFilterMenu();
     fireEvent.click(screen.getByRole("button", { name: "Filter" }));

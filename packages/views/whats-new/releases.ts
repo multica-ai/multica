@@ -1,4 +1,4 @@
-import { CircleDot, Command, Gauge, Globe, History, Layers, ListPlus, PanelLeft, Pin, Terminal, Users, Workflow, type IconComponent } from "@multica/ui/icons";
+import { CircleDot, Command, Gauge, Globe, History, Layers, ListPlus, Lock, Palette, PanelLeft, Pin, Quote, Server, Terminal, Users, Workflow, type IconComponent } from "@multica/ui/icons";
 import type { SupportedLocale } from "@multica/core/i18n";
 import type { WorkspacePaths } from "@multica/core/paths";
 import type { ReleaseStamp } from "@multica/core/whats-new";
@@ -35,6 +35,202 @@ export interface WhatsNewRelease extends ReleaseStamp {
  * match the changelog entry the highlights come from.
  */
 export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
+  {
+    version: "0.9.0",
+    date: "2026-11-13",
+    highlights: [
+      {
+        id: "community-themes",
+        icon: Palette,
+        action: { kind: "route", to: (p) => `${p.settings()}?tab=appearance` },
+        copy: {
+          en: {
+            title: "Install, import, or make a theme",
+            body: "In Settings → Appearance, click Manage next to Theme to browse and install community themes, or use Import theme for a .zip or folder. Switch themes any time from Theme in the account menu.",
+          },
+          "zh-Hans": {
+            title: "安装、导入或制作主题",
+            body: "在「设置 → 外观」里点「主题」旁的「管理」，浏览并安装社区主题；也可以用「导入主题」导入 .zip 文件或文件夹。之后随时在账户菜单的「主题」里切换。",
+          },
+          "zh-Hant": {
+            title: "安裝、匯入或製作主題",
+            body: "在「設定 → 外觀」裡點「主題」旁的「管理」，瀏覽並安裝社群主題；也可以用「匯入主題」匯入 .zip 檔案或資料夾。之後隨時在帳戶選單的「主題」裡切換。",
+          },
+          ja: {
+            title: "テーマをインストール、読み込み、作成",
+            body: "「設定 → 外観」で「テーマ」の横の「管理」を押すと、コミュニティのテーマを探してインストールできます。.zip やフォルダーは「テーマを読み込む」から追加できます。切り替えはアカウントメニューの「テーマ」からいつでもできます。",
+          },
+          ko: {
+            title: "테마 설치, 가져오기, 만들기",
+            body: "'설정 → 모양'에서 '테마' 옆의 '관리'를 누르면 커뮤니티 테마를 둘러보고 설치할 수 있습니다. .zip 파일이나 폴더는 '테마 가져오기'로 추가하세요. 테마는 계정 메뉴의 '테마'에서 언제든 바꿀 수 있습니다.",
+          },
+          fr: {
+            title: "Installez, importez ou créez un thème",
+            body: "Dans Paramètres → Apparence, cliquez sur Gérer à côté de Thème pour parcourir et installer des thèmes de la communauté, ou utilisez Importer un thème pour un .zip ou un dossier. Changez de thème à tout moment depuis Thème dans le menu du compte.",
+          },
+        },
+      },
+      {
+        id: "environment-controls",
+        icon: Server,
+        copy: {
+          en: {
+            title: "Run an issue's services from its sidebar",
+            body: "Open an issue and use Start an environment under Environments in its sidebar. Each service's menu can view its logs, restart, or stop it, and desktop apps can be brought forward with Switch to window.",
+          },
+          "zh-Hans": {
+            title: "在任务侧栏里管理服务",
+            body: "打开一个任务，在侧栏「环境」里点「启动环境」。每个服务的菜单里可以查看日志、重启或停止；桌面应用可以用「切到窗口」切到前台。",
+          },
+          "zh-Hant": {
+            title: "在任務側欄裡管理服務",
+            body: "打開一個任務，在側欄「環境」裡點「啟動環境」。每個服務的選單裡可以查看日誌、重新啟動或停止；桌面應用程式可以用「切到視窗」切到前景。",
+          },
+          ja: {
+            title: "タスクのサイドバーからサービスを操作",
+            body: "タスクを開き、サイドバーの「環境」で「環境を起動」を選びます。各サービスのメニューからログの表示、再起動、停止ができ、デスクトップアプリは「ウィンドウに切り替え」で前面に出せます。",
+          },
+          ko: {
+            title: "태스크 사이드바에서 서비스 관리",
+            body: "태스크를 열고 사이드바의 '환경'에서 '환경 시작'을 누르세요. 서비스마다 메뉴에서 로그 보기, 재시작, 중지를 할 수 있고, 데스크톱 앱은 '창으로 전환'으로 앞으로 가져올 수 있습니다.",
+          },
+          fr: {
+            title: "Pilotez les services d'une tâche depuis sa barre latérale",
+            body: "Ouvrez une tâche et choisissez Démarrer un environnement sous Environnements dans sa barre latérale. Le menu de chaque service permet de voir les journaux, de le redémarrer ou de l'arrêter, et Afficher la fenêtre met une app de bureau au premier plan.",
+          },
+        },
+      },
+      {
+        id: "chat-annotations",
+        icon: Quote,
+        action: { kind: "route", to: (p) => p.chat() },
+        copy: {
+          en: {
+            title: "Annotate an agent's chat reply",
+            body: "In Chat, select text in an agent's reply and add a note. Saved notes wait in the message box and are sent with your next message, with or without more text.",
+          },
+          "zh-Hans": {
+            title: "批注智能体的聊天回复",
+            body: "在「聊天」里选中智能体回复中的文字并添加批注。保存的批注会留在输入框里，随下一条消息一起发送，也可以不另写文字直接发送。",
+          },
+          "zh-Hant": {
+            title: "批註 AI 代理的聊天回覆",
+            body: "在「聊天」裡選取 AI 代理回覆中的文字並新增批註。儲存的批註會留在輸入框裡，隨下一則訊息一起送出，也可以不另寫文字直接送出。",
+          },
+          ja: {
+            title: "エージェントのチャット返信に注釈を付ける",
+            body: "「チャット」でエージェントの返信のテキストを選び、注釈を追加します。保存した注釈は入力欄に残り、次のメッセージと一緒に送られます。注釈だけを送ることもできます。",
+          },
+          ko: {
+            title: "에이전트 채팅 답변에 주석 달기",
+            body: "'채팅'에서 에이전트 답변의 텍스트를 선택하고 주석을 추가하세요. 저장한 주석은 입력창에 남아 다음 메시지와 함께 보내지며, 주석만 보낼 수도 있습니다.",
+          },
+          fr: {
+            title: "Annotez la réponse d'un agent dans une discussion",
+            body: "Dans Discussion, sélectionnez du texte dans la réponse d'un agent et ajoutez une note. Les notes enregistrées restent dans la zone de saisie et partent avec votre prochain message, avec ou sans texte en plus.",
+          },
+        },
+      },
+    ],
+  },
+  {
+    version: "0.8.2",
+    date: "2026-11-10",
+    highlights: [
+      {
+        id: "appearance-themes",
+        icon: Palette,
+        action: { kind: "route", to: (p) => `${p.settings()}?tab=appearance` },
+        copy: {
+          en: {
+            title: "Pick a theme and fonts in Appearance",
+            body: "Go to Settings → Appearance to choose one of five built-in themes. You can also set fonts and sizes for the interface and for content, and adjust density and contrast. Your choices are saved on this device.",
+          },
+          "zh-Hans": {
+            title: "在「外观」里选择主题和字体",
+            body: "进入「设置 → 外观」，从 5 套内置主题中选一套。还可以分别设置界面文字和内容文字的字体与字号，并调整信息密度和对比度。这些选择保存在本设备上。",
+          },
+          "zh-Hant": {
+            title: "在「外觀」裡選擇主題和字型",
+            body: "進入「設定 → 外觀」，從 5 套內建主題中選一套。還可以分別設定介面文字和內容文字的字型與字級，並調整資訊密度和對比度。這些選擇儲存在本裝置上。",
+          },
+          ja: {
+            title: "「外観」でテーマとフォントを選ぶ",
+            body: "「設定 → 外観」で 5 つの組み込みテーマから選べます。インターフェースと本文のフォントや文字サイズ、表示密度やコントラストも調整できます。設定はこのデバイスに保存されます。",
+          },
+          ko: {
+            title: "'모양'에서 테마와 글꼴 고르기",
+            body: "'설정 → 모양'에서 기본 제공 테마 5가지 중 하나를 고르세요. 인터페이스와 본문의 글꼴과 글자 크기, 밀도와 대비도 조절할 수 있습니다. 설정은 이 기기에 저장됩니다.",
+          },
+          fr: {
+            title: "Choisissez un thème et des polices dans Apparence",
+            body: "Allez dans Paramètres → Apparence pour choisir l'un des cinq thèmes intégrés. Vous pouvez aussi régler les polices et tailles de l'interface et du contenu, ainsi que la densité et le contraste. Vos choix sont enregistrés sur cet appareil.",
+          },
+        },
+      },
+      {
+        id: "private-projects",
+        icon: Lock,
+        action: { kind: "route", to: (p) => p.projects() },
+        copy: {
+          en: {
+            title: "Keep a project to its members",
+            body: "When you create a project, or later in its properties, set Access to Project members only and add the people who need it. Its issues, comments, and attachments are then visible only to them and to workspace owners and admins.",
+          },
+          "zh-Hans": {
+            title: "让项目只对成员可见",
+            body: "创建项目时，或之后在项目属性里，把「访问权限」设为「仅项目成员」，再添加需要的人。项目中的任务、评论和附件就只有他们以及工作区所有者和管理员能看到。",
+          },
+          "zh-Hant": {
+            title: "讓專案只對成員可見",
+            body: "建立專案時，或之後在專案屬性裡，把「存取權限」設為「僅專案成員」，再新增需要的人。專案中的任務、評論和附件就只有他們以及工作區所有者和管理員能看到。",
+          },
+          ja: {
+            title: "プロジェクトをメンバーだけに公開",
+            body: "プロジェクトを作るとき、またはあとからプロパティで「アクセス権」を「プロジェクトメンバーのみ」にし、必要な人を追加します。そのタスク、コメント、添付ファイルは、メンバーとワークスペースのオーナー・管理者だけが見られます。",
+          },
+          ko: {
+            title: "프로젝트를 멤버에게만 공개",
+            body: "프로젝트를 만들 때나 나중에 속성에서 '접근 권한'을 '프로젝트 멤버만'으로 정하고 필요한 사람을 추가하세요. 그 프로젝트의 태스크, 댓글, 첨부 파일은 멤버와 워크스페이스 소유자·관리자만 볼 수 있습니다.",
+          },
+          fr: {
+            title: "Réservez un projet à ses membres",
+            body: "À la création d'un projet, ou plus tard dans ses propriétés, réglez Accès sur Membres du projet uniquement et ajoutez les personnes concernées. Ses tâches, commentaires et pièces jointes ne sont alors visibles que par elles et par les propriétaires et admins de l'espace de travail.",
+          },
+        },
+      },
+      {
+        id: "issue-environments",
+        icon: Server,
+        copy: {
+          en: {
+            title: "See the services an issue started",
+            body: "Open an issue and check Environments in its sidebar for the services its agent runs started, with status, link, and time left. On macOS and Linux, agents can keep a service running with multica env start.",
+          },
+          "zh-Hans": {
+            title: "查看任务启动的服务",
+            body: "打开一个任务，在侧栏的「环境」里查看智能体运行时启动的服务，以及状态、链接和剩余时间。在 macOS 和 Linux 上，智能体可以用 multica env start 让服务持续运行。",
+          },
+          "zh-Hant": {
+            title: "查看任務啟動的服務",
+            body: "打開一個任務，在側欄的「環境」裡查看 AI 代理執行時啟動的服務，以及狀態、連結和剩餘時間。在 macOS 和 Linux 上，AI 代理可以用 multica env start 讓服務持續執行。",
+          },
+          ja: {
+            title: "タスクが起動したサービスを確認",
+            body: "タスクを開き、サイドバーの「環境」で、エージェントの実行が起動したサービスとその状態、リンク、残り時間を確認できます。macOS と Linux では、エージェントが multica env start でサービスを動かし続けられます。",
+          },
+          ko: {
+            title: "태스크가 시작한 서비스 보기",
+            body: "태스크를 열고 사이드바의 '환경'에서 에이전트 실행이 시작한 서비스와 상태, 링크, 남은 시간을 확인하세요. macOS와 Linux에서는 에이전트가 multica env start로 서비스를 계속 실행해 둘 수 있습니다.",
+          },
+          fr: {
+            title: "Voyez les services lancés par une tâche",
+            body: "Ouvrez une tâche et consultez Environnements dans sa barre latérale : services lancés par les exécutions de l'agent, avec leur état, leur lien et le temps restant. Sur macOS et Linux, les agents peuvent garder un service actif avec multica env start.",
+          },
+        },
+      },
+    ],
+  },
   {
     version: "0.8.1",
     date: "2026-11-06",

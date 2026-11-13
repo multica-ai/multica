@@ -1,0 +1,234 @@
+---
+title: 테마 만들기
+description: Multica 테마 형식(매니페스트, CSS 변수, 옵션, 앵커), 테마를 작성하고 검사하는 방법, 테마 스토어에 게시하는 방법.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+
+Multica 테마는 `manifest.json`과 `theme.css`, 그리고 CSS가 쓰는 글꼴과 이미지를 담은 폴더입니다. CSS는 라이트와 다크 모드의 공개 변수를 설정하고, 안정적인 앵커들의 스타일을 바꿀 수 있습니다. 매니페스트는 테마의 이름을 정하고, 사용자가 **설정 → 모양**에서 조정할 옵션을 선언할 수 있습니다. 테마는 JavaScript를 실행하지 않습니다.
+
+<Callout type="warn">
+  테마 형식은 베타 API입니다. 안정 버전으로 선언되기 전까지 변수, 앵커, 매니페스트가 바뀔 수 있습니다. 자동 생성된 전체 변수와 앵커 목록은 [`docs/theming.md`](https://github.com/multica-ai/multica/blob/main/docs/theming.md)에 있으며, 이 페이지는 그것들이 어떻게 맞물리는지 설명합니다.
+</Callout>
+
+## 빠른 시작
+
+<Steps>
+<Step>
+
+### 복사본에서 시작하기
+
+**설정 → 모양**에서 원하는 모습에 가장 가까운 테마를 고른 뒤 **직접 만들기 → 테마 가져오기 → "…" 복제해서 새 테마 만들기**를 선택합니다. 복사본은 자체 id(`pop-copy`, `pop-copy-2`, …), 원본의 옵션, 한 줄에 선언 하나씩 쓴 `theme.css`를 갖습니다. 수정하지 않으면 원본과 똑같이 보입니다.
+
+</Step>
+<Step>
+
+### 편집하기
+
+- **데스크톱 앱**은 복사본을 테마 폴더에 쓰고 엽니다. 아무 편집기에서나 `theme.css`를 고치면, 저장한 변경이 열려 있는 모든 창에 약 1초 안에 반영됩니다.
+- **웹**에서는 복사본이 `.zip`으로 다운로드됩니다. 압축을 풀고 편집한 뒤 **테마 가져오기 → 테마 폴더**로 다시 가져옵니다. `id`가 같으면 설치된 복사본을 대체하고 옵션 값은 유지됩니다.
+
+</Step>
+<Step>
+
+### 검사하기
+
+공유하기 전에 [Multica 저장소](https://github.com/multica-ai/multica)를 클론한 곳에서 검사를 실행합니다([검사와 미리보기](#검사와-미리보기) 참고).
+
+</Step>
+</Steps>
+
+## 폴더
+
+```text
+paper/
+├── manifest.json
+├── theme.css
+└── fonts/
+    └── serif.woff2
+```
+
+폴더는 `.zip`의 최상위에 두거나 `.zip` 안의 유일한 폴더여야 합니다. 글꼴(`woff2`, `woff`, `ttf`, `otf`)과 이미지(`png`, `jpg`, `webp`, `gif`, `avif`, `svg`) 외의 파일은 무시됩니다. 테마 전체는 최대 1 MB입니다.
+
+### manifest.json
+
+```json
+{
+  "apiVersion": 1,
+  "id": "paper",
+  "name": "Paper",
+  "author": "Someone",
+  "version": "1.2.0",
+  "description": "Warm paper, serif reading text.",
+  "options": [
+    { "id": "page", "type": "heading", "label": "Page" },
+    { "id": "paper-color", "type": "color", "label": "Paper", "default": { "light": "#f6efdf", "dark": "#1d1b16" } },
+    { "id": "hyphens", "type": "toggle", "label": "Hyphenate", "default": true }
+  ]
+}
+```
+
+| 필드 | 규칙 |
+|---|---|
+| `apiVersion` | 반드시 `1`이어야 합니다. |
+| `id` | `a-z`, `0-9`, `-`로 된 1–40자. 기본 제공 id(`default`, `pop`, `github`, `blueprint`, `notion`)는 예약되어 있습니다. 이미 설치된 id의 테마를 가져오면 대체합니다. |
+| `name` | 필수, 최대 40자. |
+| `author`, `version`, `description` | 선택. 설치할 때 표시됩니다. 테마 스토어에는 `version`이 필요합니다. |
+| `options` | 최대 24개. [옵션](#옵션)을 참고하세요. |
+
+### theme.css
+
+```css
+@font-face {
+  font-family: "Paper Serif";
+  src: url(fonts/serif.woff2);
+}
+
+.theme-light {
+  --page-canvas: var(--paper-color);
+  --brand: #8b4513;
+  --font-content-latin: "Paper Serif", Georgia;
+  --h1-style: italic;
+}
+
+.theme-dark {
+  --page-canvas: var(--paper-color);
+}
+
+:root[data-theme-option-hyphens] [data-mc="content"] p {
+  hyphens: auto;
+}
+```
+
+변수는 `<html>`에 붙는 `.theme-light`와 `.theme-dark`에 설정합니다. 테마 CSS는 앱 자체 스타일 다음에 로드되므로, 명시도가 같으면 테마가 이깁니다. 선택자는 이 정도로 단순하게 유지하고 `!important`는 피하세요.
+
+모양 페이지에서 사용자가 직접 고른 설정은 여전히 테마보다 우선합니다. 대비 높이기는 흐린 색과 테두리 색을 바꾸고, 기본값이 아닌 글꼴은 글꼴 변수를 바꿉니다. 색상은 오직 테마가 정합니다. 사용자가 색을 고르게 하려면 옵션을 선언하세요.
+
+## 변수
+
+변수는 몇 개의 층으로 나뉩니다.
+
+- **기초**: 색상, 표면, 그림자, `--radius`, 글자 크기 단계, 글꼴. 나머지는 모두 이것을 바탕으로 만들어집니다. `--surface`나 `--radius`를 바꾸면 그것을 쓰는 모든 컴포넌트가 바뀝니다.
+- **컴포넌트와 제품**: 메뉴, 버튼, 내비게이션 행, 태스크 행, 보드, 상태 색상. 기본값은 기초 변수 중 하나입니다. 하나를 설정하면 그 컴포넌트만 바뀝니다. `--menu-radius: 0`은 메뉴만 각지게 만듭니다.
+- **편집기 콘텐츠**: 제목, 목록, 표, 인용, 링크, 코드, 구문 강조 색상. 태스크 설명, 댓글, 채팅, 문서에 적용됩니다.
+
+앱은 컴포넌트 변수를 선언하지 않습니다. 컴포넌트는 기본값을 대체값으로 두고 읽습니다. 그래서 `.theme-light`뿐 아니라 어떤 조상 요소에든 설정할 수 있습니다.
+
+```css
+.theme-light [data-mc="chat-window"] {
+  --code-block-background: transparent;
+}
+```
+
+[변수 레퍼런스](https://github.com/multica-ai/multica/blob/main/docs/theming.md#variable-reference)에 모든 변수와 라이트·다크 기본값이 있습니다.
+
+## 옵션
+
+옵션은 그 테마를 쓰는 동안 모양 페이지의 **테마 옵션**에 표시됩니다. `toggle`과 `select`는 `<html>`에 속성을 붙이고, 나머지 타입은 항상 `<html>`에 변수 `--<id>`(고른 값 또는 기본값)를 설정합니다. 그래서 `theme.css`에서는 그냥 `var(--<id>)`로 읽으면 됩니다.
+
+| 타입 | 필드 | 결과 |
+|---|---|---|
+| `heading` | — | 그룹을 시작합니다. `description`은 그 아래에 표시됩니다. |
+| `toggle` | `default`: `true` 또는 `false` | 켜면 `data-theme-option-<id>="on"`, 끄면 속성 없음. |
+| `select` | `choices`: `[{ "value", "label", "swatch"? }]`, `default` | `data-theme-option-<id>="<value>"`. 모든 선택지에 `swatch`가 있으면 색상 점으로 표시됩니다. |
+| `color` | `default`: 16진수 색상 또는 `{ "light", "dark" }` | `--<id>`: 모드별 16진수 색상. |
+| `number` | `default`, 선택적으로 `min`, `max`, `step`, `unit` | `--<id>`: 숫자 뒤에 `unit`(`px`, `rem`, `%`, …)을 붙인 값. |
+| `slider` | `number`와 같으며 `min`, `max` 필수 | `number`와 같음. |
+| `text` | `default`: CSS 값 | `--<id>`: 입력한 값(안전한 값일 때). |
+| `font` | `default`: 글꼴 스택 | `--<id>`: 글꼴 스택. |
+| `variable-select` | `choices`: CSS 값을 가진 `[{ "value", "label" }]`, `default` | `--<id>`: 고른 값. |
+
+옵션 id는 `a-z`, `0-9`, `-`로 된 1–48자이며 영문자로 시작합니다. `label`, `description`, 선택지 라벨은 문자열이거나 로캘을 키로 하는 객체(`en`, `zh-Hans`, `zh-Hant`, `ja`, `ko`, `es`, `fr`)입니다. 대체 언어는 영어입니다.
+
+```json
+{ "id": "page-width", "type": "slider", "label": "Page width", "default": 46, "min": 30, "max": 60, "step": 2, "unit": "rem" }
+```
+
+```css
+[data-mc="content"] { max-width: var(--page-width); }
+```
+
+## 선택자
+
+클래스 이름이나 DOM 구조가 아니라 앵커, 슬롯, 상태 훅을 대상으로 하세요. 클래스 이름과 DOM 구조는 예고 없이 바뀝니다. 앵커, 슬롯, 훅은 다음 `apiVersion`까지 유지됩니다.
+
+- **앵커**는 앱의 주요 부분에 붙은 `data-mc` 속성입니다: `app-rail`, `sidebar`, `nav-item`, `page`, `issue-row`, `board-card`, `content`(서식 있는 텍스트), `comment`, `chat-window`, `inbox-item` 등. 상당수는 상태도 가집니다. 예를 들어 태스크 행의 `data-status`와 `data-priority`입니다.
+- **슬롯**은 UI 기본 컴포넌트의 `data-slot` 속성입니다: `button`(`data-variant`, `data-size`도 함께), `input`, `dialog-content`, `dropdown-menu-item` 등.
+- **`<html>`의 상태**: `.theme-light` / `.theme-dark`, `.is-desktop` / `.is-web`, `.mod-macos` / `.mod-windows` / `.mod-linux`, `.is-focused`, `.is-sidebar-collapsed`, `[data-theme="<id>"]`, 그리고 테마 자체의 `[data-theme-option-<id>]`.
+
+```css
+.mod-macos.is-desktop:not(.is-focused) [data-mc="app-rail"] { opacity: 0.7; }
+.theme-dark [data-mc="issue-row"][data-priority="urgent"] { box-shadow: inset 2px 0 var(--priority-urgent); }
+```
+
+[선택자 레퍼런스](https://github.com/multica-ai/multica/blob/main/docs/theming.md#selectors)에 모든 앵커와 그 속성, 모든 슬롯이 있습니다.
+
+## CSS로 할 수 없는 것
+
+리소스를 불러오는 것은 모두 거부됩니다. CSS는 속성 선택자로 페이지 내용을 읽어 요청으로 내보낼 수 있기 때문입니다.
+
+- `url()`은 테마 폴더 안의 파일(`url(fonts/serif.woff2)`)이나 프래그먼트(`url(#filter)`)만 가리킬 수 있습니다. 파일의 `data:` URL로 바뀝니다.
+- `@import`, `image()`, `image-set()`, `cross-fade()`, `element()`, `src()`, `expression()`은 거부되며, `behavior`와 `-moz-binding`도 마찬가지입니다.
+
+이스케이프, 대소문자, 주석으로는 검사를 피할 수 없습니다. 검사는 브라우저와 같은 방식으로 CSS를 읽습니다. 테마가 검사에 실패하면 아무것도 설치되지 않고, 모든 문제가 `theme.css`의 줄 번호와 함께 표시됩니다.
+
+`pnpm theme:check`는 다음과 같은 테마도 실패로 처리합니다.
+
+- 공개되지 않은 변수를 쓰는 경우. 옵션 id이거나 테마가 직접 `var()`로 읽는 변수는 예외입니다.
+- `.theme-light`와 `.theme-dark`가 아닌 곳에 하위 선택자 없이 변수를 설정한 경우. 테마 선택기가 테마의 색을 읽어 올 수 없게 됩니다.
+- 글꼴 스택에 일반 글꼴 계열(`sans-serif`, `serif`, …)이나 `ui-*` 키워드를 쓴 경우. 사용자가 고른 CJK 글꼴이 적용되지 않게 됩니다.
+- 어느 한 모드에서 WCAG AA 대비를 충족하지 못하는 경우: `--foreground`와 `--muted-foreground`는 모든 표면에서 4.5:1, `--brand`는 읽기 표면에서 4.5:1, 기본 버튼 라벨은 버튼 위에서 4.5:1, `--faint-foreground`는 3:1이 필요합니다. 툴팁 글자는 `--tooltip` 위에서 4.5:1, 눌린 표시 설정 칩의 글자는 칩 배경 위에서 4.5:1이 필요합니다. 툴팁은 항상 다크 모드 글자색을 쓰므로 바꾸려면 `--tooltip-foreground`를 설정하세요. 눌린 칩은 `--display-chip-pressed-background`를 설정하지 않으면 `--input`으로 채워집니다.
+
+## 검사와 미리보기
+
+[Multica 저장소](https://github.com/multica-ai/multica)를 클론한 곳에서 실행합니다.
+
+```bash
+pnpm theme:check path/to/paper          # 폴더
+pnpm theme:check paper.zip --json       # zip, CI용 JSON 출력
+pnpm theme:preview path/to/paper --out preview   # preview/light.png와 preview/dark.png
+```
+
+`theme:check`는 매니페스트 오류, 차단된 CSS, 공개되지 않은 변수, 일반 글꼴 계열, 두 모드의 대비를 `theme.css` 줄 번호와 함께 보고하고, 오류가 있으면 상태 코드 1로 종료합니다. 해석할 수 없는 색상 같은 경고로는 실패하지 않습니다.
+
+`theme:preview`는 테마 스토어가 보여 주는 스크린샷을 렌더링합니다. 앱 자체 스타일로 만든 태스크 목록과 열린 태스크를, 옵션을 기본값으로 둔 테마로 보여 줍니다.
+
+작업 중에 테마 때문에 인터페이스가 가려지거나 깨지면 `?theme=default`를 붙여 앱을 열거나, 로드 직후 **Shift**를 누르고 있으세요. [테마 때문에 화면이 깨졌을 때](/themes#테마-때문에-화면이-깨졌을-때)를 참고하세요.
+
+## 테마 스토어에 게시하기
+
+테마 스토어는 [multica-ai/multica-themes](https://github.com/multica-ai/multica-themes) 레지스트리의 테마를 보여 줍니다. 자세한 내용은 [기여 가이드](https://github.com/multica-ai/multica-themes/blob/main/CONTRIBUTING.md)에 있으며, 요약하면 다음과 같습니다.
+
+<Steps>
+<Step>
+
+### 테마 전용 저장소 만들기
+
+테마를 공개 GitHub 저장소에 둡니다. [multica-ai/multica-theme-sample](https://github.com/multica-ai/multica-theme-sample)은 릴리스 워크플로가 포함된 템플릿입니다.
+
+</Step>
+<Step>
+
+### 릴리스 게시하기
+
+매니페스트의 `version`(`1.0.0` 또는 `v1.0.0`)으로 태그를 달고, 압축한 테마를 `theme.zip`으로 첨부합니다.
+
+</Step>
+<Step>
+
+### 레지스트리에 추가하기
+
+레지스트리에 `themes/<id>.json` 파일을 추가하는 pull request를 엽니다. 파일 이름은 manifest의 `id`입니다. 테마마다 파일이 따로 있어서 서로 다른 테마의 pull request는 충돌하지 않습니다. pull request는 릴리스에 `theme:check`와 `theme:preview`를 실행해 결과를 댓글로 남기고, 통과하면 메인테이너가 병합합니다.
+
+</Step>
+</Steps>
+
+새 릴리스는 같은 검사를 통과한 뒤 약 1시간 안에 스토어에 반영되고, 테마를 설치한 사람에게 업데이트가 표시됩니다. 실패한 릴리스는 이전 릴리스를 대체하지 않습니다. 앱은 검사를 통과한 바로 그 `theme.zip`만 설치하며, 가져온 테마와 같은 파서와 CSS 검사로 읽습니다.
+
+스토어 카드에는 그 Multica 서버에서 테마가 다운로드된 횟수가 표시됩니다. 설치와 업데이트는 각각 한 번으로 세며, 아직 설치하지 않은 테마는 다운로드 수가 많은 순서로 나열됩니다.
+
+## 다음 단계
+
+- [테마와 모양](/themes) — 테마 설치, 업데이트, 제거.
+- [`docs/theming.md`](https://github.com/multica-ai/multica/blob/main/docs/theming.md) — 자동 생성된 변수와 선택자 레퍼런스.

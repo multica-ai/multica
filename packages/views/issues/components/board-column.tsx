@@ -202,8 +202,9 @@ export const BoardColumn = memo(function BoardColumn({
 
   return (
     <div
+      data-mc="board-column"
       style={{ width: BOARD_COL_WIDTH }}
-      className={`group/column relative flex shrink-0 flex-col rounded-xl bg-muted/40 p-2 ${
+      className={`group/column relative flex shrink-0 flex-col rounded-board-column bg-board-column p-2 ${
         hint ? "ring-2 ring-brand/30" : ""
       }`}
     >
@@ -238,7 +239,7 @@ export const BoardColumn = memo(function BoardColumn({
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  className="rounded-full text-muted-foreground"
+                  className="text-muted-foreground"
                   aria-label={tCommon(($) => $.more_actions)}
                 >
                   <MoreHorizontal className="size-3.5" />
@@ -255,7 +256,7 @@ export const BoardColumn = memo(function BoardColumn({
                           <Button
                             variant="ghost"
                             size="icon-sm"
-                            className="rounded-full text-muted-foreground"
+                            className="text-muted-foreground"
                             aria-label={tCommon(($) => $.more_actions)}
                           >
                             <MoreHorizontal className="size-3.5" />
@@ -285,7 +286,7 @@ export const BoardColumn = memo(function BoardColumn({
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  className="rounded-full text-muted-foreground"
+                  className="text-muted-foreground"
                   aria-label={t(($) => $.board.add_issue_tooltip)}
                   onClick={() => {
                     const data = {

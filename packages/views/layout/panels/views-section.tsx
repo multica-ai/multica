@@ -1,13 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useId, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useStore } from "zustand";
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { CSS } from "@dnd-kit/utilities";
-import { Bot, CircleUser, Copy, EyeOff, Layers, Link2, ListTodo, MoreHorizontal, Pencil, Plus, Trash2 } from "@multica/ui/icons";
+import { Bot, CircleUser, Copy, EyeOff, Filter, Layers, Link2, ListTodo, MoreHorizontal, Pencil, Plus, Trash2 } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import {
@@ -55,14 +55,16 @@ import {
 } from "@multica/core/issue-views/sidebar-views";
 import { issueViewTarget } from "@multica/core/issue-views/view-target";
 import { UNREAD_VIEW, UNREAD_VIEW_ID } from "@multica/core/issue-views/unread-view";
-import { useIssueViewActions, type IssueViewActions } from "../../issue-views/use-view-actions";
+import type { IssueViewActions } from "../../issue-views/use-view-actions";
 import { DeleteViewDialog } from "../../issue-views/delete-view-dialog";
 import { ViewNameInput } from "../../issue-views/view-name-input";
 import { UnreadViewIcon } from "../../issue-views/unread-view-icon";
 import { useBuiltinViewNavigation } from "../../issue-views/builtin-views";
 import { useNavigation } from "../../navigation";
+import { shouldOpenRowMenu, useRowMenu } from "../../common/point-menu";
 import { useT } from "../../i18n";
-import { PANEL_ROW_CLASS, PanelCount, PanelLink, PanelList, PanelSection, isPathWithin, panelRowStateClass } from "../panel-nav";
+import { PANEL_ROW_CLASS, PanelCount, PanelLink, PanelList, PanelSection, isPathWithin, panelRowAnchor, panelRowStateClass } from "../panel-nav";
+import { useDragClickGuard } from "../use-drag-click-guard";
 import { SidebarIssueList, TREE_ROW_BUTTON_CLASS, TreeRow } from "./sidebar-tree";
 
 const DRAG_MODIFIERS = [restrictToVerticalAxis, restrictToFirstScrollableAncestor];
@@ -79,9 +81,18 @@ interface ViewsSectionProps {
   wsId: string;
   pathname: string;
   plainRowsLit: boolean;
-  /** An expanded tree row lists the current issue, so "All issues" stays unlit. */
-  issueLitInTree: boolean;
+  /** No other row marks the open issue and it has no project, so "All issues" lights for it. */
+  issueInAllIssues: boolean;
   activeIssueId: string | null;
+  /** The one list that lights the open issue. */
+  litSource: string | null;
+  actions: IssueViewActions;
+}
+
+/** The sidebar source of a starred view's issue list. */
+export function sidebarViewItemSource(item: SidebarViewItem): string {
+  if (item.kind === "view") return viewSidebarSource(item.view.id);
+  return item.key === "unread" ? viewSidebarSource(UNREAD_VIEW_ID) : builtinSidebarSource(item.key);
 }
 
 /**
@@ -92,21 +103,24 @@ export function ViewsSection({
   wsId,
   pathname,
   plainRowsLit,
-  issueLitInTree,
+  issueInAllIssues,
   activeIssueId,
+  litSource,
+  actions,
 }: ViewsSectionProps) {
   const { t } = useT("layout");
   const p = useWorkspacePaths();
-  const actions = useIssueViewActions();
   const { items, reorder } = actions.sidebar;
   const { data: allViews = EMPTY_VIEWS } = useQuery(issueViewEverywhereOptions(wsId));
   const [deleteTarget, setDeleteTarget] = useState<IssueView | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   const collapsed = useSidebarTreeStore((s) => s.viewsCollapsed);
   const setCollapsed = useSidebarTreeStore((s) => s.setViewsCollapsed);
+  const { arm: armClickGuard, release: releaseClickGuard } = useDragClickGuard();
 
   const onDragEnd = useCallback(
     ({ active, over }: DragEndEvent) => {
+      releaseClickGuard();
       if (!over || active.id === over.id) return;
       const ids = items.map((item) => item.id);
       const from = ids.indexOf(String(active.id));
@@ -114,7 +128,7 @@ export function ViewsSection({
       if (from === -1 || to === -1) return;
       reorder(arrayMove(ids, from, to));
     },
-    [items, reorder],
+    [items, releaseClickGuard, reorder],
   );
 
   return (
@@ -143,7 +157,14 @@ export function ViewsSection({
         </IconButton>
       }
     >
-      <DndContext sensors={sensors} collisionDetection={closestCenter} modifiers={DRAG_MODIFIERS} onDragEnd={onDragEnd}>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        modifiers={DRAG_MODIFIERS}
+        onDragStart={armClickGuard}
+        onDragEnd={onDragEnd}
+        onDragCancel={releaseClickGuard}
+      >
         <SortableContext items={items.map((item) => item.id)} strategy={verticalListSortingStrategy}>
           <PanelList>
             {items.map((item) => (
@@ -155,7 +176,7 @@ export function ViewsSection({
                       item={item}
                       pathname={pathname}
                       plainRowsLit={plainRowsLit}
-                      activeIssueId={activeIssueId}
+                      activeIssueId={litSource === sidebarViewItemSource(item) ? activeIssueId : null}
                       actions={actions}
                       onDelete={setDeleteTarget}
                       drag={drag}
@@ -165,7 +186,7 @@ export function ViewsSection({
                       wsId={wsId}
                       pathname={pathname}
                       plainRowsLit={plainRowsLit}
-                      activeIssueId={activeIssueId}
+                      activeIssueId={litSource === sidebarViewItemSource(item) ? activeIssueId : null}
                       actions={actions}
                       drag={drag}
                     />
@@ -175,8 +196,8 @@ export function ViewsSection({
                       builtin={item.key}
                       pathname={pathname}
                       plainRowsLit={plainRowsLit}
-                      issueLitInTree={issueLitInTree}
-                      activeIssueId={activeIssueId}
+                      issueInAllIssues={issueInAllIssues}
+                      activeIssueId={litSource === sidebarViewItemSource(item) ? activeIssueId : null}
                       actions={actions}
                       drag={drag}
                     />
@@ -216,16 +237,10 @@ function usePrefetch(wsId: string, source: string, request: SidebarIssuesRequest
 interface DragBindings {
   rowRef: (node: HTMLElement | null) => void;
   listeners: ReturnType<typeof useSortable>["listeners"];
-  /** True right after a drag, so the release does not also navigate. */
-  consumeDrag: () => boolean;
 }
 
 function SortableViewRow({ id, children }: { id: string; children: (drag: DragBindings) => React.ReactNode }) {
   const { listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id });
-  const wasDragged = useRef(false);
-  useEffect(() => {
-    if (isDragging) wasDragged.current = true;
-  }, [isDragging]);
   return (
     <li
       ref={setNodeRef}
@@ -237,32 +252,26 @@ function SortableViewRow({ id, children }: { id: string; children: (drag: DragBi
       {children({
         rowRef: setActivatorNodeRef,
         listeners,
-        consumeDrag: () => {
-          if (!wasDragged.current) return false;
-          wasDragged.current = false;
-          return true;
-        },
       })}
     </li>
   );
 }
 
 /** "…" on hover, and the same menu on right-click. */
+/** A view row's ⋯ menu. A right-click on the row opens it at the cursor. */
 function RowMenu({
   label,
-  open,
-  onOpenChange,
+  state,
   className,
   children,
 }: {
   label: string;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+  state: ReturnType<typeof useRowMenu>;
   className?: string;
   children: React.ReactNode;
 }) {
   return (
-    <DropdownMenu open={open} onOpenChange={onOpenChange}>
+    <DropdownMenu open={state.menu.open} onOpenChange={state.onOpenChange}>
       <DropdownMenuTrigger
         render={
           <button
@@ -275,7 +284,12 @@ function RowMenu({
       >
         <MoreHorizontal className="size-3.5" />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" side="right" className="w-auto min-w-48">
+      <DropdownMenuContent
+        align="start"
+        side={state.menu.point ? "bottom" : "right"}
+        anchor={state.anchor}
+        className="w-auto min-w-48"
+      >
         {children}
       </DropdownMenuContent>
     </DropdownMenu>
@@ -295,7 +309,7 @@ function BuiltinViewRow({
   builtin,
   pathname,
   plainRowsLit,
-  issueLitInTree,
+  issueInAllIssues,
   activeIssueId,
   actions,
   drag,
@@ -304,7 +318,7 @@ function BuiltinViewRow({
   builtin: ScopeBuiltinViewKey;
   pathname: string;
   plainRowsLit: boolean;
-  issueLitInTree: boolean;
+  issueInAllIssues: boolean;
   activeIssueId: string | null;
   actions: IssueViewActions;
   drag: DragBindings;
@@ -313,7 +327,7 @@ function BuiltinViewRow({
   const p = useWorkspacePaths();
   const listId = useId();
   const linkRef = useRef<HTMLAnchorElement>(null);
-  const [menuOpen, setMenuOpen] = useState(false);
+  const rowMenu = useRowMenu();
   const builtinNav = useBuiltinViewNavigation();
   const { searchParams } = useNavigation();
   const myScope = useStore(myIssuesViewStore, (s) => myIssuesScopeFor(NO_SEARCH, s.scope));
@@ -335,7 +349,7 @@ function BuiltinViewRow({
     (builtin === "all_issues"
       ? pathname === p.issues()
         ? activeWorkspaceView === null
-        : !issueLitInTree && isPathWithin(pathname, p.issues())
+        : issueInAllIssues && isPathWithin(pathname, p.issues())
       : onMyIssues && activeMyView === null && (builtin === "my_agents") === isMyAgentsSearch(searchParams));
 
   const source = builtinSidebarSource(builtin);
@@ -365,15 +379,11 @@ function BuiltinViewRow({
         toggleLabel={t(($) => $.panels.work.project_issues, { name: label })}
         onPrefetch={prefetch}
         onContextMenu={(event) => {
-          event.preventDefault();
-          setMenuOpen(true);
-        }}
-        onNavigate={(event) => {
-          if (drag.consumeDrag()) event.preventDefault();
+          if (shouldOpenRowMenu(event)) rowMenu.openAtPointer(event);
         }}
         onNavigateInPlace={() => builtinNav.prepare(builtin)}
         trailing={
-          <RowMenu label={t(($) => $.panels.work.view_actions, { name: label })} open={menuOpen} onOpenChange={setMenuOpen}>
+          <RowMenu label={t(($) => $.panels.work.view_actions, { name: label })} state={rowMenu}>
             <DropdownMenuItem onClick={() => actions.copyLink(href)}>
               <Link2 className="size-3.5" />
               {t(($) => $.panels.work.view_copy_link)}
@@ -428,7 +438,7 @@ function UnreadViewRow({
   const p = useWorkspacePaths();
   const listId = useId();
   const linkRef = useRef<HTMLAnchorElement>(null);
-  const [menuOpen, setMenuOpen] = useState(false);
+  const rowMenu = useRowMenu();
   const target = issueViewTarget(wsId, UNREAD_VIEW, p);
   const open = useActiveIssueViewStore(
     (s) => pathname === target.path && s.active[target.containerKey] === UNREAD_VIEW_ID,
@@ -462,11 +472,7 @@ function UnreadViewRow({
         toggleLabel={t(($) => $.panels.work.project_issues, { name: label })}
         onPrefetch={prefetch}
         onContextMenu={(event) => {
-          event.preventDefault();
-          setMenuOpen(true);
-        }}
-        onNavigate={(event) => {
-          if (drag.consumeDrag()) event.preventDefault();
+          if (shouldOpenRowMenu(event)) rowMenu.openAtPointer(event);
         }}
         onNavigateInPlace={() => setActive(target.containerKey, UNREAD_VIEW_ID)}
         trailing={
@@ -478,8 +484,7 @@ function UnreadViewRow({
             />
             <RowMenu
               label={t(($) => $.panels.work.view_actions, { name: label })}
-              open={menuOpen}
-              onOpenChange={setMenuOpen}
+              state={rowMenu}
               className="absolute right-0"
             >
               <DropdownMenuItem onClick={() => actions.copyLink(target.href)}>
@@ -538,7 +543,7 @@ function SavedViewRow({
   const { view } = item;
   const listId = useId();
   const linkRef = useRef<HTMLAnchorElement>(null);
-  const [menuOpen, setMenuOpen] = useState(false);
+  const rowMenu = useRowMenu();
   const target = issueViewTarget(wsId, view, p);
   const active = useActiveIssueViewStore(
     (s) => plainRowsLit && pathname === target.path && s.active[target.containerKey] === view.id,
@@ -563,7 +568,7 @@ function SavedViewRow({
 
   if (renaming) {
     return (
-      <div className={cn(PANEL_ROW_CLASS, panelRowStateClass(active), "py-1")}>
+      <div {...panelRowAnchor(active)} className={cn(PANEL_ROW_CLASS, panelRowStateClass(active), "py-1")}>
         <Layers className="size-4 shrink-0" />
         <ViewNameInput
           initial={view.name}
@@ -591,20 +596,22 @@ function SavedViewRow({
         toggleLabel={t(($) => $.panels.work.project_issues, { name: view.name })}
         onPrefetch={prefetch}
         onContextMenu={(event) => {
-          event.preventDefault();
-          setMenuOpen(true);
-        }}
-        onNavigate={(event) => {
-          if (drag.consumeDrag()) event.preventDefault();
+          if (shouldOpenRowMenu(event)) rowMenu.openAtPointer(event);
         }}
         onNavigateInPlace={() => setActive(target.containerKey, view.id)}
         trailing={
-          <RowMenu label={t(($) => $.panels.work.view_actions, { name: view.name })} open={menuOpen} onOpenChange={setMenuOpen}>
+          <RowMenu label={t(($) => $.panels.work.view_actions, { name: view.name })} state={rowMenu}>
             {canManage && (
-              <DropdownMenuItem onClick={() => startRename(view.id, "sidebar")}>
-                <Pencil className="size-3.5" />
-                {t(($) => $.panels.work.view_rename)}
-              </DropdownMenuItem>
+              <>
+                <DropdownMenuItem onClick={() => actions.edit(view)}>
+                  <Filter className="size-3.5" />
+                  {t(($) => $.panels.work.view_edit)}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => startRename(view.id, "sidebar")}>
+                  <Pencil className="size-3.5" />
+                  {t(($) => $.panels.work.view_rename)}
+                </DropdownMenuItem>
+              </>
             )}
             <DropdownMenuItem onClick={() => actions.duplicate(view, "sidebar")}>
               <Copy className="size-3.5" />

@@ -98,6 +98,23 @@ describe("keyboard shortcut definitions", () => {
     expect(action.allowInEditable).toBe(true);
   });
 
+  it("keeps the new-chat shortcut usable on every platform and runtime", () => {
+    const action = SHORTCUT_ACTION_BY_ID.newChat;
+    const chord = createShortcutChord("J", { primary: true, shift: true });
+    expect(action.defaultShortcut).toEqual(chord);
+    for (const platform of ["macos", "windows", "linux"] as const) {
+      for (const runtime of ["web", "desktop"] as const) {
+        expect(
+          isShortcutAllowedForAction("newChat", chord, platform, runtime),
+          `Mod+Shift+J must stay assignable on ${platform}/${runtime}`,
+        ).toBe(true);
+      }
+    }
+    expect(action.allowInEditable).toBe(true);
+    expect(shortcutMatchesEvent(chord, keyEvent("J", { metaKey: true, shiftKey: true }), "macos")).toBe(true);
+    expect(shortcutMatchesEvent(chord, keyEvent("j", { metaKey: true }), "macos")).toBe(false);
+  });
+
   it("keeps the plain inbox archive key out of editable controls", () => {
     expect(SHORTCUT_ACTION_BY_ID.archiveInboxItem.allowInEditable).toBe(false);
   });

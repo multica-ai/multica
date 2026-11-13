@@ -93,3 +93,63 @@ func TestPriceForRuntimeModelKeepsCursorParsingScopedToCursor(t *testing.T) {
 		t.Errorf("PriceForRuntimeModel(codex, gpt-5.4) = %+v, %v; want %+v", got, ok, want)
 	}
 }
+
+// TestPriceForRuntimeModelAntigravityClaudeEffort pins the Antigravity-scoped
+// Claude effort fallback: agy reports Claude models with a reasoning-effort
+// suffix or a display label (see readAntigravitySelectedModel in
+// server/pkg/agent/antigravity.go); effort selects reasoning, not a SKU, so
+// the id prices at the base Claude tier. Only the four levels Antigravity
+// supports are stripped, the version is a major or major.minor number, and
+// only the antigravity provider gets the rewrite — the non-Antigravity rows
+// stay pinned unmapped by
+// TestPriceForRuntimeModelKeepsCursorParsingScopedToCursor. Mirrors the
+// antigravity branch of pricingCandidates in
+// packages/views/runtimes/utils.ts.
+func TestPriceForRuntimeModelAntigravityClaudeEffort(t *testing.T) {
+	for _, tc := range []struct {
+		model string
+		key   string
+	}{
+		{"claude-opus-5-5-high", "anthropic:claude-opus-5-5"},
+		{"claude-opus-5-5-medium", "anthropic:claude-opus-5-5"},
+		{"claude-sonnet-5-5-low", "anthropic:claude-sonnet-5-5"},
+		{"claude-haiku-5-5-minimal", "anthropic:claude-haiku-5-5"},
+		{"claude-opus-5-5-high[1m]", "anthropic:claude-opus-5-5"},
+		{"claude-opus-5.5-high", "anthropic:claude-opus-5-5"},
+		{"Claude-Opus-5.5-High", "anthropic:claude-opus-5-5"},
+		{"antigravity:claude-opus-5-5-high", "anthropic:claude-opus-5-5"},
+		{"Claude Opus 5.5 (High)", "anthropic:claude-opus-5-5"},
+		{"Claude Opus 5.5", "anthropic:claude-opus-5-5"},
+		{"gemini-4-carbon-high", "google:gemini-4-carbon"},
+	} {
+		want := modelPrices[tc.key]
+		got, ok := PriceForRuntimeModel("antigravity", tc.model)
+		if !ok || got != want {
+			t.Errorf("PriceForRuntimeModel(antigravity, %q) = %+v, %v; want %+v", tc.model, got, ok, want)
+		}
+	}
+	for _, model := range []string{
+		"claude-opus-5-5-fast",
+		"claude-opus-5-5-max",
+		"claude-opus-5-5-xhigh",
+		"claude-opus-5-5-thinking",
+		"claude-opus-5-5-preview",
+		"claude-opus-5-5-99-high",
+		"claude-opus-5-5-20261001-high",
+		"claude-opus-5-5-high-latest",
+		"/claude-opus-5-5-high",
+		"claude-opus-5-5[]",
+		"claude-opus-5-5-high[1m][2m]",
+		"Claude Opus 5.5 (Turbo)",
+	} {
+		if got, ok := PriceForRuntimeModel("antigravity", model); ok {
+			t.Errorf("PriceForRuntimeModel(antigravity, %q) = %+v; want unmapped", model, got)
+		}
+	}
+	// The Claude effort fallback must not leak beyond the antigravity
+	// provider; provider="claude" is pinned by
+	// TestPriceForRuntimeModelKeepsCursorParsingScopedToCursor.
+	if got, ok := PriceForRuntimeModel("", "claude-opus-5-5-high"); ok {
+		t.Errorf("PriceForRuntimeModel(\"\", claude-opus-5-5-high) = %+v; want unmapped", got)
+	}
+}

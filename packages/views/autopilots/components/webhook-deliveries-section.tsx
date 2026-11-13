@@ -373,7 +373,7 @@ function MetaRow({
   return (
     <div className="flex flex-col">
       <dt className="text-muted-foreground">{label}</dt>
-      <TruncatedTooltip content={value}>
+      <TruncatedTooltip content={value} focusable>
         <dd
           className={cn(
             "truncate text-foreground",

@@ -520,6 +520,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
                     type="button"
                     onClick={() => setIsExpanded((v) => !v)}
                     className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
+                    aria-label={isExpanded ? t(($) => $.dialog.collapse) : t(($) => $.dialog.expand)}
                   >
                     {isExpanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
                   </button>
@@ -536,6 +537,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
                     type="button"
                     onClick={() => onOpenChange(false)}
                     className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
+                    aria-label={t(($) => $.dialog.close)}
                   >
                     <XIcon className="size-4" />
                   </button>

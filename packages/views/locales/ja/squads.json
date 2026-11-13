@@ -27,13 +27,7 @@
     "success": "スカッドをアーカイブしました"
   },
   "name_editor": {
-    "title": "スクワッド名を変更",
-    "placeholder": "スクワッド名",
-    "required": "名前を入力してください",
-    "cancel": "キャンセル",
-    "save": "保存",
-    "saved": "保存しました",
-    "save_failed": "保存できませんでした"
+    "placeholder": "スクワッド名"
   },
   "add_member_dialog": {
     "title": "メンバーを追加",
@@ -53,12 +47,9 @@
     "empty": "役割を追加…",
     "placeholder": "役割（例：レビュアー）"
   },
-  "description_dialog": {
-    "title": "説明を編集",
-    "placeholder_empty": "説明を追加",
-    "cancel": "キャンセル",
-    "responsibility_placeholder": "このスクワッドの担当は何ですか？",
-    "save": "保存"
+  "description_editor": {
+    "empty": "説明を追加",
+    "placeholder": "このスクワッドの担当は何ですか？"
   },
   "members_tab": {
     "section_title": "メンバー",
@@ -112,7 +103,8 @@
     "leader_updated": "リーダーを更新しました",
     "leader_update_failed": "リーダーを更新できませんでした",
     "archive_failed": "スクワッドをアーカイブできませんでした",
-    "instructions_saved": "指示を保存しました"
+    "instructions_saved": "指示を保存しました",
+    "update_failed": "保存できませんでした"
   },
   "profile_card": {
     "unavailable": "スクワッドを利用できません",

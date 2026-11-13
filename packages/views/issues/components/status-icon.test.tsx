@@ -41,6 +41,6 @@ describe("issue icons", () => {
     const { container } = render(<PriorityIcon priority="unexpected_priority" />);
 
     const icon = container.querySelector("svg");
-    expect(icon).toHaveClass("text-muted-foreground");
+    expect(icon).toHaveClass("text-priority-none");
   });
 });

@@ -164,6 +164,8 @@ var allFileBasedProviders = []string{
 	"antigravity",
 	"qwen",
 	"qwenpaw",
+	"droid",
+	"amp",
 	"mcode",
 }
 

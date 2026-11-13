@@ -24,6 +24,14 @@ export const ICON_LIBRARY_IMPORT_PATTERNS = [
   },
 ];
 
+// motion's hook reads only the system setting; the core one also honours the
+// Appearance page's Reduce motion switch.
+export const REDUCED_MOTION_IMPORT = {
+  name: "motion/react",
+  importNames: ["useReducedMotion"],
+  message: "Use useReducedMotion from @multica/core/appearance: it also honours the Appearance setting.",
+};
+
 /** @type {import("eslint").Linter.Config[]} */
 export default [
   eslint.configs.recommended,
@@ -55,6 +63,7 @@ export default [
         peerDependencies: true,
       }],
       "no-restricted-imports": ["error", {
+        paths: [REDUCED_MOTION_IMPORT],
         patterns: ICON_LIBRARY_IMPORT_PATTERNS,
       }],
     },

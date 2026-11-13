@@ -1,5 +1,6 @@
 "use client";
 
+import { ApiError } from "@multica/core/api";
 import { issueStatusCategory } from "@multica/core/issues";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import type { ReactNode } from "react";
@@ -51,14 +52,10 @@ export interface IssueChipProps {
 const BASE_CLASS =
   "issue-mention inline-flex min-w-0 max-w-[min(18rem,100%)] items-center gap-1.5 rounded-md border mx-0.5 px-2 py-0.5 text-caption";
 
-export function IssueChip({
-  issueId,
-  fallbackLabel,
-  children,
-  className,
-}: IssueChipProps) {
+/** The issue a chip shows, from the issue list cache or, past its first page,
+ *  the issue's own query. Undefined until it loads, or when it is gone. */
+export function useChipIssue(issueId: string) {
   const wsId = useWorkspaceId();
-  const { colorOf: statusColorOf, iconOf: statusIconOf } = useIssueStatuses(wsId);
   const { data: issues = [] } = useQuery(issueListOptions(wsId));
   const listIssue = issues.find((i) => i.id === issueId);
 
@@ -67,9 +64,24 @@ export function IssueChip({
   const { data: detailIssue } = useQuery({
     ...issueDetailOptions(wsId, issueId),
     enabled: !listIssue,
+    // Recover transient failures on focus without repeatedly fetching missing
+    // issues. Hydrated queries stay fresh until invalidated (staleTime: Infinity).
+    refetchOnWindowFocus: (query) =>
+      !(query.state.error instanceof ApiError && query.state.error.status === 404),
   });
 
-  const issue = listIssue ?? detailIssue;
+  return listIssue ?? detailIssue;
+}
+
+export function IssueChip({
+  issueId,
+  fallbackLabel,
+  children,
+  className,
+}: IssueChipProps) {
+  const wsId = useWorkspaceId();
+  const { colorOf: statusColorOf, iconOf: statusIconOf } = useIssueStatuses(wsId);
+  const issue = useChipIssue(issueId);
   const cls = className ? `${BASE_CLASS} ${className}` : BASE_CLASS;
 
   if (children !== undefined) {

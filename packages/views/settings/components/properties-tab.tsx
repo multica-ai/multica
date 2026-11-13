@@ -594,6 +594,7 @@ function PropertyEditorDialog({
                         <button
                           type="button"
                           aria-label={option.color}
+                          // eslint-disable-next-line no-restricted-syntax -- color swatch
                           className="size-6 shrink-0 cursor-pointer rounded-full border border-surface-border transition-transform hover:scale-110"
                           style={{ backgroundColor: option.color }}
                         />

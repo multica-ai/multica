@@ -312,6 +312,12 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_QWEN_PATH", "qwen", "MULTICA_QWEN_MODEL"); ok {
 		agents["qwen"] = e
 	}
+	if e, ok := probe("MULTICA_AMP_PATH", "amp", "MULTICA_AMP_MODEL"); ok {
+		agents["amp"] = e
+	}
+	if e, ok := probe("MULTICA_DROID_PATH", "droid", "MULTICA_DROID_MODEL"); ok {
+		agents["droid"] = e
+	}
 	// QwenPaw (`qwenpaw`) is the QwenPaw CLI agent, driven over ACP via
 	// `qwenpaw acp`. It takes no model env var: the backend never calls
 	// session/set_model (it would rewrite QwenPaw's shared agent config), so
@@ -339,6 +345,19 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	// advertise a knob that silently does nothing.
 	if e, ok := probe("MULTICA_ZEROCLAW_PATH", "zeroclaw", ""); ok {
 		agents["zeroclaw"] = e
+	}
+	// museapp (muse.ai) is not a CLI: there is no binary to discover. The
+	// daemon advertises a museapp runtime exactly when
+	// MULTICA_MUSEAPP_ENDPOINT points at a Muse receptionist; reachability and
+	// protocol version are verified against the receptionist itself in
+	// probeBuiltinRuntime (there is no --version to run).
+	// MULTICA_MUSEAPP_MODEL is informational only — the backend's wire
+	// protocol has no model parameter, see ModelSelectionSupported.
+	if strings.TrimSpace(os.Getenv("MULTICA_MUSEAPP_ENDPOINT")) != "" {
+		agents["museapp"] = AgentEntry{
+			Command: "museapp",
+			Model:   strings.TrimSpace(os.Getenv("MULTICA_MUSEAPP_MODEL")),
+		}
 	}
 	if e, ok := probe("MULTICA_ZCODE_PATH", "zcode", "MULTICA_ZCODE_MODEL"); ok {
 		agents["zcode"] = e

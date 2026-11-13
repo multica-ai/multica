@@ -11,6 +11,7 @@ import { MarkDuplicateIssueModal } from "./mark-duplicate-issue";
 import { AddChildIssueModal } from "./add-child-issue";
 import { AddProjectIssueModal } from "./add-project-issue";
 import { RenameIssueModal } from "./rename-issue";
+import { RenameProjectModal } from "./rename-project";
 import { DeleteIssueConfirmModal } from "./delete-issue-confirm";
 import { RunConfirmModal } from "./run-confirm";
 import { WorkflowHandoffModal } from "./workflow-handoff";
@@ -63,6 +64,9 @@ export function ModalRegistry() {
       break;
     case "project-add-issue":
       activeModal = <AddProjectIssueModal onClose={close} data={data} />;
+      break;
+    case "project-rename":
+      activeModal = <RenameProjectModal onClose={close} data={data} />;
       break;
     case "issue-rename":
       activeModal = <RenameIssueModal onClose={close} data={data} />;

@@ -360,6 +360,7 @@ func TestPlatformSkillDescriptionNamesEveryDomain(t *testing.T) {
 		"references/autopilots.md":   "autopilot",
 		"references/projects.md":     "project",
 		"references/runtimes.md":     "runtime",
+		"references/environments.md": "local environment",
 		"references/skill-import.md": "skill import",
 	}
 
@@ -433,6 +434,7 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"references/autopilots.md",
 				"references/projects.md",
 				"references/runtimes.md",
+				"references/environments.md",
 				"references/skill-import.md",
 				// Invariants deduplicated out of the eight merged bodies. Each
 				// was repeated in most of them; the router is now their only
@@ -677,6 +679,24 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				// metadata; every other runtime gets a linked worktree.
 				"Linux and Windows Codex",
 				"task-local Git metadata",
+			},
+		},
+		{
+			file: "references/environments.md",
+			want: []string{
+				".multica/environments.toml",
+				"multica env start <name>",
+				// The port block is what keeps parallel runs from colliding;
+				// an agent that hard-codes a port breaks the second run.
+				"`MULTICA_PORT` through `MULTICA_PORT+9`",
+				// A detaching start command ends the environment at once and
+				// leaves its work unreachable by stop.
+				"`docker compose up -d`",
+				// ttl is a Go duration; the day unit fails to parse.
+				"`7d` is rejected",
+				// Reuse is keyed on the checkout as well as the name, so a run
+				// with its own checkout gets a second instance, not the old one.
+				"the name and the checkout all match",
 			},
 		},
 		{

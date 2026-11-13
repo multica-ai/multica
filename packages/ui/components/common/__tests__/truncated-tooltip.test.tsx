@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { isContentTruncated, TruncatedTooltip } from "../truncated-tooltip";
 import { TooltipProvider } from "../../ui/tooltip";
@@ -125,6 +126,45 @@ describe("TruncatedTooltip", () => {
     expect(document.querySelector("[data-slot='tooltip-content']")).toBeNull();
   });
 
+  it("opens when Tab reaches a control whose text is cut off", async () => {
+    const user = userEvent.setup();
+    renderWithTooltips(
+      <>
+        <button type="button">Before</button>
+        <Row label="A very long project name" />
+      </>,
+    );
+    setBox(screen.getByTestId("label"), { scrollWidth: 240, clientWidth: 120 });
+    screen.getByRole("button", { name: "Before" }).focus();
+
+    await user.tab();
+    expect(screen.getByRole("button", { name: "A very long project name" })).toHaveFocus();
+    expect(tooltipPopup()).toHaveTextContent("A very long project name");
+  });
+
+  it("leaves focus under a hovering pointer to the hover delay", async () => {
+    renderWithTooltips(<Row label="A very long project name" />);
+    setBox(screen.getByTestId("label"), { scrollWidth: 240, clientWidth: 120 });
+    const button = screen.getByRole("button");
+
+    // A menu moves focus to the item under the pointer.
+    vi.useFakeTimers();
+    try {
+      fireEvent.pointerEnter(button, { pointerType: "mouse" });
+      await act(async () => {
+        button.focus();
+      });
+      expect(tooltipPopup()).toBeNull();
+
+      await act(async () => {
+        vi.advanceTimersByTime(550);
+      });
+      expect(tooltipPopup()).toHaveTextContent("A very long project name");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("renders the child alone without content", () => {
     renderWithTooltips(
       <TruncatedTooltip content="">
@@ -132,6 +172,111 @@ describe("TruncatedTooltip", () => {
       </TruncatedTooltip>,
     );
     expect(screen.getByRole("button", { name: "Plain" })).not.toHaveAttribute("data-popup-open");
+  });
+});
+
+describe("TruncatedTooltip focusable", () => {
+  function Panel() {
+    return (
+      <>
+        <button type="button">Before</button>
+        <TruncatedTooltip content="feature/very-long-branch-name" focusable>
+          <span style={{ overflowX: "hidden" }}>feature/very-long-branch-name</span>
+        </TruncatedTooltip>
+        <TruncatedTooltip content="main" focusable>
+          <span style={{ overflowX: "hidden" }}>main</span>
+        </TruncatedTooltip>
+        <button type="button">After</button>
+      </>
+    );
+  }
+
+  // jsdom never resizes, so the test re-runs the measurement once it has
+  // given the text its widths.
+  function renderPanel() {
+    renderWithTooltips(<Panel />);
+    setBox(screen.getByText("feature/very-long-branch-name"), { scrollWidth: 240, clientWidth: 120 });
+    setBox(screen.getByText("main"), { scrollWidth: 30, clientWidth: 120 });
+    act(() => triggerResizeObservers());
+  }
+
+  it("reaches cut-off text with Tab and shows the full text until focus leaves", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    const text = screen.getByText("feature/very-long-branch-name");
+    screen.getByRole("button", { name: "Before" }).focus();
+
+    await user.tab();
+    expect(text).toHaveFocus();
+    expect(tooltipPopup()).toHaveTextContent("feature/very-long-branch-name");
+
+    await user.tab();
+    expect(screen.getByRole("button", { name: "After" })).toHaveFocus();
+    await waitFor(() => expect(tooltipPopup()).toBeNull());
+  });
+
+  it("still opens for Tab and Shift+Tab while the pointer rests on the text", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    const text = screen.getByText("feature/very-long-branch-name");
+    fireEvent.pointerEnter(text, { pointerType: "mouse" });
+    screen.getByRole("button", { name: "Before" }).focus();
+
+    await user.tab();
+    expect(text).toHaveFocus();
+    expect(tooltipPopup()).toHaveTextContent("feature/very-long-branch-name");
+
+    await user.tab();
+    await waitFor(() => expect(tooltipPopup()).toBeNull());
+
+    await user.tab({ shift: true });
+    expect(text).toHaveFocus();
+    expect(tooltipPopup()).toHaveTextContent("feature/very-long-branch-name");
+  });
+
+  it("keeps text that fits out of the tab order", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    expect(screen.getByText("main")).not.toHaveAttribute("tabindex");
+
+    screen.getByRole("button", { name: "Before" }).focus();
+    await user.tab();
+    await user.tab();
+    expect(screen.getByRole("button", { name: "After" })).toHaveFocus();
+  });
+
+  it("joins the tab order once a resize cuts the text off, and leaves it when the text fits again", () => {
+    renderPanel();
+    const text = screen.getByText("main");
+    expect(text).not.toHaveAttribute("tabindex");
+
+    setBox(text, { scrollWidth: 30, clientWidth: 20 });
+    act(() => triggerResizeObservers());
+    expect(text).toHaveAttribute("tabindex", "0");
+
+    setBox(text, { scrollWidth: 30, clientWidth: 120 });
+    act(() => triggerResizeObservers());
+    expect(text).not.toHaveAttribute("tabindex");
+  });
+
+  it("keeps the trigger's own ref and classes", () => {
+    let node: HTMLElement | null = null;
+    renderWithTooltips(
+      <TruncatedTooltip content="Name" focusable>
+        <span
+          ref={(el) => {
+            node = el;
+          }}
+          className="truncate rounded-md"
+        >
+          Name
+        </span>
+      </TruncatedTooltip>,
+    );
+    const text = screen.getByText("Name");
+    expect(node).toBe(text);
+    expect(text).toHaveClass("truncate", "rounded-md", "focus-visible:ring-3");
+    expect(text).not.toHaveClass("rounded-sm");
   });
 });
 

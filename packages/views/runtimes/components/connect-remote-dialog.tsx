@@ -7,7 +7,8 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
+import { useReducedMotion } from "@multica/core/appearance";
 import { Check, ChevronRight, Copy, Terminal } from "@multica/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
@@ -62,7 +63,7 @@ function WorkspaceConnectDialog({ wsId, currentUserId, onClose }: {
   const slug = useWorkspaceSlug();
   const qc = useQueryClient();
   const navigation = useNavigation();
-  const shouldReduceMotion = useReducedMotion() ?? false;
+  const shouldReduceMotion = useReducedMotion();
   const newRuntimeIdRef = useRef<string | null>(null);
   const initialDaemonIds = useRef<Set<string> | null>(null);
   const pendingInitialRefresh = useRef(false);

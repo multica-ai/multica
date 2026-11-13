@@ -52,6 +52,8 @@ export function useUpdateIssueSystemWakeup(workspaceId: string, issueId: string)
       Promise.all([
         client.invalidateQueries({ queryKey: issueSystemWakeupsOptions(workspaceId, issueId).queryKey }),
         client.invalidateQueries({ queryKey: ["workspace-wakeups", workspaceId] }),
+        // The workspace default counts the issues that set their own rule.
+        client.invalidateQueries({ queryKey: workspaceSystemWakeupsOptions(workspaceId).queryKey }),
       ]),
   });
 }

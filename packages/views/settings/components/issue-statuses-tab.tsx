@@ -532,7 +532,7 @@ function StatusRow({
           {mergeBadgeHref && (
             <AppLink
               href={mergeBadgeHref}
-              className="inline-flex shrink-0 items-center gap-1 rounded-full bg-info/10 px-1.5 py-0.5 text-micro font-medium text-info transition-colors hover:bg-info/15 focus-visible:outline-2 focus-visible:outline-ring"
+              className="inline-flex shrink-0 items-center gap-1 rounded-md bg-info/10 px-1.5 py-0.5 text-micro font-medium text-info transition-colors hover:bg-info/15 focus-visible:outline-2 focus-visible:outline-ring"
             >
               <Zap className="size-3" aria-hidden="true" />
               {t(($) => $.issue_statuses.pr_auto_complete_badge)}

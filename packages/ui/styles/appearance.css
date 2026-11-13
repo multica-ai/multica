@@ -1,0 +1,80 @@
+/* Appearance: what themes and type preferences need beyond tokens.css.
+ *
+ * Theme tokens are data (packages/core/appearance/themes.ts) and arrive as a
+ * generated stylesheet; a theme's own CSS arrives as a second one. This file
+ * holds the fixed parts both rely on: the CJK families, the content type
+ * stack and the primary button fill. Import after tokens.css. */
+
+/* ── Type families the Appearance settings can pick ─────────────────────────
+ * CJK families per locale, mirroring the sans chains in each app's
+ * globals.css: Simplified first by default, Traditional for zh-TW, Japanese
+ * Mincho for ja. Kai has no Japanese counterpart and falls back to Mincho. */
+
+:root {
+    --font-cjk-serif: "Songti SC", "STSong", "Source Han Serif SC", "Noto Serif CJK SC",
+        "Noto Serif SC", "SimSun", "Apple Myungjo", "Noto Serif CJK KR", serif;
+    --font-cjk-kai: "LXGW WenKai", "LXGW WenKai Screen", "Kaiti SC", "STKaiti", "KaiTi",
+        "Kaiti TC", "BiauKai", var(--font-cjk-serif);
+}
+
+html[lang|="ja"] {
+    --font-cjk-serif: "Hiragino Mincho ProN", "Yu Mincho", "YuMincho", "Noto Serif CJK JP",
+        "Noto Serif JP", "Songti SC", "SimSun", serif;
+    --font-cjk-kai: var(--font-cjk-serif);
+}
+
+html[lang="zh-TW"] {
+    --font-cjk-serif: "Songti TC", "Source Han Serif TC", "Noto Serif CJK TC", "PMingLiU",
+        "Songti SC", "Noto Serif CJK SC", serif;
+    --font-cjk-kai: "LXGW WenKai TC", "Kaiti TC", "BiauKai", "DFKai-SB", "LXGW WenKai",
+        "Kaiti SC", var(--font-cjk-serif);
+}
+
+/* ── Content type ───────────────────────────────────────────────────────────
+ * Issue descriptions, comments, chat and documents render under
+ * .rich-text-editor and can have their own faces, size and line height
+ * (Appearance > Content text). Each falls back to the interface setting.
+ * The text tokens are redeclared here because a custom property that uses
+ * var() is resolved where it is declared, so --content-scale has to be read
+ * on this element rather than on :root. */
+
+:root {
+    --font-content: var(--font-content-latin, var(--font-ui, var(--font-ui-inter))),
+        var(--font-content-cjk, var(--font-cjk, var(--font-cjk-sans)));
+}
+
+.rich-text-editor {
+    --content-size: var(--content-scale, var(--font-scale, 1));
+    --text-micro: calc(11px * var(--content-size));
+    --text-micro--line-height: calc(15px * var(--content-size));
+    --text-caption: calc(12px * var(--content-size));
+    --text-caption--line-height: calc(16px * var(--content-size));
+    --text-label: calc(13px * var(--content-size));
+    --text-label--line-height: calc(18px * var(--content-size));
+    --text-body: calc(14px * var(--content-size));
+    --text-body--line-height: calc(20px * var(--content-size));
+    --text-body-lg: calc(15px * var(--content-size));
+    --text-body-lg--line-height: calc(22px * var(--content-size));
+    --text-title-sm: calc(16px * var(--content-size));
+    --text-title-sm--line-height: calc(24px * var(--content-size));
+    --text-title: calc(18px * var(--content-size));
+    --text-title--line-height: calc(28px * var(--content-size));
+    --text-display-sm: calc(24px * var(--content-size));
+    --text-display-sm--line-height: calc(32px * var(--content-size));
+    font-family: var(--font-content);
+}
+
+/* ── Primary button fill ────────────────────────────────────────────────────
+ * --primary also paints text (`text-primary`), so a theme whose button colour
+ * would fail as text sets --button-primary instead. Only active under a
+ * theme; the default theme keeps the button's own classes. */
+
+:root[data-theme] [data-slot="button"][data-variant="default"] {
+    background-color: var(--button-primary, var(--primary));
+    color: var(--button-primary-foreground, var(--primary-foreground));
+    border-color: var(--button-primary-border, transparent);
+}
+
+:root[data-theme] [data-slot="button"][data-variant="default"]:not(:disabled):hover {
+    background-color: color-mix(in oklab, var(--button-primary, var(--primary)) 90%, var(--foreground));
+}

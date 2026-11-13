@@ -14,7 +14,6 @@ import {
   MoreHorizontal,
   Unlink,
   GitPullRequest,
-  GitPullRequestArrow,
   GitPullRequestClosed,
   GitPullRequestDraft,
   TriangleAlert,
@@ -35,7 +34,6 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import type {
   GitHubPullRequest,
-  GitHubPullRequestState,
   PRAutoComplete,
 } from "@multica/core/types";
 import { IconButton } from "@multica/ui/components/common/icon-button";
@@ -52,6 +50,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { useT, useTimeAgo } from "../../i18n";
 import { useStatusLabel } from "../utils/status-label";
 import { StatusIcon } from "./status-icon";
+import { PULL_REQUEST_STATE_ICON } from "./pull-request-chips";
 
 type IssuesT = ReturnType<typeof useT<"issues">>["t"];
 
@@ -59,16 +58,6 @@ type IssuesT = ReturnType<typeof useT<"issues">>["t"];
 // Keep the existing sidebar density: show the first 3 PR rows inline, then
 // collapse the rest once the section reaches 4 rows.
 const PR_LIMIT_BEFORE_COLLAPSE = 4;
-
-const STATE_ICON: Record<
-  GitHubPullRequestState,
-  { icon: React.ComponentType<{ className?: string }>; className: string }
-> = {
-  open: { icon: GitPullRequestArrow, className: "text-emerald-600 dark:text-emerald-400" },
-  draft: { icon: GitPullRequestDraft, className: "text-muted-foreground" },
-  merged: { icon: GitMerge, className: "text-violet-600 dark:text-violet-400" },
-  closed: { icon: GitPullRequestClosed, className: "text-rose-600 dark:text-rose-400" },
-};
 
 export function PullRequestList({
   issueId,
@@ -355,12 +344,13 @@ const PROBLEM_LIMIT = 3;
 type VerdictTone = "red" | "amber" | "green" | "violet" | "muted";
 
 // Pills reuse the state icons' palette. Their text sits one shade darker so
-// 11px copy on a 10% tint keeps AA contrast.
+// 11px copy on a 10% tint keeps AA contrast. Merged is a pull request state,
+// so it follows the theme's --pr-merged.
 const TONE_CLASS: Record<VerdictTone, string> = {
   red: "bg-rose-600/10 text-rose-700 dark:bg-rose-400/15 dark:text-rose-400",
   amber: "bg-amber-600/10 text-amber-700 dark:bg-amber-400/15 dark:text-amber-400",
   green: "bg-emerald-600/10 text-emerald-700 dark:bg-emerald-400/15 dark:text-emerald-400",
-  violet: "bg-violet-600/10 text-violet-700 dark:bg-violet-400/15 dark:text-violet-400",
+  violet: "bg-pr-merged/10 text-pr-merged-text dark:bg-pr-merged-dark/15 dark:text-pr-merged-dark",
   muted: "bg-muted text-muted-foreground",
 };
 
@@ -393,7 +383,7 @@ function PullRequestRow({
 }) {
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
-  const cfg = STATE_ICON[pr.state] ?? { icon: GitPullRequest, className: "" };
+  const cfg = PULL_REQUEST_STATE_ICON[pr.state] ?? { icon: GitPullRequest, className: "" };
   const StateIcon = cfg.icon;
   const verdict = derivePullRequestVerdict(pr);
   const pill = getVerdictPill(verdict, t);
@@ -498,7 +488,7 @@ function PullRequestRow({
  */
 export function PullRequestInlineSummary({ pr }: { pr: GitHubPullRequest }) {
   const { t } = useT("issues");
-  const cfg = STATE_ICON[pr.state] ?? { icon: GitPullRequest, className: "" };
+  const cfg = PULL_REQUEST_STATE_ICON[pr.state] ?? { icon: GitPullRequest, className: "" };
   const StateIcon = cfg.icon;
   const pill = getVerdictPill(derivePullRequestVerdict(pr), t);
   const isTerminal = pr.state === "merged" || pr.state === "closed";

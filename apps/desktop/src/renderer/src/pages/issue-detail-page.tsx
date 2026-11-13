@@ -5,7 +5,9 @@ import { useCanonicalIssue } from "@multica/core/issues/canonical-id";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 
 export function IssueDetailPage({ onDelete }: { onDelete?: () => void }) {
-  const { id } = useParams<{ id: string }>();
+  // React Router hands `name` over decoded; on the plain issue route it is
+  // undefined.
+  const { id, name } = useParams<{ id: string; name?: string }>();
   const wsId = useWorkspaceId();
   // `id` may be an identifier (`MUL-123`); resolving here means the title
   // watches the same UUID-keyed entry realtime events patch. Shares its
@@ -18,5 +20,5 @@ export function IssueDetailPage({ onDelete }: { onDelete?: () => void }) {
   // Render errors bubble to the root route errorElement (DesktopRouteErrorPage),
   // which contains the crash inside the tab content pane. No page-level boundary
   // here — a whole-page wrapper duplicates the route-level error UI.
-  return <IssueDetailRoute routeId={id} onDelete={onDelete} />;
+  return <IssueDetailRoute routeId={id} onDelete={onDelete} deliverable={name} />;
 }

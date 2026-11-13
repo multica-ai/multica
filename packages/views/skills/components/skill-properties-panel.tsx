@@ -1,7 +1,10 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, Download, HardDrive, History, Pencil } from "@multica/ui/icons";
 import type { AgentRuntime, MemberWithUser, Skill } from "@multica/core/types";
+import { useWorkspaceId } from "@multica/core/hooks";
+import { resourceLabelsOptions } from "@multica/core/labels";
 import { runtimeDisplayLabel } from "@multica/core/runtimes";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
@@ -18,9 +21,23 @@ import {
 } from "@multica/ui/components/ui/tooltip";
 import { cn } from "@multica/ui/lib/utils";
 import { ObjectPanelSection, ObjectProperty } from "../../layout/object-page";
-import { ResourceLabelPicker } from "../../labels/resource-label-picker";
+import { LabelChip } from "../../labels/label-chip";
+import { LabelPicker } from "../../issues/components/pickers/label-picker";
 import { useT, useTimeAgo } from "../../i18n";
 import { originSourceUrl, totalFileCount, type OriginInfo } from "../lib/origin";
+
+function ReadOnlySkillLabels({ skillId }: { skillId: string }) {
+  const wsId = useWorkspaceId();
+  const { data: labels = [] } = useQuery(resourceLabelsOptions(wsId, "skill", skillId));
+  if (labels.length === 0) return <span className="text-muted-foreground">—</span>;
+  return (
+    <div className="flex min-w-0 flex-wrap gap-1">
+      {labels.map((label) => (
+        <LabelChip key={label.id} label={label} />
+      ))}
+    </div>
+  );
+}
 
 function useOriginLabel(origin: OriginInfo, runtime: AgentRuntime | null) {
   const { t } = useT("skills");
@@ -294,11 +311,11 @@ export function SkillPropertiesPanel({
           {t(($) => $.detail.header.files, { count: totalFileCount(skill) })}
         </ObjectProperty>
         <ObjectProperty label={t(($) => $.detail.overview.labels)}>
-          <ResourceLabelPicker
-            resourceType="skill"
-            resourceId={skill.id}
-            canEdit={canEdit}
-          />
+          {canEdit ? (
+            <LabelPicker skillId={skill.id} align="start" />
+          ) : (
+            <ReadOnlySkillLabels skillId={skill.id} />
+          )}
         </ObjectProperty>
       </ObjectPanelSection>
 

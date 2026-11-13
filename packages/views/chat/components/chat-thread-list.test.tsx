@@ -46,6 +46,7 @@ vi.mock("@multica/core/chat/mutations", () => ({
   useDeleteChatSession: () => ({ mutate: vi.fn(), isPending: false }),
   useSetChatSessionPinned: () => ({ mutate: vi.fn(), isPending: false }),
   useSetChatSessionArchived: () => ({ mutate: archiveMutate, isPending: false }),
+  useUpdateChatSession: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 vi.mock("@tanstack/react-query", async (importOriginal) => {
@@ -315,6 +316,27 @@ describe("ChatThreadList row keyboard semantics", () => {
       { key: "Enter" },
     );
 
+    expect(onSelectSession).not.toHaveBeenCalled();
+  });
+});
+
+describe("ChatThreadList right-click menu", () => {
+  beforeEach(() => {
+    archiveMutate.mockClear();
+  });
+
+  it("opens the row's actions at the cursor and acts on that row", async () => {
+    const { onArchive, onSelectSession } = renderList("s1");
+
+    fireEvent.contextMenu(screen.getByText("Chat s2"), { clientX: 30, clientY: 90 });
+    const menu = await screen.findByRole("menu");
+    expect(
+      Array.from(menu.querySelectorAll('[role="menuitem"]'), (el) => el.textContent?.trim()),
+    ).toEqual([enChat.list.pin, ARCHIVE_LABEL, enChat.header.rename]);
+
+    fireEvent.click(screen.getByRole("menuitem", { name: ARCHIVE_LABEL }));
+    expect(onArchive).toHaveBeenCalledTimes(1);
+    expect(onArchive.mock.calls[0]![0]).toMatchObject({ id: "s2" });
     expect(onSelectSession).not.toHaveBeenCalled();
   });
 });

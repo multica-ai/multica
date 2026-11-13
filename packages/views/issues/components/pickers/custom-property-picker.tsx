@@ -14,7 +14,7 @@ import {
   dateOnlyToLocalDate,
   formatDateOnly,
 } from "@multica/core/issues/date";
-import { Calendar } from "@multica/ui/components/ui/calendar";
+import { LazyCalendar } from "@multica/ui/components/ui/lazy-calendar";
 import {
   Popover,
   PopoverTrigger,
@@ -335,7 +335,7 @@ export function CustomPropertyValueInput({
               </span>
               <Check className={`h-3.5 w-3.5 shrink-0 text-muted-foreground ${date ? "invisible" : ""}`} />
             </button>
-            <Calendar
+            <LazyCalendar
               mode="single"
               selected={date}
               onSelect={(d: Date | undefined) => {

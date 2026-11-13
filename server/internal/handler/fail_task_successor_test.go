@@ -474,7 +474,8 @@ func TestPromoteDueDeferred_ToleratesConcurrentUncommittedEnqueue(t *testing.T) 
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	runtimeID := dbfx.Runtime(t, "promote-uncommitted-runtime")
 	agentID := dbfx.Agent(t, "promote-uncommitted-agent", runtimeID)
@@ -488,7 +489,7 @@ func TestPromoteDueDeferred_ToleratesConcurrentUncommittedEnqueue(t *testing.T) 
 
 	// A due deferred row with no visible competitor: neither the supersede sweep
 	// nor the promotion fence has any reason to leave it alone.
-	dbfx.Task(t, agentID, testutil.Cols{
+	deferredID := dbfx.Task(t, agentID, testutil.Cols{
 		"issue_id":   issueID,
 		"runtime_id": runtimeID,
 		"status":     "deferred",
@@ -502,10 +503,12 @@ func TestPromoteDueDeferred_ToleratesConcurrentUncommittedEnqueue(t *testing.T) 
 		t.Fatalf("begin holder tx: %v", err)
 	}
 	defer tx.Rollback(context.Background())
-	if _, err := tx.Exec(ctx, `
+	var competitorID string
+	if err := tx.QueryRow(ctx, `
 		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
 		VALUES ($1, $2, $3, 'queued', 0)
-	`, agentID, runtimeID, issueID); err != nil {
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&competitorID); err != nil {
 		t.Fatalf("insert uncommitted competitor: %v", err)
 	}
 
@@ -516,10 +519,36 @@ func TestPromoteDueDeferred_ToleratesConcurrentUncommittedEnqueue(t *testing.T) 
 	// reached the index and pass without exercising the race.
 	holderPID := holderBackendPID(t, ctx, tx)
 	promoted := make(chan error, 1)
+	finished := make(chan struct{})
 	go func() {
+		defer close(finished)
 		promoted <- testHandler.TaskService.PromoteDueDeferredTasksForRuntime(ctx, parseUUID(runtimeID))
 	}()
+	defer func() {
+		cancel()
+		tx.Rollback(context.Background())
+		<-finished
+	}()
 	if !waitForWaiterBlockedBy(t, holderPID, 10*time.Second) {
+		select {
+		case err := <-promoted:
+			t.Logf("promotion returned before the expected index wait: %v", err)
+		default:
+			t.Log("promotion has not returned")
+		}
+		probeCtx, probeCancel := context.WithTimeout(context.Background(), time.Second)
+		defer probeCancel()
+		var activity string
+		err := testPool.QueryRow(probeCtx, `
+			SELECT COALESCE(jsonb_agg(jsonb_build_object(
+				'pid', pid, 'state', state, 'wait_type', wait_event_type,
+				'wait', wait_event, 'blockers', pg_blocking_pids(pid), 'query', query
+			))::text, '[]') FROM pg_stat_activity
+			WHERE datname = current_database()
+			  AND (pid = $1 OR cardinality(pg_blocking_pids(pid)) > 0)
+		`, holderPID).Scan(&activity)
+		t.Logf("pool acquired=%d max=%d; activity=%s; probe error=%v",
+			testPool.Stat().AcquiredConns(), testPool.Stat().MaxConns(), activity, err)
 		t.Fatal("promotion never blocked on the uncommitted competitor's index entry")
 	}
 	if err := tx.Commit(context.Background()); err != nil {
@@ -527,5 +556,19 @@ func TestPromoteDueDeferred_ToleratesConcurrentUncommittedEnqueue(t *testing.T) 
 	}
 	if err := <-promoted; err != nil {
 		t.Fatalf("a single contended row must not fail the claim: %v", err)
+	}
+	if got := taskStatusByID(t, deferredID); got != "deferred" {
+		t.Fatalf("contended task must stay deferred, got %q", got)
+	}
+	if got := taskStatusByID(t, competitorID); got != "queued" {
+		t.Fatalf("competitor must keep the pending slot, got %q", got)
+	}
+	var pending int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2 AND comment_thread_id IS NULL
+		  AND status IN ('queued', 'dispatched')
+	`, issueID, agentID).Scan(&pending); err != nil || pending != 1 {
+		t.Fatalf("expected exactly one pending task in the contended slot, got %d: %v", pending, err)
 	}
 }
