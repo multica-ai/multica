@@ -2,10 +2,13 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -136,11 +139,34 @@ func (h *Handler) HandleVCSWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	switch provider.EventKind(r.Header) {
+	systemHook := conn.Provider == string(vcs.KindGitLab) && r.Header.Get("X-Gitlab-Event") == "System Hook"
+	switch provider.EventKind(r.Header, body) {
 	case vcs.EventPullRequest:
 		if pr, err := provider.ParsePullRequest(body); err != nil {
 			slog.Warn("vcs: bad pull_request payload", "provider", conn.Provider, "err", err)
 		} else {
+			if systemHook {
+				ws, err := h.Queries.GetWorkspace(r.Context(), conn.WorkspaceID)
+				if err != nil {
+					slog.Warn("vcs: load workspace for system hook failed", "err", err)
+					break
+				}
+				if !gitLabSystemHookRepoAllowed(ws.Repos, conn.InstanceUrl, pr.RepoOwner, pr.RepoName) {
+					break
+				}
+				if checker, ok := provider.(vcs.RepositoryAccessChecker); ok {
+					token, err := h.openVCSSecret(conn.AccessTokenEncrypted)
+					if err != nil || token == "" {
+						slog.Warn("vcs: open access token for system hook failed", "err", err)
+						break
+					}
+					readable, err := checker.RepositoryReadable(r.Context(), conn.InstanceUrl, pr.RepoOwner, pr.RepoName, token)
+					if err != nil || !readable {
+						slog.Warn("vcs: system-hook repository is not readable", "provider", conn.Provider, "owner", pr.RepoOwner, "name", pr.RepoName, "err", err)
+						break
+					}
+				}
+			}
 			h.mirrorVCSPullRequest(r.Context(), conn, pr)
 		}
 	case vcs.EventCIStatus:
@@ -153,6 +179,60 @@ func (h *Handler) HandleVCSWebhook(w http.ResponseWriter, r *http.Request) {
 		// Acknowledge unmodelled events so the provider doesn't flag the hook.
 	}
 	w.WriteHeader(http.StatusAccepted)
+}
+
+// A system hook covers the entire GitLab instance. Only repositories explicitly
+// configured in this workspace may affect its issues; a similarly named repo
+// on another host or under another namespace must not match.
+func gitLabSystemHookRepoAllowed(raw []byte, instanceURL, owner, name string) bool {
+	var repos []workspaceRepoRef
+	if json.Unmarshal(raw, &repos) != nil || owner == "" || name == "" {
+		return false
+	}
+	instance, err := url.Parse(instanceURL)
+	if err != nil || instance.Host == "" {
+		return false
+	}
+	want := strings.Trim(instance.Path, "/")
+	if want != "" {
+		want += "/"
+	}
+	want += owner + "/" + name
+	for _, repo := range repos {
+		u, err := parseGitLabRepoURL(strings.TrimSpace(repo.URL))
+		if err != nil || !gitLabRepoURLMatchesInstance(u, instance) {
+			continue
+		}
+		path := strings.TrimSuffix(strings.Trim(u.Path, "/"), ".git")
+		if path == want {
+			return true
+		}
+	}
+	return false
+}
+
+func parseGitLabRepoURL(raw string) (*url.URL, error) {
+	if strings.Contains(raw, "://") {
+		return url.Parse(raw)
+	}
+	at := strings.Index(raw, "@")
+	colon := strings.Index(raw, ":")
+	if at <= 0 || colon <= at+1 || colon == len(raw)-1 {
+		return nil, errors.New("invalid scp-style repository URL")
+	}
+	return &url.URL{Scheme: "ssh", Host: raw[at+1 : colon], Path: "/" + raw[colon+1:], User: url.User(raw[:at])}, nil
+}
+func gitLabRepoURLMatchesInstance(repo, instance *url.URL) bool {
+	if repo.RawQuery != "" || repo.Fragment != "" {
+		return false
+	}
+	if repo.Scheme == "ssh" {
+		return strings.EqualFold(repo.Host, instance.Host) && repo.User != nil && repo.User.Username() == "git"
+	}
+	if repo.Scheme == "https" || repo.Scheme == "http" {
+		return repo.Scheme == instance.Scheme && strings.EqualFold(repo.Host, instance.Host) && repo.User == nil
+	}
+	return false
 }
 
 func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnection, ev vcs.PullRequestEvent) {

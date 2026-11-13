@@ -96,11 +96,11 @@ func TestForgejoEventKindAndParse(t *testing.T) {
 	p, _ := For("gitea")
 	h := http.Header{}
 	h.Set("X-Gitea-Event", "pull_request")
-	if p.EventKind(h) != EventPullRequest {
+	if p.EventKind(h, nil) != EventPullRequest {
 		t.Error("pull_request not classified")
 	}
 	h.Set("X-Gitea-Event", "status")
-	if p.EventKind(h) != EventCIStatus {
+	if p.EventKind(h, nil) != EventCIStatus {
 		t.Error("status not classified")
 	}
 
@@ -139,7 +139,7 @@ func TestGitlabParse(t *testing.T) {
 	p, _ := For("gitlab")
 	h := http.Header{}
 	h.Set("X-Gitlab-Event", "Merge Request Hook")
-	if p.EventKind(h) != EventPullRequest {
+	if p.EventKind(h, nil) != EventPullRequest {
 		t.Error("MR hook not classified")
 	}
 
@@ -164,7 +164,7 @@ func TestGitlabParse(t *testing.T) {
 	}
 
 	h.Set("X-Gitlab-Event", "Pipeline Hook")
-	if p.EventKind(h) != EventCIStatus {
+	if p.EventKind(h, nil) != EventCIStatus {
 		t.Error("pipeline hook not classified")
 	}
 	st, err := p.ParseCIStatus([]byte(`{"object_kind":"pipeline","object_attributes":{"sha":"deadbeef","status":"failed"}}`))
@@ -173,6 +173,29 @@ func TestGitlabParse(t *testing.T) {
 	}
 	if st.SHA != "deadbeef" || st.State != "failed" || st.Context != "gitlab/pipeline" {
 		t.Errorf("bad status: %+v", st)
+	}
+}
+
+func TestGitlabSystemHookMergeRequest(t *testing.T) {
+	p, _ := For("gitlab")
+	h := http.Header{}
+	h.Set("X-Gitlab-Event", "System Hook")
+	body := []byte(`{"object_kind":"merge_request","event_type":"merge_request",
+		"project":{"path_with_namespace":"group/sub/widget"},
+		"object_attributes":{"iid":59,"title":"MUL-44: fix","state_id":3,
+			"source_branch":"fix/mul-44","url":"https://gitlab.test/group/sub/widget/-/merge_requests/59"}}`)
+	if got := p.EventKind(h, body); got != EventPullRequest {
+		t.Fatalf("system MR kind = %v, want EventPullRequest", got)
+	}
+	pr, err := p.ParsePullRequest(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pr.State != "merged" || pr.RepoOwner != "group/sub" || pr.Number != 59 {
+		t.Fatalf("system MR = %+v", pr)
+	}
+	if got := p.EventKind(h, []byte(`{"object_kind":"project_create"}`)); got != EventOther {
+		t.Fatalf("unrelated system event kind = %v, want EventOther", got)
 	}
 }
 
@@ -285,6 +308,37 @@ func TestForgejoStatusTimestamp(t *testing.T) {
 	}
 }
 
+func TestGitlabRepositoryReadable(t *testing.T) {
+	cases := []struct {
+		status int
+		want   bool
+	}{
+		{http.StatusOK, true},
+		{http.StatusForbidden, false},
+		{http.StatusNotFound, false},
+	}
+	for _, tc := range cases {
+		t.Run(http.StatusText(tc.status), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/v4/projects/group%2Fsub%2Frepo" && r.URL.EscapedPath() != "/api/v4/projects/group%2Fsub%2Frepo" {
+					t.Errorf("path = %q", r.URL.Path)
+				}
+				if r.Header.Get("PRIVATE-TOKEN") != "tok" {
+					t.Errorf("PRIVATE-TOKEN missing")
+				}
+				w.WriteHeader(tc.status)
+				if tc.status == http.StatusOK {
+					_, _ = w.Write([]byte(`{"path_with_namespace":"group/sub/repo"}`))
+				}
+			}))
+			defer srv.Close()
+			got, err := (&gitlabProvider{}).RepositoryReadable(context.Background(), srv.URL, "group/sub", "repo", "tok")
+			if err != nil || got != tc.want {
+				t.Fatalf("got=%v err=%v want=%v", got, err, tc.want)
+			}
+		})
+	}
+}
 func TestValidateTokenUnauthorized(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)

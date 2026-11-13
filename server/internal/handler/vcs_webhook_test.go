@@ -442,6 +442,79 @@ func TestVCSWebhook_StaleEventDoesNotRewriteLink(t *testing.T) {
 	}
 }
 
+func TestGitLabSystemHookRepoAllowed(t *testing.T) {
+	repos := []byte(`[{"url":"https://gitlab.test/acme/widget.git"},{"url":"git@gitlab.test:group/sub/widget.git"},{"url":"ssh://git@gitlab.test/group/sub/other.git"}]`)
+	for _, tc := range []struct {
+		instance, owner, name string
+		want                  bool
+	}{
+		{"https://gitlab.test", "acme", "widget", true},
+		{"https://gitlab.test", "other", "widget", false},
+		{"https://other.test", "acme", "widget", false},
+		{"https://gitlab.test", "acme", "widget-extra", false},
+		{"https://gitlab.test", "group/sub", "widget", true},
+		{"https://gitlab.test", "group/sub", "other", true},
+	} {
+		if got := gitLabSystemHookRepoAllowed(repos, tc.instance, tc.owner, tc.name); got != tc.want {
+			t.Errorf("repo %s/%s on %s: got %v, want %v", tc.owner, tc.name, tc.instance, got, tc.want)
+		}
+	}
+	if gitLabSystemHookRepoAllowed(nil, "https://gitlab.test", "acme", "widget") {
+		t.Error("workspace without configured repos must reject system hook")
+	}
+}
+
+func TestVCSWebhook_SystemHookOnlyMirrorsConfiguredRepos(t *testing.T) {
+	ctx := context.Background()
+	box := withVCSBox(t)
+	gitlab := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.EscapedPath() != "/api/v4/projects/acme%2Fwidget" || r.Header.Get("PRIVATE-TOKEN") != "tok" {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		_, _ = w.Write([]byte(`{"path_with_namespace":"acme/widget"}`))
+	}))
+	defer gitlab.Close()
+	connID := seedVCSConnection(t, ctx, box, "gitlab", gitlab.URL)
+	issue := newVCSIssue(t, "System hook test")
+	t.Cleanup(func() { cleanupVCS(ctx, issue.ID) })
+	_, err := testPool.Exec(ctx, `UPDATE workspace SET repos = $1 WHERE id = $2`,
+		`[{"url":"`+gitlab.URL+`/acme/widget.git"}]`, testWorkspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `UPDATE workspace SET repos = '[]' WHERE id = $1`, testWorkspaceID)
+	})
+	for _, repo := range []string{"other/widget", "acme/widget"} {
+		raw, _ := json.Marshal(map[string]any{
+			"object_kind": "merge_request", "event_type": "merge_request",
+			"project": map[string]any{"path_with_namespace": repo},
+			"object_attributes": map[string]any{
+				"iid": 59, "title": issue.Identifier + " fix", "state_id": 3,
+				"url": "https://gitlab.test/" + repo + "/-/merge_requests/59",
+			},
+		})
+		w := httptest.NewRecorder()
+		testHandler.HandleVCSWebhook(w, vcsWebhookReq(connID, map[string]string{
+			"X-Gitlab-Event": "System Hook", "X-Gitlab-Token": vcsTestSecret,
+		}, raw))
+		if w.Code != http.StatusAccepted {
+			t.Fatalf("%s: status %d", repo, w.Code)
+		}
+		rows, err := testHandler.Queries.ListVCSPullRequestsByIssue(ctx, parseUUID(issue.ID))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if repo == "other/widget" && len(rows) != 0 {
+			t.Fatalf("unconfigured repo linked: %+v", rows)
+		}
+		if repo == "acme/widget" && (len(rows) != 1 || rows[0].State != "merged") {
+			t.Fatalf("configured repo not linked: %+v", rows)
+		}
+	}
+}
+
 func TestVCSWebhook_GitlabMergeRequest(t *testing.T) {
 	ctx := context.Background()
 	box := withVCSBox(t)
