@@ -81,6 +81,9 @@ describe("project Chats", () => {
     vi.mocked(api.listChatSessions).mockResolvedValue([]);
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     await screen.findByText("No active chats in this project");
-    await waitFor(() => expect(api.listChatSessions).toHaveBeenLastCalledWith({ status: "all" }));
+    await waitFor(() => expect(api.listChatSessions).toHaveBeenLastCalledWith(
+      { status: "all" },
+      { workspaceId: "ws-1" },
+    ));
   });
 });
