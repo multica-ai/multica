@@ -95,6 +95,7 @@ export function TranscriptButton({
   const returnFocus = finalFocus ?? fromKeyboard;
   const [loading, setLoading] = useState(false);
   const [loadedItems, setLoadedItems] = useState<TimelineItem[] | null>(null);
+  const queryClient = useQueryClient();
   const open = controlledOpen ?? uncontrolledOpen;
   const setOpen = controlledOnOpenChange ?? setUncontrolledOpen;
 
@@ -145,6 +146,7 @@ export function TranscriptButton({
       api
         .listTaskMessages(task.id)
         .then((msgs) => {
+          queryClient.setQueryData<TaskMessagePayload[]>(chatKeys.taskMessages(task.id), msgs);
           const timeline = buildTimeline(msgs);
           setLoadedItems(timeline);
           openTerminal(timeline);
@@ -156,7 +158,7 @@ export function TranscriptButton({
         })
         .finally(() => setLoading(false));
     },
-    [liveCacheMode, providedItems, loadedItems, setOpen, task.id, onOpenTranscript],
+    [liveCacheMode, providedItems, loadedItems, setOpen, task.id, onOpenTranscript, queryClient],
   );
 
   useEffect(() => {

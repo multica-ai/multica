@@ -1043,3 +1043,31 @@ describe("ChatMessageList onboarding starter cards", () => {
     expect(screen.getByRole("button", { name: "Later chip" })).toBeEnabled();
   });
 });
+
+describe("ChatMessageList failed-run commit changes", () => {
+  it("opens recorded partial results from a failed chat reply", async () => {
+    const qc = new QueryClient();
+    qc.setQueryData(chatKeys.taskMessages(TASK_ID), [taskMsg(1, "tool_use", {
+      tool: "multica_commit_diff",
+      input: {
+        repository: "demo", repository_id: "repo-1", base: "a".repeat(40), head: "b".repeat(40),
+        changes: [{ path: "partial.ts", kind: "add", diff: "@@ -0,0 +1 @@\n+partial result" }],
+      },
+    })]);
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={qc}>
+          <ChatMessageList messages={[{
+            id: "failed-message", chat_session_id: "session-1", role: "assistant",
+            content: "network failed after committing partial results", task_id: TASK_ID,
+            created_at: new Date(0).toISOString(), failure_reason: "skill_bundle_unavailable",
+          }]} pendingTask={null} availability="online" />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+    expect(await screen.findByText(enChat.message_list.failure.skill_bundle_unavailable)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Run changes · 1 file" }));
+    expect(await screen.findByRole("dialog")).toHaveTextContent("aaaaaaaa → bbbbbbbb");
+    expect(screen.getByRole("button", { name: "partial.ts" })).toBeInTheDocument();
+  });
+});

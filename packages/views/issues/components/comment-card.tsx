@@ -1,5 +1,6 @@
 "use client";
 
+import { TaskCommitChanges } from "../../common/commit-changes/commit-changes";
 import { Fragment, memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { CheckCircle2, ChevronRight, CornerUpLeft, ListChevronsDownUp, Copy, Link2, Loader2, MessageSquare, MessageSquarePlus, MoreHorizontal, Pencil, Plus, RotateCcw, SmilePlus, Trash2 } from "@multica/ui/icons";
 import { toast } from "sonner";
@@ -1023,7 +1024,7 @@ function CommentRow({
           <div className="pl-12 pr-4 max-md:pl-3 max-md:pr-3">
             <SteerReceipts issueId={issueId} entry={entry} />
             {entry.actor_type === "agent" && entry.source_task_id && (
-              <AppCallChips issueId={issueId} taskId={entry.source_task_id} />
+              <><AppCallChips issueId={issueId} taskId={entry.source_task_id} /><TaskCommitChanges taskId={entry.source_task_id} /></>
             )}
           </div>
           {retryableAgentFailureComment(entry) && (
@@ -1605,7 +1606,7 @@ function CommentCardImpl({
                 <div className="pl-8 max-md:pl-0">
                   <SteerReceipts issueId={issueId} entry={entry} />
                   {entry.actor_type === "agent" && entry.source_task_id && (
-                    <AppCallChips issueId={issueId} taskId={entry.source_task_id} />
+                    <><AppCallChips issueId={issueId} taskId={entry.source_task_id} /><TaskCommitChanges taskId={entry.source_task_id} /></>
                   )}
                 </div>
                 {retryableAgentFailureComment(entry) && (

@@ -269,5 +269,27 @@
     "archive": "Archive chat",
     "unarchive": "Unarchive chat",
     "delete": "Delete chat"
+  },
+  "commit_changes": {
+    "heading": "Run changes",
+    "files": "Changed files",
+    "incomplete": "Some changes were omitted because of recording limits.",
+    "unavailable": "This file’s diff could not be recorded in full. Review it in the repository.",
+    "no_text": "No textual diff is available.",
+    "loading": "Loading changes…",
+    "retry": "Retry loading changes",
+    "empty": "No changes were recorded for this run.",
+    "worktree": "Working tree, start to end",
+    "commits": "Commits",
+    "draft": "Saved draft",
+    "recorded_files_one": "{{count}} file",
+    "recorded_files_other": "{{count}} files",
+    "incomplete_record": "Incomplete record",
+    "repositories_omitted": "Some repositories were not recorded because the repository limit was reached.",
+    "worktree_unavailable": "Working tree changes could not be recorded.",
+    "commits_unavailable": "Commit changes could not be recorded.",
+    "draft_unavailable": "Saved draft changes could not be recorded.",
+    "worktree_unchanged": "No net working tree changes.",
+    "comparison_unchanged": "No file changes in this comparison."
   }
 }

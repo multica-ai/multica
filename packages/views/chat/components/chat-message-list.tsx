@@ -51,6 +51,7 @@ import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
 import { FOLLOW_EDGE_THRESHOLD } from "../../common/task-transcript/transcript-follow";
 import { LIVE_END_ROW_ATTR, useStickToBottom } from "./stick-to-bottom";
 import { JumpToLiveEndButton, useJumpToLiveEnd } from "./jump-to-live-end";
+import { CommitChanges } from "../../common/commit-changes/commit-changes";
 import { formatElapsedMs } from "../lib/format";
 import {
   canonicalAnswerText,
@@ -657,12 +658,15 @@ function AssistantMessage({
   // so the user can see exactly where the run broke.
   if (message?.failure_reason) {
     return (
-      <FailureBubble
-        reason={message.failure_reason}
-        rawError={message.content}
-        timeline={timeline}
-        elapsedMs={message.elapsed_ms}
-      />
+      <div className="w-full space-y-1.5">
+        <FailureBubble
+          reason={message.failure_reason}
+          rawError={message.content}
+          timeline={timeline}
+          elapsedMs={message.elapsed_ms}
+        />
+        <CommitChanges messages={taskMessages ?? []} />
+      </div>
     );
   }
 
@@ -704,6 +708,7 @@ function AssistantMessage({
           />
         </div>
       ) : null}
+      <CommitChanges messages={taskMessages ?? []} />
       {message && (
         <>
           <AttachmentList

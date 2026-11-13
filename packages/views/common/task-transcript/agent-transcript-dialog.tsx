@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo, forwardRef } from "react";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { TaskCommitChanges } from "../commit-changes/commit-changes";
 import { useTraceIssueLabels } from "./use-trace-issue-labels";
 import { Virtuoso, type VirtuosoHandle, type Components } from "react-virtuoso";
 import {
@@ -1104,6 +1105,9 @@ export function AgentTranscriptDialog({
 
         {/* ── What the run produced ──────────────────────────────────── */}
         <RunOutcomeRow outcome={outcome} branch={task.branch_name} />
+        <div className="shrink-0 px-4">
+          <TaskCommitChanges taskId={task.id} />
+        </div>
 
         {/* ── Where the time went ────────────────────────────────────── */}
         {lanes && (

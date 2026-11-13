@@ -188,3 +188,23 @@ All other failure reasons (auth, quota, configuration, model, and so on) never r
 - [Daemon and runtimes](/daemon-runtimes) — which computer a run executes on.
 - [Assigning issues to agents](/assigning-issues) — trigger a run from an issue.
 - [Mentioning agents](/mentioning-agents) — add requirements in comments or bring in other agents.
+
+## Run changes
+
+Open **Run changes** below an agent's reply or in the run's transcript dialog. Select a file to see its additions and deletions.
+
+A repository can have several comparisons:
+
+- **Working tree, start to end** compares the files before and after the run, including uncommitted edits and new files Git does not ignore. Existing edits form the baseline. In an in-place run, concurrent edits to the same directory can also appear in this comparison.
+- **Commits** compares the run's start and end commits. For a delivered worktree, this is the range delivered to the issue branch.
+- **Saved draft** shows changes that worktree finalization saved separately from the delivered commits, compared with the delivered tip.
+
+The runtime covers configured local repositories and repositories registered through `multica repo checkout`. Each run has its own records, including any partial results successfully captured after a failure. The viewer distinguishes an empty comparison, a failed capture, and a truncated record. Older runs may have no recorded diff. Records follow task-message access and retention.
+
+For an in-place run bound to a subdirectory, both working-tree snapshots and commit comparisons are restricted to that configured directory. Sibling directories are excluded. File paths in the viewer remain relative to the repository root. Concurrent edits inside the configured directory can still appear in the comparison.
+
+If worktree finalization fails and preserves the checkout, the working-tree comparison is unavailable because its starting commit may use a different representation from the files on disk, such as Git LFS or clean/smudge filters. Valid commit ranges remain reviewable. Inspect uncommitted changes in the preserved checkout.
+
+The daemon automatically sends the captured file paths and textual patches to the Multica server, including captured uncommitted changes. It masks credentials recognized by the existing redaction rules before sending; these rules cannot detect every secret. Review who can access the run before using it with sensitive repositories.
+
+Capture is limited to eight repositories, 50 files per comparison, 64 KiB per patch, and 256 KiB of patch bodies per run. Repository registrations survive environment reuse, including repositories omitted by the capture limit. The temporary working-tree snapshots can use more disk space than the uploaded patches; capture timeouts do not impose a disk quota. The daemon sends the final records once with a three-second deadline. If reporting fails or the daemon exits before delivery, the records may be missing from history.
