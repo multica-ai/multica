@@ -2,7 +2,12 @@ package main
 
 import (
 	"bytes"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/x509"
+	"errors"
 	"fmt"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -396,6 +401,102 @@ list workspaces: GET /api/workspaces returned 401: {"error":"invalid token"}
 		}
 	})
 
+	t.Run("certificate verification failures", func(t *testing.T) {
+		t.Parallel()
+		publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		validFrom := time.Date(2026, time.November, 8, 0, 0, 0, 0, time.UTC)
+		template := &x509.Certificate{
+			SerialNumber: big.NewInt(1),
+			DNSNames:     []string{"multica.test"},
+			NotBefore:    validFrom,
+			NotAfter:     validFrom.Add(48 * time.Hour),
+		}
+		der, err := x509.CreateCertificate(rand.Reader, template, template, publicKey, privateKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		certificate, err := x509.ParseCertificate(der)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cases := []struct {
+			name        string
+			currentTime time.Time
+			wantHints   []string
+			wrongReason string
+		}{
+			{
+				name:        "untrusted CA",
+				currentTime: validFrom.Add(24 * time.Hour),
+				wantHints:   []string{"certificate is not trusted", "issuer", "trust chain", "CA certificates"},
+			},
+			{
+				name:        "expired certificate",
+				currentTime: validFrom.Add(72 * time.Hour),
+				wantHints:   []string{"certificate has expired", "expiry", "renew"},
+				wrongReason: "certificate is not yet valid",
+			},
+			{
+				name:        "certificate not yet valid",
+				currentTime: validFrom.Add(-24 * time.Hour),
+				wantHints:   []string{"certificate is not yet valid", "validity start", "clock"},
+				wrongReason: "certificate has expired",
+			},
+		}
+		for _, tc := range cases {
+			for _, verifier := range []string{"Go", "native"} {
+				for _, sink := range []string{"structured log", "crash output"} {
+					t.Run(tc.name+"/"+verifier+"/"+sink, func(t *testing.T) {
+						t.Parallel()
+						_, verifyErr := certificate.Verify(x509.VerifyOptions{
+							Roots:       x509.NewCertPool(),
+							DNSName:     "multica.test",
+							CurrentTime: tc.currentTime,
+						})
+						if verifyErr == nil {
+							t.Fatal("expected certificate verification to fail")
+						}
+						if verifier == "native" {
+							var invalid x509.CertificateInvalidError
+							if errors.As(verifyErr, &invalid) {
+								invalid.Detail = ""
+								verifyErr = describeDaemonCertificateValidityError(fmt.Errorf("list workspaces: %w", invalid), tc.currentTime)
+							}
+						}
+						failure := fmt.Sprintf("list workspaces: tls: failed to verify certificate: %v", verifyErr)
+						logContent, crashContent := "", ""
+						if sink == "structured log" {
+							logContent = fmt.Sprintf("18:00:00.000 ERR startup failed component=daemon error=%q\n", failure)
+						} else {
+							crashContent = "Error: " + failure + "\n"
+						}
+						logs := daemonStartupLogs{
+							logPath:    writeLog(t, "daemon.log", logContent),
+							errLogPath: writeLog(t, "daemon.err.log", crashContent),
+						}
+						msg := daemonStartupFailureError(logs, nil, "staging", "https://multica.test").Error()
+						for _, hint := range append(tc.wantHints, "multica daemon start", logs.logPath) {
+							if !strings.Contains(msg, hint) {
+								t.Errorf("error = %q, want hint %q", msg, hint)
+							}
+						}
+						if tc.wrongReason != "" && strings.Contains(msg, tc.wrongReason) {
+							t.Errorf("error = %q, contains the wrong certificate failure reason", msg)
+						}
+						for _, unwanted := range []string{"Log output:", "component=daemon", "x509:", "insecure", "skip verification", "multica login"} {
+							if strings.Contains(msg, unwanted) {
+								t.Errorf("error = %q, contains unwanted output %q", msg, unwanted)
+							}
+						}
+					})
+				}
+			}
+		}
+	})
+
 	t.Run("unrecognized failure keeps filtered excerpt plus crash output", func(t *testing.T) {
 		t.Parallel()
 		logPath := writeLog(t, "daemon.log", `18:00:00.001 DBG some debug detail component=daemon
@@ -422,6 +523,58 @@ list workspaces: GET /api/workspaces returned 401: {"error":"invalid token"}
 		err := daemonStartupFailureError(daemonStartupLogs{logPath: logPath}, nil, "", "")
 		if !strings.Contains(err.Error(), "daemon exited during startup") || !strings.Contains(err.Error(), logPath) {
 			t.Fatalf("error = %q, want generic failure pointing at the log file", err)
+		}
+	})
+}
+
+func TestDescribeDaemonCertificateValidityError(t *testing.T) {
+	t.Parallel()
+	validFrom := time.Date(2026, time.November, 8, 0, 0, 0, 0, time.UTC)
+	certificate := &x509.Certificate{NotBefore: validFrom, NotAfter: validFrom.Add(48 * time.Hour)}
+	cases := []struct {
+		name        string
+		currentTime time.Time
+		wantReason  string
+	}{
+		{"before validity start", validFrom.Add(-time.Second), "the server certificate is not yet valid"},
+		{"past expiry", certificate.NotAfter.Add(time.Second), "the server certificate has expired"},
+		{"valid leaf with invalid chain", validFrom.Add(24 * time.Hour), ""},
+		{"at validity start", validFrom, ""},
+		{"at expiry", certificate.NotAfter, ""},
+	}
+	for _, tc := range cases {
+		for _, detail := range []string{"", "platform certificate verification failed"} {
+			t.Run(tc.name+"/"+detail, func(t *testing.T) {
+				t.Parallel()
+				cause := fmt.Errorf("list workspaces: %w", x509.CertificateInvalidError{
+					Cert: certificate, Reason: x509.Expired, Detail: detail,
+				})
+				got := describeDaemonCertificateValidityError(cause, tc.currentTime)
+				if !errors.Is(got, cause) {
+					t.Fatalf("error = %v, want original cause preserved", got)
+				}
+				if tc.wantReason == "" {
+					if got != cause {
+						t.Fatalf("error = %v, want unchanged error for a currently valid certificate", got)
+					}
+				} else if !strings.HasPrefix(got.Error(), tc.wantReason+": ") {
+					t.Fatalf("error = %v, want reason %q", got, tc.wantReason)
+				}
+			})
+		}
+	}
+	t.Run("other errors", func(t *testing.T) {
+		t.Parallel()
+		for _, cause := range []error{
+			nil,
+			errors.New("connection refused"),
+			x509.UnknownAuthorityError{Cert: certificate},
+			x509.CertificateInvalidError{Cert: certificate, Reason: x509.IncompatibleUsage},
+			x509.CertificateInvalidError{Reason: x509.Expired},
+		} {
+			if got := describeDaemonCertificateValidityError(cause, validFrom); got != cause {
+				t.Errorf("error = %v, want unchanged error %v", got, cause)
+			}
 		}
 	})
 }

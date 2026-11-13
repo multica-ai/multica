@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -772,12 +773,9 @@ type daemonStartupLogs struct {
 }
 
 // daemonStartupFailureError turns a daemon child that exited before ever
-// reporting ready into a friendly, actionable error. The two failure modes
-// users actually hit — stored token rejected by the server, server not
-// reachable — are recognized from what this startup attempt appended to the
-// structured log and the crash sink, and rendered as one reason line plus a
-// next step. Anything else falls back to a log excerpt with DBG/INF noise
-// dropped.
+// reporting ready into a friendly, actionable error. Login, reachability and
+// certificate failures are recognized from this attempt's structured log and
+// crash output. Anything else keeps a log excerpt with DBG/INF noise dropped.
 func daemonStartupFailureError(logs daemonStartupLogs, waitErr error, profile, serverURL string) error {
 	lines := readLogTailSince(logs.logPath, logs.logOffset, 40)
 	crashLines := readLogTailSince(logs.errLogPath, logs.errLogOffset, 40)
@@ -804,6 +802,30 @@ func daemonStartupFailureError(logs daemonStartupLogs, waitErr error, profile, s
 		return fmt.Errorf("daemon failed to start: cannot reach %s.\nMake sure the server is running and reachable, then rerun 'multica daemon start'.\nFull log: %s", target, logs.logPath)
 	}
 
+	for _, line := range append(lines, crashLines...) {
+		var reason, nextStep string
+		switch {
+		case strings.Contains(line, "certificate signed by unknown authority"):
+			reason = "the server certificate is not trusted"
+			nextStep = "Verify the certificate issuer and trust chain, and configure the trusted CA certificates on this machine"
+		// Go uses the same validity error for both cases; its detail identifies
+		// whether the current time is past expiry or before the validity start.
+		case strings.Contains(line, "the server certificate has expired") ||
+			(strings.Contains(line, "certificate has expired or is not yet valid: current time ") &&
+				strings.Contains(line, " is after ")):
+			reason = "the server certificate has expired"
+			nextStep = "Check the certificate expiry and renew it if needed"
+		case strings.Contains(line, "the server certificate is not yet valid") ||
+			(strings.Contains(line, "certificate has expired or is not yet valid: current time ") &&
+				strings.Contains(line, " is before ")):
+			reason = "the server certificate is not yet valid"
+			nextStep = "Check the certificate validity start and this machine's clock"
+		default:
+			continue
+		}
+		return fmt.Errorf("daemon failed to start: %s.\n%s, then rerun 'multica daemon start'.\nFull log: %s", reason, nextStep, logs.logPath)
+	}
+
 	var b strings.Builder
 	if exitErr := (&exec.ExitError{}); errors.As(waitErr, &exitErr) {
 		fmt.Fprintf(&b, "daemon exited during startup (%s).", exitErr)
@@ -828,6 +850,23 @@ func daemonStartupFailureError(logs daemonStartupLogs, waitErr error, profile, s
 		fmt.Fprintf(&b, "\nCrash output: %s", logs.errLogPath)
 	}
 	return errors.New(b.String())
+}
+
+// Native verifiers can omit the validity dates from their error text. Add the
+// reason while the foreground child still has the typed certificate error,
+// before its return value is rendered into the startup logs.
+func describeDaemonCertificateValidityError(err error, now time.Time) error {
+	var invalid x509.CertificateInvalidError
+	if !errors.As(err, &invalid) || invalid.Reason != x509.Expired || invalid.Cert == nil {
+		return err
+	}
+	if now.Before(invalid.Cert.NotBefore) {
+		return fmt.Errorf("the server certificate is not yet valid: %w", err)
+	}
+	if now.After(invalid.Cert.NotAfter) {
+		return fmt.Errorf("the server certificate has expired: %w", err)
+	}
+	return err
 }
 
 // filterDaemonLogNoise drops DBG/INF log lines from an excerpt, keeping
@@ -1184,7 +1223,7 @@ func runDaemonForeground(cmd *cobra.Command) error {
 		return fmt.Errorf("write daemon shutdown result: %w", err)
 	}
 	if runErr != nil && !errors.Is(runErr, context.Canceled) {
-		return runErr
+		return describeDaemonCertificateValidityError(runErr, time.Now())
 	}
 
 	// Check if the daemon needs to restart after a CLI update.
