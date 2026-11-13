@@ -27,7 +27,7 @@
 // real `git describe` invocation against a throwaway repo.
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { realpathSync, rmSync } from "node:fs";
+import { realpathSync, rmSync, statSync } from "node:fs";
 import { delimiter, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -443,6 +443,17 @@ function main() {
         cwd: desktopRoot,
       },
     );
+
+    // Staging is optional for frontend development; installers require it.
+    const cliName = target.platform === "win" ? "multica.exe" : "multica";
+    const cliPath = resolve(desktopRoot, "resources", "bin", cliName);
+    const cli = statSync(cliPath, { throwIfNoEntry: false });
+    if (!cli?.isFile() || cli.size === 0) {
+      throw new Error(
+        `[package] ${formatTarget(target)} requires a bundled CLI at ${cliPath}. ` +
+          "Install Go or provide a prebuilt CLI for this target in server/bin/.",
+      );
+    }
 
     const builderArgs = builderArgsForTarget(target, parsed, version, {
       disableMacNotarize,
