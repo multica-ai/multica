@@ -196,8 +196,6 @@ Multica はモデルを同梱していません。インストールと認証を
 | Amp | `amp` | Factory Droid | `droid` |
 | ZCode | `zcode` / ZCode Desktop | | |
 
-Amp と Factory Droid の対応は `v0.8.2` の後に `main` に追加されたため、このリリースでは利用できません。
-
 インストールと認証の方法：[AI コーディングツールをインストールする](https://multica.ai/docs/ja/install-agent-runtime) ·
 [プロバイダー](https://multica.ai/docs/ja/providers)
 

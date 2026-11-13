@@ -196,8 +196,6 @@ authenticated — the current source supports 31 — so switching providers is a
 | Amp | `amp` | Factory Droid | `droid` |
 | ZCode | `zcode` / ZCode Desktop | | |
 
-Amp and Factory Droid support was added on `main` after `v0.8.2` and is not available in that release.
-
 Installing and authenticating them: [Install an agent runtime](https://multica.ai/docs/install-agent-runtime) ·
 [Providers](https://multica.ai/docs/providers)
 

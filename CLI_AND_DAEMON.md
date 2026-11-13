@@ -269,8 +269,6 @@ find out that the daemon you care about is running on a different profile —
 
 The daemon auto-detects these AI CLIs on your PATH:
 
-Amp and Factory Droid support was added on `main` after `v0.8.2` and is not available in that release.
-
 | CLI | Command | Description |
 |-----|---------|-------------|
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | `claude` | Anthropic's coding agent |
