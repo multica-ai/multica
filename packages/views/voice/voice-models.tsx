@@ -14,19 +14,24 @@ import {
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
 import { Progress } from "@multica/ui/components/ui/progress";
-import { useVoiceSettingsStore } from "@multica/core/voice";
+import {
+  cancelVoice,
+  pickVoiceModel,
+  toggleVoice,
+  useVoiceSettingsStore,
+  type VoiceModel,
+} from "@multica/core/voice";
 import { formatBytes } from "../common/format-bytes";
 import { useLocale, useT } from "../i18n";
-import { localVoiceAPI, type LocalVoiceModel } from "../platform/local-voice";
+import { localVoiceAPI } from "../platform/local-voice";
 import { openExternal } from "../platform/open-external";
-import { pickModel, useVoiceModels } from "./engine";
+import { useVoiceModels } from "./engine";
 import type { ComposerVoice } from "./use-composer-voice";
-import { cancelVoice, toggleVoice } from "./voice-layer";
 
 const LISTED_LANGUAGES = 5;
 
 /** The first model that speaks the interface language, else the first one. */
-function recommendedModel(models: LocalVoiceModel[], locale: string): string | undefined {
+function recommendedModel(models: VoiceModel[], locale: string): string | undefined {
   const base = locale.split("-")[0]?.toLowerCase() ?? "";
   return (models.find((model) => model.languages.includes(base)) ?? models[0])?.id;
 }
@@ -55,7 +60,7 @@ function ModelRow({
   manage,
   onDownload,
 }: {
-  model: LocalVoiceModel;
+  model: VoiceModel;
   recommended: boolean;
   active: boolean;
   manage: boolean;
@@ -150,7 +155,7 @@ export function VoiceModelRows({
   const preferred = useVoiceSettingsStore((state) => state.modelId);
   const locale = useLocale();
   if (!snapshot) return null;
-  const active = pickModel(snapshot, preferred);
+  const active = pickVoiceModel(snapshot, preferred);
   const recommended = active ? undefined : recommendedModel(snapshot.models, locale);
   return (
     <>
@@ -174,7 +179,7 @@ export function VoiceSetupDialog({ voice }: { voice: ComposerVoice }) {
   const snapshot = useVoiceModels();
   const preferred = useVoiceSettingsStore((state) => state.modelId);
   const update = useVoiceSettingsStore((state) => state.update);
-  const ready = pickModel(snapshot, preferred) !== null;
+  const ready = pickVoiceModel(snapshot, preferred) !== null;
   return (
     <Dialog
       open={voice.showSetup}

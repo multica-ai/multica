@@ -1,12 +1,7 @@
-import { useEffect, useId, useRef, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useId, useRef, useSyncExternalStore } from "react";
+import { noteVoiceFocus, registerVoiceTarget, useVoiceState, type VoiceState } from "@multica/core/voice";
 import { useVoiceModels } from "./engine";
 import { voiceInputSupported } from "./recorder";
-import {
-  noteVoiceFocus,
-  registerVoiceTarget,
-  useVoiceState,
-  type VoiceState,
-} from "./voice-layer";
 
 export interface ComposerVoiceOptions {
   /** Insert the transcript into the editor; false while it is not mounted. */
@@ -15,6 +10,14 @@ export interface ComposerVoiceOptions {
   submit?: () => void;
   /** Mount a lazily-created editor. */
   activate?: () => void;
+  /**
+   * What the composer is writing to (a session and its agent, an issue).
+   * When it changes under a mounted composer, dictation in flight is
+   * cancelled so its text never lands in, or sends to, the new one.
+   */
+  scope?: string;
+  /** Mounted but not on screen (a closed floating window): no dictation. */
+  hidden?: boolean;
   disabled?: boolean;
 }
 
@@ -35,36 +38,53 @@ export interface ComposerVoice {
   canSubmit: boolean;
   /** Spread on the composer root so the shortcut targets the last-used one. */
   onFocusCapture: () => void;
+  /** Attach to the composer root so the shortcut skips it while it is off screen. */
+  rootRef: (element: HTMLElement | null) => void;
 }
 
 const noSubscribe = () => () => {};
+
+function onScreen(element: HTMLElement | null): boolean {
+  if (!element) return true;
+  if (!element.isConnected) return false;
+  return typeof element.checkVisibility !== "function" || element.checkVisibility({ visibilityProperty: true });
+}
 
 export function useComposerVoice({
   insert,
   submit,
   activate,
+  scope,
+  hidden = false,
   disabled = false,
 }: ComposerVoiceOptions): ComposerVoice {
   const id = useId();
   const engineAvailable = useVoiceModels()?.engineAvailable ?? false;
   const supported = useSyncExternalStore(noSubscribe, voiceInputSupported, () => false);
   const available = engineAvailable && supported && !disabled;
+  const listening = available && !hidden;
 
   const callbacks = useRef({ insert, submit, activate });
   callbacks.current = { insert, submit, activate };
+  const root = useRef<HTMLElement | null>(null);
+  const rootRef = useCallback((element: HTMLElement | null) => {
+    root.current = element;
+  }, []);
   const canSubmit = submit !== undefined;
 
   useEffect(() => {
-    if (!available) return;
+    if (!listening) return;
     return registerVoiceTarget(id, {
       insert: (text) => callbacks.current.insert(text),
-      submit: canSubmit ? () => callbacks.current.submit?.() : undefined,
+      // Read at delivery: whether the composer can send may change mid-dictation.
+      submit: () => callbacks.current.submit?.(),
       activate: () => callbacks.current.activate?.(),
+      isShown: () => onScreen(root.current),
     });
-  }, [available, canSubmit, id]);
+  }, [listening, id, scope]);
 
   const state = useVoiceState();
-  const session = available && state.targetId === id ? state : null;
+  const session = listening && state.targetId === id ? state : null;
   const live =
     session?.phase === "requesting" ||
     session?.phase === "recording" ||
@@ -80,5 +100,6 @@ export function useComposerVoice({
     showSetup: session?.phase === "setup",
     canSubmit,
     onFocusCapture: () => noteVoiceFocus(id),
+    rootRef,
   };
 }

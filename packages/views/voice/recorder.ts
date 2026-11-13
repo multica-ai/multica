@@ -2,36 +2,22 @@
  * One microphone recording: open the device, record, meter the level, and
  * hand back the clip. Knows nothing about composers or transcription.
  */
+import {
+  VoiceRecorderError,
+  type VoiceClip,
+  type VoiceMeter,
+  type VoiceRecorder,
+  type VoiceRecorderFailure,
+} from "@multica/core/voice";
 
-export type RecorderFailure = "permission-denied" | "no-microphone" | "failed";
-
-export class RecorderError extends Error {
-  constructor(readonly failure: RecorderFailure) {
-    super(failure);
-    this.name = "RecorderError";
-  }
-}
-
-/** Longest clip the server accepts comfortably; the recording stops itself here. */
-export const MAX_RECORDING_MS = 120_000;
+/** The recording stops itself here; Desktop's engine accepts a little more. */
+const MAX_RECORDING_MS = 120_000;
 /** Shorter clips, or clips that never rise above the noise floor, are not sent. */
 const MIN_RECORDING_MS = 400;
 const SPEECH_LEVEL = 0.06;
 const LEVEL_HISTORY = 64;
 
 const MIME_TYPES = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
-
-export interface RecordedClip {
-  blob: Blob;
-  durationMs: number;
-  /** False when the clip is too short or never rose above background noise. */
-  heardSpeech: boolean;
-}
-
-export interface Meter {
-  levels: number[];
-  elapsedMs: number;
-}
 
 export function voiceInputSupported(): boolean {
   return (
@@ -41,7 +27,7 @@ export function voiceInputSupported(): boolean {
   );
 }
 
-function failureOf(err: unknown): RecorderFailure {
+function failureOf(err: unknown): VoiceRecorderFailure {
   const name = err instanceof DOMException || err instanceof Error ? err.name : "";
   if (name === "NotAllowedError" || name === "SecurityError" || name === "PermissionDeniedError") {
     return "permission-denied";
@@ -64,7 +50,7 @@ async function openMicrophone(deviceId: string | null): Promise<MediaStream> {
   return navigator.mediaDevices.getUserMedia({ audio: base });
 }
 
-export class Recording {
+export class Recording implements VoiceRecorder {
   private stream: MediaStream | null = null;
   private recorder: MediaRecorder | null = null;
   private audio: AudioContext | null = null;
@@ -76,17 +62,17 @@ export class Recording {
   private levels: number[] = [];
 
   constructor(
-    private readonly onMeter: (meter: Meter) => void,
+    private readonly onMeter: (meter: VoiceMeter) => void,
     private readonly onLimit: () => void,
   ) {}
 
-  /** Resolves once audio is flowing; rejects with a RecorderError. */
+  /** Resolves once audio is flowing; rejects with a VoiceRecorderError. */
   async start(deviceId: string | null): Promise<void> {
     let stream: MediaStream;
     try {
       stream = await openMicrophone(deviceId);
     } catch (err) {
-      throw new RecorderError(failureOf(err));
+      throw new VoiceRecorderError(failureOf(err));
     }
     if (this.closed) {
       stream.getTracks().forEach((track) => track.stop());
@@ -98,7 +84,7 @@ export class Recording {
       this.recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
     } catch {
       this.release();
-      throw new RecorderError("failed");
+      throw new VoiceRecorderError("failed");
     }
     this.recorder.ondataavailable = (event) => {
       if (event.data.size > 0) this.chunks.push(event.data);
@@ -137,7 +123,7 @@ export class Recording {
   }
 
   /** Stop and return the clip. */
-  finish(): Promise<RecordedClip> {
+  finish(): Promise<VoiceClip> {
     const recorder = this.recorder;
     const durationMs = performance.now() - this.startedAt;
     const heardSpeech = durationMs >= MIN_RECORDING_MS && this.peak >= SPEECH_LEVEL;

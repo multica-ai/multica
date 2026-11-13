@@ -163,6 +163,8 @@ interface ChatInputProps {
    */
   draftKeyOverride?: string;
   editorKeyOverride?: string;
+  /** Mounted but not shown (the closed floating window): voice input is off. */
+  hidden?: boolean;
   /** Saved quotes from this session's replies, sent ahead of the typed text. */
   annotations?: Pick<ChatAnnotations, "draftKey" | "composer" | "editAnnotation">;
 }
@@ -199,6 +201,7 @@ export function ChatInput({
   focusRequest,
   draftKeyOverride,
   editorKeyOverride,
+  hidden = false,
   annotations: annotationSlot,
 }: ChatInputProps) {
   const { t } = useT("chat");
@@ -208,6 +211,7 @@ export function ChatInput({
   const editorAreaRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
+  const selectedAgentId = useChatStore((s) => s.selectedAgentId);
   // Two keys with deliberately different concerns:
   //
   // `draftKey` — zustand storage key. Scopes the in-progress draft per session
@@ -706,6 +710,10 @@ export function ChatInput({
   const voice = useComposerVoice({
     insert: (text) => editorRef.current?.insertText(text) ?? false,
     submit: canSubmitNow ? () => void submit() : undefined,
+    // The editor is shared across sessions and agents; a switch must not
+    // carry a transcript (or its send) over to the new conversation.
+    scope: draftKeyOverride ?? `${draftKey}:${selectedAgentId ?? ""}`,
+    hidden,
     disabled: !!disabled || !!noAgent,
   });
 
@@ -760,6 +768,7 @@ export function ChatInput({
           noAgent && "pointer-events-none opacity-60",
         )}
         aria-disabled={noAgent || undefined}
+        ref={voice.rootRef}
         onFocusCapture={voice.onFocusCapture}
         onKeyDown={(event) => {
           // Tab is the editor's when it wants it (list indent, the @ and /

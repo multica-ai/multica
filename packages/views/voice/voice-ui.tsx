@@ -8,10 +8,6 @@ import { ShimmerText } from "@multica/ui/components/common/shimmer-text";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { cn } from "@multica/ui/lib/utils";
 import { createShortcutChord } from "@multica/core/shortcuts";
-import { useVoiceSettingsStore } from "@multica/core/voice";
-import { ActionShortcutKeycaps, ShortcutKeycaps } from "../common/shortcut-keycaps";
-import { useT } from "../i18n";
-import type { ComposerVoice } from "./use-composer-voice";
 import {
   cancelVoice,
   noteVoiceFocus,
@@ -21,8 +17,12 @@ import {
   stopVoice,
   toggleVoice,
   useVoiceMeter,
+  useVoiceSettingsStore,
   type VoiceErrorKind,
-} from "./voice-layer";
+} from "@multica/core/voice";
+import { ActionShortcutKeycaps, ShortcutKeycaps } from "../common/shortcut-keycaps";
+import { useT } from "../i18n";
+import type { ComposerVoice } from "./use-composer-voice";
 
 const ESCAPE = createShortcutChord("Escape");
 const ENTER = createShortcutChord("Enter");

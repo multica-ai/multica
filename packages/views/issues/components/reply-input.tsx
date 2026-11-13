@@ -3,7 +3,7 @@
 import { composeAnnotatedReply, EMPTY_REPLY_ANNOTATIONS, hasReplyIntent } from "@multica/core/drafts/reply-annotation";
 import { annotationsWithPending, type AnnotationComposerSlot } from "./annotation-composer";
 import { ReplyAnnotations } from "./reply-annotations";
-import { useRef, useState, useEffect, useImperativeHandle, useMemo, type Ref } from "react";
+import { useCallback, useRef, useState, useEffect, useImperativeHandle, useMemo, type Ref } from "react";
 import { toast } from "sonner";
 import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor, useUploadGate, useComposerSubmit } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
@@ -261,7 +261,13 @@ function ReplyInput({
     // A send that would restart a run stays an explicit click — see CommentInput.
     submit: routing.restartTaskIds.length === 0 ? () => void submit() : undefined,
     activate: () => lazy.activate(),
+    scope: `${issueId}:${parentId}`,
   });
+  const voiceRootRef = voice.rootRef;
+  const bindComposer = useCallback((element: HTMLDivElement | null) => {
+    composerRef.current = element;
+    voiceRootRef(element);
+  }, [voiceRootRef]);
 
   return (<>
     {annotationComposer?.render({
@@ -279,7 +285,7 @@ function ReplyInput({
       />
       <div
         {...dropZoneProps}
-        ref={composerRef}
+        ref={bindComposer}
         className={cn(
           "relative min-w-0 flex-1 flex flex-col",
           (!isEmpty || annotations.length > 0 || showsTriggerChips || voice.showStrip) && "pb-9",

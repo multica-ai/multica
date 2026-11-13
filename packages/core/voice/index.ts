@@ -9,3 +9,32 @@ export {
   type VoiceSettings,
 } from "./store";
 export { applyVocabulary, dictationSeparator, removeSpokenFillers } from "./text";
+export {
+  pickVoiceModel,
+  useVoiceModelsStore,
+  type VoiceModel,
+  type VoiceModels,
+  type VoiceTranscription,
+} from "./models";
+export {
+  VoiceRecorderError,
+  cancelVoice,
+  connectVoiceRuntime,
+  getVoiceState,
+  noteVoiceFocus,
+  pressVoice,
+  registerVoiceTarget,
+  releaseVoice,
+  retryVoice,
+  stopVoice,
+  toggleVoice,
+  useVoiceMeter,
+  useVoiceState,
+  type VoiceClip,
+  type VoiceErrorKind,
+  type VoiceMeter,
+  type VoiceRecorder,
+  type VoiceRecorderFailure,
+  type VoiceRuntime,
+  type VoiceState,
+} from "./session";

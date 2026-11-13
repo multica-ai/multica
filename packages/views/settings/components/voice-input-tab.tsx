@@ -15,6 +15,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { useShortcut } from "@multica/core/shortcuts";
 import {
   MAX_VOCABULARY_WORDS,
+  pickVoiceModel,
   useVoiceSettingsStore,
   VOICE_LANGUAGES,
   type VoiceActivation,
@@ -25,7 +26,6 @@ import { ShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { AppLink, useOptionalNavigation } from "../../navigation";
 import { useLocale, useT } from "../../i18n";
 import { useVoiceModels, VoiceModelRows, voiceInputSupported } from "../../voice";
-import { pickModel } from "../../voice/engine";
 import { settingsHref } from "./settings-navigation";
 import {
   SettingsCard,
@@ -152,7 +152,7 @@ function LanguageRow() {
   const language = useVoiceSettingsStore((state) => state.language);
   const modelId = useVoiceSettingsStore((state) => state.modelId);
   const update = useVoiceSettingsStore((state) => state.update);
-  const model = pickModel(useVoiceModels(), modelId);
+  const model = pickVoiceModel(useVoiceModels(), modelId);
   const label = t(($) => $.voice_input.language.title);
   const options = useMemo(() => {
     let names: Intl.DisplayNames | null = null;

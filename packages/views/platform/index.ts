@@ -26,9 +26,6 @@ export {
 export {
   localVoiceAPI,
   type LocalVoiceAPI,
-  type LocalVoiceModel,
-  type LocalVoiceModels,
-  type LocalVoiceResult,
 } from "./local-voice";
 export {
   useLocalDaemonStatus,

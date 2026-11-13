@@ -237,6 +237,7 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation, annotat
     // destructive button.
     submit: routing.restartTaskIds.length === 0 ? () => void submit() : undefined,
     activate: () => lazy.activate(),
+    scope: issueId,
   });
 
   return (<>
@@ -250,6 +251,7 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation, annotat
       data-mc="comment-composer"
       {...dropZoneProps}
       className="relative flex flex-col rounded-lg bg-card pb-8 ring-1 ring-border"
+      ref={voice.rootRef}
       onFocusCapture={voice.onFocusCapture}
     >
       {attachmentsBlockSteer && <div className="px-3 pt-2">
