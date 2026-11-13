@@ -607,9 +607,11 @@ func launchAgentPlistContent(spec autostartSpec, label string) string {
 		b.WriteString("\t</dict>\n")
 	}
 	b.WriteString("\t<key>RunAtLoad</key>\n\t<true/>\n")
-	// Background process type: a poll/websocket daemon wants neither App Nap
-	// nor full user-interactive QoS.
-	b.WriteString("\t<key>ProcessType</key>\n\t<string>Background</string>\n")
+	// Interactive, not Background: the process type's QoS is inherited by
+	// everything the daemon spawns, and agent CLIs, test runners and headless
+	// browsers throttled to background priority run several times slower
+	// (Chrome dropped from ~60 to ~15 fps). Interactive also keeps App Nap off.
+	b.WriteString("\t<key>ProcessType</key>\n\t<string>Interactive</string>\n")
 	b.WriteString("</dict>\n</plist>\n")
 	return b.String()
 }

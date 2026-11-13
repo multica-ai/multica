@@ -138,7 +138,9 @@ func TestLaunchAgentPlistContent(t *testing.T) {
 		"<string>staging</string>",
 		"<key>PATH</key>",
 		"<string>/usr/bin:/opt/homebrew/bin</string>",
-		"<key>ProcessType</key>",
+		// Interactive: children inherit the daemon's QoS, so Background
+		// would throttle every agent and browser it runs.
+		"<key>ProcessType</key>\n\t<string>Interactive</string>",
 	} {
 		if !strings.Contains(content, want) {
 			t.Errorf("plist missing %q:\n%s", want, content)
