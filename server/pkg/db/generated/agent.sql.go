@@ -5334,6 +5334,85 @@ func (q *Queries) ListActiveTasksByIssueFamily(ctx context.Context, arg ListActi
 	return items, nil
 }
 
+const listAgentAccessRows = `-- name: ListAgentAccessRows :many
+SELECT id, owner_id, permission_mode, kind FROM agent
+WHERE workspace_id = $1 AND kind = 'user'
+ORDER BY created_at ASC
+`
+
+type ListAgentAccessRowsRow struct {
+	ID             pgtype.UUID `json:"id"`
+	OwnerID        pgtype.UUID `json:"owner_id"`
+	PermissionMode string      `json:"permission_mode"`
+	Kind           string      `json:"kind"`
+}
+
+// Visibility checks need no instructions, runtime config, or credentials.
+// Include archived user agents for historical aggregation and inventory.
+func (q *Queries) ListAgentAccessRows(ctx context.Context, workspaceID pgtype.UUID) ([]ListAgentAccessRowsRow, error) {
+	rows, err := q.db.Query(ctx, listAgentAccessRows, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAgentAccessRowsRow{}
+	for rows.Next() {
+		var i ListAgentAccessRowsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.OwnerID,
+			&i.PermissionMode,
+			&i.Kind,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAgentAccessRowsAnyKind = `-- name: ListAgentAccessRowsAnyKind :many
+SELECT id, owner_id, permission_mode, kind FROM agent
+WHERE workspace_id = $1
+ORDER BY created_at ASC
+`
+
+type ListAgentAccessRowsAnyKindRow struct {
+	ID             pgtype.UUID `json:"id"`
+	OwnerID        pgtype.UUID `json:"owner_id"`
+	PermissionMode string      `json:"permission_mode"`
+	Kind           string      `json:"kind"`
+}
+
+// Include hidden execution carriers so rollups can fold them for every actor.
+func (q *Queries) ListAgentAccessRowsAnyKind(ctx context.Context, workspaceID pgtype.UUID) ([]ListAgentAccessRowsAnyKindRow, error) {
+	rows, err := q.db.Query(ctx, listAgentAccessRowsAnyKind, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAgentAccessRowsAnyKindRow{}
+	for rows.Next() {
+		var i ListAgentAccessRowsAnyKindRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.OwnerID,
+			&i.PermissionMode,
+			&i.Kind,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAgentTasks = `-- name: ListAgentTasks :many
 SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, workflow_step FROM agent_task_queue
 WHERE agent_id = $1
