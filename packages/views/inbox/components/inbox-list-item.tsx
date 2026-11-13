@@ -236,11 +236,6 @@ export function InboxListItem({
             {section === "snoozed" && row?.snoozedUntil && (
               <InboxSnoozeTime until={row.snoozedUntil} />
             )}
-            {section === "updates" && (
-              <span className="text-caption text-muted-foreground">
-                {timeAgo(item.created_at)}
-              </span>
-            )}
           </div>
         </div>
         {section !== "snoozed" && (
@@ -262,7 +257,13 @@ export function InboxListItem({
               <InboxDetailLabel item={item} />
             )}
           </p>
-          {section !== "updates" && (
+          {section === "updates" ? (
+            // Only when: nothing here waits on the user, so the row carries
+            // neither the issue's status nor the agent badge.
+            <span className="shrink-0 text-caption text-muted-foreground">
+              {timeAgo(item.created_at)}
+            </span>
+          ) : (
           <div className="flex shrink-0 items-center gap-1.5">
             {/* Badge only, no hover card (MUL-5189). "An agent is on this"
                 is worth showing while triaging; the card behind it adds only
