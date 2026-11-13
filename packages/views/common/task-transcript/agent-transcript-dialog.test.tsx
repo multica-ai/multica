@@ -13,7 +13,7 @@ import { AgentTranscriptDialog } from "./agent-transcript-dialog";
 import type { TimelineItem } from "./build-timeline";
 
 vi.mock("../commit-changes/commit-changes", () => ({
-  TaskCommitChanges: ({ taskId }: { taskId: string }) => (
+  CachedTaskCommitChanges: ({ taskId }: { taskId: string }) => (
     <button type="button" data-task-id={taskId}>Run changes</button>
   ),
 }));

@@ -241,7 +241,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
             {rawError}
           </p>
         </TruncatedTooltip>}
-        {!hasReply && <TaskCommitChanges taskId={task.id} />}
+        {!hasReply && task.has_recorded_changes && <TaskCommitChanges taskId={task.id} />}
         {expanded && <div id={regionId} className="mt-2 min-w-0 space-y-1">
           {isPending && <p className="text-caption text-muted-foreground">{t(($) => $.inline_run.loading)}</p>}
           {isError && <div role="alert" className="text-caption text-destructive">{t(($) => $.inline_run.load_failed)}

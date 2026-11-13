@@ -2,11 +2,19 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
-import type { TaskMessagePayload } from "@multica/core/types";
+import { chatKeys } from "@multica/core/chat/queries";
+import type { AgentTask, TaskMessagePayload } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
-import { CommitChanges, TaskCommitChanges } from "./commit-changes";
+import {
+  CachedTaskCommitChanges,
+  CommitChanges,
+  IssueTaskCommitChanges,
+  TaskCommitChanges,
+} from "./commit-changes";
 
-vi.mock("@multica/core/api", () => ({ api: { listTaskMessages: vi.fn() } }));
+vi.mock("@multica/core/api", () => ({
+  api: { listTaskMessages: vi.fn(), listTasksByIssue: vi.fn() },
+}));
 const message: TaskMessagePayload = {
   task_id: "33333333-3333-4333-8333-333333333333",
   issue_id: "issue",
@@ -62,11 +70,15 @@ describe("CommitChanges", () => {
     );
     expect(screen.getByRole("button", { name: "本轮文件变化 · 记录不完整" })).toBeInTheDocument();
   });
-  it("shows omitted repositories before the file viewer even when recorded repositories have no changes", async () => {
+  it("shows omitted repositories before the file viewer even when the first repository has no changes", async () => {
     renderWithI18n(
       <CommitChanges messages={[{
         ...message,
         input: { ...message.input, changes: [], repositories_omitted: true },
+      }, {
+        ...message,
+        seq: 2,
+        input: { ...message.input, repository: "other", repository_id: "repo-2" },
       }]} />,
       { locale: "zh-Hans" },
     );
@@ -108,17 +120,15 @@ describe("CommitChanges", () => {
     expect(screen.getByRole("button", { name: "draft.txt" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "src/main.ts" })).not.toBeInTheDocument();
   });
-  it("shows a capture failure even without any recorded changes", async () => {
-    renderWithI18n(
-      <CommitChanges messages={[{
-        ...message,
-        input: { ...message.input, kind: "worktree", unavailable: true, base: undefined, changes: [] },
-      }]} />,
+  it.each([
+    ["no comparison lists a file", { changes: [] }],
+    ["the only comparison failed", { kind: "worktree", unavailable: true, base: undefined, changes: [] }],
+    ["only the repository limit was hit", { changes: [], repositories_omitted: true }],
+  ])("renders nothing when %s", (_, input) => {
+    const { container } = renderWithI18n(
+      <CommitChanges messages={[{ ...message, input: { ...message.input, ...input } }]} />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Run changes · Incomplete record" }));
-    expect(await screen.findByText("Working tree changes could not be recorded.")).toBeInTheDocument();
-    expect(screen.queryByText("No net working tree changes.")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Working tree changes could not be recorded." })).not.toBeInTheDocument();
+    expect(container).toBeEmptyDOMElement();
   });
   it("shows partial capture failure on the default comparison for the affected repository", async () => {
     const unavailableWorktree = {
@@ -199,5 +209,62 @@ describe("CommitChanges", () => {
       ).toBeInTheDocument(),
     );
     expect(api.listTaskMessages).toHaveBeenCalledWith(message.task_id);
+  });
+});
+
+describe("IssueTaskCommitChanges", () => {
+  const issueId = "issue";
+  const renderForTasks = async (tasks: Partial<AgentTask>[]) => {
+    vi.mocked(api.listTaskMessages).mockClear();
+    vi.mocked(api.listTasksByIssue).mockClear().mockResolvedValue(tasks as AgentTask[]);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = renderWithI18n(
+      <QueryClientProvider client={client}>
+        <IssueTaskCommitChanges issueId={issueId} taskId={message.task_id} />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(api.listTasksByIssue).toHaveBeenCalled());
+    return view;
+  };
+
+  it("stays hidden while the run is active or recorded no files", async () => {
+    const { container } = await renderForTasks([
+      { id: message.task_id, status: "running" },
+    ]);
+    await waitFor(() => expect(container).toBeEmptyDOMElement());
+    expect(api.listTaskMessages).not.toHaveBeenCalled();
+  });
+
+  it("appears once the run list marks recorded files", async () => {
+    await renderForTasks([
+      { id: message.task_id, status: "completed", has_recorded_changes: true },
+    ]);
+    expect(await screen.findByRole("button", { name: "Run changes" })).toBeInTheDocument();
+    expect(api.listTaskMessages).not.toHaveBeenCalled();
+  });
+});
+
+describe("CachedTaskCommitChanges", () => {
+  it("renders from the cached transcript without fetching it", () => {
+    vi.mocked(api.listTaskMessages).mockClear();
+    const client = new QueryClient();
+    client.setQueryData(chatKeys.taskMessages(message.task_id), [message]);
+    renderWithI18n(
+      <QueryClientProvider client={client}>
+        <CachedTaskCommitChanges taskId={message.task_id} />
+      </QueryClientProvider>,
+    );
+    expect(screen.getByRole("button", { name: "Run changes · 2 files" })).toBeInTheDocument();
+    expect(api.listTaskMessages).not.toHaveBeenCalled();
+  });
+
+  it("renders nothing before the transcript is cached", () => {
+    const { container } = renderWithI18n(
+      <QueryClientProvider client={new QueryClient()}>
+        <CachedTaskCommitChanges taskId={message.task_id} />
+      </QueryClientProvider>,
+    );
+    expect(container).toBeEmptyDOMElement();
+    expect(api.listTaskMessages).not.toHaveBeenCalled();
   });
 });

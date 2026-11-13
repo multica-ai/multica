@@ -354,6 +354,8 @@ export interface AgentTask {
   failure_reason?: TaskFailureReason | (string & {}) | "";
   /** The input comment was edited or deleted, invalidating this run. */
   cancelled_by_comment_change?: boolean;
+  /** The run's change record lists at least one file. Issue run list only. */
+  has_recorded_changes?: boolean;
   /** Present on cancellations recorded by a backend with actor provenance. */
   cancelled_by?: TaskCancellationActor;
   created_at: string;

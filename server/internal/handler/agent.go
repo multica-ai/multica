@@ -404,6 +404,9 @@ type AgentTaskResponse struct {
 	StartClaimSupported      bool                   `json:"start_claim_supported,omitempty"`
 	CancelledByCommentChange bool                   `json:"cancelled_by_comment_change,omitempty"`
 	CancelledBy              *TaskCancellationActor `json:"cancelled_by,omitempty"`
+	// HasRecordedChanges reports a daemon change record listing at least one
+	// file. Hydrated only on the issue run list.
+	HasRecordedChanges bool `json:"has_recorded_changes,omitempty"`
 
 	ID                   string                 `json:"id"`
 	AgentID              string                 `json:"agent_id"`

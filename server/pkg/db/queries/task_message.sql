@@ -120,3 +120,16 @@ SELECT type, COALESCE(CASE WHEN type = 'text' THEN content END, '')::text AS con
 FROM task_message
 WHERE task_id = $1 AND type IN ('text', 'tool_use', 'error')
 ORDER BY seq ASC;
+
+-- name: ListTaskIDsWithRecordedChanges :many
+-- Runs whose daemon change record lists at least one file. The tool predicate
+-- matches idx_task_message_commit_diff; EXISTS stops at the first record so at
+-- most one patch payload per run is read.
+SELECT t.id::uuid AS task_id
+FROM unnest(sqlc.arg('task_ids')::uuid[]) AS t(id)
+WHERE EXISTS (
+    SELECT 1 FROM task_message m
+    WHERE m.task_id = t.id
+      AND m.tool = 'multica_commit_diff'
+      AND m.input -> 'changes' -> 0 IS NOT NULL
+);

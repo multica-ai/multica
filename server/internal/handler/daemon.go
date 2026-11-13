@@ -6464,6 +6464,8 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 		} else {
 			h.hydrateTaskUsage(r.Context(), issue.ID, resp)
 		}
+		// Change records are written as a run ends, so active runs never have one.
+		h.hydrateTaskRecordedChanges(r.Context(), tasks, resp)
 	}
 
 	if scope == "subtree" {
@@ -6501,6 +6503,27 @@ func (h *Handler) hydrateSubtreeTaskUsage(ctx context.Context, tasks []db.AgentT
 			row.CacheWriteTokens, row.CostUsdTicks, row.CreditsMicros)
 	}
 	attachTaskUsage(resp, byTask)
+}
+
+func (h *Handler) hydrateTaskRecordedChanges(ctx context.Context, tasks []db.AgentTaskQueue, resp []AgentTaskResponse) {
+	if len(tasks) == 0 || len(tasks) != len(resp) {
+		return
+	}
+	ids := make([]pgtype.UUID, len(tasks))
+	for i, task := range tasks {
+		ids[i] = task.ID
+	}
+	rows, err := h.Queries.ListTaskIDsWithRecordedChanges(ctx, ids)
+	if err != nil {
+		return
+	}
+	recorded := make(map[string]bool, len(rows))
+	for _, id := range rows {
+		recorded[uuidToString(id)] = true
+	}
+	for i := range resp {
+		resp[i].HasRecordedChanges = recorded[resp[i].ID]
+	}
 }
 
 // issueTimelineTaskResponse keeps inline replies, lineage, controls and pricing.

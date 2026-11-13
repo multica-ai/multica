@@ -32,6 +32,11 @@ const commitDiffSchema = z.object({
   }));
 export type CommitDiff = z.infer<typeof commitDiffSchema>;
 
+/** Same rule as the server's `has_recorded_changes`. */
+export function hasRecordedChanges(diffs: readonly CommitDiff[]): boolean {
+  return diffs.some((diff) => diff.changes.length > 0);
+}
+
 export function getCommitDiffs(
   messages: readonly TaskMessagePayload[],
 ): CommitDiff[] {

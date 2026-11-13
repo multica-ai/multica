@@ -1,12 +1,15 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   getCommitDiffs,
+  hasRecordedChanges,
   type CommitDiff,
 } from "@multica/core/chat/commit-diff";
-import { useTaskMessages } from "@multica/core/chat/queries";
-import type { TaskMessagePayload } from "@multica/core/types";
+import { taskMessagesOptions, useTaskMessages } from "@multica/core/chat/queries";
+import { issueTasksOptions } from "@multica/core/issues/queries";
+import type { AgentTask, TaskMessagePayload } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Dialog,
@@ -21,6 +24,25 @@ import { useT } from "../../i18n";
 import { DiffDetailSurface } from "../task-transcript/detail-surfaces";
 import { parseUnifiedDiff } from "../task-transcript/trace-event-presenter";
 
+const NO_MESSAGES: TaskMessagePayload[] = [];
+
+/** Shown only once the issue's run list says this run recorded changed files. */
+export function IssueTaskCommitChanges({ issueId, taskId }: { issueId: string; taskId: string }) {
+  const select = useCallback(
+    (tasks: AgentTask[]) => tasks.some((task) => task.id === taskId && task.has_recorded_changes === true),
+    [taskId],
+  );
+  const { data: recorded } = useQuery({ ...issueTasksOptions(issueId), select });
+  return recorded ? <TaskCommitChanges taskId={taskId} /> : null;
+}
+
+/** Reads the transcript the caller already cached; never fetches it again. */
+export function CachedTaskCommitChanges({ taskId }: { taskId: string }) {
+  const { data } = useQuery({ ...taskMessagesOptions(taskId), enabled: false });
+  return <CommitChanges messages={data ?? NO_MESSAGES} />;
+}
+
+/** Loads the record on open; callers decide whether the run has one. */
 export function TaskCommitChanges({ taskId }: { taskId: string }) {
   const [open, setOpen] = useState(false);
   const { data, isPending, isError, refetch } = useTaskMessages(
@@ -48,7 +70,7 @@ export function CommitChanges({
 }) {
   const [open, setOpen] = useState(false);
   const diffs = useMemo(() => getCommitDiffs(messages), [messages]);
-  if (diffs.length === 0) return null;
+  if (!hasRecordedChanges(diffs)) return null;
   return <ChangesDialog open={open} onOpenChange={setOpen} diffs={diffs} />;
 }
 
