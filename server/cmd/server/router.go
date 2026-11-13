@@ -2613,6 +2613,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// thread (?id for a specific one, else the thread the session is in).
 			r.Get("/api/chat/history", h.GetChatChannelHistory)
 			r.Get("/api/chat/thread", h.GetChatThread)
+			r.Get("/api/chat/trigger", h.GetChatTrigger)
 
 			// Connected Apps (MUL-8516)
 			// Connected Apps management and decisions are for people; runs
