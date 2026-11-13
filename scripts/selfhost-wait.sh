@@ -60,16 +60,46 @@ health_ok() {
   curl -sf "${backend_url}/health" >/dev/null 2>&1
 }
 
+# SELFHOST_WAIT_ATTEMPTS and SELFHOST_WAIT_INTERVAL_SECONDS exist so tests can
+# finish without waiting the real 30×2s. Production callers leave them unset.
+wait_attempts=${SELFHOST_WAIT_ATTEMPTS:-30}
+wait_interval=${SELFHOST_WAIT_INTERVAL_SECONDS:-2}
+
 echo "==> Waiting for backend to be ready..."
-for _ in $(seq 1 30); do
+for _ in $(seq 1 "$wait_attempts"); do
   if health_ok; then
     break
   fi
-  sleep 2
+  sleep "$wait_interval"
 done
+
+# Compose's State for the backend service. Empty when the query itself fails
+# (older Compose, a stub that does not implement ps, docker not running) so a
+# slow but healthy start is not reported as a dead container. ps -q only proves
+# a container id exists; the state comes from ps --all, the listing that still
+# includes exited containers. Filtered by the backend service name, not by the
+# id, because ps does not take a container id as a positional argument.
+backend_container_state() {
+  local container_id state
+  container_id=$("${compose_cmd[@]}" "${compose_files[@]}" ps -q backend 2>/dev/null | tail -n 1) || return 0
+  container_id=${container_id%$'\r'}
+  if [ -z "$container_id" ]; then
+    return 0
+  fi
+  state=$("${compose_cmd[@]}" "${compose_files[@]}" ps --all --format '{{.State}}' backend 2>/dev/null | tail -n 1) || return 0
+  state=${state%$'\r'}
+  printf '%s\n' "$state"
+}
 
 if ! health_ok; then
   echo ""
+  case "$(backend_container_state)" in
+  exited | dead | created | removing)
+    echo "backend container has exited. Check logs:"
+    echo "  ${compose_cmd[*]} ${compose_files[*]} logs"
+    exit 1
+    ;;
+  esac
   echo "Services are still starting. Check logs:"
   echo "  ${compose_cmd[*]} ${compose_files[*]} logs"
   exit 0
