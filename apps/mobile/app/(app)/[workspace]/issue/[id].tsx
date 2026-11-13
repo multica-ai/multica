@@ -97,7 +97,10 @@ export default function IssueDetail() {
       qc.invalidateQueries({ queryKey: issueKeys.timeline(wsId, id) }),
     ]);
   }, [detail, qc, wsId, id]);
-  const onRefreshWithHaptics = useRefreshWithHaptics(onRefresh);
+  const {
+    refreshing: refreshingManually,
+    onRefresh: onRefreshWithHaptics,
+  } = useRefreshWithHaptics(onRefresh);
 
   const issue = detail.data;
   const deleteIssue = useDeleteIssue();
@@ -226,7 +229,7 @@ export default function IssueDetail() {
             issue={issue}
             entries={timeline.data}
             timelineLoading={timeline.isLoading}
-            refreshing={detail.isRefetching || timeline.isRefetching}
+            refreshing={refreshingManually}
             onRefresh={onRefreshWithHaptics}
             highlightCommentId={highlight}
             highlightNonce={h}

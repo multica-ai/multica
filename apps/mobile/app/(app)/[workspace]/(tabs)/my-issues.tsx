@@ -84,11 +84,11 @@ export default function MyIssues() {
     [scope, userId],
   );
 
-  const { data, isLoading, error, refetch, isRefetching } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     ...myIssueListOptions(wsId, scope, filter),
     enabled: !!wsId && !!userId,
   });
-  const onRefresh = useRefreshWithHaptics(refetch);
+  const { refreshing, onRefresh } = useRefreshWithHaptics(refetch);
 
   // Catalog labels and ordering enhance exact-key sections without blocking rows.
   const catalog = useIssueStatuses();
@@ -179,7 +179,7 @@ export default function MyIssues() {
               }}
             />
           )}
-          refreshing={isFocused && isRefetching}
+          refreshing={isFocused && refreshing}
           onRefresh={onRefresh}
         />
       )}

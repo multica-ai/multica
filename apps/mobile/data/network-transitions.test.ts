@@ -27,7 +27,7 @@ describe("shouldRefreshOnAppStateChange", () => {
 describe("shouldRefreshOnConnectivityChange", () => {
   it("refreshes only on the offline → online edge", () => {
     expect(shouldRefreshOnConnectivityChange(offline, online)).toBe(true);
-    expect(shouldRefreshOnConnectivityChange(noInternet, online)).toBe(true);
+    expect(shouldRefreshOnConnectivityChange(noInternet, online)).toBe(false);
     expect(shouldRefreshOnConnectivityChange(online, offline)).toBe(false);
     expect(shouldRefreshOnConnectivityChange(online, online)).toBe(false);
   });
@@ -43,9 +43,9 @@ describe("shouldRefreshOnConnectivityChange", () => {
 });
 
 describe("isOffline", () => {
-  it("treats a missing internet route as offline, but not an unknown state", () => {
+  it("follows isConnected and ignores a failed reachability probe", () => {
     expect(isOffline(offline)).toBe(true);
-    expect(isOffline(noInternet)).toBe(true);
+    expect(isOffline(noInternet)).toBe(false);
     expect(isOffline(online)).toBe(false);
     expect(isOffline(unknown)).toBe(false);
   });

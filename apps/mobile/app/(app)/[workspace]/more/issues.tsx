@@ -84,10 +84,10 @@ export default function IssuesPage() {
     wsId,
   );
 
-  const { data, isLoading, error, refetch, isRefetching } = useQuery(
+  const { data, isLoading, error, refetch } = useQuery(
     issueListOptions(wsId),
   );
-  const onRefresh = useRefreshWithHaptics(refetch);
+  const { refreshing, onRefresh } = useRefreshWithHaptics(refetch);
 
   // Only the active-filter chips need the catalog — sections group on the
   // category the server already resolved onto each issue. (MUL-6243)
@@ -190,7 +190,7 @@ export default function IssuesPage() {
               }}
             />
           )}
-          refreshing={isRefetching}
+          refreshing={refreshing}
           onRefresh={onRefresh}
         />
       )}

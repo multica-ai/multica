@@ -56,10 +56,10 @@ export default function PinsPage() {
   const userId = useAuthStore((s) => s.user?.id ?? null);
   const { t } = useT("workspace");
 
-  const { data, isLoading, error, refetch, isRefetching } = useQuery(
+  const { data, isLoading, error, refetch } = useQuery(
     pinListOptions(wsId, userId),
   );
-  const onRefresh = useRefreshWithHaptics(refetch);
+  const { refreshing, onRefresh } = useRefreshWithHaptics(refetch);
 
   // Sort by `position` ascending so the order matches web's sidebar
   // (the reorder endpoint writes 1-based positions there too).
@@ -107,7 +107,7 @@ export default function PinsPage() {
       contentContainerClassName="pb-6"
       refreshControl={
         <RefreshControl
-          refreshing={isRefetching}
+          refreshing={refreshing}
           onRefresh={onRefresh}
         />
       }

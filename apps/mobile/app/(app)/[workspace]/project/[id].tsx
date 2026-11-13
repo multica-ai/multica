@@ -72,7 +72,10 @@ export default function ProjectDetail() {
       }),
     ]);
   }, [detail, qc, wsId, id]);
-  const onRefreshWithHaptics = useRefreshWithHaptics(onRefresh);
+  const {
+    refreshing: refreshingManually,
+    onRefresh: onRefreshWithHaptics,
+  } = useRefreshWithHaptics(onRefresh);
 
   const project = detail.data;
 
@@ -205,7 +208,7 @@ export default function ProjectDetail() {
           contentContainerClassName="pb-10"
           refreshControl={
             <RefreshControl
-              refreshing={detail.isRefetching}
+              refreshing={refreshingManually}
               onRefresh={onRefreshWithHaptics}
             />
           }

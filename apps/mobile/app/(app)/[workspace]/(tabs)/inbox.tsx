@@ -40,10 +40,10 @@ export default function Inbox() {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
   const { colorScheme } = useColorScheme();
-  const { data: rawItems, isLoading, error, refetch, isRefetching } = useQuery(
+  const { data: rawItems, isLoading, error, refetch } = useQuery(
     inboxListOptions(wsId),
   );
-  const onRefresh = useRefreshWithHaptics(refetch);
+  const { refreshing, onRefresh } = useRefreshWithHaptics(refetch);
   // Dedup + drop archived to match web/desktop. See CLAUDE.md
   // "Behavioral parity" → inbox dedup incident.
   const data = useMemo(
@@ -152,7 +152,7 @@ export default function Inbox() {
               onArchive={() => archive.mutate(item.id)}
             />
           )}
-          refreshing={isRefetching}
+          refreshing={refreshing}
           onRefresh={onRefresh}
         />
       )}

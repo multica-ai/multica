@@ -13,10 +13,12 @@ export interface ConnectivitySnapshot {
 }
 
 export function isOffline(snapshot: ConnectivitySnapshot): boolean {
-  return (
-    snapshot.isConnected === false ||
-    snapshot.isInternetReachable === false
-  );
+  // `isConnected` is the same signal TanStack's onlineManager uses to pause
+  // queries. Keep the banner aligned with it: treating a false
+  // `isInternetReachable` probe as "offline" can strand the banner on a
+  // network that works (captive portal, VPN, or a blocked reachability URL),
+  // and would contradict a UI that is still receiving data.
+  return snapshot.isConnected === false;
 }
 
 export function shouldRefreshOnAppStateChange(

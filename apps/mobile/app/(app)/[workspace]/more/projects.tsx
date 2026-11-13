@@ -36,10 +36,10 @@ export default function ProjectsPage() {
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
   const { t } = useT("projects");
 
-  const { data, isLoading, error, refetch, isRefetching } = useQuery(
+  const { data, isLoading, error, refetch } = useQuery(
     projectListOptions(wsId),
   );
-  const onRefresh = useRefreshWithHaptics(refetch);
+  const { refreshing, onRefresh } = useRefreshWithHaptics(refetch);
 
   const sorted = useMemo(() => {
     if (!data) return [];
@@ -94,7 +94,7 @@ export default function ProjectsPage() {
             />
           )}
           refreshControl={
-            <RefreshControl refreshing={isRefetching} onRefresh={onRefresh} />
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
           }
           contentContainerClassName="pb-6"
         />

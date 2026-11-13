@@ -37,7 +37,10 @@ vi.mock("@/data/workspace-store", () => ({
 }));
 vi.mock("@/lib/use-color-scheme", () => ({ useColorScheme: () => ({ colorScheme: "light" }) }));
 vi.mock("@/lib/use-refresh-with-haptics", () => ({
-  useRefreshWithHaptics: (refresh: unknown) => refresh,
+  useRefreshWithHaptics: (refresh: unknown) => ({
+    refreshing: false,
+    onRefresh: refresh,
+  }),
 }));
 vi.mock("@/lib/theme", () => ({ THEME: { light: { mutedForeground: "gray" } } }));
 vi.mock("@/lib/i18n", () => ({ useT: () => ({ t: (key: string) => key }) }));
