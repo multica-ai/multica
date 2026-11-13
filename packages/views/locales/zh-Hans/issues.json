@@ -601,6 +601,7 @@
   },
   "activity": {
     "created": "创建了这个任务",
+    "created_on_behalf_of": "代表 {{name}} 创建了这个任务",
     "self_assigned": "把这个任务分配给了自己",
     "assigned_to": "分配给 {{name}}",
     "removed_assignee": "移除了负责人",

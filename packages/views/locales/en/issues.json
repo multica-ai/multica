@@ -611,6 +611,7 @@
   },
   "activity": {
     "created": "created this issue",
+    "created_on_behalf_of": "created this issue on behalf of {{name}}",
     "self_assigned": "self-assigned this issue",
     "assigned_to": "assigned to {{name}}",
     "removed_assignee": "removed assignee",

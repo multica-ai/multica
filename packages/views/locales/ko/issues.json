@@ -601,6 +601,7 @@
   },
   "activity": {
     "created": "이 태스크를 만들었습니다",
+    "created_on_behalf_of": "{{name}} 님을 대신하여 이 태스크를 만들었습니다",
     "self_assigned": "이 태스크를 본인에게 할당했습니다",
     "assigned_to": "{{name}}님에게 할당했습니다",
     "removed_assignee": "담당자를 제거했습니다",

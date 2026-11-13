@@ -611,6 +611,7 @@
   },
   "activity": {
     "created": "a créé cette tâche",
+    "created_on_behalf_of": "a créé cette tâche au nom de {{name}}",
     "self_assigned": "s'est assigné cette tâche",
     "assigned_to": "a assigné à {{name}}",
     "removed_assignee": "a retiré l'assignation",

@@ -594,6 +594,7 @@
   },
   "activity": {
     "created": "creó esta tarea",
+    "created_on_behalf_of": "creó esta tarea en nombre de {{name}}",
     "self_assigned": "se autoasignó esta tarea",
     "assigned_to": "la asignó a {{name}}",
     "removed_assignee": "eliminó al asignado",
