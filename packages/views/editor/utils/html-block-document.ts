@@ -1,3 +1,5 @@
+import { EMBED_TOKENS, embedTokenDeclarations } from "@multica/core/appearance";
+import type { EmbedTheme } from "../../common/embed-theme";
 import { withFragmentNavShim } from "./iframe-fragment-nav";
 
 /**
@@ -11,9 +13,10 @@ import { withFragmentNavShim } from "./iframe-fragment-nav";
  * first uncaught error. The parent treats both as untrusted input — it checks
  * the message source and clamps every value (see readHtmlBlockMessage).
  *
- * The prefix also carries the app's theme tokens as CSS custom properties, so
- * HTML written against `var(--foreground)` / `var(--chart-1)` follows light and
- * dark mode. Using a token is the opt-in: only then does the document also get
+ * The prefix also carries the app's theme tokens as CSS custom properties (the
+ * embed token contract, EMBED_TOKENS), so HTML written against
+ * `var(--foreground)` / `var(--chart-1)` follows the theme and light and dark
+ * mode. Using a token is the opt-in: only then does the document also get
  * the app's `color-scheme`. That matters in dark mode, where a light document
  * inside a dark page is painted on an opaque white canvas — right for HTML
  * that was written for white, wrong for HTML that asked for the theme. HTML
@@ -22,36 +25,6 @@ import { withFragmentNavShim } from "./iframe-fragment-nav";
 
 /** Marker on every bridge message; anything without it is ignored. */
 export const HTML_BLOCK_MESSAGE_KEY = "__multicaHtmlBlock";
-
-/**
- * Theme tokens copied into the sandbox. Only color and shape tokens: a chart
- * needs these to match the page, and every one resolves to a plain value.
- */
-export const HTML_BLOCK_THEME_TOKENS = [
-  "--background",
-  "--foreground",
-  "--surface",
-  "--muted",
-  "--muted-foreground",
-  "--border",
-  "--primary",
-  "--primary-foreground",
-  "--secondary",
-  "--secondary-foreground",
-  "--accent",
-  "--accent-foreground",
-  "--destructive",
-  "--success",
-  "--warning",
-  "--info",
-  "--brand",
-  "--chart-1",
-  "--chart-2",
-  "--chart-3",
-  "--chart-4",
-  "--chart-5",
-  "--radius",
-] as const;
 
 // The bridge is one line on purpose: it sits on the author's first line, so a
 // script error's line number still points at the author's own source.
@@ -99,54 +72,46 @@ const DOCTYPE_RE = /^\s*<!doctype[^>]*>/i;
  * The host's theme as the sandbox receives it.
  */
 export interface HtmlBlockTheme {
-  /** `:root` declarations for the theme tokens (and `--font-sans`). */
+  /** `:root` declarations for the theme tokens. */
   declarations: string;
   colorScheme: "light" | "dark";
 }
 
-// A value that could close the <style> element or the rule is dropped. Token
-// values come from the app's own stylesheet, so this is a backstop only.
-const UNSAFE_CSS_VALUE = /[<>{};]/;
+/** Read the host's tokens with `readEmbedTheme(host, HTML_BLOCK_EMBED_OPTIONS)`. */
+export const HTML_BLOCK_EMBED_OPTIONS = {
+  // Inside a block the page is the block: a document that paints
+  // `var(--background)` sits flush in its frame instead of showing a slightly
+  // different panel.
+  background: "--surface",
+} as const;
 
-/**
- * Reads the theme from the host's computed style. Tokens the host does not
- * define are skipped rather than emitted empty, so an author's own fallback in
- * `var(--x, fallback)` still applies.
- *
- * Inside a block the page is the block, so `--background` carries the block's
- * surface color: a document that paints `var(--background)` sits flush in its
- * frame instead of showing a slightly different panel.
- */
-export function readHtmlBlockTheme(
-  styles: Pick<CSSStyleDeclaration, "getPropertyValue" | "fontFamily" | "colorScheme">,
-): HtmlBlockTheme {
-  const declarations: string[] = [];
-  for (const name of HTML_BLOCK_THEME_TOKENS) {
-    const value = (
-      (name === "--background" && styles.getPropertyValue("--surface")) ||
-      styles.getPropertyValue(name)
-    ).trim();
-    if (value && !UNSAFE_CSS_VALUE.test(value)) declarations.push(`${name}:${value}`);
-  }
-  const fontFamily = styles.fontFamily.trim();
-  if (fontFamily && !UNSAFE_CSS_VALUE.test(fontFamily)) {
-    declarations.push(`--font-sans:${fontFamily}`);
-  }
-  const scheme = styles.colorScheme ?? "";
-  return {
-    declarations: declarations.join(";"),
-    colorScheme: /\bdark\b/.test(scheme) && !/\blight\b/.test(scheme) ? "dark" : "light",
-  };
+export function htmlBlockTheme({ tokens, colorScheme }: EmbedTheme): HtmlBlockTheme {
+  return { declarations: embedTokenDeclarations(tokens), colorScheme };
 }
 
 const THEME_TOKEN_USE = new RegExp(
-  `var\\(\\s*(?:${[...HTML_BLOCK_THEME_TOKENS, "--font-sans"].join("|")})(?![\\w-])`,
+  `var\\(\\s*(?:${EMBED_TOKENS.map((token) => token.name).join("|")})(?![\\w-])`,
 );
 
 /** Whether the HTML reads any theme token, which opts it into the app's scheme. */
 export function usesThemeTokens(html: string): boolean {
   return THEME_TOKEN_USE.test(html);
 }
+
+const THEME_TOKEN_MENTION = new RegExp(
+  `(?:${EMBED_TOKENS.map((token) => token.name).join("|")})(?![\\w-])`,
+);
+
+/**
+ * Whether the HTML names a theme token anywhere, in CSS or in a script's
+ * `getPropertyValue`. HTML that names none cannot read the theme.
+ */
+export function mentionsThemeTokens(html: string): boolean {
+  return THEME_TOKEN_MENTION.test(html);
+}
+
+/** The theme for a document that reads none of it. */
+export const NO_HTML_BLOCK_THEME: HtmlBlockTheme = { declarations: "", colorScheme: "light" };
 
 /**
  * The srcdoc for a ```html block: theme tokens and the bridge in front of the
