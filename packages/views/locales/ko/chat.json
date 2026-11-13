@@ -264,5 +264,26 @@
     "delete": "채팅 삭제",
     "archive": "채팅 보관",
     "unarchive": "채팅 보관 해제"
+  },
+  "commit_changes": {
+    "heading": "이 실행의 파일 변경 사항",
+    "files": "변경된 파일",
+    "incomplete": "기록 한도로 인해 일부 변경 사항이 생략되었습니다.",
+    "unavailable": "이 파일의 차이를 완전히 기록하지 못했습니다. 저장소에서 확인하세요.",
+    "no_text": "표시할 텍스트 차이가 없습니다.",
+    "loading": "파일 변경 사항을 불러오는 중…",
+    "retry": "변경 사항 다시 불러오기",
+    "empty": "이 실행에서 기록된 파일 변경 사항이 없습니다.",
+    "worktree": "작업 트리: 실행 전후",
+    "commits": "커밋 범위",
+    "draft": "저장된 초안",
+    "recorded_files_other": "파일 {{count}}개",
+    "incomplete_record": "기록 불완전",
+    "repositories_omitted": "저장소 기록 한도에 도달하여 일부 저장소를 기록하지 못했습니다.",
+    "worktree_unavailable": "작업 트리 변경 사항을 기록하지 못했습니다.",
+    "commits_unavailable": "커밋 범위의 변경 사항을 기록하지 못했습니다.",
+    "draft_unavailable": "저장된 초안의 변경 사항을 기록하지 못했습니다.",
+    "worktree_unchanged": "실행 전후 작업 트리에 차이가 없습니다.",
+    "comparison_unchanged": "이 비교 범위에 파일 변경 사항이 없습니다."
   }
 }

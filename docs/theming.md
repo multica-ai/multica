@@ -472,6 +472,9 @@ and dark differ, both defaults are given.
 | `--priority-medium` | `var(--warning)` | Medium priority icon and badge. |
 | `--priority-low` | `var(--info)` | Low priority icon and badge. |
 | `--priority-none` | `var(--muted-foreground)` | No-priority icon. |
+| `--pr-open` | `oklch(59.6% 0.145 163.225)` / `oklch(76.5% 0.177 163.223)` | Open pull request icon. |
+| `--pr-merged` | `oklch(54.1% 0.281 293.009)` / `oklch(70.2% 0.183 293.541)` | Merged pull request icon and pill. The pill's text defaults one shade darker in light mode. |
+| `--pr-closed` | `oklch(58.6% 0.253 17.585)` / `oklch(71.2% 0.194 13.428)` | Closed pull request icon. |
 
 ### Shape and depth
 

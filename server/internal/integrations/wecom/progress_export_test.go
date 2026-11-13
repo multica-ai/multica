@@ -26,6 +26,18 @@ func TestDescribeStepWordsAStepForAnotherAdapter(t *testing.T) {
 	}
 }
 
+func TestCommitDiffIsHiddenFromProgress(t *testing.T) {
+	msg := toolUse("multica_commit_diff", map[string]any{"repository": "private-repository", "head": "private-head"})
+	if step, ok := stepFromTaskMessage(msg); ok {
+		t.Fatalf("internal record became a WeCom step: %+v", step)
+	}
+	for _, detail := range []bool{false, true} {
+		if step, ok := DescribeStep(msg, LocaleEn, detail); ok {
+			t.Fatalf("internal record became an exported step: %+v", step)
+		}
+	}
+}
+
 // TestDescribeStepWithoutArgumentKeepsOnlyTheKindOfWork — a reader the run
 // does not belong to sees what sort of work it is and nothing the agent
 // composed.

@@ -1,20 +1,25 @@
 "use client";
 
 import { useState, useSyncExternalStore, type ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { agentTaskSnapshotOptions } from "@multica/core/agents/queries";
 import { useAuthStore } from "@multica/core/auth";
+import { paths } from "@multica/core/paths";
 import {
   getCurrentSlug,
   getCurrentWsId,
   subscribeToCurrentSlug,
 } from "@multica/core/platform";
 import { useWSStatus, type WSStatus } from "@multica/core/realtime";
+import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { Popover, PopoverContent, PopoverTrigger } from "@multica/ui/components/ui/popover";
 import { ChevronUp, Minus } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import {
+  activeTasks,
   apiHost,
+  eventsInLastMinute,
   formatBytes,
   jankTone,
   memoryTone,
@@ -31,6 +36,7 @@ import {
   SyncPanel,
   TONE_CLASS,
 } from "./panels";
+import { CachePanel, EventsPanel, RuntimesPanel, TasksPanel } from "./realtime-panels";
 import { useDevRecorder, useMainThreadBlocked, useNavDuration, useNow } from "./use-dev-metrics";
 
 export interface DevToolbarProps {
@@ -40,6 +46,8 @@ export interface DevToolbarProps {
   apiUrl: string;
   /** Current route as the platform's router sees it. */
   route: string;
+  /** Open an in-app path, such as the issue an agent task runs for. */
+  onNavigate: (path: string) => void;
 }
 
 // App shells size themselves to the viewport (`h-svh`, `h-screen`), so a fixed
@@ -71,7 +79,14 @@ function useCurrentWorkspace() {
     enabled: Boolean(wsId),
   });
   const role = members?.find((m) => m.user_id === userId)?.role ?? null;
-  return { slug, role };
+  return { slug, wsId, role };
+}
+
+/** Runtimes and agent tasks of the current workspace, from the app's own queries. */
+function useWorkspaceAgents(wsId: string | null) {
+  const { data: runtimes } = useQuery({ ...runtimeListOptions(wsId ?? ""), enabled: Boolean(wsId) });
+  const { data: tasks } = useQuery({ ...agentTaskSnapshotOptions(wsId ?? ""), enabled: Boolean(wsId) });
+  return { runtimes, tasks };
 }
 
 /** A bar reading that opens its detail panel. */
@@ -113,18 +128,25 @@ function Metric({
  * client health. Each reading opens the recent history behind it. Platforms
  * mount it only in dev builds, behind an opt-in flag.
  */
-export function DevToolbar({ build, apiUrl, route }: DevToolbarProps) {
+export function DevToolbar({ build, apiUrl, route, onNavigate }: DevToolbarProps) {
   const [minimized, setMinimized] = useState(false);
   const sync = useWSStatus();
   const recording = useDevRecorder(route, sync);
   const now = useNow(1_000);
-  const { slug, role } = useCurrentWorkspace();
+  const queryClient = useQueryClient();
+  const { slug, wsId, role } = useCurrentWorkspace();
+  const { runtimes, tasks } = useWorkspaceAgents(wsId);
   const blocked = useMainThreadBlocked(recording, now);
   const nav = useNavDuration(route);
   const heap = recording.memory.at(-1)?.bytes ?? null;
   const inFlight = recording.requests.filter((r) => r.durationMs === null).length;
   const failed = recording.requests.filter(requestFailed).length;
   const errors = recording.errors.length;
+  const queries = queryClient.getQueryCache().getAll();
+  const fetching = queries.filter((q) => q.state.fetchStatus === "fetching").length;
+  const online = runtimes?.filter((r) => r.status === "online").length ?? 0;
+  const running = activeTasks(tasks ?? []).filter((t) => t.status === "running").length;
+  const openIssue = slug ? (issueId: string) => onNavigate(paths.workspace(slug).issueDetail(issueId)) : null;
 
   const syncDot = (
     <span className={cn("size-1.5 shrink-0 rounded-full", SYNC_DOT_CLASS[sync])} />
@@ -195,12 +217,50 @@ export function DevToolbar({ build, apiUrl, route }: DevToolbarProps) {
           <NetworkPanel recording={recording} apiUrl={apiUrl} workspaceSlug={slug} />
         </Metric>
         <Metric
+          label="Cache"
+          value={String(queries.length)}
+          wide
+          extra={
+            // Fetches start and settle many times a second; a slot that came and
+            // went would resize the chip and shift the whole bar each time.
+            <span
+              data-testid="dev-toolbar-cache-fetching"
+              className={cn(
+                "inline-block min-w-[3ch] tabular-nums",
+                fetching > 0 ? "text-brand" : "text-faint-foreground",
+              )}
+            >
+              {`↻${fetching}`}
+            </span>
+          }
+        >
+          <CachePanel now={now} />
+        </Metric>
+        <Metric
           label="Sync"
           value={sync}
           tone={sync === "reconnecting" ? "bad" : sync === "connecting" ? "warn" : "normal"}
         >
           <SyncPanel recording={recording} status={sync} />
         </Metric>
+        <Metric label="Events" value={`${eventsInLastMinute(recording.frameCounts, now)}/m`} wide>
+          <EventsPanel recording={recording} now={now} onOpenIssue={openIssue} />
+        </Metric>
+        {wsId && (
+          <>
+            <Metric
+              label="Runtimes"
+              value={runtimes ? `${online}/${runtimes.length}` : "—"}
+              tone={runtimes && runtimes.length > 0 && online === 0 ? "bad" : "normal"}
+              wide
+            >
+              <RuntimesPanel runtimes={runtimes} now={now} />
+            </Metric>
+            <Metric label="Tasks" value={tasks ? String(running) : "—"}>
+              <TasksPanel tasks={tasks} wsId={wsId} now={now} onOpenIssue={openIssue} />
+            </Metric>
+          </>
+        )}
         <Metric label="Errors" value={String(errors)} tone={errors > 0 ? "bad" : "normal"}>
           <ErrorsPanel recording={recording} />
         </Metric>

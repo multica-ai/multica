@@ -11,9 +11,11 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
@@ -517,6 +519,9 @@ type Daemon struct {
 	// daemon tracks a handful of workspaces, and a mutex for a workspace that
 	// went away is a few bytes, not a leak worth a lifecycle.
 	registerSerial sync.Map
+
+	// Unowned directories remain untouched; warn once per path per daemon.
+	gcUnownedWarnings sync.Map
 
 	// agentsAvailable holds the current built-in agent CLI availability set —
 	// the same shape as cfg.Agents, which it supersedes as the read path.
@@ -3277,20 +3282,95 @@ func repoAllowlist(repos []RepoData) map[string]struct{} {
 	return allowed
 }
 
-func (d *Daemon) workspaceRepoAllowed(workspaceID, repoURL string) bool {
+// defaultGitPorts are the ports implied when a URL form omits one. A port
+// that differs from the scheme default can name a different server, so it
+// stays part of the identity.
+var defaultGitPorts = map[string]string{
+	"http": "80", "https": "443", "ssh": "22", "git": "9418",
+}
+
+// repoIdentity is the protocol-agnostic host+path identity of a clone URL,
+// so http, ssh, and scp-shorthand forms of the same repository compare
+// equal. Hosts are case-insensitive; repository paths are not guaranteed to
+// be, so path casing is preserved. It mirrors repositoryIdentity in
+// packages/views/settings/components/repositories-section.tsx — the two must
+// not drift, or a repo the UI refuses to add as a duplicate could still
+// bypass (or be rejected by) the daemon allowlist. An unparseable URL keeps
+// no identity and only ever matches by exact string.
+func repoIdentity(rawURL string) string {
+	value := strings.TrimSpace(rawURL)
+	if value == "" {
+		return ""
+	}
+
+	host := ""
+	path := ""
+	if !strings.Contains(value, "://") {
+		if m := scpLikeURL.FindStringSubmatch(value); m != nil {
+			host = m[1]
+			path = m[2]
+		}
+	}
+	if host == "" {
+		parsed, err := url.Parse(value)
+		if err != nil || parsed.Hostname() == "" {
+			return ""
+		}
+		host = parsed.Hostname()
+		if port := parsed.Port(); port != "" && port != defaultGitPorts[parsed.Scheme] {
+			host = host + ":" + port
+		}
+		path = parsed.Path
+	}
+
+	normalizedPath := strings.Trim(path, "/")
+	if len(normalizedPath) > 4 && strings.EqualFold(normalizedPath[len(normalizedPath)-4:], ".git") {
+		normalizedPath = normalizedPath[:len(normalizedPath)-4]
+	}
+	if normalizedPath == "" {
+		return ""
+	}
+	return strings.ToLower(host) + "/" + normalizedPath
+}
+
+var scpLikeURL = regexp.MustCompile(`^(?:[^@\s/]+@)?([^:\s/]+):(.+)$`)
+
+// resolveWorkspaceRepoURL returns the registered URL to use for cache and
+// checkout operations. Exact matches take precedence across both sources;
+// aliases prefer workspace bindings, then task repositories.
+func (d *Daemon) resolveWorkspaceRepoURL(workspaceID, repoURL string) string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	ws, ok := d.workspaces[workspaceID]
 	if !ok {
-		return false
+		return ""
 	}
 	if _, allowed := ws.allowedRepoURLs[repoURL]; allowed {
-		return true
+		return repoURL
 	}
 	if _, allowed := ws.taskRepoURLs[repoURL]; allowed {
-		return true
+		return repoURL
 	}
-	return false
+	identity := repoIdentity(repoURL)
+	if registeredURL := repoURLForIdentity(ws.allowedRepoURLs, identity); registeredURL != "" {
+		return registeredURL
+	}
+	return repoURLForIdentity(ws.taskRepoURLs, identity)
+}
+
+// Legacy bindings and task repositories can contain equivalent URLs. Choose
+// lexically within a source so map iteration cannot change the remote or ref.
+func repoURLForIdentity[V any](repos map[string]V, identity string) string {
+	if identity == "" {
+		return ""
+	}
+	match := ""
+	for url := range repos {
+		if repoIdentity(url) == identity && (match == "" || url < match) {
+			match = url
+		}
+	}
+	return match
 }
 
 // repoBarePathIsLive reports whether some watched workspace still claims the
@@ -3301,7 +3381,7 @@ func (d *Daemon) workspaceRepoAllowed(workspaceID, repoURL string) bool {
 // stale while the caller runs git and filesystem work on each repo in turn,
 // which is exactly the window in which a workspace can re-attach one.
 //
-// It mirrors workspaceRepoAllowed by unioning both sources: allowedRepoURLs
+// It mirrors resolveWorkspaceRepoURL by unioning both sources: allowedRepoURLs
 // (workspace-level bindings) and taskRepoURLs (project repos the server
 // surfaced through a task claim, which never appear in GetWorkspaceRepos).
 // Missing the second set would make the GC evict repos that tasks actively
@@ -3452,7 +3532,13 @@ func (d *Daemon) taskRepoDefaultRef(workspaceID, taskID, repoURL string) string 
 	if !ok || ws.taskRepoRefs == nil {
 		return ""
 	}
-	return strings.TrimSpace(ws.taskRepoRefs[taskID][repoURL])
+	refs := ws.taskRepoRefs[taskID]
+	if ref, ok := refs[repoURL]; ok {
+		return strings.TrimSpace(ref)
+	}
+	// A workspace binding and the current task can name the same repository
+	// differently. Resolving the cache URL must not lose the task's ref.
+	return strings.TrimSpace(refs[repoURLForIdentity(refs, repoIdentity(repoURL))])
 }
 
 func (d *Daemon) clearTaskRepoRefs(workspaceID, taskID string) {
@@ -3946,9 +4032,11 @@ func (d *Daemon) convergeWorkspaceRuntimesToZero(ctx context.Context, workspaceI
 	return nil
 }
 
-func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL string) error {
+// ensureRepoReady returns the registered URL after refreshing authorization
+// and preparing its cache. Callers must carry that URL through the checkout.
+func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL string) (string, error) {
 	if d.repoCache == nil {
-		return fmt.Errorf("repo cache not initialized")
+		return "", fmt.Errorf("repo cache not initialized")
 	}
 
 	repoURL = strings.TrimSpace(repoURL)
@@ -3957,7 +4045,7 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 	ws, ok := d.workspaces[workspaceID]
 	d.mu.Unlock()
 	if !ok {
-		return fmt.Errorf("workspace is not watched by this daemon: %s", workspaceID)
+		return "", fmt.Errorf("workspace is not watched by this daemon: %s", workspaceID)
 	}
 
 	// Record whether the cache already had this repo before we took the
@@ -3974,44 +4062,47 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 	//     a sibling goroutine on a concurrent cold-miss already refreshed
 	//     and populated the cache. We can skip the duplicate refresh — the
 	//     sibling's refresh is fresh enough for our gate read.
-	cacheHitOnEntry := d.workspaceRepoAllowed(workspaceID, repoURL) && d.repoCache.Lookup(workspaceID, repoURL) != ""
+	registeredURL := d.resolveWorkspaceRepoURL(workspaceID, repoURL)
+	cacheHitOnEntry := registeredURL != "" && d.repoCache.Lookup(workspaceID, registeredURL) != ""
 
 	if err := ws.repoRefreshMu.Lock(ctx); err != nil {
-		return err
+		return "", err
 	}
 	defer ws.repoRefreshMu.Unlock()
 
-	if !cacheHitOnEntry && d.workspaceRepoAllowed(workspaceID, repoURL) && d.repoCache.Lookup(workspaceID, repoURL) != "" {
-		return nil
+	registeredURL = d.resolveWorkspaceRepoURL(workspaceID, repoURL)
+	if !cacheHitOnEntry && registeredURL != "" && d.repoCache.Lookup(workspaceID, registeredURL) != "" {
+		return registeredURL, nil
 	}
 
 	resp, err := d.refreshWorkspaceRepos(ctx, workspaceID)
 	if err != nil {
-		return fmt.Errorf("refresh workspace repos: %w", err)
+		return "", fmt.Errorf("refresh workspace repos: %w", err)
 	}
 
-	if !d.workspaceRepoAllowed(workspaceID, repoURL) {
-		return ErrRepoNotConfigured
+	registeredURL = d.resolveWorkspaceRepoURL(workspaceID, repoURL)
+	if registeredURL == "" {
+		return "", ErrRepoNotConfigured
 	}
 
-	if d.repoCache.Lookup(workspaceID, repoURL) != "" {
-		return nil
+	if d.repoCache.Lookup(workspaceID, registeredURL) != "" {
+		return registeredURL, nil
 	}
 
 	syncErr := d.syncWorkspaceReposContext(ctx, workspaceID, resp.Repos)
 	if err := ctx.Err(); err != nil {
-		return context.Cause(ctx)
+		return "", context.Cause(ctx)
 	}
 
-	if d.repoCache.Lookup(workspaceID, repoURL) != "" {
-		return nil
+	if d.repoCache.Lookup(workspaceID, registeredURL) != "" {
+		return registeredURL, nil
 	}
 
 	if syncErr != nil {
-		return fmt.Errorf("repo is configured but not synced: %w", syncErr)
+		return "", fmt.Errorf("repo is configured but not synced: %w", syncErr)
 	}
 
-	return fmt.Errorf("repo is configured but not synced")
+	return "", fmt.Errorf("repo is configured but not synced")
 }
 
 // DefaultTokenRenewalInterval is how often the daemon asks the server to
@@ -8394,6 +8485,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// Hermes overlay's task-local state.db — carried over from the prior task.
 		envReused = env != nil
 	}
+	commitDiff := newCommitDiffRecorder()
+	defer commitDiff.close()
 	if env == nil {
 		var err error
 		prepParams := execenv.PrepareParams{
@@ -8492,6 +8585,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		} else {
 			if localAssignment != nil {
 				prepParams.LocalWorkDir = localAssignment.AbsPath
+				commitDiff.record(localAssignment.AbsPath)
 			}
 			env, err = d.prepareExecutionEnvironment(prepareCtx, prepParams)
 			if err != nil {
@@ -8500,6 +8594,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}
 	}
 	phaseRecorder.Mark(taskPhaseEnvironmentReady)
+	var msgSeq atomic.Int32
+	includeWorktreeDiff := true
+	defer func() {
+		d.reportCommitDiff(task.ID, commitDiff, &msgSeq, taskLog, includeWorktreeDiff, taskResult.FailureReason)
+	}()
+	if !env.LocalDirectory && env.LocalWorktree == nil {
+		commitDiff.restoreCheckouts(env.RootDir, env.WorkDir)
+	}
 	// Belt-and-suspenders: also mark whatever root we ended up with, in case
 	// future changes diverge from ResolveRootDir.
 	if env.RootDir != resolvedRoot && env.RootDir != "" {
@@ -8528,6 +8630,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				taskResult.BranchName = outcome.Branch
 			}
 			if finalizeErr == nil {
+				commitDiff.finalized(env.LocalWorktree.GitRoot, outcome.BaseCommit, outcome.HeadCommit, outcome.LeftoverRef)
 				// The configured local_directory becomes authoritative only after
 				// Finalize confirms the disposable task worktree is actually gone.
 				if localAssignment != nil {
@@ -8535,6 +8638,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				}
 				return
 			}
+			commitDiff.preserved(env.LocalWorktree.Path, env.LocalWorktree.BaseCommit)
 			// Finalize could not complete its delivery contract, so the task
 			// worktree remains authoritative. This covers both an uncommitted
 			// change set and a committed branch whose worktree removal could not
@@ -8591,6 +8695,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if env.LocalDirectory || env.LocalWorktree != nil {
 		defer func() {
 			if taskResult.FailureReason == taskfailure.ReasonProcessCleanupUnconfirmed.String() {
+				includeWorktreeDiff = false
 				return // Preserve files that an unconfirmed process may still use.
 			}
 			var cleanupErr error
@@ -8621,9 +8726,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			// inspection. (In place there is no commit and no branch, so a
 			// cleanup failure stays a warning: the leftover files are visible
 			// in the user's own tree and removable by hand.)
-			if cleanupErr != nil && env.LocalWorktree != nil {
-				env.LocalWorktree.AbortWithReason(fmt.Errorf(
-					"could not remove the runtime's own files from the worktree before committing: %w", cleanupErr))
+			if cleanupErr != nil {
+				includeWorktreeDiff = false
+				if env.LocalWorktree != nil {
+					env.LocalWorktree.AbortWithReason(fmt.Errorf(
+						"could not remove the runtime's own files from the worktree before committing: %w", cleanupErr))
+				}
 			}
 		}()
 	}
@@ -9101,6 +9209,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		WorkspaceID: task.WorkspaceID,
 		TaskID:      task.ID,
 		IssueID:     task.IssueID,
+		CommitDiff:  commitDiff,
 		AgentID:     task.AgentID,
 		AgentName:   task.Agent.Name,
 		WorkDir:     env.WorkDir,
@@ -9145,7 +9254,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 
 	// Shared across the resume-retry below so the retry's transcript rows
 	// keep ascending seq values for the same task.
-	var msgSeq atomic.Int32
 	d.reportThinkingLevelWarning(ctx, task.ID, selection.ThinkingLevelWarning, &msgSeq, taskLog)
 	outputObserver := &taskOutputObserver{}
 	ctx = withTaskOutputObserver(ctx, outputObserver)

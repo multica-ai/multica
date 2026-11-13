@@ -2427,3 +2427,26 @@ func TestIsolatedPrepareKeepsTheReadOnlyBranchDrop(t *testing.T) {
 		t.Error("a turn that changed nothing left its branch behind")
 	}
 }
+
+func TestFinalizeReturnsImmutableCommitRange(t *testing.T) {
+	t.Parallel()
+	repo := newTestRepo(t)
+	writeFile(t, filepath.Join(repo, "tracked.txt"), "user edits\n")
+	wt := prepareForTest(t, repo)
+	base := wt.BaseCommit
+	writeFile(t, filepath.Join(wt.WorkDir, "result.txt"), "agent output\n")
+	outcome, err := wt.Finalize(worktreeTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.BaseCommit != base || outcome.HeadCommit == "" {
+		t.Fatalf("missing committed receipt: %+v", outcome)
+	}
+	diff := gitRun(t, repo, "diff", outcome.BaseCommit, outcome.HeadCommit, "--")
+	if !strings.Contains(diff, "agent output") || strings.Contains(diff, "user edits") {
+		t.Fatalf("wrong turn boundary: %s", diff)
+	}
+	if _, err := os.Stat(wt.Path); !os.IsNotExist(err) {
+		t.Fatalf("receipt must survive worktree cleanup: %v", err)
+	}
+}

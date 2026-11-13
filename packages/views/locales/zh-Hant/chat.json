@@ -264,5 +264,26 @@
     "delete": "刪除會話",
     "archive": "歸檔會話",
     "unarchive": "取消歸檔"
+  },
+  "commit_changes": {
+    "heading": "本輪檔案變更",
+    "files": "變更檔案",
+    "incomplete": "受記錄上限限制，僅顯示部分差異。",
+    "unavailable": "此檔案的差異未能完整記錄，請在儲存庫中檢視。",
+    "no_text": "沒有可顯示的文字差異。",
+    "loading": "正在載入檔案變更...",
+    "retry": "重新載入差異",
+    "empty": "此輪沒有記錄到檔案變更。",
+    "worktree": "工作樹：執行前後",
+    "commits": "提交範圍",
+    "draft": "已儲存草稿",
+    "recorded_files_other": "{{count}} 個檔案",
+    "incomplete_record": "記錄不完整",
+    "repositories_omitted": "已達儲存庫記錄上限，部分儲存庫未擷取。",
+    "worktree_unavailable": "無法擷取工作樹差異。",
+    "commits_unavailable": "無法擷取提交範圍的差異。",
+    "draft_unavailable": "無法擷取已儲存草稿的差異。",
+    "worktree_unchanged": "本輪工作樹無淨變更。",
+    "comparison_unchanged": "此比較範圍內沒有檔案變更。"
   }
 }

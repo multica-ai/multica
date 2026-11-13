@@ -1,5 +1,6 @@
 "use client";
 
+import { TaskCommitChanges } from "../../common/commit-changes/commit-changes";
 import { Fragment, memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { CheckCircle2, ChevronRight, CornerUpLeft, ListChevronsDownUp, Copy, Link2, Loader2, MessageSquare, MessageSquarePlus, MoreHorizontal, Pencil, Plus, RotateCcw, SmilePlus, Trash2 } from "@multica/ui/icons";
 import { toast } from "sonner";
@@ -1023,7 +1024,7 @@ function CommentRow({
           <div className="pl-12 pr-4 max-md:pl-3 max-md:pr-3">
             <SteerReceipts issueId={issueId} entry={entry} />
             {entry.actor_type === "agent" && entry.source_task_id && (
-              <AppCallChips issueId={issueId} taskId={entry.source_task_id} />
+              <><AppCallChips issueId={issueId} taskId={entry.source_task_id} /><TaskCommitChanges taskId={entry.source_task_id} /></>
             )}
           </div>
           {retryableAgentFailureComment(entry) && (
@@ -1447,23 +1448,6 @@ function CommentCardImpl({
               )}
 
               <div data-comment-actions className="ml-auto flex shrink-0 items-center gap-0.5">
-                <DeferredTooltip
-                  content={toggleLabel}
-                  trigger={
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      aria-label={toggleLabel}
-                      aria-expanded={open}
-                      aria-controls={open ? `comment-body-${entry.id}` : undefined}
-                      onClick={handleToggle}
-                      className={commentActionClassName}
-                    >
-                      <ChevronRight aria-hidden className={cn("h-3.5 w-3.5 transition-transform motion-reduce:transition-none", open && "rotate-90")} />
-                    </Button>
-                  }
-                />
                 {open && !deleted && <>
                   {!edit.editing && <QuickEmojiPicker
                     onSelect={(emoji) => onToggleReaction(entry.id, emoji)}
@@ -1507,6 +1491,23 @@ function CommentCardImpl({
                     hasReplies={replyCount > 0}
                   />
                 </>}
+                <DeferredTooltip
+                  content={toggleLabel}
+                  trigger={
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={toggleLabel}
+                      aria-expanded={open}
+                      aria-controls={open ? `comment-body-${entry.id}` : undefined}
+                      onClick={handleToggle}
+                      className={commentActionClassName}
+                    >
+                      <ChevronRight aria-hidden className={cn("h-3.5 w-3.5 transition-transform motion-reduce:transition-none", open && "rotate-90")} />
+                    </Button>
+                  }
+                />
               </div>
             </div>
           </StickyHeaderShell>
@@ -1605,7 +1606,7 @@ function CommentCardImpl({
                 <div className="pl-8 max-md:pl-0">
                   <SteerReceipts issueId={issueId} entry={entry} />
                   {entry.actor_type === "agent" && entry.source_task_id && (
-                    <AppCallChips issueId={issueId} taskId={entry.source_task_id} />
+                    <><AppCallChips issueId={issueId} taskId={entry.source_task_id} /><TaskCommitChanges taskId={entry.source_task_id} /></>
                   )}
                 </div>
                 {retryableAgentFailureComment(entry) && (

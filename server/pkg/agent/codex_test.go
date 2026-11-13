@@ -4881,30 +4881,35 @@ func executeFakeCodexCollectingMessagesWithConfig(t *testing.T, fakePath string,
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	var (
-		mu       sync.Mutex
-		messages []Message
-	)
+	var messages []Message
+	messagesDone := make(chan struct{})
 	go func() {
+		defer close(messagesDone)
 		for msg := range session.Messages {
-			mu.Lock()
 			messages = append(messages, msg)
-			mu.Unlock()
 		}
 	}()
+	deadline := time.After(budget)
+	var result Result
 	select {
-	case result, ok := <-session.Result:
+	case r, ok := <-session.Result:
 		if !ok {
 			t.Fatal("result channel closed without a value")
 		}
-		mu.Lock()
-		collected := append([]Message(nil), messages...)
-		mu.Unlock()
-		return result, collected
-	case <-time.After(budget):
+		result = r
+	case <-deadline:
 		t.Fatal("timeout waiting for result")
 		return Result{}, nil
 	}
+	// The backend sends Result before it closes Messages, so messages already
+	// sent may still be buffered when Result arrives.
+	select {
+	case <-messagesDone:
+	case <-deadline:
+		t.Fatal("timeout waiting for message stream to close")
+		return Result{}, nil
+	}
+	return result, messages
 }
 
 func TestWithAgentStderrAppendsHint(t *testing.T) {

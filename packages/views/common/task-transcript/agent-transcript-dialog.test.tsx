@@ -12,6 +12,11 @@ import { renderWithI18n } from "../../test/i18n";
 import { AgentTranscriptDialog } from "./agent-transcript-dialog";
 import type { TimelineItem } from "./build-timeline";
 
+vi.mock("../commit-changes/commit-changes", () => ({
+  TaskCommitChanges: ({ taskId }: { taskId: string }) => (
+    <button type="button" data-task-id={taskId}>Run changes</button>
+  ),
+}));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "workspace" }));
 vi.mock("./use-trace-issue-labels", () => ({
   useTraceIssueLabels: () => (text: string) => text.replaceAll("01a07eca-8e82-775e-be06-e4a97ccfa299", "DEV-17"),
@@ -260,6 +265,10 @@ function codeBlock(text: string) {
 }
 
 describe("AgentTranscriptDialog", () => {
+  it("offers run changes for runs without an associated issue", () => {
+    renderDialog([], { task: { ...baseTask, issue_id: "" } });
+    expect(screen.getByRole("button", { name: "Run changes" })).toHaveAttribute("data-task-id", baseTask.id);
+  });
   it.each([
     { type: "text", label: "Agent", icon: ".icon-bot" },
     { type: "thinking", label: "Thinking", icon: ".icon-brain" },

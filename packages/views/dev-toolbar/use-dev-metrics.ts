@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   getDevRecording,
   installDevRecorder,
@@ -14,7 +15,8 @@ import { blockedRatio, JANK_WINDOW_MS, navDuration } from "./metrics";
 
 /** Start the recorder and feed it what only the platform knows: route and sync. */
 export function useDevRecorder(route: string, sync: string): DevRecording {
-  useEffect(() => installDevRecorder(), []);
+  const queryClient = useQueryClient();
+  useEffect(() => installDevRecorder(queryClient), [queryClient]);
   useEffect(() => recordDevRoute(route), [route]);
   useEffect(() => recordDevSyncStatus(sync), [sync]);
   return useSyncExternalStore(subscribeDevRecording, getDevRecording, getDevRecording);

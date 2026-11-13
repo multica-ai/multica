@@ -167,6 +167,10 @@ interface DesktopAPI {
   /** Listen for Cmd/Ctrl+Shift+N new-window requests. Returns an
    *  unsubscribe function. */
   onNewWindowShortcut: (callback: () => void) => () => void;
+  /** Whether View → Show Dev Toolbar is checked; false unless VITE_DEV_TOOLBAR is set. */
+  getDevToolbarVisible: () => boolean;
+  /** Listen for View → Show Dev Toolbar being toggled. Returns an unsubscribe function. */
+  onDevToolbarVisibleChange: (callback: (visible: boolean) => void) => () => void;
 }
 
 type DaemonReauthResult =

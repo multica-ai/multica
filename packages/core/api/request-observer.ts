@@ -4,6 +4,11 @@
  * only observer.
  */
 export interface ApiRequestObserver {
+  /**
+   * A reason not to send the request at all; the call then rejects with it.
+   * `readOnly` marks a POST that only reads, such as an issue table query.
+   */
+  refuse?(request: { method: string; path: string; readOnly: boolean }): string | null;
   onStart(request: {
     requestId: string;
     method: string;

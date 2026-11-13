@@ -1,4 +1,11 @@
-import type { DevRequest } from "@multica/core/diagnostics";
+import type {
+  DevCacheChange,
+  DevCacheEffects,
+  DevFrameCount,
+  DevRealtimeEvent,
+  DevRequest,
+} from "@multica/core/diagnostics";
+import type { AgentTask } from "@multica/core/types";
 
 export type MetricTone = "normal" | "warn" | "bad";
 
@@ -124,4 +131,88 @@ export function formatClock(at: number): string {
 
 export function formatDuration(ms: number): string {
   return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`;
+}
+
+/** Coarse age: `now`, `12s`, `4m`, `2h`. */
+export function formatAge(ms: number): string {
+  if (ms < 1000) return "now";
+  if (ms < 60_000) return `${Math.floor(ms / 1000)}s`;
+  if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}m`;
+  return `${Math.floor(ms / 3_600_000)}h`;
+}
+
+/** Frames received from the server in the last minute, from the per-second counts. */
+export function eventsInLastMinute(frameCounts: readonly DevFrameCount[], now: number): number {
+  let total = 0;
+  for (const bucket of frameCounts) if (now - bucket.at < 60_000) total += bucket.count;
+  return total;
+}
+
+export const CACHE_CHANGE_LABEL: Record<DevCacheChange, string> = {
+  written: "written",
+  invalidated: "invalidated",
+  removed: "removed",
+  refetched: "refetched",
+};
+
+/** `2 written · 5 invalidated`, or empty when the event left the cache alone. */
+export function cacheEffectSummary(cache: DevCacheEffects): string {
+  return (Object.keys(CACHE_CHANGE_LABEL) as DevCacheChange[])
+    .filter((change) => cache[change].length > 0)
+    .map((change) => `${cache[change].length} ${CACHE_CHANGE_LABEL[change]}`)
+    .join(" · ");
+}
+
+const ISSUE_KEY = /^[a-z][a-z0-9]*-\d+$/i;
+
+/**
+ * IDs of the issue a search names by key, such as `MUL-12`. Most events carry
+ * only an issue ID, so the key is resolved through events and cached issues
+ * that carry both.
+ */
+export function issueIdsForKey(
+  query: string,
+  events: readonly DevRealtimeEvent[],
+  cachedData: readonly unknown[],
+): string[] {
+  const key = query.trim();
+  if (!ISSUE_KEY.test(key)) return [];
+  const sameKey = (value: unknown) => typeof value === "string" && value.toLowerCase() === key.toLowerCase();
+  const ids = new Set<string>();
+  for (const event of events) if (event.issueId && sameKey(event.issueKey)) ids.add(event.issueId);
+  for (const data of cachedData) {
+    if (!data || typeof data !== "object") continue;
+    const { id, identifier } = data as { id?: unknown; identifier?: unknown };
+    if (typeof id === "string" && sameKey(identifier)) ids.add(id);
+  }
+  return [...ids];
+}
+
+/** Matches type, issue key or ID, or any payload text; `issueIds` widens a key search. */
+export function eventMatches(event: DevRealtimeEvent, query: string, issueIds: readonly string[]): boolean {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return true;
+  if (event.issueId && issueIds.includes(event.issueId)) return true;
+  return [event.type, event.issueKey, event.issueId, event.payload].some(
+    (text) => text?.toLowerCase().includes(needle),
+  );
+}
+
+/** The issue an event is about, as the event list labels it. */
+export function eventSubject(event: DevRealtimeEvent): string {
+  return event.issueKey ?? (event.issueId ? event.issueId.slice(0, 8) : "");
+}
+
+const TERMINAL_TASK_STATUSES: ReadonlySet<AgentTask["status"]> = new Set(["completed", "failed", "cancelled"]);
+
+/** Tasks still queued, waiting or running, oldest first. */
+export function activeTasks(tasks: readonly AgentTask[]): AgentTask[] {
+  return tasks
+    .filter((task) => !TERMINAL_TASK_STATUSES.has(task.status))
+    .sort((a, b) => a.created_at.localeCompare(b.created_at));
+}
+
+/** When the task started doing anything: run start, else dispatch, else creation. */
+export function taskStartedAt(task: AgentTask): number {
+  return Date.parse(task.started_at ?? task.dispatched_at ?? task.created_at);
 }
