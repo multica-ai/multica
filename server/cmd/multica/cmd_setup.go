@@ -117,7 +117,7 @@ func confirmOverwrite(cfg cli.CLIConfig, newServerURL, newAppURL string) bool {
 	}
 	fmt.Fprintln(os.Stderr, "")
 	if sameSetupBackend(cfg.ServerURL, newServerURL) {
-		fmt.Fprint(os.Stderr, "Keep the existing profile settings and reconnect? [y/N] ")
+		fmt.Fprint(os.Stderr, "Keep the existing local settings and sign in again? [y/N] ")
 	} else {
 		fmt.Fprint(os.Stderr, "This will reset your configuration. Continue? [y/N] ")
 	}
@@ -171,7 +171,7 @@ func runSetupCloud(cmd *cobra.Command, args []string) error {
 
 	// Authenticate.
 	fmt.Fprintln(os.Stderr, "")
-	if err := authenticateSetupProfile(cmd, args); err != nil {
+	if err := runLogin(cmd, args); err != nil {
 		return err
 	}
 
@@ -256,7 +256,7 @@ func runSetupSelfHost(cmd *cobra.Command, args []string) error {
 
 	// Authenticate.
 	fmt.Fprintln(os.Stderr, "")
-	if err := authenticateSetupProfile(cmd, args); err != nil {
+	if err := runLogin(cmd, args); err != nil {
 		return err
 	}
 
@@ -350,8 +350,8 @@ func persistSelfHostConfigIfReachable(serverURL, appURL, profile string, expecte
 	return result, nil
 }
 
-// Only a trailing slash is cosmetic. Never reuse authentication for a different
-// scheme, host, port or installation path, even if the two hosts look related.
+// Only trailing slashes are cosmetic when deciding whether local settings
+// belong to the same backend.
 func sameSetupBackend(old, next string) bool {
 	return old != "" && strings.TrimRight(old, "/") == strings.TrimRight(next, "/")
 }
@@ -367,12 +367,13 @@ func saveSetupTarget(profile, serverURL, appURL string, expected cli.CLIConfig) 
 		return fmt.Errorf("profile changed during setup; rerun setup")
 	}
 	if sameSetupBackend(cfg.ServerURL, serverURL) {
-		if strings.TrimRight(cfg.AppURL, "/") == strings.TrimRight(appURL, "/") {
+		if strings.TrimRight(cfg.AppURL, "/") == strings.TrimRight(appURL, "/") && cfg.Token == "" && cfg.WorkspaceID == "" {
 			return nil
 		}
 	} else {
 		cfg = cli.CLIConfig{}
 	}
+	cfg.Token, cfg.WorkspaceID = "", ""
 	cfg.ServerURL, cfg.AppURL = serverURL, appURL
 	return cli.SaveCLIConfigForProfile(cfg, profile)
 }

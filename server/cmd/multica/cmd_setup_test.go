@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -620,6 +619,9 @@ func TestSetupKeepsProfileOnlyForTheSameBackend(t *testing.T) {
 		{"https://example.invalid:8443/team", false},
 		{"http://example.invalid/team", false},
 		{"https://other.invalid/team", false},
+		{"https://EXAMPLE.invalid/team", false},
+		{"https://user@example.invalid/team", false},
+		{"https://example.invalid:443/team", false},
 	} {
 		t.Run(tc.target, func(t *testing.T) {
 			redirectTestHome(t, t.TempDir())
@@ -634,70 +636,16 @@ func TestSetupKeepsProfileOnlyForTheSameBackend(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if tc.keep && (got.Token != old.Token || got.WorkspaceID != old.WorkspaceID || got.DeviceName != old.DeviceName || got.PollInterval != old.PollInterval) {
+			if tc.keep && (got.DeviceName != old.DeviceName || got.PollInterval != old.PollInterval) {
 				t.Fatal("same backend lost profile settings")
 			}
-			if !tc.keep && (got.Token != "" || got.WorkspaceID != "" || got.DeviceName != "") {
+			if got.Token != "" || got.WorkspaceID != "" {
+				t.Fatal("setup retained login credentials")
+			}
+			if !tc.keep && got.DeviceName != "" {
 				t.Fatal("different backend inherited profile")
 			}
 		})
-	}
-}
-
-func TestSetupReusesAuthenticatedSession(t *testing.T) {
-	redirectTestHome(t, t.TempDir())
-	for _, status := range []int{http.StatusOK, http.StatusServiceUnavailable} {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path != "/api/workspaces" || r.Header.Get("Authorization") != "Bearer test-only" {
-				t.Error("unexpected authentication path")
-			}
-			w.WriteHeader(status)
-			if status == http.StatusOK {
-				_, _ = w.Write([]byte(`[{"id":"chosen","name":"fixture"}]`))
-			}
-		}))
-		cfg := cli.CLIConfig{ServerURL: srv.URL, Token: "test-only", WorkspaceID: "chosen", DeviceName: "fixture"}
-		if err := cli.SaveCLIConfigForProfile(cfg, "dev"); err != nil {
-			t.Fatal(err)
-		}
-		cmd := &cobra.Command{}
-		cmd.SetContext(context.Background())
-		cmd.Flags().String("profile", "dev", "")
-		err := authenticateSetupProfile(cmd, nil)
-		srv.Close()
-		if (err != nil) != (status != http.StatusOK) {
-			t.Fatalf("status %d: %v", status, err)
-		}
-		got, err := cli.LoadCLIConfigForProfile("dev")
-		if err != nil || got.Token != cfg.Token || got.WorkspaceID != cfg.WorkspaceID {
-			t.Fatal("existing session lost")
-		}
-	}
-}
-
-func TestSetupDoesNotRestorePreviousProfileAfterConcurrentSignIn(t *testing.T) {
-	redirectTestHome(t, t.TempDir())
-	const profile = "staging"
-	next := cli.CLIConfig{ServerURL: "https://new.example.invalid", Token: "new-fixture", DeviceName: "new-device"}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := cli.SaveCLIConfigForProfile(next, profile); err != nil {
-			t.Error(err)
-		}
-		_, _ = w.Write([]byte(`[{"id":"old-workspace"}]`))
-	}))
-	defer srv.Close()
-	if err := cli.SaveCLIConfigForProfile(cli.CLIConfig{ServerURL: srv.URL, Token: "old-fixture"}, profile); err != nil {
-		t.Fatal(err)
-	}
-	cmd := &cobra.Command{}
-	cmd.SetContext(context.Background())
-	cmd.Flags().String("profile", profile, "")
-	if err := authenticateSetupProfile(cmd, nil); err == nil {
-		t.Fatal("expected changed-profile error")
-	}
-	got, err := cli.LoadCLIConfigForProfile(profile)
-	if err != nil || got.ServerURL != next.ServerURL || got.Token != next.Token || got.DeviceName != next.DeviceName {
-		t.Fatal("new login was overwritten")
 	}
 }
 
@@ -737,7 +685,7 @@ func TestSetupRejectsProfileChangedDuringConfirmationOrProbe(t *testing.T) {
 
 func TestSetupDoesNotRewriteAnUnchangedTarget(t *testing.T) {
 	redirectTestHome(t, t.TempDir())
-	cfg := cli.CLIConfig{ServerURL: "https://example.test", AppURL: "https://app.example.test", Token: "fixture"}
+	cfg := cli.CLIConfig{ServerURL: "https://example.test", AppURL: "https://app.example.test"}
 	if err := cli.SaveCLIConfigForProfile(cfg, "dev"); err != nil {
 		t.Fatal(err)
 	}
@@ -762,27 +710,58 @@ func TestSetupDoesNotRewriteAnUnchangedTarget(t *testing.T) {
 	}
 }
 
-func TestSetupSavedLoginNeverFollowsRedirect(t *testing.T) {
-	redirectTestHome(t, t.TempDir())
-	destination := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Error("setup followed a redirect when verifying the saved login")
-		_, _ = w.Write([]byte("[]"))
-	}))
-	defer destination.Close()
-	source := httptest.NewServer(http.RedirectHandler(destination.URL+"/other", http.StatusFound))
-	defer source.Close()
-	cfg := cli.CLIConfig{ServerURL: source.URL, Token: "private-fixture"}
-	if err := cli.SaveCLIConfigForProfile(cfg, "dev"); err != nil {
-		t.Fatal(err)
-	}
-	cmd := &cobra.Command{}
-	cmd.SetContext(context.Background())
-	cmd.Flags().String("profile", "dev", "")
-	if err := authenticateSetupProfile(cmd, nil); err == nil {
-		t.Fatal("expected redirected login verification to fail")
-	}
-	current, err := cli.LoadCLIConfigForProfile("dev")
-	if err != nil || current.ServerURL != cfg.ServerURL || current.Token != cfg.Token {
-		t.Fatal("redirected login verification changed the profile")
+func TestSetupUnreadableProfileIsNotOverwritten(t *testing.T) {
+	for _, setup := range []struct {
+		name string
+		run  func(*cobra.Command, []string) error
+	}{
+		{"cloud", runSetupCloud},
+		{"self-host", runSetupSelfHost},
+	} {
+		for _, invalid := range []string{"invalid JSON", "permission denied"} {
+			t.Run(setup.name+"/"+invalid, func(t *testing.T) {
+				redirectTestHome(t, t.TempDir())
+				const profile = "unreadable-setup"
+				path, err := cli.CLIConfigPathForProfile(profile)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				before := []byte(`{"device_name":"preserve me",`)
+				if invalid == "permission denied" {
+					before = []byte(`{"device_name":"preserve me"}`)
+				}
+				if err := os.WriteFile(path, before, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if invalid == "permission denied" {
+					if err := os.Chmod(path, 0); err != nil {
+						t.Skipf("cannot make profile unreadable: %v", err)
+					}
+					defer os.Chmod(path, 0o600)
+					if _, err := os.ReadFile(path); err == nil {
+						t.Skip("platform allows reading a mode-000 profile")
+					}
+				}
+				cmd := testCmd()
+				cmd.Flags().String("profile", profile, "")
+				err = setup.run(cmd, nil)
+				if err == nil || !strings.Contains(err.Error(), "read existing profile") {
+					t.Fatalf("setup error = %v, want read existing profile", err)
+				}
+				if err := os.Chmod(path, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				after, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !bytes.Equal(before, after) {
+					t.Fatal("setup replaced an unreadable profile")
+				}
+			})
+		}
 	}
 }
