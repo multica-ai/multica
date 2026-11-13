@@ -2855,16 +2855,10 @@ func optionalUUID(s string) pgtype.UUID {
 	return util.MustParseUUID(s)
 }
 
-// themeStoreFromEnv builds the community theme store. MULTICA_THEME_STORE=off
-// (or false / 0) turns it off; MULTICA_THEME_REGISTRY_URL points it at
-// another registry's index.json. A URL that does not parse turns the store
-// off rather than failing the boot.
+// themeStoreFromEnv builds the community theme store, which is always on.
+// MULTICA_THEME_REGISTRY_URL points it at another registry's index.json. A
+// URL that does not parse turns the store off rather than failing the boot.
 func themeStoreFromEnv() *themestore.Store {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("MULTICA_THEME_STORE"))) {
-	case "off", "false", "0", "disabled":
-		slog.Info("theme store: turned off by MULTICA_THEME_STORE")
-		return nil
-	}
 	store, err := themestore.New(themestore.Config{
 		IndexURL: strings.TrimSpace(os.Getenv("MULTICA_THEME_REGISTRY_URL")),
 	})

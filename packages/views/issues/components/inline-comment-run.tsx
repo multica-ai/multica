@@ -33,7 +33,6 @@ import { TaskStatusIcon } from "./task-status-icon";
 import { useStatusLabel } from "./task-run-labels";
 import { commentRunOutput, isActiveCommentRun, showCommentRunInHeader, type CommentRun } from "./comment-runs";
 
-import { TaskCommitChanges } from "../../common/commit-changes/commit-changes";
 import { useRunAnimationVisibility, useRunDisclosureMotion } from "./use-run-comment-motion";
 
 function thinkingPreview(content: string | undefined, formatText: (text: string) => string): string {
@@ -241,7 +240,6 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
             {rawError}
           </p>
         </TruncatedTooltip>}
-        {!hasReply && <TaskCommitChanges taskId={task.id} />}
         {expanded && <div id={regionId} className="mt-2 min-w-0 space-y-1">
           {isPending && <p className="text-caption text-muted-foreground">{t(($) => $.inline_run.loading)}</p>}
           {isError && <div role="alert" className="text-caption text-destructive">{t(($) => $.inline_run.load_failed)}
