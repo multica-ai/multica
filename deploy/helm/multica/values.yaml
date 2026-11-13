@@ -7,15 +7,23 @@ images:
     # Empty defaults to Chart.appVersion. Released OCI charts set appVersion to
     # the Git tag (for example v0.3.5), so installs use matching app images.
     tag: ""
+    # Optional sha256 digest (sha256:<64 hex>). When set, the image is pinned
+    # as repository@digest and tag is ignored. For multi-arch clusters use the
+    # OCI index digest, not a per-platform manifest digest.
+    digest: ""
     pullPolicy: IfNotPresent
   frontend:
     repository: ghcr.io/multica-ai/multica-web
     # Empty defaults to Chart.appVersion. Set explicitly to override.
     tag: ""
+    # Optional sha256 digest; see images.backend.digest.
+    digest: ""
     pullPolicy: IfNotPresent
   postgres:
     repository: pgvector/pgvector
     tag: pg17
+    # Optional sha256 digest; see images.backend.digest.
+    digest: ""
     pullPolicy: IfNotPresent
 
 # -----------------------------------------------------------------------------
