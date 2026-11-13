@@ -99,23 +99,39 @@ func TestTaskSize_DoesNotCountDirectoryJunction(t *testing.T) {
 }
 
 func TestGC_LocalCodexHomePreservesJunctionTargets(t *testing.T) {
-	d := newGCTestDaemon(t, chatGCMux("chat", "active"))
-	d.cfg.GCCompletedTaskTTL = DefaultGCCompletedTaskTTL
-	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws", "local-task", &execenv.GCMeta{
-		Kind: execenv.GCKindChat, ChatSessionID: "chat", WorkspaceID: "ws",
-		LocalDirectory: true, CompletedAt: time.Now().Add(-15 * 24 * time.Hour),
-	})
-	writeFile(t, filepath.Join(taskDir, "codex-home/state_5.sqlite"), 32)
-	store, skills, plugins := t.TempDir(), t.TempDir(), t.TempDir()
-	for _, target := range []string{store, skills, plugins} {
-		writeFile(t, filepath.Join(target, "keep"), 64)
-	}
-	createJunction(t, store, filepath.Join(taskDir, "codex-home/sessions"))
-	createJunction(t, skills, filepath.Join(taskDir, "codex-home/skills"))
-	createJunction(t, plugins, filepath.Join(taskDir, "codex-home/plugins/cache"))
-	d.gcWorkspace(context.Background(), filepath.Dir(taskDir), &gcStats{})
-	assertGone(t, taskDir, "codex-home")
-	for _, target := range []string{store, skills, plugins} {
-		assertKept(t, target, "keep")
+	for _, expired := range []bool{false, true} {
+		name := "live store"
+		if expired {
+			name = "expired store"
+		}
+		t.Run(name, func(t *testing.T) {
+			d := newGCTestDaemon(t, chatGCMux("chat", "active"))
+			d.cfg.GCCompletedTaskTTL = DefaultGCCompletedTaskTTL
+			taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws", "local-task", &execenv.GCMeta{
+				Kind: execenv.GCKindChat, ChatSessionID: "chat", WorkspaceID: "ws",
+				LocalDirectory: true, CompletedAt: time.Now().Add(-15 * 24 * time.Hour),
+			})
+			writeFile(t, filepath.Join(taskDir, "codex-home/state_5.sqlite"), 32)
+			store, skills, plugins := filepath.Join(t.TempDir(), "conversation"), t.TempDir(), t.TempDir()
+			for _, target := range []string{store, skills, plugins} {
+				writeFile(t, filepath.Join(target, "keep"), 64)
+			}
+			createJunction(t, store, filepath.Join(taskDir, "codex-home/sessions"))
+			createJunction(t, skills, filepath.Join(taskDir, "codex-home/skills"))
+			createJunction(t, plugins, filepath.Join(taskDir, "codex-home/plugins/cache"))
+			if expired {
+				if err := os.RemoveAll(store); err != nil {
+					t.Fatal(err)
+				}
+			}
+			d.gcWorkspace(context.Background(), filepath.Dir(taskDir), &gcStats{})
+			assertGone(t, taskDir, "codex-home")
+			for _, target := range []string{skills, plugins} {
+				assertKept(t, target, "keep")
+			}
+			if !expired {
+				assertKept(t, store, "keep")
+			}
+		})
 	}
 }

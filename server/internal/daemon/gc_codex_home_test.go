@@ -202,3 +202,50 @@ func TestGC_UnownedDirectoryWarnsOnce(t *testing.T) {
 		t.Fatalf("warnings = %d, want 1: %s", got, &logs)
 	}
 }
+
+func TestGC_LocalCodexHomeAfterSessionStoreRemoval(t *testing.T) {
+	t.Parallel()
+	for _, sessionDir := range []string{"sessions", "archived_sessions"} {
+		t.Run(sessionDir, func(t *testing.T) {
+			d := newGCTestDaemon(t, chatGCMux("chat", "active"))
+			d.cfg.GCCompletedTaskTTL = DefaultGCCompletedTaskTTL
+			d.cfg.GCArtifactTTL = 0
+			taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws", "local-task", &execenv.GCMeta{
+				Kind: execenv.GCKindChat, ChatSessionID: "chat", WorkspaceID: "ws",
+				LocalDirectory: true, CompletedAt: time.Now().Add(-15 * 24 * time.Hour),
+			})
+			writeFile(t, filepath.Join(taskDir, "codex-home/state_5.sqlite"), 32)
+			store := filepath.Join(t.TempDir(), "conversation")
+			writeFile(t, filepath.Join(store, "rollout.jsonl"), 64)
+			if err := os.Symlink(store, filepath.Join(taskDir, "codex-home", sessionDir)); err != nil {
+				t.Skipf("symlink unavailable: %v", err)
+			}
+			// The independent session TTL expires before home retention.
+			if err := os.RemoveAll(store); err != nil {
+				t.Fatal(err)
+			}
+			stats := &gcStats{}
+			d.gcWorkspace(context.Background(), filepath.Dir(taskDir), stats)
+			assertGone(t, taskDir, "codex-home")
+			if stats.codexHomesReclaimed != 1 || stats.bytesReclaimed != 32 {
+				t.Fatalf("expired session store blocked home reclamation: %+v", stats)
+			}
+		})
+	}
+}
+
+func TestGC_LocalCodexHomeKeepsUnresolvableSessionLink(t *testing.T) {
+	t.Parallel()
+	d := newGCTestDaemon(t, chatGCMux("chat", "active"))
+	d.cfg.GCCompletedTaskTTL = DefaultGCCompletedTaskTTL
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws", "local-task", &execenv.GCMeta{
+		Kind: execenv.GCKindChat, ChatSessionID: "chat", WorkspaceID: "ws",
+		LocalDirectory: true, CompletedAt: time.Now().Add(-15 * 24 * time.Hour),
+	})
+	writeFile(t, filepath.Join(taskDir, "codex-home/state_5.sqlite"), 32)
+	if err := os.Symlink("sessions", filepath.Join(taskDir, "codex-home/sessions")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	d.gcWorkspace(context.Background(), filepath.Dir(taskDir), &gcStats{})
+	assertKept(t, taskDir, "codex-home/state_5.sqlite")
+}

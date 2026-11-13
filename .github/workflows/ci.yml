@@ -560,7 +560,7 @@ jobs:
         # These fixtures must redirect both the Windows user profile and the
         # platform-native Hermes home; otherwise discovery scans the runner's
         # real skills instead of the test directories.
-        run: go test ./internal/daemon -v -run '^(TestListRuntimeLocalSkills_HermesFollowsTaskHome|TestLocalSkills_DiscoversACPProviderRoots)$' -count=1 -timeout=5m
+        run: go test ./internal/daemon -v -run '^(TestListRuntimeLocalSkills_HermesFollowsTaskHome|TestLocalSkills_DiscoversACPProviderRoots|TestGC_LocalCodexHomePreservesJunctionTargets)$' -count=1 -timeout=5m
 
       - name: Test Windows Git Bash temp lifecycle
         working-directory: server

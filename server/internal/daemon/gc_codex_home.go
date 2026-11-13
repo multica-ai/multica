@@ -40,6 +40,11 @@ func localCodexHomeTarget(taskDir string) string {
 			return ""
 		}
 		target, err := filepath.EvalSymlinks(path)
+		if os.IsNotExist(err) {
+			// The independent session-store TTL can leave a dangling link.
+			// No transcript remains behind that link for home GC to destroy.
+			continue
+		}
 		if err != nil {
 			return ""
 		}

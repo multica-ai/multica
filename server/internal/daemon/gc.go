@@ -233,8 +233,8 @@ func (d *Daemon) gcWorkspace(ctx context.Context, wsDir string, stats *gcStats) 
 				continue
 			}
 		}
-		action, chatMeta := d.taskDirGCDecision(ctx, taskDir)
-		cleanedHere += d.applyGCActionWithChatMeta(ctx, taskDir, action, stats, chatMeta)
+		action, meta, removal := d.taskDirGCDecision(ctx, taskDir)
+		cleanedHere += d.applyGCActionWithChatMeta(ctx, taskDir, action, stats, meta, removal)
 	}
 	workspaceIDs := make([]string, 0, len(issueCandidatesByWorkspace))
 	for workspaceID := range issueCandidatesByWorkspace {
@@ -317,10 +317,10 @@ func (d *Daemon) gcWorkspaceIssues(ctx context.Context, workspaceID string, cand
 			cleaned += d.applyGCAction(ctx, candidate.taskDir, action, stats)
 			continue
 		}
-		action := d.gcDecisionIssueResult(candidate.taskDir, candidate.meta, result)
+		action, removal := d.gcDecisionIssueResult(candidate.taskDir, candidate.meta, result)
 		action = d.applyLocalDirectoryGCOverride(candidate.taskDir, candidate.meta, action)
 		action = d.applyManagedArtifactFallback(candidate.taskDir, candidate.meta, action)
-		cleaned += d.applyGCAction(ctx, candidate.taskDir, action, stats)
+		cleaned += d.applyGCActionWithChatMeta(ctx, candidate.taskDir, action, stats, candidate.meta, removal)
 	}
 	return cleaned
 }
@@ -329,10 +329,10 @@ func (d *Daemon) gcWorkspaceIssues(ctx context.Context, workspaceID string, cand
 // atomically reserves the env root because a task can start while the server
 // reconciliation request is in flight.
 func (d *Daemon) applyGCAction(ctx context.Context, taskDir string, action gcAction, stats *gcStats) int {
-	return d.applyGCActionWithChatMeta(ctx, taskDir, action, stats, nil)
+	return d.applyGCActionWithChatMeta(ctx, taskDir, action, stats, nil, gcRemovalDetails{})
 }
 
-func (d *Daemon) applyGCActionWithChatMeta(ctx context.Context, taskDir string, action gcAction, stats *gcStats, chatMeta *execenv.GCMeta) int {
+func (d *Daemon) applyGCActionWithChatMeta(ctx context.Context, taskDir string, action gcAction, stats *gcStats, checkedMeta *execenv.GCMeta, removal gcRemovalDetails) int {
 	if ctx.Err() != nil {
 		stats.skipped++
 		return 0
@@ -360,30 +360,46 @@ func (d *Daemon) applyGCActionWithChatMeta(ctx context.Context, taskDir string, 
 	bytesBefore := stats.bytesReclaimed
 	removedBefore := stats.artifactRemoved
 	switch action {
-	case gcActionClean:
+	case gcActionClean, gcActionOrphan:
 		bytes, removed := d.cleanTaskDir(taskDir)
 		if !removed {
 			stats.skipped++
 			return 0
 		}
-		stats.cleaned++
-		stats.bytesReclaimed += bytes
-		return 1
-	case gcActionOrphan:
-		bytes, removed := d.cleanTaskDir(taskDir)
-		if !removed {
-			stats.skipped++
-			return 0
+		if action == gcActionOrphan {
+			stats.orphaned++
+		} else {
+			stats.cleaned++
 		}
-		stats.orphaned++
 		stats.bytesReclaimed += bytes
+		attrs := []any{"dir", taskDir, "bytes_reclaimed", bytes, "reason", removal.reason}
+		if removal.retention > 0 {
+			attrs = append(attrs, "retention", removal.retention)
+		}
+		if removal.status != "" {
+			attrs = append(attrs, "status", removal.status)
+		}
+		if checkedMeta != nil {
+			attrs = append(attrs, "kind", string(checkedMeta.Kind))
+			switch checkedMeta.Kind {
+			case execenv.GCKindIssue:
+				attrs = append(attrs, "issue", checkedMeta.IssueID)
+			case execenv.GCKindChat:
+				attrs = append(attrs, "chat_session", checkedMeta.ChatSessionID)
+			case execenv.GCKindAutopilotRun:
+				attrs = append(attrs, "autopilot_run", checkedMeta.AutopilotRunID)
+			case execenv.GCKindQuickCreate:
+				attrs = append(attrs, "task", checkedMeta.TaskID)
+			}
+		}
+		d.logger.Info("gc: removed", attrs...)
 		return 1
 	case gcActionCleanArtifacts:
 		removed, bytes, perPattern := d.cleanTaskArtifacts(ctx, taskDir, d.cfg.GCArtifactPatterns)
 		recordArtifactCleanup(stats, removed, bytes, perPattern)
 		stats.skipped++ // task dir itself preserved
 	case gcActionCleanChatArtifacts:
-		d.cleanIdleChatArtifacts(ctx, taskDir, chatMeta, stats)
+		d.cleanIdleChatArtifacts(ctx, taskDir, checkedMeta, stats)
 		stats.skipped++ // task dir itself preserved
 	case gcActionCleanManagedArtifacts:
 		removed, bytes, perPattern := d.cleanManagedTaskArtifacts(taskDir)
@@ -427,6 +443,12 @@ func recordArtifactCleanup(stats *gcStats, removed int, bytes int64, perPattern 
 	}
 }
 
+type gcRemovalDetails struct {
+	reason    string
+	status    string
+	retention time.Duration
+}
+
 type gcAction int
 
 const (
@@ -443,11 +465,11 @@ const (
 // Dispatches on meta.Kind so chat / autopilot / quick-create tasks each
 // follow the parent record that actually governs their lifecycle.
 func (d *Daemon) shouldCleanTaskDir(ctx context.Context, taskDir string) gcAction {
-	action, _ := d.taskDirGCDecision(ctx, taskDir)
+	action, _, _ := d.taskDirGCDecision(ctx, taskDir)
 	return action
 }
 
-func (d *Daemon) taskDirGCDecision(ctx context.Context, taskDir string) (gcAction, *execenv.GCMeta) {
+func (d *Daemon) taskDirGCDecision(ctx context.Context, taskDir string) (gcAction, *execenv.GCMeta, gcRemovalDetails) {
 	// A task currently running on this env root must never be reclaimed —
 	// not even on the done/cancelled or orphan-404 paths. A re-dispatched or
 	// still-running task can reuse the prior workdir of an already-done issue
@@ -455,21 +477,22 @@ func (d *Daemon) taskDirGCDecision(ctx context.Context, taskDir string) (gcActio
 	// updated_at), so the regular TTL check alone wouldn't notice the resumed
 	// activity. A directory a running environment serves from is in use too.
 	if d.isActiveEnvRoot(taskDir) || d.environments.servesFrom(taskDir) {
-		return gcActionSkip, nil
+		return gcActionSkip, nil, gcRemovalDetails{}
 	}
 
 	meta, err := execenv.ReadGCMeta(taskDir)
 	if err != nil {
 		if _, ownerErr := d.gcTaskDirOwner(taskDir); ownerErr != nil {
 			d.warnUnownedTaskDir(taskDir, ownerErr)
-			return gcActionSkip, nil
+			return gcActionSkip, nil, gcRemovalDetails{}
 		}
-		return d.orphanByMTime(taskDir, "no meta"), nil
+		action, removal := d.orphanByMTime(taskDir, "no meta")
+		return action, nil, removal
 	}
 
-	action := d.shouldCleanTaskDirForKind(ctx, taskDir, meta)
+	action, removal := d.shouldCleanTaskDirForKind(ctx, taskDir, meta)
 	action = d.applyLocalDirectoryGCOverride(taskDir, meta, action)
-	return d.applyManagedArtifactFallback(taskDir, meta, action), meta
+	return d.applyManagedArtifactFallback(taskDir, meta, action), meta, removal
 }
 
 // applyManagedArtifactFallback upgrades a skip into managed-artifact cleanup
@@ -555,7 +578,7 @@ func (d *Daemon) applyLocalDirectoryGCOverride(taskDir string, meta *execenv.GCM
 // shouldCleanTaskDirForKind runs the per-Kind dispatch without applying the
 // local_directory override. Split out so shouldCleanTaskDir can intercept
 // the result.
-func (d *Daemon) shouldCleanTaskDirForKind(ctx context.Context, taskDir string, meta *execenv.GCMeta) gcAction {
+func (d *Daemon) shouldCleanTaskDirForKind(ctx context.Context, taskDir string, meta *execenv.GCMeta) (gcAction, gcRemovalDetails) {
 	switch meta.Kind {
 	case execenv.GCKindIssue:
 		return d.gcDecisionIssue(ctx, taskDir, meta)
@@ -575,16 +598,15 @@ func (d *Daemon) shouldCleanTaskDirForKind(ctx context.Context, taskDir string, 
 // orphanByMTime returns gcActionOrphan if the directory is older than
 // GCOrphanTTL, gcActionSkip otherwise. Centralizes the "we have no parent
 // record signal so just look at the disk" fallback used by every kind.
-func (d *Daemon) orphanByMTime(taskDir, reason string) gcAction {
+func (d *Daemon) orphanByMTime(taskDir, reason string) (gcAction, gcRemovalDetails) {
 	info, err := os.Stat(taskDir)
 	if err != nil {
-		return gcActionSkip
+		return gcActionSkip, gcRemovalDetails{}
 	}
 	if time.Since(info.ModTime()) > d.cfg.GCOrphanTTL {
-		d.logger.Debug("gc: orphan candidate", "dir", taskDir, "reason", reason)
-		return gcActionOrphan
+		return gcActionOrphan, gcRemovalDetails{reason: reason, retention: d.cfg.GCOrphanTTL}
 	}
-	return gcActionSkip
+	return gcActionSkip, gcRemovalDetails{}
 }
 
 // isAccessNotFound detects the 404 returned by gc-check endpoints. The same
@@ -596,7 +618,7 @@ func isAccessNotFound(err error) bool {
 	return errors.As(err, &reqErr) && reqErr.StatusCode == http.StatusNotFound
 }
 
-func (d *Daemon) gcDecisionIssue(ctx context.Context, taskDir string, meta *execenv.GCMeta) gcAction {
+func (d *Daemon) gcDecisionIssue(ctx context.Context, taskDir string, meta *execenv.GCMeta) (gcAction, gcRemovalDetails) {
 	if strings.TrimSpace(meta.IssueID) == "" {
 		return d.orphanByMTime(taskDir, "empty issue id")
 	}
@@ -610,7 +632,7 @@ func (d *Daemon) gcDecisionIssue(ctx context.Context, taskDir string, meta *exec
 			// can't instantly wipe dirs whose issues are still live.
 			return d.orphanByMTime(taskDir, "issue not accessible")
 		}
-		return gcActionSkip
+		return gcActionSkip, gcRemovalDetails{}
 	}
 
 	return d.gcDecisionIssueResult(taskDir, meta, IssueGCCheckResult{
@@ -622,7 +644,7 @@ func (d *Daemon) gcDecisionIssue(ctx context.Context, taskDir string, meta *exec
 	})
 }
 
-func (d *Daemon) gcDecisionIssueResult(taskDir string, meta *execenv.GCMeta, result IssueGCCheckResult) gcAction {
+func (d *Daemon) gcDecisionIssueResult(taskDir string, meta *execenv.GCMeta, result IssueGCCheckResult) (gcAction, gcRemovalDetails) {
 	if !result.Found {
 		return d.orphanByMTime(taskDir, "issue not accessible")
 	}
@@ -630,7 +652,7 @@ func (d *Daemon) gcDecisionIssueResult(taskDir string, meta *execenv.GCMeta, res
 	terminal, recognized := issueGCLifecycle(result)
 
 	if terminal && time.Since(result.UpdatedAt) > d.cfg.GCTTL {
-		return gcActionClean
+		return gcActionClean, gcRemovalDetails{reason: "terminal issue retention expired", status: result.Status, retention: d.cfg.GCTTL}
 	}
 
 	// Operators may opt into a hard retention bound for completed issue-task
@@ -646,11 +668,11 @@ func (d *Daemon) gcDecisionIssueResult(taskDir string, meta *execenv.GCMeta, res
 		!meta.CompletedAt.IsZero() &&
 		recognized &&
 		time.Since(meta.CompletedAt) > d.cfg.GCCompletedTaskTTL {
-		return gcActionClean
+		return gcActionClean, gcRemovalDetails{reason: "completed task retention expired", status: result.Status, retention: d.cfg.GCCompletedTaskTTL}
 	}
 
 	if d.cfg.GCArtifactTTL > 0 && !meta.CompletedAt.IsZero() && time.Since(meta.CompletedAt) > d.cfg.GCArtifactTTL {
-		return gcActionCleanArtifacts
+		return gcActionCleanArtifacts, gcRemovalDetails{}
 	}
 
 	// Old metadata may not have completed_at. Keep that case conservative:
@@ -660,11 +682,11 @@ func (d *Daemon) gcDecisionIssueResult(taskDir string, meta *execenv.GCMeta, res
 	// even when activity below taskDir leaves the root directory mtime stale.
 	if d.cfg.GCArtifactTTL > 0 && meta.CompletedAt.IsZero() {
 		if age, ok := gcMetaFileAge(taskDir); ok && age > d.cfg.GCOrphanTTL {
-			return gcActionCleanManagedArtifacts
+			return gcActionCleanManagedArtifacts, gcRemovalDetails{}
 		}
 	}
 
-	return gcActionSkip
+	return gcActionSkip, gcRemovalDetails{}
 }
 
 // issueGCLifecycle answers the only two questions GC asks about a parent issue:
@@ -717,7 +739,7 @@ func gcMetaFileAge(taskDir string) (time.Duration, bool) {
 	return time.Since(info.ModTime()), true
 }
 
-func (d *Daemon) gcDecisionChat(ctx context.Context, taskDir string, meta *execenv.GCMeta) gcAction {
+func (d *Daemon) gcDecisionChat(ctx context.Context, taskDir string, meta *execenv.GCMeta) (gcAction, gcRemovalDetails) {
 	if strings.TrimSpace(meta.ChatSessionID) == "" {
 		return d.orphanByMTime(taskDir, "empty chat session id")
 	}
@@ -734,9 +756,9 @@ func (d *Daemon) gcDecisionChat(ctx context.Context, taskDir string, meta *exece
 			// We don't gate on mtime: every chat_session_id in a meta file
 			// was written by this daemon under its current token, so there
 			// is no cross-workspace probe to defend against.
-			return gcActionClean
+			return gcActionClean, gcRemovalDetails{reason: "chat session not accessible (hard-deleted)"}
 		}
-		return gcActionSkip
+		return gcActionSkip, gcRemovalDetails{}
 	}
 
 	switch status.Status {
@@ -746,19 +768,19 @@ func (d *Daemon) gcDecisionChat(ctx context.Context, taskDir string, meta *exece
 		if d.idleChatArtifactEligible(meta) {
 			matcher := newArtifactMatcher(d.cfg.GCArtifactPatterns, execenv.ManagedReclaimableArtifactSubpaths())
 			if !chatArtifactSweepRecorded(taskDir, chatArtifactSweepMarker(meta, matcher)) {
-				return gcActionCleanChatArtifacts
+				return gcActionCleanChatArtifacts, gcRemovalDetails{}
 			}
 		}
-		return gcActionSkip
+		return gcActionSkip, gcRemovalDetails{}
 	case "archived":
 		if time.Since(status.UpdatedAt) > d.cfg.GCTTL {
-			return gcActionClean
+			return gcActionClean, gcRemovalDetails{reason: "archived chat retention expired", status: status.Status, retention: d.cfg.GCTTL}
 		}
 	}
-	return gcActionSkip
+	return gcActionSkip, gcRemovalDetails{}
 }
 
-func (d *Daemon) gcDecisionAutopilotRun(ctx context.Context, taskDir string, meta *execenv.GCMeta) gcAction {
+func (d *Daemon) gcDecisionAutopilotRun(ctx context.Context, taskDir string, meta *execenv.GCMeta) (gcAction, gcRemovalDetails) {
 	if strings.TrimSpace(meta.AutopilotRunID) == "" {
 		return d.orphanByMTime(taskDir, "empty autopilot run id")
 	}
@@ -768,7 +790,7 @@ func (d *Daemon) gcDecisionAutopilotRun(ctx context.Context, taskDir string, met
 		if isAccessNotFound(err) {
 			return d.orphanByMTime(taskDir, "autopilot run not accessible")
 		}
-		return gcActionSkip
+		return gcActionSkip, gcRemovalDetails{}
 	}
 
 	// Terminal states per the autopilot_run CHECK constraint:
@@ -789,9 +811,9 @@ func (d *Daemon) gcDecisionAutopilotRun(ctx context.Context, taskDir string, met
 	// active-env-root short-circuit in shouldCleanTaskDir still protects a run
 	// that is mid-flight, so this can't pull the rug from under live work.
 	if isAutopilotRunTerminal(status.Status) {
-		return gcActionClean
+		return gcActionClean, gcRemovalDetails{reason: "autopilot run finished", status: status.Status}
 	}
-	return gcActionSkip
+	return gcActionSkip, gcRemovalDetails{}
 }
 
 // isAutopilotRunTerminal mirrors the run.status CHECK in
@@ -807,7 +829,7 @@ func isAutopilotRunTerminal(status string) bool {
 	}
 }
 
-func (d *Daemon) gcDecisionQuickCreate(ctx context.Context, taskDir string, meta *execenv.GCMeta) gcAction {
+func (d *Daemon) gcDecisionQuickCreate(ctx context.Context, taskDir string, meta *execenv.GCMeta) (gcAction, gcRemovalDetails) {
 	if strings.TrimSpace(meta.TaskID) == "" {
 		return d.orphanByMTime(taskDir, "empty task id")
 	}
@@ -820,7 +842,7 @@ func (d *Daemon) gcDecisionQuickCreate(ctx context.Context, taskDir string, meta
 			// tokens — same reasoning as the issue path.
 			return d.orphanByMTime(taskDir, "task not accessible")
 		}
-		return gcActionSkip
+		return gcActionSkip, gcRemovalDetails{}
 	}
 
 	// Quick-create workdirs are not reused by the issue task that
@@ -830,9 +852,9 @@ func (d *Daemon) gcDecisionQuickCreate(ctx context.Context, taskDir string, meta
 	// waiting for GCTTL. If the user wants to revisit, the linked issue
 	// has the agent's output already.
 	if isAgentTaskTerminal(status.Status) {
-		return gcActionClean
+		return gcActionClean, gcRemovalDetails{reason: "quick-create task finished", status: status.Status}
 	}
-	return gcActionSkip
+	return gcActionSkip, gcRemovalDetails{}
 }
 
 // isAgentTaskTerminal reports whether a value of agent_task_queue.status
@@ -883,8 +905,8 @@ func (d *Daemon) gcTaskDirOwner(taskDir string) (*execenv.EnvRootOwner, error) {
 	return &validated, nil
 }
 
-// cleanTaskDir removes a proven daemon-owned task directory, logs the
-// reclaimed bytes, and returns that count for the cycle summary. A failed or
+// cleanTaskDir removes a proven daemon-owned task directory and returns the
+// reclaimed bytes for the removal log and cycle summary. A failed or
 // refused removal reports removed=false.
 func (d *Daemon) cleanTaskDir(taskDir string) (bytes int64, removed bool) {
 	// Measure first, prove ownership second. dirSize walks the entire tree,
@@ -901,8 +923,6 @@ func (d *Daemon) cleanTaskDir(taskDir string) (bytes int64, removed bool) {
 	if err := os.RemoveAll(taskDir); err != nil {
 		d.logger.Warn("gc: remove task dir failed", "dir", taskDir, "error", err)
 		return 0, false
-	} else {
-		d.logger.Info("gc: removed", "dir", taskDir, "bytes_reclaimed", bytes)
 	}
 	if err := execenv.RemoveRootDirRecord(d.cfg.WorkspacesRoot, taskDir, *owner); err != nil {
 		d.logger.Warn("gc: remove stable task root record failed", "dir", taskDir, "error", err)
