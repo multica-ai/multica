@@ -102,7 +102,7 @@ export function PanelSection({
   const contentId = useId();
   const collapsible = !!onCollapsedChange;
   return (
-    <section aria-labelledby={id} className="mt-5">
+    <section data-mc="panel-section" aria-labelledby={id} className="mt-5">
       <div className="group/section flex h-7 items-center gap-1 pl-3 pr-1">
         <h3 id={id} className="min-w-0 flex-1 truncate text-caption font-medium text-muted-foreground">
           {collapsible ? (
