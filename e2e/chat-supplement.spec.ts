@@ -83,9 +83,9 @@ test("direct chat adds guidance explicitly and preserves a rejected draft", asyn
     expect(ack.status()).toBe(200);
     await expect(page.getByText("Accepted by engine")).toBeVisible({ timeout: 15_000 });
     await page.screenshot({ path: testInfo.outputPath("guidance-accepted.png") });
-    // The floating window uses the second shared send controller.
+    // The status-bar session chip opens the other surface of the shared controller.
     await page.goto(`/${ws.slug}/issues`, { waitUntil: "domcontentloaded" });
-    await page.getByRole("button", { name: "Multica is working...", exact: true }).click();
+    await page.getByRole("button", { name: "Active guidance test, Running", exact: true }).click();
     await expect(add).toBeVisible();
     await editor.fill("Additional guidance from the floating chat");
     const floatingPosted = page.waitForResponse((response) => response.request().method()==="POST" && response.url().endsWith(`/tasks/${taskId}/supplements`));
