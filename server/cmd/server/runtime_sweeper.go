@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -87,6 +89,14 @@ const (
 	// liveness + DB stale + FailTasksForOfflineRuntimes), which typically
 	// reclaims orphaned tasks within ~180s.
 	runningTimeoutSeconds = 9000.0
+	// hardRunningTimeoutSeconds is an absolute wall-clock cap for running tasks,
+	// independent of runtime heartbeat. It exists because a daemon can stay alive
+	// while its agent loop is wedged (no progress, no output), which makes the
+	// liveness-gated branch above never fire (FIN-611). Deliberately generous:
+	// set well above healthy long runs; overridable via
+	// MULTICA_HARD_RUN_TIMEOUT_SECS.
+	hardRunningTimeoutSeconds = 5400.0
+	hardRunTimeoutBatchSize    = 50
 	// queuedExpireBatchSize caps how many queued rows a single sweeper tick
 	// transitions to failed. Keeps the sweep transaction short even when
 	// the historical backlog is large (~89k at MUL-1899 baseline). At 30s
@@ -161,6 +171,12 @@ func runPeriodicSweep(ctx context.Context, interval time.Duration, sweep func())
 // When liveness is unavailable or errors, we fall back to trusting the DB
 // stale window — that is the original behavior.
 func runRuntimeSweeper(ctx context.Context, queries *db.Queries, liveness handler.LivenessStore, taskSvc *service.TaskService, bus *events.Bus, reconnectGrace time.Duration) {
+	hardTimeout := hardRunningTimeoutSeconds
+	if v := os.Getenv("MULTICA_HARD_RUN_TIMEOUT_SECS"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
+			hardTimeout = f
+		}
+	}
 	runPeriodicSweep(ctx, sweepInterval, func() {
 		// These stages retain their existing cadence and ordering. Runtime GC and
 		// delegated-failure recovery run in independent lower-frequency loops.
@@ -168,6 +184,7 @@ func runRuntimeSweeper(ctx context.Context, queries *db.Queries, liveness handle
 		sweepOfflineRuntimeTasks(ctx, queries, taskSvc, reconnectGrace)
 		sweepExpiredRuntimeReconnectRetries(ctx, queries, taskSvc, reconnectGrace)
 		sweepStaleTasks(ctx, queries, taskSvc, bus, reconnectGrace)
+		sweepHardTimedOutTasks(ctx, taskSvc, hardTimeout)
 		sweepExpiredQueuedTasks(ctx, queries, taskSvc, reconnectGrace)
 		sweepDeferredChatFinalizations(ctx, queries, taskSvc)
 	})
@@ -618,6 +635,34 @@ func sweepStaleTasks(ctx context.Context, queries *db.Queries, taskSvc *service.
 	taskSvc.CaptureLeaseExpiredTasks(ctx, failedTasks)
 	taskSvc.HandleFailedTasks(ctx, failedTasks)
 	return
+}
+
+// sweepHardTimedOutTasks is the absolute backstop for running tasks: it fails
+// rows older than hardRunningTimeoutSeconds even when the owning runtime is
+// still heartbeating. See FailHardTimedOutTasks for why this is separate from
+// the liveness-aware sweep.
+func sweepHardTimedOutTasks(ctx context.Context, taskSvc *service.TaskService, timeoutSecs float64) (stats runtimeSweepStageStats) {
+	if timeoutSecs <= 0 {
+		return stats
+	}
+	startedAt := time.Now()
+	defer func() {
+		observeRuntimeSweepStage(taskServiceMetrics(taskSvc), obsmetrics.RuntimeSweepStageStaleTasks, startedAt, stats)
+	}()
+
+	failedTasks, err := taskSvc.FailHardTimedOutTasks(ctx, timeoutSecs, hardRunTimeoutBatchSize)
+	if err != nil {
+		slog.Warn("task sweeper: failed to clean up hard timed-out tasks", "error", err)
+		return
+	}
+	stats.candidates = len(failedTasks)
+	stats.changed = len(failedTasks)
+	if len(failedTasks) == 0 {
+		return
+	}
+	slog.Info("task sweeper: failed hard timed-out tasks", "count", len(failedTasks), "timeout_secs", timeoutSecs)
+	taskSvc.HandleFailedTasks(ctx, failedTasks)
+	return stats
 }
 
 // sweepExpiredQueuedTasks fails queued tasks whose runtime has stopped proving
