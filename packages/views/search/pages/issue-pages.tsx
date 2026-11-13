@@ -115,6 +115,8 @@ export function IssueStatusPage({ target, query }: { target: IssueTarget; query:
     <PaletteGroup heading={t(($) => $.pages.status)}>
       {visible.map((option) => (
         <CommandPrimitive.Item
+          data-mc="palette-item"
+          data-type="option"
           key={option.key}
           value={`status:${option.key}`}
           onSelect={() => select(option.key)}
@@ -153,6 +155,8 @@ export function IssuePriorityPage({ target, query }: { target: IssueTarget; quer
     <PaletteGroup heading={t(($) => $.pages.priority)}>
       {options.map(({ priority, label }) => (
         <CommandPrimitive.Item
+          data-mc="palette-item"
+          data-type="option"
           key={priority}
           value={`priority:${priority}`}
           onSelect={() => {
@@ -208,6 +212,8 @@ export function IssueAssigneePage({ target, query }: { target: IssueTarget; quer
       {showUnassigned && (
         <PaletteGroup heading={t(($) => $.pages.assignee)}>
           <CommandPrimitive.Item
+            data-mc="palette-item"
+            data-type="option"
             value="assignee:none"
             onSelect={() => select(null, null)}
             className={ROW_CLASS}
@@ -343,6 +349,8 @@ export function IssueLabelsPage({ target, query }: { target: IssueTarget; query:
         const onAll = issues.every((issue) => labelIdsOf(issue).has(label.id));
         return (
           <CommandPrimitive.Item
+            data-mc="palette-item"
+            data-type="option"
             key={label.id}
             value={`label:${label.id}`}
             onSelect={() => toggle(label)}
@@ -387,6 +395,8 @@ export function IssueDueDatePage({ target, query }: { target: IssueTarget; query
     <PaletteGroup heading={t(($) => $.pages.due_date)}>
       {options.map((option) => (
         <CommandPrimitive.Item
+          data-mc="palette-item"
+          data-type="option"
           key={option.id}
           value={`due:${option.id}`}
           onSelect={() => {
@@ -425,6 +435,8 @@ export function IssueProjectPage({ target, query }: { target: IssueTarget; query
     <PaletteGroup heading={t(($) => $.pages.project)}>
       {(!q || scoreText(noProjectLabel, q) > 0) && (
         <CommandPrimitive.Item
+          data-mc="palette-item"
+          data-type="option"
           value="project:none"
           onSelect={() => {
             palette.close();
@@ -439,6 +451,8 @@ export function IssueProjectPage({ target, query }: { target: IssueTarget; query
       )}
       {visible.map((project) => (
         <CommandPrimitive.Item
+          data-mc="palette-item"
+          data-type="option"
           key={project.id}
           value={`project:${project.id}`}
           onSelect={() => {
@@ -474,6 +488,8 @@ export function IssueParentPage({ target, query }: { target: IssueTarget; query:
       {hasParent && !query.trim() && (
         <PaletteGroup heading={t(($) => $.pages.parent)}>
           <CommandPrimitive.Item
+            data-mc="palette-item"
+            data-type="option"
             value="parent:none"
             onSelect={() => {
               palette.close();
@@ -531,6 +547,8 @@ export function IssueQuickActionPage({ issue, query }: { issue: Issue; query: st
         const targetName = action.target_name || tIssues(($) => $.detail.quick_action_target_fallback);
         return (
           <CommandPrimitive.Item
+            data-mc="palette-item"
+            data-type="option"
             key={action.id}
             value={`quick-action:${action.id}`}
             onSelect={() => {

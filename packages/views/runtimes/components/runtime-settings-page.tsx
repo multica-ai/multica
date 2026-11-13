@@ -36,6 +36,7 @@ export function RuntimeSettingsPage({
   if (isLoading) {
     return (
       <ObjectPage
+        type="runtime"
         layoutId="multica_runtime_detail_layout"
         segments={segments}
         leaf={<Skeleton className="h-4 w-40" />}
@@ -62,6 +63,7 @@ export function RuntimeSettingsPage({
   if (!target) {
     return (
       <ObjectPage
+        type="runtime"
         layoutId="multica_runtime_detail_layout"
         segments={segments}
         leaf={

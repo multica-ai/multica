@@ -105,7 +105,7 @@ export function IssueSidebarSections({
     );
 
   return (
-    <div ref={containerRef} className="relative">
+    <div ref={containerRef} data-mc="issue-properties" className="relative">
       <IssueSidebarSettings
         available={available}
         getEmptySections={getEmptySections}

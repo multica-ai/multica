@@ -499,6 +499,8 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
     // variant only differs in width / max-height / chrome.
     return (
       <div
+        data-mc="editor-menu"
+        data-kind="mention"
         className={cn(
           "flex flex-col overflow-y-auto overscroll-contain border bg-popover py-1",
           // Height budget: clamp to whichever is smaller — the design max or the

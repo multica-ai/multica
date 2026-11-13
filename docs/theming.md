@@ -196,6 +196,18 @@ those change without notice. Anchors, slots and hooks stay until the next
 | `[data-mc="unread-dot"]` | The unread marker on an inbox item. |
 | `[data-mc="toaster"]` | The toast region. Each toast inside is an `li` with `data-type` `success`, `error`, `info`, `warning`, `loading` or `default`. A plain toast usually has no `data-type`, so match it with both `li:not([data-type])` and `li[data-type="default"]`. |
 | `[data-mc="settings-page"]` | The settings page. |
+| `[data-mc="issue-detail"]` | An open issue, on its page or in the peek; `data-status`, `data-priority`, and `data-view` (`page` or `peek`). |
+| `[data-mc="issue-title"]` | The issue's title above its description, reading and editing. |
+| `[data-mc="issue-properties"]` | The properties sidebar next to an issue. |
+| `[data-mc="issue-activity"]` | The activity and comments under an issue. |
+| `[data-mc="object-page"]` | The page of one project, agent, squad, runtime, member, autopilot or skill; `data-type` is `project`, `agent`, `squad`, `runtime`, `member`, `autopilot` or `skill`. |
+| `[data-mc="command-palette"]` | The search and command palette. |
+| `[data-mc="palette-item"]` | A row in the palette; `data-type` is `command`, `page`, `workspace`, `issue`, `project`, `member`, `agent`, `squad`, `object` or `option` (a choice inside a palette page). The highlighted row has `data-selected`. |
+| `[data-mc="avatar"]` | An avatar; `data-type` is `member`, `agent`, `squad` or `system`. |
+| `[data-mc="empty-state"]` | A placeholder for something with nothing in it yet; `data-variant` is `page` (a centred state) or `section` (a quiet row in a page section). |
+| `[data-mc="editor-toolbar"]` | The formatting toolbar over selected text; `data-mode` is `format` or `link`. |
+| `[data-mc="editor-menu"]` | A menu floating over the editor while typing; `data-kind` is `slash` or `mention`. |
+| `[data-mc="tab"]` | Desktop only: one tab in `tab-bar`; `data-active` and `data-pinned` are `true` or `false`. |
 
 Each label chip sets `--label-color` (its hex colour) and `--label-foreground`
 (a text colour readable on it). Read them to draw a label another way, such
