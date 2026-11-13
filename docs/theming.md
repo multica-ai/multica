@@ -385,9 +385,7 @@ Themes not yet installed are listed most downloaded first. A self-hosted
 server counts its own downloads.
 
 A self-hosted server reads the official registry by default.
-`MULTICA_THEME_STORE=off` turns the store off: **Manage** lists only the
-themes on the device, and the server makes no registry requests. `MULTICA_THEME_REGISTRY_URL` points it at
-another registry's `index.json`.
+`MULTICA_THEME_REGISTRY_URL` points it at another registry's `index.json`.
 
 ## Variable reference
 
