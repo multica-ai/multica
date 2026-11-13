@@ -9,8 +9,8 @@
  * system exists to fix. Importing this module from `storage-cleanup` guarantees
  * the registry is complete wherever cleanup runs.
  *
- * Chat is intentionally absent: its keys are registered inside `createChatStore`
- * (the store is instance-scoped, created by the chat provider), so its keys
+ * The instance-scoped chat store is intentionally absent: its keys are
+ * registered inside `createChatStore` by the chat provider, so its keys
  * only exist once that instance does, and registration is tied to the same
  * lifecycle. There is nothing to import here that would register them earlier.
  */
@@ -20,6 +20,7 @@ import "../issues/stores/comment-draft-store";
 import "../projects/draft-store";
 import "../feedback/draft-store";
 import "../agents/manual-draft-store";
+import "../chat/run-draft-store";
 import { registerDraftCleanup } from "./cleanup-registry";
 
 // Retired: drafts for a running turn now live in the thread's reply draft.

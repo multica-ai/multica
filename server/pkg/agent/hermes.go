@@ -20,6 +20,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
@@ -575,6 +576,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	promptDone := make(chan hermesPromptResult, 1)
 	activity := make(chan struct{}, 1)
 
+	guidance := &hermesGuidanceSession{promptID: uuid.NewString()}
 	c := &hermesClient{
 		cfg:                        b.cfg,
 		stdin:                      stdin,
@@ -598,6 +600,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			deliverable.observe(msg)
 			trySend(msgCh, msg)
 		},
+		primaryPromptOnly: true,
 		onPromptDone: func(result hermesPromptResult) {
 			if !streamingCurrentTurn.Load() {
 				return
@@ -607,8 +610,11 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			default:
 			}
 		},
-		onUsage: opts.OnUsage,
+		onUsage:        opts.OnUsage,
+		onNotification: guidance.notification,
 	}
+
+	guidance.client = c
 
 	// Start reading stdout in background.
 	readerDone := make(chan struct{})
@@ -690,13 +696,17 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		var sessionCurrentModel string
 
 		// 1. Initialize handshake.
+		clientCapabilities := map[string]any{}
+		if opts.EnableTaskSupplement {
+			clientCapabilities["_meta"] = map[string]any{hermesGuidanceCapability: map[string]any{"version": 1}}
+		}
 		initResult, err := c.request(runCtx, "initialize", map[string]any{
 			"protocolVersion": 1,
 			"clientInfo": map[string]any{
 				"name":    "multica-agent-sdk",
 				"version": "0.2.0",
 			},
-			"clientCapabilities": map[string]any{},
+			"clientCapabilities": clientCapabilities,
 		})
 		depSync.Finish(err == nil)
 		if err != nil {
@@ -705,6 +715,10 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 			return
 		}
+
+		guidance.mu.Lock()
+		guidance.enabled = opts.EnableTaskSupplement && hermesHasGuidance(initResult)
+		guidance.mu.Unlock()
 
 		// Drop MCP entries whose remote transport the runtime didn't
 		// advertise. ACP requires the client to honour
@@ -907,13 +921,25 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// here and the prompt response is still covered: this send happens first.
 		trySend(msgCh, Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
 
+		guidance.mu.Lock()
+		guidance.sessionID = sessionID
+		guidanceEnabled := guidance.enabled
+		guidance.mu.Unlock()
 		streamingCurrentTurn.Store(true)
-		_, err = c.request(runCtx, "session/prompt", map[string]any{
+		promptParams := map[string]any{
 			"sessionId": sessionID,
 			"prompt": []map[string]any{
 				{"type": "text", "text": hermesTurnText(prompt, opts.ResumeExpected, resumeLanded, opts.ResumeContinuityNotice)},
 			},
-		})
+		}
+		if guidanceEnabled {
+			promptParams["_meta"] = map[string]any{hermesGuidanceCapability: map[string]any{"promptId": guidance.promptID}}
+		}
+		primaryResult, promptErr := c.requestWithCallbacks(runCtx, "session/prompt", promptParams, nil, guidance.finish)
+		if promptErr != nil {
+			guidance.finish(nil)
+		}
+		err = promptErr
 		if err != nil {
 			// If the request itself failed (not just context cancelled),
 			// check if the context was cancelled/timed out.
@@ -946,6 +972,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				}
 			}
 		} else {
+			c.extractPromptResult(primaryResult)
 			// The prompt completed. Check if we got a promptDone result
 			// from the response parsing.
 			select {
@@ -1088,7 +1115,14 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		}
 	}()
 
-	return &Session{Messages: msgCh, Result: resCh}, nil
+	session := &Session{Messages: msgCh, Result: resCh}
+	if opts.EnableTaskSupplement {
+		session.Supplement = guidance.send
+		session.SupplementWithID = guidance.sendID
+		session.SupplementReady = guidance.ready
+		session.SupplementRequiresNegotiation = true
+	}
+	return session, nil
 }
 
 // waitForHermesNotificationQuiescence gives the stdout reader a bounded chance
@@ -1174,15 +1208,17 @@ type hermesPromptResult struct {
 }
 
 type hermesClient struct {
-	cfg          Config
-	stdin        interface{ Write([]byte) (int, error) }
-	writeMu      sync.Mutex // serialises stdin.Write calls across goroutines
-	mu           sync.Mutex
-	nextID       int
-	pending      map[int]*pendingRPC
-	sessionID    string
-	onMessage    func(Message)
-	onPromptDone func(hermesPromptResult)
+	// Hermes parses the primary RPC return directly; extension replies cannot settle it.
+	primaryPromptOnly bool
+	cfg               Config
+	stdin             interface{ Write([]byte) (int, error) }
+	writeMu           sync.Mutex // serialises stdin.Write calls across goroutines
+	mu                sync.Mutex
+	nextID            int
+	pending           map[int]*pendingRPC
+	sessionID         string
+	onMessage         func(Message)
+	onPromptDone      func(hermesPromptResult)
 	// onUsage mirrors the run's cumulative usage to the daemon while the turn is
 	// live (agent.ExecOptions.OnUsage). Nil means the caller does not meter live.
 	onUsage func(map[string]TokenUsage)
@@ -1305,10 +1341,14 @@ func (c *hermesClient) request(ctx context.Context, method string, params any) (
 // that request use it to avoid advertising readiness before the provider has
 // received the lifecycle-starting frame.
 func (c *hermesClient) requestAndNotifySent(ctx context.Context, method string, params any, afterWrite func()) (json.RawMessage, error) {
+	return c.requestWithCallbacks(ctx, method, params, afterWrite, nil)
+}
+
+func (c *hermesClient) requestWithCallbacks(ctx context.Context, method string, params any, afterWrite func(), observeResult func(json.RawMessage)) (json.RawMessage, error) {
 	c.mu.Lock()
 	id := c.nextID
 	c.nextID++
-	pr := &pendingRPC{ch: make(chan rpcResult, 1), method: method}
+	pr := &pendingRPC{ch: make(chan rpcResult, 1), method: method, observeResult: observeResult}
 	c.pending[id] = pr
 	c.mu.Unlock()
 
@@ -1802,6 +1842,9 @@ func (c *hermesClient) handleResponse(raw map[string]json.RawMessage) {
 		return
 	}
 
+	if pr.observeResult != nil {
+		pr.observeResult(raw["result"])
+	}
 	if errData, hasErr := raw["error"]; hasErr {
 		var rpcErr struct {
 			Code    int             `json:"code"`
@@ -1827,7 +1870,7 @@ func (c *hermesClient) handleResponse(raw map[string]json.RawMessage) {
 		pr.ch <- rpcResult{err: &acpRPCError{Method: pr.method, Code: rpcErr.Code, Message: rpcErr.Message, Data: detail}}
 	} else {
 		// If this is a prompt response, extract usage and stop reason.
-		if pr.method == "session/prompt" {
+		if pr.method == "session/prompt" && !c.primaryPromptOnly {
 			c.extractPromptResult(raw["result"])
 		}
 		pr.ch <- rpcResult{result: raw["result"]}

@@ -221,7 +221,8 @@ vi.mock("../../projects/components/project-picker", () => ({
 // Mock chat store with an in-memory implementation that supports both
 // (selector) calls and getState(). Draft attachments hold coordinator-owned
 // DraftUpload entries (MUL-5181 L2).
-vi.mock("@multica/core/chat", () => {
+vi.mock("@multica/core/chat", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@multica/core/chat")>();
   const state = {
     activeSessionId: null as string | null,
     selectedAgentId: "agent-1",
@@ -238,6 +239,7 @@ vi.mock("@multica/core/chat", () => {
     clearInputDraft: vi.fn(),
   };
   return {
+    ...actual,
     DRAFT_NEW_SESSION: "__draft_new__",
     useChatStore: Object.assign(
       (selector?: (s: typeof state) => unknown) =>
@@ -248,7 +250,7 @@ vi.mock("@multica/core/chat", () => {
 });
 
 import { ChatInput } from "./chat-input";
-import { useChatStore } from "@multica/core/chat";
+import { useChatStore, useChatRunDraftStore } from "@multica/core/chat";
 import { useCommentDraftStore } from "@multica/core/issues/stores";
 import { composeAnnotatedReply } from "@multica/core/drafts/reply-annotation";
 
@@ -256,6 +258,7 @@ type ChatInputOnSend = React.ComponentProps<typeof ChatInput>["onSend"];
 type ChatInputCommit = Parameters<ChatInputOnSend>[2];
 
 beforeEach(() => {
+  useChatRunDraftStore.getState().clearDraft();
   dropHandlers.onDrop = null;
   editorProps.last = null;
   editorState.cleared = 0;
@@ -1878,4 +1881,107 @@ describe("ChatInput send disabled reason", () => {
     expect(sendButton()).toBeDisabled();
     expect(sendButton()).not.toHaveAttribute("aria-disabled");
   });
+});
+
+describe("ChatInput add to current run", () => {
+  it("keeps queued send as the default and hides the action without support", async () => {
+    const { onSend } = renderInput({ isRunning: true, allowSubmitWhileRunning: true });
+    expect(screen.queryByRole("button", { name: "Add to current run" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "queued" } });
+    fireEvent.click(screen.getByRole("button", { name: enChat.input.queue_send_tooltip }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith("queued", undefined, expect.any(Function), []));
+  });
+
+  it("sends explicit guidance through the same draft commit contract", async () => {
+    const onAddToRun = vi.fn().mockResolvedValue(undefined);
+    const { onSend } = renderInput({ isRunning: true, allowSubmitWhileRunning: true, onAddToRun });
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "guidance" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add to current run" }));
+    await waitFor(() => expect(onAddToRun).toHaveBeenCalledWith("guidance"));
+    await waitFor(() => expect(editorState.cleared).toBe(1));
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("preserves page context and exposes retry for an ambiguous instruction", async () => {
+    const onAddToRun = vi.fn(async (content: string) => {
+      useChatRunDraftStore.getState().setDraft({ attempts: [
+        { id: "request", session: "chat", task: "original", content },
+      ] });
+      throw new Error("response lost");
+    });
+    useChatStore.getState().activeSessionId = "chat";
+    renderInput({
+      isRunning: true, allowSubmitWhileRunning: true, onAddToRun,
+      pageContext: { id: "issue-1", label: "MUL-1", type: "issue", group: "current" },
+    });
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "check this" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add this page as context" }));
+    fireEvent.click(screen.getByRole("button", { name: enChat.input.add_to_run }));
+    await waitFor(() => expect(onAddToRun).toHaveBeenCalledWith(
+      "[MUL-1](mention://issue/issue-1)\n\ncheck this",
+    ));
+    await waitFor(() => expect(screen.getByRole("button", { name: enChat.input.retry_run })).toBeEnabled());
+    expect(screen.getByTestId("editor")).toHaveValue("check this");
+    fireEvent.click(screen.getByRole("button", { name: enChat.input.new_run_instruction }));
+    expect(useChatRunDraftStore.getState().draft.attempts).toEqual([]);
+  });
+
+  it("keeps the draft when the exact run rejects guidance", async () => {
+    const onAddToRun = vi.fn().mockRejectedValue(new Error("turn ended"));
+    renderInput({ isRunning: true, allowSubmitWhileRunning: true, onAddToRun });
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "keep me" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add to current run" }));
+    await waitFor(() => expect(onAddToRun).toHaveBeenCalledOnce());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Add to current run" })).toBeEnabled());
+    expect(screen.getByTestId("editor")).toHaveValue("keep me");
+    expect(editorState.cleared).toBe(0);
+  });
+
+  it("preserves text typed while guidance is being submitted", async () => {
+    let accept!: () => void;
+    const onAddToRun = vi.fn(() => new Promise<void>((resolve) => { accept = resolve; }));
+    renderInput({ isRunning: true, allowSubmitWhileRunning: true, onAddToRun });
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "first" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add to current run" }));
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "newer draft" } });
+    await act(async () => accept());
+    expect(screen.getByTestId("editor")).toHaveValue("newer draft");
+  });
+});
+
+
+describe("ChatInput guidance while navigating", () => {
+  it("does not clear the newly opened session's composer on a late success", async () => {
+    let accept!: () => void;
+    const onAddToRun = vi.fn(() => new Promise<void>((resolve) => { accept = resolve; }));
+    const state = useChatStore.getState() as unknown as { activeSessionId: string | null; inputDrafts: Record<string, string>; clearInputDraft: ReturnType<typeof vi.fn> };
+    state.activeSessionId = "source";
+    const { rerender } = render(element({ isRunning: true, allowSubmitWhileRunning: true, onAddToRun }));
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "guidance for source" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add to current run" }));
+    state.activeSessionId = "destination";
+    rerender(element({ isRunning: true, allowSubmitWhileRunning: true, onAddToRun }));
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "destination draft" } });
+    await act(async () => accept());
+    expect(editorState.cleared).toBe(0);
+    expect(screen.getByTestId("editor")).toHaveValue("destination draft");
+    expect(state.inputDrafts.destination).toBe("destination draft");
+    expect(state.clearInputDraft).toHaveBeenCalledWith("source");
+  });
+});
+
+
+it("requires an explicit choice to treat an ambiguous draft as a new instruction", () => {
+  const state = useChatStore.getState();
+  state.activeSessionId = "chat";
+  state.inputDrafts.chat = "same";
+  useChatRunDraftStore.getState().setDraft({ attempts: [{ id: "request", session: "chat", task: "original", content: "same" }] });
+  const onAddToRun = vi.fn();
+  renderInput({ onAddToRun });
+  expect(screen.getByRole("button", { name: enChat.input.retry_run })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: enChat.input.new_run_instruction }));
+  expect(useChatRunDraftStore.getState().draft.attempts).toEqual([]);
+  expect(screen.getByRole("button", { name: enChat.input.add_to_run })).toBeInTheDocument();
+  expect(screen.getByTestId("editor")).toHaveValue("same");
+  expect(onAddToRun).not.toHaveBeenCalled();
 });

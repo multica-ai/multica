@@ -8755,7 +8755,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		taskCapabilities = append(taskCapabilities, protocol.DaemonCapabilityMuseAppProcessCleanupV1)
 	}
 	var cursorHookCommand []string
-	supplementSupported := agent.SupportsTaskSupplement(provider, resolvedVersion) && task.IssueID != ""
+	supplementSupported := agent.SupportsTaskSupplement(provider, resolvedVersion) && (task.IssueID != "" || (provider == "codex" && task.ChatSessionID != ""))
 	if supplementSupported && provider == "cursor" {
 		cursorHookCommand, supplementSupported = cursorSupplementHookCommand(env)
 	}
@@ -9088,7 +9088,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		idleWatchdogTimeout = d.cfg.OpenCodeIdleWatchdog
 	}
 	execOpts := agent.ExecOptions{
-		EnableTaskSupplement:       taskSupplementNegotiated,
+		EnableTaskSupplement:       taskSupplementNegotiated || (provider == "hermes" && task.ChatSessionID != "" && task.IssueID == ""),
 		CursorHookCommand:          cursorHookCommand,
 		Cwd:                        env.WorkDir,
 		PiSkillPaths:               env.PiSkillPaths,

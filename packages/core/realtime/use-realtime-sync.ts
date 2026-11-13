@@ -1187,7 +1187,7 @@ export function useRealtimeSync(
       "subscriber:added", "subscriber:removed",
       "daemon:heartbeat",
       // Chat events are handled explicitly below; do not double-invalidate.
-      "chat:message", "chat:done", "chat:reply_notification", "chat:quick_actions", "chat:cancel_finalized", "chat:session_read",
+      "chat:supplement", "chat:message", "chat:done", "chat:reply_notification", "chat:quick_actions", "chat:cancel_finalized", "chat:session_read",
       "chat:session_created", "chat:session_deleted", "chat:session_updated",
       // task:message stays out of the prefix path because it fires per
       // streamed message during a long run — invalidating the snapshot on
@@ -1757,6 +1757,15 @@ export function useRealtimeSync(
       if (id) qc.invalidateQueries({ queryKey: chatKeys.sessions(id) });
     };
 
+    const unsubChatSupplement = ws.on("chat:supplement", (payload) => {
+      if (!payload || typeof payload !== "object" || !("chat_session_id" in payload) || typeof payload.chat_session_id !== "string") return;
+      const { chat_session_id } = payload;
+      qc.invalidateQueries({ queryKey: chatKeys.pendingTask(chat_session_id) });
+      const wsId = getCurrentWsId();
+      if (wsId) qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
+      qc.invalidateQueries({ queryKey: chatKeys.messages(chat_session_id) });
+      qc.invalidateQueries({ queryKey: chatKeys.messagesPage(chat_session_id) });
+    });
     const unsubChatMessage = ws.on("chat:message", (p) => {
       const payload = p as ChatMessageEventPayload;
       chatWsLogger.info("chat:message (global)", {
@@ -2057,6 +2066,7 @@ export function useRealtimeSync(
       unsubInvitationDeclined();
       unsubInvitationRevoked();
       unsubTaskMessage();
+      unsubChatSupplement();
       unsubChatMessage();
       unsubChatDone();
       unsubChatReplyNotification();

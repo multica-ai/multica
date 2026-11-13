@@ -414,6 +414,7 @@ export function ChatWindow() {
        *  no agent (the EmptyState above carries the CTA). */}
       <ChatInput
         onSend={c.handleSend}
+        onAddToRun={c.addToRun}
         restoreDraftRequest={c.restoreDraftRequest}
         conversationStarterRequest={c.conversationStarterRequest}
         onConversationStarterApplied={c.handleConversationStarterApplied}
