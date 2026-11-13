@@ -53,11 +53,14 @@ func requireRepairable(t *testing.T, repo string, wt *LocalWorktree, wantReason 
 	return outcome
 }
 
-// #9404 shape one: the agent squashes its commits and drops the empty baseline
-// along with them. Every change is still there; only the ancestry is wrong.
+// #9404 shape one: the agent squashes its commits with the starting source
+// commit. Every change is still there; only the ancestry is wrong.
 func TestCheckDeliveryRepairsASquashThatDroppedTheBaseline(t *testing.T) {
 	t.Parallel()
 	repo := newTestRepo(t)
+	writeFile(t, filepath.Join(repo, "source.txt"), "source history\n")
+	gitRun(t, repo, "add", "source.txt")
+	gitRun(t, repo, "commit", "-m", "source history")
 	wt := prepareTurn(t, repo, "MUL-9404", turnOneTask)
 
 	writeFile(t, filepath.Join(wt.WorkDir, "agent.txt"), "turn one\n")
@@ -121,6 +124,9 @@ func TestCheckDeliveryRepairsWorkOnAFeatureBranch(t *testing.T) {
 func TestCheckDeliveryRepairOfASquashKeepsLeftoversOffTheBranch(t *testing.T) {
 	t.Parallel()
 	repo := newTestRepo(t)
+	writeFile(t, filepath.Join(repo, "source.txt"), "source history\n")
+	gitRun(t, repo, "add", "source.txt")
+	gitRun(t, repo, "commit", "-m", "source history")
 	wt := prepareTurn(t, repo, "MUL-9404", turnOneTask)
 
 	writeFile(t, filepath.Join(wt.WorkDir, "agent.txt"), "turn one\n")

@@ -346,7 +346,12 @@ func TestLeftoverRefsAreDroppedWithTheirBranch(t *testing.T) {
 		t.Parallel()
 		repo := newTestRepo(t)
 		branch := committedTurnWithLeftovers(t, repo, "MUL-9788")
-		dropBranch(repo, branch, worktreeTestLogger())
+		ref := gitRun(t, repo, "rev-parse", userStateRef(branch))
+		record, err := readBranchRecord(repo, ref)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dropBranch(repo, branch, record.incarnation, worktreeTestLogger())
 		if refs := leftoverRefs(t, repo, branch); len(refs) != 0 {
 			t.Errorf("leftover refs survived dropBranch: %v", refs)
 		}
