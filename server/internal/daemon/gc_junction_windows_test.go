@@ -9,6 +9,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 )
 
 // The per-task codex-home links shared user content into the task directory —
@@ -92,5 +95,27 @@ func TestTaskSize_DoesNotCountDirectoryJunction(t *testing.T) {
 	}
 	if artifacts != 0 {
 		t.Errorf("artifacts = %d, want 0", artifacts)
+	}
+}
+
+func TestGC_LocalCodexHomePreservesJunctionTargets(t *testing.T) {
+	d := newGCTestDaemon(t, chatGCMux("chat", "active"))
+	d.cfg.GCCompletedTaskTTL = DefaultGCCompletedTaskTTL
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws", "local-task", &execenv.GCMeta{
+		Kind: execenv.GCKindChat, ChatSessionID: "chat", WorkspaceID: "ws",
+		LocalDirectory: true, CompletedAt: time.Now().Add(-15 * 24 * time.Hour),
+	})
+	writeFile(t, filepath.Join(taskDir, "codex-home/state_5.sqlite"), 32)
+	store, skills, plugins := t.TempDir(), t.TempDir(), t.TempDir()
+	for _, target := range []string{store, skills, plugins} {
+		writeFile(t, filepath.Join(target, "keep"), 64)
+	}
+	createJunction(t, store, filepath.Join(taskDir, "codex-home/sessions"))
+	createJunction(t, skills, filepath.Join(taskDir, "codex-home/skills"))
+	createJunction(t, plugins, filepath.Join(taskDir, "codex-home/plugins/cache"))
+	d.gcWorkspace(context.Background(), filepath.Dir(taskDir), &gcStats{})
+	assertGone(t, taskDir, "codex-home")
+	for _, target := range []string{store, skills, plugins} {
+		assertKept(t, target, "keep")
 	}
 }

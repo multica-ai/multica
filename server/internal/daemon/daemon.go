@@ -518,6 +518,9 @@ type Daemon struct {
 	// went away is a few bytes, not a leak worth a lifecycle.
 	registerSerial sync.Map
 
+	// Unowned directories remain untouched; warn once per path per daemon.
+	gcUnownedWarnings sync.Map
+
 	// agentsAvailable holds the current built-in agent CLI availability set —
 	// the same shape as cfg.Agents, which it supersedes as the read path.
 	//
