@@ -121,6 +121,7 @@ func newInstallService(q installQueries, tx engine.TxStarter, box *secretbox.Box
 // RegisterParams are the inputs for a bot install: the agent this bot
 // represents, who is installing, and the pasted BotFather token.
 type RegisterParams struct {
+	Menu        *MenuConfig
 	WorkspaceID pgtype.UUID
 	AgentID     pgtype.UUID
 	InitiatorID pgtype.UUID
@@ -132,6 +133,9 @@ type RegisterParams struct {
 // detection), encrypt the token at rest, and persist the installation keyed
 // by (workspace, agent) with the bot id in the routing slot.
 func (s *InstallService) Register(ctx context.Context, p RegisterParams) (db.ChannelInstallation, error) {
+	if err := ValidateMenuConfig(p.Menu); err != nil {
+		return db.ChannelInstallation{}, err
+	}
 	token := strings.TrimSpace(p.BotToken)
 	botID, err := parseBotID(token)
 	if err != nil {
@@ -158,6 +162,7 @@ func (s *InstallService) Register(ctx context.Context, p RegisterParams) (db.Cha
 		return db.ChannelInstallation{}, fmt.Errorf("encrypt telegram bot token: %w", err)
 	}
 	cfgJSON, err := json.Marshal(installConfig{
+		Menu:              p.Menu,
 		AppID:             botID,
 		BotUsername:       me.Username,
 		BotTokenEncrypted: base64.StdEncoding.EncodeToString(sealed),
