@@ -55,3 +55,44 @@ it("restores saved French on another device and stops reloading once it matches"
     });
   }
 });
+
+// Regression: every page mounts this, including a page that carries its own
+// language switcher. A reader who picked a language there had just written it to
+// the adapter, and this effect read the account preference, decided the two
+// disagreed, put the account's value back and reloaded — so the pick reverted
+// on the page that had just been switched.
+it("leaves a language this device already chose alone", () => {
+  const reload = vi.fn();
+  const location = window.location;
+  Object.defineProperty(window, "location", {
+    configurable: true,
+    value: { reload },
+  });
+  // The account says French; the device was just switched to something else.
+  const adapter = {
+    getUserChoice: () => "zh-Hans",
+    getSystemPreferences: () => ["en"],
+    persist: vi.fn(),
+  };
+  const resources = {
+    en: { common: { save: "Save" } },
+    zh: { common: { save: "保存" } },
+  };
+
+  try {
+    render(
+      <I18nProvider locale="en" resources={resources}>
+        <LocaleAdapterProvider adapter={adapter}>
+          <UserLocaleSync />
+        </LocaleAdapterProvider>
+      </I18nProvider>,
+    );
+    expect(adapter.persist).not.toHaveBeenCalled();
+    expect(reload).not.toHaveBeenCalled();
+  } finally {
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: location,
+    });
+  }
+});
