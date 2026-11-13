@@ -260,6 +260,7 @@ process.stdin.on("end", () => {
   for (const service of ["backend", "frontend"]) {
     console.log(service + "=" + config.services[service].ports[0].published);
   }
+  console.log("postgres_password=" + config.services.postgres.environment.POSTGRES_PASSWORD);
 });
 ' >>"$STUB_PUBLISHED_RECORD"
   ;;
@@ -556,6 +557,46 @@ for shadowed_alias in BACKEND_PORT API_PORT SERVER_PORT; do
   run_recipe selfhost "s/^# ${shadowed_alias}=8080/${shadowed_alias}=9700/" \
     "${shadowed_alias}=9600" '' >/dev/null
   require_consistent "env-file ${shadowed_alias} over the same shell variable" 9700
+done
+
+# ---------------------------------------------------------------------------
+# First run without an env file (regression for #10522)
+#
+# The recipe writes .env, including a random POSTGRES_PASSWORD, and then starts
+# Compose. Compose must receive that generated password. A database initialised
+# with any other value stops authenticating the backend the next time the
+# containers are recreated from the env file. run_recipe always seeds .env, so
+# this path needs its own driver.
+# ---------------------------------------------------------------------------
+
+run_first_recipe() {
+  local target=$1
+
+  rm -f "$recipe_dir/.env"
+  : >"$record"
+  : >"$curl_log"
+
+  (
+    cd "$recipe_dir" || exit 1
+    env PATH="$stub_dir:$PATH" \
+      REAL_DOCKER="$real_docker" \
+      STUB_PUBLISHED_RECORD="$record" \
+      STUB_CURL_LOG="$curl_log" \
+      make "$target"
+  )
+}
+
+for first_run_target in selfhost selfhost-build; do
+  run_first_recipe "$first_run_target" >/dev/null
+  generated_password="$(sed -n 's/^POSTGRES_PASSWORD=//p' "$recipe_dir/.env")"
+  received_password="$(grep '^postgres_password=' "$record" | tail -n 1 | cut -d= -f2- || true)"
+
+  if [ -z "$generated_password" ] || [ "$received_password" != "$generated_password" ]; then
+    echo "[$first_run_target first run] Compose did not receive the POSTGRES_PASSWORD written to .env"
+    echo "  written to .env: ${generated_password:-<none>}"
+    echo "  received by Compose: ${received_password:-<none>}"
+    exit 1
+  fi
 done
 
 echo "self-host env derivation ok"
