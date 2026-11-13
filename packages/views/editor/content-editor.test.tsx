@@ -186,6 +186,16 @@ describe("ContentEditor", () => {
     expect(mockFocus).toHaveBeenCalledWith("end");
   });
 
+  it("lets the editor shell shrink below its content's min-content width", () => {
+    // The shell is a flex item; without min-w-0 its automatic minimum width is
+    // the longest unbreakable token (a long URL), so a bare link widens the
+    // create-issue description pane past the dialog and images stretch with it.
+    render(<ContentEditor placeholder="Add description..." />);
+
+    const shell = screen.getByTestId("editor-content").parentElement;
+    expect(shell).toHaveClass("min-w-0");
+  });
+
   it("does not hijack clicks that land inside the ProseMirror node", () => {
     render(<ContentEditor placeholder="Add description..." />);
 
