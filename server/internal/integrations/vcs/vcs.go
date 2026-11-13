@@ -131,6 +131,13 @@ type Provider interface {
 	ValidateToken(ctx context.Context, instanceURL, token string) (Account, error)
 }
 
+// RepositoryAccessChecker verifies that the connection token can read the
+// exact repository named by a GitLab system-hook event. Workspace registration
+// is an allowlist, not proof of provider access.
+type RepositoryAccessChecker interface {
+	RepositoryReadable(ctx context.Context, instanceURL, owner, name, token string) (bool, error)
+}
+
 // registry maps a Kind to its Provider. Populated by package init in the
 // adapter files (forgejo.go, gitlab.go).
 var registry = map[Kind]Provider{}

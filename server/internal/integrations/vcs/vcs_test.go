@@ -308,6 +308,37 @@ func TestForgejoStatusTimestamp(t *testing.T) {
 	}
 }
 
+func TestGitlabRepositoryReadable(t *testing.T) {
+	cases := []struct {
+		status int
+		want   bool
+	}{
+		{http.StatusOK, true},
+		{http.StatusForbidden, false},
+		{http.StatusNotFound, false},
+	}
+	for _, tc := range cases {
+		t.Run(http.StatusText(tc.status), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/v4/projects/group%2Fsub%2Frepo" && r.URL.EscapedPath() != "/api/v4/projects/group%2Fsub%2Frepo" {
+					t.Errorf("path = %q", r.URL.Path)
+				}
+				if r.Header.Get("PRIVATE-TOKEN") != "tok" {
+					t.Errorf("PRIVATE-TOKEN missing")
+				}
+				w.WriteHeader(tc.status)
+				if tc.status == http.StatusOK {
+					_, _ = w.Write([]byte(`{"path_with_namespace":"group/sub/repo"}`))
+				}
+			}))
+			defer srv.Close()
+			got, err := (&gitlabProvider{}).RepositoryReadable(context.Background(), srv.URL, "group/sub", "repo", "tok")
+			if err != nil || got != tc.want {
+				t.Fatalf("got=%v err=%v want=%v", got, err, tc.want)
+			}
+		})
+	}
+}
 func TestValidateTokenUnauthorized(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)

@@ -154,6 +154,18 @@ func (h *Handler) HandleVCSWebhook(w http.ResponseWriter, r *http.Request) {
 				if !gitLabSystemHookRepoAllowed(ws.Repos, conn.InstanceUrl, pr.RepoOwner, pr.RepoName) {
 					break
 				}
+				if checker, ok := provider.(vcs.RepositoryAccessChecker); ok {
+					token, err := h.openVCSSecret(conn.AccessTokenEncrypted)
+					if err != nil || token == "" {
+						slog.Warn("vcs: open access token for system hook failed", "err", err)
+						break
+					}
+					readable, err := checker.RepositoryReadable(r.Context(), conn.InstanceUrl, pr.RepoOwner, pr.RepoName, token)
+					if err != nil || !readable {
+						slog.Warn("vcs: system-hook repository is not readable", "provider", conn.Provider, "owner", pr.RepoOwner, "name", pr.RepoName, "err", err)
+						break
+					}
+				}
 			}
 			h.mirrorVCSPullRequest(r.Context(), conn, pr)
 		}
@@ -187,14 +199,38 @@ func gitLabSystemHookRepoAllowed(raw []byte, instanceURL, owner, name string) bo
 	}
 	want += owner + "/" + name
 	for _, repo := range repos {
-		u, err := url.Parse(strings.TrimSpace(repo.URL))
-		if err != nil || u.Scheme != instance.Scheme || !strings.EqualFold(u.Host, instance.Host) || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
+		u, err := parseGitLabRepoURL(strings.TrimSpace(repo.URL))
+		if err != nil || !gitLabRepoURLMatchesInstance(u, instance) {
 			continue
 		}
 		path := strings.TrimSuffix(strings.Trim(u.Path, "/"), ".git")
 		if path == want {
 			return true
 		}
+	}
+	return false
+}
+
+func parseGitLabRepoURL(raw string) (*url.URL, error) {
+	if strings.Contains(raw, "://") {
+		return url.Parse(raw)
+	}
+	at := strings.Index(raw, "@")
+	colon := strings.Index(raw, ":")
+	if at <= 0 || colon <= at+1 || colon == len(raw)-1 {
+		return nil, errors.New("invalid scp-style repository URL")
+	}
+	return &url.URL{Scheme: "ssh", Host: raw[at+1 : colon], Path: "/" + raw[colon+1:], User: url.User(raw[:at])}, nil
+}
+func gitLabRepoURLMatchesInstance(repo, instance *url.URL) bool {
+	if repo.RawQuery != "" || repo.Fragment != "" {
+		return false
+	}
+	if repo.Scheme == "ssh" {
+		return strings.EqualFold(repo.Host, instance.Host) && repo.User != nil && repo.User.Username() == "git"
+	}
+	if repo.Scheme == "https" || repo.Scheme == "http" {
+		return repo.Scheme == instance.Scheme && strings.EqualFold(repo.Host, instance.Host) && repo.User == nil
 	}
 	return false
 }

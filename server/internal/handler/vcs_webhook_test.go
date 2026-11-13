@@ -443,7 +443,7 @@ func TestVCSWebhook_StaleEventDoesNotRewriteLink(t *testing.T) {
 }
 
 func TestGitLabSystemHookRepoAllowed(t *testing.T) {
-	repos := []byte(`[{"url":"https://gitlab.test/acme/widget.git"}]`)
+	repos := []byte(`[{"url":"https://gitlab.test/acme/widget.git"},{"url":"git@gitlab.test:group/sub/widget.git"},{"url":"ssh://git@gitlab.test/group/sub/other.git"}]`)
 	for _, tc := range []struct {
 		instance, owner, name string
 		want                  bool
@@ -452,6 +452,8 @@ func TestGitLabSystemHookRepoAllowed(t *testing.T) {
 		{"https://gitlab.test", "other", "widget", false},
 		{"https://other.test", "acme", "widget", false},
 		{"https://gitlab.test", "acme", "widget-extra", false},
+		{"https://gitlab.test", "group/sub", "widget", true},
+		{"https://gitlab.test", "group/sub", "other", true},
 	} {
 		if got := gitLabSystemHookRepoAllowed(repos, tc.instance, tc.owner, tc.name); got != tc.want {
 			t.Errorf("repo %s/%s on %s: got %v, want %v", tc.owner, tc.name, tc.instance, got, tc.want)
@@ -465,11 +467,19 @@ func TestGitLabSystemHookRepoAllowed(t *testing.T) {
 func TestVCSWebhook_SystemHookOnlyMirrorsConfiguredRepos(t *testing.T) {
 	ctx := context.Background()
 	box := withVCSBox(t)
-	connID := seedVCSConnection(t, ctx, box, "gitlab", "https://gitlab.test")
+	gitlab := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.EscapedPath() != "/api/v4/projects/acme%2Fwidget" || r.Header.Get("PRIVATE-TOKEN") != "tok" {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		_, _ = w.Write([]byte(`{"path_with_namespace":"acme/widget"}`))
+	}))
+	defer gitlab.Close()
+	connID := seedVCSConnection(t, ctx, box, "gitlab", gitlab.URL)
 	issue := newVCSIssue(t, "System hook test")
 	t.Cleanup(func() { cleanupVCS(ctx, issue.ID) })
 	_, err := testPool.Exec(ctx, `UPDATE workspace SET repos = $1 WHERE id = $2`,
-		`[{"url":"https://gitlab.test/acme/widget.git"}]`, testWorkspaceID)
+		`[{"url":"`+gitlab.URL+`/acme/widget.git"}]`, testWorkspaceID)
 	if err != nil {
 		t.Fatal(err)
 	}

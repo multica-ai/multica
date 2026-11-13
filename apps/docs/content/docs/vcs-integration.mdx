@@ -99,7 +99,7 @@ Settings → Webhooks:
 </Tab>
 </Tabs>
 
-GitLab also supports an instance-wide **System Hook** under the administrator area. Use the same URL and secret token, and enable **Merge request events**. Multica accepts its MR events only for repositories listed under this workspace's **Settings → Code → Repositories** and on the connected GitLab instance; unrelated system events are ignored. This avoids creating a hook in every project, but the GitLab administrator must configure the system hook. A webhook delivery returning `202` means it was acknowledged, not that an issue was linked or moved. Existing merged MRs are not retroactively replayed when you connect the hook.
+GitLab also supports an instance-wide **System Hook** under the administrator area. Use the same URL and secret token, and enable **Merge request events**. Multica accepts its MR events only for repositories listed under this workspace's **Settings → Code → Repositories**, on the connected GitLab instance, and readable by the connected access token; unrelated or unauthorized system events are ignored. Repository entries may use HTTPS or SSH clone URLs. This avoids creating a hook in every project, but the GitLab administrator must configure the system hook. System Hooks deliver MR events only, not Pipeline events; retain repository or group Pipeline webhooks if you need CI status. Project/group hooks and a System Hook may coexist. A webhook delivery returning `202` means it was acknowledged, not that an issue was linked or moved. Existing merged MRs are not retroactively replayed when you connect the hook.
 
 Multica authenticates every delivery against the stored secret, so a webhook without the matching secret is rejected.
 
