@@ -534,7 +534,8 @@ func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
 			return
 		}
 
-		if err := d.ensureRepoReady(r.Context(), req.WorkspaceID, req.URL); err != nil {
+		registeredURL, err := d.ensureRepoReady(r.Context(), req.WorkspaceID, req.URL)
+		if err != nil {
 			if r.Context().Err() != nil {
 				d.logger.Debug("repo checkout readiness cancelled", "url", req.URL, "error", err)
 				return
@@ -547,6 +548,7 @@ func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
 			http.Error(w, err.Error(), statusCode)
 			return
 		}
+		req.URL = registeredURL
 
 		req.WorkDir = checkoutWorkDirOutsideOwnCheckout(r.Context(), taskRoot, authorizedWorkDir, d.repoCache.Lookup(req.WorkspaceID, req.URL))
 		if req.WorkDir != authorizedWorkDir {
@@ -577,7 +579,6 @@ func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
 			params.LockWaitTimeout = repoCheckoutLockWaitTimeout
 		}
 		var result *repocache.WorktreeResult
-		var err error
 		if cache, ok := d.repoCache.(interface {
 			CreateWorktreeContext(context.Context, repocache.WorktreeParams) (*repocache.WorktreeResult, error)
 		}); ok {
