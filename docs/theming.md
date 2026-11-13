@@ -194,7 +194,7 @@ those change without notice. Anchors, slots and hooks stay until the next
 | `[data-mc="chat-bubble"]` | The bubble around a user message. Assistant replies have none: they are full-width rich text. |
 | `[data-mc="inbox-item"]` | One notification in the inbox; `data-read` is `true` or `false`, and `data-selected` is `true` on the one open in the detail pane. |
 | `[data-mc="unread-dot"]` | The unread marker on an inbox item. |
-| `[data-mc="toaster"]` | The toast region. Each toast inside is an `li` whose `data-type` is `success`, `error`, `info`, `warning`, `loading` or `default`. |
+| `[data-mc="toaster"]` | The toast region. Each toast inside is an `li` with `data-type` `success`, `error`, `info`, `warning`, `loading` or `default`. A plain toast usually has no `data-type`, so match it with both `li:not([data-type])` and `li[data-type="default"]`. |
 | `[data-mc="settings-page"]` | The settings page. |
 
 Each label chip sets `--label-color` (its hex colour) and `--label-foreground`
@@ -204,6 +204,13 @@ as a dot in front of its name:
 ```css
 [data-mc="label-chip"] { background: transparent; color: inherit; }
 [data-mc="label-chip"]::before { content: ""; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--label-color); }
+```
+
+A plain toast has no `data-type`, so style the default look with both
+selectors:
+
+```css
+[data-mc="toaster"] :is(li:not([data-type]), li[data-type="default"]) { border-radius: 0.75rem; }
 ```
 
 UI primitives carry a `data-slot`; these are public too: `button` (also

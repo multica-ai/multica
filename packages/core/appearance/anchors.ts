@@ -40,7 +40,7 @@ export const THEME_ANCHORS = {
     "One notification in the inbox list; `data-read` is true or false, `data-selected` is true on the one open in the detail pane.",
   "unread-dot": "The unread marker on an inbox item.",
   toaster:
-    "The toast region. Each toast is an `li` whose `data-type` is success, error, info, warning, loading or default.",
+    "The toast region. Each toast is an `li`; `data-type` is success, error, info, warning, loading or default, and a plain toast may have no `data-type` at all.",
   "settings-page": "The settings page.",
 } as const;
 
