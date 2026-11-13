@@ -173,6 +173,70 @@ describe("inbox row context menu", () => {
     expect(screen.queryByText("Mark as read")).toBeNull();
   });
 
+  describe("snooze", () => {
+    // A Wednesday afternoon, with the evening still more than an hour away.
+    const now = new Date(2026, 5, 17, 14, 20);
+    const frozen = (run: () => Promise<void>) => async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(now);
+      try {
+        await run();
+      } finally {
+        vi.useRealTimers();
+      }
+    };
+
+    it("puts the issue away until the time picked", frozen(async () => {
+      const onSnooze = vi.fn();
+      const { row } = renderRow({ entry: item({ id: "inbox-4" }), actions: { onSnooze } });
+
+      fireEvent.contextMenu(row);
+      expect(await screen.findByText("Snooze for 1 hour")).toBeInTheDocument();
+      expect(screen.getByText("Snooze until later today")).toBeInTheDocument();
+      expect(screen.getByText("Snooze until next Monday")).toBeInTheDocument();
+      fireEvent.click(screen.getByText("Snooze until tomorrow"));
+
+      expect(onSnooze).toHaveBeenCalledWith("inbox-4", new Date(2026, 5, 18, 9));
+    }));
+
+    it("offers only the way back on an issue that is snoozed", frozen(async () => {
+      const onUnsnooze = vi.fn();
+      const { row } = renderRow({
+        entry: item({ id: "inbox-5", snoozed_until: new Date(2026, 5, 18, 9).toISOString() }),
+        actions: { onSnooze: vi.fn(), onUnsnooze },
+      });
+
+      fireEvent.contextMenu(row);
+      fireEvent.click(await screen.findByText("Unsnooze"));
+
+      expect(onUnsnooze).toHaveBeenCalledWith("inbox-5");
+      expect(screen.queryByText("Snooze until tomorrow")).toBeNull();
+    }));
+
+    it("offers to snooze again once the time has passed", frozen(async () => {
+      const { row } = renderRow({
+        entry: item({ snoozed_until: new Date(2026, 5, 17, 9).toISOString() }),
+        actions: { onSnooze: vi.fn(), onUnsnooze: vi.fn() },
+      });
+
+      fireEvent.contextMenu(row);
+
+      expect(await screen.findByText("Snooze until tomorrow")).toBeInTheDocument();
+      expect(screen.queryByText("Unsnooze")).toBeNull();
+    }));
+
+    it("is not offered in the archive, or where the list cannot snooze", async () => {
+      const archived = renderRow({
+        entry: item({ archived: true }),
+        view: "archived",
+        actions: { onSnooze: vi.fn() },
+      });
+      fireEvent.contextMenu(archived.row);
+      expect(await screen.findByText("Unarchive")).toBeInTheDocument();
+      expect(screen.queryByText("Snooze until tomorrow")).toBeNull();
+    });
+  });
+
   it("suppresses the browser's native menu so ours is the only one", async () => {
     const { row } = renderRow();
 

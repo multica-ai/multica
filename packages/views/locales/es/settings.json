@@ -431,6 +431,10 @@
         "label": "Archivar notificación",
         "description": "Archiva la notificación de la bandeja abierta, o restaúrala mientras lees el archivo."
       },
+      "snoozeInboxItem": {
+        "label": "Posponer notificación",
+        "description": "Elige cuándo vuelve la notificación abierta de la bandeja de entrada."
+      },
       "send": {
         "label": "Enviar",
         "description": "También envía nuevas tareas."

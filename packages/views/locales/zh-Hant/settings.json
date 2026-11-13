@@ -425,6 +425,10 @@
         "label": "歸檔通知",
         "description": "歸檔當前開啟的收件箱通知；在歸檔列表中則取消歸檔。"
       },
+      "snoozeInboxItem": {
+        "label": "延後通知",
+        "description": "選擇目前開啟的收件箱通知何時回來。"
+      },
       "send": {
         "label": "傳送",
         "description": "也用於提交新任務。"

@@ -8,6 +8,7 @@ import { EMPTY_INBOX_FILTERS, filterInboxItems, useInboxFilterStore, type InboxF
 import { archivedInboxLookupOptions, inboxKeys } from "@multica/core/inbox/queries";
 import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
 import { onInboxIssueDeleted, patchInboxIssueProjection } from "@multica/core/inbox/ws-updaters";
+import type { InboxSections } from "@multica/core/inbox/sections";
 import type { ArchivedInboxPage } from "@multica/core/types/inbox";
 import type { InboxItem } from "@multica/core/types";
 import { InboxPage } from "./inbox-page";
@@ -47,6 +48,17 @@ vi.mock("./inbox-list", () => ({
     ))}</div>
   ),
 }));
+vi.mock("./inbox-sectioned-list", () => ({
+  InboxSectionedList: ({ sections, onSelect }: { sections: InboxSections; onSelect: (item: InboxItem) => void }) => (
+    <div>{[...sections.needsYou, ...sections.updates, ...sections.snoozed].map(({ item: row }) => (
+      <button key={row.id} data-read={row.read} onClick={() => onSelect(row)}>{row.id}</button>
+    ))}</div>
+  ),
+}));
+vi.mock("@multica/core/auth", () => ({
+  useAuthStore: (selector: (state: { user: { id: string } }) => unknown) =>
+    selector({ user: { id: "member-1" } }),
+}));
 const filterMenuUnmounted = vi.hoisted(() => vi.fn());
 vi.mock("./inbox-filter-menu", () => ({
   InboxFilterMenu: () => {
@@ -65,7 +77,7 @@ vi.mock("./inbox-context-menu", () => ({
 vi.mock("./inbox-detail-label", () => ({ useTypeLabels: () => ({}) }));
 vi.mock("../../i18n", () => {
   const t = () => "Inbox";
-  return { useT: () => ({ t }) };
+  return { useT: () => ({ t }), useLocale: () => "en" };
 });
 
 function item(overrides: Partial<InboxItem> = {}): InboxItem {

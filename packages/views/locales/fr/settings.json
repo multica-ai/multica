@@ -431,6 +431,10 @@
         "label": "Archiver la notification",
         "description": "Archiver la notification ouverte, ou la restaurer lors de la consultation des archives."
       },
+      "snoozeInboxItem": {
+        "label": "Reporter la notification",
+        "description": "Choisissez quand la notification ouverte revient dans la boîte de réception."
+      },
       "send": {
         "label": "Envoyer",
         "description": "Permet aussi de créer des tâches."

@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import { ApiError } from "@multica/core/api";
+import type { InboxSections } from "@multica/core/inbox/sections";
 import type { AgentTask, InboxItem } from "@multica/core/types";
 import { useInboxFilterStore } from "@multica/core/inbox/filter-store";
 import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
@@ -15,10 +16,17 @@ vi.mock("sonner", () => ({
 // The page runs two queries — the active list and the archived one. They are
 // told apart by the queryKey their options carry, so each test can stock the
 // two lists independently.
-const listData: { active: InboxItem[]; archived: InboxItem[]; lookup?: InboxItem[]; tasks: AgentTask[] } = {
+const listData: {
+  active: InboxItem[];
+  archived: InboxItem[];
+  lookup?: InboxItem[];
+  tasks: AgentTask[];
+  tasksPending: boolean;
+} = {
   active: [],
   archived: [],
   tasks: [],
+  tasksPending: false,
 };
 
 const queryCalls: Array<{ queryKey: readonly unknown[]; enabled?: boolean }> = [];
@@ -37,6 +45,7 @@ vi.mock("@tanstack/react-query", () => ({
     isError: false,
     refetch: vi.fn(),
     ...(options.queryKey.includes("lookup") ? lookupState : {}),
+    ...(options.queryKey.includes("agent-task-snapshot") ? { isPending: listData.tasksPending } : {}),
   }); },
   useInfiniteQuery: (options: { queryKey: readonly unknown[]; enabled?: boolean }) => {
     queryCalls.push(options);
@@ -86,6 +95,8 @@ const markReadMutate = vi.fn();
 const markUnreadMutate = vi.fn();
 const archiveMutate = vi.fn();
 const unarchiveMutate = vi.fn();
+const snoozeMutate = vi.fn();
+const unsnoozeMutate = vi.fn();
 const retrySourceContextMutateAsync = vi.fn();
 const showIssueLimitUpgradePrompt = vi.hoisted(() => vi.fn());
 const showAutopilotQuotaRecoveryPrompt = vi.hoisted(() => vi.fn());
@@ -104,6 +115,8 @@ vi.mock("@multica/core/inbox/mutations", () => {
     useMarkInboxUnread: () => ({ mutate: markUnreadMutate }),
     useArchiveInbox: () => ({ mutate: archiveMutate }),
     useUnarchiveInbox: () => ({ mutate: unarchiveMutate }),
+    useSnoozeInbox: () => ({ mutate: snoozeMutate }),
+    useUnsnoozeInbox: () => ({ mutate: unsnoozeMutate }),
     useMarkAllInboxRead: mutation,
     useArchiveAllInbox: mutation,
     useArchiveAllReadInbox: mutation,
@@ -124,9 +137,35 @@ const issueDetailProps = vi.hoisted(
 vi.mock("../../issues/components/issue-detail", () => ({
   IssueDetail: (props: Record<string, unknown>) => {
     issueDetailProps.push(props);
-    return null;
+    // The header slot the inbox fills with its own actions.
+    return <>{props.hostActions as React.ReactNode}</>;
   },
   issueHighlightMementoKey: (issueId: string) => `highlight:${issueId}`,
+}));
+
+// The header actions as bare controls, so a test can drive what the page
+// wired into them and read back the state it passed down.
+const SNOOZE_UNTIL = new Date("2026-06-18T01:00:00Z");
+vi.mock("./inbox-detail-actions", () => ({
+  InboxDetailActions: ({
+    snoozed,
+    snoozeOpen,
+    onSnooze,
+    onUnsnooze,
+    onArchive,
+  }: {
+    snoozed: boolean;
+    snoozeOpen: boolean;
+    onSnooze: (until: Date) => void;
+    onUnsnooze: () => void;
+    onArchive: () => void;
+  }) => (
+    <div data-testid="detail-actions" data-snoozed={String(snoozed)} data-snooze-open={String(snoozeOpen)}>
+      <button type="button" data-testid="detail-snooze" onClick={() => onSnooze(SNOOZE_UNTIL)} />
+      <button type="button" data-testid="detail-unsnooze" onClick={onUnsnooze} />
+      <button type="button" data-testid="detail-archive" onClick={onArchive} />
+    </div>
+  ),
 }));
 
 const replace = vi.fn();
@@ -180,6 +219,61 @@ vi.mock("./inbox-list", () => ({
     </div>
   ),
 }));
+// The main view's list, flattened in section order. Rows keep the `row` test
+// id whichever section they are in, so a test that only cares that a row is
+// listed does not have to know where; `data-section` is there for the ones
+// that do. "Working" rows are issues, not notifications, and get their own id.
+vi.mock("./inbox-sectioned-list", () => ({
+  InboxSectionedList: ({
+    sections,
+    onSelect,
+    onSelectIssue,
+    emptyLabel,
+    emptyAction,
+  }: {
+    sections: InboxSections;
+    onSelect: (item: InboxItem) => void;
+    onSelectIssue: (issueId: string) => void;
+    emptyLabel?: string;
+    emptyAction?: React.ReactNode;
+  }) => {
+    const groups = [
+      ["needs_you", sections.needsYou],
+      ["updates", sections.updates],
+      ["snoozed", sections.snoozed],
+    ] as const;
+    const empty = groups.every(([, rows]) => rows.length === 0) && sections.working.length === 0;
+    return (
+      <div data-testid="list" data-view="inbox">
+        {groups.slice(0, 1).map(([section, rows]) =>
+          rows.map((row) => (
+            <button key={row.item.id} data-testid="row" data-section={section} onClick={() => onSelect(row.item)}>
+              {row.item.id}
+            </button>
+          )),
+        )}
+        {sections.working.map((row) => (
+          <button key={row.issueId} data-testid="working-row" onClick={() => onSelectIssue(row.issueId)}>
+            {row.issueId}
+          </button>
+        ))}
+        {groups.slice(1).map(([section, rows]) =>
+          rows.map((row) => (
+            <button key={row.item.id} data-testid="row" data-section={section} onClick={() => onSelect(row.item)}>
+              {row.item.id}
+            </button>
+          )),
+        )}
+        {empty && emptyLabel && <p>{emptyLabel}</p>}
+        {empty && emptyAction}
+      </div>
+    );
+  },
+}));
+vi.mock("@multica/core/auth", () => ({
+  useAuthStore: (selector: (state: { user: { id: string } }) => unknown) =>
+    selector({ user: { id: "member-1" } }),
+}));
 vi.mock("./inbox-filter-menu", () => ({
   InboxFilterMenu: () => <button type="button">Filter inbox</button>,
 }));
@@ -196,6 +290,8 @@ let rowActions: {
   onMarkRead: (id: string) => void;
   onMarkUnread: (id: string) => void;
   onAction: (id: string) => void;
+  onSnooze: (id: string, until: Date) => void;
+  onUnsnooze: (id: string) => void;
 } | null = null;
 vi.mock("./inbox-context-menu", () => ({
   InboxContextMenuProvider: ({
@@ -225,7 +321,7 @@ vi.mock("./autopilot-quota-notice", () => ({
     </button>
   ),
 }));
-vi.mock("../../i18n", () => ({ useT: () => ({ t: () => "Inbox" }) }));
+vi.mock("../../i18n", () => ({ useT: () => ({ t: () => "Inbox" }), useLocale: () => "en" }));
 
 function item(overrides: Partial<InboxItem> = {}): InboxItem {
   return {
@@ -256,6 +352,7 @@ function reset() {
   listData.archived = [];
   listData.lookup = undefined;
   listData.tasks = [];
+  listData.tasksPending = false;
   lookupState.isLoading = false;
   lookupState.isError = false;
   lookupState.refetch.mockClear();
@@ -266,6 +363,8 @@ function reset() {
   markUnreadMutate.mockClear();
   archiveMutate.mockClear();
   unarchiveMutate.mockClear();
+  snoozeMutate.mockClear();
+  unsnoozeMutate.mockClear();
   retrySourceContextMutateAsync.mockReset();
   retrySourceContextMutateAsync.mockResolvedValue({});
   showIssueLimitUpgradePrompt.mockClear();
@@ -342,15 +441,11 @@ describe("InboxPage", () => {
     );
   });
 
-  it("keeps the title unread count static", () => {
+  it("leaves the count to the section it counts, not the title", () => {
     reset();
     const { container } = render(<InboxPage />);
-    const titleCount = container.querySelector("h1")?.parentElement?.querySelector(
-      "number-flow-react",
-    ) as (HTMLElement & { animated?: boolean }) | null;
 
-    expect(titleCount?.getAttribute("aria-label")).toBe("2");
-    expect(titleCount?.animated).toBe(false);
+    expect(container.querySelector("h1")?.parentElement?.querySelector("number-flow-react")).toBeNull();
   });
 
   it("shows the active list by default", () => {
@@ -1150,6 +1245,301 @@ describe("InboxPage", () => {
 
       expect(toast.error).toHaveBeenCalledTimes(1);
       expect(toast.success).not.toHaveBeenCalled();
+    });
+  });
+
+  // A run the viewer started themselves: the only kind "Working" lists.
+  function ownRun(issueId: string, startedBy = "member-1"): AgentTask {
+    return {
+      id: `task-${issueId}`,
+      agent_id: "agent-1",
+      issue_id: issueId,
+      status: "running",
+      created_at: "2026-06-15T08:00:00Z",
+      started_at: "2026-06-15T08:01:00Z",
+      attribution: { source: "direct_human", precise: true, originator: { id: startedBy } },
+    } as AgentTask;
+  }
+
+  const listed = () =>
+    screen.getAllByTestId("row").map((row) => `${row.dataset.section}:${row.textContent}`);
+
+  describe("sections", () => {
+    it("files each issue under the section its notifications put it in", () => {
+      reset();
+      layout.width = DESKTOP;
+      listData.active = [
+        item({ id: "update", issue_id: "issue-u", section: "updates" }),
+        item({ id: "needs", issue_id: "issue-n", section: "needs_you" }),
+        item({
+          id: "snoozed",
+          issue_id: "issue-s",
+          section: "needs_you",
+          snoozed_until: new Date(Date.now() + 3_600_000).toISOString(),
+        }),
+      ];
+
+      render(<InboxPage />);
+
+      expect(listed()).toEqual(["needs_you:needs", "updates:update", "snoozed:snoozed"]);
+    });
+
+    it("lists the issues the viewer handed to an agent, which have no notification", () => {
+      reset();
+      layout.width = DESKTOP;
+      listData.tasks = [ownRun("issue-w"), ownRun("issue-other", "member-2")];
+
+      render(<InboxPage />);
+
+      expect(screen.getAllByTestId("working-row").map((row) => row.textContent)).toEqual(["issue-w"]);
+    });
+
+    it("leaves Working out while a filter is on: the list is the matches", () => {
+      reset();
+      layout.width = DESKTOP;
+      listData.active = [item({ id: "inbox-a", issue_id: "issue-a", read: false })];
+      listData.tasks = [ownRun("issue-w")];
+      useInboxFilterStore.getState().toggleUnreadOnly("workspace-1");
+
+      render(<InboxPage />);
+
+      expect(listed()).toEqual(["needs_you:inbox-a"]);
+      expect(screen.queryByTestId("working-row")).toBeNull();
+    });
+  });
+
+  describe("an issue open without a notification", () => {
+    it("opens a Working row in the detail pane, with nothing to snooze or archive", () => {
+      reset();
+      layout.width = DESKTOP;
+      listData.tasks = [ownRun("issue-w")];
+
+      render(<InboxPage />);
+      fireEvent.click(screen.getByTestId("working-row"));
+
+      expect(replace).toHaveBeenCalledWith("/acme/inbox?issue=issue-w");
+      expect(issueDetailProps.at(-1)).toMatchObject({ issueId: "issue-w", readsInbox: false });
+      expect(issueDetailProps.at(-1)?.onDone).toBeUndefined();
+      expect(screen.queryByTestId("detail-actions")).toBeNull();
+      expect(markReadMutate).not.toHaveBeenCalled();
+      expect(replace).not.toHaveBeenCalledWith("/acme/issues/issue-w");
+    });
+
+    it("opens a link to a Working issue instead of leaving for its page", () => {
+      reset();
+      layout.width = DESKTOP;
+      searchParams = new URLSearchParams("issue=issue-w");
+      listData.tasks = [ownRun("issue-w")];
+
+      render(<InboxPage />);
+
+      expect(issueDetailProps.at(-1)).toMatchObject({ issueId: "issue-w" });
+      expect(replace).not.toHaveBeenCalled();
+    });
+
+    it("waits for the runs to load before calling such a link broken", () => {
+      reset();
+      layout.width = DESKTOP;
+      searchParams = new URLSearchParams("issue=issue-w");
+      listData.tasksPending = true;
+
+      const { rerender } = render(<InboxPage />);
+      expect(replace).not.toHaveBeenCalled();
+
+      listData.tasksPending = false;
+      rerender(<InboxPage />);
+      expect(replace).toHaveBeenCalledWith("/acme/issues/issue-w");
+    });
+
+    it("keeps the issue open when replying hands it to an agent and its notification goes", () => {
+      reset();
+      layout.width = DESKTOP;
+      listData.active = [item({ id: "inbox-a", issue_id: "issue-a" })];
+
+      const { rerender } = render(<InboxPage />);
+      fireEvent.click(screen.getByTestId("row"));
+      expect(screen.getByTestId("detail-actions")).toBeInTheDocument();
+      replace.mockClear();
+      issueDetailProps.length = 0;
+
+      // The server archives the viewer's notifications as the run starts.
+      listData.active = [];
+      listData.tasks = [ownRun("issue-a")];
+      rerender(<InboxPage />);
+
+      expect(issueDetailProps.at(-1)).toMatchObject({ issueId: "issue-a" });
+      expect(screen.queryByTestId("detail-actions")).toBeNull();
+      expect(replace).not.toHaveBeenCalled();
+    });
+
+    it("keeps it open even when no run shows up for it", () => {
+      reset();
+      layout.width = DESKTOP;
+      listData.active = [item({ id: "inbox-a", issue_id: "issue-a" })];
+
+      const { rerender } = render(<InboxPage />);
+      fireEvent.click(screen.getByTestId("row"));
+      replace.mockClear();
+      issueDetailProps.length = 0;
+      listData.active = [];
+      rerender(<InboxPage />);
+
+      expect(issueDetailProps.at(-1)).toMatchObject({ issueId: "issue-a" });
+      expect(replace).not.toHaveBeenCalled();
+    });
+
+    it("lets go once the selection moves on", () => {
+      reset();
+      layout.width = DESKTOP;
+      listData.active = [
+        item({ id: "inbox-a", issue_id: "issue-a" }),
+        item({ id: "inbox-b", issue_id: "issue-b" }),
+      ];
+
+      const { rerender } = render(<InboxPage />);
+      fireEvent.click(screen.getAllByTestId("row")[0]!);
+      listData.active = [item({ id: "inbox-b", issue_id: "issue-b" })];
+      rerender(<InboxPage />);
+      fireEvent.click(screen.getByTestId("row"));
+      expect(issueDetailProps.at(-1)).toMatchObject({ issueId: "issue-b" });
+      replace.mockClear();
+
+      // Back on the first issue by URL: it is a plain unknown link again.
+      searchParams = new URLSearchParams("issue=issue-a");
+      rerender(<InboxPage />);
+
+      expect(replace).toHaveBeenCalledWith("/acme/issues/issue-a");
+    });
+  });
+
+  describe("snooze", () => {
+    type MutateOptions = { onSuccess?: () => void; onError?: (err: unknown) => void };
+    const until = new Date("2026-06-18T01:00:00Z");
+
+    function renderTwoWaiting() {
+      reset();
+      layout.width = DESKTOP;
+      listData.active = [
+        item({ id: "inbox-a", issue_id: "issue-a", section: "needs_you" }),
+        item({ id: "inbox-b", issue_id: "issue-b", section: "needs_you" }),
+        item({ id: "inbox-u", issue_id: "issue-u", section: "updates" }),
+      ];
+      const view = render(<InboxPage />);
+      fireEvent.click(screen.getAllByTestId("row")[0]!);
+      replace.mockClear();
+      return view;
+    }
+
+    it("snoozes from the row menu and moves on to the next issue that waits", () => {
+      renderTwoWaiting();
+      act(() => rowActions?.onSnooze("inbox-a", until));
+
+      expect(snoozeMutate).toHaveBeenCalledWith(
+        { id: "inbox-a", until: "2026-06-18T01:00:00.000Z" },
+        expect.anything(),
+      );
+      expect(replace).toHaveBeenCalledWith("/acme/inbox?issue=issue-b");
+    });
+
+    it("stays in the section it finished rather than dropping into the updates below", () => {
+      renderTwoWaiting();
+      fireEvent.click(screen.getAllByTestId("row")[1]!);
+      replace.mockClear();
+      act(() => rowActions?.onAction("inbox-b"));
+
+      expect(replace).toHaveBeenCalledWith("/acme/inbox?issue=issue-a");
+      expect(replace).not.toHaveBeenCalledWith("/acme/inbox?issue=issue-u");
+    });
+
+    it("says when the issue comes back, since its row has left the screen", () => {
+      renderTwoWaiting();
+      act(() => rowActions?.onSnooze("inbox-a", until));
+      act(() => (snoozeMutate.mock.calls.at(-1)?.[1] as MutateOptions).onSuccess?.());
+
+      expect(toast.success).toHaveBeenCalledTimes(1);
+    });
+
+    it("reports a failed snooze as a failure only", () => {
+      renderTwoWaiting();
+      act(() => rowActions?.onSnooze("inbox-a", until));
+      act(() => (snoozeMutate.mock.calls.at(-1)?.[1] as MutateOptions).onError?.(new Error("boom")));
+
+      expect(toast.error).toHaveBeenCalledWith("boom");
+      expect(toast.success).not.toHaveBeenCalled();
+    });
+
+    it("snoozes and archives the open notification from the detail header", () => {
+      renderTwoWaiting();
+
+      fireEvent.click(screen.getByTestId("detail-snooze"));
+      expect(snoozeMutate).toHaveBeenCalledWith(
+        { id: "inbox-a", until: SNOOZE_UNTIL.toISOString() },
+        expect.anything(),
+      );
+
+      fireEvent.click(screen.getByTestId("detail-archive"));
+      expect(archiveMutate).toHaveBeenCalledWith("inbox-b", expect.anything());
+    });
+
+    it("offers the way back on an issue that is snoozed, and takes it", () => {
+      reset();
+      layout.width = DESKTOP;
+      listData.active = [
+        item({
+          id: "inbox-s",
+          issue_id: "issue-s",
+          section: "needs_you",
+          snoozed_until: new Date(Date.now() + 3_600_000).toISOString(),
+        }),
+      ];
+
+      render(<InboxPage />);
+      fireEvent.click(screen.getByTestId("row"));
+      expect(screen.getByTestId("detail-actions")).toHaveAttribute("data-snoozed", "true");
+
+      fireEvent.click(screen.getByTestId("detail-unsnooze"));
+      expect(unsnoozeMutate).toHaveBeenCalledWith("inbox-s", expect.anything());
+      // Unsnoozing brings the issue back; it does not move the selection off it.
+      expect(replace).not.toHaveBeenCalledWith("/acme/inbox");
+    });
+
+    it("opens the snooze menu for the open notification on its shortcut", () => {
+      renderTwoWaiting();
+      expect(screen.getByTestId("detail-actions")).toHaveAttribute("data-snooze-open", "false");
+
+      fireEvent.keyDown(document, { key: "h" });
+
+      expect(screen.getByTestId("detail-actions")).toHaveAttribute("data-snooze-open", "true");
+      expect(snoozeMutate).not.toHaveBeenCalled();
+    });
+
+    it("closes the menu with the selection it was opened for", () => {
+      renderTwoWaiting();
+      fireEvent.keyDown(document, { key: "h" });
+
+      fireEvent.click(screen.getAllByTestId("row")[1]!);
+
+      expect(screen.getByTestId("detail-actions")).toHaveAttribute("data-snooze-open", "false");
+    });
+
+    it("has nothing to snooze in the archive or on a Working issue", () => {
+      reset();
+      layout.width = DESKTOP;
+      searchParams = new URLSearchParams("view=archived");
+      listData.archived = [item({ id: "archived-1", issue_id: "issue-9", archived: true })];
+      const archive = render(<InboxPage />);
+      fireEvent.click(screen.getByTestId("row"));
+      fireEvent.keyDown(document, { key: "h" });
+      expect(screen.queryByTestId("detail-actions")).toBeNull();
+      archive.unmount();
+
+      reset();
+      layout.width = DESKTOP;
+      listData.tasks = [ownRun("issue-w")];
+      render(<InboxPage />);
+      fireEvent.click(screen.getByTestId("working-row"));
+      fireEvent.keyDown(document, { key: "h" });
+      expect(screen.queryByTestId("detail-actions")).toBeNull();
     });
   });
 

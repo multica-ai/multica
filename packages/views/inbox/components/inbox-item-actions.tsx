@@ -1,6 +1,7 @@
 "use client";
 
-import { Archive, ArchiveRestore, Check, CircleDot, ExternalLink, Trash2 } from "@multica/ui/icons";
+import { Archive, ArchiveRestore, Check, CircleDot, Clock, ExternalLink, Trash2, Undo2 } from "@multica/ui/icons";
+import { inboxSnoozeOptions, type InboxSnoozePreset } from "@multica/core/inbox/snooze";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import type { InboxItem } from "@multica/core/types";
 import type { RowActionItem } from "../../common/row-actions-menu";
@@ -18,6 +19,10 @@ export interface InboxRowActions {
    */
   onAction: (id: string) => void;
   onDelete: (id: string) => void;
+  /** Put the row's issue away until a time. Absent where snoozing is not offered. */
+  onSnooze?: (id: string, until: Date) => void;
+  /** Bring a snoozed issue back now. */
+  onUnsnooze?: (id: string) => void;
 }
 
 /**
@@ -47,6 +52,12 @@ export function useInboxItemActions(
       ? paths.workspace(slug).issueDetail(item.issue_id)
       : null;
   const isArchivedView = view === "archived";
+  const snoozeLabel: Record<InboxSnoozePreset, string> = {
+    in_one_hour: t(($) => $.context_menu.snooze_in_one_hour),
+    later_today: t(($) => $.context_menu.snooze_later_today),
+    tomorrow: t(($) => $.context_menu.snooze_tomorrow),
+    next_week: t(($) => $.context_menu.snooze_next_week),
+  };
 
   const groups: RowActionItem[][] = [];
 
@@ -84,6 +95,35 @@ export function useInboxItemActions(
             onSelect: () => actions.onMarkRead(item.id),
           },
     ]);
+  }
+
+  // Snoozing is for the main list: an archived row is already put away. The
+  // menus have no room for a time field, so they offer the fixed choices and
+  // the detail header's menu covers any other time.
+  if (!isArchivedView) {
+    const { onSnooze, onUnsnooze } = actions;
+    const now = new Date();
+    const snoozed =
+      item.snoozed_until != null && new Date(item.snoozed_until).getTime() > now.getTime();
+    if (snoozed && onUnsnooze) {
+      groups.push([
+        {
+          key: "unsnooze",
+          label: t(($) => $.context_menu.unsnooze),
+          icon: <Undo2 className="h-4 w-4" />,
+          onSelect: () => onUnsnooze(item.id),
+        },
+      ]);
+    } else if (!snoozed && onSnooze) {
+      groups.push(
+        inboxSnoozeOptions(now).map((option) => ({
+          key: `snooze-${option.preset}`,
+          label: snoozeLabel[option.preset],
+          icon: <Clock className="h-4 w-4" />,
+          onSelect: () => onSnooze(item.id, option.until),
+        })),
+      );
+    }
   }
 
   groups.push([
