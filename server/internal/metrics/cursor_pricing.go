@@ -47,6 +47,7 @@ var cursorModelPrices = buildCursorPrices([]struct {
 	{"claude-opus-4-7-fast", 30, 150, 3, 37.5},
 	{"claude-4.6-opus", 5, 25, 0.5, 6.25},
 	{"claude-4.5-opus", 5, 25, 0.5, 6.25},
+	{"claude-fable-5-2", 8, 40, 0.2, 10},
 	{"claude-fable-5-1", 10, 50, 0.25, 12.5},
 	{"claude-fable-5", 10, 50, 1, 12.5},
 	{"claude-sonnet-5-5", 2, 10, 0.1, 2.5},

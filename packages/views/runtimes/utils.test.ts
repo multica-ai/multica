@@ -799,6 +799,7 @@ describe("estimateCost", () => {
     expect(cost("claude-opus-5-5-high")).toBeCloseTo(opus55, 5);
     expect(cost("claude-opus-5-5-max")).toBeCloseTo(opus55, 5);
     expect(cost("claude-fable-5-1-thinking-high")).toBeCloseTo(10 + 50 + 0.25 + 12.5, 5);
+    expect(cost("claude-fable-5-2-xhigh")).toBeCloseTo(8 + 40 + 0.2 + 10, 5);
     // Thinking after the effort level, and the older `claude-4.6-sonnet` naming.
     expect(cost("claude-4.6-sonnet-medium-thinking")).toBeCloseTo(3 + 15 + 0.3 + 3.75, 5);
     expect(cost("gpt-5.5-extra-high")).toBeCloseTo(5 + 30 + 0.5, 5);
