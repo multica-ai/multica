@@ -335,8 +335,8 @@
     },
     "content_size": {
       "title": "文字サイズ",
-      "description": "本文だけ。インターフェースは変わりません。",
-      "follow": "インターフェースと同じ（{{size}} px）"
+      "description": "本文だけ。初期設定ではインターフェースと同じです。",
+      "follow": "インターフェースの文字サイズに合わせる"
     },
     "content_leading": {
       "title": "行の高さ",

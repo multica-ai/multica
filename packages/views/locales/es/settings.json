@@ -341,8 +341,8 @@
     },
     "content_size": {
       "title": "Tamaño de letra",
-      "description": "Solo el texto del contenido; la interfaz mantiene su tamaño.",
-      "follow": "Igual que la interfaz ({{size}} px)"
+      "description": "Solo el texto del contenido. Por defecto, igual que la interfaz.",
+      "follow": "Seguir el tamaño de la interfaz"
     },
     "content_leading": {
       "title": "Interlineado",

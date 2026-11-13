@@ -935,36 +935,60 @@ function InterfaceTextSection() {
           description={t(($) => $.appearance.font_size.description)}
           anchor="font-size"
         >
-          <div className="flex w-56 items-center gap-3">
-            <span aria-hidden="true" className="text-caption text-muted-foreground">
-              A
-            </span>
-            <Slider
-              aria-label={sizeLabel}
-              min={FONT_SIZES[0]}
-              max={FONT_SIZES[FONT_SIZES.length - 1]}
-              step={1}
-              value={fontSize}
-              onValueChange={(next) => {
-                const size = Array.isArray(next) ? next[0] : next;
-                if ((FONT_SIZES as readonly number[]).includes(size as number)) {
-                  set({ fontSize: size as FontSize });
-                }
-              }}
-              className="flex-1"
-            />
-            <span aria-hidden="true" className="text-title-sm text-muted-foreground">
-              A
-            </span>
-            <span className="w-24 shrink-0 text-right text-caption tabular-nums text-muted-foreground">
-              {fontSize === DEFAULT_FONT_SIZE
-                ? t(($) => $.appearance.font_size.default, { size: fontSize })
-                : t(($) => $.appearance.font_size.value, { size: fontSize })}
-            </span>
-          </div>
+          <FontSizeSlider
+            label={sizeLabel}
+            sizes={FONT_SIZES}
+            value={fontSize}
+            isDefault={fontSize === DEFAULT_FONT_SIZE}
+            onChange={(size) => set({ fontSize: size as FontSize })}
+          />
         </SettingsRow>
       </SettingsCard>
     </SettingsSection>
+  );
+}
+
+/** The small-A to large-A slider both text sections use for their size. */
+function FontSizeSlider({
+  label,
+  sizes,
+  value,
+  isDefault,
+  onChange,
+}: {
+  label: string;
+  sizes: readonly number[];
+  value: number;
+  isDefault: boolean;
+  onChange: (size: number) => void;
+}) {
+  const { t } = useT("settings");
+  return (
+    <div className="flex w-56 items-center gap-3">
+      <span aria-hidden="true" className="text-caption text-muted-foreground">
+        A
+      </span>
+      <Slider
+        aria-label={label}
+        min={sizes[0]}
+        max={sizes[sizes.length - 1]}
+        step={1}
+        value={value}
+        onValueChange={(next) => {
+          const size = Array.isArray(next) ? next[0] : next;
+          if (typeof size === "number" && sizes.includes(size)) onChange(size);
+        }}
+        className="flex-1"
+      />
+      <span aria-hidden="true" className="text-title-sm text-muted-foreground">
+        A
+      </span>
+      <span className="min-w-24 shrink-0 whitespace-nowrap text-right text-caption tabular-nums text-muted-foreground">
+        {isDefault
+          ? t(($) => $.appearance.font_size.default, { size: value })
+          : t(($) => $.appearance.font_size.value, { size: value })}
+      </span>
+    </div>
   );
 }
 
@@ -984,6 +1008,7 @@ function ContentTextSection() {
     );
   const codeLabel = t(($) => $.appearance.code_font.title);
   const sizeLabel = t(($) => $.appearance.content_size.title);
+  const followSizeLabel = t(($) => $.appearance.content_size.follow);
   const leadingLabel = t(($) => $.appearance.content_leading.title);
   const themeCodeFont = useThemeSetsFont("font-mono");
   const themeFontLabel = t(($) => $.appearance.theme_font);
@@ -991,14 +1016,6 @@ function ContentTextSection() {
   const codeName = (id: CodeFont) => (fromTheme(id) ? themeFontLabel : CODE_FONT_NAME[id]);
   const codeSample = (id: CodeFont) => (fromTheme(id) ? "var(--font-mono)" : CODE_FONT_SAMPLE[id]);
   const codeOptions = CODE_FONTS.map((id) => ({ value: id, label: codeName(id) }));
-  const sizeName = (size: ContentSize) =>
-    size === FOLLOW_UI
-      ? t(($) => $.appearance.content_size.follow, { size: fontSize })
-      : t(($) => $.appearance.font_size.value, { size });
-  const sizeOptions = ([FOLLOW_UI, ...CONTENT_SIZES] as ContentSize[]).map((size) => ({
-    value: String(size),
-    label: sizeName(size),
-  }));
 
   return (
     <SettingsSection
@@ -1061,30 +1078,21 @@ function ContentTextSection() {
           label={sizeLabel}
           description={t(($) => $.appearance.content_size.description)}
           anchor="content-size"
-          size="select"
         >
-          <Select
-            items={sizeOptions}
-            value={String(contentSize)}
-            onValueChange={(next) => {
-              if (!next) return;
-              const size = next === FOLLOW_UI ? FOLLOW_UI : Number(next);
-              if (size === FOLLOW_UI || (CONTENT_SIZES as readonly number[]).includes(size)) {
-                set({ contentSize: size as ContentSize });
-              }
-            }}
-          >
-            <SelectTrigger size="sm" className="w-full" aria-label={sizeLabel}>
-              <SelectValue>{sizeName(contentSize)}</SelectValue>
-            </SelectTrigger>
-            <SelectContent align="end">
-              {sizeOptions.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <FontSizeSlider
+            label={sizeLabel}
+            sizes={CONTENT_SIZES}
+            value={contentSize === FOLLOW_UI ? fontSize : contentSize}
+            isDefault={contentSize === FOLLOW_UI}
+            onChange={(size) => set({ contentSize: size as ContentSize })}
+          />
+        </SettingsRow>
+        <SettingsRow label={followSizeLabel} anchor="content-size-follow">
+          <Switch
+            checked={contentSize === FOLLOW_UI}
+            onCheckedChange={(checked) => set({ contentSize: checked ? FOLLOW_UI : fontSize })}
+            aria-label={followSizeLabel}
+          />
         </SettingsRow>
         <SettingsRow label={leadingLabel} anchor="content-leading">
           <div role="group" aria-label={leadingLabel}>

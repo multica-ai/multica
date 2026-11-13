@@ -335,8 +335,8 @@
     },
     "content_size": {
       "title": "글자 크기",
-      "description": "본문만 바뀌고 인터페이스는 그대로예요.",
-      "follow": "인터페이스와 같게 ({{size}}px)"
+      "description": "본문만 바뀌어요. 기본값은 인터페이스와 같아요.",
+      "follow": "인터페이스 글자 크기에 맞추기"
     },
     "content_leading": {
       "title": "줄 간격",

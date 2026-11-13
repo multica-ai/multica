@@ -56,7 +56,7 @@ export const FONT_SIZES = [12, 13, 14, 15, 16] as const;
 export type FontSize = (typeof FONT_SIZES)[number];
 export const DEFAULT_FONT_SIZE: FontSize = 14;
 
-export const CONTENT_SIZES = [13, 14, 15, 16, 17, 18] as const;
+export const CONTENT_SIZES = [12, 13, 14, 15, 16, 17, 18] as const;
 export type ContentSize = typeof FOLLOW_UI | (typeof CONTENT_SIZES)[number];
 
 export const CONTENT_LEADINGS = ["compact", "default", "relaxed"] as const;
