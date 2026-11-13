@@ -16,6 +16,9 @@
     "ios:device:prod": "dotenv -e .env.production.local -e .env.production -- cross-env APP_ENV=production pnpm ios:device",
     "ios:device:prod:release": "dotenv -e .env.production.local -e .env.production -- cross-env APP_ENV=production pnpm ios:device --configuration Release",
     "bundle:ios": "dotenv -e .env.production -- cross-env APP_ENV=production expo export --platform ios --output-dir dist",
+    "preview:web": "cross-env MULTICA_WEB_PREVIEW=1 expo start --web",
+    "preview:export": "cross-env MULTICA_WEB_PREVIEW=1 expo export --platform web --output-dir dist-web",
+    "sync:icons": "node scripts/sync-icons.mjs",
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
@@ -23,8 +26,12 @@
   "dependencies": {
     "@multica/core": "workspace:*",
     "@react-native-community/netinfo": "12.0.1",
+    "@react-navigation/bottom-tabs": "^7.21.0",
+    "@react-navigation/native": "^7.5.1",
+    "@react-navigation/native-stack": "^7.21.0",
     "@tanstack/react-query": "catalog:",
     "expo": "~57.0.26",
+    "expo-blur": "~57.0.3",
     "expo-build-properties": "~57.0.22",
     "expo-constants": "~57.0.20",
     "expo-dev-client": "^57.0.19",
@@ -35,9 +42,13 @@
     "expo-status-bar": "~57.0.1",
     "react": "19.2.3",
     "react-native": "0.86.3",
+    "react-native-safe-area-context": "~5.7.0",
+    "react-native-screens": "~4.26.2",
+    "react-native-svg": "15.15.4",
     "zustand": "catalog:"
   },
   "devDependencies": {
+    "@expo/metro-runtime": "~57.0.18",
     "@types/node": "catalog:",
     "@types/react": "catalog:",
     "@types/react-test-renderer": "^19.3.0",
@@ -46,6 +57,8 @@
     "dotenv-cli": "^7.4.4",
     "eslint": "^9.0.0",
     "eslint-config-expo": "~57.0.2",
+    "react-dom": "catalog:",
+    "react-native-web": "^0.21.2",
     "react-test-renderer": "19.2.3",
     "typescript": "catalog:",
     "vitest": "catalog:"

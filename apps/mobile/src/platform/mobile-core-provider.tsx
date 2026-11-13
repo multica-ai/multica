@@ -1,14 +1,12 @@
 import type { ReactNode } from "react";
-import { getLocales } from "expo-localization";
 import { CoreProvider } from "@multica/core/platform";
 import { subscribeAppActivity } from "./app-lifecycle";
+import { appLocale } from "./app-locale";
 import { endpoints } from "./env";
 import { identity } from "./identity";
-import { resolveLocale } from "./locale";
 import { handleWorkspaceLost, selectWorkspace } from "./workspace";
 
-const locale = resolveLocale(getLocales());
-const resources = { [locale]: {} };
+const resources = { [appLocale]: {} };
 
 const forgetWorkspace = () => selectWorkspace(null);
 
@@ -25,7 +23,7 @@ export function MobileCoreProvider({ children }: { children: ReactNode }) {
       apiBaseUrl={endpoints.apiUrl}
       wsUrl={endpoints.wsUrl}
       identity={identity}
-      locale={locale}
+      locale={appLocale}
       resources={resources}
       onLogout={forgetWorkspace}
       subscribeAppActivity={subscribeAppActivity}
