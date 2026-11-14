@@ -34,12 +34,19 @@ describe("removeSpokenFillers", () => {
     ["Um, I think uh it's the cache", "I think it's the cache"],
     ["the umbrella and the hmm", "the umbrella and the"],
     ["Uhh the drum", "the drum"],
+    // Glued to the words around them, as the model writes them mid-sentence.
+    ["还有一个场景，就是呃，annotation的功能", "还有一个场景，就是 annotation的功能"],
+    ["转写的那个呃标识会和呃 reply 左下角的", "转写的那个标识会和 reply 左下角的"],
+    ["will work 的那个呃呃，就是重叠在一起。", "will work 的那个就是重叠在一起。"],
+    ["我嗯觉得可以", "我觉得可以"],
+    ["那个呃。", "那个。"],
   ])("%j", (input, output) => {
     expect(removeSpokenFillers(input)).toBe(output);
   });
 
   it("leaves meaningful words alone", () => {
     expect(removeSpokenFillers("嗯哼是一个词 human umami")).toBe("嗯哼是一个词 human umami");
+    expect(removeSpokenFillers("金额，额外的额度和呃逆")).toBe("金额，额外的额度和呃逆");
   });
 });
 
