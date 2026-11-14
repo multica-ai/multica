@@ -1,6 +1,6 @@
 ---
 title: Chat integrations
-description: Connect Multica agents to Feishu, Lark, Slack, DingTalk, WeCom, or Telegram and use them from the chat tools your team already uses.
+description: Connect Multica agents to Feishu, Lark, Slack, DingTalk, WeCom, Telegram, or WeChat and use them from the chat tools your team already uses.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
@@ -8,7 +8,7 @@ import { ChannelChatDemo } from "@/components/demos/channel-chat-demo";
 
 Chat integrations let the team ask an agent questions in a DM, @-mention it in a group chat, or create issues from the chat window, without opening Multica.
 
-Feishu/Lark, Slack, DingTalk, WeCom, and Telegram are supported today. They share the same session, identity, and execution mechanics but install differently.
+Feishu/Lark, Slack, DingTalk, WeCom, Telegram, and WeChat are available. WeChat accepts private messages only from the account that scans the connection QR code. They share the same session, identity, and execution mechanics but install differently.
 
 ## Choose a platform
 
@@ -38,6 +38,8 @@ Step-by-step guides:
 - [Slack Bot integration](/slack-bot-integration)
 - [DingTalk Bot integration](/dingtalk-bot-integration)
 - [Telegram Bot integration](/telegram-bot-integration)
+
+[WeChat Bot](/weixin-bot-integration) connects by QR code and binds the scanner to the initiating Multica user. It does not use the first-message binding-link flow below.
 
 ## How a message is processed
 
@@ -97,6 +99,7 @@ MULTICA_SLACK_SECRET_KEY=<base64-encoded 32-byte key>
 MULTICA_DINGTALK_SECRET_KEY=<base64-encoded 32-byte key>
 MULTICA_WECOM_SECRET_KEY=<base64-encoded 32-byte key>
 MULTICA_TELEGRAM_SECRET_KEY=<base64-encoded 32-byte key>
+MULTICA_WEIXIN_SECRET_KEY=<base64-encoded 32-byte key>
 ```
 
 These keys encrypt stored Bot credentials. See [Environment variables](/environment-variables) for how to generate, store, and rotate them. Multica Cloud already has this configured.

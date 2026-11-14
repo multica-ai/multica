@@ -1,6 +1,6 @@
 ---
 title: 聊天整合
-description: 把 Multica AI 代理接入飛書、Lark、Slack、釘釘、企業微信或 Telegram，在團隊已有的聊天工具中使用。
+description: 把 Multica AI 代理接入飛書、Lark、Slack、釘釘、企業微信、Telegram 或微信，在團隊已有的聊天工具中使用。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
@@ -8,7 +8,7 @@ import { ChannelChatDemo } from "@/components/demos/channel-chat-demo";
 
 接入聊天工具後，團隊不用開啟 Multica，就能在私聊裡向 AI 代理提問、在群聊中 @ 它，或者直接在聊天視窗建立任務。
 
-目前支援飛書/Lark、Slack、釘釘、企業微信和 Telegram。它們使用相同的會話、身份和執行機制，但安裝方式不同。
+目前支援飛書/Lark、Slack、釘釘、企業微信、Telegram 和微信。微信只接收掃描連線 QR 碼帳號的私訊。它們使用相同的會話、身份和執行機制，但安裝方式不同。
 
 ## 選擇平臺
 
@@ -38,6 +38,8 @@ Telegram 會把圖片、檔案、影片和音訊作為附件轉交給 AI 代理�
 - [Slack Bot 接入](/slack-bot-integration)
 - [釘釘 Bot 接入](/dingtalk-bot-integration)
 - [Telegram Bot 接入](/telegram-bot-integration)
+
+[微信 Bot](/weixin-bot-integration) 透過掃碼連線，將掃碼帳號繫結到發起連線的 Multica 使用者，不使用下方首次傳送訊息時的繫結連結流程。
 
 ## 訊息的執行流程
 
@@ -97,6 +99,7 @@ MULTICA_SLACK_SECRET_KEY=<base64 編碼的 32 位元組金鑰>
 MULTICA_DINGTALK_SECRET_KEY=<base64 編碼的 32 位元組金鑰>
 MULTICA_WECOM_SECRET_KEY=<base64 編碼的 32 位元組金鑰>
 MULTICA_TELEGRAM_SECRET_KEY=<base64 編碼的 32 位元組金鑰>
+MULTICA_WEIXIN_SECRET_KEY=<base64 編碼的 32 位元組金鑰>
 ```
 
 這些金鑰用於加密儲存 Bot 憑據。生成、儲存和輪換方法見[環境變數](/environment-variables)。Multica Cloud 已完成這項配置。
