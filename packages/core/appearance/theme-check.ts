@@ -20,7 +20,9 @@ import {
  * do: set variables that are not public, name generic families in Latin
  * font stacks, or paint text without enough contrast. Contrast is measured
  * with the options at their defaults, then once per other value of each
- * `select` and `toggle` with the rest at their defaults.
+ * `select` and `toggle` with the rest at their defaults. With a backdrop,
+ * the frame and the page are measured as the glass the app paints over
+ * `--backdrop-color`.
  */
 
 export interface ThemeCheckIssue {
@@ -53,6 +55,8 @@ export interface ContrastCheck {
   variant?: ContrastVariant;
   /** Set when the foreground is the app's default, not a variable the theme set. */
   defaulted?: boolean;
+  /** Set when the background is glass: its colour at the glass opacity over the backdrop. */
+  glass?: boolean;
 }
 
 export interface ThemeCheckReport {
@@ -106,7 +110,10 @@ type Slot = "tooltip-content" | "popover-content";
 const SLOTS: readonly Slot[] = ["tooltip-content", "popover-content"];
 
 /** How to fix a pair the theme reaches only through a default. */
-function contrastHint({ area, foreground, background, defaulted }: ContrastCheck): string {
+function contrastHint({ area, foreground, background, defaulted, glass }: ContrastCheck): string {
+  if (glass) {
+    return " With the backdrop, it is measured as glass: the colour at --glass-opacity (--frame-glass-opacity for --app-shell) over --backdrop-color.";
+  }
   if (area === "tooltip" && foreground === "--foreground") {
     return " Tooltip text is the app's dark-mode --foreground in both modes; set --tooltip-foreground to choose it.";
   }
@@ -282,6 +289,72 @@ class ScopePalette extends ReadTracker {
   }
 }
 
+const rgb = ({ r, g, b }: Rgba) => `rgb(${r} ${g} ${b})`;
+
+/** A percentage, following var() chains, as 0–1; null when it is not one. */
+function resolveShare(palette: Map<string, string>, name: string, fallback: string): number | null {
+  let value = palette.get(name) ?? fallback;
+  for (let hops = 0; hops < 12; hops += 1) {
+    const reference = /^var\(\s*(--[\w-]+)\s*(?:,\s*(.+))?\)$/s.exec(value.trim());
+    if (!reference) {
+      const share = /^(\d+(?:\.\d+)?|\.\d+)%$/.exec(value.trim());
+      return share ? Math.min(1, Number(share[1]) / 100) : null;
+    }
+    const next = palette.get(reference[1]!) ?? reference[2];
+    if (next === undefined) return null;
+    value = next;
+  }
+  return null;
+}
+
+/** Surfaces the app paints as glass when a theme has a backdrop. */
+const GLASS_SURFACES = ["--app-shell", "--page-canvas", "--background"] as const;
+
+type GlassResult =
+  | { glass: Set<string>; solid: boolean }
+  | { error: string }
+  | { unresolved: string }
+  | null;
+
+/**
+ * With a backdrop the frame and the page are glass, the way appearance.css
+ * paints them: the frame is --app-shell at --frame-glass-opacity over
+ * --backdrop-color, and the page's colours sit at --glass-opacity over the
+ * frame. Writes those mixes into the palette, so every pair on them is
+ * measured on what the app paints. Null without a backdrop.
+ */
+function applyGlass(palette: Map<string, string>): GlassResult {
+  const backdrop = palette.get("--backdrop")?.trim();
+  if (!backdrop || backdrop === "none") return null;
+  if (!palette.has("--backdrop-color")) {
+    return {
+      error:
+        "--backdrop is set without --backdrop-color. Set it to the colour the backdrop averages to: the glass is measured on it, and it shows while the backdrop loads and while motion is reduced.",
+    };
+  }
+  const under = resolveColor(palette, "--backdrop-color");
+  if (!("color" in under) || under.color.a < 1) {
+    return { error: "--backdrop-color must be an opaque colour this check can read: hex, rgb(), hsl(), oklab() or oklch()." };
+  }
+  const frameShare = resolveShare(palette, "--frame-glass-opacity", "var(--glass-opacity, 100%)");
+  const pageShare = resolveShare(palette, "--glass-opacity", "100%");
+  if (frameShare === null || pageShare === null) {
+    return { unresolved: `${frameShare === null ? "--frame-glass-opacity" : "--glass-opacity"} is not a percentage this check can read` };
+  }
+  const colors = new Map<string, Rgba>();
+  for (const name of GLASS_SURFACES) {
+    const color = resolveColor(palette, name);
+    if (!("color" in color)) return { unresolved: color.unresolved };
+    colors.set(name, color.color);
+  }
+  const glassOver = (color: Rgba, share: number, bottom: Rgba) => paintOver({ ...color, a: color.a * share }, bottom);
+  const frame = glassOver(colors.get("--app-shell")!, frameShare, under.color);
+  palette.set("--app-shell", rgb(frame));
+  palette.set("--page-canvas", rgb(glassOver(colors.get("--page-canvas")!, pageShare, frame)));
+  palette.set("--background", rgb(glassOver(colors.get("--background")!, pageShare, frame)));
+  return { glass: new Set(GLASS_SURFACES), solid: frameShare === 1 && pageShare === 1 };
+}
+
 /** Declarations by name, the most specific winning and, at equal specificity, the later one. */
 type Cascade = Map<string, { value: string; specificity: number }>;
 
@@ -425,7 +498,7 @@ function measureContrast(
   chosen: ThemeOptionValues | undefined,
   base: BasePalette,
   variant: ContrastVariant | undefined,
-): { results: ContrastCheck[]; unresolved: Set<string> } {
+): { results: ContrastCheck[]; unresolved: Set<string>; backdrop: Map<string, ThemeCheckIssue["level"]> } {
   // The cascade on <html>, per mode: the base tokens (`:root` and `.dark`),
   // then the theme's root and mode rules by specificity and order.
   const cascade = {
@@ -478,11 +551,22 @@ function measureContrast(
   const options = theme ? themeOptionVariables(theme, chosen) : { light: {}, dark: {} };
   const results: ContrastCheck[] = [];
   const unresolved = new Set<string>();
+  const backdrop = new Map<string, ThemeCheckIssue["level"]>();
   const read = new Set<string>();
 
   for (const m of ["light", "dark"] as const) {
     // Option values are written after the theme as `:root.theme-<mode>`, so they win.
     const palette = new ReadTracker(read, [...cascadeValues(cascade[m]), ...Object.entries(options[m])]);
+    const glassed = applyGlass(palette);
+    const glass = glassed && "glass" in glassed ? glassed.glass : new Set<string>();
+    if (glassed && "error" in glassed) backdrop.set(`Backdrop, ${m} mode: ${glassed.error}`, "error");
+    if (glassed && "unresolved" in glassed) unresolved.add(`${m}: the backdrop's glass, because ${glassed.unresolved}`);
+    if (glassed && "solid" in glassed && glassed.solid) {
+      backdrop.set(
+        `Backdrop, ${m} mode: --glass-opacity and --frame-glass-opacity are 100%, so the frame and the page cover the backdrop completely.`,
+        "warning",
+      );
+    }
     const measure = (
       area: ContrastCheck["area"],
       p: Map<string, string>,
@@ -522,6 +606,7 @@ function measureContrast(
           required,
           ...(variant ? { variant } : {}),
           ...(defaulted ? { defaulted } : {}),
+          ...(glass.has(background) && surface.get(background) === palette.get(background) ? { glass: true } : {}),
         });
       }
     };
@@ -616,7 +701,7 @@ function measureContrast(
   for (const [name, where] of unmodelled) {
     if (read.has(name)) unresolved.add(`${where}, which the check does not follow`);
   }
-  return { results, unresolved };
+  return { results, unresolved, backdrop };
 }
 
 const pairKey = (c: ContrastCheck) => `${c.mode} ${c.area} ${c.foreground} ${c.background}`;
@@ -636,7 +721,7 @@ function reportFailing(checks: readonly ContrastCheck[], issues: ThemeCheckIssue
     const where = [...(area === "page" ? [] : [area]), ...(variant ? [variant.label] : [])];
     issues.push({
       level: "error",
-      message: `Contrast, ${m} mode${where.length > 0 ? ` (${where.join(", ")})` : ""}: ${foreground} is below ${required}:1 on ${list}.${contrastHint(group[0]!)}`,
+      message: `Contrast, ${m} mode${where.length > 0 ? ` (${where.join(", ")})` : ""}: ${foreground} is below ${required}:1 on ${list}.${contrastHint({ ...group[0]!, glass: group.some((c) => c.glass) })}`,
     });
   }
 }
@@ -655,6 +740,7 @@ function checkContrast(
   const parsed = rules(clean);
   const defaults = measureContrast(clean, parsed, theme, undefined, base, undefined);
   reportFailing(defaults.results, issues);
+  for (const [message, level] of defaults.backdrop) issues.push({ level, message });
   const failingByDefault = new Set(defaults.results.filter((c) => c.ratio < c.required).map(pairKey));
   const results = [...defaults.results];
   const unresolvedWith = new Map<string, string[]>();
@@ -662,6 +748,9 @@ function checkContrast(
     const run = measureContrast(clean, parsed, theme, chosen, base, variant);
     results.push(...run.results);
     reportFailing(run.results.filter((c) => !failingByDefault.has(pairKey(c))), issues);
+    for (const [message, level] of run.backdrop) {
+      if (!defaults.backdrop.has(message)) issues.push({ level, message: `${message} (${variant.label})` });
+    }
     for (const reason of run.unresolved) {
       if (!defaults.unresolved.has(reason)) unresolvedWith.set(reason, [...(unresolvedWith.get(reason) ?? []), variant.label]);
     }

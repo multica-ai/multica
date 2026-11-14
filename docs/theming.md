@@ -13,7 +13,8 @@ Appearance → Theme options**. Themes never run JavaScript.
 **Settings → Appearance → Manage** lists the themes installed on the device
 and the community theme store; the built-in themes are in the theme picker. Install a theme from the
 store there, or with **Import theme**, from a `.zip` of the folder or from the
-folder itself. Themes are saved on the device, like every other Appearance
+folder itself; a theme `.zip` attached to a chat or comment installs with
+**Install theme** on the attachment. Themes are saved on the device, like every other Appearance
 setting; **Remove** on a theme's card deletes it, and goes back to Default
 when it was in use. **Check for updates** looks for new releases of the
 themes installed from the store.
@@ -192,6 +193,54 @@ and choice labels are a string or an object keyed by locale (`en`,
 [data-mc="content"] { max-width: var(--page-width); }
 ```
 
+## Backdrop and glass
+
+A theme can put a picture behind the app: a gradient, an image, or an
+animated SVG. Set `--backdrop` per mode to a CSS `background` value, and
+the app paints it on a layer under the whole window, on Desktop and on the
+web. While a mode has a backdrop, the frame (rail, window toolbar, tab bar
+and bottom bar) and the page turn to glass: each keeps its own colour,
+`--app-shell` for the frame and `--page-canvas` for the page, at the
+opacity the theme sets, over the backdrop.
+
+```css
+.theme-dark {
+  --backdrop: url(night.svg) center / cover no-repeat;
+  --backdrop-still: url(night-still.svg) center / cover no-repeat;
+  --backdrop-color: #1e1e4a;
+  --glass-opacity: 72%;
+  --glass-blur: 18px;
+  --frame-glass-opacity: 0%;
+  --frame-glass-blur: 0px;
+}
+```
+
+| Variable | What it does |
+| --- | --- |
+| `--backdrop` | The layers behind the window, as `background` takes them. Images must be in the theme folder. An SVG's own CSS animation plays. |
+| `--backdrop-color` | Required with a backdrop. The solid colour under it: shown while the images load and while motion is reduced, and what `theme:check` measures the glass on. Use the colour the backdrop averages to. |
+| `--backdrop-still` | What shows instead while motion is reduced (Multica's **Reduce motion**, or the system setting). Without it, only `--backdrop-color` shows then: the app cannot pause an animation inside an SVG image. |
+| `--glass-opacity` | How much of `--page-canvas` (and `--background`) covers the backdrop in the page: `100%` is solid. |
+| `--glass-blur` | How much the backdrop is blurred behind the page. |
+| `--frame-glass-opacity`, `--frame-glass-blur` | The same for the frame. They default to the page's values; `0%` and `0px` leave the backdrop clear around the page. |
+
+Use these variables instead of making `--app-shell` transparent or setting a
+`background` on `body`: the app then knows there is a backdrop, keeps the
+frame and the page distinct, swaps to the still version for reduced motion,
+and decodes a new backdrop before it replaces the old one, so switching
+themes or saving `theme.css` never flashes the window. Option sliders can
+set the glass directly: an option with the id `glass-opacity` sets
+`--glass-opacity`.
+
+`theme:check` measures text over glass: the frame's text on `--app-shell` at
+`--frame-glass-opacity` over `--backdrop-color`, and the page's on
+`--page-canvas` at `--glass-opacity` over it. A backdrop without a solid
+`--backdrop-color` is an error. The colour is a stand-in for the picture,
+so look at the brightest and darkest parts of the backdrop too, and raise
+the glass opacity or blur where the text gets hard to read.
+`examples/themes/night-sky` in the repository is a complete example: an
+animated sky in each mode, still versions, and the glass on two sliders.
+
 ## Selectors
 
 Target anchors, slots and state hooks, not class names or DOM structure:
@@ -318,7 +367,9 @@ that breaks them:
   `--muted-foreground` need 4.5:1 on every surface, `--brand` 4.5:1 on the
   reading surfaces, the primary button label 4.5:1 on the button, and
   `--faint-foreground` 3:1. A frame (rules on the rail, window toolbar,
-  tab bar or bottom bar) is checked against its own colours. The check follows `:root`,
+  tab bar or bottom bar) is checked against its own colours. With a
+  backdrop, the frame and the page are checked as glass over
+  `--backdrop-color`; see [Backdrop and glass](#backdrop-and-glass). The check follows `:root`,
   `html`, the mode classes and option attributes the way the browser does,
   with every option at its default; when a colour it measures is also set
   somewhere else, such as inside `@media` or on `body`, it says so instead
@@ -390,6 +441,37 @@ with the same id whenever it is read: on a change and at every start.
 Duplicating downloads a `.zip`. Unzip it, edit, and import the folder
 again: the same `id` replaces the installed copy, and option values are
 kept. If a check fails, the import dialog lists every problem.
+
+### Ask an agent
+
+**Ask an agent** next to **Import theme** takes a description of the look
+you want and an agent, and starts a chat with that agent. The first message
+is the request in full: the description, the theme's id, this guide, the
+checker and where to deliver, so you can see exactly what the agent was
+told. The agent must pass `theme:check` with 0 errors before it delivers,
+and attaches `theme:preview` screenshots when it can run them.
+
+- **On Desktop**, the request names the themes folder. An agent on the
+  same computer writes the theme there: Multica switches to it as soon as it
+  passes the checks, and every later change you ask for shows up within a
+  second.
+- **On the web, or with an agent on another machine**, the agent attaches
+  the theme as a `.zip`. **Install theme** on the attachment reads it with
+  the same checks and confirmation as **Import theme**.
+
+Ask for changes in the same chat: the theme keeps its id, so each version
+replaces the last. The knowledge of the format travels with the request
+instead of being a skill every agent carries: an agent reads this guide
+only when it is asked for a theme.
+
+The checker runs without installing the repository, from a sparse clone
+and Node 22.18 or newer:
+
+```sh
+git clone --depth 1 --filter=blob:none --sparse https://github.com/multica-ai/multica.git multica-themes
+git -C multica-themes sparse-checkout set docs scripts packages/core/appearance packages/ui/styles
+node multica-themes/scripts/theme-check.mjs path/to/paper
+```
 
 ### Checking a theme
 
@@ -694,6 +776,18 @@ and dark differ, both defaults are given.
 | `--nav-item-hover-color` | `var(--foreground)` | Row text on hover. |
 | `--nav-item-active-background` | `var(--surface-selected)` | The current row. |
 | `--nav-item-active-color` | `var(--surface-selected-foreground)` | Text of the current row. |
+
+### Backdrop and glass
+
+| Variable | Default (light / dark) | Use |
+| --- | --- | --- |
+| `--backdrop` | `none` | What the window shows behind the frame and the page, as `background` layers: colours, gradients and images in the theme folder, such as `url(sky.svg) center / cover no-repeat`. An SVG's own CSS animation plays. It shows through the glass below. |
+| `--backdrop-still` | `none` | The backdrop while motion is reduced, in Multica or in the system. Unset, only `backdrop-color` shows then. |
+| `--backdrop-color` | `var(--app-shell)` | Solid colour under the backdrop: shown while it loads and while motion is reduced, and the colour `theme:check` measures the glass on. Required with a backdrop; use the colour the backdrop averages to. |
+| `--glass-opacity` | `100%` | How much of the page's own colour covers the backdrop: `100%` is solid, lower lets the backdrop through. Only applies with a backdrop. |
+| `--glass-blur` | `0px` | Blur of the backdrop seen through the page. |
+| `--frame-glass-opacity` | `var(--glass-opacity, 100%)` | How much of `app-shell` covers the backdrop in the frame: rail, toolbar, tab bar and bottom bar. |
+| `--frame-glass-blur` | `var(--glass-blur, 0px)` | Blur of the backdrop seen through the frame. |
 
 ### Layout and spacing
 

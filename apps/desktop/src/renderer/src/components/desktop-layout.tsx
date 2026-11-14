@@ -262,8 +262,10 @@ export function DesktopShell() {
           IndexRedirect, not a route. */}
       <WorkspaceSlugProvider slug={slug}>
         <DesktopInboxBridge />
-        <div className="flex h-screen bg-app-shell">
-          {/* bg-app-shell is the wrapper's non-inset fill, so it also owns the
+        <div className="flex h-screen">
+          {/* The wrapper alone paints the frame: a second fill under it would
+              double the frame's glass over a theme's backdrop.
+              bg-app-shell is the wrapper's non-inset fill, so it also owns the
               non-inset half of --sidebar-wrapper-fill. sidebar.tsx supplies the
               inset half of both. Anything that has to paint an opaque layer
               over this wrapper (the tab flares) reads the variable rather than

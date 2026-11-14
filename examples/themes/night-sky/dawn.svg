@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+<style>
+.t0{animation:tw 4s ease-in-out infinite}
+.t1{animation:tw 6s ease-in-out -2s infinite}
+.t2{animation:tw 9s ease-in-out -5s infinite}
+.ga{animation:drift 90s ease-in-out infinite alternate}
+.gb{animation:drift 120s ease-in-out -40s infinite alternate-reverse}
+@keyframes tw{0%,100%{opacity:1}50%{opacity:.25}}
+@keyframes drift{from{transform:translate(-120px,-40px)}to{transform:translate(140px,60px)}}
+@media (prefers-reduced-motion: reduce){*{animation:none!important}}
+</style>
+<defs>
+<linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#cfe0ff"/><stop offset="1" stop-color="#fde6d8"/></linearGradient>
+<radialGradient id="ga"><stop offset="0" stop-color="#ffb38a" stop-opacity=".55"/><stop offset="1" stop-color="#ffb38a" stop-opacity="0"/></radialGradient>
+<radialGradient id="gb"><stop offset="0" stop-color="#8fb6ff" stop-opacity=".45"/><stop offset="1" stop-color="#8fb6ff" stop-opacity="0"/></radialGradient>
+</defs>
+<rect width="1600" height="1000" fill="url(#sky)"/>
+<circle class="ga" cx="320" cy="260" r="520" fill="url(#ga)"/>
+<circle class="gb" cx="1280" cy="380" r="560" fill="url(#gb)"/>
+<circle class="t0" cx="1064" cy="481" r="1.62" fill="#ffffff"/><circle class="t1" cx="1415" cy="642" r="1.98" fill="#ffffff"/><circle class="t2" cx="701" cy="370" r="1.94" fill="#ffffff"/><circle class="t0" cx="1560" cy="272" r="0.71" fill="#ffffff"/><circle class="t1" cx="548" cy="671" r="1.59" fill="#ffffff"/><circle class="t2" cx="1181" cy="726" r="1.70" fill="#ffffff"/><circle class="t0" cx="331" cy="181" r="1.72" fill="#ffffff"/><circle class="t1" cx="167" cy="696" r="1.72" fill="#ffffff"/><circle class="t2" cx="1016" cy="541" r="1.35" fill="#ffffff"/><circle class="t0" cx="709" cy="663" r="1.39" fill="#ffffff"/><circle class="t1" cx="1398" cy="206" r="1.56" fill="#ffffff"/><circle class="t2" cx="694" cy="300" r="0.86" fill="#ffffff"/><circle class="t0" cx="942" cy="176" r="1.86" fill="#ffffff"/><circle class="t1" cx="1315" cy="257" r="1.56" fill="#ffffff"/><circle class="t2" cx="1404" cy="88" r="1.03" fill="#ffffff"/><circle class="t0" cx="1473" cy="1" r="0.78" fill="#ffffff"/><circle class="t1" cx="636" cy="16" r="1.57" fill="#ffffff"/><circle class="t2" cx="1437" cy="131" r="0.90" fill="#ffffff"/><circle class="t0" cx="1516" cy="532" r="0.85" fill="#ffffff"/><circle class="t1" cx="187" cy="476" r="0.62" fill="#ffffff"/><circle class="t2" cx="1299" cy="450" r="1.65" fill="#ffffff"/><circle class="t0" cx="205" cy="252" r="1.60" fill="#ffffff"/><circle class="t1" cx="1528" cy="416" r="1.42" fill="#ffffff"/><circle class="t2" cx="1244" cy="534" r="1.63" fill="#ffffff"/><circle class="t0" cx="956" cy="76" r="0.66" fill="#ffffff"/><circle class="t1" cx="981" cy="171" r="1.41" fill="#ffffff"/><circle class="t2" cx="401" cy="170" r="1.47" fill="#ffffff"/><circle class="t0" cx="1007" cy="618" r="0.94" fill="#ffffff"/><circle class="t1" cx="1449" cy="40" r="1.57" fill="#ffffff"/><circle class="t2" cx="651" cy="602" r="1.52" fill="#ffffff"/>
+<path d="M0 860 L180 800 L360 840 L560 760 L760 830 L980 770 L1180 840 L1400 790 L1600 830 L1600 1000 L0 1000 Z" fill="#b9c4dc"/>
+</svg>
