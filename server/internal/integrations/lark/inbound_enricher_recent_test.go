@@ -539,8 +539,8 @@ func TestEnrichForwardedResolvesNames(t *testing.T) {
 
 // TestEnrichForwardedNamesFromMentions covers an app whose contact scope
 // hides the forwarded speakers: Contact resolves nobody, yet a speaker
-// someone @-mentioned is named from that mention's id (users by open_id,
-// apps by app_id). A speaker nobody mentioned keeps the positional label.
+// someone @-mentioned is named from that mention's open_id. A speaker
+// nobody mentioned keeps the positional label.
 func TestEnrichForwardedNamesFromMentions(t *testing.T) {
 	t.Parallel()
 	fake := newEnricherFake()
@@ -552,10 +552,7 @@ func TestEnrichForwardedNamesFromMentions(t *testing.T) {
 		{MessageID: "om_forward", MessageType: "merge_forward", SenderID: "ou_fwd", SenderType: "user", Content: `{"content":"Merged and Forwarded Message"}`},
 		mention(textMsg("c1", "ou_alice", "@_user_1 can you check?", "1000"), "@_user_1", "ou_bob", "Bob"),
 		textMsg("c2", "ou_bob", "on it", "2000"),
-		mention(textMsg("c3", "ou_bob", "@_user_1 please trace this", "3000"), "@_user_1", "cli_helper", "Helper"),
-		{MessageID: "c4", MessageType: "text", Content: `{"text":"tracing"}`, SenderID: "cli_helper", SenderType: "app", CreateTime: "4000"},
-		mention(textMsg("c5", "ou_carol", "@_user_1 thanks", "5000"), "@_user_1", "ou_alice", "Alice"),
-		{MessageID: "c6", MessageType: "text", Content: `{"text":"done"}`, SenderID: "cli_other", SenderType: "app", CreateTime: "6000"},
+		mention(textMsg("c3", "ou_carol", "@_user_1 thanks", "3000"), "@_user_1", "ou_alice", "Alice"),
 	}
 	in := InboundMessage{
 		MessageType:    "merge_forward",
@@ -568,16 +565,21 @@ func TestEnrichForwardedNamesFromMentions(t *testing.T) {
 
 	out := enrich(t, fake, in, InboundEnricherConfig{})
 
-	want := `<forwarded_messages count="6">
+	want := `<forwarded_messages count="3">
 [Alice]: @Bob can you check?
 [Bob]: on it
-[Bob]: @Helper please trace this
-[Helper (Bot)]: tracing
 [User 1]: @Alice thanks
-[Bot]: done
 </forwarded_messages>`
 	if out.Body != want {
 		t.Errorf("body\n got = %q\nwant = %q", out.Body, want)
+	}
+}
+
+func TestSpeakerLabelerAppIgnoresNameMap(t *testing.T) {
+	t.Parallel()
+	labeler := newSpeakerLabeler(map[string]string{"cli_bot": "Helper"})
+	if got := labeler.label(appMsg("om_bot", "tracing", "1000")); got != "Bot" {
+		t.Errorf("app speaker label = %q, want Bot", got)
 	}
 }
 

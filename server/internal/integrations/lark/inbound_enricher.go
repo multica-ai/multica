@@ -244,9 +244,9 @@ func (e *inboundEnricher) Enrich(ctx context.Context, msg InboundMessage, creds 
 	}
 	names := e.resolveNames(ctx, creds, ids)
 	// The Contact lookup only covers users inside the app's contact scope,
-	// which is often just a few people. Every @-mention in the fetched
-	// messages carries the mentioned user's (or app's) id and display name,
-	// so a speaker someone @-mentioned is still named exactly.
+	// which is often just a few people. Mentions in the fetched messages
+	// carry open_ids and display names, so user speakers can still be
+	// matched exactly when someone @-mentioned them.
 	names = addMentionNames(names, recentItems, quotedItems, forwardItems)
 
 	// Phase 3 — render broadest-to-narrowest with the complete name map.
@@ -348,10 +348,9 @@ func (e *inboundEnricher) resolveNames(ctx context.Context, creds InstallationCr
 	return names
 }
 
-// addMentionNames fills ids missing from names with the display names
-// carried by @-mentions in msgs, and returns the (possibly new) map. A REST
-// mention's id has the same type as a sender id from the same call
-// (open_id for users, app_id for apps), so speakers match by id equality.
+// addMentionNames fills missing open_ids with display names carried by
+// @-mentions in msgs, and returns the (possibly new) map. Mention open_ids
+// match user sender ids; app senders use app_ids and remain "Bot".
 // Contact-resolved names are never overwritten.
 func addMentionNames(names map[string]string, batches ...[]LarkMessage) map[string]string {
 	for _, msgs := range batches {
@@ -767,12 +766,11 @@ func parseLarkMillis(s string) int64 {
 // speakerLabeler assigns stable, human-readable labels to the senders
 // within one rendered block. Lark message items carry only a sender id
 // (no display name in the payload), so the enricher resolves real names
-// out of band via the Contact API and passes them in as a sender-id ->
-// name map. A sender present in that map is labeled with their real
-// name; one that is not (restricted contact scope, deactivated user,
-// name lookup failed) falls back to "User 1", "User 2", … in
-// first-appearance order. App senders are "<name> (Bot)" when the map
-// names their app_id, otherwise "Bot".
+// out of band via the Contact API or fetched @-mentions and passes them
+// in as an open_id -> name map. A user present in that map is labeled
+// with their real name; one that is not (restricted contact scope,
+// deactivated user, name lookup failed) falls back to "User 1", "User 2",
+// … in first-appearance order. App senders are always "Bot".
 type speakerLabeler struct {
 	names map[string]string // resolved open_id -> display name (may be nil)
 	seen  map[string]string
@@ -785,9 +783,6 @@ func newSpeakerLabeler(names map[string]string) *speakerLabeler {
 
 func (l *speakerLabeler) label(m LarkMessage) string {
 	if m.SenderType == "app" {
-		if name := l.names[m.SenderID]; name != "" {
-			return name + " (Bot)"
-		}
 		return "Bot"
 	}
 	key := m.SenderID
