@@ -126,3 +126,16 @@ describe("TriggerRow", () => {
     expect(screen.queryByRole("button", { name: "Edit schedule" })).not.toBeInTheDocument();
   });
 });
+
+it("shows a completed finite schedule without promising another run", () => {
+  // Derive exhaustion from durable facts even when an older server omits the flag.
+  renderRow(trigger({ execution_limit: 1, execution_count: 1 }));
+  expect(screen.getByText("Completed")).toBeInTheDocument();
+  expect(screen.queryByText(/Next:/)).not.toBeInTheDocument();
+});
+
+it("shows progress on a finite schedule with remaining occurrences", () => {
+  renderRow(trigger({ execution_limit: 3, execution_count: 1, exhausted: false }));
+  expect(screen.getByText("1 / 3 accepted")).toBeInTheDocument();
+  expect(screen.getByText(/Next:/)).toBeInTheDocument();
+});

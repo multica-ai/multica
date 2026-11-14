@@ -65,6 +65,12 @@ Cron has no seconds field, and timezones use IANA names like `Asia/Shanghai`. Be
 
 ![The autopilot editor: Runbook, schedule settings, and a preview of the next few runs](/images/docs/autopilot-schedule.webp)
 
+### Finite schedules
+
+Choose **Unlimited** (the default), **Once** (the next cron occurrence that is accepted), or **Custom count**. A schedule completes after it has created that many issues or queued that many runs. Failures after acceptance still count; admission skips and rolled-back creation do not. Retries of the same occurrence count once. Manual **Run now** and webhook triggers do not use this count.
+
+Editing the cron or limit preserves the accepted count. Raising the limit or selecting Unlimited allows future cron occurrences again; lowering it to or below the used count keeps the schedule completed. Enabling an exhausted trigger does not reset it.
+
 ## Run from a webhook
 
 After adding a webhook trigger, Multica generates a unique URL. Send it a JSON object or array to trigger the autopilot:
