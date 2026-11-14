@@ -329,7 +329,7 @@ function applyGlass(palette: Map<string, string>): GlassResult {
   if (!palette.has("--backdrop-color")) {
     return {
       error:
-        "--backdrop is set without --backdrop-color. Set it to the colour the backdrop averages to: the glass is measured on it, and it shows while the backdrop loads and while motion is reduced.",
+        "--backdrop is set without --backdrop-color. Set it to the colour the backdrop averages to: the glass is measured on it, and it shows while the backdrop loads.",
     };
   }
   const under = resolveColor(palette, "--backdrop-color");

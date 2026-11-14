@@ -156,7 +156,6 @@ paper/
 ```css
 .theme-dark {
   --backdrop: url(night.svg) center / cover no-repeat;
-  --backdrop-still: url(night-still.svg) center / cover no-repeat;
   --backdrop-color: #1e1e4a;
   --glass-opacity: 72%;
   --glass-blur: 18px;
@@ -166,11 +165,10 @@ paper/
 ```
 
 - `--backdrop`은 창 전체 아래에 그려지는 CSS `background` 값으로, 데스크톱과 웹 모두에 표시됩니다. 이미지는 테마 폴더 안에 있어야 하며, SVG 자체의 애니메이션은 재생됩니다.
-- 배경을 쓸 때는 `--backdrop-color`가 필수입니다. 로딩 중과 동작 줄이기가 켜져 있을 때 보이는 단색이며, `theme:check`가 유리의 대비를 잴 때 쓰는 바탕색이기도 합니다.
-- **동작 줄이기**(또는 시스템 설정)가 켜져 있는 동안에는 `--backdrop-still`이 배경을 대신합니다. 설정하지 않으면 `--backdrop-color`만 보입니다.
+- 배경을 쓸 때는 `--backdrop-color`가 필수입니다. 로딩 중에 보이는 단색이며, `theme:check`가 유리의 대비를 잴 때 쓰는 바탕색이기도 합니다.
 - `--glass-opacity`와 `--glass-blur`는 페이지 자체 색이 배경을 얼마나 덮는지, 페이지 뒤의 배경을 얼마나 흐리게 할지 정합니다. `--frame-glass-opacity`와 `--frame-glass-blur`는 레일, 창 도구 모음, 탭 바, 하단 바에 같은 역할을 합니다.
 
-`--app-shell`을 투명하게 하거나 `body`에 `background`를 지정하는 대신 이 변수들을 쓰세요. 그러면 동작 줄이기에서 정지 버전으로 바뀌고, 배경을 바꿔도 창이 깜빡이지 않습니다. [`examples/themes/night-sky`](https://github.com/multica-ai/multica/tree/main/examples/themes/night-sky)가 완전한 예입니다.
+`--app-shell`을 투명하게 하거나 `body`에 `background`를 지정하는 대신 이 변수들을 쓰세요. 그러면 배경을 바꿔도 창이 깜빡이지 않습니다. [`examples/themes/night-sky`](https://github.com/multica-ai/multica/tree/main/examples/themes/night-sky)가 완전한 예입니다.
 
 ## 선택자
 

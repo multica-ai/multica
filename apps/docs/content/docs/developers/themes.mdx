@@ -156,7 +156,6 @@ A theme can put a picture behind the app — a gradient, an image, or an animate
 ```css
 .theme-dark {
   --backdrop: url(night.svg) center / cover no-repeat;
-  --backdrop-still: url(night-still.svg) center / cover no-repeat;
   --backdrop-color: #1e1e4a;
   --glass-opacity: 72%;
   --glass-blur: 18px;
@@ -166,11 +165,10 @@ A theme can put a picture behind the app — a gradient, an image, or an animate
 ```
 
 - `--backdrop` is a CSS `background` value painted under the whole window, on desktop and on the web. Images must be in the theme folder; an SVG's own animation plays.
-- `--backdrop-color` is required with a backdrop: the solid color shown while it loads and while motion is reduced, and the color `theme:check` measures the glass on.
-- `--backdrop-still` replaces the backdrop while **Reduce motion**, or the system setting, is on. Without it, only `--backdrop-color` shows.
+- `--backdrop-color` is required with a backdrop: the solid color shown while it loads, and the color `theme:check` measures the glass on.
 - `--glass-opacity` and `--glass-blur` set how much of the page's own color covers the backdrop and how much the backdrop blurs behind it. `--frame-glass-opacity` and `--frame-glass-blur` do the same for the rail, window toolbar, tab bar, and bottom bar.
 
-Use these instead of a transparent `--app-shell` or a `background` on `body`: the app then swaps to the still version for reduced motion and changes backdrops without flashing the window. [`examples/themes/night-sky`](https://github.com/multica-ai/multica/tree/main/examples/themes/night-sky) is a complete example.
+Use these instead of a transparent `--app-shell` or a `background` on `body`: the app then changes backdrops without flashing the window. [`examples/themes/night-sky`](https://github.com/multica-ai/multica/tree/main/examples/themes/night-sky) is a complete example.
 
 ## Selectors
 

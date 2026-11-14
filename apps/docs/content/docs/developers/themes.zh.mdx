@@ -156,7 +156,6 @@ paper/
 ```css
 .theme-dark {
   --backdrop: url(night.svg) center / cover no-repeat;
-  --backdrop-still: url(night-still.svg) center / cover no-repeat;
   --backdrop-color: #1e1e4a;
   --glass-opacity: 72%;
   --glass-blur: 18px;
@@ -166,11 +165,10 @@ paper/
 ```
 
 - `--backdrop` 是一个 CSS `background` 值，铺在整个窗口下面，桌面应用和网页版都会显示。图片必须放在主题文件夹里；SVG 自带的动画会播放。
-- 设置背景时必须同时设置 `--backdrop-color`：加载期间和减少动态效果时显示的纯色，也是 `theme:check` 计算玻璃对比度时用的底色。
-- 开启 **减少动态效果**（或系统设置）时，`--backdrop-still` 会替代背景。不设置的话，此时只显示 `--backdrop-color`。
+- 设置背景时必须同时设置 `--backdrop-color`：加载期间显示的纯色，也是 `theme:check` 计算玻璃对比度时用的底色。
 - `--glass-opacity` 和 `--glass-blur` 决定页面自身颜色盖住背景的程度，以及背景在页面后面的模糊程度。`--frame-glass-opacity` 和 `--frame-glass-blur` 对侧栏、窗口工具栏、标签栏和底栏起同样的作用。
 
-请用这些变量，而不是把 `--app-shell` 设成透明或给 `body` 设置 `background`：这样应用会在减少动态效果时换成静态版本，切换背景时也不会让整个窗口闪烁。[`examples/themes/night-sky`](https://github.com/multica-ai/multica/tree/main/examples/themes/night-sky) 是一个完整示例。
+请用这些变量，而不是把 `--app-shell` 设成透明或给 `body` 设置 `background`：这样切换背景时不会让整个窗口闪烁。[`examples/themes/night-sky`](https://github.com/multica-ai/multica/tree/main/examples/themes/night-sky) 是一个完整示例。
 
 ## 选择器
 

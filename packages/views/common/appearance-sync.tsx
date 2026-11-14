@@ -16,7 +16,6 @@ import {
   themeFromFolderFiles,
   useAppearanceStore,
   useInstalledThemesStore,
-  useReducedMotion,
   useThemeFolderStatus,
   useThemeSafeMode,
   type ThemeFolderEntry,
@@ -156,13 +155,11 @@ function useThemeFolderSync() {
  * the sync to call once the theme's CSS is written; mode changes call it
  * themselves. The layer outlives each style rewrite and goes on unmount.
  */
-function useBackdrop(reduceMotion: boolean) {
+function useBackdrop() {
   const state = useRef<BackdropState>({ request: 0 });
-  const reduce = useRef(reduceMotion);
-  reduce.current = reduceMotion;
   const sync = useCallback(() => {
     const styles = getComputedStyle(document.documentElement);
-    syncBackdrop(state.current, reduce.current, (name) => styles.getPropertyValue(name));
+    syncBackdrop(state.current, (name) => styles.getPropertyValue(name));
   }, []);
   useLayoutEffect(() => {
     const observer = new MutationObserver(sync);
@@ -197,11 +194,10 @@ export function AppearanceSync() {
   const prefs = useAppearanceStore(useShallow(selectAppearance));
   const installed = useInstalledThemesStore((s) => s.themes);
   const safeMode = useThemeSafeMode((s) => s.active);
-  const reduceMotion = useReducedMotion();
   useModeClasses();
   useStateClasses();
   useThemeFolderSync();
-  const syncBackdropLayer = useBackdrop(reduceMotion);
+  const syncBackdropLayer = useBackdrop();
 
   useLayoutEffect(() => {
     const root = document.documentElement;
@@ -229,7 +225,7 @@ export function AppearanceSync() {
       document.getElementById(STYLE_ELEMENT_ID)?.remove();
       document.getElementById(THEME_CSS_ELEMENT_ID)?.remove();
     };
-  }, [prefs, installed, safeMode, reduceMotion, syncBackdropLayer]);
+  }, [prefs, installed, safeMode, syncBackdropLayer]);
 
   useEffect(() => {
     const onStorage = (event: StorageEvent) => {

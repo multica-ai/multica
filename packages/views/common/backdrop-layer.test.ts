@@ -10,7 +10,6 @@ import {
 
 const NIGHT = 'url("data:image/svg+xml;base64,bmlnaHQ=") center / cover no-repeat';
 const DAWN = 'url("data:image/svg+xml;base64,ZGF3bg==") center / cover no-repeat';
-const STILL = 'url("data:image/svg+xml;base64,c3RpbGw=") center / cover no-repeat';
 
 /** Image decodes that finish only when the test says so. */
 const decodes = new Map<string, () => void>();
@@ -54,7 +53,7 @@ describe("backdrop layer", () => {
   });
 
   it("paints the backdrop once it has decoded and marks <html>", async () => {
-    syncBackdrop(state, false, variables({ "--backdrop": NIGHT }));
+    syncBackdrop(state, variables({ "--backdrop": NIGHT }));
     expect(document.documentElement.hasAttribute(BACKDROP_ATTR)).toBe(true);
     expect(document.body.firstElementChild?.id).toBe(BACKDROP_ELEMENT_ID);
     expect(image()?.style.background).toBe("");
@@ -63,9 +62,9 @@ describe("backdrop layer", () => {
   });
 
   it("keeps the old backdrop on screen until the new one has decoded", async () => {
-    syncBackdrop(state, false, variables({ "--backdrop": NIGHT }));
+    syncBackdrop(state, variables({ "--backdrop": NIGHT }));
     await finishDecode(NIGHT);
-    syncBackdrop(state, false, variables({ "--backdrop": DAWN }));
+    syncBackdrop(state, variables({ "--backdrop": DAWN }));
     await settle();
     expect(image()?.style.background).toContain("bmlnaHQ=");
     await finishDecode(DAWN);
@@ -73,26 +72,16 @@ describe("backdrop layer", () => {
   });
 
   it("drops a decode that a later change overtook", async () => {
-    syncBackdrop(state, false, variables({ "--backdrop": NIGHT }));
-    syncBackdrop(state, false, variables({ "--backdrop": DAWN }));
+    syncBackdrop(state, variables({ "--backdrop": NIGHT }));
+    syncBackdrop(state, variables({ "--backdrop": DAWN }));
     await finishDecode(DAWN);
     await finishDecode(NIGHT);
     expect(image()?.style.background).toContain("ZGF3bg==");
   });
 
-  it("shows the still backdrop, or only the colour, while motion is reduced", async () => {
-    syncBackdrop(state, true, variables({ "--backdrop": NIGHT, "--backdrop-still": STILL }));
-    await finishDecode(STILL);
-    expect(image()?.style.background).toContain("c3RpbGw=");
-    syncBackdrop(state, true, variables({ "--backdrop": NIGHT }));
-    await settle();
-    expect(image()?.style.background).toBe("none");
-    expect(document.documentElement.hasAttribute(BACKDROP_ATTR)).toBe(true);
-  });
-
   it("removes the layer when the mode has no backdrop", () => {
-    syncBackdrop(state, false, variables({ "--backdrop": NIGHT }));
-    syncBackdrop(state, false, variables({ "--backdrop": " none" }));
+    syncBackdrop(state, variables({ "--backdrop": NIGHT }));
+    syncBackdrop(state, variables({ "--backdrop": " none" }));
     expect(document.getElementById(BACKDROP_ELEMENT_ID)).toBeNull();
     expect(document.documentElement.hasAttribute(BACKDROP_ATTR)).toBe(false);
   });

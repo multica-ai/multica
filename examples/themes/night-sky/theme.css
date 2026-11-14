@@ -3,7 +3,6 @@
 
 .theme-light {
   --backdrop: url(dawn.svg) center / cover no-repeat;
-  --backdrop-still: url(dawn-still.svg) center / cover no-repeat;
   --backdrop-color: #d6d5e4;
   --frame-glass-opacity: 0%;
   --frame-glass-blur: 0px;
@@ -16,7 +15,6 @@
 
 .theme-dark {
   --backdrop: url(night.svg) center / cover no-repeat;
-  --backdrop-still: url(night-still.svg) center / cover no-repeat;
   --backdrop-color: #1e1e4a;
   --frame-glass-opacity: 0%;
   --frame-glass-blur: 0px;

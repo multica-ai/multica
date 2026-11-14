@@ -206,7 +206,6 @@ opacity the theme sets, over the backdrop.
 ```css
 .theme-dark {
   --backdrop: url(night.svg) center / cover no-repeat;
-  --backdrop-still: url(night-still.svg) center / cover no-repeat;
   --backdrop-color: #1e1e4a;
   --glass-opacity: 72%;
   --glass-blur: 18px;
@@ -218,16 +217,14 @@ opacity the theme sets, over the backdrop.
 | Variable | What it does |
 | --- | --- |
 | `--backdrop` | The layers behind the window, as `background` takes them. Images must be in the theme folder. An SVG's own CSS animation plays. |
-| `--backdrop-color` | Required with a backdrop. The solid colour under it: shown while the images load and while motion is reduced, and what `theme:check` measures the glass on. Use the colour the backdrop averages to. |
-| `--backdrop-still` | What shows instead while motion is reduced (Multica's **Reduce motion**, or the system setting). Without it, only `--backdrop-color` shows then: the app cannot pause an animation inside an SVG image. |
+| `--backdrop-color` | Required with a backdrop. The solid colour under it: shown while the images load, and what `theme:check` measures the glass on. Use the colour the backdrop averages to. |
 | `--glass-opacity` | How much of `--page-canvas` (and `--background`) covers the backdrop in the page: `100%` is solid. |
 | `--glass-blur` | How much the backdrop is blurred behind the page. |
 | `--frame-glass-opacity`, `--frame-glass-blur` | The same for the frame. They default to the page's values; `0%` and `0px` leave the backdrop clear around the page. |
 
 Use these variables instead of making `--app-shell` transparent or setting a
 `background` on `body`: the app then knows there is a backdrop, keeps the
-frame and the page distinct, swaps to the still version for reduced motion,
-and decodes a new backdrop before it replaces the old one, so switching
+frame and the page distinct, and decodes a new backdrop before it replaces the old one, so switching
 themes or saving `theme.css` never flashes the window. Option sliders can
 set the glass directly: an option with the id `glass-opacity` sets
 `--glass-opacity`.
@@ -239,7 +236,7 @@ set the glass directly: an option with the id `glass-opacity` sets
 so look at the brightest and darkest parts of the backdrop too, and raise
 the glass opacity or blur where the text gets hard to read.
 `examples/themes/night-sky` in the repository is a complete example: an
-animated sky in each mode, still versions, and the glass on two sliders.
+animated sky in each mode and the glass on two sliders.
 
 ## Selectors
 
@@ -782,8 +779,7 @@ and dark differ, both defaults are given.
 | Variable | Default (light / dark) | Use |
 | --- | --- | --- |
 | `--backdrop` | `none` | What the window shows behind the frame and the page, as `background` layers: colours, gradients and images in the theme folder, such as `url(sky.svg) center / cover no-repeat`. An SVG's own CSS animation plays. It shows through the glass below. |
-| `--backdrop-still` | `none` | The backdrop while motion is reduced, in Multica or in the system. Unset, only `backdrop-color` shows then. |
-| `--backdrop-color` | `var(--app-shell)` | Solid colour under the backdrop: shown while it loads and while motion is reduced, and the colour `theme:check` measures the glass on. Required with a backdrop; use the colour the backdrop averages to. |
+| `--backdrop-color` | `var(--app-shell)` | Solid colour under the backdrop: shown while it loads, and the colour `theme:check` measures the glass on. Required with a backdrop; use the colour the backdrop averages to. |
 | `--glass-opacity` | `100%` | How much of the page's own colour covers the backdrop: `100%` is solid, lower lets the backdrop through. Only applies with a backdrop. |
 | `--glass-blur` | `0px` | Blur of the backdrop seen through the page. |
 | `--frame-glass-opacity` | `var(--glass-opacity, 100%)` | How much of `app-shell` covers the backdrop in the frame: rail, toolbar, tab bar and bottom bar. |

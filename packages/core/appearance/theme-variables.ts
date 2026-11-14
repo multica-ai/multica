@@ -72,7 +72,6 @@ const DEFAULT_TEXT: Record<string, string> = {
   ...Object.fromEntries(PALETTE_SLOTS.map((slot) => [`palette-${slot}`, "the colour as picked"])),
   "label-chip-color": "dark or light, whichever reads on the picked colour",
   backdrop: "`none`",
-  "backdrop-still": "`none`",
 };
 
 function section(name: ThemeVariableSection, entries: readonly Entry[]): ThemeVariable[] {
@@ -270,8 +269,7 @@ const NAVIGATION: Entry[] = [
 
 const BACKDROP: Entry[] = [
   ["backdrop", "What the window shows behind the frame and the page, as `background` layers: colours, gradients and images in the theme folder, such as `url(sky.svg) center / cover no-repeat`. An SVG's own CSS animation plays. It shows through the glass below."],
-  ["backdrop-still", "The backdrop while motion is reduced, in Multica or in the system. Unset, only `backdrop-color` shows then."],
-  ["backdrop-color", "Solid colour under the backdrop: shown while it loads and while motion is reduced, and the colour `theme:check` measures the glass on. Required with a backdrop; use the colour the backdrop averages to.", "var(--app-shell)"],
+  ["backdrop-color", "Solid colour under the backdrop: shown while it loads, and the colour `theme:check` measures the glass on. Required with a backdrop; use the colour the backdrop averages to.", "var(--app-shell)"],
   ["glass-opacity", "How much of the page's own colour covers the backdrop: `100%` is solid, lower lets the backdrop through. Only applies with a backdrop.", "100%"],
   ["glass-blur", "Blur of the backdrop seen through the page.", "0px"],
   ["frame-glass-opacity", "How much of `app-shell` covers the backdrop in the frame: rail, toolbar, tab bar and bottom bar.", "var(--glass-opacity, 100%)"],

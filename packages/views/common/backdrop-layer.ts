@@ -6,10 +6,7 @@
  *
  * The image is set inline from the computed value, not through `var()`, so a
  * new one can be decoded before it replaces the old: switching themes or
- * saving a theme file never clears the window to repaint it. With motion
- * reduced the layer shows `--backdrop-still`, or only `--backdrop-color`,
- * because an animated SVG keeps playing whatever the document's own
- * animation settings say.
+ * saving a theme file never clears the window to repaint it.
  */
 
 export const BACKDROP_ELEMENT_ID = "multica-backdrop";
@@ -38,19 +35,13 @@ function decode(url: string): Promise<void> {
  * Brings the layer and `data-backdrop` in line with the variables `read`
  * returns, as computed on <html>.
  */
-export function syncBackdrop(
-  state: BackdropState,
-  reduceMotion: boolean,
-  read: (name: string) => string,
-): void {
-  const backdrop = read("--backdrop").trim();
-  if (!isSet(backdrop)) {
+export function syncBackdrop(state: BackdropState, read: (name: string) => string): void {
+  const value = read("--backdrop").trim();
+  if (!isSet(value)) {
     removeBackdrop(state);
     return;
   }
   document.documentElement.setAttribute(BACKDROP_ATTR, "");
-  const still = read("--backdrop-still").trim();
-  const value = reduceMotion ? (isSet(still) ? still : "none") : backdrop;
 
   let layer = document.getElementById(BACKDROP_ELEMENT_ID);
   if (!layer) {
