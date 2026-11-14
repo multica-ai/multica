@@ -287,10 +287,10 @@ function WorkflowUsage({ name, projects, isDefault }: { name: string; projects: 
     [projects],
   );
 
-  if (sorted.length === 0) {
+  if (sorted.length === 0 && !isDefault) {
     return (
       <span className="ml-auto shrink-0 text-label text-muted-foreground">
-        {isDefault ? t(($) => $.workflows.settings.usage_default_none) : t(($) => $.workflows.settings.no_projects)}
+        {t(($) => $.workflows.settings.no_projects)}
       </span>
     );
   }
@@ -300,7 +300,9 @@ function WorkflowUsage({ name, projects, isDefault }: { name: string; projects: 
     ? sorted.filter((p) => p.title.toLowerCase().includes(query) || matchesPinyin(p.title, query))
     : sorted;
   const summary = isDefault
-    ? t(($) => $.workflows.settings.usage_default, { count: sorted.length })
+    ? sorted.length === 0
+      ? t(($) => $.workflows.settings.usage_default_none)
+      : t(($) => $.workflows.settings.usage_default, { count: sorted.length })
     : sorted.length === 1
       ? sorted[0]!.title
       : t(($) => $.workflows.settings.projects, { count: sorted.length });
@@ -343,26 +345,28 @@ function WorkflowUsage({ name, projects, isDefault }: { name: string; projects: 
             />
           </div>
         )}
-        <div className="max-h-72 overflow-y-auto p-1">
-          {visible.length === 0 ? (
-            <p className="px-2 py-3 text-center text-caption text-muted-foreground">
-              {t(($) => $.workflows.settings.no_matching_projects)}
-            </p>
-          ) : (
-            visible.map((project) => (
-              <AppLink
-                key={project.id}
-                href={paths.projectDetail(project.id)}
-                onClick={() => setOpen(false)}
-                className="flex h-8 items-center gap-2 rounded-md px-2 text-label transition-colors hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
-              >
-                <ProjectIcon project={project} size="sm" />
-                <span className="min-w-0 flex-1 truncate">{project.title}</span>
-                <span className="shrink-0 text-caption tabular-nums text-muted-foreground">{project.issue_count}</span>
-              </AppLink>
-            ))
-          )}
-        </div>
+        {sorted.length > 0 && (
+          <div className="max-h-72 overflow-y-auto p-1">
+            {visible.length === 0 ? (
+              <p className="px-2 py-3 text-center text-caption text-muted-foreground">
+                {t(($) => $.workflows.settings.no_matching_projects)}
+              </p>
+            ) : (
+              visible.map((project) => (
+                <AppLink
+                  key={project.id}
+                  href={paths.projectDetail(project.id)}
+                  onClick={() => setOpen(false)}
+                  className="flex h-8 items-center gap-2 rounded-md px-2 text-label transition-colors hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
+                >
+                  <ProjectIcon project={project} size="sm" />
+                  <span className="min-w-0 flex-1 truncate">{project.title}</span>
+                  <span className="shrink-0 text-caption tabular-nums text-muted-foreground">{project.issue_count}</span>
+                </AppLink>
+              ))
+            )}
+          </div>
+        )}
         {isDefault && (
           <p className="flex items-center gap-2 border-t border-surface-border px-3 py-2.5 text-caption text-muted-foreground">
             <Info aria-hidden className="size-3.5 shrink-0" />
