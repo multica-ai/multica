@@ -145,6 +145,19 @@ multica issue comment add MUL-123 --content-file note.md --steer-active
 
 複数の PR を順番に作成するタスクでは、`issue create --title "..." --pr-auto-complete off` または `issue update <id> --pr-auto-complete off` で、マージ時も状態を維持できます。`--pr-auto-complete on` はワークスペースのルールを復元し、次の PR イベントから有効になります。`issue pull-requests <id>` は、PR が未関連付けでもタスクとワークスペースの設定、移行先の状態、判定結果を表示します。対応サーバーは作成トランザクション内で設定を保存し、旧サーバーには追加の PUT を送ります。失敗時は作成済み ID と再試行用の update コマンドが表示されるため、create を繰り返さないでください。
 
+### タスクを削除する
+
+1 件のタスクを削除するか、複数のタスク番号または完全な UUID を渡して一括削除します。
+
+```bash
+multica issue delete MUL-123
+multica issue delete MUL-123 MUL-124 --yes --output json
+```
+
+削除は元に戻せません。コメントと添付ファイルが削除され、進行中の実行はキャンセルされ、関連する自動化の実行は失敗扱いになります。削除したタスクを参照する重複マークは解除されます。サブタスクは親との関連が外れますが、削除されません。確認の前にすべての ID を解決し、存在しないタスクやアクセスできないタスクがあれば、削除せずにコマンドを中止します。
+
+コマンドは確認を求めます。`--yes` で確認を省略できます。指定しない場合、確認に答えられない非対話実行は、何も削除せずにエラーで終了します。
+
 ### タイムライン
 
 `issue get` はタスクの現在の状態を返します。`issue timeline` はステータス、優先度、担当者、タイトル、日付の変更と実行結果を時系列に並べ、コメントも混ぜて表示します。「いつ in_review に移ったか」「今のステータスにどれだけ留まっているか」を調べるときに使います。
@@ -265,7 +278,7 @@ multica runtime profile create --display-name "社内 Claude ラッパー" \
   --command-name ccms --runtime-type claude
 ```
 
-`daemon autostart` は現在のプロファイルをログイン時に起動するよう登録します。プラットフォームごとの違いは[ログイン時の自動起動](/daemon-runtimes#autostart)を参照してください。`runtime usage` は既定で 90 日分を集計し、`--days` は最大 365 です。`runtime update` はそのコンピューターのデーモンに CLI を指定のバージョンへ更新させ、`--wait` を付けると更新が終わるまで待ちます。`runtime profile create` は互換ツールを `--runtime-type` で指定します（古い `--protocol-family` も使えます）。固定引数は今のところ Web アプリでしか設定できません。
+`daemon autostart` は現在のプロファイルをログイン時に起動するよう登録します。プラットフォームごとの違いは[ログイン時の自動起動](/daemon-runtimes#autostart)を参照してください。`runtime usage` は既定で 90 日分を集計し、`--days` は最大 365 です。`runtime update` はそのコンピューターのデーモンに CLI を指定のバージョンへ更新させ、`--wait` を付けると更新の完了を待ちます。更新の失敗、更新のタイムアウト、待機自体のタイムアウトでは、終了コードが非ゼロになります。`runtime profile create` は互換ツールを `--runtime-type` で指定します（古い `--protocol-family` も使えます）。固定引数は今のところ Web アプリでしか設定できません。
 
 アクティブなエージェントがまだ紐付いているランタイムの削除は、デフォルトで拒否されます。`multica runtime delete <id> --cascade` は、それらのエージェントをランタイムから解除して設定と履歴を保持し、アクティブな実行をキャンセルします。
 
@@ -374,6 +387,7 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 | | `get <id>` | 単一のタスクを表示 | `--resolve-properties`（JSON のみ；保存された id に加えてプロパティ名・選択肢名・メンバー名を返します） |
 | | `create` | タスクを作成 | `--title`（必須）、`--description` / `--description-stdin` / `--description-file`、`--pr-auto-complete on/off`、`--status`、`--priority`、`--assignee`、`--parent`、`--stage`、`--project`、`--start-date`、`--due-date`、`--attachment`（繰り返し可）、`--property`（繰り返し可）、`--allow-duplicate`（同じタイトルの未完了タスクがあっても作成） |
 | | `update <id>` | タスクのフィールドを更新 | `create` と同系のフィールドに加え `--position`、`--no-start`、`--duplicate-of` |
+| | `delete <id>...` | 1 件以上のタスクを完全に削除 | `--yes` で確認を省略。タスク番号または完全な UUID を指定 |
 | | `assign <id>` | 割り当てまたは割り当て解除 | `--to`（メンバー、エージェント、スクワッドを名前であいまいマッチ）、`--to-id`、`--unassign`、`--no-start` |
 | | `status <id> <status>` | ステータスを変更 | `--no-start`、`--duplicate-of` |
 | | `reorder <id>` | カラム内で移動 | |
@@ -397,7 +411,7 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 | | `resource list/add/update/remove` | プロジェクトの追加リソースを管理 | `--type`、`--url`、`--default-branch-hint`、`--ref`、`--local-path`、`--daemon-id`、`--execution-mode`（ローカルディレクトリの `in_place` / `worktree`） |
 | `label` | `list/get/create/update/delete` | ワークスペースのラベルを管理 | `list`: `--resource-type`（`issue` または `skill`）、`--full-id`；`create`: `--name`、`--color`、`--resource-type`（`issue` または `skill`）、`--description` |
 | `property` | `list/get/create/update/archive/unarchive` | ワークスペースのカスタムプロパティを管理 | `create`: `--name`、`--type`（`text`、`number`、`select`、`multi_select`、`date`、`checkbox`、`url`、`actor`、`multi_actor`、`multi_text`、`multi_url`）、`--option`（繰り返し可、select 系のみ）；`list`: `--include-archived`；タイプは作成後に変更できません |
-| `view` | `list/get/issues` | 開けるビュー（自分のものとワークスペースで共有されたもの）を読み取り、`issues` でビューに表示されるタスクを保存された並び順で一覧（保存されたフィルターはすべてサーバー側で適用）。エージェントの実行中は、ビューと「自分」の条件はランタイム所有者のものになります | `<view>` は ID、ID プレフィックス、または完全な名前を受け付けます；`list`: `--scope`（`workspace`、`my`、`project`）、`--project`、`--full-id`；`issues`: `--limit`（最大 100）、`--cursor`（前のページの `next_cursor`）、`--today`（相対的な期日フィルターの基準日、既定は今日）、`--fields`（JSON のみ）、`--full-id` |
+| `view` | `list/get/issues/create/update/duplicate/delete` | 開けるビュー（自分のものとワークスペースで共有されたもの）を読み取り、`issues` でビューに表示されるタスクを保存された並び順で一覧（保存されたフィルターはすべてサーバー側で適用）。`create`・`update`・`duplicate`・`delete` はアプリと同じ形式でビューを書き込むため、サイドバーに表示され、アプリで引き続き編集できます。`update` は指定した項目だけを変更し、読み取り後に他の人が変更したビューは上書きせずに拒否します。変更・削除できるのは所有者（共有ビューはワークスペースのオーナーと管理者も）だけです。エージェントの実行中は、ビューと「自分」の条件はランタイム所有者のものになります | `<view>` は ID、ID プレフィックス、または完全な名前を受け付けます；`list`: `--scope`（`workspace`、`my`、`project`）、`--project`、`--full-id`；`issues`: `--limit`（最大 100）、`--cursor`（前のページの `next_cursor`）、`--today`（相対的な期日フィルターの基準日、既定は今日）、`--fields`（JSON のみ）、`--full-id`；`create`: `--name`、`--scope`、`--project`、`--scope-variant`、`--visibility`；`create/update/duplicate` のフィルター: `--status`、`--priority`、`--assignee`、`--creator`、`--label`、`--project-filter`、`--property "Name=Value"`、`--negate <filter>` など；表示: `--view-mode`、`--grouping`、`--sort`、`--direction`、`--show-sub-issues` など；`--definition-file`、`--clear-filters`、`--dry-run` |
 | `agent` | `list/get/create/update/archive/restore` | エージェントを管理 | `--name`、`--runtime-id`（`create` では必須）、`--instructions`、`--conversation-starters`、`--model`、`--thinking-level`、`--custom-env` / `--custom-env-file` / `--custom-env-stdin`（`create` のみ）、`--custom-args`、`--mcp-config` / `--mcp-config-file` / `--mcp-config-stdin`、`--permission-mode`、`--visibility`（古い書き方）、`--max-concurrent-tasks` |
 | | `copy <agent-id>` | 新しいエージェントとして複製。元のエージェントは変更されません | `--name`（デフォルトは元の名前 + ` (copy)`）、`--runtime-id`（別のランタイムへ複製する場合は `--model` の同時指定が必須）、`--no-skills`；`custom_env`、`mcp_config`、`runtime_config` などの機密設定は複製されないため、`create` と同じフラグで再指定してください |
 | | `tasks <id>` | エージェントの実行を表示 | |

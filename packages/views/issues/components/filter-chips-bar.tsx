@@ -53,6 +53,7 @@ import { PriorityIcon } from "./priority-icon";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useProjectStatusLabels } from "../../projects/components/labels";
 import { useT } from "../../i18n";
+import { paletteColor } from "@multica/core/appearance";
 
 /** One rendered chip: a dimension with its selected values summarised. */
 export interface FilterChip {
@@ -194,7 +195,7 @@ function DotStack({ colors }: { colors: string[] }) {
         <span
           key={i}
           className="size-2.5 rounded-full"
-          style={{ backgroundColor: color }}
+          style={{ backgroundColor: paletteColor(color) }}
         />
       ))}
     </IconStack>

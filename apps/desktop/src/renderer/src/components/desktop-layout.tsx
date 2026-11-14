@@ -104,13 +104,14 @@ function MainTopBar({ railMounted }: { railMounted: boolean }) {
       >
         <TabBar />
       </div>
-      {/* pr-6 is the canvas's mr-2 plus the page header's PAGE_GUTTER (px-4),
-          and gap-1 is the page header's action gap, so each icon here stands
-          on the same column as a trailing icon of the page header below. */}
+      {/* The right padding is the canvas's mr-2 plus the page header's
+          PAGE_GUTTER, and gap-1 is the page header's action gap, so each icon
+          here stands on the same column as a trailing icon of the page header
+          below. */}
       {railMounted && (
         <div
           data-slot="title-bar-actions"
-          className="relative z-10 ml-auto flex shrink-0 items-center gap-1 pr-6"
+          className="relative z-10 ml-auto flex shrink-0 items-center gap-1 pr-[calc(var(--page-padding-x,var(--space-md,1rem))+0.5rem)]"
           style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
         >
           <NewIssueButton className={TITLE_BAR_ACTION_CLASS} tooltipSide="bottom" />
@@ -261,8 +262,10 @@ export function DesktopShell() {
           IndexRedirect, not a route. */}
       <WorkspaceSlugProvider slug={slug}>
         <DesktopInboxBridge />
-        <div className="flex h-screen bg-app-shell">
-          {/* bg-app-shell is the wrapper's non-inset fill, so it also owns the
+        <div className="flex h-screen">
+          {/* The wrapper alone paints the frame: a second fill under it would
+              double the frame's glass over a theme's backdrop.
+              bg-app-shell is the wrapper's non-inset fill, so it also owns the
               non-inset half of --sidebar-wrapper-fill. sidebar.tsx supplies the
               inset half of both. Anything that has to paint an opaque layer
               over this wrapper (the tab flares) reads the variable rather than

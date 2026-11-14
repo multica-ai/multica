@@ -743,6 +743,12 @@ func writeSubIssueCreation(b *strings.Builder, ctx TaskContextForEnv) {
 // import; the brief's rendered-output tests pin the two together.
 const platformSkillName = "multica-platform"
 
+// platformSkillDomains is the domain list from the platform skill's
+// description, repeated in the brief's recall hint for agents that never read
+// the skill listing. TestPlatformSkillDomainsMatchDescription keeps it equal to
+// the description, so a new reference cannot ship without reaching the brief.
+const platformSkillDomains = "issue and PR contracts, sub-issues, saved views, charts and files in comments, mentions, agents, squads, autopilots, projects, runtimes, local environments, skill import, themes"
+
 // subIssueContractsSkill returns how the brief should refer to the skill
 // carrying the sub-issue contracts, and whether any such skill is installed.
 //
@@ -796,7 +802,7 @@ func writeSkills(b *strings.Builder, provider string, ctx TaskContextForEnv) {
 	// what keeps that consolidation from costing recall, and it must therefore
 	// name the skill that actually holds those contracts.
 	if platformSlug != "" {
-		b.WriteString("For a Multica platform action this brief does not fully cover — issue and PR contracts, mentions, agents, squads, autopilots, projects, runtimes, local environments, skill import — load the `" + platformSlug + "` skill and open the reference(s) its routing table names for the domains your task touches.\n\n")
+		b.WriteString("For a Multica platform action this brief does not fully cover — " + platformSkillDomains + " — load the `" + platformSlug + "` skill and open the reference(s) its routing table names for the domains your task touches.\n\n")
 	}
 }
 
@@ -822,7 +828,7 @@ func writeTraecliSkills(b *strings.Builder, skills []SkillContextForEnv) {
 	}
 	b.WriteString("\n")
 	if platformSlug != "" {
-		b.WriteString("For a Multica platform action this brief does not fully cover — issue and PR contracts, mentions, agents, squads, autopilots, projects, runtimes, local environments, skill import — read `" + skillPath(platformSlug) + "` and open the reference(s) its routing table names for the domains your task touches.\n\n")
+		b.WriteString("For a Multica platform action this brief does not fully cover — " + platformSkillDomains + " — read `" + skillPath(platformSlug) + "` and open the reference(s) its routing table names for the domains your task touches.\n\n")
 	}
 }
 

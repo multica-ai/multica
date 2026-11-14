@@ -91,6 +91,8 @@ export function RootView({ model, rawQuery }: { model: RootModel; rawQuery: stri
             const PageIcon = routeIconForPath(p[page.key]());
             return (
               <CommandPrimitive.Item
+                data-mc="palette-item"
+                data-type="page"
                 key={page.key}
                 value={`page:${page.key}`}
                 onSelect={() => palette.navigate(p[page.key]())}
@@ -323,6 +325,8 @@ export function RootView({ model, rawQuery }: { model: RootModel; rawQuery: stri
         <PaletteGroup key="workspaces" heading={t(($) => $.groups.workspaces)}>
           {objects.workspaces.map(({ item: ws }) => (
             <CommandPrimitive.Item
+              data-mc="palette-item"
+              data-type="workspace"
               key={ws.id}
               value={`workspace:${ws.id}`}
               // Web lands on the target's Issues; the desktop adapter reads
@@ -409,6 +413,8 @@ function HandToAgentRow({ seed, disabled }: { seed: HandToAgentSeed; disabled: b
   return (
     <div className="px-2 py-1">
       <CommandPrimitive.Item
+        data-mc="palette-item"
+        data-type="command"
         // cmdk picks a default selection only when an item mounts, so the row
         // remounts on enable to become the selection when nothing else matched.
         key={disabled ? "disabled" : "enabled"}
@@ -559,6 +565,8 @@ function BestMatchGroups({
               <AssignActionRow key={action.id} label={action.label} target={target} best={best} query={query} />
             ) : (
               <CommandPrimitive.Item
+                data-mc="palette-item"
+                data-type="command"
                 key={action.id}
                 value={`best-action:${action.id}`}
                 onSelect={action.run}
@@ -592,6 +600,8 @@ function AssignActionRow({
   const writer = useIssueTargetWriter(target);
   return (
     <CommandPrimitive.Item
+      data-mc="palette-item"
+      data-type="command"
       value="best-action:assign"
       onSelect={() => {
         palette.close();

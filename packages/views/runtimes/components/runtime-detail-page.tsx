@@ -224,6 +224,7 @@ export function RuntimeDetailPage({
   if (isLoading) {
     return (
       <ObjectPage
+        type="runtime"
         layoutId={LAYOUT_ID}
         segments={segments}
         leaf={<Skeleton className="h-4 w-40" />}
@@ -237,6 +238,7 @@ export function RuntimeDetailPage({
   if (!machine) {
     return (
       <ObjectPage
+        type="runtime"
         layoutId={LAYOUT_ID}
         segments={segments}
         leaf={
@@ -280,6 +282,7 @@ export function RuntimeDetailPage({
   return (
     <>
       <ObjectPage
+        type="runtime"
         layoutId={LAYOUT_ID}
         segments={segments}
         leaf={

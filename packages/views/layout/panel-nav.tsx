@@ -102,7 +102,7 @@ export function PanelSection({
   const contentId = useId();
   const collapsible = !!onCollapsedChange;
   return (
-    <section aria-labelledby={id} className="mt-5">
+    <section data-mc="panel-section" aria-labelledby={id} className="mt-5">
       <div className="group/section flex h-7 items-center gap-1 pl-3 pr-1">
         <h3 id={id} className="min-w-0 flex-1 truncate text-caption font-medium text-muted-foreground">
           {collapsible ? (
@@ -148,7 +148,7 @@ export function PanelList({
 }
 
 export const PANEL_ROW_CLASS =
-  "flex min-h-[var(--nav-item-height,2rem)] w-full items-center gap-2.5 rounded-nav-item px-3 py-1.5 text-left text-body transition-colors outline-none focus-visible:outline-2 focus-visible:outline-ring";
+  "flex min-h-[var(--nav-item-height,2rem)] w-full items-center gap-2.5 rounded-nav-item px-3 py-[var(--nav-item-padding-y,0.375rem)] text-left text-body transition-colors outline-none focus-visible:outline-2 focus-visible:outline-ring";
 
 /** The `nav-item` theme anchor; every row with an active state carries it. */
 export function panelRowAnchor(active: boolean) {

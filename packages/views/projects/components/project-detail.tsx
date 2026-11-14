@@ -549,7 +549,14 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
 
   return (
     <>
-    <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
+    <ResizablePanelGroup
+      data-mc="object-page"
+      data-type="project"
+      orientation="horizontal"
+      className="flex-1 min-h-0"
+      defaultLayout={defaultLayout}
+      onLayoutChanged={onLayoutChanged}
+    >
       <ResizablePanel id="content" minSize="50%">
         <div ref={rightSidebarShortcutTargetRef} className="flex h-full flex-col">
           <IssueSurface

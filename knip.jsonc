@@ -53,6 +53,10 @@
 
     "apps/docs": {},
 
+    "apps/storybook": {
+      "entry": ["eslint.config.mjs"]
+    },
+
     // The three shared packages export raw .ts/.tsx compiled by their
     // consumers (CLAUDE.md "Project Shape"), so `entry` names only the config
     // files knip would otherwise miss and the apps supply the real entry

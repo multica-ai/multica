@@ -14,6 +14,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { ModalRegistry } from "@multica/views/modals/registry";
 import { WorkspacePresencePrefetch } from "@multica/views/layout";
+import { VoiceWorkspaceWords } from "@multica/views/voice";
 import { DragStrip, WindowTitleBarProvider } from "@multica/views/platform";
 import type { IssueWindowContext } from "../../../shared/issue-window";
 import { DesktopAuthRecoveryPage } from "../pages/auth-recovery";
@@ -82,6 +83,7 @@ function IssueWindowRoute() {
     <WorkspaceSlugProvider slug={workspaceSlug}>
       <IssueWindowNavigationProvider>
         <WorkspacePresencePrefetch />
+        <VoiceWorkspaceWords />
         <IssueWindowFrame pageOwnsTitleBar>
           <IssueDetailPage onDelete={() => window.desktopAPI.closeWindow()} />
         </IssueWindowFrame>
