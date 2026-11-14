@@ -22,9 +22,20 @@ WHERE id = $1 AND user_id = $2
 RETURNING token_hash;
 
 -- name: UpdatePersonalAccessTokenLastUsed :exec
+-- Callers run this on a PAT cache miss, and only when the stamp they just
+-- read is stale (auth.PATLastUsedStale); without Redis every request
+-- misses. The guard repeats that check against now() so concurrent
+-- callers that read the same stale stamp write once: each waiter
+-- re-checks the row the first writer committed and skips it. A stamp
+-- more than a minute ahead (the clock stepped back) is rewritten; the
+-- minute of slack stops concurrent callers, whose now() is their own
+-- statement start, from re-stamping each other.
 UPDATE personal_access_token
 SET last_used_at = now()
-WHERE id = $1;
+WHERE id = $1
+  AND (last_used_at IS NULL
+       OR last_used_at < now() - interval '1 minute'
+       OR last_used_at > now() + interval '1 minute');
 
 -- name: ExtendPersonalAccessTokenExpiry :one
 -- In-place renew: only bumps expires_at when the token is still valid

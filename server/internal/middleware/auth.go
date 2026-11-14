@@ -250,9 +250,13 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 				patCache.Set(r.Context(), hash, userID, auth.TTLForExpiry(time.Now(), expiresAt))
 
 				// Cache miss = TTL expired (or first use after revoke /
-				// process restart). Refresh last_used_at; subsequent hits
-				// within the TTL window skip this write entirely.
-				go queries.UpdatePersonalAccessTokenLastUsed(context.Background(), pat.ID)
+				// process restart). Refresh a stale last_used_at;
+				// subsequent hits within the TTL window skip this write
+				// entirely. Without Redis every request misses, so a
+				// fresh stamp must not cost a statement.
+				if auth.PATLastUsedStale(time.Now(), pat.LastUsedAt.Time) {
+					go queries.UpdatePersonalAccessTokenLastUsed(context.Background(), pat.ID)
+				}
 
 				next.ServeHTTP(w, r)
 				return

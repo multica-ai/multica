@@ -168,3 +168,25 @@ func TestPATCache_Set_RespectsClampedTTL(t *testing.T) {
 		t.Fatal("negative-TTL Set must not cache")
 	}
 }
+
+func TestPATLastUsedStale(t *testing.T) {
+	now := time.Date(2026, 4, 29, 12, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name       string
+		lastUsedAt time.Time
+		want       bool
+	}{
+		{"never used", time.Time{}, true},
+		{"stamped now", now, false},
+		{"a minute old", now.Add(-PATLastUsedResolution), false},
+		{"over a minute old", now.Add(-PATLastUsedResolution - time.Second), true},
+		{"a minute ahead", now.Add(PATLastUsedResolution), false},
+		{"over a minute ahead", now.Add(PATLastUsedResolution + time.Second), true},
+		{"hours ahead", now.Add(2 * time.Hour), true},
+	}
+	for _, tc := range cases {
+		if got := PATLastUsedStale(now, tc.lastUsedAt); got != tc.want {
+			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
