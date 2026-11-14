@@ -204,6 +204,7 @@
     }
   },
   "access": {
+    "agent_notice": "Agent tuân theo quyền truy cập của chủ sở hữu.",
     "label": "Quyền truy cập",
     "title": "Quyền truy cập vào {{title}}",
     "description": "Quy định ai có thể xem dự án này cùng các công việc, bình luận và tệp đính kèm của nó.",
