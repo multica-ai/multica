@@ -34,6 +34,18 @@ function I18nWrapper({ children }: { children: ReactNode }) {
 const mockParentIssue = vi.hoisted(() => ({ value: null as Issue | null }));
 const mockPush = vi.hoisted(() => vi.fn());
 const mockCreateIssue = vi.hoisted(() => vi.fn());
+type VoiceOptions = { insert: (text: string) => boolean; submit?: () => void };
+const voiceOptions = vi.hoisted(() => ({ last: null as VoiceOptions | null }));
+
+// Voice input has its own tests; here only its wiring to the editor matters.
+vi.mock("../voice", () => ({
+  useComposerVoice: (options: VoiceOptions) => {
+    voiceOptions.last = options;
+    return { rootRef: () => {}, onFocusCapture: () => {} };
+  },
+  VoiceDialogFooter: ({ children }: { children: ReactNode }) => children,
+  VoiceMicButton: () => null,
+}));
 const mockCreateCommentSubIssue = vi.hoisted(() => vi.fn());
 const mockAttachLabel = vi.hoisted(() => vi.fn());
 const mockListProperties = vi.hoisted(() => vi.fn());
@@ -388,6 +400,12 @@ vi.mock("../editor", async () => {
           inFlightRef.current -= 1;
           if (inFlightRef.current === 0) onUploadingChange?.(false);
         }
+      },
+      insertText: (text: string) => {
+        valueRef.current += text;
+        setValue(valueRef.current);
+        onUpdate?.(valueRef.current);
+        return true;
       },
       hasActiveUploads: () => inFlightRef.current > 0,
       // Placeholder rebuild contract: the real handle draws a card for an
@@ -800,6 +818,21 @@ describe("CreateIssueModal", () => {
       title: "Child scope", description: "Only implement validation", status: "todo",
       priority: "high", start_date: "2026-11-05", due_date: undefined,
       properties: { "property-tier": "option-enterprise" }, parent_issue_id: "parent-copy",
+    }));
+  });
+
+  it("dictates into the description and leaves creating to the button", async () => {
+    const user = userEvent.setup();
+    mockDraftStore.draft.manual.title = "Voice issue";
+    mockDraftStore.draft.manual.description = "Steps:";
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+    expect(voiceOptions.last?.submit).toBeUndefined();
+    act(() => {
+      expect(voiceOptions.last?.insert(" open the inbox")).toBe(true);
+    });
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    expect(mockCreateIssue).toHaveBeenCalledWith(expect.objectContaining({
+      title: "Voice issue", description: "Steps: open the inbox",
     }));
   });
 
