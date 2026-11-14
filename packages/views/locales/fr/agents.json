@@ -888,6 +888,15 @@
     "failed_indicator": "En échec"
   },
   "transcript": {
+    "managed_mcp_sources": {
+      "title": "Sources de configuration MCP gérée",
+      "unavailable": "Historique des sources indisponible pour cette exécution",
+      "empty": "Aucun serveur MCP géré à la prise en charge",
+      "pending": "Les sources seront enregistrées à la prise en charge",
+      "workspace": "Liaison de l’espace de travail",
+      "agent": "Configuration de l’agent",
+      "task": "Configuration de la tâche"
+    },
     "dialog_title": "Transcription d'exécution de l'agent",
     "status_running": "En cours",
     "status_completed": "Terminée",

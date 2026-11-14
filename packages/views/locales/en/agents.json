@@ -888,6 +888,15 @@
     "failed_indicator": "Failed"
   },
   "transcript": {
+    "managed_mcp_sources": {
+      "title": "Managed MCP configuration sources",
+      "unavailable": "Source history unavailable for this run",
+      "empty": "No managed MCP servers at claim time",
+      "pending": "Sources will be recorded when this run is claimed",
+      "workspace": "Workspace binding",
+      "agent": "Agent configuration",
+      "task": "Task overlay"
+    },
     "dialog_title": "Agent Execution Transcript",
     "status_running": "Running",
     "status_completed": "Completed",

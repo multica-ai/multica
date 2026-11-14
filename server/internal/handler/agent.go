@@ -396,7 +396,15 @@ type TaskCancellationActor struct {
 	Name string `json:"name,omitempty"`
 }
 
+// ManagedMcpSource contains only the name and winning configuration layer.
+type ManagedMcpSource struct {
+	Name   string `json:"name"`
+	Source string `json:"source"`
+}
+
 type AgentTaskResponse struct {
+	ManagedMcpSources *[]ManagedMcpSource `json:"managed_mcp_sources,omitempty"`
+
 	// Restricted marks a run on an issue in a private project the caller
 	// cannot see (MUL-8472): only identity, status, timing and usage remain.
 	Restricted bool `json:"restricted,omitempty"`
@@ -921,6 +929,7 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		CancelledByCommentChange: t.Status == "cancelled" && cancellation.TaskID != "" && cancellation.TaskID == uuidToString(t.ID),
 		CancelledBy:              taskCancellationActorToResponse(t),
 
+		ManagedMcpSources:      decodeManagedMcpSnapshot(t),
 		ID:                     uuidToString(t.ID),
 		AgentID:                uuidToString(t.AgentID),
 		RuntimeID:              uuidToString(t.RuntimeID),

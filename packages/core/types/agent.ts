@@ -310,7 +310,15 @@ export interface TaskCancellationActor {
   name?: string;
 }
 
+export interface ManagedMcpSource {
+  name: string;
+  source: "workspace" | "agent" | "task";
+}
+
 export interface AgentTask {
+  /** Claim-time managed configuration sources. Absent on historical runs. */
+  managed_mcp_sources?: ManagedMcpSource[];
+
   /** Owning issue labels supplied by subtree execution-history reads. */
   issue_identifier?: string;
   issue_title?: string;

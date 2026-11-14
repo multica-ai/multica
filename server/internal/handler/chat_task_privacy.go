@@ -42,6 +42,7 @@ func (h *Handler) redactForeignChatTaskContent(ctx context.Context, viewerID str
 		if owner, ok := owners[t.ChatSessionID]; ok && owner != "" && owner == viewerID {
 			continue
 		}
+		resp[i].ManagedMcpSources = nil
 		resp[i].Result = nil
 		resp[i].Error = nil
 	}

@@ -868,6 +868,15 @@
     "failed_indicator": "失敗"
   },
   "transcript": {
+    "managed_mcp_sources": {
+      "title": "受管 MCP 設定來源",
+      "unavailable": "此執行的來源歷史無法取得",
+      "empty": "領取任務時沒有受管 MCP 伺服器",
+      "pending": "領取此任務時將記錄來源",
+      "workspace": "工作區綁定",
+      "agent": "AI 代理設定",
+      "task": "任務覆寫設定"
+    },
     "dialog_title": "AI 代理執行記錄",
     "status_running": "進行中",
     "status_completed": "已完成",

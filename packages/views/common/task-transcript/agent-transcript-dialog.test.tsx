@@ -1193,3 +1193,27 @@ describe("tool output completeness", () => {
     expect(screen.queryByText(/cannot be confirmed|completeness/i)).not.toBeInTheDocument();
   });
 });
+
+describe("managed MCP claim sources", () => {
+  it("shows sorted names and winning layers and refreshes the captured run", async () => {
+    const props = { open: true, onOpenChange: vi.fn(), items: [], agentName: "Fixture agent" };
+    const view = renderWithI18n(<AgentTranscriptDialog {...props} task={{ ...baseTask, status: "queued" }} />);
+    expect(screen.getByText("Sources will be recorded when this run is claimed")).toBeInTheDocument();
+    view.rerender(<AgentTranscriptDialog {...props} task={{ ...baseTask, managed_mcp_sources: [
+      { name: "zulu", source: "task" }, { name: "alpha", source: "workspace" }, { name: "middle", source: "agent" },
+    ] }} />);
+    expect(screen.getByText("Workspace binding")).toBeInTheDocument();
+    expect(screen.getByText("Agent configuration")).toBeInTheDocument();
+    expect(screen.getByText("Task overlay")).toBeInTheDocument();
+    expect(Array.from(view.container.querySelectorAll("dt")).map((node) => node.textContent).filter((name) => ["alpha", "middle", "zulu"].includes(name ?? ""))).toEqual(["alpha", "middle", "zulu"]);
+  });
+
+  it("distinguishes a captured empty set from unavailable old history", () => {
+    const props = { open: true, onOpenChange: vi.fn(), items: [], agentName: "Fixture agent" };
+    const view = renderWithI18n(<AgentTranscriptDialog {...props} task={baseTask} />);
+    expect(screen.getByText("Source history unavailable for this run")).toBeInTheDocument();
+    view.rerender(<AgentTranscriptDialog {...props} task={{ ...baseTask, managed_mcp_sources: [] }} />);
+    expect(screen.getByText("No managed MCP servers at claim time")).toBeInTheDocument();
+    expect(screen.queryByText("Source history unavailable for this run")).not.toBeInTheDocument();
+  });
+});
