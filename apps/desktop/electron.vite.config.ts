@@ -5,7 +5,8 @@ import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()],
+    // Core exports raw TypeScript. Bundle the pure diagnostics subpaths into main.
+    plugins: [externalizeDepsPlugin({ exclude: ["@multica/core"] })],
   },
   preload: {
     // `@electron-toolkit/preload` must be bundled INTO the preload script:

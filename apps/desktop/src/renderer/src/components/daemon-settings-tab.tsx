@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, type ReactNode } from "react";
-import { AlertCircle, Info, LogIn } from "@multica/ui/icons";
+import { AlertCircle, Info, Loader2, LogIn } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { cn } from "@multica/ui/lib/utils";
@@ -55,6 +55,8 @@ export function DaemonSettingsTab() {
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<DaemonStatus>({ state: "stopped" });
   const [reauthLoading, setReauthLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportFeedback, setExportFeedback] = useState<string | null>(null);
 
   useEffect(() => {
     window.daemonAPI.getPrefs().then(setPrefs);
@@ -68,6 +70,39 @@ export function DaemonSettingsTab() {
     await reauthenticateDaemon(t);
     setReauthLoading(false);
   }, [t]);
+
+  const exportDiagnostics = async () => {
+    setExporting(true);
+    setExportFeedback(null);
+    try {
+      const result = await window.daemonAPI.exportDiagnostics();
+      if (result.status === "saved") {
+        const message = result.partial
+          ? t(($) => $.desktop.daemon.export_saved_partial)
+          : t(($) => $.desktop.daemon.export_saved);
+        toast.success(message);
+        setExportFeedback(message);
+      }
+      if (result.status === "cancelled")
+        setExportFeedback(t(($) => $.desktop.daemon.export_cancelled));
+      if (result.status === "error") {
+        const message = t(($) => $.desktop.daemon.export_failed);
+        toast.error(message);
+        setExportFeedback(message);
+      }
+      if (result.status === "busy") {
+        const message = t(($) => $.desktop.daemon.export_busy);
+        toast.error(message);
+        setExportFeedback(message);
+      }
+    } catch {
+      const message = t(($) => $.desktop.daemon.export_failed);
+      toast.error(message);
+      setExportFeedback(message);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const updatePref = useCallback(
     async (key: keyof DaemonPrefs, value: boolean) => {
@@ -245,6 +280,20 @@ export function DaemonSettingsTab() {
             }
           />
           </div>
+          <SettingsRow
+            label={t(($) => $.desktop.daemon.export_title)}
+            description={t(($) => $.desktop.daemon.export_description)}
+          >
+            <Button type="button" variant="outline" size="sm" disabled={exporting} aria-busy={exporting} onClick={exportDiagnostics}>
+              {exporting && <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden="true" />}
+              {t(($) => $.desktop.daemon.export_action)}
+            </Button>
+          </SettingsRow>
+          {exportFeedback && (
+            <p role="status" className="px-4 pb-3.5 text-caption text-muted-foreground">
+              {exportFeedback}
+            </p>
+          )}
         </SettingsCard>
       </SettingsSection>
     </SettingsTab>

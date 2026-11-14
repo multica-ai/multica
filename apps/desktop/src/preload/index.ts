@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import { electronAPI } from "@electron-toolkit/preload";
+import { DIAGNOSTICS_EXPORT_CHANNEL, type DiagnosticsExportResult } from "../shared/diagnostics";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
 import type { FreezeBreadcrumb } from "../shared/freeze-breadcrumb";
 import type {
@@ -453,6 +454,8 @@ type FocusEnvironmentResult =
   | { ok: false; reason: "gone" | "unsupported" | "unavailable" | "failed"; error?: string };
 
 const daemonAPI = {
+  exportDiagnostics: (): Promise<DiagnosticsExportResult> =>
+    ipcRenderer.invoke(DIAGNOSTICS_EXPORT_CHANNEL),
   start: (): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke("daemon:start"),
   stop: (): Promise<{ success: boolean; error?: string }> =>
@@ -539,12 +542,5 @@ if (process.contextIsolated) {
   contextBridge.exposeInMainWorld("daemonAPI", daemonAPI);
   contextBridge.exposeInMainWorld("updater", updaterAPI);
 } else {
-  // @ts-expect-error - fallback for non-isolated context
-  window.electron = electronAPI;
-  // @ts-expect-error - fallback for non-isolated context
-  window.desktopAPI = desktopAPI;
-  // @ts-expect-error - fallback for non-isolated context
-  window.daemonAPI = daemonAPI;
-  // @ts-expect-error - fallback for non-isolated context
-  window.updater = updaterAPI;
+  Object.assign(globalThis, { electron: electronAPI, desktopAPI, daemonAPI, updater: updaterAPI });
 }
