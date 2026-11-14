@@ -22,7 +22,7 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: "{{ .Values.images.frontend.repository }}:{{ $frontendImageTag }}"
+          image: {{ include "multica.image" (dict "name" "frontend" "image" .Values.images.frontend "tag" $frontendImageTag) | quote }}
           imagePullPolicy: {{ .Values.images.frontend.pullPolicy }}
           ports:
             - containerPort: 3000

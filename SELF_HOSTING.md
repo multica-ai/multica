@@ -357,6 +357,18 @@ images:
     tag: v0.2.4
 ```
 
+To pin an image to an immutable registry digest instead, set `digest`. When a digest is set, the chart renders `repository@digest` and ignores that image's `tag`. You can pin any of `backend`, `frontend`, and `postgres` on its own. If the cluster runs more than one CPU architecture, use the multi-arch index digest (for example, `docker buildx imagetools inspect <image>:<tag>` prints it as `Digest:`):
+
+```yaml
+images:
+  backend:
+    digest: sha256:<64 hex characters>
+  frontend:
+    digest: sha256:<64 hex characters>
+```
+
+`helm template`, `helm install`, and `helm upgrade` fail before rollout if a digest is not of the form `sha256:` followed by 64 lowercase hex characters.
+
 Then run the same upgrade command with `-f my-values.yaml`:
 
 ```bash

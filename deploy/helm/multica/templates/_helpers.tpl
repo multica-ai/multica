@@ -33,3 +33,24 @@ on the same container (see envFrom on the backend Deployment).
 {{- define "multica.databaseUrl" -}}
 postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@{{ include "multica.postgres.fullname" . }}:5432/$(POSTGRES_DB)?sslmode=disable
 {{- end -}}
+
+{{/*
+Container image reference. Renders repository@digest when a digest is set and
+repository:tag otherwise, so existing tag-only values render unchanged. The
+digest must be a full sha256 digest (for a multi-arch release, use the OCI
+index digest). Anything else fails `helm template` / `helm install` before
+rollout instead of producing an image reference the kubelet cannot pull.
+
+Usage: include "multica.image" (dict "name" "backend" "image" .Values.images.backend "tag" $tag)
+*/}}
+{{- define "multica.image" -}}
+{{- $digest := .image.digest | default "" | trim -}}
+{{- if $digest -}}
+{{- if not (regexMatch "^sha256:[a-f0-9]{64}$" $digest) -}}
+{{- fail (printf "images.%s.digest must be a sha256 digest such as sha256:<64 lowercase hex characters>, got %q" .name $digest) -}}
+{{- end -}}
+{{- printf "%s@%s" .image.repository $digest -}}
+{{- else -}}
+{{- printf "%s:%s" .image.repository .tag -}}
+{{- end -}}
+{{- end -}}

@@ -64,7 +64,7 @@ spec:
     spec:
       containers:
         - name: backend
-          image: "{{ .Values.images.backend.repository }}:{{ $backendImageTag }}"
+          image: {{ include "multica.image" (dict "name" "backend" "image" .Values.images.backend "tag" $backendImageTag) | quote }}
           imagePullPolicy: {{ .Values.images.backend.pullPolicy }}
           ports:
             - containerPort: 8080
