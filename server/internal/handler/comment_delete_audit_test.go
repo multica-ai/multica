@@ -126,8 +126,8 @@ func assertCommentDeletionAudit(t *testing.T, issueID, commentID, actorType, act
 			t.Fatalf("audit fields=%v, want exactly %v (no body)", details, want)
 		}
 		for key, value := range want {
-			if details[key] != value {
-				t.Errorf("%s=%v, want %v", key, details[key], value)
+			if actual, exists := details[key]; !exists || actual != value {
+				t.Errorf("%s=%v (present=%t), want %v", key, actual, exists, value)
 			}
 		}
 	}
