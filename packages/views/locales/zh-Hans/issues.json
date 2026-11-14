@@ -40,7 +40,8 @@
     "steer_resend": "作为新一轮发送",
     "steer_resend_failed": "没能作为新一轮发送。",
     "steer_step": "{{name}} 插话",
-    "steer_step_read": "已读取"
+    "steer_step_read": "已读取",
+    "steps_one": "{{count}} 个步骤"
   },
   "working_filter_error": {
     "title": "无法加载智能体正在处理的任务"
@@ -116,7 +117,8 @@
     "error_comment_limit": "来源评论线程历史至少包含 {{count}} 条评论，上限为 256 条。",
     "error_text_limit": "来源文本为 {{size}} 字节，上限为 1 MiB。",
     "error_attachment_count_limit": "来源包含 {{count}} 个附件，上限为 100 个。",
-    "error_attachment_size_limit": "来源附件合计 {{size}} 字节，上限为 500 MiB。"
+    "error_attachment_size_limit": "来源附件合计 {{size}} 字节，上限为 500 MiB。",
+    "preview_summary_one": "来自 {{identifier}} 的上下文 · 任务描述 + {{count}} 条评论"
   },
   "revision": {
     "conflict": "任务或评论已发生变化。已刷新到最新版本，请比较后重新保存。",
@@ -273,7 +275,11 @@
     "advanced_group_match_trailing": "条件",
     "advanced_group_hint": "组内条件之间用「{{word}}」连接",
     "advanced_add_to_group": "添加到条件组",
-    "advanced_turn_into_group": "转为条件组"
+    "advanced_turn_into_group": "转为条件组",
+    "unsaved_changes_one": "{{count}} 处未保存的改动",
+    "issue_count_one": "{{count}} 个任务",
+    "active_count_one": "{{count}} 个筛选",
+    "advanced_conditions_one": "{{count}} 个条件"
   },
   "display": {
     "tooltip": "显示设置",
@@ -592,7 +598,9 @@
     "workdir_path_unavailable": "暂无本地 workdir — 这个任务还没被本地智能体运行过",
     "unsubscribe_subtree_succeeded": "已取消订阅此任务及其子任务。",
     "subscription_update_failed": "无法更新订阅状态，请重试。",
-    "pull_requests_empty_title": "暂无关联 PR。"
+    "pull_requests_empty_title": "暂无关联 PR。",
+    "pull_request_card_files_count_one": "{{count}} 个文件",
+    "thread_nav_show_replies_one": "展开 {{count}} 条回复"
   },
   "timeline": {
     "loading": "加载中…",
@@ -654,9 +662,17 @@
     "wakeup_checkin_coalesced_other": "静默检查 {{count}} 次 · 最近一次：{{note}}",
     "wakeup_chip_created_by": "{{name}} 创建",
     "wakeup_chip_system": "系统规则",
+    "task_completed_one": "完成了运行（{{count}} 次）",
+    "task_failed_one": "运行失败（{{count}} 次）",
+    "activity_count_one": "{{count}} 条动态",
+    "show_more_activities_one": "展开更早 {{count}} 条动态",
+    "wakeup_child_done_stage_one": "第 {{stage}} 阶段的 {{count}} 个子任务已全部结束",
+    "wakeup_child_done_all_one": "{{count}} 个子任务已全部结束",
+    "wakeup_checkin_coalesced_one": "静默检查 {{count}} 次 · 最近一次：{{note}}",
     "environment_stopped": "停止了环境 {{name}}",
     "environment_restarted": "重启了环境 {{name}}",
     "environment_started": "启动了环境 {{name}}"
+
   },
   "comment": {
     "add_reaction": "添加表情回应",
@@ -737,7 +753,10 @@
       "fold_other": "来自 {{authors}} 的 {{count}} 条评论",
       "bar_authors_more_other": "{{names}} 等 {{count}} 人",
       "resolve_failed": "标记已解决失败",
-      "unresolve_failed": "重新打开失败"
+      "unresolve_failed": "重新打开失败",
+      "bar_one": "来自 {{authors}} 的 {{count}} 条已解决评论",
+      "fold_one": "来自 {{authors}} 的 {{count}} 条评论",
+      "bar_authors_more_one": "{{names}} 等 {{count}} 人"
     },
     "recipient_steer": "插话到当前运行",
     "recipient_steer_desc": "{{name}} 会在当前步骤结束后读到，并继续完成原任务。仅支持文字。",
@@ -754,6 +773,10 @@
     "steer_attachment_notice": "插话只支持文字，带附件的消息会在本轮结束后处理。",
     "restart_send": "停止并发送",
     "restart_failed": "没能停止当前运行，消息还没有发送。",
+    "posted_partial_trigger_one": "评论已发布，但有 {{count}} 个提及未触发",
+    "reply_count_one": "{{count}} 条回复",
+    "trigger_will_start_count_one": "发送后 {{count}} 个智能体开始工作",
+    "recipient_count_one": "{{count}} 个智能体会收到",
     "reply_action": "回复",
     "actions_label": "评论操作",
     "create_issue_from_selection": "用选中内容创建子任务"
@@ -783,7 +806,8 @@
       "selection_failed": "未能获取选中文字。请在同一条评论或任务描述内重新选择后再试。",
       "source_label": "{{name}} 的评论",
       "edit": "编辑批注 {{number}}",
-      "note_placeholder": "添加意见..."
+      "note_placeholder": "添加意见...",
+      "count_one": "{{count}} 条批注"
     }
   },
   "agent_activity": {
@@ -801,7 +825,13 @@
     "tasks_count_other": "{{count}} 次运行",
     "chip_agents_working_other": "{{count}} 个智能体工作中",
     "issues_count_other": "{{count}} 个任务",
-    "chip_agents_working_unknown": "工作中的智能体：—"
+    "chip_agents_working_unknown": "工作中的智能体：—",
+    "hover_header_one": "{{count}} 个智能体工作中",
+    "hover_header_tasks_one": "{{count}} 次运行进行中",
+    "hover_header_queued_one": "{{count}} 个智能体排队中",
+    "tasks_count_one": "{{count}} 次运行",
+    "chip_agents_working_one": "{{count}} 个智能体工作中",
+    "issues_count_one": "{{count}} 个任务"
   },
   "filtered_empty": {
     "title": "没有符合筛选条件的任务",
@@ -818,14 +848,10 @@
     "transcript_button": "查看记录",
     "stop_button": "停止",
     "stop_tooltip": "停止智能体",
-    "cancel_failed": "取消运行失败"
+    "cancel_failed": "取消运行失败",
+    "tool_count_one": "{{count}} 次工具调用"
   },
   "execution_log": {
-    "latest": "最近",
-    "include_children": "包含子任务",
-    "loading": "正在加载运行记录...",
-    "load_failed_retry": "无法加载运行记录，点击重试",
-    "empty": "此范围内暂无运行记录。",
     "section": "执行日志",
     "cancel_task_tooltip": "取消运行",
     "cancel_task_aria": "取消运行",
@@ -871,7 +897,16 @@
     "more_runs_other": "显示其余 {{count}} 次运行",
     "strip_aria": "每次运行的费用——打开运行时间线",
     "strip_no_usage": "没有用量记录",
-    "queued_count_other": "{{count}} 个排队中"
+    "queued_count_other": "{{count}} 个排队中",
+    "included_comments_one": "包含 {{count}} 条评论",
+    "summary_runs_one": "{{count}} 次运行",
+    "more_runs_one": "显示其余 {{count}} 次运行",
+    "queued_count_one": "{{count}} 个排队中",
+    "latest": "最近",
+    "include_children": "包含子任务",
+    "loading": "正在加载运行记录...",
+    "load_failed_retry": "无法加载运行记录，点击重试",
+    "empty": "此范围内暂无运行记录。"
   },
   "runs_timeline": {
     "title": "运行记录",
@@ -934,7 +969,13 @@
     "detail_cache": "缓存命中",
     "cache_hit_value": "{{percent}} · 节省 {{amount}}",
     "detail_time": "时间",
-    "detail_branch": "分支"
+    "detail_branch": "分支",
+    "count_failed_one": "{{count}} 次失败",
+    "count_cancelled_one": "{{count}} 次取消",
+    "count_active_one": "{{count}} 次进行中",
+    "chart_aria_one": "运行情况：{{count}} 次运行，共 {{cost}}",
+    "day_runs_one": "{{count}} 次运行",
+    "cumulative_aria_one": "累计费用随时间的变化：{{count}} 次运行，共 {{cost}}"
   },
   "terminate_dialog": {
     "title": "确定停止本次运行？",
@@ -958,6 +999,11 @@
     "delete_dialog_title_other": "删除 {{count}} 个任务？",
     "delete_dialog_desc_other": "此操作无法撤销，所选任务及其全部关联数据都会被永久删除。",
     "cancel": "取消",
+    "update_success_one": "已更新 {{count}} 个任务",
+    "update_partial_one": "已更新 {{updated}}/{{count}} 个任务，其余任务不支持这项修改，保持不变。",
+    "delete_success_one": "已删除 {{count}} 个任务",
+    "delete_dialog_title_one": "删除 {{count}} 个任务？",
+    "delete_dialog_desc_one": "此操作无法撤销，所选任务及其全部关联数据都会被永久删除。",
     "copy_links": "复制链接",
     "links_copied_other": "已复制 {{count}} 个链接",
     "delete_count_other": "删除 {{count}} 个任务"
@@ -1353,7 +1399,9 @@
       "missing_issue": "请选择一个任务。",
       "checked": "已勾选",
       "unchecked": "未勾选",
-      "assignee_comment_hint": "{{name}} 是负责人，成员发评论时本来就会被触发。这条规则会并入那次运行，不会多跑一次；只有想追加指令时才需要它。"
+      "assignee_comment_hint": "{{name}} 是负责人，成员发评论时本来就会被触发。这条规则会并入那次运行，不会多跑一次；只有想追加指令时才需要它。",
+      "wait_days_one": "{{count}} 天",
+      "max_fires_times_one": "{{count}} 次"
     },
     "system": {
       "badge": "系统",
@@ -1386,6 +1434,7 @@
       "instruction_placeholder": "留空则使用默认指令",
       "instruction_invalid": "指令最多 4,000 字节。",
       "paused": "已暂停：{{reason}}",
+      "remaining_one": "还差 {{count}} 个",
       "default_change": "修改默认值"
     },
     "cond": {
@@ -1452,7 +1501,8 @@
       "delete_title": "删除这条唤醒？",
       "delete_body": "删除后不再唤醒 {{agent}}，尚未开始的运行会被撤回。已经开始的运行会继续。",
       "deleting": "正在删除…",
-      "delete_error": "无法删除唤醒"
+      "delete_error": "无法删除唤醒",
+      "fires_one": "已触发 {{count}} 次"
     },
     "paused_reason": {
       "max_fires": "达到 {{count}} 次上限",
@@ -1493,7 +1543,8 @@
     "not_merged_action": "移除",
     "all_merged_to": "PR 均已合并。之后有新 PR 合并时会改为 {{status}}。",
     "issue_disabled": "此任务合并后不改状态",
-    "issue_disabled_action": "恢复"
+    "issue_disabled_action": "恢复",
+    "waiting_to_one": "等待 {{prs}} 合并后改为 {{status}}"
   },
   "deliverables": {
     "section_title": "产物",
@@ -1527,7 +1578,10 @@
     "overview_summary_with_size_other": "{{count}} 个产物 · 共 {{size}}",
     "overview_close": "关闭",
     "overview_empty": "没有这类产物。",
-    "group_comment_by": "{{name}} 的评论"
+    "group_comment_by": "{{name}} 的评论",
+    "view_all_one": "查看全部 {{count}} 个产物",
+    "overview_summary_one": "{{count}} 个产物",
+    "overview_summary_with_size_one": "{{count}} 个产物 · 共 {{size}}"
   },
   "workflows": {
     "default_name": "Default",
@@ -1568,7 +1622,11 @@
       "no_matching_projects": "没有匹配的项目",
       "default_covers_no_project": "也适用于没有项目的任务",
       "new_blank": "空白工作流",
-      "from_template": "从模板创建"
+      "from_template": "从模板创建",
+      "projects_one": "{{count}} 个项目",
+      "statuses_one": "{{count}} 个状态",
+      "handoffs_one": "{{count}} 步自动交接",
+      "usage_default_one": "{{count}} 个项目 + 没有项目的任务"
     },
     "editor": {
       "create_title": "新建工作流",
@@ -1632,7 +1690,8 @@
       "step_off": "已关闭：这个工作流不使用这个状态。在左侧列表打开开关即可使用。",
       "status_new_hint": "新状态，保存时加入状态库。",
       "no_other_status": "所有状态都已经是步骤了。",
-      "no_handoff_step": "这一步不交接：任务进入时负责人不变，也不会启动运行。"
+      "no_handoff_step": "这一步不交接：任务进入时负责人不变，也不会启动运行。",
+      "used_by_note_one": "用于 {{count}} 个项目：{{names}}。修改保存后对这些项目立即生效。"
     },
     "mapping": {
       "title": "将任务移入「{{name}}」",
@@ -1653,7 +1712,14 @@
       "edit_description": "使用这个工作流的项目里，有任务处在被移除的状态上。请为它们选择新状态，其他任务不变。",
       "confirm_save_count_other": "保存并更新 {{count}} 个任务",
       "switched_other": "「{{project}}」已切换到「{{workflow}}」，{{count}} 个任务已更新状态",
-      "nothing_moves": "所有任务的状态两个工作流都有，保持不变。"
+      "nothing_moves": "所有任务的状态两个工作流都有，保持不变。",
+      "issues_one": "{{count}} 个任务",
+      "switch_description_one": "{{project}} 共 {{count}} 个任务。只有状态不在「{{workflow}}」里的任务需要重新选择状态。",
+      "needs_mapping_one": "需要映射 · {{count}} 个任务",
+      "unchanged_one": "其余 {{count}} 个任务的状态（{{statuses}}）两个工作流都有，保持不变。",
+      "confirm_count_one": "切换并更新 {{count}} 个任务",
+      "confirm_save_count_one": "保存并更新 {{count}} 个任务",
+      "switched_one": "「{{project}}」已切换到「{{workflow}}」，{{count}} 个任务已更新状态"
     },
     "project": {
       "label": "工作流",
@@ -1689,7 +1755,9 @@
       "under_minute": "不到 1 分钟",
       "error": "无法移动任务",
       "project_title": "将 {{issue}} 移到「{{project}}」？",
-      "project_confirm": "移到{{project}}"
+      "project_confirm": "移到{{project}}",
+      "minutes_one": "{{count}} 分钟",
+      "hours_one": "{{count}} 小时"
     },
     "board": {
       "drop_hint_run": "松开后交给 {{name}}，并开始运行",
@@ -1748,6 +1816,7 @@
       "scope_own": "只有这个项目使用这个工作流。",
       "no_handoff_here": "不交接",
       "scope_shared_other": "{{count}} 个项目使用这个工作流，它的交接对这些项目都生效。",
+      "scope_shared_one": "{{count}} 个项目使用这个工作流，它的交接对这些项目都生效。",
       "switch": "切换工作流"
     },
     "templates": {
@@ -1846,7 +1915,8 @@
       "row_actions": "{{name}} 的操作",
       "empty_title": "还没有保存的视图",
       "empty_description": "在任务列表里调好筛选和显示方式，然后另存为视图。"
-    }
+    },
+    "filter_count_one": "{{count}} 个筛选"
   },
   "app_calls": {
     "section_title": "应用",

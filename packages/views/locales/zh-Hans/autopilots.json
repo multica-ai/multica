@@ -462,7 +462,8 @@
       "warning": "此操作无法撤销。",
       "cancel": "取消",
       "confirm": "永久删除",
-      "deleting": "删除中…"
+      "deleting": "删除中…",
+      "description_one": "将永久删除 {{count}} 个自动化及其运行历史。"
     }
   },
   "wakeups": {
@@ -544,6 +545,7 @@
         "event_examples": "PR 合并、有新评论"
       }
     },
+    "banner_one": "{{count}} 条唤醒已自动暂停：{{issue}}「{{condition}}」——{{reason}}",
     "defaults": {
       "title": "子任务结束时",
       "description": "某个阶段的子任务全部结束、且后面还有阶段在等待时，唤醒父任务的负责人；全部子任务结束时再唤醒一次。负责人是成员时，改为发送收件箱通知。",

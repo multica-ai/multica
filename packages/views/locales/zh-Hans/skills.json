@@ -1,7 +1,7 @@
 {
   "page": {
     "search": "搜索 skill",
-    "title": "Skills",
+    "title": "技能",
     "new_skill": "新建 skill",
     "scopes": {
       "all": {
@@ -83,7 +83,14 @@
     "cancel": "取消",
     "add_confirm": "添加（{{num}}）",
     "adding": "添加中...",
-    "added_multi_toast_other": "已添加到 {{count}} 个智能体"
+    "added_multi_toast_other": "已添加到 {{count}} 个智能体",
+    "delete_dialog_title_one": "删除 {{count}} 个 skill？",
+    "delete_dialog_desc_one": "将永久删除选中的 {{count}} 个 skill，并从所有智能体上移除。",
+    "deleted_toast_one": "已删除 {{count}} 个 skill",
+    "update_summary_selected_one": "将从来源更新 {{count}} 个 skill",
+    "update_summary_skipped_one": "{{count}} 个无法从来源更新，跳过",
+    "updated_toast_one": "已从来源更新 {{count}} 个 skill",
+    "added_multi_toast_one": "已添加到 {{count}} 个智能体"
   },
   "toolbar": {
     "section_usage": "使用状态",
@@ -116,7 +123,8 @@
       "changed_files_other": "{{count}} 个文件",
       "discard": "丢弃",
       "save": "保存修改",
-      "saving": "保存中..."
+      "saving": "保存中...",
+      "changed_files_one": "{{count}} 个文件"
     },
     "not_found": {
       "title": "未找到该 skill",
@@ -151,7 +159,8 @@
       "warning": "此操作不可撤销。",
       "cancel": "取消",
       "confirm": "永久删除",
-      "deleting": "删除中..."
+      "deleting": "删除中...",
+      "description_with_agents_one": "将永久删除\"{{name}}\"，并从当前正在使用它的 {{count}} 个智能体上移除。"
     },
     "add_file": {
       "placeholder": "templates/review.md",
@@ -168,7 +177,8 @@
       }
     },
     "header": {
-      "files_other": "{{count}} 个文件"
+      "files_other": "{{count}} 个文件",
+      "files_one": "{{count}} 个文件"
     },
     "overview": {
       "properties": "属性",
@@ -191,7 +201,8 @@
       "mode_aria": "文件视图",
       "mode_preview": "预览",
       "mode_edit": "编辑",
-      "mode_raw": "纯文本"
+      "mode_raw": "纯文本",
+      "supporting_one": "附属文件 {{count}}"
     },
     "versions": {
       "list_aria": "skill 版本",
@@ -290,6 +301,7 @@
       "import": "导入",
       "importing": "导入中...",
       "toast_imported": "已导入 skill",
+      "files_one": "{{count}} 个文件",
       "select_all": "全选",
       "import_count": "导入 {{count}} 个",
       "done": "完成",
@@ -369,7 +381,8 @@
     "conflict_footer": "还有 {{count}} 个冲突决策待处理。",
     "conflict_apply_button": "应用决策",
     "conflict_missing_resolution": "请选择如何处理这个冲突。",
-    "conflict_name_still_exists": "这个名称仍然已存在。请换一个名称或跳过。"
+    "conflict_name_still_exists": "这个名称仍然已存在。请换一个名称或跳过。",
+    "skill_files_one": "{{count}} 个文件"
   },
   "file_tree": {
     "no_files": "无文件",

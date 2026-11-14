@@ -118,7 +118,8 @@
     "submitting": "创建中...",
     "toast_created": "小队已创建",
     "toast_failed": "创建小队失败",
-    "toast_member_add_failed": "添加 {{name}} 失败：{{error}}"
+    "toast_member_add_failed": "添加 {{name}} 失败：{{error}}",
+    "members_selected_count_one": "已选 {{count}} 人"
   },
   "create_project": {
     "title": "新建项目",
@@ -164,6 +165,7 @@
     "local_invalid_dir": "这个文件夹不可用，请重新选择。",
     "local_hint": "其他电脑上的智能体访问不到这个文件夹，会启动失败。需要协作请用仓库。",
     "repos_ref_default": "默认分支",
+    "repos_pill_count_one": "{{count}} 个仓库",
     "repos_remove_aria": "移除 {{repo}}"
   },
   "create_issue": {

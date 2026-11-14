@@ -87,7 +87,11 @@
     "table_columns_other": "{{count}} 列",
     "address": "地址",
     "address_hint": "?参数",
-    "reload": "刷新"
+    "reload": "刷新",
+    "tree_items_one": "{{count}} 项",
+    "tree_keys_one": "{{count}} 个键",
+    "table_rows_one": "{{count}} 行",
+    "table_columns_one": "{{count}} 列"
   },
   "link_hover": {
     "copy_link": "复制链接",

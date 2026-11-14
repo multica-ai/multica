@@ -148,7 +148,8 @@
       "members_description": "智能体和待接受的邀请不计入席位。",
       "member_count_other": "{{count}} 位成员",
       "billing_interval": "付款周期",
-      "period_end": "当前周期结束时间"
+      "period_end": "当前周期结束时间",
+      "member_count_one": "{{count}} 位成员"
     },
     "upgrade": {
       "title": "升级到 Pro",
@@ -159,7 +160,8 @@
       "pro_for_team_other": "为 {{count}} 个成员席位升级 Pro",
       "price_loading": "正在加载订阅价格",
       "unit_price": "每个成员席位 {{price}}",
-      "price_at_checkout": "购买前，服务端会重新统计成员。付款前，Stripe Checkout 会显示权威的单席位价格和总额。"
+      "price_at_checkout": "购买前，服务端会重新统计成员。付款前，Stripe Checkout 会显示权威的单席位价格和总额。",
+      "pro_for_team_one": "为 {{count}} 个成员席位升级 Pro"
     },
     "management": {
       "title": "订阅管理",
@@ -205,7 +207,9 @@
       "members_over_capacity_description": "当前工作区有 {{actual}} 名成员，但只购买了 {{purchased}} 个席位。继续邀请前，请补足席位或移除成员。",
       "occupancy_over_capacity_description": "当前工作区已占用 {{occupied}} 个席位，但只购买了 {{purchased}} 个（{{members}} 名成员和 {{reserved}} 个待接受邀请）。继续邀请前，请补足席位、移除成员或撤销待接受邀请。",
       "updated": "席位购买已提交",
-      "available_help": "可用席位如何计算"
+      "available_help": "可用席位如何计算",
+      "seat_count_one": "{{count}} 个席位",
+      "pending_with_date_one": "{{date}} 起 {{count}} 个席位"
     },
     "seat_purchase": {
       "title": "添加席位",
@@ -232,7 +236,10 @@
       "delayed_description": "自动检查已停止，购买仍可能完成。开始另一笔购买前，请稍后再查看或联系支持人员。",
       "delayed_description_with_expiry": "自动检查已停止。若到 {{date}} 仍在等待，请重新加载页面后再获取报价；若状态仍未更新，请联系支持人员。",
       "submitted_other": "购买 {{count}} 个席位的请求已提交。Stripe 确认后会显示新容量。",
-      "error_title": "无法更新估算金额"
+      "error_title": "无法更新估算金额",
+      "confirm_one": "添加 {{count}} 个席位",
+      "pending_description_one": "Stripe 正在确认订阅更新至 {{count}} 个席位。",
+      "submitted_one": "购买 {{count}} 个席位的请求已提交。Stripe 确认后会显示新容量。"
     },
     "confirm": {
       "title": "前往 Stripe Checkout？",

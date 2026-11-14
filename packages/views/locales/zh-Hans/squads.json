@@ -112,7 +112,9 @@
     "archived": "已归档",
     "member_count_other": "{{count}} 名成员",
     "members_section": "成员",
-    "more_members_other": "还有 {{count}} 人"
+    "more_members_other": "还有 {{count}} 人",
+    "member_count_one": "{{count}} 名成员",
+    "more_members_one": "还有 {{count}} 人"
   },
   "instructions_tab": {
     "description": "队长每次处理分配给此小队的任务时，都会读取这些指引。",
