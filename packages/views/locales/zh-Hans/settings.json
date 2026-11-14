@@ -426,10 +426,6 @@
         "label": "归档通知",
         "description": "归档当前打开的收件箱通知；在归档列表中则取消归档。"
       },
-      "snoozeInboxItem": {
-        "label": "推迟通知",
-        "description": "选择当前打开的收件箱通知何时回来。"
-      },
       "send": {
         "label": "发送",
         "description": "也用于提交新任务。"
@@ -826,48 +822,25 @@
     "toast_profile_failed": "更新资料失败"
   },
   "notifications": {
+    "title": "收件箱通知",
+    "description": "关闭通知后，仍可在任务中查看相关动态。",
     "toast_failed": "更新通知设置失败",
-    "needs_you": {
-      "title": "要你处理",
-      "description": "写给你的事会留在收件箱的「要你处理」里，直到你处理或归档。这些不能关闭。",
-      "always_on": "始终开启",
-      "mentions": {
-        "label": "提及",
-        "description": "有人 @ 你时"
-      },
+    "groups": {
       "assignments": {
         "label": "分配",
-        "description": "任务分配给你时"
-      },
-      "runs": {
-        "label": "你发起的运行",
-        "description": "智能体跑完、失败、向你提问，或运行被取消时"
-      },
-      "your_issues": {
-        "label": "你创建或负责的任务",
-        "description": "有新评论，或状态变成等你处理时"
-      }
-    },
-    "updates": {
-      "title": "动态",
-      "description": "你订阅的任务上发生的事。不计入徽标，看过就离开收件箱。关闭后仍可在任务中查看。"
-    },
-    "groups": {
-      "mentions": {
-        "label": "@all 和 @squad",
-        "description": "群体提及也进「要你处理」。关闭后改进「动态」。"
-      },
-      "comments": {
-        "label": "评论",
-        "description": "你订阅的任务有新评论时"
+        "description": "你被分配或取消分配某个任务时"
       },
       "status_changes": {
         "label": "状态变更",
         "description": "你订阅的任务状态变化时（例如 todo、in_progress、done）"
       },
-      "assignments": {
-        "label": "分配变化",
-        "description": "你被取消分配，或你订阅的任务换了负责人时"
+      "comments": {
+        "label": "评论",
+        "description": "你订阅的任务有新评论时"
+      },
+      "mentions": {
+        "label": "提及",
+        "description": "有人 @ 你时，包括 @all 和 @squad"
       },
       "updates": {
         "label": "优先级与截止日期",
@@ -878,8 +851,8 @@
         "description": "你订阅的项目中有新任务创建时"
       },
       "agent_activity": {
-        "label": "智能体运行",
-        "description": "你订阅的任务上智能体运行失败或卡住时"
+        "label": "智能体活动",
+        "description": "智能体运行失败时"
       },
       "chat_replies": {
         "label": "包含聊天回复"
@@ -887,8 +860,7 @@
     },
     "system": {
       "title": "系统通知",
-      "label": "Multica 在后台时显示系统通知",
-      "description": "收件箱里只有「要你处理」的事会弹出，动态不弹。"
+      "label": "Multica 在后台时显示系统通知"
     },
     "browser": {
       "label": "浏览器通知",

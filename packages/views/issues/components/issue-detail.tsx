@@ -1254,13 +1254,6 @@ interface IssueDetailProps {
   /** Peek only: host controls at the end of the header (open full page, close). */
   trailingActions?: ReactNode;
   /**
-   * The host's own actions on what it has open, ahead of the issue's in the
-   * header. The inbox puts snooze and archive here: they act on the
-   * notification, which only the inbox knows. A host that passes them owns
-   * archiving, so the header's own archive button for a done issue is left out.
-   */
-  hostActions?: ReactNode;
-  /**
    * Read the viewer's inbox notifications on this issue while it is on screen
    * (MUL-8588). The inbox turns this off for the issue it has open: it reads
    * the notification it selected itself, and keeps one marked unread there.
@@ -1479,7 +1472,7 @@ export function IssueDetailSkeleton({
 
 // IssueDetail
 
-export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = ISSUE_DETAIL_LAYOUT_ID, highlightCommentId: linkedCommentId, highlightRequestToken: linkedRequestToken, highlightAppRequestId, leadingAction, variant = "page", trailingActions, hostActions, readsInbox = true, skipInitialRefetch = false, openDeliverable, onDeliverableLinkDone }: IssueDetailProps) {
+export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = ISSUE_DETAIL_LAYOUT_ID, highlightCommentId: linkedCommentId, highlightRequestToken: linkedRequestToken, highlightAppRequestId, leadingAction, variant = "page", trailingActions, readsInbox = true, skipInitialRefetch = false, openDeliverable, onDeliverableLinkDone }: IssueDetailProps) {
   const isPeek = variant === "peek";
   const { t } = useT("issues");
   const { t: tCommon } = useT("common");
@@ -3546,7 +3539,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 It self-hides when no agent is active. */}
             <IssueAgentHeaderChip issueId={id} onJumpToRun={jumpToRun} />
             <IssueWakeupHeaderChip issueId={id} onOpen={openWakeups} />
-            {hostActions}
             {onDone && !issueBehavesAsAny(issue, ["done", "closed"]) && (
               <IconButton
                 label={t(($) => $.detail.mark_done_tooltip)}
@@ -3557,7 +3549,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 <CircleCheck />
               </IconButton>
             )}
-            {onDone && !hostActions && issueBehavesAs(issue, "done") && (
+            {onDone && issueBehavesAs(issue, "done") && (
               <IconButton
                 label={t(($) => $.detail.archive_tooltip)}
                 tooltipSide="bottom"

@@ -36,19 +36,21 @@ import {
   useMarkInboxUnread,
   useArchiveInbox,
   useUnarchiveInbox,
-  useSnoozeInbox,
-  useUnsnoozeInbox,
-  useArchiveInboxUpdates,
+  useMarkAllInboxRead,
+  useArchiveAllInbox,
+  useArchiveAllReadInbox,
+  useArchiveCompletedInbox,
   useRetrySourceContextQuickCreate,
 } from "@multica/core/inbox/mutations";
 import {
-  activeInboxFilterSupport,
   effectiveInboxFilters,
   filterInboxItems,
   inboxFilterCount,
   inboxIssueFieldsSupport,
+  inboxPriorityFilterSupport,
   useInboxFilters,
   useInboxFilterStore,
+  type InboxAgentFilter,
   type InboxFilterSupport,
 } from "@multica/core/inbox/filter-store";
 
@@ -56,32 +58,40 @@ import { IssueDetail, issueHighlightMementoKey } from "../../issues/components/i
 import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { useRegisterCommandBarContext } from "../../search/register-context";
 import { IssuePeekHost } from "../../issues/components/issue-peek";
+import { useIssueSurfaceActivity } from "../../issues/surface/activity";
 import { useViewStateWriter } from "../../platform";
 import { ErrorBoundary } from "@multica/ui/components/common/error-boundary";
 import { useNavigation, useReportNavigating } from "../../navigation";
 import { toast } from "sonner";
 import {
+  MoreHorizontal,
   Inbox,
+  CheckCheck,
   Archive,
   ArchiveRestore,
+  BookCheck,
   ChevronDown,
-  Clock,
+  ListChecks,
   ArrowLeft,
 } from "@multica/ui/icons";
 import type { InboxItem } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { NumberFlow } from "@multica/ui/components/ui/number-flow";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSeparator,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useIsCompact } from "@multica/ui/hooks/use-mobile";
 import { cn } from "@multica/ui/lib/utils";
@@ -92,11 +102,6 @@ import { InboxDeleteDialog } from "./inbox-delete-dialog";
 import { ListColumn } from "../../layout/list-column";
 import { useTimeAgo } from "./inbox-list-item";
 import { InboxList } from "./inbox-list";
-import { InboxSectionedList } from "./inbox-sectioned-list";
-import { InboxDetailActions } from "./inbox-detail-actions";
-import { InboxSnoozeMenu } from "./inbox-snooze-menu";
-import { formatSnoozeTime } from "./inbox-snooze-time";
-import { useInboxSections } from "./use-inbox-sections";
 import { InboxFilterMenu } from "./inbox-filter-menu";
 import { InboxFilterChipsBar } from "./inbox-filter-options";
 import { InboxContextMenuProvider } from "./inbox-context-menu";
@@ -110,16 +115,14 @@ import {
 } from "./inbox-display";
 import { AutopilotQuotaNotice } from "./autopilot-quota-notice";
 import { InboxAppRequest } from "../../common/app-requests";
-import { useLocale, useT } from "../../i18n";
+import { useT } from "../../i18n";
 import { useIssueLimitUpgradePrompt } from "../../modals/use-issue-limit-upgrade-prompt";
-
-const NO_ITEMS: InboxItem[] = [];
 
 
 export function InboxPage() {
   const queryClient = useQueryClient();
   const { t } = useT("inbox");
-  const locale = useLocale();
+  const { t: tCommon } = useT("common");
   const showIssueLimitUpgradePrompt = useIssueLimitUpgradePrompt();
   const showAutopilotQuotaRecoveryPrompt = useIssueLimitUpgradePrompt(
     "autopilot_quota",
@@ -136,6 +139,12 @@ export function InboxPage() {
   // so the filter would otherwise drop the row before the detail finishes
   // mounting. Scoped to the selection: moving away releases it.
   const pinnedUnreadKeyRef = useRef<string | null>(null);
+  // The row the user opened under the agent filter. Replying from the detail
+  // can start or finish an agent on its issue, which would otherwise drop the
+  // row the user is working in. Set once the open row has passed the agent
+  // filter, so turning the filter on over a non-matching row still filters
+  // it out; it only holds for the agent state it was pinned under.
+  const pinnedAgentRef = useRef<{ key: string; agent: InboxAgentFilter } | null>(null);
 
   // Sync from URL when searchParams change (e.g. navigation)
   useEffect(() => {
@@ -181,21 +190,37 @@ export function InboxPage() {
   const viewItems = isArchivedView ? archivedItems : items;
   // The paginated endpoint guarantees the priority projection, including on
   // empty pages.
-  const activeSupport = activeInboxFilterSupport(rawItems);
-  const priorityFilterSupport = isArchivedView ? "supported" : activeSupport.priority;
-  const issueFieldsSupport = isArchivedView ? archiveIssueFields : activeSupport.issueFields;
+  const priorityFilterSupport = isArchivedView ? "supported" : inboxPriorityFilterSupport(rawItems);
+  const issueFieldsSupport = isArchivedView ? archiveIssueFields : inboxIssueFieldsSupport(rawItems);
   const activeFilters = useMemo(
     () => effectiveInboxFilters(filters, { priority: priorityFilterSupport, issueFields: issueFieldsSupport }),
     [filters, priorityFilterSupport, issueFieldsSupport],
   );
   const effectiveFilters = isArchivedView ? archiveFilters : activeFilters;
-  // The open row survives the unread dimension while it stays selected; see
-  // the pin ref above.
-  const pinnedKey =
+  // "Active" is the same running-or-queued rule the row's activity badge uses.
+  const { activityByIssueId } = useIssueSurfaceActivity();
+  const activeIssueIds = useMemo(() => new Set(activityByIssueId.keys()), [activityByIssueId]);
+  // Only an agent selection reads the snapshot, so task churn leaves the
+  // list alone while it is off.
+  const agentFilterIssueIds = effectiveFilters.agent ? activeIssueIds : undefined;
+  // The open row survives the unread and agent dimensions while it stays
+  // selected; see the pin refs above. Each pin is passed separately so it
+  // only crosses its own dimension.
+  const pinnedUnreadKey =
     effectiveFilters.unreadOnly && pinnedUnreadKeyRef.current === selectedKey
       ? selectedKey
       : null;
-  const filterContext = useMemo(() => ({ pinnedUnreadKey: pinnedKey }), [pinnedKey]);
+  const pinnedAgentKey =
+    effectiveFilters.agent &&
+    pinnedAgentRef.current?.key === selectedKey &&
+    pinnedAgentRef.current.agent === effectiveFilters.agent
+      ? selectedKey
+      : null;
+  const pinnedKey = pinnedUnreadKey ?? pinnedAgentKey;
+  const filterContext = useMemo(
+    () => ({ activeIssueIds: agentFilterIssueIds, pinnedUnreadKey, pinnedAgentKey }),
+    [agentFilterIssueIds, pinnedUnreadKey, pinnedAgentKey],
+  );
   const filterRows = isArchivedView ? archivedItems : activeRows;
   const filteredItems = useMemo(
     () => filterInboxItems(filterRows, effectiveFilters, filterContext),
@@ -234,25 +259,10 @@ export function InboxPage() {
   }, [isArchivedView, selectedOnPage, filteredItems, lookupItems, effectiveFilters, filterContext]);
   const visibleItems = isArchivedView && pinnedKey ? selectionItems : filteredItems;
 
-  // The main list, by whose turn it is. Every active notification decides the
-  // section; the filtered rows decide what is listed in it.
-  const sections = useInboxSections(wsId, isArchivedView ? NO_ITEMS : visibleItems, activeRows, {
-    filters: activeFilters,
-    openKey: selectedKey,
-  });
-  const workingIssueIds = useMemo(
-    () => new Set(sections.working.map((row) => row.issueId)),
-    [sections.working],
-  );
-  const { workingPending } = sections;
-  const hasRows = isArchivedView
-    ? visibleItems.length > 0
-    : sections.needsYou.length + sections.working.length + sections.updates.length + sections.snoozed.length > 0;
-
-  // Inbox zero: the bleeding m rises once, at the moment the last issue that
-  // needs the user leaves; opening an inbox with none shows it at rest.
-  // Archived and filtered views are not inbox zero, so they never arm it.
-  const inboxZeroCount = isArchivedView || hasActiveFilters ? -1 : sections.needsYou.length;
+  // Inbox zero: the bleeding m rises once, at the moment the last notification
+  // leaves; opening an already-empty inbox shows it at rest. Archived and
+  // filtered views are not inbox zero, so they never arm it.
+  const inboxZeroCount = isArchivedView || hasActiveFilters ? -1 : visibleItems.length;
   const [prevInboxZeroCount, setPrevInboxZeroCount] = useState(inboxZeroCount);
   const [inboxZeroRises, setInboxZeroRises] = useState(false);
   if (inboxZeroCount !== prevInboxZeroCount) {
@@ -264,22 +274,6 @@ export function InboxPage() {
     ? [...lookupItems, ...presenceItems].find((i) => (i.issue_id ?? i.id) === selectedKey)
     : null);
   const selectionFilteredOut = !!selectedKey && !!selectedInView && !selected;
-
-  // An issue can be open without a notification of its own: a "Working" row
-  // has none, and neither does the issue the user just handed to an agent
-  // from here, whose notifications the server archives as the run starts.
-  // `heldKey` keeps that second one open: it is the issue that was resolved
-  // while it has stayed selected, so replying never closes the detail under
-  // the reply. Moving the selection releases it.
-  const [heldKey, setHeldKey] = useState<string | null>(null);
-  const selectedIssueResolved =
-    !isArchivedView && !!selectedKey && (selected?.issue_id === selectedKey || workingIssueIds.has(selectedKey));
-  useEffect(() => {
-    setHeldKey((held) => (selectedIssueResolved || held === selectedKey ? selectedKey : null));
-  }, [selectedIssueResolved, selectedKey]);
-  const isIssueOnlyKey = (key: string) =>
-    !isArchivedView && !!key && (workingIssueIds.has(key) || heldKey === key);
-  const selectedIssueOnly = !selected && !selectionFilteredOut && isIssueOnlyKey(selectedKey);
 
   // What the DETAIL pane shows, one React transition behind the click.
   //
@@ -293,18 +287,6 @@ export function InboxPage() {
   const detailKey = useDeferredValue(selectedKey);
   const detailSwapping = detailKey !== selectedKey;
   const detailItem = resolveDetailItem(selectionItems, selectedKey, detailKey);
-  // The issue the pane shows: the open notification's, or an issue open
-  // without one. The deferred key is held like a row is, and falls forward to
-  // the live selection once it no longer resolves.
-  const detailIssueId =
-    detailItem?.issue_id ??
-    (detailItem
-      ? null
-      : isIssueOnlyKey(detailKey)
-        ? detailKey
-        : selectedIssueOnly
-          ? selectedKey
-          : null);
 
   // The gap above is invisible to the navigation adapter — the inbox stays on
   // the same route and only rewrites `?issue=` — so report it explicitly and
@@ -315,10 +297,8 @@ export function InboxPage() {
   // selection that disappears stays in Inbox; an unknown shared link still
   // falls back to the issue page.
   useEffect(() => {
-    if (selected || selectedIssueOnly) {
-      useInboxSelectionStore.getState().rememberResolvedKey(wsId, selectedKey);
-    }
-  }, [wsId, selected, selectedIssueOnly, selectedKey]);
+    if (selected) useInboxSelectionStore.getState().rememberResolvedKey(wsId, selectedKey);
+  }, [wsId, selected, selectedKey]);
 
   // Both the view and the selection live in the URL, so every write has to
   // carry the other one — a bare `?issue=` would silently drop the user out of
@@ -373,9 +353,8 @@ export function InboxPage() {
   useEffect(() => {
     if (viewLoading || viewError || lookupLoading || lookupError) return;
     if (!selectedKey) return;
-    if (selected || selectedIssueOnly) return;
+    if (selected) return;
     if (selectionFilteredOut) return;
-    if (!isArchivedView && workingPending) return;
     if (useInboxSelectionStore.getState().lastResolvedKeyByWorkspace[wsId] === selectedKey) {
       setSelectedKey("");
       return;
@@ -388,10 +367,7 @@ export function InboxPage() {
     lookupError,
     selectedKey,
     selected,
-    selectedIssueOnly,
     selectionFilteredOut,
-    isArchivedView,
-    workingPending,
     replace,
     wsPaths,
     wsId,
@@ -407,9 +383,10 @@ export function InboxPage() {
   const markUnreadMutation = useMarkInboxUnread();
   const archiveMutation = useArchiveInbox();
   const unarchiveMutation = useUnarchiveInbox();
-  const snoozeMutation = useSnoozeInbox();
-  const unsnoozeMutation = useUnsnoozeInbox();
-  const archiveUpdatesMutation = useArchiveInboxUpdates();
+  const markAllReadMutation = useMarkAllInboxRead();
+  const archiveAllMutation = useArchiveAllInbox();
+  const archiveAllReadMutation = useArchiveAllReadInbox();
+  const archiveCompletedMutation = useArchiveCompletedInbox();
   const retrySourceContextMutation = useRetrySourceContextQuickCreate();
   const timeAgo = useTimeAgo();
   const typeLabels = useTypeLabels();
@@ -430,7 +407,6 @@ export function InboxPage() {
   const markReadMutate = markReadMutation.mutate;
   const selectedId = selected?.id;
   const selectedRead = selected?.read;
-  const unreadOnlyActive = effectiveFilters.unreadOnly;
   useEffect(() => {
     if (!selectedId) {
       openedItemIdRef.current = null;
@@ -440,7 +416,7 @@ export function InboxPage() {
     openedItemIdRef.current = selectedId;
     if (!justOpened && selectedRead) return;
     if (manualUnreadIdRef.current === selectedId) return;
-    if (unreadOnlyActive) {
+    if (filters.unreadOnly) {
       pinnedUnreadKeyRef.current = selectedKey;
       if (isArchivedView && selected) {
         // The unread page drops this group on refetch. Seed its lookup before
@@ -458,7 +434,7 @@ export function InboxPage() {
             : t(($) => $.errors.mark_read_failed),
         ),
     });
-  }, [selectedId, selectedRead, selectedKey, selected, unreadOnlyActive, isArchivedView, queryClient, wsId, lookupFilters, markReadMutate, t]);
+  }, [selectedId, selectedRead, selectedKey, selected, filters.unreadOnly, isArchivedView, queryClient, wsId, lookupFilters, markReadMutate, t]);
 
   // Release the guards as soon as the selection moves off their row.
   useEffect(() => {
@@ -468,28 +444,30 @@ export function InboxPage() {
     if (pinnedUnreadKeyRef.current && pinnedUnreadKeyRef.current !== selectedKey) {
       pinnedUnreadKeyRef.current = null;
     }
+    if (pinnedAgentRef.current && pinnedAgentRef.current.key !== selectedKey) {
+      pinnedAgentRef.current = null;
+    }
   }, [selectedId, selectedKey]);
 
-  // Turning the filter off releases its pin, so turning it back on judges the
+  // `selected` only exists once the open row passed every filter, so under
+  // the agent filter this pins a row that matched when the user opened it.
+  const agentFilter = effectiveFilters.agent;
+  const unreadOnlyActive = effectiveFilters.unreadOnly;
+  const hasSelected = selected != null;
+  useEffect(() => {
+    if (agentFilter && hasSelected && selectedKey) {
+      pinnedAgentRef.current = { key: selectedKey, agent: agentFilter };
+    }
+  }, [agentFilter, hasSelected, selectedKey]);
+
+  // Turning a filter off releases its pin, so turning it back on judges the
   // open row by its current state instead of an exemption from earlier.
+  useEffect(() => {
+    if (!agentFilter) pinnedAgentRef.current = null;
+  }, [agentFilter]);
   useEffect(() => {
     if (!unreadOnlyActive) pinnedUnreadKeyRef.current = null;
   }, [unreadOnlyActive]);
-
-  // Reading an update is all there is to do with it, so the read ones move to
-  // the archive: when the page opens, and as the user moves on from one they
-  // had open. The server checks each issue again. One set is asked for once,
-  // so a request that fails is not repeated until the set changes.
-  const archiveUpdates = archiveUpdatesMutation.mutate;
-  const readUpdates = sections.readUpdates;
-  const sweptUpdatesRef = useRef("");
-  useEffect(() => {
-    if (isArchivedView || readUpdates.length === 0) return;
-    const signature = [...readUpdates].sort().join(",");
-    if (sweptUpdatesRef.current === signature) return;
-    sweptUpdatesRef.current = signature;
-    archiveUpdates({ groups: readUpdates, readOnly: true });
-  }, [isArchivedView, readUpdates, archiveUpdates]);
 
   const writeViewState = useViewStateWriter();
   // Bumped when the already-open notification row is re-clicked; threaded to
@@ -513,9 +491,6 @@ export function InboxPage() {
     }
     setSelectedKey(nextKey);
   };
-
-  /** Open an issue that has no notification: a "Working" row. */
-  const handleSelectIssue = (issueId: string) => setSelectedKey(issueId);
 
   const handleMarkRead = (id: string) => {
     // Reading it back explicitly cancels an earlier park on the same row.
@@ -545,24 +520,18 @@ export function InboxPage() {
     });
   };
 
-  // Archive, unarchive and snooze all remove the row from where it was
-  // actioned, so each has to move the selection off it first. `list` is
-  // whichever list the row came from: the archived one for unarchive, and in
-  // the main view the row's own section, so finishing "Needs you" leaves the
-  // selection there instead of dropping into the updates below it.
+  // Both archive and unarchive remove the row from the list it was actioned
+  // from, so both have to move the selection off it first. `list` is whichever
+  // list the row came from — the main one for archive, the archived one for
+  // unarchive.
   const advanceSelectionPast = (id: string, list: InboxItem[]) => {
-    if (!isArchivedView) {
-      const sectionRows = [sections.needsYou, sections.updates, sections.snoozed].find((rows) =>
-        rows.some((row) => row.item.id === id),
-      );
-      if (sectionRows) list = sectionRows.map((row) => row.item);
-    }
     const idx = list.findIndex((i) => i.id === id);
     const target = idx >= 0 ? list[idx] : null;
     const wasSelected = !!target && (target.issue_id ?? target.id) === selectedKey;
     if (!wasSelected) return;
-    // Prefer the next row down, fall back to the one above when actioning at
-    // the bottom, and only clear the selection when nothing else is left.
+    // List is sorted newest-first; prefer the next (older) item, fall back
+    // to the previous (newer) one when actioning at the bottom, and only
+    // clear the selection when nothing else is left.
     const next = list[idx + 1] ?? list[idx - 1] ?? null;
     setSelectedKey(next ? (next.issue_id ?? next.id) : "");
   };
@@ -594,54 +563,12 @@ export function InboxPage() {
     });
   };
 
-  // Snoozing puts the whole issue away until a time, so like archive it moves
-  // the selection on first. The toast names the time: the row has gone into a
-  // folded section and nothing else on screen says when it returns.
-  const handleSnooze = (id: string, until: Date) => {
-    advanceSelectionPast(id, selectionItems);
-    snoozeMutation.mutate(
-      { id, until: until.toISOString() },
-      {
-        onSuccess: () =>
-          toast.success(
-            t(($) => $.toasts.snoozed, { time: formatSnoozeTime(until, new Date(), locale) }),
-          ),
-        onError: (err) =>
-          toast.error(
-            err instanceof Error && err.message
-              ? err.message
-              : t(($) => $.errors.snooze_failed),
-          ),
-      },
-    );
-  };
-
-  const handleUnsnooze = (id: string) => {
-    unsnoozeMutation.mutate(id, {
-      onError: (err) =>
-        toast.error(
-          err instanceof Error && err.message
-            ? err.message
-            : t(($) => $.errors.unsnooze_failed),
-        ),
-    });
-  };
-
-  // The snooze menu hangs off the detail header's button; the shortcut opens
-  // it for the row that is open. It belongs to that row, so it closes when the
-  // selection moves.
-  const [snoozeMenuKey, setSnoozeMenuKey] = useState<string | null>(null);
-  const snoozeMenuOpen = !!selectedKey && snoozeMenuKey === selectedKey;
-
   // Keep the listener stable while using the latest selected-item action.
   const actionOnSelectedRef = useRef<(() => void) | null>(null);
-  const snoozeSelectedRef = useRef<(() => void) | null>(null);
   useEffect(() => {
     actionOnSelectedRef.current = selected
       ? () => (isArchivedView ? handleUnarchive(selected.id) : handleArchive(selected.id))
       : null;
-    snoozeSelectedRef.current =
-      selected && !isArchivedView ? () => setSnoozeMenuKey(selectedKey) : null;
   });
 
   useEffect(() => {
@@ -650,11 +577,8 @@ export function InboxPage() {
       if (isEditableShortcutTarget(event.target)) return;
       if (isPortalLayerShortcutTarget(event.target)) return;
       if (useModalStore.getState().modal) return;
-      const run = shortcutMatchesEvent(getShortcut("archiveInboxItem"), event)
-        ? actionOnSelectedRef.current
-        : shortcutMatchesEvent(getShortcut("snoozeInboxItem"), event)
-          ? snoozeSelectedRef.current
-          : null;
+      if (!shortcutMatchesEvent(getShortcut("archiveInboxItem"), event)) return;
+      const run = actionOnSelectedRef.current;
       if (!run) return;
       event.preventDefault();
       run();
@@ -663,30 +587,58 @@ export function InboxPage() {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  // "Clear" archives every update listed, read or not. Under a filter that is
-  // the ones the filter shows.
-  const handleClearUpdates = () => {
-    const groups = sections.updates.map((row) => row.item.issue_id ?? row.item.id);
-    if (groups.length === 0) return;
-    if (groups.includes(selectedKey)) setSelectedKey("");
-    archiveUpdatesMutation.mutate(
-      { groups, readOnly: false },
-      {
-        onError: (err) =>
-          toast.error(
-            err instanceof Error && err.message
-              ? err.message
-              : t(($) => $.errors.archive_failed),
-          ),
-      },
-    );
+  // Batch operations
+  const handleMarkAllRead = () => {
+    markAllReadMutation.mutate(undefined, {
+      onError: (err) =>
+        toast.error(
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.errors.mark_all_read_failed),
+        ),
+    });
+  };
+
+  const handleArchiveAll = () => {
+    setSelectedKey("");
+    archiveAllMutation.mutate(undefined, {
+      onError: (err) =>
+        toast.error(
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.errors.archive_all_failed),
+        ),
+    });
+  };
+
+  const handleArchiveAllRead = () => {
+    const readKeys = items.filter((i) => i.read).map((i) => i.issue_id ?? i.id);
+    if (readKeys.includes(selectedKey)) setSelectedKey("");
+    archiveAllReadMutation.mutate(undefined, {
+      onError: (err) =>
+        toast.error(
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.errors.archive_all_read_failed),
+        ),
+    });
   };
 
   // The command bar calls the page's own handlers, so archiving from it moves
   // the selection and toasts exactly like the row actions do.
-  const commandBarHandlersRef = useRef({ handleArchive, handleMarkUnread });
+  const commandBarHandlersRef = useRef({
+    handleArchive,
+    handleMarkUnread,
+    handleMarkAllRead,
+    handleArchiveAllRead,
+  });
   useEffect(() => {
-    commandBarHandlersRef.current = { handleArchive, handleMarkUnread };
+    commandBarHandlersRef.current = {
+      handleArchive,
+      handleMarkUnread,
+      handleMarkAllRead,
+      handleArchiveAllRead,
+    };
   });
   const commandBarItem = isArchivedView ? null : selected;
   useRegisterCommandBarContext(
@@ -696,10 +648,24 @@ export function InboxPage() {
         item: commandBarItem,
         archive: (id: string) => commandBarHandlersRef.current.handleArchive(id),
         markUnread: (id: string) => commandBarHandlersRef.current.handleMarkUnread(id),
+        markAllRead: () => commandBarHandlersRef.current.handleMarkAllRead(),
+        archiveAllRead: () => commandBarHandlersRef.current.handleArchiveAllRead(),
       }),
       [commandBarItem],
     ),
   );
+
+  const handleArchiveCompleted = () => {
+    setSelectedKey("");
+    archiveCompletedMutation.mutate(undefined, {
+      onError: (err) =>
+        toast.error(
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.errors.archive_completed_failed),
+        ),
+    });
+  };
 
   // -- Shared sub-components --------------------------------------------------
 
@@ -739,25 +705,65 @@ export function InboxPage() {
         </DropdownMenu>
       }
       leading={<CollapsedNavTrigger />}
+      meta={
+        !isArchivedView && unreadCount > 0 && (
+          <NumberFlow
+            value={unreadCount}
+            animated={false}
+            format={{ maximumFractionDigits: 0 }}
+            aria-label={String(unreadCount)}
+            className="text-caption text-muted-foreground"
+          />
+        )
+      }
     >
       <InboxFilterMenu
         wsId={wsId}
         items={filterRows}
         priorityFilterSupport={priorityFilterSupport}
         issueFieldsSupport={issueFieldsSupport}
+        activeIssueIds={activeIssueIds}
         archived={isArchivedView}
       />
+      {/* Batch actions are main-view only. Every entry archives from the MAIN
+          inbox, so offering them while the archived list is on screen reads as
+          "archive all of these" and does the opposite of what it looks like. */}
+      {!isArchivedView && (
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <IconButton
+              label={tCommon(($) => $.more_actions)}
+              tooltipSide="bottom"
+              className="text-muted-foreground"
+            />
+          }
+        >
+          <MoreHorizontal className="h-4 w-4" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-auto">
+          <DropdownMenuItem onClick={handleMarkAllRead}>
+            <CheckCheck className="h-4 w-4" />
+            {t(($) => $.menu.mark_all_read)}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={handleArchiveAll}>
+            <Archive className="h-4 w-4" />
+            {t(($) => $.menu.archive_all)}
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={handleArchiveAllRead}>
+            <BookCheck className="h-4 w-4" />
+            {t(($) => $.menu.archive_all_read)}
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={handleArchiveCompleted}>
+            <ListChecks className="h-4 w-4" />
+            {t(($) => $.menu.archive_completed)}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      )}
     </PanelHeader>
   );
-
-  const filterEmptyLabel =
-    hasActiveFilters && !hasRows ? t(($) => $.filters.empty) : undefined;
-  const filterEmptyAction =
-    hasActiveFilters && !hasRows ? (
-      <Button variant="outline" size="sm" onClick={() => clearFilters(wsId)}>
-        {t(($) => $.filters.clear)}
-      </Button>
-    ) : undefined;
 
   const list = isArchivedView && archivedError ? (
     <div className="flex-1 min-h-0 overflow-y-auto">
@@ -777,40 +783,39 @@ export function InboxPage() {
         onMarkUnread: handleMarkUnread,
         onAction: isArchivedView ? handleUnarchive : handleArchive,
         onDelete: (id) => setDeleteTarget(selectionItems.find((item) => item.id === id) ?? null),
-        onSnooze: handleSnooze,
-        onUnsnooze: handleUnsnooze,
       }}
     >
-      {isArchivedView ? (
-        <InboxList
-          items={visibleItems}
-          view={view}
-          selectedKey={selectedKey}
-          onLoadMore={archiveQuery.hasNextPage ? loadNextArchivedPage : undefined}
-          loadingMore={archiveQuery.isFetchingNextPage}
-          loadMoreError={archiveQuery.isFetchNextPageError}
-          onSelect={handleSelect}
-          onAction={handleUnarchive}
-          emptyLabel={filterEmptyLabel}
-          emptyAction={filterEmptyAction}
-        />
-      ) : (
-        <InboxSectionedList
-          sections={sections}
-          selectedKey={selectedKey}
-          filtered={hasActiveFilters}
-          onSelect={handleSelect}
-          onSelectIssue={handleSelectIssue}
-          onAction={handleArchive}
-          onClearUpdates={handleClearUpdates}
-          emptyLabel={filterEmptyLabel}
-          emptyAction={filterEmptyAction}
-        />
-      )}
+      <InboxList
+        items={visibleItems}
+        view={view}
+        selectedKey={selectedKey}
+        onLoadMore={isArchivedView && archiveQuery.hasNextPage ? loadNextArchivedPage : undefined}
+        loadingMore={archiveQuery.isFetchingNextPage}
+        loadMoreError={archiveQuery.isFetchNextPageError}
+        onSelect={handleSelect}
+        onAction={isArchivedView ? handleUnarchive : handleArchive}
+        emptyLabel={
+          hasActiveFilters && visibleItems.length === 0
+            ? t(($) => $.filters.empty)
+            : undefined
+        }
+        emptyAction={
+          hasActiveFilters && visibleItems.length === 0 ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => clearFilters(wsId)}
+            >
+              {t(($) => $.filters.clear)}
+            </Button>
+          ) : undefined
+        }
+      />
       {deleteTarget && (
         <InboxDeleteDialog
           key={deleteTarget.id}
           item={deleteTarget}
+          view={view}
           onClose={() => setDeleteTarget(null)}
           onDeleted={(id) => {
             advanceSelectionPast(id, selectionItems);
@@ -871,33 +876,13 @@ export function InboxPage() {
     </div>
   ) : null;
 
-  // Snooze and archive act on the open notification, so an issue open without
-  // one (a "Working" row) has neither, and the archive keeps its own actions.
-  const detailSnoozed =
-    !!detailItem &&
-    sections.snoozed.some((row) => row.item.id === detailItem.id);
-  const detailHostActions =
-    detailItem && !isArchivedView ? (
-      <InboxDetailActions
-        compact={isCompact}
-        snoozed={detailSnoozed}
-        snoozeOpen={snoozeMenuOpen}
-        onSnoozeOpenChange={(open) => setSnoozeMenuKey(open ? selectedKey : null)}
-        onSnooze={(until) => handleSnooze(detailItem.id, until)}
-        onUnsnooze={() => handleUnsnooze(detailItem.id)}
-        onArchive={() => handleArchive(detailItem.id)}
-      />
-    ) : undefined;
-
-  const detailContent = detailIssueId ? (
+  const detailContent = detailItem?.issue_id ? (
     // Key by issue_id (not inbox-item id): a new comment/reaction generates a
     // new inbox notification for the same issue, and the dedup helper picks the
     // newest one — keying on its id would remount IssueDetail on every event,
-    // wiping the comment composer draft and resetting scroll position. It is
-    // also what keeps the detail mounted while the issue's notification comes
-    // and goes under it.
+    // wiping the comment composer draft and resetting scroll position.
     <ErrorBoundary
-      resetKeys={[detailIssueId]}
+      resetKeys={[detailItem.issue_id]}
       // The default fallback is a bare message card. On a phone it would be the
       // only thing on screen, so it has to carry the way back too — the bar is
       // the point here, the message is whatever the boundary caught.
@@ -911,16 +896,16 @@ export function InboxPage() {
       ) : undefined}
     >
       {/* Shift+Click on an issue mention peeks it over the detail pane. */}
-      <IssuePeekHost key={detailIssueId}>
+      <IssuePeekHost key={detailItem.issue_id}>
         <IssueDetail
-          key={detailIssueId}
-          issueId={detailIssueId}
+          key={detailItem.issue_id}
+          issueId={detailItem.issue_id}
           defaultSidebarOpen={false}
           layoutId="multica_inbox_issue_detail_layout"
-          highlightCommentId={detailItem?.details?.comment_id ?? undefined}
+          highlightCommentId={detailItem.details?.comment_id ?? undefined}
           highlightRequestToken={highlightRequestToken}
           highlightAppRequestId={
-            detailItem?.type.startsWith("app_") ? (detailItem.details?.request_id ?? undefined) : undefined
+            detailItem.type.startsWith("app_") ? (detailItem.details?.request_id ?? undefined) : undefined
           }
           // The inbox reads the row it selected itself (see the auto-read
           // effect above), and must keep a row marked unread while it is open.
@@ -936,8 +921,9 @@ export function InboxPage() {
             // longer exists.
             setSelectedKey("");
           }}
-          hostActions={detailHostActions}
-          onDone={detailItem ? () => handleArchive(detailItem.id) : undefined}
+          onDone={() => {
+            handleArchive(detailItem.id);
+          }}
         />
       </IssuePeekHost>
     </ErrorBoundary>
@@ -1029,22 +1015,6 @@ export function InboxPage() {
             {t(($) => $.detail.edit_advanced)}
           </Button>
         )}
-        {!isArchivedView && (
-          <InboxSnoozeMenu
-            open={snoozeMenuOpen}
-            onOpenChange={(open) => setSnoozeMenuKey(open ? selectedKey : null)}
-            snoozed={detailSnoozed}
-            onSnooze={(until) => handleSnooze(detailItem.id, until)}
-            onUnsnooze={() => handleUnsnooze(detailItem.id)}
-            trigger={
-              <Button variant="outline" size="sm">
-                <Clock className="mr-1.5 h-3.5 w-3.5" />
-                {t(($) => $.snooze.action)}
-                <ActionShortcutKeycaps action="snoozeInboxItem" />
-              </Button>
-            }
-          />
-        )}
         {/* Mirrors the row action: the button always reverses the view the
             item is being read in. */}
         <Tooltip>
@@ -1108,7 +1078,7 @@ export function InboxPage() {
     // of selection get their chrome from different places, so they render
     // differently — `InboxItem.issue_id` is nullable and a null one is a plain
     // notification (a failed quick-create, say), not an issue.
-    if (detailIssueId) {
+    if (detailItem?.issue_id) {
       // No scroll container and no back bar of our own: `IssueDetail` owns
       // both, and takes the way back through `leadingAction`. Wrapping it in
       // an `overflow-y-auto` used to collapse its inner scroller to content
@@ -1186,19 +1156,12 @@ export function InboxPage() {
               <Inbox className="mb-3 h-10 w-10 text-faint-foreground" />
             )}
             <p className="relative text-body">
-              {inboxZeroCount === 0
-                ? t(($) => $.detail.nothing_needs_you)
-                : hasRows
-                  ? t(($) => $.detail.select_prompt)
-                  : isArchivedView
-                    ? t(($) => $.list.archived_empty)
-                    : t(($) => $.filters.empty)}
+              {visibleItems.length > 0
+                ? t(($) => $.detail.select_prompt)
+                : isArchivedView
+                  ? t(($) => $.list.archived_empty)
+                  : t(($) => $.detail.empty)}
             </p>
-            {inboxZeroCount === 0 && (
-              <p className="relative mt-1 max-w-xs text-center text-caption">
-                {t(($) => $.detail.nothing_needs_you_hint)}
-              </p>
-            )}
           </div>
           </>
         )}

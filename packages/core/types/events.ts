@@ -39,8 +39,6 @@ export type WSEventType =
   | "inbox:unread"
   | "inbox:archived"
   | "inbox:unarchived"
-  | "inbox:snoozed"
-  | "inbox:unsnoozed"
   | "inbox:deleted"
   | "inbox:batch-read"
   | "inbox:batch-archived"
@@ -242,20 +240,6 @@ export interface InboxArchivedPayload {
 }
 
 export interface InboxUnarchivedPayload {
-  item_id: string;
-  issue_id: string | null;
-  recipient_id: string;
-}
-
-/** Personal: the recipient snoozed an issue's notifications until a time. */
-export interface InboxSnoozedPayload {
-  item_id: string;
-  issue_id: string | null;
-  recipient_id: string;
-  snoozed_until: string;
-}
-
-export interface InboxUnsnoozedPayload {
   item_id: string;
   issue_id: string | null;
   recipient_id: string;
@@ -698,8 +682,6 @@ export interface WSEventPayloadMap {
   "inbox:unread": InboxUnreadPayload;
   "inbox:archived": InboxArchivedPayload;
   "inbox:unarchived": InboxUnarchivedPayload;
-  "inbox:snoozed": InboxSnoozedPayload;
-  "inbox:unsnoozed": InboxUnsnoozedPayload;
   "inbox:deleted": { item_id: string; recipient_id: string; count: number };
   "inbox:batch-read": InboxBatchReadPayload;
   "inbox:batch-archived": InboxBatchArchivedPayload;

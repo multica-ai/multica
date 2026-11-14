@@ -432,10 +432,6 @@
         "label": "Archivar notificación",
         "description": "Archiva la notificación de la bandeja abierta, o restaúrala mientras lees el archivo."
       },
-      "snoozeInboxItem": {
-        "label": "Posponer notificación",
-        "description": "Elige cuándo vuelve la notificación abierta de la bandeja de entrada."
-      },
       "send": {
         "label": "Enviar",
         "description": "También envía nuevas tareas."
@@ -835,48 +831,25 @@
     "toast_profile_failed": "Error al actualizar el perfil"
   },
   "notifications": {
+    "title": "Notificaciones de la bandeja",
+    "description": "Los eventos silenciados siguen visibles en la tarea.",
     "toast_failed": "Error al actualizar la configuración de notificaciones",
-    "needs_you": {
-      "title": "Pendientes de ti",
-      "description": "Lo que va dirigido a ti permanece en «Pendientes de ti» de la bandeja de entrada hasta que lo atiendas o lo archives. No se puede desactivar.",
-      "always_on": "Siempre activado",
-      "mentions": {
-        "label": "Menciones",
-        "description": "Cuando alguien te @menciona"
-      },
+    "groups": {
       "assignments": {
         "label": "Asignaciones",
-        "description": "Cuando te asignan una tarea"
-      },
-      "runs": {
-        "label": "Ejecuciones que iniciaste",
-        "description": "Cuando el agente termina, falla, te pregunta algo o se cancela la ejecución"
-      },
-      "your_issues": {
-        "label": "Tareas que creaste o tienes asignadas",
-        "description": "Comentarios nuevos, o un estado que espera tu acción"
-      }
-    },
-    "updates": {
-      "title": "Novedades",
-      "description": "Actividad en las tareas que sigues. No cuenta en la insignia y desaparece de la bandeja de entrada al leerla. Lo que desactives sigue visible en la tarea."
-    },
-    "groups": {
-      "mentions": {
-        "label": "@all y @squad",
-        "description": "Las menciones de grupo también van a «Pendientes de ti». Si se desactiva, van a «Novedades»."
-      },
-      "comments": {
-        "label": "Comentarios",
-        "description": "Comentarios nuevos en tareas que sigues"
+        "description": "Cuando te asignan o te quitan de una tarea"
       },
       "status_changes": {
         "label": "Cambios de estado",
         "description": "Cuando una tarea que sigues cambia de estado (p. ej. pendiente, en curso, completado)"
       },
-      "assignments": {
-        "label": "Cambios de asignación",
-        "description": "Cuando te quitan de una tarea, o una tarea que sigues cambia de responsable"
+      "comments": {
+        "label": "Comentarios",
+        "description": "Comentarios nuevos en tareas que sigues"
+      },
+      "mentions": {
+        "label": "Menciones",
+        "description": "Cuando alguien te @menciona, incluidos @all y @squad"
       },
       "updates": {
         "label": "Prioridad y fecha de entrega",
@@ -887,8 +860,8 @@
         "description": "Cuando se crea una tarea en un proyecto al que estás suscrito"
       },
       "agent_activity": {
-        "label": "Ejecuciones de agentes",
-        "description": "Cuando la ejecución de un agente falla o se bloquea en una tarea que sigues"
+        "label": "Actividad de agentes",
+        "description": "Cuando falla una ejecución de agente"
       },
       "chat_replies": {
         "label": "Incluir respuestas del chat"
@@ -896,8 +869,7 @@
     },
     "system": {
       "title": "Notificaciones del sistema",
-      "label": "Mostrar notificaciones del sistema",
-      "description": "De la bandeja de entrada, solo «Pendientes de ti» muestra un aviso. Las novedades, nunca."
+      "label": "Mostrar notificaciones del sistema"
     },
     "browser": {
       "label": "Notificaciones del navegador",

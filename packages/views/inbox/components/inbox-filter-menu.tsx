@@ -5,7 +5,7 @@ import { Filter, RotateCcw, Search } from "@multica/ui/icons";
 import { PRIORITY_DISPLAY_ORDER } from "@multica/core/issues/config";
 import { DUE_DATE_FILTERS, FILTER_NONE_VALUE } from "@multica/core/issues/stores/filter-tree";
 import {
-  INBOX_NOTIFICATION_FILTER_KEYS,
+  INBOX_AGENT_FILTERS,
   INBOX_RECEIVED_FILTERS,
   INBOX_TYPE_GROUPS,
   activeInboxFilterKeys,
@@ -57,18 +57,21 @@ import {
 import { useStatusOptions } from "../../issues/utils/status-options";
 import { useT } from "../../i18n";
 import {
+  INBOX_AGENT_ICONS,
   INBOX_FILTER_ICONS,
   INBOX_TYPE_ICONS,
   useInboxFilterChips,
   useInboxFilterLabels,
 } from "./inbox-filter-options";
 
+const EMPTY_ISSUE_IDS: ReadonlySet<string> = new Set();
 const NO_COUNTS = new Map<string, number>();
 
-const NOTIFICATION_KEYS = INBOX_NOTIFICATION_FILTER_KEYS;
+const NOTIFICATION_KEYS: readonly InboxFilterKey[] = ["unread", "type", "actor", "received"];
 const ISSUE_KEYS: readonly InboxFilterKey[] = [
   "status",
   "priority",
+  "agent",
   "project",
   "assignee",
   "label",
@@ -110,12 +113,8 @@ function ValueItem({
 
 /**
  * The inbox filter, shaped like the issue filter: search, the dimensions in
- * use pinned on top, "is" / "is not" per field, and each field's current
- * value on its row.
- *
- * The main Inbox is narrowed by the issue only: its sections already say what
- * kind of notification a row is and whether it is read. The archive is one
- * flat list, so it also offers the notification fields.
+ * use pinned on top, then notification and issue fields, "is" / "is not" per
+ * field, and each field's current value on its row.
  *
  * `items` are the view's notifications, every one rather than one per issue:
  * the notification fields match any notification of an issue.
@@ -125,12 +124,15 @@ export function InboxFilterMenu({
   items,
   priorityFilterSupport,
   issueFieldsSupport = "supported",
+  activeIssueIds = EMPTY_ISSUE_IDS,
   archived = false,
 }: {
   wsId: string;
   items: InboxItem[];
   priorityFilterSupport: InboxFilterSupport;
   issueFieldsSupport?: InboxFilterSupport;
+  /** Issues an agent is running or queued on. */
+  activeIssueIds?: ReadonlySet<string>;
   archived?: boolean;
 }) {
   const { t } = useT("inbox");
@@ -165,10 +167,10 @@ export function InboxFilterMenu({
     switch (key) {
       case "priority":
         return priorityFilterSupport === "supported";
-      case "unread":
-        return archived;
+      case "agent":
+        return !archived;
       case "actor":
-        return archived && actorOptions.length > 0;
+        return actorOptions.length > 0;
       case "project":
       case "assignee":
       case "label":
@@ -176,7 +178,7 @@ export function InboxFilterMenu({
         return issueFieldsSupported;
       case "type":
       case "received":
-        return archived && serverOnlySupported;
+        return serverOnlySupported;
       default:
         return true;
     }
@@ -197,8 +199,8 @@ export function InboxFilterMenu({
   // Counts are faceted: each respects every other active dimension while
   // ignoring its own, so it says how many rows selecting that value shows.
   const localCounts = useMemo(
-    () => (archived || !open ? null : inboxFacetCounts(items, effectiveFilters)),
-    [archived, open, items, effectiveFilters],
+    () => (archived || !open ? null : inboxFacetCounts(items, effectiveFilters, { activeIssueIds })),
+    [archived, open, items, effectiveFilters, activeIssueIds],
   );
   const counts = {
     types: archived ? toMap(facets?.types) : localCounts?.types ?? NO_COUNTS,
@@ -360,6 +362,19 @@ export function InboxFilterMenu({
             ))}
           </>
         );
+      case "agent":
+        return INBOX_AGENT_FILTERS.map((agent) => {
+          const Icon = INBOX_AGENT_ICONS[agent];
+          return (
+            <ValueItem
+              key={agent}
+              checked={effectiveFilters.agent === agent}
+              onToggle={() => store.setAgent(wsId, agent)}
+              icon={<Icon className="size-3.5 text-muted-foreground" />}
+              label={labels.agent[agent]}
+            />
+          );
+        });
       case "project":
         return (
           <>
@@ -448,12 +463,12 @@ export function InboxFilterMenu({
   // The dimensions in use when the menu opened go first; membership is
   // taken at open, so a row never jumps out from under the pointer.
   const activeKeys = activeAtOpen ?? new Set(activeInboxFilterKeys(effectiveFilters));
-  const group = (title: string | null, keys: readonly InboxFilterKey[]) => {
+  const group = (title: string, keys: readonly InboxFilterKey[]) => {
     const shown = keys.filter((key) => available(key) && !activeKeys.has(key));
     if (shown.length === 0) return null;
     return (
       <DropdownMenuGroup>
-        {title && <DropdownMenuLabel>{title}</DropdownMenuLabel>}
+        <DropdownMenuLabel>{title}</DropdownMenuLabel>
         {shown.map(section)}
       </DropdownMenuGroup>
     );
@@ -481,9 +496,7 @@ export function InboxFilterMenu({
         valueHits.push(listHit("type", type, labels.type[type], <Icon className="size-3.5 text-muted-foreground" />));
       }
     }
-    if (available("actor")) {
-      for (const option of actorOptions) valueHits.push(listHit("actor", option.key, option.name, actorAvatar(option)));
-    }
+    for (const option of actorOptions) valueHits.push(listHit("actor", option.key, option.name, actorAvatar(option)));
     if (available("received")) {
       for (const received of INBOX_RECEIVED_FILTERS) {
         valueHits.push({
@@ -495,6 +508,14 @@ export function InboxFilterMenu({
     for (const option of statusOptions) valueHits.push(listHit("status", option.key, option.label, statusIcon(option.key)));
     if (available("priority")) {
       for (const option of valueCatalog("priority")) valueHits.push(listHit("priority", option.value, option.label, option.icon));
+    }
+    if (available("agent")) {
+      for (const agent of INBOX_AGENT_FILTERS) {
+        valueHits.push({
+          key: "agent", value: agent, label: labels.agent[agent], icon: null,
+          checked: effectiveFilters.agent === agent, onToggle: () => store.setAgent(wsId, agent),
+        });
+      }
     }
     for (const dimension of ["project", "assignee", "label", "dueDate"] as const) {
       if (!available(dimension)) continue;
@@ -553,8 +574,7 @@ export function InboxFilterMenu({
         </>
       )}
       {group(t(($) => $.filters.section_notification), NOTIFICATION_KEYS)}
-      {/* With no notification fields the heading has nothing to tell apart. */}
-      {group(archived ? t(($) => $.filters.section_issue) : null, ISSUE_KEYS)}
+      {group(t(($) => $.filters.section_issue), ISSUE_KEYS)}
       {activeCount > 0 && (
         <>
           <DropdownMenuSeparator />

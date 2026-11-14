@@ -426,10 +426,6 @@
         "label": "알림 보관",
         "description": "열린 인박스 알림을 보관합니다. 보관함을 보는 중에는 보관을 해제합니다."
       },
-      "snoozeInboxItem": {
-        "label": "알림 미루기",
-        "description": "열려 있는 인박스 알림이 돌아올 시간을 선택합니다."
-      },
       "send": {
         "label": "보내기",
         "description": "새 태스크 생성에도 사용됩니다."
@@ -826,48 +822,25 @@
     "toast_profile_failed": "프로필을 업데이트하지 못했습니다"
   },
   "notifications": {
+    "title": "인박스 알림",
+    "description": "알림을 꺼도 태스크에서 관련 활동을 볼 수 있습니다.",
     "toast_failed": "알림 설정을 업데이트하지 못했습니다",
-    "needs_you": {
-      "title": "처리 필요",
-      "description": "나에게 온 알림은 처리하거나 보관할 때까지 인박스의 '처리 필요'에 남습니다. 끌 수 없습니다.",
-      "always_on": "항상 켜짐",
-      "mentions": {
-        "label": "멘션",
-        "description": "누군가 나를 @멘션할 때"
-      },
+    "groups": {
       "assignments": {
         "label": "할당",
-        "description": "태스크가 나에게 할당될 때"
-      },
-      "runs": {
-        "label": "내가 시작한 실행",
-        "description": "에이전트가 완료하거나 실패할 때, 질문할 때, 또는 실행이 취소될 때"
-      },
-      "your_issues": {
-        "label": "내가 만들었거나 담당하는 태스크",
-        "description": "새 댓글이 달리거나 상태가 내 처리를 기다리게 될 때"
-      }
-    },
-    "updates": {
-      "title": "업데이트",
-      "description": "팔로우 중인 태스크의 활동입니다. 배지에 포함되지 않으며 읽으면 인박스에서 사라집니다. 꺼도 태스크에서는 볼 수 있습니다."
-    },
-    "groups": {
-      "mentions": {
-        "label": "@all 및 @squad",
-        "description": "그룹 멘션도 '처리 필요'에 들어갑니다. 끄면 '업데이트'로 들어갑니다."
-      },
-      "comments": {
-        "label": "댓글",
-        "description": "팔로우 중인 태스크에 새 댓글이 달릴 때"
+        "description": "태스크에 할당되거나 할당 해제될 때"
       },
       "status_changes": {
         "label": "상태 변경",
         "description": "팔로우 중인 태스크의 상태가 바뀔 때(예: 할 일, 진행 중, 완료)"
       },
-      "assignments": {
-        "label": "할당 변경",
-        "description": "내 할당이 해제되거나 팔로우 중인 태스크의 담당자가 바뀔 때"
+      "comments": {
+        "label": "댓글",
+        "description": "팔로우 중인 태스크에 새 댓글이 달릴 때"
+      },
+      "mentions": {
+        "label": "멘션",
+        "description": "누군가 나를 @멘션할 때(@all, @squad 포함)"
       },
       "updates": {
         "label": "우선순위 및 마감일",
@@ -878,8 +851,8 @@
         "description": "구독 중인 프로젝트에 태스크가 생성될 때"
       },
       "agent_activity": {
-        "label": "에이전트 실행",
-        "description": "팔로우 중인 태스크에서 에이전트 실행이 실패하거나 막혔을 때"
+        "label": "에이전트 활동",
+        "description": "에이전트 실행이 실패할 때"
       },
       "chat_replies": {
         "label": "채팅 답변 포함"
@@ -887,8 +860,7 @@
     },
     "system": {
       "title": "시스템 알림",
-      "label": "Multica가 백그라운드에 있을 때 시스템 알림 표시",
-      "description": "인박스에서는 '처리 필요'만 배너를 띄웁니다. '업데이트'는 띄우지 않습니다."
+      "label": "Multica가 백그라운드에 있을 때 시스템 알림 표시"
     },
     "browser": {
       "label": "브라우저 알림",

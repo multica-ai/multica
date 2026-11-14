@@ -432,10 +432,6 @@
         "label": "Archiver la notification",
         "description": "Archiver la notification ouverte, ou la restaurer lors de la consultation des archives."
       },
-      "snoozeInboxItem": {
-        "label": "Reporter la notification",
-        "description": "Choisissez quand la notification ouverte revient dans la boîte de réception."
-      },
       "send": {
         "label": "Envoyer",
         "description": "Permet aussi de créer des tâches."
@@ -835,48 +831,25 @@
     "toast_profile_failed": "Échec de la mise à jour du profil"
   },
   "notifications": {
+    "title": "Notifications de la boîte de réception",
+    "description": "Les événements désactivés restent visibles dans la tâche.",
     "toast_failed": "Échec de la mise à jour des réglages de notification",
-    "needs_you": {
-      "title": "À traiter",
-      "description": "Ce qui vous est adressé reste dans « À traiter » de la boîte de réception jusqu'à ce que vous le traitiez ou l'archiviez. Impossible à désactiver.",
-      "always_on": "Toujours activé",
-      "mentions": {
-        "label": "Mentions",
-        "description": "Quand quelqu'un vous @mentionne"
-      },
+    "groups": {
       "assignments": {
         "label": "Assignations",
-        "description": "Quand une tâche vous est assignée"
-      },
-      "runs": {
-        "label": "Exécutions que vous avez lancées",
-        "description": "Quand l'agent termine, échoue, vous pose une question, ou que l'exécution est annulée"
-      },
-      "your_issues": {
-        "label": "Tâches que vous avez créées ou qui vous sont assignées",
-        "description": "Nouveaux commentaires, ou statut en attente de votre action"
-      }
-    },
-    "updates": {
-      "title": "Mises à jour",
-      "description": "L'activité des tâches que vous suivez. Non comptée dans le badge, et retirée de la boîte de réception une fois lue. Ce que vous désactivez reste visible sur la tâche."
-    },
-    "groups": {
-      "mentions": {
-        "label": "@all et @squad",
-        "description": "Les mentions de groupe vont aussi dans « À traiter ». Désactivé, elles vont dans « Mises à jour »."
-      },
-      "comments": {
-        "label": "Commentaires",
-        "description": "Nouveaux commentaires sur les tâches que vous suivez"
+        "description": "Quand une tâche vous est assignée ou retirée"
       },
       "status_changes": {
         "label": "Changements de statut",
         "description": "Quand une tâche que vous suivez change de statut (à faire, en cours, terminé…)"
       },
-      "assignments": {
-        "label": "Changements d'assignation",
-        "description": "Quand une tâche ne vous est plus assignée, ou qu'une tâche que vous suivez change de responsable"
+      "comments": {
+        "label": "Commentaires",
+        "description": "Nouveaux commentaires sur les tâches que vous suivez"
+      },
+      "mentions": {
+        "label": "Mentions",
+        "description": "Quand quelqu'un vous @mentionne, y compris via @all et @squad"
       },
       "updates": {
         "label": "Priorité et date d'échéance",
@@ -887,8 +860,8 @@
         "description": "Quand une tâche est créée dans un projet auquel vous êtes abonné"
       },
       "agent_activity": {
-        "label": "Exécutions d'agent",
-        "description": "Quand l'exécution d'un agent échoue ou se bloque sur une tâche que vous suivez"
+        "label": "Activité des agents",
+        "description": "Lorsqu'une exécution d'agent échoue"
       },
       "chat_replies": {
         "label": "Inclure les réponses du chat"
@@ -896,8 +869,7 @@
     },
     "system": {
       "title": "Notifications système",
-      "label": "Afficher les notifications système lorsque Multica est en arrière-plan",
-      "description": "Dans la boîte de réception, seul « À traiter » affiche une bannière. Les mises à jour, jamais."
+      "label": "Afficher les notifications système lorsque Multica est en arrière-plan"
     },
     "browser": {
       "label": "Notifications du navigateur",

@@ -3075,11 +3075,6 @@ export const InboxUnreadSummarySchema = z.array(
     .object({
       workspace_id: z.string(),
       count: z.number(),
-      // Absent from a server that predates the sectioned Inbox. A value that
-      // is not a number is dropped the same way, so the badge falls back to
-      // `count` instead of the whole summary failing.
-      needs_you: z.number().optional().catch(undefined),
-      next_wake_at: z.string().optional().catch(undefined),
     })
     .loose(),
 );
@@ -3183,10 +3178,6 @@ export const InboxItemListSchema = z.array(
       read: z.boolean(),
       archived: z.boolean(),
       created_at: z.string(),
-      // Absent from a server that predates the sectioned Inbox. Neither may
-      // fail the row: an unknown section or a malformed time reads as unset.
-      section: z.enum(["needs_you", "updates"]).nullish().catch(undefined),
-      snoozed_until: z.string().nullish().catch(undefined),
     })
     .loose(),
 );

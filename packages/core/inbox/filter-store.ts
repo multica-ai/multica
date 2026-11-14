@@ -10,6 +10,7 @@ import {
   sanitizeInboxFilters,
   toggleInboxFilterValue,
   withoutInboxFilter,
+  type InboxAgentFilter,
   type InboxFilterKey,
   type InboxFilters,
   type InboxListDimension,
@@ -29,6 +30,7 @@ interface InboxFilterState {
   toggleUnreadOnly: (wsId: string) => void;
   /** Selecting the current value again clears the dimension. */
   setReceived: (wsId: string, received: InboxReceivedFilter) => void;
+  setAgent: (wsId: string, agent: InboxAgentFilter) => void;
   clearFilter: (wsId: string, key: InboxFilterKey) => void;
   clearPriorityFilters: (wsId: string) => void;
   clearIssueFieldFilters: (wsId: string) => void;
@@ -92,6 +94,13 @@ export const useInboxFilterStore = create<InboxFilterState>()(
           update(state, wsId, (current) => ({
             ...current,
             received: current.received === received ? null : received,
+          })),
+        ),
+      setAgent: (wsId, agent) =>
+        set((state) =>
+          update(state, wsId, (current) => ({
+            ...current,
+            agent: current.agent === agent ? null : agent,
           })),
         ),
       clearFilter: (wsId, key) =>

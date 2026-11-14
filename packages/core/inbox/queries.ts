@@ -15,7 +15,7 @@ export const inboxKeys = {
   lookup: (wsId: string) => [...inboxKeys.archived(wsId), "lookup"] as const,
   facets: (wsId: string) => [...inboxKeys.all(wsId), "archived-facets"] as const,
   // Account-level (not workspace-scoped): a single shared cache entry that
-  // holds the inbox counts for every workspace the user belongs to.
+  // holds unread counts for every workspace the user belongs to.
   unreadSummary: () => ["inbox", "unread-summary"] as const,
 };
 
@@ -108,21 +108,6 @@ export function patchArchivedInboxCaches(qc: QueryClient, wsId: string, patch: (
   return snapshot;
 }
 
-// The longest delay a timer takes; a wake further out is re-checked then.
-const MAX_TIMER_MS = 2_147_000_000;
-// Read a little after the wake, so the server's clock has passed it too.
-const WAKE_SLACK_MS = 1_000;
-
-/** The earliest time a snoozed issue comes back in any workspace, in ms. */
-export function nextInboxSummaryWake(summary: readonly InboxWorkspaceUnread[] | undefined): number | null {
-  let next: number | null = null;
-  for (const entry of summary ?? []) {
-    const at = entry.next_wake_at ? Date.parse(entry.next_wake_at) : Number.NaN;
-    if (Number.isFinite(at) && (next == null || at < next)) next = at;
-  }
-  return next;
-}
-
 /**
  * Cross-workspace unread inbox summary. One cache entry shared across all
  * workspaces — the data is account-level, so switching workspaces does not
@@ -130,14 +115,9 @@ export function nextInboxSummaryWake(summary: readonly InboxWorkspaceUnread[] | 
  *
  * Visibility gating is the default, including for direct observers such as
  * the search palette. `refetchOnWindowFocus` re-reads an invalidated summary
- * once when the page is shown again; a page that missed no event is not stale
- * and makes no request. The dock badge overrides `enabled` through
- * `inboxUnreadSummaryEnabled` to stay live while hidden.
- *
- * The one change no event reports is a snooze running out (MUL-9215). The
- * summary says when the next one does: the query is re-read then while on
- * screen, and counts as stale from then on, so a page shown again after it
- * re-reads on focus.
+ * once when the page is shown again; with `staleTime: Infinity` a page that
+ * missed no event is not stale and makes no request. The dock badge overrides
+ * `enabled` through `inboxUnreadSummaryEnabled` to stay live while hidden.
  */
 export function inboxUnreadSummaryOptions() {
   return queryOptions({
@@ -145,14 +125,6 @@ export function inboxUnreadSummaryOptions() {
     queryFn: () => api.getInboxUnreadSummary(),
     enabled: () => focusManager.isFocused(),
     refetchOnWindowFocus: true,
-    staleTime: (query) => {
-      const wake = nextInboxSummaryWake(query.state.data);
-      return wake == null ? Infinity : Math.min(Math.max(wake - query.state.dataUpdatedAt, 0), MAX_TIMER_MS);
-    },
-    refetchInterval: (query) => {
-      const wake = nextInboxSummaryWake(query.state.data);
-      return wake == null ? false : Math.min(Math.max(wake - Date.now(), 0) + WAKE_SLACK_MS, MAX_TIMER_MS);
-    },
   });
 }
 
@@ -175,56 +147,44 @@ export function inboxUnreadSummaryEnabled(
 }
 
 /**
- * The number a workspace's Inbox badge shows: the issues waiting on the user,
- * read or not (MUL-9215). Reading a row no longer clears it; handling the
- * issue does. A server that predates the sectioned Inbox sends no `needs_you`,
- * and the badge keeps counting unread issues as it did.
- */
-export function inboxBadgeCount(entry: InboxWorkspaceUnread): number {
-  return entry.needs_you ?? entry.count;
-}
-
-/**
- * Whether any workspace OTHER than `currentWsId` has issues waiting on the
- * user. Drives the workspace-switcher dot: the active workspace's own count
- * is already on the Inbox nav badge, so it is excluded here to avoid a
+ * Whether any workspace OTHER than `currentWsId` has unread inbox items.
+ * Drives the workspace-switcher dot: the active workspace's own unread is
+ * already surfaced by the Inbox nav count, so it is excluded here to avoid a
  * duplicate signal.
  */
 export function hasOtherWorkspaceUnread(
   summary: InboxWorkspaceUnread[],
   currentWsId: string | null | undefined,
 ): boolean {
-  return summary.some((s) => s.workspace_id !== currentWsId && inboxBadgeCount(s) > 0);
+  return summary.some((s) => s.workspace_id !== currentWsId && s.count > 0);
 }
 
 /**
- * Set of workspace ids that have issues waiting on the user. Lets the
- * workspace switcher dropdown mark WHICH workspace they live in (the
+ * Set of workspace ids that have unread inbox items. Lets the workspace
+ * switcher dropdown mark WHICH workspace a pending message lives in (the
  * aggregate switcher dot only says "somewhere else"). Workspaces with a zero
  * count are excluded.
  */
 export function unreadWorkspaceIds(summary: InboxWorkspaceUnread[]): Set<string> {
-  return new Set(summary.filter((s) => inboxBadgeCount(s) > 0).map((s) => s.workspace_id));
+  return new Set(summary.filter((s) => s.count > 0).map((s) => s.workspace_id));
 }
 
 /**
- * Inbox badge count for one workspace within the cross-workspace summary.
- * A workspace with nothing to report is absent from the response entirely, so
- * a missing entry means zero rather than "not loaded yet".
+ * Unread inbox count for one workspace within the cross-workspace summary.
+ * A workspace with nothing unread is absent from the response entirely, so a
+ * missing entry means zero rather than "not loaded yet".
  */
 export function unreadCountForWorkspace(
   summary: InboxWorkspaceUnread[],
   wsId: string | null | undefined,
 ): number {
   if (!wsId) return 0;
-  const entry = summary.find((s) => s.workspace_id === wsId);
-  return entry ? inboxBadgeCount(entry) : 0;
+  return summary.find((s) => s.workspace_id === wsId)?.count ?? 0;
 }
 
 /**
- * Inbox badge count for the given workspace — the number the sidebar nav
- * badge and the desktop dock badge render. See {@link inboxBadgeCount} for
- * what it counts.
+ * Unread inbox count for the given workspace — the number the sidebar nav
+ * badge and the desktop dock badge render.
  *
  * Read from the cross-workspace summary, NOT from the inbox list. The summary
  * is one small server-computed row per workspace and the sidebar already
@@ -234,8 +194,8 @@ export function unreadCountForWorkspace(
  *
  * `GET /api/inbox/unread-count` is deliberately not the source: it counts raw
  * notification rows, while the inbox renders one row per issue. The summary
- * endpoint counts issues, so this number matches the "Needs you" section the
- * user sees.
+ * endpoint applies the same newest-per-issue rule `deduplicateInboxItems`
+ * applies client-side, so this number matches the list the user sees.
  */
 export function useInboxUnreadCount(
   wsId: string | null | undefined,
@@ -244,7 +204,6 @@ export function useInboxUnreadCount(
   const { data } = useQuery({
     ...inboxUnreadSummaryOptions(),
     enabled: inboxUnreadSummaryEnabled(wsId, options),
-    refetchIntervalInBackground: options?.whileHidden ?? false,
     select: (summary: InboxWorkspaceUnread[]) =>
       unreadCountForWorkspace(summary, wsId),
   });

@@ -85,7 +85,9 @@
   },
   "inbox": {
     "archive": "アーカイブ",
-    "mark_unread": "未読にする"
+    "mark_unread": "未読にする",
+    "mark_all_read": "インボックスをすべて既読にする",
+    "archive_all_read": "既読のインボックス項目をすべてアーカイブ"
   },
   "chat": {
     "link_project": "プロジェクトに関連付け...",

@@ -426,10 +426,6 @@
         "label": "歸檔通知",
         "description": "歸檔當前開啟的收件箱通知；在歸檔列表中則取消歸檔。"
       },
-      "snoozeInboxItem": {
-        "label": "延後通知",
-        "description": "選擇目前開啟的收件箱通知何時回來。"
-      },
       "send": {
         "label": "傳送",
         "description": "也用於提交新任務。"
@@ -826,48 +822,25 @@
     "toast_profile_failed": "更新資料失敗"
   },
   "notifications": {
+    "title": "收件箱通知",
+    "description": "關閉通知後，仍可在任務中檢視相關動態。",
     "toast_failed": "更新通知設定失敗",
-    "needs_you": {
-      "title": "需要你處理",
-      "description": "寫給你的事會留在收件箱的「需要你處理」裡，直到你處理或歸檔。這些無法關閉。",
-      "always_on": "一律開啟",
-      "mentions": {
-        "label": "提及",
-        "description": "有人 @ 你時"
-      },
+    "groups": {
       "assignments": {
         "label": "分配",
-        "description": "任務分配給你時"
-      },
-      "runs": {
-        "label": "你發起的執行",
-        "description": "AI 代理執行完成、失敗、向你提問，或執行被取消時"
-      },
-      "your_issues": {
-        "label": "你建立或負責的任務",
-        "description": "有新評論，或狀態變成等你處理時"
-      }
-    },
-    "updates": {
-      "title": "動態",
-      "description": "你訂閱的任務上發生的事。不計入徽章，看過就離開收件箱。關閉後仍可在任務中查看。"
-    },
-    "groups": {
-      "mentions": {
-        "label": "@all 和 @squad",
-        "description": "群組提及也進「需要你處理」。關閉後改進「動態」。"
-      },
-      "comments": {
-        "label": "評論",
-        "description": "你訂閱的任務有新評論時"
+        "description": "你被分配或取消分配某個任務時"
       },
       "status_changes": {
         "label": "狀態變更",
         "description": "你訂閱的任務狀態變化時（例如 todo、in_progress、done）"
       },
-      "assignments": {
-        "label": "分配變更",
-        "description": "你被取消分配，或你訂閱的任務換了負責人時"
+      "comments": {
+        "label": "評論",
+        "description": "你訂閱的任務有新評論時"
+      },
+      "mentions": {
+        "label": "提及",
+        "description": "有人 @ 你時，包括 @all 和 @squad"
       },
       "updates": {
         "label": "優先順序與截止日期",
@@ -878,8 +851,8 @@
         "description": "你訂閱的專案中有新任務建立時"
       },
       "agent_activity": {
-        "label": "AI 代理執行",
-        "description": "你訂閱的任務上 AI 代理執行失敗或卡住時"
+        "label": "AI 代理活動",
+        "description": "AI 代理執行失敗時"
       },
       "chat_replies": {
         "label": "包含聊天回覆"
@@ -887,8 +860,7 @@
     },
     "system": {
       "title": "系統通知",
-      "label": "Multica 在背景時顯示系統通知",
-      "description": "收件箱裡只有「需要你處理」的事會跳出，動態不會。"
+      "label": "Multica 在背景時顯示系統通知"
     },
     "browser": {
       "label": "瀏覽器通知",

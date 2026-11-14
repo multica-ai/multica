@@ -1,10 +1,9 @@
 // @vitest-environment node
 
 import { beforeEach, describe, expect, it } from "vitest";
-import type { InboxItem, Label } from "../types";
+import type { InboxItem } from "../types";
 import {
   EMPTY_INBOX_FILTERS,
-  activeInboxFilterSupport,
   archivedInboxQuery,
   effectiveInboxFilters,
   filterInboxItems,
@@ -13,8 +12,6 @@ import {
   inboxFiltersForPrioritySupport,
   inboxFilterCount,
   inboxIssueFieldsSupport,
-  inboxIssueMatches,
-  inboxIssueProjection,
   inboxPriorityFilterSupport,
   inboxReceivedAfter,
   inboxTypeGroup,
@@ -204,24 +201,11 @@ describe("issue dimensions", () => {
     expect(run({ dueDates: ["overdue", "none"] })).toEqual(["bare"]);
   });
 
-  it("asks an issue that has no notification the same questions", () => {
-    // A "Working" row is an issue, not a notification: it is filtered by the
-    // issue fields alone, read off the issue itself.
-    const issue = inboxIssueProjection({
-      id: "issue-working", status: "in_progress", priority: "high", project_id: "project-1",
-      assignee_type: "agent", assignee_id: "agent-1", due_date: "2026-08-24",
-      labels: [{ id: "bug" } as Label],
-    });
-    const matches = (filters: Partial<InboxFilters>) =>
-      inboxIssueMatches(issue, { ...EMPTY_INBOX_FILTERS, ...filters }, new Date(2026, 7, 24, 12));
-
-    expect(matches({})).toBe(true);
-    expect(matches({ statuses: ["in_progress"], projects: ["project-1"], labels: ["bug"], dueDates: ["today"] })).toBe(true);
-    expect(matches({ assignees: ["agent:agent-1"] })).toBe(true);
-    expect(matches({ statuses: ["done"] })).toBe(false);
-    expect(matches({ labels: ["bug"], negated: ["label"] })).toBe(false);
-    // The notification dimensions have nothing to ask an issue.
-    expect(matches({ types: ["mention"], actors: ["system"], received: "today", unreadOnly: true })).toBe(true);
+  it("keeps or drops issues by whether an agent is on them", () => {
+    const filters = (agent: InboxFilters["agent"]) => ({ ...EMPTY_INBOX_FILTERS, agent });
+    const activeIssueIds = new Set(["issue-tracked"]);
+    expect(ids(filterInboxItems(rows, filters("running"), { activeIssueIds }))).toEqual(["tracked"]);
+    expect(ids(filterInboxItems(rows, filters("idle"), { activeIssueIds }))).toEqual(["bare"]);
   });
 });
 
@@ -264,6 +248,45 @@ describe("unread filtering", () => {
   });
 });
 
+describe("pinned row with agent filtering", () => {
+  it("keeps the open notification after an agent starts on its issue", () => {
+    const filters = { ...EMPTY_INBOX_FILTERS, agent: "idle" as const };
+    const opened = item("opened", "todo", "high", { issue_id: "issue-opened" });
+    const other = item("other", "todo", "high", { issue_id: "issue-other" });
+    const activeIssueIds = new Set(["issue-opened", "issue-other"]);
+
+    expect(
+      ids(filterInboxItems([opened, other], filters, {
+        activeIssueIds,
+        pinnedAgentKey: "issue-opened",
+      })),
+    ).toEqual(["opened"]);
+
+    // Each pin crosses only its own dimension.
+    expect(
+      filterInboxItems([opened], filters, {
+        activeIssueIds,
+        pinnedUnreadKey: "issue-opened",
+      }),
+    ).toEqual([]);
+    expect(
+      filterInboxItems(
+        [{ ...opened, read: true }],
+        { ...filters, agent: null, unreadOnly: true },
+        { pinnedAgentKey: "issue-opened" },
+      ),
+    ).toEqual([]);
+
+    // The pin still never crosses an explicit issue filter.
+    expect(
+      filterInboxItems([opened], { ...filters, statuses: ["done"] }, {
+        activeIssueIds,
+        pinnedAgentKey: "issue-opened",
+      }),
+    ).toEqual([]);
+  });
+});
+
 describe("inboxFacetCounts", () => {
   it("counts each value as if it alone were selected", () => {
     const rows = [
@@ -300,28 +323,20 @@ describe("backend capability", () => {
     expect(inboxIssueFieldsSupport([item("legacy", "todo", "high", { issue_label_ids: undefined })])).toBe("unsupported");
   });
 
-  it("holds the main list's selection with no notification, for the Working rows left", () => {
-    expect(activeInboxFilterSupport([])).toEqual({ priority: "supported", issueFields: "supported" });
-    expect(activeInboxFilterSupport([item("legacy", "todo", undefined, { issue_label_ids: undefined })])).toEqual({
-      priority: "unsupported",
-      issueFields: "unsupported",
-    });
-  });
-
   it("keeps unproven dimensions dormant, and on the archive everything an old server would ignore", () => {
     const filters: InboxFilters = {
       ...EMPTY_INBOX_FILTERS,
-      types: ["mention"], statuses: ["done"], projects: ["p"],
+      types: ["mention"], statuses: ["done"], projects: ["p"], agent: "idle",
       negated: ["status"], received: "today",
     };
     expect(effectiveInboxFilters(filters, { priority: "supported", issueFields: "unknown" })).toEqual({
-      ...filters, projects: [], types: [], received: null,
+      ...filters, projects: [],
     });
     expect(effectiveInboxFilters(filters, { priority: "supported", issueFields: "unsupported", archived: true })).toEqual({
       ...EMPTY_INBOX_FILTERS,
     });
     expect(effectiveInboxFilters(filters, { priority: "supported", issueFields: "supported", archived: true })).toEqual({
-      ...filters,
+      ...filters, agent: null,
     });
   });
 });
@@ -413,14 +428,16 @@ describe("useInboxFilterStore", () => {
     expect(sanitizeInboxFilters(filters).negated).toEqual([]);
   });
 
-  it("selects a single received window, toggling off on reselect", () => {
+  it("selects a single received window and agent state, toggling off on reselect", () => {
     const store = useInboxFilterStore.getState();
     store.setReceived("ws-1", "today");
     store.setReceived("ws-1", "last_7_days");
+    store.setAgent("ws-1", "running");
     expect(useInboxFilterStore.getState().filtersByWorkspace["ws-1"]).toMatchObject({
-      received: "last_7_days",
+      received: "last_7_days", agent: "running",
     });
     useInboxFilterStore.getState().setReceived("ws-1", "last_7_days");
+    useInboxFilterStore.getState().clearFilter("ws-1", "agent");
     expect(useInboxFilterStore.getState().filtersByWorkspace["ws-1"]).toBeUndefined();
   });
 
@@ -436,13 +453,13 @@ describe("useInboxFilterStore", () => {
 });
 
 describe("sanitizeInboxFilters", () => {
-  it("rebuilds a stored entry, dropping unknown values and dimensions that no longer exist", () => {
+  it("rebuilds a stored entry, dropping unknown values and carrying the old idle toggle over", () => {
     expect(sanitizeInboxFilters({
-      statuses: ["todo", 3], types: ["mention", "bogus"], agent: "idle",
+      statuses: ["todo", 3], types: ["mention", "bogus"], idleOnly: true,
       negated: ["status", "label", "creator"], received: "yesterday",
     })).toEqual({
       ...EMPTY_INBOX_FILTERS,
-      statuses: ["todo"], types: ["mention"], negated: ["status"],
+      statuses: ["todo"], types: ["mention"], agent: "idle", negated: ["status"],
     });
     expect(sanitizeInboxFilters(null)).toEqual(EMPTY_INBOX_FILTERS);
   });
