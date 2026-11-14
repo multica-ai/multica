@@ -224,7 +224,7 @@ function HistoryList({ api, entries }: { api: LocalVoiceHistoryAPI; entries: Voi
     }
     return out;
   }, [entries, shown, locale, t]);
-  const time = useMemo(() => new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit" }), [locale]);
+  const time = useMemo(() => new Intl.DateTimeFormat(locale, { hour: "numeric", minute: "2-digit" }), [locale]);
 
   const transcribeAgain = async (entry: VoiceHistoryEntry) => {
     const previous = entry.text;
@@ -250,9 +250,9 @@ function HistoryList({ api, entries }: { api: LocalVoiceHistoryAPI; entries: Voi
                 key={entry.id}
                 className="group/entry flex items-start gap-4 border-b border-surface-border px-4 py-3 last:border-b-0"
               >
-                <div className="w-14 shrink-0 pt-0.5 text-caption tabular-nums text-muted-foreground">
-                  <div>{time.format(entry.createdAt)}</div>
-                  <div className="text-faint-foreground">{formatDuration(entry.durationMs)}</div>
+                <div className="flex min-w-20 shrink-0 gap-2 whitespace-nowrap pt-0.5 text-caption tabular-nums text-muted-foreground">
+                  <span>{time.format(entry.createdAt)}</span>
+                  <span className="text-faint-foreground">{formatDuration(entry.durationMs)}</span>
                 </div>
                 <div className="min-w-0 flex-1 text-body">
                   {entry.status === "transcribing" ? (
@@ -271,7 +271,7 @@ function HistoryList({ api, entries }: { api: LocalVoiceHistoryAPI; entries: Voi
                 </div>
                 <div
                   className={cn(
-                    "flex shrink-0 items-center gap-0.5 transition-opacity",
+                    "-my-1 flex shrink-0 items-center gap-0.5 transition-opacity",
                     // Recordings without text keep their actions in view: retrying is the point.
                     entry.text && player.playing !== entry.id &&
                       "opacity-0 group-hover/entry:opacity-100 group-focus-within/entry:opacity-100",
