@@ -1,9 +1,10 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createAuthStore } from "../auth";
 import { setCurrentWorkspace } from "../platform/workspace-storage";
 import { configStore } from "../config";
 import type { StorageAdapter, User } from "../types";
 import { ApiClient, ApiError, CHAT_DRAFT_RESTORE_CAPABILITY, clientErrorMessage } from "./client";
+import type { Logger } from "../logger";
 import { setApiRequestObserver } from "./request-observer";
 import { EMPTY_PLUGIN_PACKAGE_LIST, EMPTY_PLUGIN_PREVIEW, EMPTY_PLUGIN_SURFACE_LAUNCH } from "./schemas";
 
@@ -2208,21 +2209,27 @@ describe("ApiClient", () => {
   });
 
   describe("chat attachment wiring", () => {
-    it("uploadFile includes chat_session_id in the FormData body", async () => {
-      const fetchMock = vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ id: "att-1", url: "https://cdn/x" }), {
+    it("uploadFile falls back to multipart with chat_session_id when the server cannot presign", async () => {
+      const fetchMock = vi.fn().mockImplementation((url: string) => {
+        if (String(url).endsWith("/api/attachments/presign-upload")) {
+          return Promise.resolve(new Response(
+            JSON.stringify({ error: "unsupported", code: "attachment_presign_unsupported" }),
+            { status: 501, headers: { "Content-Type": "application/json" } },
+          ));
+        }
+        return Promise.resolve(new Response(JSON.stringify({ id: "att-1", url: "https://cdn/x" }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
-        }),
-      );
+        }));
+      });
       vi.stubGlobal("fetch", fetchMock);
 
       const client = new ApiClient("https://api.example.test");
       const file = new File(["hi"], "hi.png", { type: "image/png" });
       await client.uploadFile(file, { chatSessionId: "session-123" });
 
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-      const [url, init] = fetchMock.mock.calls[0]!;
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      const [url, init] = fetchMock.mock.calls[1]!;
       expect(url).toBe("https://api.example.test/api/upload-file");
       expect(init?.method).toBe("POST");
       const body = init?.body as FormData;
@@ -2232,13 +2239,16 @@ describe("ApiClient", () => {
       expect(body.get("comment_id")).toBeNull();
     });
 
-    it("threads an AbortSignal into fetch so the coordinator can cancel it (MUL-5181)", async () => {
-      const fetchMock = vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ id: "att-1", url: "https://cdn/x" }), {
+    it("threads an AbortSignal into the multipart fallback so the coordinator can cancel it (MUL-5181)", async () => {
+      const fetchMock = vi.fn().mockImplementation((url: string) => {
+        if (url.endsWith("/api/attachments/presign-upload")) {
+          return Promise.resolve(new Response("not found", { status: 404 }));
+        }
+        return Promise.resolve(new Response(JSON.stringify({ id: "att-1", url: "https://cdn/x" }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
-        }),
-      );
+        }));
+      });
       vi.stubGlobal("fetch", fetchMock);
 
       const client = new ApiClient("https://api.example.test");
@@ -2246,8 +2256,8 @@ describe("ApiClient", () => {
       const file = new File(["hi"], "hi.png", { type: "image/png" });
       await client.uploadFile(file, { issueId: "issue-1" }, controller.signal);
 
-      const [, init] = fetchMock.mock.calls[0]!;
-      expect(init?.signal).toBe(controller.signal);
+      const fallback = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/api/upload-file"))!;
+      expect(fallback[1]?.signal).toBe(controller.signal);
     });
 
     it("rejects with the fetch AbortError when the signal is already aborted", async () => {
@@ -3598,5 +3608,507 @@ describe("ApiClient request observer", () => {
     const events = observe();
     await expect(new ApiClient("https://api.example.test").listMembers("ws-1")).rejects.toThrow();
     expect(events[1]).toMatchObject({ phase: "end", status: null, error: "TypeError: Failed to fetch" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Presigned direct upload.
+//
+// The contract under test: the API only ever sees metadata, the File body goes
+// to the presigned URL with no credentials attached, only a capability refusal
+// falls back to multipart, and a completion retry can never publish a second
+// attachment.
+// ---------------------------------------------------------------------------
+
+const PRESIGN_URL = "https://bucket.example.test/upload-staging/ws/session-1?X-Amz-Signature=secret";
+const ATTACHMENT_BODY = {
+  id: "att-1",
+  filename: "report.pdf",
+  url: "https://bucket.example.test/workspaces/ws/att-1.pdf",
+  download_url: "https://bucket.example.test/workspaces/ws/att-1.pdf?X-Amz-Signature=dl",
+  content_type: "application/pdf",
+  size_bytes: 5,
+};
+
+interface RecordedCall {
+  url: string;
+  init: RequestInit | undefined;
+}
+
+/** Routes fetches by path; every unmatched call fails the test loudly. */
+function stubUploadRoutes(routes: {
+  presign: () => Response | Promise<Response>;
+  put?: (call: RecordedCall) => Response | Promise<Response>;
+  complete?: () => Response | Promise<Response>;
+}) {
+  const calls: RecordedCall[] = [];
+  const fetchMock = vi.fn().mockImplementation((input: string | URL, init?: RequestInit) => {
+    const url = String(input);
+    calls.push({ url, init });
+    if (url.endsWith("/api/attachments/presign-upload")) return Promise.resolve(routes.presign());
+    if (url.startsWith("https://bucket.example.test/")) {
+      if (!routes.put) throw new Error(`unexpected PUT to ${url}`);
+      return Promise.resolve(routes.put({ url, init }));
+    }
+    if (url.includes("/complete-upload")) {
+      if (!routes.complete) throw new Error(`unexpected complete at ${url}`);
+      return Promise.resolve(routes.complete());
+    }
+    throw new Error(`unexpected request to ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return { fetchMock, calls };
+}
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+const presignResponse = {
+  attachment_id: "session-1",
+  upload_url: PRESIGN_URL,
+  method: "PUT",
+  headers: { "Content-Type": "application/pdf", "Content-Length": "5" },
+  expires_in: 900,
+};
+
+describe("ApiClient presigned direct upload", () => {
+  let logger: Logger & {
+    debug: ReturnType<typeof vi.fn>;
+    info: ReturnType<typeof vi.fn>;
+    warn: ReturnType<typeof vi.fn>;
+    error: ReturnType<typeof vi.fn>;
+  };
+
+  beforeEach(() => {
+    logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    } as unknown as typeof logger;
+  });
+
+  function client() {
+    const c = new ApiClient("https://api.example.test", { logger });
+    c.setToken("api-token");
+    return c;
+  }
+
+  it("sends only metadata to the API and the File to object storage", async () => {
+    const { calls } = stubUploadRoutes({
+      presign: () => jsonResponse(presignResponse),
+      put: () => new Response(null, { status: 200 }),
+      complete: () => jsonResponse(ATTACHMENT_BODY),
+    });
+
+    const file = new File(["hello"], "report.pdf", { type: "application/pdf" });
+    const att = await client().uploadFile(file, { issueId: "issue-1" });
+
+    expect(att.id).toBe("att-1");
+    expect(att.download_url).toContain("X-Amz-Signature=");
+    expect(calls.map((c) => `${c.init?.method ?? "GET"} ${c.url}`)).toEqual([
+      "POST https://api.example.test/api/attachments/presign-upload",
+      `PUT ${PRESIGN_URL}`,
+      "POST https://api.example.test/api/attachments/session-1/complete-upload",
+    ]);
+
+    // Metadata only: the declared size, type and binding, never the bytes.
+    const presignBody = JSON.parse(String(calls[0]!.init?.body));
+    expect(presignBody).toEqual({
+      filename: "report.pdf",
+      content_type: "application/pdf",
+      size_bytes: 5,
+      issue_id: "issue-1",
+    });
+    // The PUT body is the File itself, unframed and unmodified.
+    expect(calls[1]!.init?.body).toBe(file);
+  });
+
+  it("keeps every API credential off the storage request", async () => {
+    const { calls } = stubUploadRoutes({
+      presign: () => jsonResponse(presignResponse),
+      put: () => new Response(null, { status: 200 }),
+      complete: () => jsonResponse(ATTACHMENT_BODY),
+    });
+
+    await client().uploadFile(new File(["hello"], "report.pdf", { type: "application/pdf" }));
+
+    const put = calls[1]!;
+    expect(put.init?.credentials).toBe("omit");
+    const sent = new Headers(put.init?.headers);
+    expect(sent.get("authorization")).toBeNull();
+    // Only the signed headers travel; nothing of this client's identity does.
+    expect([...sent.keys()].sort()).toEqual(["content-type"]);
+    expect(sent.get("content-type")).toBe("application/pdf");
+  });
+
+  it("does not set browser-managed headers even when the presign response lists them", async () => {
+    const { calls } = stubUploadRoutes({
+      presign: () => jsonResponse({
+        ...presignResponse,
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Length": "5",
+          Host: "bucket.example.test",
+          "x-amz-meta-source": "web",
+        },
+      }),
+      put: () => new Response(null, { status: 200 }),
+      complete: () => jsonResponse(ATTACHMENT_BODY),
+    });
+
+    await client().uploadFile(new File(["hello"], "report.pdf", { type: "application/pdf" }));
+
+    const sent = new Headers(calls[1]!.init?.headers);
+    // Content-Length and Host are the browser's to choose; asking for them is
+    // at best ignored and at worst a preflight failure.
+    expect(sent.get("content-length")).toBeNull();
+    expect(sent.get("host")).toBeNull();
+    // Any other signed header is still forwarded verbatim.
+    expect(sent.get("x-amz-meta-source")).toBe("web");
+  });
+
+  it("names the generic binary type when the File carries none", async () => {
+    const { calls } = stubUploadRoutes({
+      presign: () => jsonResponse({ ...presignResponse, headers: { "Content-Type": "application/octet-stream" } }),
+      put: () => new Response(null, { status: 200 }),
+      complete: () => jsonResponse(ATTACHMENT_BODY),
+    });
+
+    // A pasted or dragged File often has an empty type; the endpoint rejects a
+    // blank content_type, so the client supplies the generic one.
+    await client().uploadFile(new File(["hello"], "blob"));
+
+    expect(JSON.parse(String(calls[0]!.init?.body)).content_type).toBe("application/octet-stream");
+  });
+
+  it.each([
+    ["a missing upload_url", { ...presignResponse, upload_url: undefined }],
+    ["a missing method", { ...presignResponse, method: undefined }],
+    ["a missing headers object", { ...presignResponse, headers: undefined }],
+    ["a missing attachment_id", { ...presignResponse, attachment_id: undefined }],
+    ["a relative upload_url", { ...presignResponse, upload_url: "/upload-staging/x" }],
+  ])("fails safely on %s instead of sending a request", async (_label, body) => {
+    const { calls } = stubUploadRoutes({ presign: () => jsonResponse(body) });
+
+    await expect(
+      client().uploadFile(new File(["hello"], "report.pdf", { type: "application/pdf" })),
+    ).rejects.toThrow(/malformed presigned upload response/i);
+
+    // Crucially no PUT: a defaulted empty URL or unsigned request would be sent
+    // to the API origin instead of the bucket.
+    expect(calls).toHaveLength(1);
+  });
+
+  it("rejects a presign response that asks for a method other than PUT", async () => {
+    const { calls } = stubUploadRoutes({
+      presign: () => jsonResponse({ ...presignResponse, method: "POST" }),
+    });
+
+    await expect(
+      client().uploadFile(new File(["hello"], "report.pdf", { type: "application/pdf" })),
+    ).rejects.toThrow(/unsupported method/i);
+    expect(calls).toHaveLength(1);
+  });
+
+  it.each([404, 405])("falls back to multipart when the endpoint is absent (%i)", async (status) => {
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (String(url).endsWith("/api/attachments/presign-upload")) {
+        return Promise.resolve(new Response("not found", { status }));
+      }
+      return Promise.resolve(jsonResponse(ATTACHMENT_BODY));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const att = await client().uploadFile(new File(["hello"], "report.pdf", { type: "application/pdf" }));
+    expect(att.id).toBe("att-1");
+    expect(fetchMock.mock.calls.at(-1)?.[0]).toBe("https://api.example.test/api/upload-file");
+  });
+
+  it("falls back to multipart on a 501 carrying the capability code", async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (String(url).endsWith("/api/attachments/presign-upload")) {
+        return Promise.resolve(jsonResponse({ error: "unsupported", code: "attachment_presign_unsupported" }, 501));
+      }
+      return Promise.resolve(jsonResponse(ATTACHMENT_BODY));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const att = await client().uploadFile(new File(["hello"], "report.pdf", { type: "application/pdf" }));
+    expect(att.id).toBe("att-1");
+    expect(fetchMock.mock.calls.at(-1)?.[0]).toBe("https://api.example.test/api/upload-file");
+  });
+
+  it.each([
+    ["a 501 without the capability code", 501, { error: "boom" }],
+    ["a 401", 401, { error: "unauthorized" }],
+    ["a 403", 403, { error: "forbidden" }],
+    ["a 400", 400, { error: "invalid issue_id" }],
+    ["a 500", 500, { error: "internal error" }],
+    ["a 502", 502, { error: "bad gateway" }],
+  ])("does not fall back on %s", async (_label, status, body) => {
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (String(url).endsWith("/api/attachments/presign-upload")) {
+        return Promise.resolve(jsonResponse(body, status));
+      }
+      throw new Error(`no fallback expected, but ${url} was requested`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      client().uploadFile(new File(["hello"], "report.pdf", { type: "application/pdf" })),
+    ).rejects.toThrow();
+
+    // Exactly one request: the failed presign. Retrying the bytes through the
+    // API would double the transfer and hide the real failure.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("propagates a rejected PUT status without its body or a fallback", async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (String(url).endsWith("/api/attachments/presign-upload")) {
+        return Promise.resolve(jsonResponse(presignResponse));
+      }
+      if (String(url).startsWith("https://bucket.example.test/")) {
+        return Promise.resolve(new Response(
+          "<Error><Code>SignatureDoesNotMatch</Code></Error>",
+          { status: 403 },
+        ));
+      }
+      throw new Error(`no fallback expected, but ${url} was requested`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      client().uploadFile(new File(["hello"], "report.pdf", { type: "application/pdf" })),
+    ).rejects.toThrow(/^Upload to storage failed: 403$/);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("propagates a failed completion without falling back or opening a new session", async () => {
+    const { fetchMock } = stubUploadRoutes({
+      presign: () => jsonResponse(presignResponse),
+      put: () => new Response(null, { status: 200 }),
+      complete: () => jsonResponse({ error: "upload session expired", code: "attachment_upload_session_expired" }, 409),
+    });
+
+    await expect(
+      client().uploadFile(new File(["hello"], "report.pdf", { type: "application/pdf" })),
+    ).rejects.toThrow(/upload session expired/);
+
+    const presigns = fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/presign-upload"));
+    const completes = fetchMock.mock.calls.filter(([url]) => String(url).includes("/complete-upload"));
+    // A 4xx completion is final: no retry, and never a second presign.
+    expect(presigns).toHaveLength(1);
+    expect(completes).toHaveLength(1);
+  });
+
+  it("retries a 5xx completion in place so one upload publishes one attachment", async () => {
+    let completions = 0;
+    const { fetchMock } = stubUploadRoutes({
+      presign: () => jsonResponse(presignResponse),
+      put: () => new Response(null, { status: 200 }),
+      complete: () => {
+        completions += 1;
+        // The server publishes on the second attempt; the first response was
+        // lost to a transient fault.
+        return completions === 1
+          ? jsonResponse({ error: "internal error" }, 500)
+          : jsonResponse(ATTACHMENT_BODY);
+      },
+    });
+
+    const att = await client().uploadFile(new File(["hello"], "report.pdf", { type: "application/pdf" }));
+    expect(att.id).toBe("att-1");
+
+    const presigns = fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/presign-upload"));
+    const puts = fetchMock.mock.calls.filter(([url]) => String(url).startsWith("https://bucket.example.test/"));
+    const completes = fetchMock.mock.calls.filter(([url]) => String(url).includes("/complete-upload"));
+    // The retry repeats the completion only — the same session, the same stored
+    // object. Re-presigning would create a second attachment.
+    expect(presigns).toHaveLength(1);
+    expect(puts).toHaveLength(1);
+    expect(completes).toHaveLength(2);
+    expect(String(completes[0]![0])).toBe(String(completes[1]![0]));
+  });
+
+  it("retries a completion that never got a response, still on the same session", async () => {
+    let completions = 0;
+    const { fetchMock } = stubUploadRoutes({
+      presign: () => jsonResponse(presignResponse),
+      put: () => new Response(null, { status: 200 }),
+      complete: () => {
+        completions += 1;
+        if (completions === 1) throw new TypeError("Failed to fetch");
+        return jsonResponse(ATTACHMENT_BODY);
+      },
+    });
+
+    const att = await client().uploadFile(new File(["hello"], "report.pdf", { type: "application/pdf" }));
+    expect(att.id).toBe("att-1");
+    // A lost response is exactly the case the idempotent replay exists for.
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/presign-upload"))).toHaveLength(1);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/complete-upload"))).toHaveLength(2);
+  });
+
+  it("gives up after three failed completions and reports the last error", async () => {
+    const { fetchMock } = stubUploadRoutes({
+      presign: () => jsonResponse(presignResponse),
+      put: () => new Response(null, { status: 200 }),
+      complete: () => jsonResponse({ error: "still down" }, 503),
+    });
+
+    await expect(
+      client().uploadFile(new File(["hello"], "report.pdf", { type: "application/pdf" })),
+    ).rejects.toThrow(/still down/);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/complete-upload"))).toHaveLength(3);
+  });
+
+  it("stops at the presign step when the signal aborts before any byte moves", async () => {
+    const controller = new AbortController();
+    const { fetchMock } = stubUploadRoutes({
+      presign: () => {
+        controller.abort();
+        const err = new Error("The operation was aborted");
+        err.name = "AbortError";
+        throw err;
+      },
+    });
+
+    await expect(
+      client().uploadFile(new File(["hi"], "a.png", { type: "image/png" }), undefined, controller.signal),
+    ).rejects.toMatchObject({ name: "AbortError" });
+
+    // A cancelled upload must not fall back: the multipart path would restart
+    // the transfer the caller just cancelled.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]![0])).not.toContain("/api/upload-file");
+  });
+
+  it("aborts the PUT and sends no completion", async () => {
+    const controller = new AbortController();
+    const { fetchMock } = stubUploadRoutes({
+      presign: () => jsonResponse(presignResponse),
+      put: () => {
+        controller.abort();
+        const err = new Error("The operation was aborted");
+        err.name = "AbortError";
+        throw err;
+      },
+      complete: () => jsonResponse(ATTACHMENT_BODY),
+    });
+
+    await expect(
+      client().uploadFile(new File(["hello"], "report.pdf", { type: "application/pdf" }), undefined, controller.signal),
+    ).rejects.toMatchObject({ name: "AbortError" });
+
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/complete-upload"))).toHaveLength(0);
+  });
+
+  it("aborts a completion retry instead of waiting out the backoff", async () => {
+    vi.useFakeTimers();
+    try {
+      const controller = new AbortController();
+      const { fetchMock } = stubUploadRoutes({
+        presign: () => jsonResponse(presignResponse),
+        put: () => new Response(null, { status: 200 }),
+        complete: () => {
+          // The first attempt fails and schedules a retry; aborting during the
+          // backoff must end the upload rather than let it resume.
+          setTimeout(() => controller.abort(), 10);
+          return jsonResponse({ error: "internal error" }, 500);
+        },
+      });
+
+      const promise = client().uploadFile(
+        new File(["hello"], "report.pdf", { type: "application/pdf" }),
+        undefined,
+        controller.signal,
+      );
+      const assertion = expect(promise).rejects.toMatchObject({ name: "AbortError" });
+      await vi.advanceTimersByTimeAsync(5_000);
+      await assertion;
+      expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/complete-upload"))).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the presigned URL and the API token out of the logs", async () => {
+    stubUploadRoutes({
+      presign: () => jsonResponse(presignResponse),
+      put: () => new Response(null, { status: 200 }),
+      complete: () => jsonResponse(ATTACHMENT_BODY),
+    });
+
+    await client().uploadFile(new File(["hello"], "report.pdf", { type: "application/pdf" }));
+
+    const logged = [
+      ...logger.debug.mock.calls,
+      ...logger.info.mock.calls,
+      ...logger.warn.mock.calls,
+      ...logger.error.mock.calls,
+    ].map((call) => call.map((part) => JSON.stringify(part)).join(" ")).join("\n");
+    // The presigned URL is a credential for one key: never in a log line.
+    expect(logged).not.toContain("X-Amz-Signature");
+    expect(logged).not.toContain("bucket.example.test");
+    expect(logged).not.toContain("api-token");
+  });
+
+  it("does not log the signed URL while reporting a malformed presign response", async () => {
+    // The strongest leak is the one that only happens on the error path: a
+    // schema warning that echoes the payload would write the credential to the
+    // console in exactly the situation an operator is most likely to capture.
+    stubUploadRoutes({
+      presign: () => jsonResponse({ ...presignResponse, method: undefined }),
+    });
+
+    await expect(
+      client().uploadFile(new File(["hello"], "report.pdf", { type: "application/pdf" })),
+    ).rejects.toThrow(/malformed presigned upload response/i);
+
+    const logged = [
+      ...logger.debug.mock.calls,
+      ...logger.info.mock.calls,
+      ...logger.warn.mock.calls,
+      ...logger.error.mock.calls,
+    ].map((call) => call.map((part) => JSON.stringify(part)).join(" ")).join("\n");
+    expect(logged).not.toContain("X-Amz-Signature");
+    expect(logged).not.toContain("bucket.example.test");
+    // The failure is still diagnosable: the field that failed is named.
+    expect(logged).toContain("method");
+  });
+
+  it("does not expose a signed URL echoed in a storage error response", async () => {
+    const { fetchMock } = stubUploadRoutes({
+      presign: () => jsonResponse(presignResponse),
+      put: () => new Response(`<Error><Resource>${PRESIGN_URL}</Resource></Error>`, { status: 403 }),
+    });
+    await expect(
+      client().uploadFile(new File(["hello"], "report.pdf", { type: "application/pdf" })),
+    ).rejects.toThrow(/^Upload to storage failed: 403$/);
+    expect(fetchMock.mock.calls).toHaveLength(2);
+    expect(JSON.stringify(logger.error.mock.calls)).not.toContain("X-Amz-Signature");
+  });
+
+  it("keeps the presigned URL out of a failed PUT's error message", async () => {
+    stubUploadRoutes({
+      presign: () => jsonResponse(presignResponse),
+      put: () => {
+        // A browser reports a CORS/network failure as a bare TypeError, but a
+        // wrapped one can carry the request URL. Neither may reach the caller.
+        throw new TypeError(`Failed to fetch ${PRESIGN_URL}`);
+      },
+    });
+
+    const err = await client()
+      .uploadFile(new File(["hello"], "report.pdf", { type: "application/pdf" }))
+      .then(() => null, (e: unknown) => e as Error);
+    expect(err).toBeInstanceOf(Error);
+    expect(err!.message).not.toContain("X-Amz-Signature");
   });
 });

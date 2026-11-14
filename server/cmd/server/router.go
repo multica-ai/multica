@@ -563,6 +563,18 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			Storage: store,
 			Logger:  slog.Default(),
 		}
+		// Presigned-upload sessions own object-storage bytes the same way the
+		// channel-media ledger does, so they get the same independent worker.
+		// Built only when a presign-capable backend is configured; on local
+		// storage the endpoints answer 501 and no session rows are ever
+		// written.
+		if handler.StorageSupportsDirectUpload(store) {
+			h.AttachmentUploadReconciler = &service.AttachmentUploadReconciler{
+				Queries: queries,
+				Storage: store,
+				Logger:  slog.Default(),
+			}
+		}
 	}
 	installationStore := lark.NewChannelInstallationStore(queries)
 	h.ChannelSupervisor = buildChannelSupervisor(
@@ -2373,6 +2385,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			})
 
 			// Attachments
+			//
+			// Presigned direct upload. The two-step shape (issue a PUT
+			// credential, then complete) keeps file bytes off this API and
+			// therefore off any reverse proxy in front of it. Both routes are
+			// workspace-scoped, like the rest of the attachment metadata API:
+			// the target binding must be visible to this member. The handlers
+			// still self-validate the target, because the workspace header only
+			// proves membership, not access to the specific issue/comment/chat.
+			r.Post("/api/attachments/presign-upload", h.PresignAttachmentUpload)
+			r.Post("/api/attachments/{id}/complete-upload", h.CompleteAttachmentUpload)
 			r.Get("/api/attachments/{id}", h.GetAttachmentByID)
 			// /api/attachments/{id}/download is registered in the
 			// outer Auth-only group above so it can be loaded as a

@@ -292,6 +292,8 @@ import {
   AgentActivityBucketListSchema,
   AttachmentListSchema,
   AttachmentResponseSchema,
+  AttachmentPresignUploadSchema,
+  type AttachmentPresignUpload,
   CancelTaskResponseSchema,
   ChatDraftRestoresResponseSchema,
   ChatMessageListSchema,
@@ -857,6 +859,83 @@ function isReplayableBody(body: BodyInit | null | undefined): boolean {
   if (typeof URLSearchParams !== "undefined" && body instanceof URLSearchParams)
     return true;
   return false;
+}
+
+/**
+ * Machine-readable code a server that predates the endpoint's storage backend
+ * support answers with. It is the only 501 the client treats as "fall back";
+ * a 501 without it is a server bug and is reported.
+ */
+const ATTACHMENT_PRESIGN_UNSUPPORTED_CODE = "attachment_presign_unsupported";
+
+/** How many times a completion is attempted (transport failures and 5xx only). */
+const COMPLETE_UPLOAD_ATTEMPTS = 3;
+
+/** Base backoff between completion attempts; the n-th retry waits n× this. */
+const COMPLETE_UPLOAD_RETRY_MS = 1000;
+
+/**
+ * Thrown by the direct path when, and only when, this deployment cannot serve
+ * presigned uploads. `uploadFile` converts it into the legacy multipart
+ * request; every other error propagates untouched.
+ */
+class DirectUploadUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DirectUploadUnavailableError";
+  }
+}
+
+/**
+ * Whether a failed presign means "this server has no direct path" rather than
+ * "the direct path failed".
+ *
+ * The route is absent (404 from a build without it, 405 from a router that
+ * rejects the method) or the capability is declined (501 carrying the stable
+ * code). A 401/403 is a credential problem and a 5xx is a server fault: neither
+ * is fixed by routing the bytes through the API, and a fallback there would
+ * double the transfer or hide a real outage.
+ */
+function directUploadFallsBack(status: number, body: unknown): boolean {
+  if (status === 404 || status === 405) return true;
+  if (status !== 501) return false;
+  const code = (body as { code?: unknown } | null | undefined)?.code;
+  return code === ATTACHMENT_PRESIGN_UNSUPPORTED_CODE;
+}
+
+function isAbortError(err: unknown): boolean {
+  return (
+    (err instanceof Error && err.name === "AbortError") ||
+    (typeof DOMException !== "undefined" && err instanceof DOMException && err.name === "AbortError")
+  );
+}
+
+/** Sleeps unless the signal aborts first, in which case it rejects right away. */
+function delayAbortable(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(abortError());
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    function onAbort() {
+      clearTimeout(timer);
+      reject(abortError());
+    }
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+function abortError(): Error {
+  if (typeof DOMException !== "undefined") {
+    return new DOMException("The operation was aborted", "AbortError");
+  }
+  const err = new Error("The operation was aborted");
+  err.name = "AbortError";
+  return err;
 }
 
 export class ApiClient {
@@ -3992,6 +4071,18 @@ export class ApiClient {
   }
 
   // File Upload & Attachments
+  //
+  // Two paths, one contract. The direct path asks the API for a presigned PUT,
+  // sends the file straight to object storage, then completes: the file never
+  // passes through the API or a reverse proxy in front of it, so a proxy's
+  // request-body limit no longer caps attachment size and the API only ever
+  // sees metadata. The legacy multipart path stays for deployments whose
+  // storage cannot presign.
+  //
+  // The only automatic fallback is a capability one, decided before any bytes
+  // move (see directUploadFallsBack). Everything else — a rejected credential,
+  // a 5xx, a failed PUT or completion — is reported as-is: the file may already
+  // be stored, and a blind retry through the other path would send it twice.
   async uploadFile(
     file: File,
     opts?: { issueId?: string; commentId?: string; chatSessionId?: string },
@@ -3999,6 +4090,236 @@ export class ApiClient {
     // can cancel an in-flight upload on logout. When aborted, `fetch` rejects
     // with an AbortError, which the coordinator distinguishes from a real
     // failure via `signal.aborted` / `err.name === "AbortError"`.
+    signal?: AbortSignal,
+  ): Promise<Attachment> {
+    try {
+      return await this.uploadFileDirect(file, opts, signal);
+    } catch (err) {
+      if (!(err instanceof DirectUploadUnavailableError)) throw err;
+      this.logger.info("direct upload unavailable; using the multipart endpoint", {
+        reason: err.message,
+      });
+    }
+    return this.uploadFileMultipart(file, opts, signal);
+  }
+
+  /**
+   * presign → PUT → complete.
+   *
+   * Throws `DirectUploadUnavailableError` only when the server said this
+   * deployment cannot presign at all; every other failure propagates.
+   */
+  private async uploadFileDirect(
+    file: File,
+    opts?: { issueId?: string; commentId?: string; chatSessionId?: string },
+    signal?: AbortSignal,
+  ): Promise<Attachment> {
+    const presign = await this.presignAttachmentUpload(file, opts, signal);
+    await this.putAttachmentObject(presign, file, signal);
+    return this.completeAttachmentUpload(presign.attachment_id, signal);
+  }
+
+  /**
+   * Asks the API for a single-object PUT credential.
+   *
+   * The response is parsed strictly: a missing URL, method or headers object
+   * is a malformed response, not something to paper over with defaults. The
+   * alternative — `PUT ""` or a PUT carrying no signed header — is a request
+   * that can only fail, sent to an origin the caller did not intend.
+   */
+  private async presignAttachmentUpload(
+    file: File,
+    opts: { issueId?: string; commentId?: string; chatSessionId?: string } | undefined,
+    signal: AbortSignal | undefined,
+  ): Promise<AttachmentPresignUpload> {
+    const body: Record<string, unknown> = {
+      filename: file.name,
+      // The declared type only shapes the PUT signature; the server sniffs the
+      // stored bytes to decide the published content type. A File built from a
+      // drag/paste often has an empty `type`, which the endpoint rejects, so
+      // name the generic binary type instead of failing the upload.
+      content_type: file.type || "application/octet-stream",
+      size_bytes: file.size,
+    };
+    if (opts?.issueId) body.issue_id = opts.issueId;
+    if (opts?.commentId) body.comment_id = opts.commentId;
+    if (opts?.chatSessionId) body.chat_session_id = opts.chatSessionId;
+
+    const rid = createRequestId();
+    const start = Date.now();
+    const path = "/api/attachments/presign-upload";
+    this.logger.info(`→ POST ${path}`, { rid });
+
+    let res: Response;
+    try {
+      // Routed through fetchRaw so this request inherits the shared auth
+      // headers, the 401 → session-expiry path, and the structured ApiError
+      // shape the fallback decision reads.
+      res = await this.fetchRaw(path, {
+        method: "POST",
+        body: JSON.stringify(body),
+        signal,
+        extraHeaders: { "Content-Type": "application/json" },
+      });
+    } catch (err) {
+      // A 4xx/5xx arrives as an ApiError carrying the decoded body; only a
+      // capability refusal is a fallback signal.
+      if (err instanceof ApiError) throw this.classifyPresignFailure(err, rid, start);
+      throw err;
+    }
+
+    this.logger.info(`← ${res.status} POST ${path}`, { rid, duration: `${Date.now() - start}ms` });
+    let raw: unknown;
+    try {
+      raw = (await res.json()) as unknown;
+    } catch {
+      // A proxied HTML error page or a truncated body: report it as malformed
+      // rather than letting a JSON SyntaxError escape with no context.
+      this.logger.warn("presigned upload response was not JSON", { rid });
+      throw new Error("Malformed presigned upload response from the server");
+    }
+    // Parsed here rather than through parseWithFallback: that helper logs the
+    // received payload on failure, and this payload holds the signed URL — a
+    // credential for one key. A malformed response is reported as an error, so
+    // only the zod issues matter, and they are logged without the value.
+    const parsed = AttachmentPresignUploadSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.logger.warn("malformed presigned upload response", {
+        rid,
+        issues: parsed.error.issues.map((issue) => ({ path: issue.path, code: issue.code })),
+      });
+      throw new Error("Malformed presigned upload response from the server");
+    }
+    const presign = parsed.data;
+    if (presign.method.toUpperCase() !== "PUT") {
+      throw new Error(`Presigned upload asked for an unsupported method: ${presign.method}`);
+    }
+    return presign;
+  }
+
+  /** Turns a failed presign response into either a fallback signal or an error. */
+  private classifyPresignFailure(err: ApiError, rid: string, start: number): Error {
+    const path = "/api/attachments/presign-upload";
+    this.logger.error(`← ${err.status} POST ${path}`, {
+      rid,
+      duration: `${Date.now() - start}ms`,
+      error: err.message,
+    });
+    if (directUploadFallsBack(err.status, err.body)) {
+      return new DirectUploadUnavailableError(`${err.status} from ${path}`);
+    }
+    return err;
+  }
+
+  /**
+   * Sends the file to the object store.
+   *
+   * The request carries nothing of this client's identity: no Authorization
+   * header, no cookie (`credentials: "omit"`), no workspace or client headers.
+   * The storage host is a different origin operated by the bucket owner, and
+   * handing it an API token would hand the token to whatever answers that URL.
+   * The URL itself is never logged for the same reason — it is a password for
+   * one key until it expires.
+   */
+  private async putAttachmentObject(
+    presign: AttachmentPresignUpload,
+    file: File,
+    signal: AbortSignal | undefined,
+  ): Promise<void> {
+    const headers = new Headers();
+    for (const [name, value] of Object.entries(presign.headers)) {
+      // Content-Length and Host are chosen by the browser and cannot be set
+      // from script. Setting them is at best ignored and at worst a preflight
+      // failure, so skip them explicitly rather than hoping.
+      const lowered = name.toLowerCase();
+      if (lowered === "content-length" || lowered === "host") continue;
+      headers.set(name, value);
+    }
+
+    const rid = createRequestId();
+    const start = Date.now();
+    this.logger.info("→ PUT object storage", { rid, bytes: file.size });
+
+    let res: Response;
+    try {
+      // The File goes out as-is: its length is known to the browser, so the
+      // body is framed rather than chunked, which the store's signature
+      // requires.
+      res = await fetch(presign.upload_url, {
+        method: "PUT",
+        headers,
+        body: file,
+        credentials: "omit",
+        signal,
+      });
+    } catch (err) {
+      // A wrapped fetch error carries the full signed query string in its
+      // message, so report the failure without interpolating it.
+      if (isAbortError(err) || signal?.aborted) throw err;
+      this.logger.error("← PUT object storage failed", { rid, duration: `${Date.now() - start}ms` });
+      throw new Error("Upload to storage failed: the request could not be completed");
+    }
+
+    if (!res.ok) {
+      // Storage/proxy error bodies can echo the signed request URL. Report
+      // only the status so callers cannot put that credential into UI or logs.
+      this.logger.error(`← ${res.status} PUT object storage`, { rid, duration: `${Date.now() - start}ms` });
+      throw new Error(`Upload to storage failed: ${res.status}`);
+    }
+    this.logger.info(`← ${res.status} PUT object storage`, { rid, duration: `${Date.now() - start}ms` });
+  }
+
+  /**
+   * Publishes the uploaded object.
+   *
+   * Only transport failures and 5xx are retried: the call is idempotent (a
+   * repeated completion returns the attachment the first one published), and a
+   * 4xx means the session or the object is gone, which another attempt cannot
+   * change. Retrying in place — never starting a second session — is what keeps
+   * one upload to one attachment.
+   */
+  private async completeAttachmentUpload(
+    attachmentId: string,
+    signal: AbortSignal | undefined,
+  ): Promise<Attachment> {
+    const path = `/api/attachments/${encodeURIComponent(attachmentId)}/complete-upload`;
+    let lastError: unknown;
+
+    for (let attempt = 1; attempt <= COMPLETE_UPLOAD_ATTEMPTS; attempt += 1) {
+      if (attempt > 1) await delayAbortable(COMPLETE_UPLOAD_RETRY_MS * (attempt - 1), signal);
+      try {
+        const raw = await this.fetch<unknown>(path, { method: "POST", signal });
+        const attachment = parseWithFallback(raw, AttachmentResponseSchema, EMPTY_ATTACHMENT, {
+          endpoint: "POST /api/attachments/{id}/complete-upload",
+        });
+        if (!attachment.id) {
+          // A 200 with no id publishes nothing a client can use — the object
+          // stays staged and the caller would carry on with a blank attachment.
+          // Reporting it lets the caller retry instead of silently losing the file.
+          throw new Error("complete-upload response did not name the attachment");
+        }
+        return attachment;
+      } catch (err) {
+        if (isAbortError(err) || signal?.aborted) throw err;
+        // A transport failure says nothing about whether the server published
+        // anything, and the call is idempotent, so it is retried. A 4xx means
+        // the session or the object is gone — another attempt cannot fix that.
+        const retryable = !(err instanceof ApiError) || err.status >= 500;
+        if (!retryable) throw err;
+        lastError = err;
+        this.logger.warn("complete-upload failed; retrying", {
+          attempt,
+          status: err instanceof ApiError ? err.status : "network",
+        });
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error("Upload could not be completed");
+  }
+
+  /** The legacy whole-file-through-the-API upload, kept for older deployments. */
+  private async uploadFileMultipart(
+    file: File,
+    opts?: { issueId?: string; commentId?: string; chatSessionId?: string },
     signal?: AbortSignal,
   ): Promise<Attachment> {
     const formData = new FormData();

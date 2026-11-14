@@ -1363,6 +1363,18 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			},
 		},
 		{
+			// Hand every presigned-upload session to the reconciler before the
+			// workspace rows go: deleting the rows here would drop the only
+			// record naming their staging objects, which the file bytes' owner
+			// (the client) will never clean up. Same rule as the channel-media
+			// ledger below.
+			name: "release attachment upload sessions",
+			run: func() error {
+				_, err := qtx.ExpirePendingAttachmentUploadSessionsForWorkspace(ctx, requester.WorkspaceID)
+				return err
+			},
+		},
+		{
 			name: "delete issue roots",
 			run:  func() error { return qtx.DeleteWorkspaceIssueRoots(ctx, requester.WorkspaceID) },
 		},

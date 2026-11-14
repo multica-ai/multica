@@ -146,6 +146,68 @@ no upload-size environment variable is supported.
 | `CLOUDFRONT_KEY_PAIR_ID` | CloudFront key pair ID for signed URLs |
 | `CLOUDFRONT_PRIVATE_KEY` | CloudFront private key (PEM format) |
 
+#### Presigned direct upload
+
+With an S3-compatible bucket configured, the CLI and the web/desktop apps upload
+attachments straight to the bucket; only metadata reaches the API:
+
+```
+client -> API      POST /api/attachments/presign-upload   (metadata only)
+client -> bucket   PUT  <presigned URL>                   (the file)
+client -> API      POST /api/attachments/{id}/complete-upload
+```
+
+The bytes therefore never traverse the API or a reverse proxy in front of it,
+so a proxy's body limit no longer caps attachment size and the API's response
+time no longer tracks the upload. The **100 MiB** attachment limit is unchanged
+and is enforced on the declared size, on the stored object's size, and again
+after the copy.
+
+Configure a reachable bucket and browser CORS; see
+[Environment variables](https://multica.ai/docs/environment-variables#direct-upload) for the
+permissions, the two storage preconditions, and the CORS rule browser callers
+need.
+
+##### Which upload path a client uses
+
+The direct path is chosen from the deployment's storage backend, not from a
+setting. Every combination below is exercised by the client's own tests, which
+is why an old server and a new client interoperate without configuration:
+
+| Server | Client | Path taken | Why |
+|---|---|---|---|
+| Any release before direct upload | any | multipart `/api/upload-file` | `presign-upload` answers `404`, which the client treats as "the route is absent here" |
+| Storage that cannot presign (local disk, or a backend missing inspect/copy) | current | multipart `/api/upload-file` | the endpoint answers `501` with code `attachment_presign_unsupported` |
+| S3-compatible bucket | current | presign → PUT → complete | the only case where the file skips the API |
+| S3-compatible bucket, but the bucket is unreachable from the client | current | **no fallback** — the upload fails with the storage error | the bytes were already sent; retrying through the API would transfer them twice |
+| S3-compatible bucket, credential rejected (`401`/`403`) or server error (`5xx`) | current | **no fallback** — the error is reported | a capability refusal is the only fallback signal, so a real failure is never hidden behind a second attempt |
+
+A failed `complete-upload` is retried in place, at most three times and only
+for transport failures and `5xx`. The call is idempotent — a repeat returns the
+attachment the first attempt published — so a retry can never create a second
+attachment. A `4xx` completion (expired session, missing object, changed object)
+is final and is reported.
+
+##### Browser clients
+
+The web and desktop apps use the same contract, which means the browser PUTs
+cross-origin to your bucket. Without a matching CORS rule the browser blocks
+that request and the upload never completes; see the CORS section in
+[Environment variables](https://multica.ai/docs/environment-variables#browser-cors). The PUT carries no
+Multica credential — no `Authorization` header and no cookie — and sends the
+`File` as the body, letting the browser frame `Content-Length`. `Content-Length`
+and `Host` are never set by script.
+
+##### Staged objects and cleanup
+
+Uploads land under a private `upload-staging/` prefix that no read path serves,
+and a completed upload's object is copied to its permanent key
+(`workspaces/<workspace-id>/<attachment-id><ext>`) before the attachment row is
+written. A background sweep reclaims staging objects for published, abandoned
+and never-started uploads; it needs `s3:DeleteObject` and runs once a minute
+with backoff and a widening re-delete schedule, so a PUT that materializes after
+its delete is still caught. Nothing has to be scheduled by the operator.
+
 #### Avatars on a private bucket
 
 User / agent / squad / workspace avatars are stored as the raw storage object

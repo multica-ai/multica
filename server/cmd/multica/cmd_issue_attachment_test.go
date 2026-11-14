@@ -125,6 +125,11 @@ func TestIssueAttachmentLiteralArgv(t *testing.T) {
 						defer mu.Unlock()
 						w.Header().Set("Content-Type", "application/json")
 						switch {
+						case isPresignUploadRequest(r):
+							// This fake models a server from before the presigned-upload
+							// endpoint; the client's documented fallback is what these
+							// assertions cover.
+							http.NotFound(w, r)
 						case r.Method == http.MethodPost && r.URL.Path == "/api/upload-file":
 							file, header, err := r.FormFile("file")
 							if err != nil {

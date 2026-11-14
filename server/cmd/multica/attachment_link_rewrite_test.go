@@ -215,6 +215,9 @@ func TestRunIssueCommentAddRewritesInlineAttachmentLinks(t *testing.T) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/MUL-1":
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": "issue-1", "identifier": "MUL-1"})
+		case isPresignUploadRequest(r):
+			// Models a server from before the presigned-upload endpoint.
+			http.NotFound(w, r)
 		case r.Method == http.MethodPost && r.URL.Path == "/api/upload-file":
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"id": "att-1", "filename": "a.png", "content_type": "image/png", "markdown_url": markdownURL,
@@ -270,6 +273,9 @@ func TestRunIssueCreateKeepsInlineAttachmentInPlace(t *testing.T) {
 	var posted map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case isPresignUploadRequest(r):
+			// Models a server from before the presigned-upload endpoint.
+			http.NotFound(w, r)
 		case r.Method == http.MethodPost && r.URL.Path == "/api/upload-file":
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": "att-1", "filename": "a.png", "content_type": "image/png"})
 		case r.Method == http.MethodPost && r.URL.Path == "/api/issues":
