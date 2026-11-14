@@ -217,7 +217,7 @@
     "no_selected": "メンバーはいません",
     "admin_notice": "ワークスペースの owner と admin は常にアクセスできます。",
     "hide_from_admins": "ワークスペースの admin にも非表示",
-    "hide_from_admins_description": "プロジェクトメンバーではない admin はこのプロジェクトを表示できません。ワークスペースの owner は常にアクセスできます。",
+    "hide_from_admins_description": "プロジェクトメンバーではない admin はこのプロジェクトを表示できません。",
     "owner_notice": "ワークスペースの owner は常にアクセスできます。",
     "you": "あなた",
     "remove": "{{name}}を削除",
