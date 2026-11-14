@@ -1,3 +1,4 @@
+import "./stdio-errors";
 import {
   app,
   autoUpdater as nativeAutoUpdater,
