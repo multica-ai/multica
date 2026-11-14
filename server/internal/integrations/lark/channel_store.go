@@ -266,6 +266,15 @@ func (s *ChannelStore) GetLarkChatSessionBinding(ctx context.Context, arg GetCha
 	return chatSessionBindingFromRow(row), nil
 }
 
+// QuoteInCurrentContext implements QuoteHistory.
+func (s *ChannelStore) QuoteInCurrentContext(ctx context.Context, installationID pgtype.UUID, routeKey, marker string) (bool, error) {
+	return s.Queries.ChannelChatContextHasUserMessageContaining(ctx, db.ChannelChatContextHasUserMessageContainingParams{
+		InstallationID: installationID,
+		ChannelChatID:  routeKey,
+		Marker:         marker,
+	})
+}
+
 func (s *ChannelStore) GetLarkChatSessionBindingBySession(ctx context.Context, chatSessionID pgtype.UUID) (ChatSessionBinding, error) {
 	row, err := s.Queries.GetChannelChatSessionBindingBySession(ctx, db.GetChannelChatSessionBindingBySessionParams{
 		ChatSessionID: chatSessionID,
