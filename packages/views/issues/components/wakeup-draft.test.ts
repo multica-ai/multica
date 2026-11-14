@@ -86,6 +86,8 @@ describe("platform conditions", () => {
     });
     expect(input({ condition: "children", stage: 2 })).toMatchObject({ input: { condition: { type: "children_done", stage: 2 } } });
     expect(input({ condition: "children", stage: null })).toMatchObject({ input: { condition: { type: "children_done" } } });
+    expect(input({ condition: "children_reported", stage: 2 })).toMatchObject({ input: { condition: { type: "children_reported", stage: 2 } } });
+    expect(input({ condition: "children_reported", stage: null })).toMatchObject({ input: { condition: { type: "children_reported" } } });
     expect(input({ condition: "pull_request", prEvent: "merged" })).toMatchObject({ input: { condition: { type: "pull_request", event: "merged" } } });
     expect(input({ condition: "pull_request", prEvent: "conflicts" })).toMatchObject({ input: { condition: { type: "pull_request", event: "conflicts" } } });
     expect(input({ condition: "other_issue", otherIssue: { id: "i2", identifier: "MUL-2" }, otherState: "ended" })).toMatchObject({
