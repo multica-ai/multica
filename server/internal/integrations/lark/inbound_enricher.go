@@ -134,9 +134,11 @@ func NewInboundEnricher(client APIClient, cfg InboundEnricherConfig) Enricher {
 // display names via ONE Contact batch call, so the agent reads
 // "[Alice]: …" rather than "[User 1]: …" and knows who addressed it. This
 // is why the quote/forward items are fetched up front (Phase 1) before
-// names are resolved (Phase 2). Unresolved senders fall back to positional
-// "User N"; resolution is best-effort and never blocks. p2p chats keep
-// positional labels (identity is unambiguous in a 1:1).
+// names are resolved (Phase 2). A sender the Contact lookup misses is still
+// named when an @-mention in the fetched messages carries its id; the rest
+// fall back to positional "User N". Resolution is best-effort and never
+// blocks. In p2p chats only quoted and forwarded speakers are resolved; the
+// trigger sender stays unlabeled (identity is unambiguous in a 1:1).
 //
 // Persistence note: like the quoted/forwarded blocks, the rewritten Body
 // is persisted into the addressed turn's chat_message.content downstream
@@ -228,20 +230,24 @@ func (e *inboundEnricher) Enrich(ctx context.Context, msg InboundMessage, creds 
 	fetches.Wait()
 
 	// Phase 2 — resolve display names for every speaker we're about to
-	// render (recent + quoted + forwarded) plus the sender who @-mentioned
-	// the Bot, in one batch. Group chats only; p2p keeps positional labels
-	// (identity is unambiguous in a 1:1). Unresolved ids fall back to
-	// "User N" per speakerLabeler.
-	var names map[string]string
-	if msg.ChatType == ChatTypeGroup {
-		ids := senderOpenIDs(recentItems)
-		ids = append(ids, senderOpenIDs(quotedItems)...)
-		ids = append(ids, senderOpenIDs(forwardItems)...)
-		if msg.SenderOpenID != "" {
-			ids = append(ids, string(msg.SenderOpenID))
-		}
-		names = e.resolveNames(ctx, creds, ids)
+	// render (recent + quoted + forwarded), plus in groups the sender who
+	// @-mentioned the Bot, in one batch. A p2p trigger sender needs no label
+	// (identity is unambiguous in a 1:1), but a quoted or forwarded message
+	// there can come from anyone. Unresolved ids fall back to "User N" per
+	// speakerLabeler.
+	isGroup := msg.ChatType == ChatTypeGroup
+	ids := senderOpenIDs(recentItems)
+	ids = append(ids, senderOpenIDs(quotedItems)...)
+	ids = append(ids, senderOpenIDs(forwardItems)...)
+	if isGroup && msg.SenderOpenID != "" {
+		ids = append(ids, string(msg.SenderOpenID))
 	}
+	names := e.resolveNames(ctx, creds, ids)
+	// The Contact lookup only covers users inside the app's contact scope,
+	// which is often just a few people. Mentions in the fetched messages
+	// carry open_ids and display names, so user speakers can still be
+	// matched exactly when someone @-mentioned them.
+	names = addMentionNames(names, recentItems, quotedItems, forwardItems)
 
 	// Phase 3 — render broadest-to-narrowest with the complete name map.
 	if msg.ParentID != "" || isForward {
@@ -276,7 +282,7 @@ func (e *inboundEnricher) Enrich(ctx context.Context, msg InboundMessage, creds 
 			// Label the user's own message with their real name so the agent
 			// knows WHO @-mentioned it — not just what they said. Only when the
 			// name resolved (group path); otherwise the body passes through.
-			if name := names[string(msg.SenderOpenID)]; name != "" {
+			if name := names[string(msg.SenderOpenID)]; isGroup && name != "" {
 				core = fmt.Sprintf("[%s]: %s", name, msg.Body)
 			}
 		}
@@ -338,6 +344,27 @@ func (e *inboundEnricher) resolveNames(ctx context.Context, creds InstallationCr
 	if err != nil {
 		e.logger.Warn("lark enricher: speaker name resolution failed", "ids", len(uniq), "err", err)
 		return nil
+	}
+	return names
+}
+
+// addMentionNames fills missing open_ids with display names carried by
+// @-mentions in msgs, and returns the (possibly new) map. Mention open_ids
+// match user sender ids; app senders use app_ids and remain "Bot".
+// Contact-resolved names are never overwritten.
+func addMentionNames(names map[string]string, batches ...[]LarkMessage) map[string]string {
+	for _, msgs := range batches {
+		for _, m := range msgs {
+			for _, mn := range m.Mentions {
+				if mn.ID == "" || mn.Name == "" || names[mn.ID] != "" {
+					continue
+				}
+				if names == nil {
+					names = make(map[string]string)
+				}
+				names[mn.ID] = mn.Name
+			}
+		}
 	}
 	return names
 }
@@ -739,11 +766,11 @@ func parseLarkMillis(s string) int64 {
 // speakerLabeler assigns stable, human-readable labels to the senders
 // within one rendered block. Lark message items carry only a sender id
 // (no display name in the payload), so the enricher resolves real names
-// out of band via the Contact API and passes them in as a sender-id ->
-// name map. A sender present in that map is labeled with their real
-// name; one that is not (restricted contact scope, deactivated user,
-// name lookup failed) falls back to "User 1", "User 2", … in
-// first-appearance order. App senders are always "Bot".
+// out of band via the Contact API or fetched @-mentions and passes them
+// in as an open_id -> name map. A user present in that map is labeled
+// with their real name; one that is not (restricted contact scope,
+// deactivated user, name lookup failed) falls back to "User 1", "User 2",
+// … in first-appearance order. App senders are always "Bot".
 type speakerLabeler struct {
 	names map[string]string // resolved open_id -> display name (may be nil)
 	seen  map[string]string

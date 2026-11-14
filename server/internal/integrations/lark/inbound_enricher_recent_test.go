@@ -537,6 +537,119 @@ func TestEnrichForwardedResolvesNames(t *testing.T) {
 	}
 }
 
+// TestEnrichForwardedNamesFromMentions covers an app whose contact scope
+// hides the forwarded speakers: Contact resolves nobody, yet a speaker
+// someone @-mentioned is named from that mention's open_id. A speaker
+// nobody mentioned keeps the positional label.
+func TestEnrichForwardedNamesFromMentions(t *testing.T) {
+	t.Parallel()
+	fake := newEnricherFake()
+	mention := func(m LarkMessage, key, id, name string) LarkMessage {
+		m.Mentions = append(m.Mentions, LarkMessageMention{Key: key, ID: id, Name: name})
+		return m
+	}
+	fake.byID["om_forward"] = []LarkMessage{
+		{MessageID: "om_forward", MessageType: "merge_forward", SenderID: "ou_fwd", SenderType: "user", Content: `{"content":"Merged and Forwarded Message"}`},
+		mention(textMsg("c1", "ou_alice", "@_user_1 can you check?", "1000"), "@_user_1", "ou_bob", "Bob"),
+		textMsg("c2", "ou_bob", "on it", "2000"),
+		mention(textMsg("c3", "ou_carol", "@_user_1 thanks", "3000"), "@_user_1", "ou_alice", "Alice"),
+	}
+	in := InboundMessage{
+		MessageType:    "merge_forward",
+		MessageID:      "om_forward",
+		ChatID:         "oc_g",
+		ChatType:       ChatTypeGroup,
+		AddressedToBot: true,
+		SenderOpenID:   "ou_fwd",
+	}
+
+	out := enrich(t, fake, in, InboundEnricherConfig{})
+
+	want := `<forwarded_messages count="3">
+[Alice]: @Bob can you check?
+[Bob]: on it
+[User 1]: @Alice thanks
+</forwarded_messages>`
+	if out.Body != want {
+		t.Errorf("body\n got = %q\nwant = %q", out.Body, want)
+	}
+}
+
+func TestSpeakerLabelerAppIgnoresNameMap(t *testing.T) {
+	t.Parallel()
+	labeler := newSpeakerLabeler(map[string]string{"cli_bot": "Helper"})
+	if got := labeler.label(appMsg("om_bot", "tracing", "1000")); got != "Bot" {
+		t.Errorf("app speaker label = %q, want Bot", got)
+	}
+}
+
+// TestEnrichP2PResolvesQuotedAndForwardedNames covers forwarding into a
+// 1:1 chat, the usual way a user hands the Bot a conversation: the
+// forwarded and quoted speakers get real names, while the trigger sender
+// stays unlabeled as before.
+func TestEnrichP2PResolvesQuotedAndForwardedNames(t *testing.T) {
+	t.Parallel()
+	fake := newEnricherFake()
+	fake.userNames = map[string]string{"ou_alice": "Alice", "ou_bob": "Bob", "ou_me": "Me"}
+	fake.byID["om_forward"] = []LarkMessage{
+		{MessageID: "om_forward", MessageType: "merge_forward", SenderID: "ou_me", SenderType: "user", Content: `{"content":"Merged and Forwarded Message"}`},
+		textMsg("c1", "ou_alice", "login is broken", "1000"),
+		textMsg("c2", "ou_me", "looking", "2000"),
+	}
+	fake.byID["om_parent"] = []LarkMessage{textMsg("om_parent", "ou_bob", "see logs", "1000")}
+
+	forward := enrich(t, fake, InboundMessage{MessageType: "merge_forward", MessageID: "om_forward", ChatID: "oc_p", ChatType: ChatTypeP2P, SenderOpenID: "ou_me"}, groupCfg())
+	quote := enrich(t, fake, InboundMessage{MessageType: "text", MessageID: "om_q", ChatID: "oc_p", ChatType: ChatTypeP2P, SenderOpenID: "ou_me", Body: "why?", ParentID: "om_parent"}, groupCfg())
+
+	wantForward := `<forwarded_messages count="2">
+[Alice]: login is broken
+[Me]: looking
+</forwarded_messages>`
+	wantQuote := `<quoted_message message_id="om_parent" sender="Bob" type="text">
+see logs
+</quoted_message>
+
+why?`
+	if forward.Body != wantForward {
+		t.Errorf("forward body\n got = %q\nwant = %q", forward.Body, wantForward)
+	}
+	if quote.Body != wantQuote {
+		t.Errorf("quote body\n got = %q\nwant = %q", quote.Body, wantQuote)
+	}
+	if len(fake.listCalls) != 0 {
+		t.Errorf("p2p must not prefetch recent context, got %v", fake.listCalls)
+	}
+}
+
+// TestEnrichContactNameWinsOverMentionName pins precedence: a mention's
+// name only fills an id the Contact lookup did not resolve.
+func TestEnrichContactNameWinsOverMentionName(t *testing.T) {
+	t.Parallel()
+	fake := newEnricherFake()
+	fake.userNames = map[string]string{"ou_alice": "Alice Chen"}
+	quoted := textMsg("om_parent", "ou_alice", "ship it", "1000")
+	fake.byID["om_parent"] = []LarkMessage{quoted}
+	recent := textMsg("om_r", "ou_bob", "@_user_1 ok", "2000")
+	recent.Mentions = []LarkMessageMention{{Key: "@_user_1", ID: "ou_alice", Name: "Ally"}}
+	fake.byChat["oc_g"] = []LarkMessage{textMsg("om_trigger", "ou_bob", "go", "3000"), recent}
+	in := InboundMessage{
+		MessageType:    "text",
+		MessageID:      "om_trigger",
+		ChatID:         "oc_g",
+		ChatType:       ChatTypeGroup,
+		AddressedToBot: true,
+		Body:           "go",
+		ParentID:       "om_parent",
+		CreateTime:     "3000",
+	}
+
+	out := enrich(t, fake, in, groupCfg())
+
+	if !strings.Contains(out.Body, `sender="Alice Chen"`) || !strings.Contains(out.Body, "[User 1]: @Ally ok") {
+		t.Errorf("Contact name must win for the sender label; got\n%s", out.Body)
+	}
+}
+
 // TestEnrichRecentContextFetchError degrades to a plain, user-readable
 // note on a list failure without leaking the old internal XML placeholder
 // or dropping the user's body.
