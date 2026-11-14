@@ -142,7 +142,7 @@ describe("SourceContextBadge", () => {
     fireEvent.click(screen.getByRole("button", { name: "Context snapshot" }));
 
     const dialog = screen.getByRole("dialog");
-    expect(dialog).toHaveClass("h-[min(82dvh,56rem)]", "sm:max-w-4xl");
+    expect(dialog).toHaveClass("h-[min(82%,56rem)]", "sm:max-w-4xl");
     expect(dialog).not.toHaveClass("h-[calc(100%-2rem)]", "sm:max-w-[calc(100%-2rem)]");
     expect(screen.getByText("Source comment")).toHaveClass(
       "rounded-xs",
@@ -609,7 +609,7 @@ describe("SourceContextBadge", () => {
       expect(screen.getByText(author.expected)).toBeTruthy();
       expect(screen.queryByRole("button", { name: "Go to source comment" }) !== null)
         .toBe(display.openCurrent);
-      expect(dialog).toHaveClass("h-[min(82dvh,56rem)]", "sm:max-w-4xl");
+      expect(dialog).toHaveClass("h-[min(82%,56rem)]", "sm:max-w-4xl");
     },
   );
 });

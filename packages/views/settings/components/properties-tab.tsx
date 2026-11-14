@@ -462,7 +462,7 @@ function PropertyEditorDialog({
       {/* Options are unbounded, so the form is the part that has to give:
           header and footer stay put and the fields scroll, keeping "Save
           property" clickable no matter how many options are on the draft. */}
-      <DialogContent className="flex max-h-[85dvh] flex-col sm:max-w-lg">
+      <DialogContent className="flex max-h-[85%] flex-col sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>
             {property
