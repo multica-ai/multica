@@ -181,7 +181,8 @@ export function ChannelsTab() {
             <span>
               {t(($) => $.slack.section_title)},{" "}
               {t(($) => $.wecom.section_title)},{" "}
-              {t(($) => $.telegram.section_title)}
+              {t(($) => $.telegram.section_title)},{" "}
+              {t(($) => $.sharecrm.section_title)}
             </span>
             <span className="text-muted-foreground">
               {t(($) => $.channels.admin_only)}

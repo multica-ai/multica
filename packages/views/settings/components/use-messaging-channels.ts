@@ -8,6 +8,7 @@ import { slackInstallationsOptions } from "@multica/core/slack";
 import { dingtalkInstallationsOptions } from "@multica/core/dingtalk";
 import { wecomInstallationsOptions } from "@multica/core/wecom";
 import { telegramInstallationsOptions } from "@multica/core/telegram";
+import { sharecrmInstallationsOptions } from "@multica/core/sharecrm";
 import type {
   Agent,
   LarkInstallation,
@@ -15,6 +16,7 @@ import type {
   DingTalkInstallation,
   WecomInstallation,
   TelegramInstallation,
+  ShareCRMInstallation,
 } from "@multica/core/types";
 import type { ChannelIntegration } from "./settings-navigation";
 
@@ -23,7 +25,8 @@ export type ChannelConnection =
   | { channel: "slack"; installation: SlackInstallation }
   | { channel: "dingtalk"; installation: DingTalkInstallation }
   | { channel: "wecom"; installation: WecomInstallation }
-  | { channel: "telegram"; installation: TelegramInstallation };
+  | { channel: "telegram"; installation: TelegramInstallation }
+  | { channel: "sharecrm"; installation: ShareCRMInstallation };
 
 export function channelChatLink(
   connection: ChannelConnection,
@@ -56,7 +59,8 @@ export function useMessagingChannels() {
   const dingtalk = useQuery({ ...dingtalkInstallationsOptions(wsId), enabled });
   const wecom = useQuery({ ...wecomInstallationsOptions(wsId), enabled });
   const telegram = useQuery({ ...telegramInstallationsOptions(wsId), enabled });
-  const queries = { lark, slack, dingtalk, wecom, telegram };
+  const sharecrm = useQuery({ ...sharecrmInstallationsOptions(wsId), enabled });
+  const queries = { lark, slack, dingtalk, wecom, telegram, sharecrm };
   const connections: ChannelConnection[] = [
     ...(lark.data?.installations ?? []).map((installation) => ({
       channel: "lark" as const,
@@ -76,6 +80,10 @@ export function useMessagingChannels() {
     })),
     ...(telegram.data?.installations ?? []).map((installation) => ({
       channel: "telegram" as const,
+      installation,
+    })),
+    ...(sharecrm.data?.installations ?? []).map((installation) => ({
+      channel: "sharecrm" as const,
       installation,
     })),
   ].filter(({ installation }) => installation.status === "active");

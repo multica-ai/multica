@@ -24,6 +24,11 @@ describe("settings location", () => {
       { tab: "appearance", section: "theme", integration: null },
     ],
     ["tab=lark", { tab: "channels", section: null, integration: null }],
+    ["tab=sharecrm", { tab: "channels", section: null, integration: null }],
+    [
+      "tab=integrations&integration=sharecrm",
+      { tab: "channels", section: null, integration: null },
+    ],
     [
       "tab=integrations&integration=slack",
       { tab: "channels", section: null, integration: null },

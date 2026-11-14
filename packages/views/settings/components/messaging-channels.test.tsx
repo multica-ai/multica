@@ -56,15 +56,18 @@ vi.mock("@multica/core/api", async (original) => ({
       "listDingTalkInstallations",
       "listWecomInstallations",
       "listTelegramInstallations",
+      "listShareCRMInstallations",
       "registerSlackBYO",
       "registerDingTalkBYO",
       "registerWecomBYO",
       "registerTelegramBot",
+      "registerShareCRMBYO",
       "deleteLarkInstallation",
       "deleteSlackInstallation",
       "deleteDingTalkInstallation",
       "deleteWecomInstallation",
       "deleteTelegramInstallation",
+      "deleteShareCRMInstallation",
       "listAgentDingTalkGroups",
       "listAgents",
       "beginLarkInstall",
@@ -122,6 +125,7 @@ beforeEach(() => {
     "listDingTalkInstallations",
     "listWecomInstallations",
     "listTelegramInstallations",
+    "listShareCRMInstallations",
   ] as const) {
     vi.mocked(api[name]).mockResolvedValue(listing() as never);
   }
@@ -339,7 +343,7 @@ describe("agent messaging channels", () => {
     expect(screen.queryByText("Telegram")).toBeNull();
   });
 
-  it.each(["lark", "slack", "dingtalk", "wecom", "telegram"] as const)(
+  it.each(["lark", "slack", "dingtalk", "wecom", "telegram", "sharecrm"] as const)(
     "confirms %s disconnect and preserves the connection on failure",
     async (channel) => {
       const methods = {
@@ -348,6 +352,7 @@ describe("agent messaging channels", () => {
         dingtalk: ["listDingTalkInstallations", "deleteDingTalkInstallation"],
         wecom: ["listWecomInstallations", "deleteWecomInstallation"],
         telegram: ["listTelegramInstallations", "deleteTelegramInstallation"],
+        sharecrm: ["listShareCRMInstallations", "deleteShareCRMInstallation"],
       } as const;
       const [list, remove] = methods[channel];
       vi.mocked(api[list]).mockResolvedValue(listing([active]) as never);
@@ -386,6 +391,7 @@ const platformName = {
   dingtalk: "DingTalk",
   wecom: "WeCom",
   telegram: "Telegram",
+  sharecrm: "ShareCRM",
 } as const;
 
 describe("shared connection dialog", () => {
@@ -492,6 +498,12 @@ describe("shared connection dialog", () => {
       { bot_id: "first", secret: "second", bot_name: undefined },
     ],
     ["telegram", "registerTelegramBot", ["Bot token"], { bot_token: "first" }],
+    [
+      "sharecrm",
+      "registerShareCRMBYO",
+      ["App ID", "App Secret"],
+      { app_id: "first", app_secret: "second" },
+    ],
   ] as const)(
     "submits %s through the existing API and closes after success",
     async (channel, method, labels, payload) => {
@@ -527,6 +539,39 @@ describe("shared connection dialog", () => {
       await waitFor(() => expect(close).toHaveBeenCalledWith(false));
     },
   );
+
+  it("sends a ShareCRM gateway only when the admin sets one", async () => {
+    vi.mocked(api.registerShareCRMBYO).mockResolvedValue(active as never);
+    show(
+      <ChannelConnectDialog
+        agents={[agent]}
+        initialAgent={agent}
+        initialChannel="sharecrm"
+        open
+        onOpenChange={vi.fn()}
+      />,
+    );
+    const row = await screen.findByRole("button", { name: /^ShareCRM$/ });
+    await waitFor(() => expect(row).toBeEnabled());
+    fireEvent.click(row);
+    fireEvent.change(screen.getByLabelText("App ID"), {
+      target: { value: "app" },
+    });
+    fireEvent.change(screen.getByLabelText("App Secret"), {
+      target: { value: "secret" },
+    });
+    fireEvent.change(screen.getByLabelText("API base URL (optional)"), {
+      target: { value: " https://open.fxiaoke.com " },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    await waitFor(() =>
+      expect(api.registerShareCRMBYO).toHaveBeenCalledWith("ws-1", "agent-1", {
+        app_id: "app",
+        app_secret: "secret",
+        gateway_base_url: "https://open.fxiaoke.com",
+      }),
+    );
+  });
 
   it("keeps inputs and localized WeCom errors after rejected credentials", async () => {
     vi.mocked(api.registerWecomBYO).mockRejectedValue(
@@ -610,7 +655,7 @@ describe("workspace overview", () => {
     );
     expect(state.replace).toHaveBeenCalledWith("/acme/settings?tab=channels");
     expect(screen.getByText("Who can connect")).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "Connect" })).toHaveLength(5);
+    expect(screen.getAllByRole("button", { name: "Connect" })).toHaveLength(6);
   });
 
   it("reports failed reads as unavailable and keeps a retry control", async () => {

@@ -40,6 +40,7 @@ export function ChannelDisconnectDialog({
         dingtalk: api.deleteDingTalkInstallation.bind(api),
         wecom: api.deleteWecomInstallation.bind(api),
         telegram: api.deleteTelegramInstallation.bind(api),
+        sharecrm: api.deleteShareCRMInstallation.bind(api),
       }[channel];
       await revoke(installation.workspace_id, installation.id);
       await qc.invalidateQueries({

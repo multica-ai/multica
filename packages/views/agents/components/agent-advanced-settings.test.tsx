@@ -60,6 +60,9 @@ const slackListingRef = vi.hoisted(() => ({
 const telegramListingRef = vi.hoisted(() => ({
   current: { installations: [] as unknown[], configured: false },
 }));
+const sharecrmListingRef = vi.hoisted(() => ({
+  current: { installations: [] as unknown[], configured: false },
+}));
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
@@ -79,6 +82,12 @@ vi.mock("@multica/core/telegram", () => ({
   telegramInstallationsOptions: () => ({
     queryKey: ["telegram", "installations"],
     queryFn: () => Promise.resolve(telegramListingRef.current),
+  }),
+}));
+vi.mock("@multica/core/sharecrm", () => ({
+  sharecrmInstallationsOptions: () => ({
+    queryKey: ["sharecrm", "installations"],
+    queryFn: () => Promise.resolve(sharecrmListingRef.current),
   }),
 }));
 
@@ -181,6 +190,7 @@ beforeEach(() => {
   larkListingRef.current = { installations: [], configured: false };
   slackListingRef.current = { installations: [], configured: false };
   telegramListingRef.current = { installations: [], configured: false };
+  sharecrmListingRef.current = { installations: [], configured: false };
 });
 
 describe("AgentAdvancedSettings MCP section visibility", () => {
@@ -221,6 +231,9 @@ describe("AgentAdvancedSettings Integrations section visibility", () => {
     // Slack-only deployment was hiding the section (and its bind entry).
     ["Slack", slackListingRef],
     ["Telegram", telegramListingRef],
+    // ShareCRM follows the same rule: a configured channel does not bring
+    // the retired Integrations section back into agent settings.
+    ["ShareCRM", sharecrmListingRef],
   ])("keeps channels out of settings when %s is configured", async (_name, ref) => {
     ref.current = { installations: [], configured: true };
     renderDialog([makeRuntime("claude")]);

@@ -312,6 +312,9 @@ function ChannelCredentials({
     botId: "",
     secret: "",
     botName: "",
+    appId: "",
+    appSecret: "",
+    gatewayBaseUrl: "",
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -361,13 +364,31 @@ function ChannelCredentials({
                 optional: true,
               },
             ]
-          : [
-              {
-                key: "token",
-                label: t(($) => $.telegram.bot_token_label),
-                secret: true,
-              },
-            ];
+          : channel === "sharecrm"
+            ? [
+                {
+                  key: "appId",
+                  label: t(($) => $.sharecrm.byo_app_id_label),
+                  secret: true,
+                },
+                {
+                  key: "appSecret",
+                  label: t(($) => $.sharecrm.byo_app_secret_label),
+                  secret: true,
+                },
+                {
+                  key: "gatewayBaseUrl",
+                  label: t(($) => $.sharecrm.byo_gateway_url_label),
+                  optional: true,
+                },
+              ]
+            : [
+                {
+                  key: "token",
+                  label: t(($) => $.telegram.bot_token_label),
+                  secret: true,
+                },
+              ];
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -396,9 +417,17 @@ function ChannelCredentials({
                   secret: v.secret,
                   bot_name: v.botName || undefined,
                 })
-              : await api.registerTelegramBot(wsId, agentId, {
-                  bot_token: v.token,
-                });
+              : channel === "sharecrm"
+                ? await api.registerShareCRMBYO(wsId, agentId, {
+                    app_id: v.appId,
+                    app_secret: v.appSecret,
+                    ...(v.gatewayBaseUrl
+                      ? { gateway_base_url: v.gatewayBaseUrl }
+                      : {}),
+                  })
+                : await api.registerTelegramBot(wsId, agentId, {
+                    bot_token: v.token,
+                  });
       if (!installation.id || installation.status !== "active")
         throw new Error(t(($) => $.channels.connect_failed));
       await qc.invalidateQueries({

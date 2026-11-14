@@ -321,6 +321,12 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
   // DingTalk identity. Reserve the prefix so a workspace slug cannot shadow it.
   "dingtalk",
 
+  // ShareCRM account-bind route
+  // `/sharecrm/bind` is a global pre-workspace route where a member links their
+  // ShareCRM (纷享销客) identity. Reserve the prefix so a workspace slug cannot
+  // shadow it.
+  "sharecrm",
+
   // Chat channel account-bind routes
   // `/lark/bind`, `/slack/bind`, `/telegram/bind`, and `/wecom/bind` are global
   // pre-workspace routes where a member links their chat identity, the same as
