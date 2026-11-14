@@ -28,6 +28,10 @@ import type {
   WorkspacePathRequest,
 } from "../shared/workspace-window";
 import type {
+  VoiceHistoryAudio,
+  VoiceHistoryEntry,
+  VoiceHistorySaveRequest,
+  VoiceHistoryUpdate,
   VoiceModelRequest,
   VoiceModelsSnapshot,
   VoiceTranscribeRequest,
@@ -149,6 +153,20 @@ interface DesktopAPI {
     /** Load the model while the user is still speaking. */
     prepare: (request: VoiceModelRequest) => void;
     transcribe: (request: VoiceTranscribeRequest) => Promise<VoiceTranscribeResult>;
+    /** Recordings and their transcripts, kept on this device. */
+    history: {
+      /** Newest first. */
+      list: () => Promise<VoiceHistoryEntry[]>;
+      /** Called after any change. Returns an unsubscribe function. */
+      onChanged: (callback: () => void) => () => void;
+      /** Null when the request is invalid. */
+      save: (request: VoiceHistorySaveRequest) => Promise<VoiceHistoryEntry | null>;
+      update: (id: string, patch: VoiceHistoryUpdate) => Promise<void>;
+      audio: (id: string) => Promise<VoiceHistoryAudio | null>;
+      remove: (id: string) => Promise<void>;
+      /** Drop entries older than `keepDays` (0 drops all); null keeps them. */
+      prune: (keepDays: number | null) => Promise<void>;
+    };
   };
   /** Listen for Cmd/Ctrl+W tab-close requests from the main process.
    *  Returns an unsubscribe function. */

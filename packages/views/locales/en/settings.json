@@ -1911,6 +1911,47 @@
       "blocked": "Microphone access is blocked. Allow it in your browser or system settings.",
       "start": "Test",
       "stop": "Stop"
+    },
+    "history": {
+      "title": "History",
+      "description": "Recordings and their text stay on this computer and are never uploaded. One that failed or was interrupted can be transcribed again from its audio.",
+      "keep": {
+        "title": "Keep history",
+        "hint": "How long recordings stay on this computer.",
+        "options": {
+          "off": "Don't keep",
+          "1d": "1 day",
+          "7d": "7 days",
+          "30d": "30 days",
+          "forever": "Forever"
+        }
+      },
+      "clear": "Clear all",
+      "clear_dialog": {
+        "title": "Clear voice history?",
+        "description": "Every recording and transcript kept on this computer will be deleted.",
+        "cancel": "Cancel"
+      },
+      "empty": "Your dictations will appear here.",
+      "off": "History is off. New recordings are not kept.",
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "status": {
+        "transcribing": "Transcribing…",
+        "failed": "Transcription failed",
+        "interrupted": "Interrupted before it was transcribed"
+      },
+      "actions": {
+        "play": "Play recording",
+        "pause": "Pause",
+        "retranscribe": "Transcribe again",
+        "copy": "Copy text",
+        "delete": "Delete"
+      },
+      "copied": "Copied",
+      "copy_failed": "Couldn't copy",
+      "retry_failed": "Couldn't transcribe this recording",
+      "show_more": "Show more"
     }
   }
 }

@@ -261,6 +261,12 @@ export function useSettingsSearchIndex(
         title: t(($) => $.voice_input.test.title),
       },
       {
+        tab: "voice-input",
+        anchor: "voice-history",
+        title: t(($) => $.voice_input.history.title),
+        description: t(($) => $.voice_input.history.description),
+      },
+      {
         tab: "apps",
         title: t(($) => $.page.tabs.apps),
         description: t(($) => $.connected_apps.description),

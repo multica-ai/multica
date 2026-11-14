@@ -17,6 +17,7 @@ import { create } from "zustand";
 import { getShortcut } from "../shortcuts/store";
 import { shortcutMatchesEvent } from "../shortcuts/definitions";
 import { activeVoiceModel, useVoiceModelsStore, type VoiceModel, type VoiceModels, type VoiceTranscription } from "./models";
+import { voiceHistoryDays, type VoiceHistoryStatus } from "./history";
 import { voiceHotwords } from "./hotwords";
 import { useVoiceSettingsStore } from "./store";
 import { applyVocabulary, removeSpokenFillers } from "./text";
@@ -64,6 +65,14 @@ export interface VoiceRuntime {
   transcribe: (clip: Blob, model: VoiceModel, options: VoiceDecodeOptions) => Promise<VoiceTranscription>;
   /** Report the model list now and whenever it changes. */
   watchModels: (onChange: (models: VoiceModels) => void) => void;
+  /** Keep recordings on this device; absent where there is nowhere to keep them. */
+  history?: VoiceHistoryRuntime;
+}
+
+export interface VoiceHistoryRuntime {
+  /** Resolves to the entry id, or null when it could not be kept. */
+  save: (clip: VoiceClip, keepDays: number | null) => Promise<string | null>;
+  update: (id: string, status: VoiceHistoryStatus, text?: string) => void;
 }
 
 /** `setup`: no speech model is installed yet, so the setup dialog is open. */
@@ -125,6 +134,9 @@ let focusedId: string | null = null;
 let session = 0;
 let recording: VoiceRecorder | null = null;
 let lastClip: Blob | null = null;
+/** The history entry for `lastClip`, and whether its outcome is still open. */
+let historyEntry: Promise<string | null> | null = null;
+let historyOpen = false;
 let sendAfterInsert = false;
 let held = false;
 let heldByKey = false;
@@ -160,6 +172,42 @@ function decodeOptions(): VoiceDecodeOptions {
   return { language, hotwords: voiceHotwords(vocabulary) };
 }
 
+function keepInHistory(clip: VoiceClip) {
+  const keepDays = voiceHistoryDays(useVoiceSettingsStore.getState().keepHistory);
+  const history = runtime?.history;
+  historyEntry = history && keepDays !== 0 ? history.save(clip, keepDays).catch(() => null) : null;
+  historyOpen = historyEntry !== null;
+}
+
+function settleHistory(status: VoiceHistoryStatus, text?: string) {
+  const entry = historyEntry;
+  const history = runtime?.history;
+  historyOpen = status === "transcribing";
+  if (!entry || !history) return;
+  void entry.then((id) => {
+    if (id) history.update(id, status, text);
+  });
+}
+
+/** The transcript as it is inserted: fillers dropped, vocabulary spelled. */
+function cleanTranscript(text: string): string {
+  const settings = useVoiceSettingsStore.getState();
+  const spoken = settings.removeFillers ? removeSpokenFillers(text) : text;
+  return applyVocabulary(spoken, settings.vocabulary).trim();
+}
+
+/**
+ * Transcribe a kept recording again, outside any composer (history). Null
+ * when there is no model or engine, or nothing was heard.
+ */
+export async function transcribeVoiceClip(clip: Blob): Promise<string | null> {
+  const model = activeVoiceModel();
+  if (!runtime || !model) return null;
+  const result = await runtime.transcribe(clip, model, decodeOptions()).catch(() => null);
+  if (!result?.ok) return null;
+  return cleanTranscript(result.text) || null;
+}
+
 function clearHold() {
   held = false;
   heldByKey = false;
@@ -180,6 +228,8 @@ function begin(targetId: string, mode: VoiceMode) {
   const token = ++session;
   recording?.discard();
   lastClip = null;
+  historyEntry = null;
+  historyOpen = false;
   sendAfterInsert = false;
   const current = runtime.record(
     (next) => {
@@ -228,6 +278,7 @@ async function finish(send: boolean) {
     return;
   }
   lastClip = clip.blob;
+  keepInHistory(clip);
   await transcribe(token);
 }
 
@@ -237,24 +288,27 @@ async function transcribe(token: number) {
   if (!clip || !runtime) return;
   const { targetId } = state();
   if (!model) {
+    settleHistory("failed");
     if (targetId) openSetup(targetId);
     return;
   }
-  const settings = useVoiceSettingsStore.getState();
   const result = await runtime.transcribe(clip, model, decodeOptions()).catch(() => null);
   if (token !== session) return;
   if (!result?.ok) {
+    settleHistory("failed");
     if (result?.reason === "model-missing" && targetId) openSetup(targetId);
     else if (result?.reason === "engine-unavailable") fail("unavailable", false);
     else fail("transcription-failed", true);
     return;
   }
-  const spoken = settings.removeFillers ? removeSpokenFillers(result.text) : result.text;
-  const cleaned = applyVocabulary(spoken, settings.vocabulary).trim();
+  const cleaned = cleanTranscript(result.text);
   if (!cleaned) {
+    settleHistory("failed");
     fail("no-speech", false);
     return;
   }
+  // Kept before inserting: the text survives a composer that went away.
+  settleHistory("done", cleaned);
   deliver(token, cleaned);
 }
 
@@ -299,6 +353,10 @@ function fail(error: VoiceErrorKind, canRetry: boolean) {
 
 /** Abandon whatever is in flight, including a failed clip. */
 export function cancelVoice() {
+  // Cancelled while transcribing: the recording stays in history to retry.
+  if (historyOpen) settleHistory("interrupted");
+  historyEntry = null;
+  historyOpen = false;
   session++;
   recording?.discard();
   recording = null;
@@ -313,6 +371,7 @@ export function retryVoice() {
   const { phase, targetId, canRetry } = state();
   if (phase !== "error" || !targetId) return;
   if (canRetry && lastClip) {
+    if (historyEntry) settleHistory("transcribing");
     const token = ++session;
     setState({ phase: "transcribing", error: null, canRetry: false });
     void transcribe(token);

@@ -1890,6 +1890,47 @@
       "blocked": "麥克風權限被封鎖。請在瀏覽器或系統設定中允許。",
       "start": "測試",
       "stop": "停止"
+    },
+    "history": {
+      "title": "歷史記錄",
+      "description": "錄音和轉寫文字只保存在這台電腦上，不會上傳。轉寫失敗或被中斷的錄音可以用原始音訊重新轉寫。",
+      "keep": {
+        "title": "保留歷史記錄",
+        "hint": "錄音在這台電腦上保留多久。",
+        "options": {
+          "off": "不保留",
+          "1d": "1 天",
+          "7d": "7 天",
+          "30d": "30 天",
+          "forever": "永久"
+        }
+      },
+      "clear": "全部清除",
+      "clear_dialog": {
+        "title": "清除語音歷史記錄？",
+        "description": "這台電腦上保存的所有錄音和轉寫文字都會被刪除。",
+        "cancel": "取消"
+      },
+      "empty": "你的語音輸入會顯示在這裡。",
+      "off": "歷史記錄已關閉，新的錄音不會被保留。",
+      "today": "今天",
+      "yesterday": "昨天",
+      "status": {
+        "transcribing": "轉寫中…",
+        "failed": "轉寫失敗",
+        "interrupted": "轉寫前被中斷"
+      },
+      "actions": {
+        "play": "播放錄音",
+        "pause": "暫停",
+        "retranscribe": "重新轉寫",
+        "copy": "複製文字",
+        "delete": "刪除"
+      },
+      "copied": "已複製",
+      "copy_failed": "複製失敗",
+      "retry_failed": "這段錄音轉寫失敗",
+      "show_more": "顯示更多"
     }
   }
 }

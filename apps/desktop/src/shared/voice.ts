@@ -11,6 +11,13 @@ export const VOICE_MODEL_CANCEL_CHANNEL = "voice:models:cancel";
 export const VOICE_MODEL_DELETE_CHANNEL = "voice:models:delete";
 export const VOICE_PREPARE_CHANNEL = "voice:prepare";
 export const VOICE_TRANSCRIBE_CHANNEL = "voice:transcribe";
+export const VOICE_HISTORY_LIST_CHANNEL = "voice:history:list";
+export const VOICE_HISTORY_CHANGED_CHANNEL = "voice:history:changed";
+export const VOICE_HISTORY_SAVE_CHANNEL = "voice:history:save";
+export const VOICE_HISTORY_UPDATE_CHANNEL = "voice:history:update";
+export const VOICE_HISTORY_AUDIO_CHANNEL = "voice:history:audio";
+export const VOICE_HISTORY_REMOVE_CHANNEL = "voice:history:remove";
+export const VOICE_HISTORY_PRUNE_CHANNEL = "voice:history:prune";
 
 /** The sample rate every model expects. */
 export const VOICE_SAMPLE_RATE = 16000;
@@ -61,3 +68,39 @@ export interface VoiceTranscribeRequest extends VoiceModelRequest {
 export type VoiceTranscribeResult =
   | { ok: true; text: string }
   | { ok: false; reason: "model-missing" | "engine-unavailable" | "failed"; error?: string };
+
+/**
+ * Dictation history: every recording is kept on this device with its text,
+ * so a failed or interrupted transcription can be run again from the audio.
+ * `transcribing` left over from a previous run reads as `interrupted`.
+ */
+export type VoiceHistoryStatus = "transcribing" | "done" | "failed" | "interrupted";
+
+export interface VoiceHistoryEntry {
+  id: string;
+  /** Epoch milliseconds. */
+  createdAt: number;
+  durationMs: number;
+  status: VoiceHistoryStatus;
+  /** The transcript as inserted; empty until one succeeds. */
+  text: string;
+}
+
+export interface VoiceHistorySaveRequest {
+  /** The recording as captured (compressed, e.g. webm/opus). */
+  audio: Uint8Array;
+  mimeType: string;
+  durationMs: number;
+  /** Prune entries older than this many days; null keeps everything. */
+  keepDays: number | null;
+}
+
+export interface VoiceHistoryUpdate {
+  status: VoiceHistoryStatus;
+  text?: string;
+}
+
+export interface VoiceHistoryAudio {
+  audio: Uint8Array;
+  mimeType: string;
+}

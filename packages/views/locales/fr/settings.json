@@ -1911,6 +1911,47 @@
       "blocked": "L’accès au micro est bloqué. Autorisez-le dans le navigateur ou les réglages système.",
       "start": "Tester",
       "stop": "Arrêter"
+    },
+    "history": {
+      "title": "Historique",
+      "description": "Les enregistrements et leur texte restent sur cet ordinateur et ne sont jamais envoyés. Un enregistrement qui a échoué ou a été interrompu peut être retranscrit à partir de son audio.",
+      "keep": {
+        "title": "Conserver l'historique",
+        "hint": "Durée de conservation des enregistrements sur cet ordinateur.",
+        "options": {
+          "off": "Ne pas conserver",
+          "1d": "1 jour",
+          "7d": "7 jours",
+          "30d": "30 jours",
+          "forever": "Toujours"
+        }
+      },
+      "clear": "Tout effacer",
+      "clear_dialog": {
+        "title": "Effacer l'historique vocal ?",
+        "description": "Tous les enregistrements et transcriptions conservés sur cet ordinateur seront supprimés.",
+        "cancel": "Annuler"
+      },
+      "empty": "Vos dictées apparaîtront ici.",
+      "off": "L'historique est désactivé. Les nouveaux enregistrements ne sont pas conservés.",
+      "today": "Aujourd'hui",
+      "yesterday": "Hier",
+      "status": {
+        "transcribing": "Transcription…",
+        "failed": "Échec de la transcription",
+        "interrupted": "Interrompu avant la transcription"
+      },
+      "actions": {
+        "play": "Lire l'enregistrement",
+        "pause": "Pause",
+        "retranscribe": "Retranscrire",
+        "copy": "Copier le texte",
+        "delete": "Supprimer"
+      },
+      "copied": "Copié",
+      "copy_failed": "Impossible de copier",
+      "retry_failed": "Impossible de transcrire cet enregistrement",
+      "show_more": "Afficher plus"
     }
   }
 }

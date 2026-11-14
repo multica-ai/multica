@@ -14,6 +14,7 @@ import {
   releaseVoice,
   retryVoice,
   toggleVoice,
+  transcribeVoiceClip,
   type VoiceTarget,
 } from "./session";
 import { DEFAULT_VOICE_SETTINGS, useVoiceSettingsStore } from "./store";
@@ -36,6 +37,7 @@ const INSTALLED: VoiceModels = { engineAvailable: true, models: [MODEL] };
 const clip = { durationMs: 1500, heardSpeech: true };
 const recordings = { started: 0, discarded: 0 };
 const engine = { transcribe: vi.fn(), prepare: vi.fn() };
+const history = { save: vi.fn(), update: vi.fn() };
 
 beforeAll(() => {
   connectVoiceRuntime(() => ({
@@ -52,6 +54,10 @@ beforeAll(() => {
     prepare: (...args) => engine.prepare(...args),
     transcribe: (...args) => engine.transcribe(...args),
     watchModels: (onChange) => onChange(INSTALLED),
+    history: {
+      save: (...args) => history.save(...args),
+      update: (...args) => history.update(...args),
+    },
   }));
 });
 
@@ -91,6 +97,9 @@ beforeEach(() => {
   engine.prepare.mockReset();
   engine.transcribe.mockReset();
   engine.transcribe.mockResolvedValue({ ok: true, text: "hello world" });
+  history.save.mockReset();
+  history.save.mockResolvedValue("h1");
+  history.update.mockReset();
   useVoiceSettingsStore.getState().update(DEFAULT_VOICE_SETTINGS);
   useShortcutStore.getState().setShortcut("voiceInput", createShortcutChord("Space", { alt: true }));
 });
@@ -325,5 +334,61 @@ describe("voice session", () => {
     expect(engine.prepare).toHaveBeenCalledWith(MODEL, options);
     expect(engine.transcribe).toHaveBeenCalledWith(expect.any(Blob), MODEL, options);
     setVoiceContextWords([]);
+  });
+});
+
+describe("voice history", () => {
+  async function dictate(id = "chat") {
+    pressVoice(id);
+    releaseVoice();
+    await untilPhase("recording");
+    pressVoice(id);
+  }
+
+  it("keeps the recording before transcribing, then its text as inserted", async () => {
+    engine.transcribe.mockResolvedValueOnce({ ok: true, text: "呃，assign it to lambda" });
+    useVoiceSettingsStore.getState().update({ vocabulary: ["Lambda"], keepHistory: "7d" });
+    target("chat");
+    await dictate();
+    await untilPhase("idle");
+    expect(history.save).toHaveBeenCalledWith(expect.objectContaining({ durationMs: 1500 }), 7);
+    await vi.waitFor(() => expect(history.update).toHaveBeenCalledWith("h1", "done", "assign it to Lambda"));
+  });
+
+  it("marks a failed transcription failed, and a retry runs on the same entry", async () => {
+    engine.transcribe.mockResolvedValueOnce({ ok: false, reason: "failed" });
+    target("chat");
+    await dictate();
+    await untilPhase("error");
+    await vi.waitFor(() => expect(history.update).toHaveBeenCalledWith("h1", "failed", undefined));
+    retryVoice();
+    await untilPhase("idle");
+    expect(history.save).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(history.update).toHaveBeenLastCalledWith("h1", "done", "hello world"));
+  });
+
+  it("keeps a recording cancelled mid-transcription as interrupted", async () => {
+    engine.transcribe.mockReturnValueOnce(new Promise(() => {}));
+    target("chat");
+    await dictate();
+    await untilPhase("transcribing");
+    await vi.waitFor(() => expect(history.save).toHaveBeenCalled());
+    cancelVoice();
+    await vi.waitFor(() => expect(history.update).toHaveBeenCalledWith("h1", "interrupted", undefined));
+  });
+
+  it("keeps nothing when history is off", async () => {
+    useVoiceSettingsStore.getState().update({ keepHistory: "off" });
+    target("chat");
+    await dictate();
+    await untilPhase("idle");
+    expect(history.save).not.toHaveBeenCalled();
+  });
+
+  it("transcribes a kept recording again outside any composer", async () => {
+    engine.transcribe.mockResolvedValueOnce({ ok: true, text: "嗯，再试一次" });
+    await expect(transcribeVoiceClip(new Blob(["audio"]))).resolves.toBe("再试一次");
+    engine.transcribe.mockResolvedValueOnce({ ok: false, reason: "failed" });
+    await expect(transcribeVoiceClip(new Blob(["audio"]))).resolves.toBeNull();
   });
 });

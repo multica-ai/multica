@@ -8,6 +8,13 @@ export {
   type VoiceLanguage,
   type VoiceSettings,
 } from "./store";
+export {
+  VOICE_HISTORY_RETENTIONS,
+  voiceHistoryDays,
+  type VoiceHistoryEntry,
+  type VoiceHistoryRetention,
+  type VoiceHistoryStatus,
+} from "./history";
 export { applyVocabulary, dictationSeparator, removeSpokenFillers } from "./text";
 export { MAX_VOICE_HOTWORDS, setVoiceContextWords, voiceHotwords } from "./hotwords";
 export {
@@ -29,11 +36,13 @@ export {
   retryVoice,
   stopVoice,
   toggleVoice,
+  transcribeVoiceClip,
   useVoiceMeter,
   useVoiceState,
   type VoiceClip,
   type VoiceDecodeOptions,
   type VoiceErrorKind,
+  type VoiceHistoryRuntime,
   type VoiceMeter,
   type VoiceRecorder,
   type VoiceRecorderFailure,

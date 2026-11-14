@@ -33,6 +33,7 @@ async function decodeClip(clip: Blob): Promise<Float32Array> {
 function desktopVoiceRuntime(): VoiceRuntime | null {
   const api = localVoiceAPI();
   if (!api) return null;
+  const history = api.history;
   const request = (model: VoiceModel, { language, hotwords }: VoiceDecodeOptions) => ({
     modelId: model.id,
     language,
@@ -43,6 +44,18 @@ function desktopVoiceRuntime(): VoiceRuntime | null {
     prepare: (model, options) => api.prepare(request(model, options)),
     transcribe: async (clip, model, options) =>
       api.transcribe({ ...request(model, options), samples: await decodeClip(clip) }),
+    history: history && {
+      save: async (clip, keepDays) => {
+        const entry = await history.save({
+          audio: new Uint8Array(await clip.blob.arrayBuffer()),
+          mimeType: clip.blob.type,
+          durationMs: clip.durationMs,
+          keepDays,
+        });
+        return entry?.id ?? null;
+      },
+      update: (id, status, text) => void history.update(id, { status, text }).catch(() => {}),
+    },
     watchModels: (onChange) => {
       let changed = false;
       api.onModelsChanged((models) => {

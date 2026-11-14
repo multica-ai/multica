@@ -45,6 +45,13 @@ import type {
   LocalRuntimeProbe,
 } from "../shared/daemon-types";
 import {
+  VOICE_HISTORY_AUDIO_CHANNEL,
+  VOICE_HISTORY_CHANGED_CHANNEL,
+  VOICE_HISTORY_LIST_CHANNEL,
+  VOICE_HISTORY_PRUNE_CHANNEL,
+  VOICE_HISTORY_REMOVE_CHANNEL,
+  VOICE_HISTORY_SAVE_CHANNEL,
+  VOICE_HISTORY_UPDATE_CHANNEL,
   VOICE_MODEL_CANCEL_CHANNEL,
   VOICE_MODEL_DELETE_CHANNEL,
   VOICE_MODEL_DOWNLOAD_CHANNEL,
@@ -52,6 +59,10 @@ import {
   VOICE_MODELS_LIST_CHANNEL,
   VOICE_PREPARE_CHANNEL,
   VOICE_TRANSCRIBE_CHANNEL,
+  type VoiceHistoryAudio,
+  type VoiceHistoryEntry,
+  type VoiceHistorySaveRequest,
+  type VoiceHistoryUpdate,
   type VoiceModelRequest,
   type VoiceModelsSnapshot,
   type VoiceTranscribeRequest,
@@ -307,6 +318,23 @@ const desktopAPI = {
     prepare: (request: VoiceModelRequest) => ipcRenderer.send(VOICE_PREPARE_CHANNEL, request),
     transcribe: (request: VoiceTranscribeRequest): Promise<VoiceTranscribeResult> =>
       ipcRenderer.invoke(VOICE_TRANSCRIBE_CHANNEL, request),
+    history: {
+      list: (): Promise<VoiceHistoryEntry[]> => ipcRenderer.invoke(VOICE_HISTORY_LIST_CHANNEL),
+      onChanged: (callback: () => void) => {
+        const handler = () => callback();
+        ipcRenderer.on(VOICE_HISTORY_CHANGED_CHANNEL, handler);
+        return () => {
+          ipcRenderer.removeListener(VOICE_HISTORY_CHANGED_CHANNEL, handler);
+        };
+      },
+      save: (request: VoiceHistorySaveRequest): Promise<VoiceHistoryEntry | null> =>
+        ipcRenderer.invoke(VOICE_HISTORY_SAVE_CHANNEL, request),
+      update: (id: string, patch: VoiceHistoryUpdate): Promise<void> =>
+        ipcRenderer.invoke(VOICE_HISTORY_UPDATE_CHANNEL, id, patch),
+      audio: (id: string): Promise<VoiceHistoryAudio | null> => ipcRenderer.invoke(VOICE_HISTORY_AUDIO_CHANNEL, id),
+      remove: (id: string): Promise<void> => ipcRenderer.invoke(VOICE_HISTORY_REMOVE_CHANNEL, id),
+      prune: (keepDays: number | null): Promise<void> => ipcRenderer.invoke(VOICE_HISTORY_PRUNE_CHANNEL, keepDays),
+    },
   },
   /** Listen for Cmd/Ctrl+W tab-close requests from the main process.
    *  The renderer should close the active tab; if it was the last tab,

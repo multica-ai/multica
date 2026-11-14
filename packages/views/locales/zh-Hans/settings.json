@@ -1890,6 +1890,47 @@
       "blocked": "麦克风权限被阻止。请在浏览器或系统设置中允许。",
       "start": "测试",
       "stop": "停止"
+    },
+    "history": {
+      "title": "历史记录",
+      "description": "录音和转写文字只保存在这台电脑上，不会上传。转写失败或被中断的录音可以用原始音频重新转写。",
+      "keep": {
+        "title": "保留历史记录",
+        "hint": "录音在这台电脑上保留多久。",
+        "options": {
+          "off": "不保留",
+          "1d": "1 天",
+          "7d": "7 天",
+          "30d": "30 天",
+          "forever": "永久"
+        }
+      },
+      "clear": "全部清除",
+      "clear_dialog": {
+        "title": "清除语音历史记录？",
+        "description": "这台电脑上保存的所有录音和转写文字都会被删除。",
+        "cancel": "取消"
+      },
+      "empty": "你的语音输入会显示在这里。",
+      "off": "历史记录已关闭，新的录音不会被保留。",
+      "today": "今天",
+      "yesterday": "昨天",
+      "status": {
+        "transcribing": "转写中…",
+        "failed": "转写失败",
+        "interrupted": "转写前被中断"
+      },
+      "actions": {
+        "play": "播放录音",
+        "pause": "暂停",
+        "retranscribe": "重新转写",
+        "copy": "复制文字",
+        "delete": "删除"
+      },
+      "copied": "已复制",
+      "copy_failed": "复制失败",
+      "retry_failed": "这段录音转写失败",
+      "show_more": "显示更多"
     }
   }
 }

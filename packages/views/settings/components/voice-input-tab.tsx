@@ -27,6 +27,7 @@ import { AppLink, useOptionalNavigation } from "../../navigation";
 import { useLocale, useT } from "../../i18n";
 import { useVoiceModels, VoiceModelRows, voiceInputSupported } from "../../voice";
 import { settingsHref } from "./settings-navigation";
+import { VoiceHistorySection } from "./voice-history";
 import {
   SettingsCard,
   SettingsRow,
@@ -86,6 +87,7 @@ export function VoiceInputTab() {
           <MicrophoneRows />
         </SettingsCard>
       </SettingsSection>
+      <VoiceHistorySection />
     </SettingsTab>
   );
 }

@@ -3,6 +3,7 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { defaultStorage } from "../platform/storage";
+import { VOICE_HISTORY_RETENTIONS, type VoiceHistoryRetention } from "./history";
 
 /**
  * How a press of the mic (or the voice shortcut) starts a recording.
@@ -32,6 +33,8 @@ export interface VoiceSettings {
   vocabulary: string[];
   /** The local speech model to use; null picks the first one installed. */
   modelId: string | null;
+  /** How long recordings and transcripts stay on this device. */
+  keepHistory: VoiceHistoryRetention;
 }
 
 export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
@@ -41,6 +44,7 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   removeFillers: true,
   vocabulary: [],
   modelId: null,
+  keepHistory: "30d",
 };
 
 interface VoiceSettingsState extends VoiceSettings {
@@ -69,7 +73,10 @@ export function sanitizeVoiceSettings(value: unknown): VoiceSettings {
     ? normalizeVocabulary(raw.vocabulary.filter((w): w is string => typeof w === "string"))
     : [];
   const modelId = typeof raw.modelId === "string" && raw.modelId ? raw.modelId : null;
-  return { activation, language, deviceId, removeFillers, vocabulary, modelId };
+  const keepHistory = (VOICE_HISTORY_RETENTIONS as readonly string[]).includes(raw.keepHistory as string)
+    ? (raw.keepHistory as VoiceHistoryRetention)
+    : DEFAULT_VOICE_SETTINGS.keepHistory;
+  return { activation, language, deviceId, removeFillers, vocabulary, modelId, keepHistory };
 }
 
 function normalizeVocabulary(words: readonly string[]): string[] {
@@ -114,5 +121,6 @@ function pickSettings(state: VoiceSettings): VoiceSettings {
     removeFillers: state.removeFillers,
     vocabulary: state.vocabulary,
     modelId: state.modelId,
+    keepHistory: state.keepHistory,
   };
 }

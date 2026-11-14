@@ -1911,6 +1911,47 @@
       "blocked": "El acceso al micrófono está bloqueado. Permítelo en el navegador o en la configuración del sistema.",
       "start": "Probar",
       "stop": "Detener"
+    },
+    "history": {
+      "title": "Historial",
+      "description": "Las grabaciones y su texto se quedan en este ordenador y nunca se suben. Una que falló o se interrumpió puede transcribirse de nuevo desde su audio.",
+      "keep": {
+        "title": "Conservar historial",
+        "hint": "Cuánto tiempo se guardan las grabaciones en este ordenador.",
+        "options": {
+          "off": "No conservar",
+          "1d": "1 día",
+          "7d": "7 días",
+          "30d": "30 días",
+          "forever": "Siempre"
+        }
+      },
+      "clear": "Borrar todo",
+      "clear_dialog": {
+        "title": "¿Borrar el historial de voz?",
+        "description": "Se eliminarán todas las grabaciones y transcripciones guardadas en este ordenador.",
+        "cancel": "Cancelar"
+      },
+      "empty": "Tus dictados aparecerán aquí.",
+      "off": "El historial está desactivado. Las nuevas grabaciones no se guardan.",
+      "today": "Hoy",
+      "yesterday": "Ayer",
+      "status": {
+        "transcribing": "Transcribiendo…",
+        "failed": "La transcripción falló",
+        "interrupted": "Interrumpida antes de transcribirse"
+      },
+      "actions": {
+        "play": "Reproducir grabación",
+        "pause": "Pausar",
+        "retranscribe": "Transcribir de nuevo",
+        "copy": "Copiar texto",
+        "delete": "Eliminar"
+      },
+      "copied": "Copiado",
+      "copy_failed": "No se pudo copiar",
+      "retry_failed": "No se pudo transcribir esta grabación",
+      "show_more": "Mostrar más"
     }
   }
 }

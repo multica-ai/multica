@@ -1,11 +1,28 @@
 // Desktop's on-device speech engine, through the preload `desktopAPI.voice`.
 // Undefined on web and on Desktop builds that predate it.
-import type { VoiceModels, VoiceTranscription } from "@multica/core/voice";
+import type { VoiceHistoryEntry, VoiceHistoryStatus, VoiceModels, VoiceTranscription } from "@multica/core/voice";
 
 export interface LocalVoiceRequest {
   modelId: string;
   language: string;
   hotwords: string[];
+}
+
+export interface LocalVoiceHistoryAPI {
+  /** Newest first. */
+  list: () => Promise<VoiceHistoryEntry[]>;
+  onChanged: (callback: () => void) => () => void;
+  save: (request: {
+    audio: Uint8Array;
+    mimeType: string;
+    durationMs: number;
+    keepDays: number | null;
+  }) => Promise<VoiceHistoryEntry | null>;
+  update: (id: string, patch: { status: VoiceHistoryStatus; text?: string }) => Promise<void>;
+  audio: (id: string) => Promise<{ audio: Uint8Array<ArrayBuffer>; mimeType: string } | null>;
+  remove: (id: string) => Promise<void>;
+  /** Drop entries older than `keepDays` (0 drops all); null keeps them. */
+  prune: (keepDays: number | null) => Promise<void>;
 }
 
 export interface LocalVoiceAPI {
@@ -17,6 +34,8 @@ export interface LocalVoiceAPI {
   prepare: (request: LocalVoiceRequest) => void;
   /** `samples` is mono PCM at 16 kHz. */
   transcribe: (request: LocalVoiceRequest & { samples: Float32Array }) => Promise<VoiceTranscription>;
+  /** Absent on Desktop builds that predate history. */
+  history?: LocalVoiceHistoryAPI;
 }
 
 export function localVoiceAPI(): LocalVoiceAPI | undefined {
