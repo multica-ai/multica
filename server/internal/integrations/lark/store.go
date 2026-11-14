@@ -42,6 +42,7 @@ import (
 // from the JSONB config; the rest are flat columns.
 type Installation struct {
 	BindingGeneration      string
+	LastSendObservation    *SendObservation
 	FirstMessageReceivedAt *time.Time
 	ID                     pgtype.UUID
 	WorkspaceID            pgtype.UUID
@@ -135,14 +136,15 @@ type OutboundCardMessage struct {
 // rather than as a json []byte field, so MIME-wrapped base64 from the SQL
 // backfill round-trips too. omitempty mirrors the migration's jsonb_strip_nulls.
 type feishuInstallConfig struct {
-	BindingGeneration      string     `json:"binding_generation,omitempty"`
-	FirstMessageReceivedAt *time.Time `json:"first_message_received_at,omitempty"`
-	AppID                  string     `json:"app_id"`
-	AppSecretEncrypted     string     `json:"app_secret_encrypted,omitempty"`
-	TenantKey              string     `json:"tenant_key,omitempty"`
-	BotOpenID              string     `json:"bot_open_id,omitempty"`
-	BotUnionID             string     `json:"bot_union_id,omitempty"`
-	Region                 string     `json:"region,omitempty"`
+	LastSendObservation    *SendObservation `json:"last_send_observation,omitempty"`
+	BindingGeneration      string           `json:"binding_generation,omitempty"`
+	FirstMessageReceivedAt *time.Time       `json:"first_message_received_at,omitempty"`
+	AppID                  string           `json:"app_id"`
+	AppSecretEncrypted     string           `json:"app_secret_encrypted,omitempty"`
+	TenantKey              string           `json:"tenant_key,omitempty"`
+	BotOpenID              string           `json:"bot_open_id,omitempty"`
+	BotUnionID             string           `json:"bot_union_id,omitempty"`
+	Region                 string           `json:"region,omitempty"`
 }
 
 // feishuBindingConfig is the JSON shape of channel_user_binding.config.
@@ -164,6 +166,7 @@ func installationFromRow(row db.ChannelInstallation) (Installation, error) {
 		return Installation{}, fmt.Errorf("decode app_secret_encrypted: %w", err)
 	}
 	return Installation{
+		LastSendObservation:    cfg.LastSendObservation,
 		BindingGeneration:      cfg.BindingGeneration,
 		FirstMessageReceivedAt: cfg.FirstMessageReceivedAt,
 		ID:                     row.ID,

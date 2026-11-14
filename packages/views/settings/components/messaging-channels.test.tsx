@@ -71,6 +71,7 @@ vi.mock("@multica/core/api", async (original) => ({
       "getLarkInstallStatus",
       "beginWecomInstall",
       "getWecomInstallStatus",
+      "getLarkSendObservation",
     ].map((name) => [name, vi.fn()]),
   ),
 }));
@@ -126,6 +127,7 @@ beforeEach(() => {
     vi.mocked(api[name]).mockResolvedValue(listing() as never);
   }
   vi.mocked(api.listAgents).mockResolvedValue([agent, otherAgent]);
+  vi.mocked(api.getLarkSendObservation).mockResolvedValue({ available: true, observation: null });
   vi.mocked(api.listAgentDingTalkGroups).mockResolvedValue({
     groups: [],
     group_discovery_supported: false,
@@ -303,7 +305,7 @@ describe("agent messaging channels", () => {
     ).toBeNull();
   });
 
-  it("updates Lark from waiting to connected when inbound evidence arrives", async () => {
+  it("shows historical reception evidence rather than current connection health", async () => {
     vi.mocked(api.listLarkInstallations).mockResolvedValue(
       listing([{ ...active, app_id: "cli_mika" }]) as never,
     );
@@ -324,7 +326,31 @@ describe("agent messaging channels", () => {
     await waitFor(() =>
       expect(screen.queryByText("Waiting for first message")).toBeNull(),
     );
-    expect(screen.getByText("Connected")).toBeInTheDocument();
+    expect(screen.getByText("Message reception verified")).toBeInTheDocument();
+    expect(screen.getByText("This binding received a valid message. This does not confirm ongoing connectivity, agent execution, or replies.")).toBeInTheDocument();
+    expect(screen.queryByText("Connected")).toBeNull();
+  });
+
+  it.each(["owner", "admin"])("lets a workspace %s read the observation on the agent page only after expansion", async (role) => {
+    state.role = role;
+    vi.mocked(api.listLarkInstallations).mockResolvedValue(listing([{
+      ...active, installed_at: "2026-11-11T00:00:00.123456Z",
+    }]) as never);
+    show(<AgentChannelsSection agent={agent} />);
+    const summary = await screen.findByText("Last text/card send observation");
+    expect(api.getLarkSendObservation).not.toHaveBeenCalled();
+    fireEvent.click(summary);
+    expect(await screen.findByText("No saved observation for this binding.")).toBeInTheDocument();
+    expect(api.getLarkSendObservation).toHaveBeenCalledExactlyOnceWith("ws-1", "i1");
+  });
+
+  it("keeps the admin observation hidden from an agent owner who is an ordinary member", async () => {
+    state.role = "member";
+    vi.mocked(api.listLarkInstallations).mockResolvedValue(listing([active]) as never);
+    show(<AgentChannelsSection agent={agent} />);
+    await screen.findByRole("button", { name: "Manage Lark" });
+    expect(screen.queryByText("Last text/card send observation")).toBeNull();
+    expect(api.getLarkSendObservation).not.toHaveBeenCalled();
   });
 
   it("does not display revoked connections or another agent's connection", async () => {

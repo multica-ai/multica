@@ -23,6 +23,7 @@ import { useNavigation } from "../../navigation";
 import { IntegrationChannelIcon } from "../../settings/components/integration-channel-icon";
 import { ChannelDisconnectDialog } from "../../settings/components/channel-disconnect-dialog";
 import { ChannelConnectDialog } from "../../settings/components/channel-connect-dialog";
+import { LarkSendObservation } from "../../settings/components/lark-send-observation";
 import {
   DingTalkBotGroups,
   getDingTalkBotIdentity,
@@ -138,6 +139,7 @@ export function AgentChannelsSection({ agent }: { agent: Agent }) {
                 connection={connection}
                 canManage={canManage(connection.channel, agent)}
                 canForget={isAdmin}
+                canViewSendObservation={isAdmin}
               />
             ))}
           </div>
@@ -181,10 +183,12 @@ function AgentChannelRow({
   connection,
   canManage,
   canForget,
+  canViewSendObservation,
 }: {
   connection: ChannelConnection;
   canManage: boolean;
   canForget: boolean;
+  canViewSendObservation: boolean;
 }) {
   const { t, i18n } = useT("settings");
   const timeAgo = useTimeAgo();
@@ -259,7 +263,9 @@ function AgentChannelRow({
               ? t(($) => $.dingtalk.bot_identity_unavailable)
               : pending
                 ? t(($) => $.channels.waiting_message)
-                : t(($) => $.channels.normal)}
+                : channel === "lark"
+                  ? t(($) => $.lark.inbound_verified)
+                  : t(($) => $.channels.normal)}
             {lastMessage ? (
               <span className="ml-2 text-muted-foreground">
                 {t(($) => $.channels.last_message, {
@@ -325,6 +331,22 @@ function AgentChannelRow({
           </DropdownMenu>
         ) : null}
       </div>
+      {connection.channel === "lark" ? (
+        <div className="mt-2 space-y-1 text-caption text-muted-foreground">
+          <p>
+            {pending
+              ? t(($) => $.lark.inbound_pending_hint)
+              : t(($) => $.lark.inbound_verified_hint)}
+          </p>
+          {canViewSendObservation ? (
+            <LarkSendObservation
+              wsId={installation.workspace_id}
+              installationId={installation.id}
+              revision={connection.installation.installed_at}
+            />
+          ) : null}
+        </div>
+      ) : null}
       {missingChatPermission && canManage ? (
         <p role="status" className="mt-2 text-caption text-muted-foreground">
           {t(($) => $.dingtalk.bot_permission_tooltip_prefix)}{" "}

@@ -18,6 +18,20 @@ SET config = jsonb_set(config, '{bot_union_id}', to_jsonb(sqlc.arg('bot_union_id
     updated_at = now()
 WHERE id = sqlc.arg('id') AND channel_type = 'feishu';
 
+-- name: RecordFeishuSendObservation :exec
+-- Fixed-width UTC nanosecond strings sort by completion time. Merge only this
+-- field, preserving concurrent receipt/identity writes and installation time.
+UPDATE channel_installation
+SET config = jsonb_set(config, '{last_send_observation}', sqlc.arg('observation')::jsonb)
+WHERE id = sqlc.arg('id')
+  AND workspace_id = sqlc.arg('workspace_id')
+  AND channel_type = 'feishu'
+  AND status = 'active'
+  AND config->>'app_id' = sqlc.arg('app_id')::text
+  AND COALESCE(config->>'binding_generation', '') = sqlc.arg('binding_generation')::text
+  AND (config->'last_send_observation'->>'observed_at' IS NULL
+       OR config->'last_send_observation'->>'observed_at' < sqlc.arg('observation')::jsonb->>'observed_at');
+
 -- name: BackfillLegacyFeishuInboundReceipts :execrows
 -- Session routes are positive receipt evidence only for the current binding.
 -- Materialize the candidate timestamp; recheck eligibility after any concurrent
