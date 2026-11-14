@@ -5,9 +5,10 @@
 // schema in `server/internal/daemon/openclaw_runtime_config.go` — keep both
 // sides in lockstep when changing field names.
 
-export type OpenclawRoutingMode = "local" | "gateway";
+export type OpenclawRoutingMode = "local" | "gateway" | "isolated-local";
 
 export interface OpenclawGatewayPin {
+  extra?: Record<string, unknown>;
   host?: string;
   port?: number;
   token?: string;
@@ -15,7 +16,8 @@ export interface OpenclawGatewayPin {
 }
 
 export interface OpenclawRuntimeConfig {
-  mode?: OpenclawRoutingMode;
+  mode?: OpenclawRoutingMode | (string & {});
+  extra?: Record<string, unknown>;
   gateway?: OpenclawGatewayPin;
   // Persistent agent-level model override. `agent.model` selects the OpenClaw
   // identity; this setting selects the underlying LLM for all runs claimed
@@ -30,7 +32,8 @@ export interface OpenclawRuntimeConfig {
 export const OPENCLAW_GATEWAY_TOKEN_MASK = "***";
 
 // Parse an arbitrary runtime_config payload into the typed schema. Unknown
-// keys are dropped, malformed payloads collapse to an empty object. The form
+// keys and nonempty future modes are preserved; malformed payloads collapse
+// to an empty object. The form
 // never throws on bad input — invalid configs simply render as defaults so
 // the user can correct them without a JSON parse error blocking the UI.
 export function parseOpenclawRuntimeConfig(
@@ -39,7 +42,9 @@ export function parseOpenclawRuntimeConfig(
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
   const root = raw as Record<string, unknown>;
   const out: OpenclawRuntimeConfig = {};
-  if (root.mode === "local" || root.mode === "gateway") {
+  const extra = Object.fromEntries(Object.entries(root).filter(([key]) => !["mode", "gateway", "model_override"].includes(key)));
+  if (Object.keys(extra).length) out.extra = extra;
+  if (typeof root.mode === "string" && root.mode !== "") {
     out.mode = root.mode;
   }
   if (typeof root.model_override === "string" && root.model_override.trim() !== "") {
@@ -48,6 +53,8 @@ export function parseOpenclawRuntimeConfig(
   if (root.gateway && typeof root.gateway === "object" && !Array.isArray(root.gateway)) {
     const gw = root.gateway as Record<string, unknown>;
     const pin: OpenclawGatewayPin = {};
+    const extra = Object.fromEntries(Object.entries(gw).filter(([key]) => !["host", "port", "token", "tls"].includes(key)));
+    if (Object.keys(extra).length) pin.extra = extra;
     if (typeof gw.host === "string" && gw.host !== "") pin.host = gw.host;
     if (typeof gw.port === "number" && Number.isFinite(gw.port) && gw.port > 0) pin.port = gw.port;
     if (typeof gw.token === "string" && gw.token !== "") pin.token = gw.token;
@@ -64,11 +71,11 @@ export function parseOpenclawRuntimeConfig(
 export function serializeOpenclawRuntimeConfig(
   cfg: OpenclawRuntimeConfig,
 ): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
+  const out: Record<string, unknown> = { ...cfg.extra };
   if (cfg.mode) out.mode = cfg.mode;
   if (cfg.modelOverride) out.model_override = cfg.modelOverride;
   if (cfg.gateway) {
-    const gw: Record<string, unknown> = {};
+    const gw: Record<string, unknown> = { ...cfg.gateway.extra };
     if (cfg.gateway.host) gw.host = cfg.gateway.host;
     if (cfg.gateway.port) gw.port = cfg.gateway.port;
     if (cfg.gateway.tls) gw.tls = true;

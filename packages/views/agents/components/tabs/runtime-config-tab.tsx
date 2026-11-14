@@ -5,7 +5,6 @@ import { Loader2, Save } from "@multica/ui/icons";
 import type { Agent } from "@multica/core/types";
 import {
   OPENCLAW_GATEWAY_TOKEN_MASK,
-  type OpenclawRoutingMode,
   type OpenclawRuntimeConfig,
   openclawRuntimeConfigEquals,
   parseOpenclawRuntimeConfig,
@@ -18,13 +17,10 @@ import { Switch } from "@multica/ui/components/ui/switch";
 import { toast } from "sonner";
 import { useT } from "../../../i18n";
 
-// Form state mirrors OpenclawRuntimeConfig, but always carries a defined
-// mode value so the radio group is fully controlled. Empty-string mode
-// shouldn't be reachable in this form because the field defaults to "local"
-// the first time an openclaw agent's tab opens — equivalent to the daemon's
-// fail-soft default — but the union accepts it as a defensive belt.
+// Absent mode defaults to local; nonempty unsupported modes remain visible
+// and round-trip unchanged until the user explicitly selects a known mode.
 interface FormState {
-  mode: OpenclawRoutingMode;
+  mode: NonNullable<OpenclawRuntimeConfig["mode"]>;
   // Persistent agent model override. Empty uses the model bound to the
   // selected OpenClaw agent. A string keeps the input controlled while typing.
   modelOverride: string;
@@ -57,13 +53,14 @@ function configToForm(cfg: OpenclawRuntimeConfig): FormState {
   };
 }
 
-function formToConfig(state: FormState): OpenclawRuntimeConfig {
-  const cfg: OpenclawRuntimeConfig = { mode: state.mode };
+function formToConfig(state: FormState, original: OpenclawRuntimeConfig): OpenclawRuntimeConfig {
+  const cfg: OpenclawRuntimeConfig = { mode: state.mode, extra: original.extra };
+  if (state.mode === original.mode && state.mode !== "gateway") cfg.gateway = original.gateway;
   if (state.modelOverride.trim() !== "") {
     cfg.modelOverride = state.modelOverride.trim();
   }
   if (state.mode === "gateway") {
-    const gw: NonNullable<OpenclawRuntimeConfig["gateway"]> = {};
+    const gw: NonNullable<OpenclawRuntimeConfig["gateway"]> = { ...original.gateway, host: undefined, port: undefined, token: undefined, tls: undefined };
     if (state.host.trim() !== "") gw.host = state.host.trim();
     const portNum = Number.parseInt(state.port, 10);
     if (Number.isFinite(portNum) && portNum > 0) gw.port = portNum;
@@ -71,9 +68,7 @@ function formToConfig(state: FormState): OpenclawRuntimeConfig {
     if (state.tokenWasMasked && state.token === "") {
       // User opened a saved token and never touched the field — replay
       // the mask sentinel so the server's preserve hook keeps the
-      // persisted value. The matching client-side serializer drops the
-      // sentinel before it hits the wire, but we need it on the typed
-      // object so the equality check sees an unchanged config.
+      // persisted value. The serializer preserves this sentinel on the wire.
       gw.token = OPENCLAW_GATEWAY_TOKEN_MASK;
     } else if (state.token !== "") {
       gw.token = state.token;
@@ -114,7 +109,7 @@ export function RuntimeConfigTab({
     previousFormRef.current = originalForm;
   }, [originalForm]);
 
-  const currentCfg = useMemo(() => formToConfig(state), [state]);
+  const currentCfg = useMemo(() => formToConfig(state, original), [state, original]);
   const dirty = !openclawRuntimeConfigEquals(original, currentCfg);
 
   useEffect(() => {
@@ -153,7 +148,7 @@ export function RuntimeConfigTab({
           {t(($) => $.tab_body.runtime_config.mode_label)}
         </Label>
         <div className="flex gap-2">
-          {(["local", "gateway"] as const).map((mode) => (
+          {(["local", "gateway", "isolated-local"] as const).map((mode) => (
             <button
               key={mode}
               type="button"
@@ -175,12 +170,16 @@ export function RuntimeConfigTab({
                   : "border-border bg-background text-foreground hover:bg-muted"
               }`}
             >
-              {t(($) => $.tab_body.runtime_config[`mode_${mode}`])}
+              {mode === "isolated-local" ? "Isolated local" : t(($) => $.tab_body.runtime_config[`mode_${mode}`])}
             </button>
           ))}
         </div>
         <p className="text-caption text-muted-foreground">
-          {isGateway
+          {state.mode === "isolated-local"
+            ? "Task-private state and agent directories. Inherits config/environment credentials; not a filesystem sandbox."
+            : !["local", "gateway"].includes(state.mode)
+              ? `Unsupported mode (${state.mode}) — preserved unless explicitly changed.`
+              : isGateway
             ? t(($) => $.tab_body.runtime_config.mode_gateway_hint)
             : t(($) => $.tab_body.runtime_config.mode_local_hint)}
         </p>

@@ -597,6 +597,9 @@ func (b *openclawBackend) processOutput(r io.Reader, ch chan<- Message) openclaw
 		if result, ok := tryParseOpenclawResult(line); ok {
 			gotEvents = true
 			res := b.buildOpenclawEventResult(result, ch, &output)
+			if res.status == "failed" {
+				finalStatus, finalError = res.status, res.errMsg
+			}
 			if res.sessionID != "" {
 				sessionID = res.sessionID
 			}
@@ -609,6 +612,12 @@ func (b *openclawBackend) processOutput(r io.Reader, ch chan<- Message) openclaw
 				usage = u
 			}
 			continue
+		}
+
+		// JSON-shaped output that failed both protocol parsers is not a reply.
+		// This also catches pretty-printed/truncated objects after log preambles.
+		if strings.HasPrefix(line, "{") {
+			return openclawEventResult{status: "failed", errMsg: "openclaw returned incomplete or unsupported JSON output"}
 		}
 
 		// Not JSON — treat as log line.
@@ -688,10 +697,12 @@ func tryParseOpenclawEvent(line string) (openclawEvent, bool) {
 	if err := json.Unmarshal([]byte(line), &event); err != nil {
 		return openclawEvent{}, false
 	}
-	if event.Type == "" {
+	switch event.Type {
+	case "text", "tool_use", "tool_result", "error", "lifecycle", "step_start", "step_finish":
+		return event, true
+	default:
 		return openclawEvent{}, false
 	}
-	return event, true
 }
 
 // tryParseOpenclawResult attempts to parse a line as a final result blob
@@ -706,7 +717,38 @@ func tryParseOpenclawResult(raw string) (openclawResult, bool) {
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {
 		return openclawResult{}, false
 	}
-	if result.Payloads == nil && result.Meta.DurationMs == 0 {
+	// Gateway CLI replies wrap the embedded result. Require the protocol's
+	// run identity and terminal status, not merely an arbitrary result key.
+	var envelope struct {
+		RunID  string          `json:"runId"`
+		Status string          `json:"status"`
+		Result *openclawResult `json:"result"`
+		Error  *openclawError  `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(raw), &envelope); err != nil {
+		return openclawResult{}, false
+	}
+	if envelope.RunID != "" {
+		switch envelope.Status {
+		case "ok":
+			if envelope.Result == nil {
+				return openclawResult{}, false
+			}
+			result = *envelope.Result
+		case "error", "timeout", "cancelled":
+			if envelope.Result != nil {
+				result = *envelope.Result
+			}
+			result.failure = "openclaw gateway " + envelope.Status
+			if envelope.Error != nil && envelope.Error.message() != "" {
+				result.failure = envelope.Error.message()
+			}
+			return result, true
+		default:
+			return openclawResult{}, false
+		}
+	}
+	if result.Payloads == nil && result.Meta.DurationMs == 0 && result.Meta.Error == nil && !result.Meta.Aborted && result.Meta.StopReason != "error" && result.Meta.StopReason != "timeout" {
 		return openclawResult{}, false
 	}
 	return result, true
@@ -715,7 +757,28 @@ func tryParseOpenclawResult(raw string) (openclawResult, bool) {
 // buildOpenclawEventResult extracts text and metadata from a final result blob.
 // Text payloads are appended to the shared output builder and emitted to ch.
 func (b *openclawBackend) buildOpenclawEventResult(result openclawResult, ch chan<- Message, output *strings.Builder) openclawEventResult {
+	failure := result.failure
+	if result.Meta.Error != nil {
+		if diagnostic := result.Meta.Error.message(); diagnostic != "" {
+			failure = diagnostic
+		} else if failure == "" {
+			failure = "openclaw run failed"
+		}
+	}
+	if failure == "" && (result.Meta.Aborted || result.Meta.StopReason == "error" || result.Meta.StopReason == "timeout") {
+		failure = "openclaw run failed"
+	}
 	for _, p := range result.Payloads {
+		if p.IsError {
+			failure = p.Text
+			if failure == "" {
+				failure = "openclaw error payload"
+			}
+			continue
+		}
+		if p.IsReasoning || p.IsCommentary {
+			continue
+		}
 		if p.Text != "" {
 			output.WriteString(p.Text)
 			trySend(ch, Message{Type: MessageText, Content: p.Text})
@@ -741,8 +804,14 @@ func (b *openclawBackend) buildOpenclawEventResult(result openclawResult, ch cha
 		}
 	}
 
+	status := "completed"
+	if failure != "" {
+		status = "failed"
+		trySend(ch, Message{Type: MessageError, Content: failure})
+	}
 	return openclawEventResult{
-		status:    "completed",
+		status:    status,
+		errMsg:    failure,
 		output:    output.String(),
 		sessionID: sessionID,
 		usage:     usage,
@@ -864,15 +933,22 @@ type openclawErrorData struct {
 // openclawResult represents the final JSON output from `openclaw agent --json`
 // (the legacy single-blob format with payloads + meta).
 type openclawResult struct {
+	failure  string
 	Payloads []openclawPayload `json:"payloads"`
 	Meta     openclawMeta      `json:"meta"`
 }
 
 type openclawPayload struct {
-	Text string `json:"text"`
+	Text         string `json:"text"`
+	IsError      bool   `json:"isError"`
+	IsReasoning  bool   `json:"isReasoning"`
+	IsCommentary bool   `json:"isCommentary"`
 }
 
 type openclawMeta struct {
+	Error      *openclawError `json:"error"`
+	Aborted    bool           `json:"aborted"`
+	StopReason string         `json:"stopReason"`
 	DurationMs int64          `json:"durationMs"`
 	AgentMeta  map[string]any `json:"agentMeta"`
 }

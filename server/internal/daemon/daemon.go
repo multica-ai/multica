@@ -8454,6 +8454,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			McpConfig:             effectiveMcpConfig,
 			CursorMcpAuthSource:   cursorMcpAuthSource,
 			OpenclawGateway:       openclawGateway,
+			OpenclawIsolatedState: openclawMode == "isolated-local",
 			HermesSourceHome:      hermesSourceHome,
 			HermesSourceMustExist: hermesSourceMustExist,
 			HermesEnv:             hermesEnv,
@@ -8504,6 +8505,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			McpConfig:             effectiveMcpConfig,
 			CursorMcpAuthSource:   cursorMcpAuthSource,
 			OpenclawGateway:       openclawGateway,
+			OpenclawIsolatedState: openclawMode == "isolated-local",
 			HermesSourceHome:      hermesSourceHome,
 			HermesSourceMustExist: hermesSourceMustExist,
 			HermesEnv:             hermesEnv,
@@ -8589,6 +8591,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				return TaskResult{}, asEnvironmentSetupFailure(fmt.Errorf("prepare execution environment: %w", err))
 			}
 		}
+	}
+	if provider == "openclaw" && openclawMode == "isolated-local" && env.OpenclawConfigPath == "" {
+		return TaskResult{}, asEnvironmentSetupFailure(fmt.Errorf("prepare execution environment: isolated-local requires a prepared private OpenClaw config"))
 	}
 	phaseRecorder.Mark(taskPhaseEnvironmentReady)
 	// Belt-and-suspenders: also mark whatever root we ended up with, in case
@@ -8932,7 +8937,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.Agent != nil {
 		agentCustomEnv = task.Agent.CustomEnv
 	}
-	layerCustomEnvAndHermesHome(agentEnv, agentCustomEnv, env.HermesHome, d.logger)
+	layerTaskEnvironment(agentEnv, agentCustomEnv, env.HermesHome, provider, openclawMode, env.RootDir, d.logger)
 	if provider == "reasonix" {
 		reasonixStateHome, err := prepareReasonixTaskStateHome(d.cfg.Profile, task.RuntimeID, task.AgentID)
 		if err != nil {

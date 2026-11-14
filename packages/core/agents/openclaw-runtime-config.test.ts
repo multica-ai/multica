@@ -85,6 +85,11 @@ describe("serializeOpenclawRuntimeConfig", () => {
 });
 
 describe("parseOpenclawRuntimeConfig", () => {
+  it.each(["isolated-local", "local", "gateway", "future-mode"])("round trips %s without losing future fields", (mode) => {
+    const raw = { mode, future: { enabled: true }, gateway: { token: "***", future: 3 } };
+    expect(serializeOpenclawRuntimeConfig(parseOpenclawRuntimeConfig(raw))).toEqual(raw);
+  });
+
   it("reads and trims a persisted model override", () => {
     expect(
       parseOpenclawRuntimeConfig({

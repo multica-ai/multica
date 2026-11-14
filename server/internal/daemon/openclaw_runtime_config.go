@@ -66,7 +66,7 @@ func decodeOpenclawRuntimeConfig(raw json.RawMessage, logger *slog.Logger) (stri
 	// Surface an unrecognized non-empty mode instead of silently treating it
 	// as local — a typo like "gatway" would otherwise leave the user wondering
 	// why their gateway config is ignored.
-	if cfg.Mode != "" && cfg.Mode != "local" && cfg.Mode != "gateway" {
+	if cfg.Mode != "" && cfg.Mode != "local" && cfg.Mode != "gateway" && cfg.Mode != "isolated-local" {
 		logger.Warn("openclaw runtime_config: unrecognized mode; falling back to local mode",
 			"mode", cfg.Mode)
 	}

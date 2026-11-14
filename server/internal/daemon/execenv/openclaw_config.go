@@ -173,6 +173,8 @@ func resolveOpenclawCLITimeout(explicit time.Duration, logger *slog.Logger) time
 // and CacheDir are meaningful in production — Timeout is here for tests that
 // need a tight deadline to assert error paths.
 type OpenclawConfigPrep struct {
+	IsolatedState  bool
+	PreparedSkills []string
 	// OpenclawBin is the openclaw CLI binary to invoke for config introspection.
 	// Empty means resolve "openclaw" from PATH at exec time.
 	OpenclawBin string
@@ -287,6 +289,11 @@ func prepareOpenclawConfig(envRoot, workDir string, opts OpenclawConfigPrep) (Op
 	}
 	timeout := resolveOpenclawCLITimeout(opts.Timeout, opts.Logger)
 
+	// Isolated mode needs current skill allowlists; older discovery caches
+	// intentionally retained only agent keys. Do not reuse those projections.
+	if opts.IsolatedState {
+		opts.CacheDir = ""
+	}
 	activePath, exists, resolvedList, agentsSource, cached, err := discoverOpenclawConfig(bin, timeout, opts)
 	if err != nil {
 		return OpenclawConfigResult{}, err
@@ -322,22 +329,26 @@ func prepareOpenclawConfig(envRoot, workDir string, opts OpenclawConfigPrep) (Op
 	resetPath := ""
 	if hasManagedMcp && exists {
 		resetPath = filepath.Join(envRoot, openclawMcpResetFile)
-		if werr := os.WriteFile(resetPath, []byte(openclawMcpResetBody), 0o600); werr != nil {
+		if werr := writeOpenclawPrivateFile(envRoot, openclawMcpResetFile, []byte(openclawMcpResetBody)); werr != nil {
 			return OpenclawConfigResult{}, fmt.Errorf("write openclaw mcp reset: %w", werr)
 		}
 	}
 
 	cfg := buildPerTaskOpenclawConfig(activePath, exists, resetPath, resolvedList, agentsSource, workDir, managedMcp, hasManagedMcp, opts.Gateway)
+	if opts.IsolatedState {
+		if err := prepareOpenclawIsolation(cfg, envRoot, resolvedList, agentsSource, opts.PreparedSkills); err != nil {
+			return OpenclawConfigResult{}, err
+		}
+	}
 
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return OpenclawConfigResult{}, fmt.Errorf("marshal openclaw config: %w", err)
 	}
 	outPath := filepath.Join(envRoot, openclawConfigFile)
-	// 0o600 — defense in depth. The wrapper itself carries no secrets (the
-	// $include link is just a filesystem path), but the file lives next to
-	// task scratch and we keep the same posture as ~/.openclaw/openclaw.json.
-	if err := os.WriteFile(outPath, data, 0o600); err != nil {
+	// The wrapper may contain managed MCP credentials or a gateway token.
+	// Atomically replace it with a private file, including on workdir reuse.
+	if err := writeOpenclawPrivateFile(envRoot, openclawConfigFile, data); err != nil {
 		return OpenclawConfigResult{}, fmt.Errorf("write openclaw config: %w", err)
 	}
 	result := OpenclawConfigResult{ConfigPath: outPath}
@@ -1150,7 +1161,12 @@ func openclawResolvedAgentsEntriesOrRegistry(ctx context.Context, bin string, ti
 		if _, ok := raw.(map[string]any); !ok {
 			return nil, "", fmt.Errorf("parse `openclaw config get agents.entries --json` output: entry %q is not an object", id)
 		}
-		list = append(list, map[string]any{openclawEntriesKeyField: id})
+		entry := map[string]any{openclawEntriesKeyField: id}
+		// Skill names are non-secret policy, unlike arbitrary redacted fields.
+		if skills, ok := raw.(map[string]any)["skills"].([]any); ok {
+			entry["skills"] = skills
+		}
+		list = append(list, entry)
 	}
 	return list, openclawAgentsSourceEntries, nil
 }
