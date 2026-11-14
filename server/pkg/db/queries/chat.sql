@@ -1735,3 +1735,16 @@ WHERE workspace_id = $1
   AND status = 'active'
 ORDER BY created_at ASC
 LIMIT 1;
+
+-- name: HasNewerChatTurnForSession :one
+-- A human retry of a failed chat turn is only valid while that turn is still
+-- the session's latest: any later turn (a new message, or an earlier retry of
+-- the same turn) makes the retry card stale. Background quick-actions
+-- regeneration owns no turn and is excluded. Read under the session lock.
+SELECT EXISTS (
+  SELECT 1 FROM agent_task_queue t
+  WHERE t.chat_session_id = @chat_session_id
+    AND t.id <> @task_id
+    AND t.created_at >= @created_at
+    AND t.regenerate_quick_actions_for IS NULL
+) AS has_newer;

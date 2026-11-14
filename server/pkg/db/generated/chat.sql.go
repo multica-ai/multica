@@ -1359,6 +1359,33 @@ func (q *Queries) HasActiveChatTaskForSession(ctx context.Context, chatSessionID
 	return has_active, err
 }
 
+const hasNewerChatTurnForSession = `-- name: HasNewerChatTurnForSession :one
+SELECT EXISTS (
+  SELECT 1 FROM agent_task_queue t
+  WHERE t.chat_session_id = $1
+    AND t.id <> $2
+    AND t.created_at >= $3
+    AND t.regenerate_quick_actions_for IS NULL
+) AS has_newer
+`
+
+type HasNewerChatTurnForSessionParams struct {
+	ChatSessionID pgtype.UUID        `json:"chat_session_id"`
+	TaskID        pgtype.UUID        `json:"task_id"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
+// A human retry of a failed chat turn is only valid while that turn is still
+// the session's latest: any later turn (a new message, or an earlier retry of
+// the same turn) makes the retry card stale. Background quick-actions
+// regeneration owns no turn and is excluded. Read under the session lock.
+func (q *Queries) HasNewerChatTurnForSession(ctx context.Context, arg HasNewerChatTurnForSessionParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasNewerChatTurnForSession, arg.ChatSessionID, arg.TaskID, arg.CreatedAt)
+	var has_newer bool
+	err := row.Scan(&has_newer)
+	return has_newer, err
+}
+
 const hasPendingChatTasksByCreator = `-- name: HasPendingChatTasksByCreator :one
 SELECT EXISTS (
   SELECT 1
