@@ -33,6 +33,8 @@ export interface ComposerVoice {
   showStrip: boolean;
   /** The push-to-talk pill floats above the composer. */
   showHud: boolean;
+  /** The mic is pressed, or held to talk: its button must stay where it is. */
+  holding: boolean;
   /** No speech model is installed; the setup dialog is open for this composer. */
   showSetup: boolean;
   canSubmit: boolean;
@@ -97,6 +99,7 @@ export function useComposerVoice({
       state.targetId !== null && state.targetId !== id && state.phase !== "error" && state.phase !== "setup",
     showStrip: live && session?.mode === "strip",
     showHud: live && session?.mode === "hud",
+    holding: live && session?.mode !== "strip",
     showSetup: session?.phase === "setup",
     canSubmit,
     onFocusCapture: () => noteVoiceFocus(id),

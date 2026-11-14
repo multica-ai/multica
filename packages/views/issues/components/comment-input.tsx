@@ -3,7 +3,6 @@
 import { useRef, useState, useEffect, useMemo } from "react";
 import { cn } from "@multica/ui/lib/utils";
 import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor, useUploadGate, useComposerSubmit } from "../../editor";
-import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { Button } from "@multica/ui/components/ui/button";
 import { contentReferencesAttachment, type AgentTask } from "@multica/core/types";
@@ -18,11 +17,17 @@ import {
   useComposerVoice,
   VoiceErrorRow,
   VoiceHud,
-  VoiceMicButton,
   VoiceSetupDialog,
-  VoiceStrip,
 } from "../../voice";
 import { CommentTriggerChips } from "./comment-trigger-chips";
+import {
+  ComposerIdleTools,
+  ComposerToolbar,
+  ComposerTools,
+  QUIET_SEND_CLASS,
+  useComposerExpanded,
+  useComposerFocus,
+} from "./composer-frame";
 import { commentTriggerPreviewSignature, useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
 import { useRecipientActions } from "../hooks/use-recipient-actions";
 import { SteerAttachmentNotice } from "./steer-attachment-notice";
@@ -239,6 +244,14 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation, annotat
     activate: () => lazy.activate(),
     scope: issueId,
   });
+  const { focused, focusProps } = useComposerFocus();
+  const showsTriggerChips = recipients.length > 0 || triggerPreview.blocked.length > 0 || triggerPreview.hasAllMembersMention;
+  // One line at rest; the toolbar with recipients and send appears once the
+  // user is writing here.
+  const expanded = useComposerExpanded(
+    focused || !isEmpty || annotations.length > 0 || showsTriggerChips || voice.showStrip || submitting || gate.uploading,
+    voice,
+  );
 
   return (<>
     {annotationComposer?.render({
@@ -250,7 +263,11 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation, annotat
     <div
       data-mc="comment-composer"
       {...dropZoneProps}
-      className="relative flex flex-col rounded-lg bg-card pb-8 ring-1 ring-border"
+      {...focusProps}
+      className={cn(
+        "relative flex flex-col rounded-lg bg-card ring-1 transition-shadow",
+        focused ? "ring-foreground/25" : "ring-border",
+      )}
       ref={voice.rootRef}
       onFocusCapture={voice.onFocusCapture}
     >
@@ -261,6 +278,7 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation, annotat
         <ReplyAnnotations draftKey={draftKey} annotations={annotations} disabled={submitting}
           onEditAnnotation={onEditAnnotation} />
       </div>}
+      <div className="flex min-h-0 flex-1 items-center">
       {/* Lock the editor while the send is in flight. ContentEditor can't
           toggle Tiptap's `editable` post-mount (see its docstring), so the
           documented way to make it non-interactive is a pointer-events-none +
@@ -268,7 +286,7 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation, annotat
       {lazy.active && (
       <div
         className={cn(
-          "flex-1 min-h-0 overflow-y-auto px-3 py-2",
+          "min-w-0 flex-1 min-h-0 overflow-y-auto px-3 py-2",
           // Pinned to the viewport bottom the composer grows upward; cap it
           // so a long draft can't swallow the whole timeline (the editor
           // area scrolls internally instead).
@@ -313,7 +331,7 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation, annotat
           role="button"
           tabIndex={0}
           aria-label={t(($) => $.comment.leave_comment_placeholder)}
-          className="flex-1 min-h-0 cursor-text px-3 py-2"
+          className="min-w-0 flex-1 cursor-text px-3 py-2"
           onClick={() => lazy.activate()}
           onKeyDown={(e) => {
             if (e.key === "Enter" || e.key === " ") {
@@ -330,42 +348,36 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation, annotat
           </div>
         </div>
       )}
+      {!expanded && <ComposerIdleTools className="pr-1.5" voice={voice} onAttach={(file) => lazy.uploadOrQueue([file])} />}
+      </div>
       <VoiceHud voice={voice} />
       <VoiceSetupDialog voice={voice} />
       <VoiceErrorRow voice={voice} className="mx-2 mb-1" />
-      {voice.showStrip && (
-        <div className="absolute inset-x-1.5 bottom-1 flex items-center">
-          <VoiceStrip voice={voice} />
-        </div>
-      )}
-      <div className={cn("absolute bottom-1 left-2 min-w-0", voice.available ? "right-36" : "right-28", voice.showStrip && "hidden")}>
-        <CommentTriggerChips
+      {expanded && <ComposerToolbar
+        className="px-1.5 pb-1"
+        voice={voice}
+        hasRecipients={showsTriggerChips}
+        recipients={<CommentTriggerChips
           recipients={recipients}
           blocked={triggerPreview.blocked}
           hasAllMembersMention={triggerPreview.hasAllMembersMention}
           draftContent={composedContent}
           onActionChange={setAction}
-        />
-      </div>
-      <div className={cn("absolute bottom-1 right-1.5 flex items-center gap-1", voice.showStrip && "hidden")}>
-        <VoiceMicButton voice={voice} />
-        <FileUploadButton
-          size="sm"
-          multiple
-          onSelect={(file) => lazy.uploadOrQueue([file])}
-        />
-        {routing.restartTaskIds.length > 0 ? (
+        />}
+        tools={<ComposerTools voice={voice} onAttach={(file) => lazy.uploadOrQueue([file])} />}
+        send={routing.restartTaskIds.length > 0 ? (
           <Button
             size="sm"
             variant="destructive"
             // eslint-disable-next-line no-restricted-syntax -- composer send button, the one round button
-            className="rounded-full"
+            className="rounded-full px-3"
             onClick={submit}
             disabled={!canSend || submitting || gate.uploading}
           >
             {t(($) => $.comment.restart_send)}
           </Button>
         ) : <SubmitButton
+          className={QUIET_SEND_CLASS}
           onClick={submit}
           disabled={!canSend}
           loading={submitting}
@@ -387,7 +399,7 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation, annotat
             ? tEditor(($) => $.upload.in_progress)
             : t(($) => $.comment.send_tooltip)}
         />}
-      </div>
+      />}
       {isDragOver && <FileDropOverlay />}
     </div>
   </>);

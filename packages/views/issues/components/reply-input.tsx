@@ -6,7 +6,6 @@ import { ReplyAnnotations } from "./reply-annotations";
 import { useCallback, useRef, useState, useEffect, useImperativeHandle, useMemo, type Ref } from "react";
 import { toast } from "sonner";
 import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor, useUploadGate, useComposerSubmit } from "../../editor";
-import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { Button } from "@multica/ui/components/ui/button";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -21,11 +20,17 @@ import {
   useComposerVoice,
   VoiceErrorRow,
   VoiceHud,
-  VoiceMicButton,
   VoiceSetupDialog,
-  VoiceStrip,
 } from "../../voice";
 import { CommentTriggerChips } from "./comment-trigger-chips";
+import {
+  ComposerIdleTools,
+  ComposerToolbar,
+  ComposerTools,
+  QUIET_SEND_CLASS,
+  useComposerExpanded,
+  useComposerFocus,
+} from "./composer-frame";
 import { commentTriggerPreviewSignature, useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
 import { useRecipientActions } from "../hooks/use-recipient-actions";
 import { SteerAttachmentNotice } from "./steer-attachment-notice";
@@ -263,6 +268,12 @@ function ReplyInput({
     activate: () => lazy.activate(),
     scope: `${issueId}:${parentId}`,
   });
+  const { focused, focusProps } = useComposerFocus();
+  // One line at rest, like the comment box — see CommentInput.
+  const expanded = useComposerExpanded(
+    focused || !isEmpty || annotations.length > 0 || showsTriggerChips || voice.showStrip || submitting || gate.uploading,
+    voice,
+  );
   const voiceRootRef = voice.rootRef;
   const bindComposer = useCallback((element: HTMLDivElement | null) => {
     composerRef.current = element;
@@ -281,28 +292,30 @@ function ReplyInput({
         actorType={avatarType}
         actorId={avatarId}
         size={avatarSize}
-        className="mt-0.5 shrink-0"
+        className={cn("shrink-0", size === "sm" ? "mt-1.5" : "mt-1")}
       />
       <div
         {...dropZoneProps}
+        {...focusProps}
         ref={bindComposer}
         className={cn(
-          "relative min-w-0 flex-1 flex flex-col",
-          (!isEmpty || annotations.length > 0 || showsTriggerChips || voice.showStrip) && "pb-9",
+          "relative flex min-w-0 flex-1 flex-col rounded-md bg-card ring-1 transition-shadow",
+          focused ? "ring-foreground/25" : "ring-border",
         )}
         onFocusCapture={voice.onFocusCapture}
       >
-        {attachmentsBlockSteer && <SteerAttachmentNotice />}
-        {draftKey && annotations.length > 0 && <>
+        {attachmentsBlockSteer && <div className="px-2.5 pt-1.5"><SteerAttachmentNotice /></div>}
+        {draftKey && annotations.length > 0 && <div className="px-2.5 pt-1.5">
           {targetMissing && <p role="alert" className="mb-2 text-caption text-destructive">{t(($) => $.reply.annotations.target_deleted)}</p>}
           <ReplyAnnotations draftKey={draftKey} annotations={annotations}
             disabled={submitting} onEditAnnotation={onEditAnnotation} />
-        </>}
+        </div>}
+        <div className="flex min-h-0 flex-1 items-center">
         {/* Lock the editor while the reply is in flight — see CommentInput. */}
         {lazy.active && (
         <div
           className={cn(
-            "flex-1 min-h-0 overflow-y-auto",
+            "min-w-0 flex-1 min-h-0 overflow-y-auto px-2.5 py-1",
             submitting && "pointer-events-none opacity-60",
             !lazy.ready && "hidden",
           )}
@@ -340,7 +353,7 @@ function ReplyInput({
             role="button"
             tabIndex={0}
             aria-label={placeholderText}
-            className="flex-1 min-h-0 cursor-text rich-text-editor text-body"
+            className="min-w-0 flex-1 cursor-text px-2.5 py-1 rich-text-editor text-body"
             onClick={() => lazy.activate()}
             onKeyDown={(e) => {
               if (e.key === "Enter" || e.key === " ") {
@@ -354,42 +367,36 @@ function ReplyInput({
             <p className="text-muted-foreground">{placeholderText}</p>
           </div>
         )}
+        {!expanded && <ComposerIdleTools className="pr-1" voice={voice} onAttach={(file) => lazy.uploadOrQueue([file])} />}
+        </div>
         <VoiceHud voice={voice} />
         <VoiceSetupDialog voice={voice} />
-        <VoiceErrorRow voice={voice} className="mt-1" />
-        {voice.showStrip && (
-          <div className="absolute inset-x-0 bottom-0 flex items-center">
-            <VoiceStrip voice={voice} />
-          </div>
-        )}
-        <div className={cn("absolute bottom-0 left-0 min-w-0", voice.available ? "right-32" : "right-24", voice.showStrip && "hidden")}>
-          <CommentTriggerChips
+        <VoiceErrorRow voice={voice} className="mx-1.5 mb-1" />
+        {expanded && <ComposerToolbar
+          className="px-1 pb-1"
+          voice={voice}
+          hasRecipients={showsTriggerChips}
+          recipients={<CommentTriggerChips
             recipients={recipients}
             blocked={triggerPreview.blocked}
             hasAllMembersMention={triggerPreview.hasAllMembersMention}
             draftContent={composedContent}
             onActionChange={setAction}
-          />
-        </div>
-        <div className={cn("absolute bottom-0 right-0 flex items-center gap-1", voice.showStrip && "hidden")}>
-          <VoiceMicButton voice={voice} />
-          <FileUploadButton
-            size="sm"
-            multiple
-            onSelect={(file) => lazy.uploadOrQueue([file])}
-          />
-          {routing.restartTaskIds.length > 0 ? (
+          />}
+          tools={<ComposerTools voice={voice} onAttach={(file) => lazy.uploadOrQueue([file])} />}
+          send={routing.restartTaskIds.length > 0 ? (
             <Button
               size="sm"
               variant="destructive"
               // eslint-disable-next-line no-restricted-syntax -- composer send button, the one round button
-              className="rounded-full"
+              className="rounded-full px-3"
               onClick={submit}
               disabled={!canSend || submitting || gate.uploading}
             >
               {t(($) => $.comment.restart_send)}
             </Button>
           ) : <SubmitButton
+            className={QUIET_SEND_CLASS}
             onClick={submit}
             disabled={!canSend}
             loading={submitting}
@@ -411,7 +418,7 @@ function ReplyInput({
               ? tEditor(($) => $.upload.in_progress)
               : t(($) => $.comment.send_tooltip)}
           />}
-        </div>
+        />}
         {isDragOver && <FileDropOverlay />}
       </div>
     </div>
