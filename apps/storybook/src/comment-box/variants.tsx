@@ -47,7 +47,13 @@ function ReplyRow({ children, avatarClassName }: { children: ReactNode; avatarCl
 function ShippedRestart({ box }: { box: Box }) {
   const { t } = useCopy();
   return (
-    <Button size="sm" variant="destructive" className="rounded-full" onClick={box.send}>
+    <Button
+      size="sm"
+      variant="destructive"
+      // eslint-disable-next-line no-restricted-syntax -- composer send button, the one round button
+      className="rounded-full"
+      onClick={box.send}
+    >
       {t(TEXT.restartSend)}
     </Button>
   );
@@ -117,7 +123,13 @@ function CurrentReply({ preset }: BoxProps) {
 function RestartPill({ box }: { box: Box }) {
   const { t } = useCopy();
   return (
-    <Button size="sm" variant="destructive" className="h-7 rounded-full px-3" onClick={box.send}>
+    <Button
+      size="sm"
+      variant="destructive"
+      // eslint-disable-next-line no-restricted-syntax -- composer send button, the one round button
+      className="h-7 rounded-full px-3"
+      onClick={box.send}
+    >
       {t(TEXT.restartSend)}
     </Button>
   );

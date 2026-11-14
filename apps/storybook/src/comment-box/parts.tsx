@@ -188,6 +188,7 @@ export function QuietSend({ box, className }: { box: Box; className?: string }) 
       disabled={!ready}
       onClick={box.send}
       className={cn(
+        // eslint-disable-next-line no-restricted-syntax -- composer send button, the one round button
         "rounded-full transition-colors disabled:opacity-100",
         ready ? "bg-foreground text-background hover:bg-foreground/85" : "bg-muted text-faint-foreground",
         className,
