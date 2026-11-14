@@ -312,17 +312,38 @@ func (c *wsRPCClient) deliver(resp protocol.RPCResponsePayload) {
 // retried over HTTP only after a short safety window. The request/response bodies
 // are identical to the HTTP endpoint so both transports are interchangeable.
 // Wired into the claim poller as part of the poller cutover.
-func (d *Daemon) ClaimTasksWSFirst(ctx context.Context, daemonID string, runtimeIDs []string, maxTasks int) ([]*Task, error) {
-	result, err := d.claimTasksWSFirst(ctx, daemonID, runtimeIDs, maxTasks)
-	return result.Tasks, err
+// forceRecheckIDs (#7452) names runtimes woken by a targeted `task_available`
+// since the last claim; it is forwarded unchanged over whichever transport
+// wins so the server bypasses their cached "empty" verdict. The legacy
+// per-runtime fallback ignores it (an un-upgraded server has no such route).
+//
+// The exported wrapper returns the server's acknowledgement of the forced
+// runtimes (#7452) as a POINTER (claimTasksResult.ForceRecheckedRuntimeIDs) so
+// the caller can tell an explicit empty acknowledgement from a missing one:
+//   - a normal WS/HTTP claim passes the server's force_rechecked_runtime_ids
+//     through verbatim: present (possibly empty) from an upgraded server,
+//     absent from an older one that does not know the field;
+//   - the send-nothing cooldown branch acknowledges nothing (present, empty),
+//     so the caller keeps the whole drained set forced and re-forces next cycle;
+//   - the uncertain-after-send branch acknowledges the full forced set, so the
+//     caller re-notes nothing: a frame DID go out and replaying the hint could
+//     double-claim, so recovery falls to the next wakeup or the TTL;
+//   - the legacy/unsupported fallbacks report ABSENT, so the caller drops the
+//     hint the way it did before #7452 instead of re-forcing a server that can
+//     never acknowledge it.
+func (d *Daemon) ClaimTasksWSFirst(ctx context.Context, daemonID string, runtimeIDs []string, maxTasks int, forceRecheckIDs ...string) ([]*Task, *[]string, error) {
+	result, err := d.claimTasksWSFirst(ctx, daemonID, runtimeIDs, maxTasks, forceRecheckIDs...)
+	return result.Tasks, result.ForceRecheckedRuntimeIDs, err
 }
 
-func (d *Daemon) claimTasksWSFirst(ctx context.Context, daemonID string, runtimeIDs []string, maxTasks int) (claimTasksResult, error) {
+func (d *Daemon) claimTasksWSFirst(ctx context.Context, daemonID string, runtimeIDs []string, maxTasks int, forceRecheckIDs ...string) (claimTasksResult, error) {
 	// Un-upgraded server without the batch route: a prior poll already learned
 	// this (via a 404), so go straight to the legacy per-runtime claim and skip
 	// the WS + batch attempts each cycle.
 	if d.batchClaimUnsupported.Load() {
 		tasks, err := d.client.claimTasksLegacy(ctx, runtimeIDs, maxTasks)
+		// The legacy route cannot honour the hint, so report ABSENT (nil): the
+		// caller drops it instead of re-forcing a server that will never ack.
 		return claimTasksResult{Tasks: tasks}, err
 	}
 	bypassWSOnce := false
@@ -332,7 +353,11 @@ func (d *Daemon) claimTasksWSFirst(ctx context.Context, daemonID string, runtime
 		if now.Before(retryAfter) {
 			d.logger.Debug("ws claim outcome uncertain; delaying http fallback until safety window elapses",
 				"retry_after", retryAfter.Sub(now).Round(time.Millisecond))
-			return claimTasksResult{}, nil
+			// Nothing was sent and nothing scanned this cycle: acknowledge nothing
+			// (present but empty) so the caller keeps the whole drained force set and
+			// re-forces next cycle. Unlike the uncertain-after-send branch below, no
+			// frame went out, so replaying the hint cannot double-claim.
+			return claimTasksResult{ForceRecheckedRuntimeIDs: ackNone()}, nil
 		}
 		if d.wsClaimHTTPFallbackAfter.CompareAndSwap(retryAfterNanos, 0) {
 			bypassWSOnce = true
@@ -343,11 +368,7 @@ func (d *Daemon) claimTasksWSFirst(ctx context.Context, daemonID string, runtime
 		var resp claimTasksResult
 		// batchClaimRequestTimeout is the server-side execution budget; the
 		// daemon waits that plus the client's grace margin for the response.
-		_, err := d.wsRPC.CallIfRPCV1Supported(ctx, "tasks.claim", batchClaimRequestTimeout, map[string]any{
-			"daemon_id":   daemonID,
-			"runtime_ids": runtimeIDs,
-			"max_tasks":   maxTasks,
-		}, &resp)
+		_, err := d.wsRPC.CallIfRPCV1Supported(ctx, "tasks.claim", batchClaimRequestTimeout, claimTasksBody(daemonID, runtimeIDs, maxTasks, forceRecheckIDs...), &resp)
 		if err == nil {
 			resp.ClaimedOverWS = true
 			return resp, nil
@@ -359,17 +380,22 @@ func (d *Daemon) claimTasksWSFirst(ctx context.Context, daemonID string, runtime
 			// execution budget plus response grace has elapsed. If the WS claim
 			// committed, the task is already dispatched and stale reclaim owns
 			// recovery; if it did not, HTTP regains liveness for the queued task.
+			// The drained forceRecheck set (#7452) is intentionally not re-noted
+			// here: a frame DID go out and may have committed server-side, so
+			// replaying the hint immediately could double-claim. Echo the full
+			// forced set as "confirmed" so the caller re-notes nothing; recovery
+			// falls to the next targeted wakeup or the empty-claim TTL.
 			delay := wsClaimUncertainFallbackDelay
 			if delay < 0 {
 				delay = 0
 			}
 			d.wsClaimHTTPFallbackAfter.Store(time.Now().Add(delay).UnixNano())
 			d.logger.Debug("ws claim outcome uncertain after disconnect; delaying http fallback", "retry_after", delay)
-			return claimTasksResult{}, nil
+			return claimTasksResult{ForceRecheckedRuntimeIDs: ackAll(forceRecheckIDs)}, nil
 		}
 		d.logger.Debug("ws claim failed; falling back to http", "error", err)
 	}
-	result, err := d.client.claimTasksWithHints(ctx, daemonID, runtimeIDs, maxTasks)
+	result, err := d.client.claimTasksWithHints(ctx, daemonID, runtimeIDs, maxTasks, forceRecheckIDs...)
 	if err == nil {
 		return result, nil
 	}
@@ -380,7 +406,26 @@ func (d *Daemon) claimTasksWSFirst(ctx context.Context, daemonID string, runtime
 		d.batchClaimUnsupported.Store(true)
 		d.logger.Info("batch claim route unsupported by server; using legacy per-runtime claim")
 		tasks, legacyErr := d.client.claimTasksLegacy(ctx, runtimeIDs, maxTasks)
+		// An old server without the batch route can never acknowledge the hint,
+		// so report ABSENT (nil) and let the caller drop it (pre-#7452 behaviour)
+		// rather than re-force it forever.
 		return claimTasksResult{Tasks: tasks}, legacyErr
 	}
 	return claimTasksResult{}, err
+}
+
+// ackNone is a present-but-empty acknowledgement (#7452): the transport knows
+// the server scanned nothing this cycle, so the caller keeps every drained
+// runtime forced. Distinct from a nil acknowledgement, which means the server
+// never spoke about the hint at all.
+func ackNone() *[]string {
+	acked := []string{}
+	return &acked
+}
+
+// ackAll acknowledges the whole drained set (#7452), so the caller re-notes
+// nothing.
+func ackAll(ids []string) *[]string {
+	acked := append([]string{}, ids...)
+	return &acked
 }

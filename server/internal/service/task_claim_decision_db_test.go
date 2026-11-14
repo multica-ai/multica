@@ -197,7 +197,7 @@ func TestClaimDecisionDBBatchClaimed(t *testing.T) {
 	f := newClaimDecisionFixture(t, 5)
 	f.insertTask(t, "queued")
 
-	claimed, err := f.svc.ClaimTasksForRuntimes(context.Background(), []pgtype.UUID{f.runtimeID}, 8)
+	claimed, _, err := f.svc.ClaimTasksForRuntimes(context.Background(), []pgtype.UUID{f.runtimeID}, 8)
 	if err != nil {
 		t.Fatalf("ClaimTasksForRuntimes: %v", err)
 	}
@@ -215,7 +215,7 @@ func TestClaimDecisionDBBatchClaimed(t *testing.T) {
 func TestClaimDecisionDBBatchNoVisibleCandidates(t *testing.T) {
 	f := newClaimDecisionFixture(t, 5)
 
-	claimed, err := f.svc.ClaimTasksForRuntimes(context.Background(), []pgtype.UUID{f.runtimeID}, 8)
+	claimed, _, err := f.svc.ClaimTasksForRuntimes(context.Background(), []pgtype.UUID{f.runtimeID}, 8)
 	if err != nil {
 		t.Fatalf("ClaimTasksForRuntimes: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestClaimDecisionDBBatchCandidatesUnclaimed(t *testing.T) {
 		t.Fatalf("take runtime offline: %v", err)
 	}
 
-	claimed, err := f.svc.ClaimTasksForRuntimes(context.Background(), []pgtype.UUID{f.runtimeID}, 8)
+	claimed, _, err := f.svc.ClaimTasksForRuntimes(context.Background(), []pgtype.UUID{f.runtimeID}, 8)
 	if err != nil {
 		t.Fatalf("ClaimTasksForRuntimes: %v", err)
 	}
