@@ -12,7 +12,10 @@ import (
 )
 
 type AppConfig struct {
-	CdnDomain string `json:"cdn_domain"`
+	CLIInstallCommandUnix    string `json:"cli_install_command_unix,omitempty"`
+	CLIInstallCommandWindows string `json:"cli_install_command_windows,omitempty"`
+	CLILatestVersion         string `json:"cli_latest_version,omitempty"`
+	CdnDomain                string `json:"cdn_domain"`
 	// The origin used for durable private-attachment Markdown links. Clients
 	// use it only to recognize links belonging to this deployment.
 	AttachmentPublicURL string `json:"attachment_public_url,omitempty"`
@@ -121,6 +124,9 @@ type AppConfig struct {
 // to anonymous callers — never user- or tenant-scoped data.
 func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	config := AppConfig{
+		CLIInstallCommandUnix:    strings.TrimSpace(os.Getenv("MULTICA_CLI_INSTALL_COMMAND_UNIX")),
+		CLIInstallCommandWindows: strings.TrimSpace(os.Getenv("MULTICA_CLI_INSTALL_COMMAND_WINDOWS")),
+		CLILatestVersion:         strings.TrimSpace(os.Getenv("MULTICA_CLI_LATEST_VERSION")),
 		// A property of this build, not of the deployment: if this code is
 		// running, the save gate is running with it.
 		LocalWorktreeSupported:             true,

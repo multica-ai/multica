@@ -9,6 +9,7 @@ import {
 } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { api } from "@multica/core/api";
+import { useConfigStore } from "@multica/core/config";
 import type { RuntimeUpdateStatus } from "@multica/core/types";
 import { useT } from "../../i18n";
 
@@ -113,6 +114,8 @@ export function UpdateSection({
 }: UpdateSectionProps) {
   const { t } = useT("runtimes");
   const isManaged = launchedBy === "desktop";
+  const configStatus = useConfigStore((state) => state.daemonConfigStatus);
+  const configuredVersion = useConfigStore((state) => state.cliLatestVersion);
   const [latestVersion, setLatestVersion] = useState<string | null>(null);
   const [status, setStatus] = useState<RuntimeUpdateStatus | null>(null);
   const [error, setError] = useState("");
@@ -130,10 +133,19 @@ export function UpdateSection({
 
   useEffect(() => cleanup, [cleanup]);
 
-  // Fetch latest version on mount.
   useEffect(() => {
-    fetchLatestVersion().then(setLatestVersion);
-  }, []);
+    let active = true;
+    setLatestVersion(null);
+    if (configStatus !== "ready") return;
+    if (configuredVersion) {
+      setLatestVersion(parseReleaseVersion(configuredVersion) ? configuredVersion : null);
+      return;
+    }
+    fetchLatestVersion().then((version) => {
+      if (active) setLatestVersion(version);
+    });
+    return () => { active = false; };
+  }, [configStatus, configuredVersion]);
 
   const markCompleted = useCallback(
     (message: string) => {

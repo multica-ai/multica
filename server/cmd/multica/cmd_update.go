@@ -45,7 +45,7 @@ func runUpdate(_ *cobra.Command, _ []string) error {
 	}
 
 	// Detect installation method and update accordingly.
-	if cli.IsBrewInstall() {
+	if cli.ShouldUpdateViaBrew() {
 		fmt.Fprintln(os.Stderr, "Updating via Homebrew...")
 		output, err := cli.UpdateViaBrew()
 		if err != nil {

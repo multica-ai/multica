@@ -1,6 +1,7 @@
+import { configStore } from "@multica/core/config";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   CLI_INSTALL_COMMANDS,
   CliInstallCommand,
@@ -61,4 +62,21 @@ describe("CliInstallCommand", () => {
 
     expect(screen.getByText(CLI_INSTALL_COMMANDS.windows)).toBeInTheDocument();
   });
+});
+
+afterEach(() => {
+  configStore.setState({ cliInstallCommandUnix: "", cliInstallCommandWindows: "" });
+});
+
+it("shows deployment install commands for both platforms", async () => {
+  configStore.setState({
+    cliInstallCommandUnix: "bash ./internal-install.sh",
+    cliInstallCommandWindows: "./internal-install.ps1",
+  });
+  const user = userEvent.setup();
+  renderSwitch();
+  expect(screen.getByText("bash ./internal-install.sh")).toBeInTheDocument();
+  await user.click(screen.getByRole("tab", { name: "Windows" }));
+  expect(screen.getByText("./internal-install.ps1")).toBeInTheDocument();
+  expect(screen.queryByText(CLI_INSTALL_COMMANDS.windows)).toBeNull();
 });

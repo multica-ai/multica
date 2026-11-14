@@ -328,18 +328,21 @@ func MatchKnownBrewPrefix(path string) string {
 	return ""
 }
 
-// IsBrewInstall selects Homebrew updates only when no artifact mirror is set.
+// IsBrewInstall checks whether the running multica binary was installed via Homebrew.
 // The check itself lives in brewInstallForPath (stable_exe.go) so it stays
 // one implementation with the stable-path resolver that depends on it.
 func IsBrewInstall() bool {
-	if releaseDownloadBaseURL() != "" {
-		return false
-	}
 	exePath, err := selfexec.Resolve()
 	if err != nil {
 		return false
 	}
 	return brewInstallForPath(exePath)
+}
+
+// ShouldUpdateViaBrew keeps update policy separate from physical install
+// detection, which restart and autostart paths also need.
+func ShouldUpdateViaBrew() bool {
+	return releaseDownloadBaseURL() == "" && IsBrewInstall()
 }
 
 // GetBrewPrefix returns the Homebrew prefix by running `brew --prefix`, or empty string.

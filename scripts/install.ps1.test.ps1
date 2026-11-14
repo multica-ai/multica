@@ -368,6 +368,9 @@ try {
         $psi.RedirectStandardOutput = $true
         $psi.RedirectStandardError = $true
         $psi.EnvironmentVariables["USERPROFILE"] = $profileDir
+        $psi.EnvironmentVariables["TEMP"] = $caseDir
+        $psi.EnvironmentVariables["TMP"] = $caseDir
+        $psi.EnvironmentVariables["TMPDIR"] = $caseDir
         $psi.EnvironmentVariables["MULTICA_TEST_INSTALLER"] = $InstallerPath
         $psi.EnvironmentVariables["MULTICA_TEST_SCENARIO"] = $scenario
         $psi.EnvironmentVariables["MULTICA_TEST_ARCHIVE"] = $archive

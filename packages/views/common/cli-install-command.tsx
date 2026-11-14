@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { useConfigStore } from "@multica/core/config";
 import {
   Tabs,
   TabsContent,
@@ -58,6 +59,12 @@ export function CliInstallCommand({
   classNames?: { list?: string; trigger?: string };
   children: (command: string) => ReactNode;
 }) {
+  const unix = useConfigStore((state) => state.cliInstallCommandUnix);
+  const windows = useConfigStore((state) => state.cliInstallCommandWindows);
+  const commands = {
+    macosLinux: unix || CLI_INSTALL_COMMANDS.macosLinux,
+    windows: windows || CLI_INSTALL_COMMANDS.windows,
+  };
   return (
     <Tabs defaultValue={PLATFORMS[0]}>
       <TabsList
@@ -77,7 +84,7 @@ export function CliInstallCommand({
       </TabsList>
       {PLATFORMS.map((platform) => (
         <TabsContent key={platform} value={platform}>
-          {children(CLI_INSTALL_COMMANDS[platform])}
+          {children(commands[platform])}
         </TabsContent>
       ))}
     </Tabs>

@@ -44,6 +44,8 @@ printf '\nBACKEND_PORT=9100\nSMTP_FROM_EMAIL=multica@example.com\n' >>"$tmp_env"
 printf 'MULTICA_LLM_API_KEY=llm-key-from-env\nMULTICA_LLM_BASE_URL=http://gateway.example/v1\nMULTICA_LLM_DEFAULT_MODEL=model-from-env\nMULTICA_LLM_MAX_RETRIES=3\n' >>"$tmp_env"
 printf 'DATABASE_REPLICA_URL=postgres://reader:secret@replica.example.com:5432/multica?sslmode=require\nDATABASE_REPLICA_MAX_CONNS=12\nDATABASE_REPLICA_MIN_CONNS=1\n' >>"$tmp_env"
 
+printf 'MULTICA_CLI_INSTALL_COMMAND_UNIX=internal-unix-command\nMULTICA_CLI_INSTALL_COMMAND_WINDOWS=internal-windows-command\nMULTICA_CLI_LATEST_VERSION=v9.8.7\n' >>"$tmp_env"
+
 config="$(
   docker compose \
     --env-file "$tmp_env" \
@@ -51,6 +53,9 @@ config="$(
     config
 )"
 
+require_config "$config" 'MULTICA_CLI_INSTALL_COMMAND_UNIX: internal-unix-command'
+require_config "$config" 'MULTICA_CLI_INSTALL_COMMAND_WINDOWS: internal-windows-command'
+require_config "$config" 'MULTICA_CLI_LATEST_VERSION: v9.8.7'
 require_config "$config" 'published: "3100"'
 require_config "$config" 'published: "9100"'
 require_config "$config" 'FRONTEND_ORIGIN: http://localhost:3100'

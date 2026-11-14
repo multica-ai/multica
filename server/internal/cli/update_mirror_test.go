@@ -163,10 +163,25 @@ func TestFileMirrorDoesNotProbeHomebrew(t *testing.T) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("MULTICA_TEST_BREW_PROBE", probe)
 	t.Setenv(releaseDownloadBaseURLEnv, "https://mirror.example/releases")
-	if IsBrewInstall() {
+	if ShouldUpdateViaBrew() {
 		t.Fatal("mirror update selected Homebrew")
 	}
 	if _, err := os.Stat(probe); !os.IsNotExist(err) {
 		t.Fatalf("mirror update probed Homebrew: %v", err)
+	}
+}
+
+func TestFileMirrorPreservesBrewInstallDetection(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Homebrew is a Unix installation method")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "brew"), []byte("#!/bin/sh\nprintf '/\\n'\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv(releaseDownloadBaseURLEnv, "https://mirror.example/releases")
+	if !IsBrewInstall() {
+		t.Fatal("mirror configuration changed physical install detection used for stable restart paths")
 	}
 }

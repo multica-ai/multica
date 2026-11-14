@@ -123,6 +123,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   configStore.setState({
     daemonConfigStatus: "loading",
+    cliInstallCommandUnix: "",
+    cliInstallCommandWindows: "",
+    cliLatestVersion: "",
     daemonSetupTarget: "unknown",
     daemonServerUrl: "",
     daemonAppUrl: "",
@@ -564,4 +567,25 @@ describe("AuthInitializer recovery", () => {
     expect(storage.snapshot().multica_token).toBeUndefined();
     expect(onLogout).toHaveBeenCalledOnce();
   });
+});
+
+it("loads deployment CLI config and clears stale overrides for an older server", async () => {
+  const first = renderInitializer({ api: makeApiWithConfigResponse({
+    cli_install_command_unix: "bash internal.sh",
+    cli_install_command_windows: "./internal.ps1",
+    cli_latest_version: "v9.8.7",
+  }) });
+  await waitFor(() => expect(configStore.getState()).toMatchObject({
+    cliInstallCommandUnix: "bash internal.sh",
+    cliInstallCommandWindows: "./internal.ps1",
+    cliLatestVersion: "v9.8.7",
+  }));
+  first.unmount();
+  renderInitializer({ api: makeApiWithConfigResponse({}) });
+  await waitFor(() => expect(configStore.getState()).toMatchObject({
+    daemonConfigStatus: "ready",
+    cliInstallCommandUnix: "",
+    cliInstallCommandWindows: "",
+    cliLatestVersion: "",
+  }));
 });

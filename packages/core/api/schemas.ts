@@ -1029,6 +1029,9 @@ export const EMPTY_ISSUE_PROPERTIES_RESPONSE: IssuePropertiesResponse = {
 };
 
 export interface AppConfigResponse {
+  cli_install_command_unix?: string;
+  cli_install_command_windows?: string;
+  cli_latest_version?: string;
   cdn_domain: string;
   attachment_public_url?: string;
   // True when the CDN domain serves private content via time-bounded signed
@@ -1342,6 +1345,9 @@ export const EMPTY_REFRESH_SESSION_RESPONSE: RefreshSessionResponse = {
 };
 
 export const AppConfigSchema = z.object({
+  cli_install_command_unix: OptionalStringSchema,
+  cli_install_command_windows: OptionalStringSchema,
+  cli_latest_version: OptionalStringSchema,
   cdn_domain: z.string().default(""),
   attachment_public_url: OptionalStringSchema,
   cdn_signed: BooleanWithDefaultSchema(false),

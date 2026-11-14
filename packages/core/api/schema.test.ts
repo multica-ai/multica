@@ -1039,6 +1039,20 @@ describe("ApiClient schema fallback", () => {
       expect(config.daemon_setup_target).toBe(target);
     });
 
+    it("drops malformed public CLI config fields without discarding other config", async () => {
+      stubFetchJson({
+        cdn_domain: "cdn.example.com",
+        cli_install_command_unix: {},
+        cli_install_command_windows: 123,
+        cli_latest_version: [],
+      });
+      const config = await new ApiClient("https://api.example.test").getConfig();
+      expect(config.cdn_domain).toBe("cdn.example.com");
+      expect(config.cli_install_command_unix).toBeUndefined();
+      expect(config.cli_install_command_windows).toBeUndefined();
+      expect(config.cli_latest_version).toBeUndefined();
+    });
+
     it("drops malformed daemon setup URLs instead of throwing", async () => {
       stubFetchJson({
         cdn_domain: "cdn.example.com",
