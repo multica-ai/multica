@@ -145,17 +145,20 @@ install_cli_brew() {
 }
 
 install_cli_binary() {
-  info "Installing Multica CLI from GitHub Releases..."
+  info "Installing Multica CLI from the configured release source..."
 
   # Get latest release tag
   local latest
-  latest=$(curl -sI "$REPO_WEB_URL/releases/latest" 2>/dev/null | grep -i '^location:' | sed 's/.*tag\///' | tr -d '\r\n' || true)
+  latest=$(get_latest_version)
   if [ -z "$latest" ]; then
     fail "Could not determine latest release. Check your network connection."
   fi
 
   local version="${latest#v}"
-  local url="https://github.com/multica-ai/multica/releases/download/${latest}/multica-cli-${version}-${OS}-${ARCH}.tar.gz"
+  local release_base="${MULTICA_RELEASE_DOWNLOAD_BASE_URL:-$REPO_WEB_URL/releases/download}"
+  release_base="${release_base%/}"
+  local asset="multica-cli-${version}-${OS}-${ARCH}.tar.gz"
+  local url="${release_base}/${latest}/${asset}"
   local tmp_dir
   tmp_dir=$(mktemp -d)
 
@@ -163,6 +166,27 @@ install_cli_binary() {
   if ! curl -fsSL "$url" -o "$tmp_dir/multica.tar.gz"; then
     rm -rf "$tmp_dir"
     fail "Failed to download CLI binary."
+  fi
+
+  if [ -n "${MULTICA_RELEASE_DOWNLOAD_BASE_URL:-}" ]; then
+    if ! curl -fsSL "${release_base}/${latest}/checksums.txt" -o "$tmp_dir/checksums.txt"; then
+      rm -rf "$tmp_dir"
+      fail "Could not download mirror checksums.txt."
+    fi
+    local expected actual
+    expected=$(awk -v name="$asset" '$2 == name { print tolower($1); exit }' "$tmp_dir/checksums.txt")
+    if command_exists sha256sum; then
+      actual=$(sha256sum "$tmp_dir/multica.tar.gz" | awk '{print $1}')
+    elif command_exists shasum; then
+      actual=$(shasum -a 256 "$tmp_dir/multica.tar.gz" | awk '{print $1}')
+    else
+      rm -rf "$tmp_dir"
+      fail "Mirror installation requires sha256sum or shasum."
+    fi
+    if [ -z "$expected" ] || [ "$actual" != "$expected" ]; then
+      rm -rf "$tmp_dir"
+      fail "Checksum verification failed for $asset."
+    fi
   fi
 
   tar -xzf "$tmp_dir/multica.tar.gz" -C "$tmp_dir" multica
@@ -201,6 +225,16 @@ add_to_path() {
 }
 
 get_latest_version() {
+  if [ -n "${MULTICA_CLI_VERSION:-}" ]; then
+    if [[ ! "$MULTICA_CLI_VERSION" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      fail "MULTICA_CLI_VERSION must name a release version."
+    fi
+    printf 'v%s' "${MULTICA_CLI_VERSION#v}"
+    return
+  fi
+  if [ -n "${MULTICA_RELEASE_DOWNLOAD_BASE_URL:-}" ]; then
+    fail "MULTICA_CLI_VERSION is required with MULTICA_RELEASE_DOWNLOAD_BASE_URL."
+  fi
   # grep exits 1 when no match; use `|| true` to avoid triggering pipefail
   curl -sI "$REPO_WEB_URL/releases/latest" 2>/dev/null | grep -i '^location:' | sed 's/.*tag\///' | tr -d '\r\n' || true
 }
@@ -300,7 +334,7 @@ install_cli() {
     fi
 
     info "Multica CLI $current_ver installed, latest is $latest_ver — upgrading..."
-    if command_exists brew && brew list "$BREW_PACKAGE" >/dev/null 2>&1; then
+    if [ -z "${MULTICA_RELEASE_DOWNLOAD_BASE_URL:-}" ] && [ -z "${MULTICA_CLI_VERSION:-}" ] && command_exists brew && brew list "$BREW_PACKAGE" >/dev/null 2>&1; then
       upgrade_cli_brew
     else
       install_cli_binary
@@ -312,7 +346,7 @@ install_cli() {
     return 0
   fi
 
-  if command_exists brew; then
+  if [ -z "${MULTICA_RELEASE_DOWNLOAD_BASE_URL:-}" ] && [ -z "${MULTICA_CLI_VERSION:-}" ] && command_exists brew; then
     install_cli_brew || install_cli_binary
   else
     install_cli_binary
@@ -545,6 +579,10 @@ main() {
         echo "  --stop          Stop a self-hosted installation"
         echo ""
         echo "Environment variables:"
+        echo "  MULTICA_CLI_VERSION  Pin the CLI release (for example v0.6.3)"
+        echo "  MULTICA_RELEASE_DOWNLOAD_BASE_URL  Static release mirror, serving"
+        echo "                        /<tag>/checksums.txt and release archives"
+        echo "                        (requires MULTICA_CLI_VERSION; skips Homebrew)"
         echo "  MULTICA_INSTALL_DIR   Self-host server install directory"
         echo "                        (default: \$HOME/.multica/server)"
         echo "  MULTICA_BIN_DIR       Target directory for the CLI binary when"

@@ -589,6 +589,77 @@ STUB
   fi
 }
 
+test_file_mirror_install() {
+  local scenario tmp code
+  for scenario in new existing wrong_checksum missing_checksum missing_pin; do
+    tmp="$(mktemp -d)"
+    _setup_sandbox "$tmp"
+    if [ "$scenario" = existing ]; then
+      cp "$tmp/payload/multica" "$tmp/install-bin/multica"
+      sed 's/0.3.2/0.3.1/' "$tmp/payload/multica" > "$tmp/install-bin/multica"
+    fi
+    cat > "$tmp/stub-bin/brew" <<'STUB'
+#!/usr/bin/env bash
+echo "Homebrew must not run for a file mirror" >&2
+exit 99
+STUB
+    chmod +x "$tmp/stub-bin/brew"
+    cat > "$tmp/stub-bin/curl" <<'STUB'
+#!/usr/bin/env bash
+url="" out=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o) out="$2"; shift 2 ;;
+    http*) url="$1"; shift ;;
+    *) shift ;;
+  esac
+done
+printf '%s\n' "$url" >> "$MULTICA_TEST_REQUESTS"
+case "$url" in
+  https://mirror.example/releases/v0.3.2/checksums.txt)
+    if [ "$MULTICA_TEST_SCENARIO" = wrong_checksum ]; then
+      hash="$(printf '%064d' 0)"
+    else
+      hash="$(shasum -a 256 "$MULTICA_TEST_ARCHIVE" | awk '{print $1}')"
+    fi
+    asset="multica-cli-0.3.2-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m).tar.gz"
+    asset="${asset/x86_64/amd64}"
+    asset="${asset/aarch64/arm64}"
+    [ "$MULTICA_TEST_SCENARIO" != missing_checksum ] || asset=unrelated.tar.gz
+    printf '%s  %s\n' "$hash" "$asset" > "$out" ;;
+  https://mirror.example/releases/v0.3.2/multica-cli-0.3.2-*.tar.gz)
+    cp "$MULTICA_TEST_ARCHIVE" "$out" ;;
+  *) echo "unexpected URL: $url" >&2; exit 97 ;;
+esac
+STUB
+    chmod +x "$tmp/stub-bin/curl"
+    code=0
+    PATH="$tmp/stub-bin:$tmp/install-bin:/usr/bin:/bin" \
+      MULTICA_BIN_DIR="$tmp/install-bin" \
+      MULTICA_TEST_ARCHIVE="$tmp/multica.tar.gz" \
+      MULTICA_TEST_REQUESTS="$tmp/requests" \
+      MULTICA_TEST_SCENARIO="$scenario" \
+      MULTICA_CLI_VERSION="$([ "$scenario" = missing_pin ] || printf '0.3.2')" \
+      MULTICA_RELEASE_DOWNLOAD_BASE_URL="https://mirror.example/releases/" \
+      bash "$ROOT_DIR/scripts/install.sh" > "$tmp/install.out" 2> "$tmp/install.err" || code=$?
+    case "$scenario" in
+      new|existing)
+        if [ "$code" -ne 0 ] || [ ! -x "$tmp/install-bin/multica" ]; then
+          cat "$tmp/install.out" "$tmp/install.err" >&2
+          echo "mirror $scenario install failed" >&2; return 1
+        fi
+        if [ "$(wc -l < "$tmp/requests" | tr -d ' ')" -ne 2 ]; then echo "expected exactly manifest + archive requests" >&2; return 1; fi
+        ;;
+      *)
+        if [ "$code" -eq 0 ] || [ -f "$tmp/install-bin/multica" ]; then echo "unsafe mirror $scenario install succeeded" >&2; return 1; fi
+        if [ "$scenario" = missing_pin ] && [ -s "$tmp/requests" ]; then echo "missing pin attempted network access" >&2; return 1; fi
+        ;;
+    esac
+    rm -rf "$tmp"
+  done
+}
+
+test_file_mirror_install
 test_brew_install_failure_falls_back_to_release_binary
 test_brew_tap_failure_falls_back_to_release_binary
 test_remote_ssh_install_prints_token_login_hint

@@ -85,6 +85,16 @@ function Get-ComposePublishedPort {
 }
 
 function Get-LatestVersion {
+    if ($env:MULTICA_CLI_VERSION) {
+        $version = $env:MULTICA_CLI_VERSION.Trim()
+        if ($version -notmatch '^v?\d+\.\d+\.\d+$') {
+            Write-Fail "MULTICA_CLI_VERSION must name a release version."
+        }
+        return "v" + $version.TrimStart('v')
+    }
+    if ($env:MULTICA_RELEASE_DOWNLOAD_BASE_URL) {
+        Write-Fail "MULTICA_CLI_VERSION is required with MULTICA_RELEASE_DOWNLOAD_BASE_URL."
+    }
     try {
         $release = Invoke-RestMethod -Uri "https://api.github.com/repos/multica-ai/multica/releases/latest" -ErrorAction Stop
         return $release.tag_name
@@ -233,7 +243,7 @@ function Get-InstalledCliVersion {
 # CLI Installation
 # ---------------------------------------------------------------------------
 function Install-CliBinary {
-    Write-Info "Installing Multica CLI from GitHub Releases..."
+    Write-Info "Installing Multica CLI from the configured release source..."
 
     if (-not [Environment]::Is64BitOperatingSystem) {
         Write-Fail "Multica requires a 64-bit Windows installation."
@@ -247,7 +257,12 @@ function Install-CliBinary {
     }
 
     $version = $latest.TrimStart('v')
-    $url = "https://github.com/multica-ai/multica/releases/download/$latest/multica-cli-$version-windows-$arch.zip"
+    $releaseBase = if ($env:MULTICA_RELEASE_DOWNLOAD_BASE_URL) {
+        $env:MULTICA_RELEASE_DOWNLOAD_BASE_URL.TrimEnd('/')
+    } else {
+        "https://github.com/multica-ai/multica/releases/download"
+    }
+    $url = "$releaseBase/$latest/multica-cli-$version-windows-$arch.zip"
     $tmpDir = Join-Path ([System.IO.Path]::GetTempPath()) "multica-install"
 
     if (Test-Path $tmpDir) { Remove-Item $tmpDir -Recurse -Force }
@@ -262,7 +277,7 @@ function Install-CliBinary {
     }
 
     # Verify SHA256 checksum
-    $checksumUrl = "https://github.com/multica-ai/multica/releases/download/$latest/checksums.txt"
+    $checksumUrl = "$releaseBase/$latest/checksums.txt"
     try {
         $checksums = Invoke-WebRequest -Uri $checksumUrl -UseBasicParsing -ErrorAction Stop
         $checksumContent = if ($checksums.Content -is [byte[]]) {
@@ -276,8 +291,9 @@ function Install-CliBinary {
         $legacyAsset = "multica_windows_$arch.zip"
         $expectedLine = ($checksumContent -split "`r?`n") |
             Where-Object {
-                $_ -match [regex]::Escape($releaseAsset) -or
-                $_ -match [regex]::Escape($legacyAsset)
+                $_ -match ('^\S+\s+' + [regex]::Escape($releaseAsset) + '\s*$') -or
+                (-not $env:MULTICA_RELEASE_DOWNLOAD_BASE_URL -and
+                 $_ -match ('^\S+\s+' + [regex]::Escape($legacyAsset) + '\s*$'))
             } |
             Select-Object -First 1
         if ($expectedLine) {
@@ -288,9 +304,15 @@ function Install-CliBinary {
             }
             Write-Ok "Checksum verified"
         } else {
+            if ($env:MULTICA_RELEASE_DOWNLOAD_BASE_URL) {
+                Write-Fail "Could not find mirror checksum entry for $releaseAsset."
+            }
             Write-Warn "Could not find checksum entry for $releaseAsset - skipping verification."
         }
     } catch {
+        if ($env:MULTICA_RELEASE_DOWNLOAD_BASE_URL) {
+            Write-Fail "Could not verify mirror checksums.txt: $_"
+        }
         Write-Warn "Could not download checksums.txt - skipping verification."
     }
 
@@ -341,7 +363,9 @@ function Install-Cli {
         $latestCmp = if ($latestVer) { $latestVer -replace '^v','' } else { $null }
 
         $isUpToDate = $currentCmp -and -not $latestCmp
-        if (-not $isUpToDate) {
+        if ($env:MULTICA_CLI_VERSION) {
+            $isUpToDate = $currentCmp -and $latestCmp -and ($currentCmp -eq $latestCmp)
+        } elseif (-not $isUpToDate) {
             try {
                 $isUpToDate = $currentCmp -and $latestCmp -and ([System.Version]$currentCmp -ge [System.Version]$latestCmp)
             } catch {
