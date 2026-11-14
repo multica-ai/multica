@@ -57,7 +57,7 @@ const preview: Preview = {
   parameters: {
     layout: "centered",
     options: {
-      storySort: { order: ["Voice input", ["Composer (A + C)", "Settings", "First use", "Edge cases", "Explored", ["All directions", "*"]]] },
+      storySort: { order: ["Voice input", ["Composer (A + C)", "Waveform", ["Compare all", "*"], "Settings", "First use", "Edge cases", "Explored", ["All directions", "*"]]] },
     },
     controls: { disable: true },
     actions: { disable: true },
