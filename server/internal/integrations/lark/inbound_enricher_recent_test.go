@@ -537,6 +537,79 @@ func TestEnrichForwardedResolvesNames(t *testing.T) {
 	}
 }
 
+// TestEnrichForwardedNamesFromMentions covers an app whose contact scope
+// hides the forwarded speakers: Contact resolves nobody, yet a speaker
+// someone @-mentioned is named from that mention's id (users by open_id,
+// apps by app_id). A speaker nobody mentioned keeps the positional label.
+func TestEnrichForwardedNamesFromMentions(t *testing.T) {
+	t.Parallel()
+	fake := newEnricherFake()
+	mention := func(m LarkMessage, key, id, name string) LarkMessage {
+		m.Mentions = append(m.Mentions, LarkMessageMention{Key: key, ID: id, Name: name})
+		return m
+	}
+	fake.byID["om_forward"] = []LarkMessage{
+		{MessageID: "om_forward", MessageType: "merge_forward", SenderID: "ou_fwd", SenderType: "user", Content: `{"content":"Merged and Forwarded Message"}`},
+		mention(textMsg("c1", "ou_alice", "@_user_1 can you check?", "1000"), "@_user_1", "ou_bob", "Bob"),
+		textMsg("c2", "ou_bob", "on it", "2000"),
+		mention(textMsg("c3", "ou_bob", "@_user_1 please trace this", "3000"), "@_user_1", "cli_helper", "Helper"),
+		{MessageID: "c4", MessageType: "text", Content: `{"text":"tracing"}`, SenderID: "cli_helper", SenderType: "app", CreateTime: "4000"},
+		mention(textMsg("c5", "ou_carol", "@_user_1 thanks", "5000"), "@_user_1", "ou_alice", "Alice"),
+		{MessageID: "c6", MessageType: "text", Content: `{"text":"done"}`, SenderID: "cli_other", SenderType: "app", CreateTime: "6000"},
+	}
+	in := InboundMessage{
+		MessageType:    "merge_forward",
+		MessageID:      "om_forward",
+		ChatID:         "oc_g",
+		ChatType:       ChatTypeGroup,
+		AddressedToBot: true,
+		SenderOpenID:   "ou_fwd",
+	}
+
+	out := enrich(t, fake, in, InboundEnricherConfig{})
+
+	want := `<forwarded_messages count="6">
+[Alice]: @Bob can you check?
+[Bob]: on it
+[Bob]: @Helper please trace this
+[Helper (Bot)]: tracing
+[User 1]: @Alice thanks
+[Bot]: done
+</forwarded_messages>`
+	if out.Body != want {
+		t.Errorf("body\n got = %q\nwant = %q", out.Body, want)
+	}
+}
+
+// TestEnrichContactNameWinsOverMentionName pins precedence: a mention's
+// name only fills an id the Contact lookup did not resolve.
+func TestEnrichContactNameWinsOverMentionName(t *testing.T) {
+	t.Parallel()
+	fake := newEnricherFake()
+	fake.userNames = map[string]string{"ou_alice": "Alice Chen"}
+	quoted := textMsg("om_parent", "ou_alice", "ship it", "1000")
+	fake.byID["om_parent"] = []LarkMessage{quoted}
+	recent := textMsg("om_r", "ou_bob", "@_user_1 ok", "2000")
+	recent.Mentions = []LarkMessageMention{{Key: "@_user_1", ID: "ou_alice", Name: "Ally"}}
+	fake.byChat["oc_g"] = []LarkMessage{textMsg("om_trigger", "ou_bob", "go", "3000"), recent}
+	in := InboundMessage{
+		MessageType:    "text",
+		MessageID:      "om_trigger",
+		ChatID:         "oc_g",
+		ChatType:       ChatTypeGroup,
+		AddressedToBot: true,
+		Body:           "go",
+		ParentID:       "om_parent",
+		CreateTime:     "3000",
+	}
+
+	out := enrich(t, fake, in, groupCfg())
+
+	if !strings.Contains(out.Body, `sender="Alice Chen"`) || !strings.Contains(out.Body, "[User 1]: @Ally ok") {
+		t.Errorf("Contact name must win for the sender label; got\n%s", out.Body)
+	}
+}
+
 // TestEnrichRecentContextFetchError degrades to a plain, user-readable
 // note on a list failure without leaking the old internal XML placeholder
 // or dropping the user's body.

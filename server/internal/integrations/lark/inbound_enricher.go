@@ -134,9 +134,11 @@ func NewInboundEnricher(client APIClient, cfg InboundEnricherConfig) Enricher {
 // display names via ONE Contact batch call, so the agent reads
 // "[Alice]: …" rather than "[User 1]: …" and knows who addressed it. This
 // is why the quote/forward items are fetched up front (Phase 1) before
-// names are resolved (Phase 2). Unresolved senders fall back to positional
-// "User N"; resolution is best-effort and never blocks. p2p chats keep
-// positional labels (identity is unambiguous in a 1:1).
+// names are resolved (Phase 2). A sender the Contact lookup misses is still
+// named when an @-mention in the fetched messages carries its id; the rest
+// fall back to positional "User N". Resolution is best-effort and never
+// blocks. p2p chats skip the Contact call (identity is unambiguous in a
+// 1:1) but still use @-mention names.
 //
 // Persistence note: like the quoted/forwarded blocks, the rewritten Body
 // is persisted into the addressed turn's chat_message.content downstream
@@ -242,6 +244,11 @@ func (e *inboundEnricher) Enrich(ctx context.Context, msg InboundMessage, creds 
 		}
 		names = e.resolveNames(ctx, creds, ids)
 	}
+	// The Contact lookup only covers users inside the app's contact scope,
+	// which is often just a few people. Every @-mention in the fetched
+	// messages carries the mentioned user's (or app's) id and display name,
+	// so a speaker someone @-mentioned is still named exactly.
+	names = addMentionNames(names, recentItems, quotedItems, forwardItems)
 
 	// Phase 3 — render broadest-to-narrowest with the complete name map.
 	if msg.ParentID != "" || isForward {
@@ -338,6 +345,28 @@ func (e *inboundEnricher) resolveNames(ctx context.Context, creds InstallationCr
 	if err != nil {
 		e.logger.Warn("lark enricher: speaker name resolution failed", "ids", len(uniq), "err", err)
 		return nil
+	}
+	return names
+}
+
+// addMentionNames fills ids missing from names with the display names
+// carried by @-mentions in msgs, and returns the (possibly new) map. A REST
+// mention's id has the same type as a sender id from the same call
+// (open_id for users, app_id for apps), so speakers match by id equality.
+// Contact-resolved names are never overwritten.
+func addMentionNames(names map[string]string, batches ...[]LarkMessage) map[string]string {
+	for _, msgs := range batches {
+		for _, m := range msgs {
+			for _, mn := range m.Mentions {
+				if mn.ID == "" || mn.Name == "" || names[mn.ID] != "" {
+					continue
+				}
+				if names == nil {
+					names = make(map[string]string)
+				}
+				names[mn.ID] = mn.Name
+			}
+		}
 	}
 	return names
 }
@@ -743,7 +772,8 @@ func parseLarkMillis(s string) int64 {
 // name map. A sender present in that map is labeled with their real
 // name; one that is not (restricted contact scope, deactivated user,
 // name lookup failed) falls back to "User 1", "User 2", … in
-// first-appearance order. App senders are always "Bot".
+// first-appearance order. App senders are "<name> (Bot)" when the map
+// names their app_id, otherwise "Bot".
 type speakerLabeler struct {
 	names map[string]string // resolved open_id -> display name (may be nil)
 	seen  map[string]string
@@ -756,6 +786,9 @@ func newSpeakerLabeler(names map[string]string) *speakerLabeler {
 
 func (l *speakerLabeler) label(m LarkMessage) string {
 	if m.SenderType == "app" {
+		if name := l.names[m.SenderID]; name != "" {
+			return name + " (Bot)"
+		}
 		return "Bot"
 	}
 	key := m.SenderID
