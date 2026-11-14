@@ -281,17 +281,28 @@ export function useUnarchiveInbox() {
   });
 }
 
-export function useMarkAllInboxRead() {
+/**
+ * Move issues that only carry updates to the archive: what reading an update
+ * comes to (`readOnly`), and what clearing the section does to the rest.
+ * `groups` are list keys (`issue_id ?? id`).
+ *
+ * The rows leave at once. Which of them the server really archived is its
+ * call — an issue that gained something addressed to the user in the meantime
+ * stays — so the list is refreshed on settle rather than trusted.
+ */
+export function useArchiveInboxUpdates() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   return useMutation({
-    mutationFn: () => api.markAllInboxRead(),
-    onMutate: async () => {
+    mutationFn: ({ groups, readOnly }: { groups: readonly string[]; readOnly: boolean }) =>
+      api.archiveInboxUpdates(groups, readOnly),
+    onMutate: async ({ groups }) => {
       await qc.cancelQueries({ queryKey: inboxKeys.list(wsId) });
       const prev = qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId));
+      const keys = new Set(groups);
       qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), (old) =>
         old?.map((item) =>
-          !item.archived ? { ...item, read: true } : item,
+          !item.archived && keys.has(item.issue_id ?? item.id) ? { ...item, archived: true } : item,
         ),
       );
       return { prev };
@@ -299,42 +310,6 @@ export function useMarkAllInboxRead() {
     onError: (_err, _vars, ctx) => {
       if (ctx?.prev) qc.setQueryData(inboxKeys.list(wsId), ctx.prev);
     },
-    onSettled: () => {
-      refreshInboxAfterWrite(qc, wsId);
-    },
-  });
-}
-
-// The three batch-archive mutations below all move items into the archive, so
-// each invalidates BOTH lists on settle — plus the unread summary, since an
-// archived unread group leaves the badge.
-export function useArchiveAllInbox() {
-  const qc = useQueryClient();
-  const wsId = useWorkspaceId();
-  return useMutation({
-    mutationFn: () => api.archiveAllInbox(),
-    onSettled: () => {
-      refreshInboxAfterWrite(qc, wsId);
-    },
-  });
-}
-
-export function useArchiveAllReadInbox() {
-  const qc = useQueryClient();
-  const wsId = useWorkspaceId();
-  return useMutation({
-    mutationFn: () => api.archiveAllReadInbox(),
-    onSettled: () => {
-      refreshInboxAfterWrite(qc, wsId);
-    },
-  });
-}
-
-export function useArchiveCompletedInbox() {
-  const qc = useQueryClient();
-  const wsId = useWorkspaceId();
-  return useMutation({
-    mutationFn: () => api.archiveCompletedInbox(),
     onSettled: () => {
       refreshInboxAfterWrite(qc, wsId);
     },

@@ -9,7 +9,7 @@ import type { ReactNode } from "react";
 import { setApiInstance } from "../api";
 import type { ApiClient } from "../api/client";
 import type { InboxItem, InboxWorkspaceUnread } from "../types";
-import { useDeleteInbox, useMarkInboxRead, useMarkInboxUnread, useMarkIssueInboxRead, useSnoozeInbox, useUnarchiveInbox, useUnsnoozeInbox } from "./mutations";
+import { useArchiveInboxUpdates, useDeleteInbox, useMarkInboxRead, useMarkInboxUnread, useMarkIssueInboxRead, useSnoozeInbox, useUnarchiveInbox, useUnsnoozeInbox } from "./mutations";
 import { inboxKeys, useInboxUnreadCount } from "./queries";
 import { onInboxSummaryInvalidate } from "./ws-updaters";
 import { createQueryClient } from "../query-client";
@@ -451,6 +451,58 @@ describe("useSnoozeInbox", () => {
     await waitFor(() => expect(result.current.isError).toBe(true));
 
     expect(listCache(queryClient).every((row) => row.snoozed_until == null && row.read)).toBe(true);
+  });
+});
+
+describe("useArchiveInboxUpdates", () => {
+  let queryClient: QueryClient;
+  let archiveInboxUpdates: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    archiveInboxUpdates = vi.fn(async () => undefined);
+    setApiInstance({ archiveInboxUpdates } as unknown as ApiClient);
+    queryClient.setQueryData(inboxKeys.list(WORKSPACE_ID), [
+      item({ id: "inbox-1", issue_id: "issue-1", archived: false, read: true }),
+      item({ id: "inbox-2", issue_id: "issue-1", archived: false, read: true }),
+      item({ id: "inbox-3", issue_id: "issue-2", archived: false }),
+      item({ id: "inbox-4", issue_id: null, archived: false, read: true }),
+    ]);
+  });
+
+  it("takes the named issues out of the list at once, a notification without an issue by its own id", async () => {
+    let finish!: () => void;
+    archiveInboxUpdates.mockImplementation(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    const { result } = renderHook(() => useArchiveInboxUpdates(), { wrapper: createWrapper(queryClient) });
+
+    act(() => result.current.mutate({ groups: ["issue-1", "inbox-4"], readOnly: true }));
+    await waitFor(() => expect(archiveInboxUpdates).toHaveBeenCalledWith(["issue-1", "inbox-4"], true));
+
+    expect(listCache(queryClient).map((row) => [row.id, row.archived])).toEqual([
+      ["inbox-1", true],
+      ["inbox-2", true],
+      ["inbox-3", false],
+      ["inbox-4", true],
+    ]);
+
+    // The server decides what really left, so the list is read back.
+    await act(async () => finish());
+    await waitFor(() =>
+      expect(invalidate).toHaveBeenCalledWith(expect.objectContaining({ queryKey: inboxKeys.all(WORKSPACE_ID) })),
+    );
+  });
+
+  it("puts the rows back when the request fails", async () => {
+    archiveInboxUpdates.mockRejectedValue(new Error("offline"));
+    const { result } = renderHook(() => useArchiveInboxUpdates(), { wrapper: createWrapper(queryClient) });
+
+    act(() => result.current.mutate({ groups: ["issue-1"], readOnly: false }));
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    expect(listCache(queryClient).every((row) => !row.archived)).toBe(true);
   });
 });
 

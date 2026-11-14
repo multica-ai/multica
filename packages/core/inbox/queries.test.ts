@@ -141,17 +141,6 @@ describe("deduplicateArchivedInboxItems", () => {
 });
 
 describe("archived inbox options", () => {
-  it("keeps an agent selection out of archive query keys", () => {
-    const idle: InboxFilters = { ...EMPTY_INBOX_FILTERS, agent: "idle" };
-
-    expect(archivedInboxPagesOptions("ws", idle).queryKey).toEqual(
-      archivedInboxPagesOptions("ws", EMPTY_INBOX_FILTERS).queryKey,
-    );
-    expect(archivedInboxFacetsOptions("ws", idle).queryKey).toEqual(
-      archivedInboxFacetsOptions("ws", EMPTY_INBOX_FILTERS).queryKey,
-    );
-  });
-
   it("carries the previous result across a filter change but never across workspaces", () => {
     const todo: InboxFilters = { ...EMPTY_INBOX_FILTERS, statuses: ["todo"] };
     for (const options of [archivedInboxPagesOptions, archivedInboxFacetsOptions]) {

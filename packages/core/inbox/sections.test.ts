@@ -181,7 +181,7 @@ describe("buildInboxSections", () => {
 
   it("lists an issue the user's agent is working on under working, not updates", () => {
     const update = item({ id: "update", section: "updates" });
-    const sections = buildInboxSections([update], [update], NOW, { tasks: [task({})], userId: "me" });
+    const sections = buildInboxSections([update], [update], NOW, { working: { tasks: [task({})], userId: "me" } });
 
     expect(sections.working.map((row) => row.issueId)).toEqual(["issue-1"]);
     expect(sections.updates).toEqual([]);
@@ -189,7 +189,7 @@ describe("buildInboxSections", () => {
 
   it("keeps an issue that needs the user out of working", () => {
     const mention = item({ type: "mentioned" });
-    const sections = buildInboxSections([mention], [mention], NOW, { tasks: [task({})], userId: "me" });
+    const sections = buildInboxSections([mention], [mention], NOW, { working: { tasks: [task({})], userId: "me" } });
 
     expect(sections.needsYou).toHaveLength(1);
     expect(sections.working).toEqual([]);
@@ -197,10 +197,56 @@ describe("buildInboxSections", () => {
 
   it("keeps a snoozed issue out of working", () => {
     const snoozed = item({ section: "updates", snoozed_until: LATER });
-    const sections = buildInboxSections([snoozed], [snoozed], NOW, { tasks: [task({})], userId: "me" });
+    const sections = buildInboxSections([snoozed], [snoozed], NOW, { working: { tasks: [task({})], userId: "me" } });
 
     expect(sections.snoozed).toHaveLength(1);
     expect(sections.working).toEqual([]);
+  });
+
+  it("leaves a read update out and names it for the archive", () => {
+    const unread = item({ id: "unread", issue_id: "issue-a", section: "updates" });
+    const read = item({ id: "read", issue_id: "issue-b", section: "updates", read: true });
+    const all = [unread, read];
+
+    const sections = buildInboxSections(all, all, NOW);
+
+    expect(sections.updates.map((row) => row.item.id)).toEqual(["unread"]);
+    expect(sections.readUpdates).toEqual(["issue-b"]);
+  });
+
+  it("goes by the newest update, so a later unread one keeps the issue listed", () => {
+    const older = item({ id: "older", section: "updates", read: true, created_at: "2026-06-15T09:00:00Z" });
+    const newer = item({ id: "newer", section: "updates", created_at: "2026-06-15T10:00:00Z" });
+
+    const sections = buildInboxSections([newer], [newer, older], NOW);
+
+    expect(sections.updates.map((row) => row.item.id)).toEqual(["newer"]);
+    expect(sections.readUpdates).toEqual([]);
+  });
+
+  it("keeps the update that is open until the user moves on", () => {
+    const open = item({ id: "open", issue_id: "issue-a", section: "updates", read: true });
+    const all = [open];
+
+    expect(buildInboxSections(all, all, NOW, { openKey: "issue-a" })).toMatchObject({
+      updates: [{ item: open }],
+      readUpdates: [],
+    });
+    expect(buildInboxSections(all, all, NOW, { openKey: "issue-b" })).toMatchObject({
+      updates: [],
+      readUpdates: ["issue-a"],
+    });
+  });
+
+  it("names a read update a filter left out, and never one that is read but needs the user", () => {
+    const readUpdate = item({ id: "update", issue_id: "issue-a", section: "updates", read: true });
+    const readMention = item({ id: "mention", issue_id: "issue-b", type: "mentioned", read: true });
+    const snoozed = item({ id: "snoozed", issue_id: "issue-c", section: "updates", read: true, snoozed_until: LATER });
+
+    const sections = buildInboxSections([readMention], [readUpdate, readMention, snoozed], NOW);
+
+    expect(sections.needsYou.map((row) => row.item.id)).toEqual(["mention"]);
+    expect(sections.readUpdates).toEqual(["issue-a"]);
   });
 });
 
@@ -284,6 +330,7 @@ describe("inboxReasonKind", () => {
     expect(inboxReasonKind(item({ type: "mentioned", issue_status: "in_review" }))).toBe("mention");
     expect(inboxReasonKind(item({ type: "issue_assigned" }))).toBe("assigned");
     expect(inboxReasonKind(item({ type: "task_failed", issue_status: "in_review" }))).toBe("failed");
+    expect(inboxReasonKind(item({ type: "task_cancelled", issue_status: "in_progress" }))).toBe("cancelled");
     expect(inboxReasonKind(item({ type: "agent_blocked" }))).toBe("question");
     expect(inboxReasonKind(item({ type: "review_requested" }))).toBe("review");
   });

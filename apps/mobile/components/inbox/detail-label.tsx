@@ -49,6 +49,7 @@ const TYPE_KEY: Record<InboxItemType, string> = {
   review_requested: "type.review_requested",
   task_completed: "type.task_completed",
   task_failed: "type.task_failed",
+  task_cancelled: "type.task_cancelled",
   agent_blocked: "type.agent_blocked",
   agent_completed: "type.agent_completed",
   reaction_added: "type.reaction_added",

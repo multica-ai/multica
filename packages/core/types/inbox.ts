@@ -18,6 +18,9 @@ export type InboxItemType =
   | "review_requested"
   | "task_completed"
   | "task_failed"
+  // A run the recipient started was cancelled. `details` names who by
+  // (`cancelled_by_type`, `cancelled_by_id`, `cancelled_by_name`).
+  | "task_cancelled"
   | "agent_blocked"
   | "agent_completed"
   | "reaction_added"

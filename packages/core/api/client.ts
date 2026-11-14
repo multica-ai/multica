@@ -838,6 +838,9 @@ function dingTalkGroupSearch(params: ListDingTalkGroupsParams): string {
 // (server/internal/middleware/auth.go). Matched rather than inferred from the
 // status, because 403 also covers real authorization failures that must not
 // be retried.
+/** The most groups `POST /api/inbox/archive-updates` takes in one request. */
+const INBOX_ARCHIVE_UPDATES_MAX_GROUPS = 500;
+
 const CSRF_REJECTED_ERROR = "CSRF validation failed";
 
 // One header, two possible values — see ApiClient.readCsrfValue.
@@ -3236,10 +3239,6 @@ export class ApiClient {
     });
   }
 
-  async markAllInboxRead(): Promise<{ count: number }> {
-    return this.fetch("/api/inbox/mark-all-read", { method: "POST" });
-  }
-
   /**
    * Reads every unread notification the caller has on one issue. `count` is
    * how many rows the server read, or `null` when the response did not say:
@@ -3253,16 +3252,22 @@ export class ApiClient {
     });
   }
 
-  async archiveAllInbox(): Promise<{ count: number }> {
-    return this.fetch("/api/inbox/archive-all", { method: "POST" });
-  }
-
-  async archiveAllReadInbox(): Promise<{ count: number }> {
-    return this.fetch("/api/inbox/archive-all-read", { method: "POST" });
-  }
-
-  async archiveCompletedInbox(): Promise<{ count: number }> {
-    return this.fetch("/api/inbox/archive-completed", { method: "POST" });
+  /**
+   * Archive issues that only carry updates. `groups` are list keys
+   * (`issue_id ?? id`). The server re-checks each one and leaves it when it
+   * has since gained something addressed to the user or was snoozed; with
+   * `readOnly`, also when its newest update is unread.
+   */
+  async archiveInboxUpdates(groups: readonly string[], readOnly: boolean): Promise<void> {
+    for (let start = 0; start < groups.length; start += INBOX_ARCHIVE_UPDATES_MAX_GROUPS) {
+      await this.fetch("/api/inbox/archive-updates", {
+        method: "POST",
+        body: JSON.stringify({
+          groups: groups.slice(start, start + INBOX_ARCHIVE_UPDATES_MAX_GROUPS),
+          read_only: readOnly,
+        }),
+      });
+    }
   }
 
   // Notification preferences

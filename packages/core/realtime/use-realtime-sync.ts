@@ -61,6 +61,7 @@ import {
   invalidateUpdatedAtSortedIssueLists,
 } from "../issues/cache-coordinator";
 import { onInboxNew, onInboxInvalidate, onInboxIssueStatusChanged, onInboxIssueDeleted, onInboxSummaryInvalidate } from "../inbox/ws-updaters";
+import { inboxItemNeedsUser } from "../inbox/sections";
 import {
   notificationPreferenceOptions,
   notificationPreferenceKeys,
@@ -589,6 +590,10 @@ export async function handleInboxNew(
   // A new item in ANY workspace can light the workspace-switcher dot, so
   // refresh the cross-workspace summary regardless of the active workspace.
   void onInboxSummaryInvalidate(qc);
+  // A banner interrupts, so it is kept for what is addressed to the user and
+  // still unread. An update reports activity on something they only follow,
+  // and a run they stopped themselves comes back already read.
+  if (!inboxItemNeedsUser(item) || item.read) return;
   // Fire a native OS notification only when the app isn't focused. When
   // the user is already looking at Multica, the inbox sidebar's unread
   // styling is enough — no need to interrupt with a banner. `desktopAPI`
