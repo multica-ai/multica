@@ -76,6 +76,12 @@ Safari stays on the login page after a successful sign-in.
 
 The first line becomes the title and the rest becomes the description. Sending `/issue` alone creates nothing; the Bot replies with the required format instead.
 
+### Interactive cards
+
+<Callout type="warning">
+Multica renders Markdown replies as Feishu interactive cards, but it does not process card actions today. The Feishu long-connection integration handles only `im.message.receive_v1`; `card.action.trigger` events are acknowledged and dropped, so buttons and forms in a card never reach the agent. Use a text command or an external automation instead. Do not run a second long-connection client on the same Feishu app — Feishu delivers each event to only one of the app's connections, so the second client can silently take a share of `im.message.receive_v1` events away from Multica.
+</Callout>
+
 ## Images and files from the agent
 
 When file delivery is enabled, text and supported images attached to an agent’s reply appear together in one Feishu message. Images update that message as they finish uploading; files arrive separately in the same conversation. An image-only reply can use an image message. Supported images are limited to 10 MB; unsupported, larger, or explicitly rejected images are sent as files, up to 30 MB. This requires object storage and the application’s resource upload permission. If delivery fails or cannot be confirmed, the attachments remain available on the reply in Multica. Check the conversation before requesting a resend.
