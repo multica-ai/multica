@@ -1,0 +1,33 @@
+# Example deployment next to a reverse proxy on the same host (the proxy terminates TLS and forwards /mcp to
+# 127.0.0.1:8101). Host networking keeps the proxy on loopback, so the server can trust its X-Forwarded-For.
+# Put the variables in .env next to this file (never commit it), then: docker compose up -d --build
+services:
+  multica-mcp:
+    build:
+      context: .
+      args:
+        MULTICA_BACKEND_IMAGE: ${MULTICA_BACKEND_IMAGE:-ghcr.io/multica-ai/multica-backend:latest}
+    network_mode: host
+    environment:
+      MULTICA_API_URL: ${MULTICA_API_URL:-https://api.multica.ai}
+      MULTICA_MCP_KEY: ${MULTICA_MCP_KEY:?generate one with openssl rand -hex 32}
+      MULTICA_PAT: ${MULTICA_PAT:?create a personal access token in Multica}
+      MULTICA_MCP_WORKSPACES: ${MULTICA_MCP_WORKSPACES:?comma-separated workspace slugs}
+      MULTICA_MCP_ALLOWED_HOSTS: ${MULTICA_MCP_ALLOWED_HOSTS:-localhost,127.0.0.1}
+      MULTICA_MCP_HOST: 127.0.0.1
+      MULTICA_MCP_RUN_DIR: /run/multica-cli
+      # Per-person keys: mount an owner-only (0600) JSON file and point MULTICA_MCP_CLIENTS at it.
+      # MULTICA_MCP_CLIENTS: /run/secrets/multica-mcp-clients.json
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+      - /run/multica-cli:rw,noexec,nosuid,size=16m,mode=1777
+    volumes:
+      - audit:/state
+    mem_limit: 256m
+    pids_limit: 64
+    restart: unless-stopped
+volumes:
+  audit: {}
