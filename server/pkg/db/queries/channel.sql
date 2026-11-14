@@ -701,6 +701,24 @@ SELECT * FROM binding;
 SELECT * FROM channel_chat_session_binding
 WHERE installation_id = $1 AND channel_chat_id = $2 AND retired_at IS NULL;
 
+-- name: ChannelChatContextHasUserMessageContaining :one
+-- Whether the active route's current context generation already holds an
+-- agent-visible user message containing marker. Adapters use it to inline a
+-- quoted message once per conversation context instead of on every reply.
+SELECT EXISTS (
+    SELECT 1
+    FROM channel_chat_session_binding b
+    JOIN chat_message m
+      ON m.chat_session_id = b.chat_session_id
+     AND m.channel_context_revision = b.context_revision
+    WHERE b.installation_id = @installation_id
+      AND b.channel_chat_id = @channel_chat_id
+      AND b.retired_at IS NULL
+      AND m.role = 'user'
+      AND m.message_kind != 'channel_command'
+      AND strpos(m.content, @marker::text) > 0
+) AS found;
+
 -- name: LockCurrentChannelChatSessionBinding :one
 SELECT * FROM channel_chat_session_binding
 WHERE installation_id = $1 AND channel_chat_id = $2 AND retired_at IS NULL

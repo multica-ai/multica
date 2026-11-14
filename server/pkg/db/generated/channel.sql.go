@@ -230,6 +230,38 @@ func (q *Queries) BackfillChannelInstallationRegionToFeishuLark(ctx context.Cont
 	return result.RowsAffected(), nil
 }
 
+const channelChatContextHasUserMessageContaining = `-- name: ChannelChatContextHasUserMessageContaining :one
+SELECT EXISTS (
+    SELECT 1
+    FROM channel_chat_session_binding b
+    JOIN chat_message m
+      ON m.chat_session_id = b.chat_session_id
+     AND m.channel_context_revision = b.context_revision
+    WHERE b.installation_id = $1
+      AND b.channel_chat_id = $2
+      AND b.retired_at IS NULL
+      AND m.role = 'user'
+      AND m.message_kind != 'channel_command'
+      AND strpos(m.content, $3::text) > 0
+) AS found
+`
+
+type ChannelChatContextHasUserMessageContainingParams struct {
+	InstallationID pgtype.UUID `json:"installation_id"`
+	ChannelChatID  string      `json:"channel_chat_id"`
+	Marker         string      `json:"marker"`
+}
+
+// Whether the active route's current context generation already holds an
+// agent-visible user message containing marker. Adapters use it to inline a
+// quoted message once per conversation context instead of on every reply.
+func (q *Queries) ChannelChatContextHasUserMessageContaining(ctx context.Context, arg ChannelChatContextHasUserMessageContainingParams) (bool, error) {
+	row := q.db.QueryRow(ctx, channelChatContextHasUserMessageContaining, arg.InstallationID, arg.ChannelChatID, arg.Marker)
+	var found bool
+	err := row.Scan(&found)
+	return found, err
+}
+
 const channelMediaObjectIsReferenced = `-- name: ChannelMediaObjectIsReferenced :one
 SELECT EXISTS (
     SELECT 1 FROM attachment

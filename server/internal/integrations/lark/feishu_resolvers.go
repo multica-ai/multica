@@ -202,11 +202,21 @@ type larkBindingConfig struct {
 // function so the isolation contract is unit-tested without a DB.
 func larkSessionRouting(msg channel.InboundMessage) (bindingKey string, config []byte) {
 	chatID := msg.Source.ChatID
-	if msg.Source.ChatType != channel.ChatTypeGroup || msg.Source.ThreadID == "" {
+	bindingKey = larkRouteKey(chatID, ChatType(msg.Source.ChatType), msg.Source.ThreadID)
+	if bindingKey == chatID {
 		return chatID, nil
 	}
 	cfg, _ := json.Marshal(larkBindingConfig{ChatID: chatID})
-	return chatID + ":" + msg.Source.ThreadID, cfg
+	return bindingKey, cfg
+}
+
+// larkRouteKey is the channel chat id a message's Chat route is bound under:
+// the chat id, or "<chat id>:<topic id>" inside a group topic.
+func larkRouteKey(chatID string, chatType ChatType, threadID string) string {
+	if chatType != ChatTypeGroup || threadID == "" {
+		return chatID
+	}
+	return chatID + ":" + threadID
 }
 
 func (r *feishuSessionBinder) EnsureSession(ctx context.Context, p engine.EnsureSessionParams) (pgtype.UUID, error) {
