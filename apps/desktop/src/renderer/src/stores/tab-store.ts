@@ -341,10 +341,15 @@ export function splitTabUrl(url: string): { pathname: string; suffix: string } {
  * plus the list it opens — `?view=` names a saved view and `?scope=` a
  * built-in one (My agents' work), so cmd+clicking list B from a tab showing
  * list A must open B, not focus A. A saved view carries its own scope.
+ * Chat sessions name distinct conversations on the shared /chat pathname.
  */
 export function resourceKeyForUrl(url: string): string {
   const { pathname, suffix } = splitTabUrl(url);
   const params = searchParamsOfSuffix(suffix);
+  const session = params.get("session");
+  if (session && /^\/[^/]+\/chat$/.test(pathname)) {
+    return `${pathname}?session=${encodeURIComponent(session)}`;
+  }
   const view = params.get("view");
   if (view) return `${pathname}?view=${encodeURIComponent(view)}`;
   const scope = params.get("scope");
@@ -360,8 +365,8 @@ function searchParamsOfSuffix(suffix: string): URLSearchParams {
 /**
  * Dedup identity for the workspace-wide browsing history.
  *
- * Tab sessions intentionally treat search params as view state, but selecting
- * an Inbox row changes the content being viewed without leaving /inbox. Keep
+ * Tab sessions treat filters as view state. Selecting an Inbox row changes
+ * the content being viewed without leaving /inbox. Keep
  * those selections distinct in global History while leaving Back/Forward's
  * pathname-based session semantics unchanged.
  */

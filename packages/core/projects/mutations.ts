@@ -1,6 +1,7 @@
 import { onlineManager, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { projectKeys } from "./queries";
+import { chatKeys } from "../chat/queries";
 import { issueKeys } from "../issues/queries";
 import { useWorkspaceId } from "../hooks";
 import { useRecentContextStore } from "../chat/recent-context-store";
@@ -91,6 +92,8 @@ export function useDeleteProject() {
       qc.removeQueries({ queryKey: projectKeys.detail(wsId, id) });
       useRecentContextStore.getState().forgetContext(wsId, { type: "project", id });
       clearIssueSurfaceViewState(issueScopeKey({ type: "project", projectId: id }));
+      // The server clears project_id on surviving chats. Refresh list and detail caches.
+      qc.invalidateQueries({ queryKey: chatKeys.all(wsId) });
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: projectKeys.list(wsId) });
