@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -132,6 +133,19 @@ func escapeMarkdownLabel(s string) string {
 	).Replace(s)
 }
 
+// windowsSafeFilename replaces the characters Windows does not allow in a file
+// name. Attachments uploaded from macOS or Linux can carry them, and writing
+// such a name either fails outright or, for ':', silently writes into an NTFS
+// alternate data stream of a different file.
+func windowsSafeFilename(name string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || strings.ContainsRune(`<>:"|?*`, r) {
+			return '_'
+		}
+		return r
+	}, name)
+}
+
 func runAttachmentDownload(cmd *cobra.Command, args []string) error {
 	client, err := newAPIClient(cmd)
 	if err != nil {
@@ -155,6 +169,9 @@ func runAttachmentDownload(cmd *cobra.Command, args []string) error {
 	filename := filepath.Base(strVal(att, "filename"))
 	if filename == "" || filename == "." {
 		filename = args[0]
+	}
+	if runtime.GOOS == "windows" {
+		filename = windowsSafeFilename(filename)
 	}
 
 	// Download the file content.
