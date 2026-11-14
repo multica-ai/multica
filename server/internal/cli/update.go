@@ -34,8 +34,8 @@ const ChecksumManifestName = "checksums.txt"
 const defaultReleaseAPIBaseURL = "https://api.github.com"
 
 // MULTICA_RELEASE_API_BASE_URL points at a GitHub Releases API-compatible
-// mirror. MULTICA_RELEASE_DOWNLOAD_BASE_URL points at an artifact mirror
-// serving /<tag>/<asset-name>; when unset, the release-provided URLs win.
+// mirror. MULTICA_RELEASE_DOWNLOAD_BASE_URL selects a static artifact mirror
+// serving /<tag>/<asset-name> and checksums.txt without a release API.
 const releaseAPIBaseURLEnv = "MULTICA_RELEASE_API_BASE_URL"
 const releaseDownloadBaseURLEnv = "MULTICA_RELEASE_DOWNLOAD_BASE_URL"
 
@@ -277,8 +277,16 @@ func fetchReleaseByTag(tag string) (*GitHubRelease, error) {
 	return &release, nil
 }
 
-// FetchLatestRelease fetches the latest release tag from the multica GitHub repo.
+// FetchLatestRelease uses a static mirror's pinned version, or fetches the
+// latest release tag from the configured Releases API.
 func FetchLatestRelease() (*GitHubRelease, error) {
+	if releaseDownloadBaseURL() != "" {
+		version := strings.TrimSpace(os.Getenv("MULTICA_CLI_VERSION"))
+		if !IsReleaseVersion(version) {
+			return nil, fmt.Errorf("MULTICA_CLI_VERSION must name a release when %s is set", releaseDownloadBaseURLEnv)
+		}
+		return &GitHubRelease{TagName: normalizeReleaseTag(version)}, nil
+	}
 	client := &http.Client{Timeout: 10 * time.Second}
 	req, err := http.NewRequest(http.MethodGet, releaseAPIBaseURL()+"/repos/multica-ai/multica/releases/latest", nil)
 	if err != nil {
@@ -320,10 +328,13 @@ func MatchKnownBrewPrefix(path string) string {
 	return ""
 }
 
-// IsBrewInstall checks whether the running multica binary was installed via Homebrew.
+// IsBrewInstall selects Homebrew updates only when no artifact mirror is set.
 // The check itself lives in brewInstallForPath (stable_exe.go) so it stays
 // one implementation with the stable-path resolver that depends on it.
 func IsBrewInstall() bool {
+	if releaseDownloadBaseURL() != "" {
+		return false
+	}
 	exePath, err := selfexec.Resolve()
 	if err != nil {
 		return false
@@ -381,7 +392,7 @@ func fetchURLBytes(url string, timeout time.Duration) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-// UpdateViaDownload downloads the latest release binary from GitHub and replaces
+// UpdateViaDownload downloads the release binary from the configured source and replaces
 // the current executable in-place. Returns the combined output message and any error.
 func UpdateViaDownload(targetVersion string) (string, error) {
 	return UpdateViaDownloadWithTimeout(targetVersion, DefaultUpdateDownloadTimeout)
@@ -400,30 +411,16 @@ func UpdateViaDownloadWithTimeout(targetVersion string, downloadTimeout time.Dur
 	}
 
 	tag := normalizeReleaseTag(targetVersion)
-	release, err := fetchReleaseByTag(tag)
-	if err != nil {
-		return "", fmt.Errorf("fetch release metadata: %w", err)
-	}
-	asset, err := findReleaseAsset(release.Assets, tag, runtime.GOOS, runtime.GOARCH)
-	if err != nil {
-		return "", err
-	}
-	manifestAsset, err := findChecksumManifestAsset(release.Assets)
-	if err != nil {
-		return "", err
-	}
-	downloadURL := releaseAssetDownloadURL(asset.Name, tag, asset.BrowserDownloadURL)
-	assetName := asset.Name
-
 	// Pull the checksum manifest first so a release that is half-published
 	// (archives uploaded but checksums.txt not yet) fails before we eat the
 	// archive's bandwidth.
 	timeout := updateDownloadTimeoutOrDefault(downloadTimeout)
-	manifestURL := releaseAssetDownloadURL(manifestAsset.Name, tag, manifestAsset.BrowserDownloadURL)
-	manifestData, err := fetchURLBytes(manifestURL, timeout)
+	asset, manifestData, err := resolveReleaseDownload(tag, runtime.GOOS, runtime.GOARCH, timeout)
 	if err != nil {
-		return "", fmt.Errorf("download checksum manifest: %w", err)
+		return "", err
 	}
+	downloadURL := asset.BrowserDownloadURL
+	assetName := asset.Name
 	expectedSum, err := parseChecksumManifest(manifestData, assetName)
 	if err != nil {
 		return "", fmt.Errorf("parse checksum manifest: %w", err)
@@ -497,6 +494,52 @@ func UpdateViaDownloadWithTimeout(targetVersion string, downloadTimeout time.Dur
 	}
 
 	return fmt.Sprintf("Downloaded %s and replaced %s", assetName, exePath), nil
+}
+
+func resolveReleaseDownload(tag, goos, goarch string, timeout time.Duration) (*GitHubReleaseAsset, []byte, error) {
+	if releaseDownloadBaseURL() == "" {
+		release, err := fetchReleaseByTag(tag)
+		if err != nil {
+			return nil, nil, fmt.Errorf("fetch release metadata: %w", err)
+		}
+		asset, err := findReleaseAsset(release.Assets, tag, goos, goarch)
+		if err != nil {
+			return nil, nil, err
+		}
+		manifest, err := findChecksumManifestAsset(release.Assets)
+		if err != nil {
+			return nil, nil, err
+		}
+		data, err := fetchURLBytes(manifest.BrowserDownloadURL, timeout)
+		if err != nil {
+			return nil, nil, fmt.Errorf("download checksum manifest: %w", err)
+		}
+		return asset, data, nil
+	}
+
+	data, err := fetchURLBytes(releaseAssetDownloadURL(ChecksumManifestName, tag, ""), timeout)
+	if err != nil {
+		return nil, nil, fmt.Errorf("download checksum manifest: %w", err)
+	}
+	// Static mirrors need only the published manifest, not a Releases API.
+	// Selection still accepts only the exact platform archive names above.
+	var assets []GitHubReleaseAsset
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) >= 2 && !strings.HasPrefix(fields[0], "#") {
+			assets = append(assets, GitHubReleaseAsset{Name: fields[1]})
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, nil, fmt.Errorf("read checksum manifest: %w", err)
+	}
+	asset, err := findReleaseAsset(assets, tag, goos, goarch)
+	if err != nil {
+		return nil, nil, err
+	}
+	asset.BrowserDownloadURL = releaseAssetDownloadURL(asset.Name, tag, "")
+	return asset, data, nil
 }
 
 // extractBinaryFromTarGz reads a .tar.gz stream and returns the contents of the
