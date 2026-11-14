@@ -7,7 +7,8 @@ import { groupInboxRows } from "./group";
  * - "Needs you": a notification addressed to the user is waiting on the issue.
  *   It stays there after it is read, until the user hands the issue on,
  *   archives it or snoozes it.
- * - "Working": an agent run the user started is active on the issue.
+ * - "Working": an agent run the user started is active on the issue, or an
+ *   agent is still filing the issue the user asked it to create.
  * - "Snoozed": the user put it away until a time.
  * - "Updates": the user only follows the issue. Reading one is all there is
  *   to do with it, so a read update leaves for the archive.
@@ -54,9 +55,23 @@ export interface InboxWorkingRow {
   since: string;
 }
 
+/**
+ * A "Create with agent" the user sent whose issue the agent has not filed yet.
+ * Listed under "Working" from the click on, so the request is visibly in
+ * flight before there is an issue to show.
+ */
+export interface InboxCreatingRow {
+  taskId: string;
+  agentId: string;
+  queued: boolean;
+  since: string;
+}
+
 export interface InboxSections {
   needsYou: InboxSectionRow[];
   working: InboxWorkingRow[];
+  /** Listed under "Working", after the issues. */
+  creating: InboxCreatingRow[];
   updates: InboxSectionRow[];
   snoozed: InboxSectionRow[];
   /**
@@ -173,6 +188,7 @@ export function buildInboxSections(
   const sections: InboxSections = {
     needsYou: [],
     working: workingRows,
+    creating: working ? inboxCreatingRows(working.tasks, working.userId) : [],
     updates: [],
     snoozed: [],
     readUpdates: [...readUpdates],
@@ -230,11 +246,28 @@ function isQueued(task: AgentTask): boolean {
   );
 }
 
+function startedBy(task: AgentTask, userId: string): boolean {
+  return task.attribution?.source === "direct_human" && task.attribution.originator?.id === userId;
+}
+
+/** The user's "Create with agent" runs, by id. */
+function quickCreatesBy(tasks: readonly AgentTask[], userId: string): Set<string> {
+  const ids = new Set<string>();
+  for (const task of tasks) {
+    if (task.kind === "quick_create" && startedBy(task, userId)) ids.add(task.id);
+  }
+  return ids;
+}
+
 /**
  * The issues an agent is working on because the user asked: a run the user
- * started themselves, by assigning, commenting or rerunning. Runs that
- * autopilots, other members or other agents started are not the user's
+ * started themselves, by assigning, commenting or rerunning, and the run an
+ * agent starts on an issue it filed for the user's "Create with agent". Runs
+ * that autopilots, other members or other agents started are not the user's
  * hand-over, and neither are chat runs, which have no issue.
+ *
+ * A filed issue's run is told by its lineage to the create run, which the task
+ * snapshot keeps as the agent's latest outcome once it has finished.
  *
  * One row per issue, a running run before a queued one. Issues in `exclude`
  * are listed elsewhere: they need the user, or the user snoozed them.
@@ -245,13 +278,16 @@ export function inboxWorkingRows(
   exclude: ReadonlySet<string> = new Set(),
 ): InboxWorkingRow[] {
   if (!userId) return [];
+  const quickCreates = quickCreatesBy(tasks, userId);
   const byIssue = new Map<string, InboxWorkingRow>();
   for (const task of tasks) {
     if (!task.issue_id || exclude.has(task.issue_id)) continue;
     const running = task.status === "running";
     if (!running && !isQueued(task)) continue;
-    if (task.attribution?.source !== "direct_human") continue;
-    if (task.attribution.originator?.id !== userId) continue;
+    const filed =
+      task.attribution?.source === "delegation" &&
+      quickCreates.has(task.attribution.delegated_from_task_id ?? "");
+    if (!startedBy(task, userId) && !filed) continue;
     const row: InboxWorkingRow = {
       issueId: task.issue_id,
       taskId: task.id,
@@ -271,6 +307,40 @@ export function inboxWorkingRows(
   return [...byIssue.values()].sort((a, b) =>
     a.queued === b.queued ? time(b.since) - time(a.since) : a.queued ? 1 : -1,
   );
+}
+
+/**
+ * The user's "Create with agent" runs that have no issue yet, newest first.
+ *
+ * The run is linked to the issue it filed only when it finishes, so a run
+ * whose filed issue already has a run of its own is left out: that issue's
+ * row has taken over.
+ */
+export function inboxCreatingRows(
+  tasks: readonly AgentTask[],
+  userId: string | null | undefined,
+): InboxCreatingRow[] {
+  if (!userId) return [];
+  const filed = new Set<string>();
+  for (const task of tasks) {
+    if (task.issue_id && task.attribution?.source === "delegation" && task.attribution.delegated_from_task_id) {
+      filed.add(task.attribution.delegated_from_task_id);
+    }
+  }
+  const rows: InboxCreatingRow[] = [];
+  for (const task of tasks) {
+    if (task.issue_id || task.kind !== "quick_create" || filed.has(task.id)) continue;
+    const running = task.status === "running";
+    if (!running && !isQueued(task)) continue;
+    if (!startedBy(task, userId)) continue;
+    rows.push({
+      taskId: task.id,
+      agentId: task.agent_id,
+      queued: !running,
+      since: (running ? task.started_at : null) ?? task.created_at,
+    });
+  }
+  return rows.sort((a, b) => time(b.since) - time(a.since));
 }
 
 /** Why an issue waits on the user, for the words a "Needs you" row leads with. */

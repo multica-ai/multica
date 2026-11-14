@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { AgentTask, InboxItem } from "../types";
 import {
   buildInboxSections,
+  inboxCreatingRows,
   inboxReasonKind,
   inboxWorkingRows,
   nextInboxWake,
@@ -305,6 +306,87 @@ describe("inboxWorkingRows", () => {
 
   it("lists nothing before the user is known", () => {
     expect(inboxWorkingRows([task({})], undefined)).toEqual([]);
+  });
+
+  it("lists the run on an issue an agent filed for the user's create with agent", () => {
+    const create = task({ id: "create", kind: "quick_create", issue_id: "", status: "completed" });
+    const filed = task({
+      id: "filed",
+      issue_id: "issue-new",
+      attribution: { source: "delegation", precise: true, originator: { id: "me" }, delegated_from_task_id: "create" },
+    });
+    const otherDelegation = task({
+      id: "sub-issue",
+      issue_id: "issue-sub",
+      attribution: { source: "delegation", precise: true, originator: { id: "me" }, delegated_from_task_id: "unrelated" },
+    });
+    expect(inboxWorkingRows([create, filed, otherDelegation], "me").map((row) => row.issueId)).toEqual(["issue-new"]);
+  });
+
+  it("leaves out a filed issue's run when someone else sent the create", () => {
+    const create = task({
+      id: "create",
+      kind: "quick_create",
+      issue_id: "",
+      attribution: { source: "direct_human", precise: true, originator: { id: "someone" } },
+    });
+    const filed = task({
+      id: "filed",
+      issue_id: "issue-new",
+      attribution: { source: "delegation", precise: true, originator: { id: "someone" }, delegated_from_task_id: "create" },
+    });
+    expect(inboxWorkingRows([create, filed], "me")).toEqual([]);
+  });
+});
+
+describe("inboxCreatingRows", () => {
+  it("lists a create with agent the user sent, from the moment it is queued", () => {
+    const rows = inboxCreatingRows(
+      [
+        task({ id: "queued", kind: "quick_create", issue_id: "", status: "queued", started_at: null }),
+        task({ id: "running", kind: "quick_create", issue_id: "" }),
+      ],
+      "me",
+    );
+    expect(rows).toEqual([
+      { taskId: "running", agentId: "agent-1", queued: false, since: "2026-06-15T11:00:00Z" },
+      { taskId: "queued", agentId: "agent-1", queued: true, since: "2026-06-15T10:59:00Z" },
+    ]);
+  });
+
+  it("leaves out finished creates, other people's, and other runs", () => {
+    const rows = inboxCreatingRows(
+      [
+        task({ id: "done", kind: "quick_create", issue_id: "", status: "completed" }),
+        task({ id: "failed", kind: "quick_create", issue_id: "", status: "failed" }),
+        task({
+          id: "theirs",
+          kind: "quick_create",
+          issue_id: "",
+          attribution: { source: "direct_human", precise: true, originator: { id: "someone" } },
+        }),
+        task({ id: "chat", kind: "chat", issue_id: "" }),
+        task({ id: "issue-run", kind: "direct" }),
+      ],
+      "me",
+    );
+    expect(rows).toEqual([]);
+  });
+
+  it("hands over to the filed issue once its run exists", () => {
+    const create = task({ id: "create", kind: "quick_create", issue_id: "" });
+    const filed = task({
+      id: "filed",
+      issue_id: "issue-new",
+      status: "queued",
+      attribution: { source: "delegation", precise: true, originator: { id: "me" }, delegated_from_task_id: "create" },
+    });
+    expect(inboxCreatingRows([create], "me").map((row) => row.taskId)).toEqual(["create"]);
+    expect(inboxCreatingRows([create, filed], "me")).toEqual([]);
+
+    const sections = buildInboxSections([], [], NOW, { working: { tasks: [create, filed], userId: "me" } });
+    expect(sections.working.map((row) => row.issueId)).toEqual(["issue-new"]);
+    expect(sections.creating).toEqual([]);
   });
 });
 

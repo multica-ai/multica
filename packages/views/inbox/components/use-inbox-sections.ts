@@ -68,7 +68,7 @@ function useInboxClock(items: readonly InboxItem[]): number {
  * `filters` narrows "Working" like every other section. A run carries none of
  * its issue's fields, so the row is tested against the issue itself, the same
  * cache entry the row shows its title from, and is left out until that has
- * loaded.
+ * loaded. An issue still being created has nothing to test, and is left out.
  */
 export function useInboxSections(
   wsId: string,
@@ -97,6 +97,8 @@ export function useInboxSections(
         const issue = workingIssues.issues[index];
         return !!issue && inboxIssueMatches(inboxIssueProjection(issue), filters, at);
       }),
+      // No issue yet, so nothing to test a filter against.
+      creating: [],
       workingPending: tasksPending || workingIssues.pending,
     };
   }, [sections, filtered, workingIssues, filters, now, tasksPending]);

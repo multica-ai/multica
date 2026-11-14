@@ -3,6 +3,7 @@ import { fireEvent, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useInboxSectionStore } from "@multica/core/inbox/section-store";
 import type {
+  InboxCreatingRow,
   InboxSectionRow,
   InboxSections,
   InboxWorkingRow,
@@ -75,6 +76,7 @@ vi.mock("./inbox-working-item", () => ({
       {row.issueId}
     </button>
   ),
+  InboxCreatingItem: ({ row }: { row: InboxCreatingRow }) => <div data-row="creating">{row.taskId}</div>,
 }));
 
 function row(id: string, overrides: Partial<InboxItem> = {}): InboxSectionRow {
@@ -108,11 +110,19 @@ const working = (issueId: string, agentId = "agent-1"): InboxWorkingRow => ({
   since: "2026-06-15T08:00:00Z",
 });
 
-const EMPTY: InboxSections = { needsYou: [], working: [], updates: [], snoozed: [], readUpdates: [] };
+const creating = (taskId: string, agentId = "agent-1"): InboxCreatingRow => ({
+  taskId,
+  agentId,
+  queued: true,
+  since: "2026-06-15T08:00:00Z",
+});
+
+const EMPTY: InboxSections = { needsYou: [], working: [], creating: [], updates: [], snoozed: [], readUpdates: [] };
 
 const FULL: InboxSections = {
   needsYou: [row("a"), row("b")],
   working: [working("issue-w")],
+  creating: [],
   updates: [row("u", { read: false })],
   snoozed: [row("s")],
   readUpdates: [],
@@ -207,6 +217,13 @@ describe("InboxSectionedList sections", () => {
     expect(within(header("working")!).queryByRole("button")).toBeNull();
   });
 
+  it("lists an issue still being created under working, after the issues", () => {
+    renderList({ ...EMPTY, working: [working("issue-w")], creating: [creating("task-new")] });
+
+    expect(rows()).toEqual(["working:issue-w", "creating:task-new"]);
+    expect(header("working")).toHaveTextContent(/^Working2$/);
+  });
+
   it("leaves out a section with nothing in it, except the one that leads", () => {
     renderList({ ...EMPTY, updates: [row("u")] });
 
@@ -229,6 +246,14 @@ describe("InboxSectionedList with nothing waiting", () => {
     ).toBeInTheDocument();
     // The section has nothing to count.
     expect(header("needs_you")).toHaveTextContent(/^Needs you$/);
+  });
+
+  it("counts an agent still creating an issue as at work", () => {
+    renderList({ ...EMPTY, creating: [creating("task-new", "agent-3")] });
+
+    expect(
+      screen.getByText("1 agent is still working. Results come back here."),
+    ).toBeInTheDocument();
   });
 
   it("says nothing about agents when none is working", () => {
@@ -302,6 +327,18 @@ describe("InboxSectionedList selection", () => {
     fireEvent.keyDown(scroller, { key: "ArrowDown" });
 
     expect(onSelect).toHaveBeenCalledWith(FULL.updates[0]!.item);
+  });
+
+  it("walks past an issue still being created, which has nothing to open", () => {
+    const { scroller, onSelect, onSelectIssue } = renderList(
+      { ...FULL, creating: [creating("task-new")] },
+      { selectedKey: "issue-w" },
+    );
+
+    fireEvent.keyDown(scroller, { key: "ArrowDown" });
+
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(onSelectIssue).not.toHaveBeenCalled();
   });
 
   it("leaves modified arrows and arrows typed into a field alone", () => {

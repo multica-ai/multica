@@ -153,6 +153,7 @@
     "snoozed": "Pospuestas",
     "clear_updates": "Vaciar",
     "queued": "En cola",
+    "creating_issue": "Creando la tarea…",
     "caught_up": "Todo al día",
     "still_working_one": "{{count}} agente sigue trabajando. Los resultados volverán aquí.",
     "still_working_other": "{{count}} agentes siguen trabajando. Los resultados volverán aquí."

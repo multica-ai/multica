@@ -59,6 +59,8 @@ The inbox badge counts the issues under **Needs you**. Reading one doesn't take 
 
 When your comment or assignment starts an agent run, the issue leaves **Needs you** and shows under **Working**. When the run finishes, fails, or is cancelled, it comes back to **Needs you**, unless the issue is already closed.
 
+**Create with agent** shows under **Working** as soon as you send it, as **Creating issue…** with the agent that's writing it. Once the agent has filed the issue and starts working on it, the row becomes that issue.
+
 A cancelled run comes back as **Run cancelled**. If you stopped it yourself, the row is already read and says **You stopped this run**; if someone else did, it is unread and names them. It doesn't come back while another run you started is active on the issue, as when you rerun it: the issue stays under **Working**.
 
 ## Handle notifications
@@ -79,7 +81,7 @@ Open **Archived** from the menu on the inbox title to browse older notifications
 
 ### Filter
 
-The inbox filters by the issue: status, priority, project, assignee, label, and due date. A filter applies to every section, **Working** included. **Archived** can also be filtered by the notification itself: read state, type, sender, and when it was received. Its filters apply to the entire archive, including records that have not loaded yet.
+The inbox filters by the issue: status, priority, project, assignee, label, and due date. A filter applies to every section, **Working** included; an issue still being created has nothing to match yet, so it's hidden while a filter is on. **Archived** can also be filtered by the notification itself: read state, type, sender, and when it was received. Its filters apply to the entire archive, including records that have not loaded yet.
 
 ### Snooze
 

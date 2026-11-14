@@ -153,6 +153,7 @@
     "snoozed": "Reportées",
     "clear_updates": "Effacer",
     "queued": "En file d'attente",
+    "creating_issue": "Création de la tâche…",
     "caught_up": "Tout est traité",
     "still_working_one": "{{count}} agent travaille encore. Les résultats reviendront ici.",
     "still_working_other": "{{count}} agents travaillent encore. Les résultats reviendront ici."

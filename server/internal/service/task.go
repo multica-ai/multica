@@ -1781,6 +1781,9 @@ func (s *TaskService) enqueueQuickCreateTask(ctx context.Context, workspaceID, r
 	// triggered" because the modal closes immediately and the task
 	// sits in 'queued' until the next sleepWithContextOrWakeup tick.
 	s.RecordHumanDelegation(ctx, attr)
+	// Clients list the request under the Inbox's "Working" from the moment it
+	// is queued, not from the daemon's claim.
+	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
 	s.NotifyTaskEnqueued(ctx, task)
 	return task, nil
 }

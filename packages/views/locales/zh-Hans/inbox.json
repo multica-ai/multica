@@ -151,6 +151,7 @@
     "snoozed": "已推迟",
     "clear_updates": "清空",
     "queued": "排队中",
+    "creating_issue": "正在创建任务…",
     "caught_up": "都处理完了",
     "still_working_other": "{{count}} 个智能体还在运行，有结果会回到这里。"
   },

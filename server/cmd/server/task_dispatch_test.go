@@ -15,7 +15,7 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
-func requireWorkspaceDispatchPayload(t *testing.T, fb *fakeBroadcaster, want map[string]string) {
+func requireWorkspaceTaskPayload(t *testing.T, fb *fakeBroadcaster, eventType string, want map[string]string) {
 	t.Helper()
 	found := 0
 	for _, call := range fb.workspaceCalls {
@@ -26,7 +26,7 @@ func requireWorkspaceDispatchPayload(t *testing.T, fb *fakeBroadcaster, want map
 		if err := json.Unmarshal(call.msg, &frame); err != nil {
 			t.Fatal(err)
 		}
-		if frame.Type != protocol.EventTaskDispatch {
+		if frame.Type != eventType {
 			continue
 		}
 		found++
@@ -35,11 +35,11 @@ func requireWorkspaceDispatchPayload(t *testing.T, fb *fakeBroadcaster, want map
 			expected[key] = value
 		}
 		if !reflect.DeepEqual(frame.Payload, expected) {
-			t.Errorf("workspace dispatch payload = %v, want only routing ids %v", frame.Payload, expected)
+			t.Errorf("workspace %s payload = %v, want only routing ids %v", eventType, frame.Payload, expected)
 		}
 	}
 	if found != 1 {
-		t.Fatalf("workspace dispatch events = %d, want 1", found)
+		t.Fatalf("workspace %s events = %d, want 1", eventType, found)
 	}
 }
 
@@ -62,6 +62,10 @@ func TestPrivateProjectQuickCreateDispatchOmitsPrompt(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id=$1`, task.ID)
 	})
+	// The Inbox lists the request from the moment it is queued.
+	requireWorkspaceTaskPayload(t, fb, protocol.EventTaskQueued, map[string]string{
+		"task_id": util.UUIDToString(task.ID), "agent_id": agent, "issue_id": "", "status": "queued",
+	})
 	claimed, err := tasks.ClaimTask(ctx, ppUUID(agent))
 	if err != nil || claimed == nil {
 		t.Fatalf("claim: task=%v error=%v", claimed, err)
@@ -70,7 +74,7 @@ func TestPrivateProjectQuickCreateDispatchOmitsPrompt(t *testing.T) {
 	if err := json.Unmarshal(claimed.Context, &taskContext); err != nil || taskContext.Prompt != prompt {
 		t.Fatalf("claimed task must retain its prompt for the daemon: context=%s error=%v", claimed.Context, err)
 	}
-	requireWorkspaceDispatchPayload(t, fb, map[string]string{
+	requireWorkspaceTaskPayload(t, fb, protocol.EventTaskDispatch, map[string]string{
 		"task_id": util.UUIDToString(claimed.ID), "agent_id": agent, "runtime_id": runtime, "issue_id": "",
 	})
 }
@@ -100,7 +104,7 @@ func TestTaskDispatchKeepsIssueAndChatRoutingWithoutContext(t *testing.T) {
 			if claimed, err := tasks.ClaimTask(ctx, ppUUID(agent)); err != nil || claimed == nil {
 				t.Fatalf("claim: task=%v error=%v", claimed, err)
 			}
-			requireWorkspaceDispatchPayload(t, fb, want)
+			requireWorkspaceTaskPayload(t, fb, protocol.EventTaskDispatch, want)
 		})
 	}
 }

@@ -153,6 +153,7 @@
     "snoozed": "Snoozed",
     "clear_updates": "Clear",
     "queued": "Queued",
+    "creating_issue": "Creating issue…",
     "caught_up": "All caught up",
     "still_working_one": "{{count}} agent is still working. Results come back here.",
     "still_working_other": "{{count}} agents are still working. Results come back here."

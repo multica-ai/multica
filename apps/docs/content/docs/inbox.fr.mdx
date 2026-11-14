@@ -59,6 +59,8 @@ Le badge de la boîte de réception compte les tâches de la section **À traite
 
 Quand votre commentaire ou votre assignation lance une exécution d'agent, la tâche quitte **À traiter** et s'affiche dans **En cours**. Quand l'exécution se termine, échoue ou est annulée, elle revient dans **À traiter**, sauf si la tâche est déjà clôturée.
 
+**Créer avec un agent** apparaît dans **En cours** dès l'envoi, sous la forme **Création de la tâche…** avec l'agent qui la rédige. Une fois la tâche créée et prise en charge par l'agent, la ligne devient cette tâche.
+
 Une exécution annulée revient avec la mention **Exécution annulée**. Si vous l'avez arrêtée vous-même, la ligne est déjà lue et indique **Vous avez arrêté cette exécution** ; si quelqu'un d'autre l'a arrêtée, elle est non lue et nomme cette personne. Elle ne revient pas tant qu'une autre exécution que vous avez lancée est active sur la tâche, par exemple après une relance : la tâche reste dans **En cours**.
 
 ## Traiter les notifications
@@ -79,7 +81,7 @@ Ouvrez **Archivées** depuis le menu du titre de la boîte de réception pour pa
 
 ### Filtrer
 
-La boîte de réception se filtre selon la tâche : statut, priorité, projet, responsable, étiquette et date d'échéance. Un filtre s'applique à toutes les sections, **En cours** comprise. **Archivées** se filtre aussi selon la notification elle-même : état de lecture, type, expéditeur et date de réception. Ses filtres s'appliquent à l'ensemble des archives, y compris aux éléments pas encore chargés.
+La boîte de réception se filtre selon la tâche : statut, priorité, projet, responsable, étiquette et date d'échéance. Un filtre s'applique à toutes les sections, **En cours** comprise ; une tâche encore en cours de création n'a rien à comparer, elle est donc masquée tant qu'un filtre est actif. **Archivées** se filtre aussi selon la notification elle-même : état de lecture, type, expéditeur et date de réception. Ses filtres s'appliquent à l'ensemble des archives, y compris aux éléments pas encore chargés.
 
 ### Reporter
 

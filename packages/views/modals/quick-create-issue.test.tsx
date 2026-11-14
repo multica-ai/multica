@@ -10,6 +10,7 @@ import {
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { agentTaskSnapshotKeys } from "@multica/core/agents";
 
 const mockQuickCreateIssue = vi.hoisted(() => vi.fn());
 type VoiceOptions = { insert: (text: string) => boolean; submit?: () => void };
@@ -153,7 +154,10 @@ const mockRuntimesData = vi.hoisted(
 // the same or the two records drift apart only in tests.
 let mockUploadIdSeq = 0;
 
+const mockInvalidateQueries = vi.hoisted(() => vi.fn());
+
 vi.mock("@tanstack/react-query", () => ({
+  useQueryClient: () => ({ invalidateQueries: mockInvalidateQueries }),
   useQuery: ({ queryKey }: { queryKey: string[] }) => {
     // Workspace-scoped query keys carry the wsId as `queryKey[1]`; the
     // discriminator is at `queryKey[2]` (e.g. ["workspaces", wsId, "squads"]).
@@ -702,6 +706,8 @@ describe("AgentCreatePanel", () => {
     expect(mockClearDraft).toHaveBeenCalled();
     expect(mockSetLastMode).toHaveBeenCalledWith("agent");
     expect(onClose).toHaveBeenCalled();
+    // The Inbox's "Working" section lists the run as soon as it is sent.
+    expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: agentTaskSnapshotKeys.all("ws-test") });
   });
 
   it("dictates into the prompt and lets voice send it to the agent", async () => {

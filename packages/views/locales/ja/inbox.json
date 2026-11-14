@@ -151,6 +151,7 @@
     "snoozed": "スヌーズ中",
     "clear_updates": "クリア",
     "queued": "待機中",
+    "creating_issue": "タスクを作成中…",
     "caught_up": "すべて対応済みです",
     "still_working_other": "{{count}} 件のエージェントが実行中です。結果はここに戻ります。"
   },

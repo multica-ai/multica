@@ -151,6 +151,7 @@
     "snoozed": "미룬 항목",
     "clear_updates": "비우기",
     "queued": "대기 중",
+    "creating_issue": "태스크 생성 중…",
     "caught_up": "모두 처리했습니다",
     "still_working_other": "에이전트 {{count}}개가 아직 실행 중입니다. 결과는 여기로 돌아옵니다."
   },

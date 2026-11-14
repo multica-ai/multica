@@ -247,7 +247,12 @@ export function InboxPage() {
   const { workingPending } = sections;
   const hasRows = isArchivedView
     ? visibleItems.length > 0
-    : sections.needsYou.length + sections.working.length + sections.updates.length + sections.snoozed.length > 0;
+    : sections.needsYou.length +
+        sections.working.length +
+        sections.creating.length +
+        sections.updates.length +
+        sections.snoozed.length >
+      0;
 
   // Inbox zero: the bleeding m rises once, at the moment the last issue that
   // needs the user leaves; opening an inbox with none shows it at rest.

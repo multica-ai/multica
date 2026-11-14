@@ -14,6 +14,7 @@ import {
   type InboxFoldingSection,
 } from "@multica/core/inbox/section-store";
 import type {
+  InboxCreatingRow,
   InboxSectionRow,
   InboxSections,
   InboxWorkingRow,
@@ -27,7 +28,7 @@ import { VirtuosoSeed, VIRTUOSO_SEED_COUNT } from "../../common/virtuoso-seed";
 import { useT } from "../../i18n";
 import { useRestoredScrollOffset, useRestoredScrollRef } from "../../platform";
 import { InboxListItem, type InboxRowSection } from "./inbox-list-item";
-import { InboxWorkingItem } from "./inbox-working-item";
+import { InboxCreatingItem, InboxWorkingItem } from "./inbox-working-item";
 
 // Sizing only, shared by the seed's spacer and Virtuoso's default: a
 // "Needs you" row is two text lines plus py-2.5; the other rows are shorter
@@ -40,6 +41,7 @@ type Entry =
   | { kind: "header"; section: SectionKey; count: number | null; folding: boolean; open: boolean }
   | { kind: "item"; section: InboxRowSection; row: InboxSectionRow }
   | { kind: "working"; row: InboxWorkingRow }
+  | { kind: "creating"; row: InboxCreatingRow }
   | { kind: "caught-up"; agents: number };
 
 /** The key the page selects a row by. */
@@ -111,7 +113,7 @@ export function InboxSectionedList({
 
   const entries = useMemo(() => {
     const out: Entry[] = [];
-    const { needsYou, working, updates, snoozed } = sections;
+    const { needsYou, working, creating, updates, snoozed } = sections;
     const header = (section: SectionKey, count: number | null, open = true) =>
       out.push({ kind: "header", section, count, folding: !filtered && section !== "needs_you" && section !== "working", open });
 
@@ -119,12 +121,14 @@ export function InboxSectionedList({
       header("needs_you", needsYou.length > 0 ? needsYou.length : null);
       for (const row of needsYou) out.push({ kind: "item", section: "needs_you", row });
       if (needsYou.length === 0) {
-        out.push({ kind: "caught-up", agents: new Set(working.map((row) => row.agentId)).size });
+        const agents = new Set([...working, ...creating].map((row) => row.agentId));
+        out.push({ kind: "caught-up", agents: agents.size });
       }
     }
-    if (working.length > 0) {
-      header("working", working.length);
+    if (working.length + creating.length > 0) {
+      header("working", working.length + creating.length);
       for (const row of working) out.push({ kind: "working", row });
+      for (const row of creating) out.push({ kind: "creating", row });
     }
     if (updates.length > 0) {
       const open = filtered || stored.updates;
@@ -208,7 +212,9 @@ export function InboxSectionedList({
       ? `header:${entry.section}`
       : entry.kind === "caught-up"
         ? "caught-up"
-        : `${entry.kind}:${entryKey(entry)}`;
+        : entry.kind === "creating"
+          ? `creating:${entry.row.taskId}`
+          : `${entry.kind}:${entryKey(entry)}`;
 
   const itemContent = (index: number, entry: Entry) => {
     if (entry.kind === "header") {
@@ -286,6 +292,7 @@ export function InboxSectionedList({
         />
       );
     }
+    if (entry.kind === "creating") return <InboxCreatingItem row={entry.row} />;
     const { item } = entry.row;
     return (
       <InboxListItem

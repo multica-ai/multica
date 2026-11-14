@@ -151,6 +151,7 @@
     "snoozed": "已延後",
     "clear_updates": "清空",
     "queued": "排隊中",
+    "creating_issue": "正在建立任務…",
     "caught_up": "都處理完了",
     "still_working_other": "{{count}} 個 AI 代理還在執行，有結果會回到這裡。"
   },

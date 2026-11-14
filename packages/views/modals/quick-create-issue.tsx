@@ -13,7 +13,7 @@ import {
   Settings2,
   X as XIcon,
 } from "@multica/ui/icons";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { DialogTitle } from "@multica/ui/components/ui/dialog";
 import {
@@ -66,7 +66,7 @@ import { useComposerVoice, VoiceDialogFooter, VoiceMicButton } from "../voice";
 import { ProjectPicker } from "../projects/components/project-picker";
 import { DueDatePicker, PriorityIcon, PriorityPicker } from "../issues/components";
 import { canAssignAgent } from "../issues/components/pickers/assignee-picker";
-import { isAgentRuntimeBound } from "@multica/core/agents";
+import { agentTaskSnapshotKeys, isAgentRuntimeBound } from "@multica/core/agents";
 import {
   PropertyPicker,
   PickerItem,
@@ -129,6 +129,7 @@ export function AgentCreatePanel({
   const workspaceName = useCurrentWorkspace()?.name;
   const workspacePaths = useWorkspacePaths();
   const wsId = useWorkspaceId();
+  const qc = useQueryClient();
   const anchorCommentId = typeof data?.anchor_comment_id === "string" ? data.anchor_comment_id : null;
   const sourcePreview = data?.source_context_preview as SourceContextPreview | undefined;
   const sourceContextLoading = data?.source_context_loading === true;
@@ -488,6 +489,9 @@ export function AgentCreatePanel({
             ...(activeAttachmentIds.length > 0 ? { attachment_ids: activeAttachmentIds } : {}),
           });
         }
+        // The Inbox lists the run under "Working" from the snapshot; read it
+        // now rather than when the daemon claims the run.
+        void qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.all(wsId) });
         setLastActor(actor.type, actor.id);
         setLastMode("agent");
         toast.success(t(($) => $.create_issue.agent.toast_sent), {
