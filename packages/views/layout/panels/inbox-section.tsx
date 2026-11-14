@@ -2,24 +2,38 @@
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Archive } from "@multica/ui/icons";
+import { toast } from "sonner";
+import { Archive, BookCheck, CheckCheck, ListChecks, MoreHorizontal } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@multica/ui/components/ui/dropdown-menu";
 import { inboxTypeGroup } from "@multica/core/inbox/filter-store";
-import { useArchiveInbox } from "@multica/core/inbox/mutations";
+import {
+  useArchiveAllInbox,
+  useArchiveAllReadInbox,
+  useArchiveCompletedInbox,
+  useArchiveInbox,
+  useMarkAllInboxRead,
+} from "@multica/core/inbox/mutations";
 import { deduplicateInboxItems, inboxListOptions, useInboxUnreadCount } from "@multica/core/inbox/queries";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
 import { useWorkspacePaths, type WorkspacePaths } from "@multica/core/paths";
 import type { InboxItem } from "@multica/core/types";
-import { AppLink } from "../../navigation";
+import { AppLink, useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 import { INBOX_TYPE_ICONS } from "../../inbox/components/inbox-filter-options";
 import { getInboxDisplayTitle, isAutopilotQuotaNotice } from "../../inbox/components/inbox-display";
 import { useTypeLabels } from "../../inbox/components/inbox-detail-label";
 import { useTimeAgo } from "../../inbox/components/inbox-list-item";
-import { PANEL_ROW_CLASS, PanelCount, PanelLink, PanelList, PanelSection, panelRowAnchor, panelRowStateClass } from "../panel-nav";
+import { PANEL_ROW_CLASS, PanelCount, PanelList, PanelSection, panelRowAnchor, panelRowStateClass } from "../panel-nav";
 import { InboxSectionSettings, SECTION_SETTINGS_REVEAL_CLASS } from "./sidebar-settings";
-import { ISSUE_ROW_LINK_CLASS } from "./sidebar-tree";
+import { ISSUE_ROW_LINK_CLASS, TREE_ROW_BUTTON_CLASS } from "./sidebar-tree";
 
 const EMPTY_INBOX: InboxItem[] = [];
 
@@ -28,7 +42,8 @@ export const INBOX_LIST = "inbox";
 
 /**
  * Where a notification row leads: its issue, at the comment it is about when
- * it names one. An issue-less notification opens in the full Inbox.
+ * it names one. An issue-less notification opens on the Inbox page, which
+ * shows the detail of the row picked here.
  */
 function inboxRowHref(p: WorkspacePaths, item: InboxItem): string {
   if (!item.issue_id) return `${p.inbox()}?${new URLSearchParams({ issue: item.id }).toString()}`;
@@ -87,7 +102,10 @@ export function InboxSection({
   const showCount = useSidebarTreeStore((s) => s.inboxSettings.showCount);
   const unread = useInboxUnreadCount(wsId);
   const archive = useArchiveInbox();
+  const { searchParams } = useNavigation();
   const { rows: all, displayed, expanded, limit, setExpanded } = rows;
+  // The notification the Inbox page has open, keyed as it groups rows.
+  const openKey = pathname === p.inbox() ? searchParams.get("issue") : null;
 
   return (
     <PanelSection
@@ -97,22 +115,30 @@ export function InboxSection({
       action={
         <>
           {showCount && <PanelCount value={unread} className="px-1 font-medium text-brand" />}
+          <InboxSectionActions className={SECTION_SETTINGS_REVEAL_CLASS} />
           <InboxSectionSettings className={SECTION_SETTINGS_REVEAL_CLASS} />
         </>
       }
     >
-      {displayed.length > 0 && (
+      {displayed.length > 0 ? (
         <PanelList data-sidebar-list={INBOX_LIST}>
           {displayed.map((item) => (
             <InboxRow
               key={item.id}
               item={item}
               href={inboxRowHref(p, item)}
-              active={!!item.issue_id && item.issue_id === activeIssueId}
+              active={
+                (!!item.issue_id && item.issue_id === activeIssueId) ||
+                (!!openKey && (item.issue_id ?? item.id) === openKey)
+              }
               onArchive={() => archive.mutate(item.id)}
             />
           ))}
         </PanelList>
+      ) : (
+        <p className={cn(PANEL_ROW_CLASS, "pl-[2.375rem] text-caption text-faint-foreground")}>
+          {t(($) => $.panels.work.inbox_empty)}
+        </p>
       )}
       {all.length > limit && (
         <button
@@ -126,16 +152,74 @@ export function InboxSection({
             : t(($) => $.sidebar.show_more_pins, { count: all.length - limit })}
         </button>
       )}
-      <PanelList className="mt-px">
-        <PanelLink
-          href={p.inbox()}
-          icon={<span className="size-4" aria-hidden />}
-          label={all.length > 0 ? t(($) => $.panels.work.inbox_all) : t(($) => $.panels.work.inbox_empty)}
-          active={pathname === p.inbox()}
-          className="text-caption"
-        />
-      </PanelList>
     </PanelSection>
+  );
+}
+
+function InboxSectionActions({ className }: { className?: string }) {
+  const { t } = useT("layout");
+  const { t: tInbox } = useT("inbox");
+  const markAllRead = useMarkAllInboxRead();
+  const archiveAll = useArchiveAllInbox();
+  const archiveAllRead = useArchiveAllReadInbox();
+  const archiveCompleted = useArchiveCompletedInbox();
+  const label = t(($) => $.panels.work.inbox_actions);
+  const onError = (fallback: string) => (err: unknown) =>
+    toast.error(err instanceof Error && err.message ? err.message : fallback);
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <button
+            type="button"
+            aria-label={label}
+            className={cn(
+              TREE_ROW_BUTTON_CLASS,
+              "text-muted-foreground data-popup-open:bg-surface-selected data-popup-open:text-foreground data-popup-open:opacity-100",
+              className,
+            )}
+          />
+        }
+      >
+        <MoreHorizontal className="size-3.5" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent side="right" align="start" className="w-auto min-w-48">
+        <DropdownMenuItem
+          onClick={() =>
+            markAllRead.mutate(undefined, { onError: onError(tInbox(($) => $.errors.mark_all_read_failed)) })
+          }
+        >
+          <CheckCheck className="size-4" />
+          {tInbox(($) => $.menu.mark_all_read)}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          onClick={() =>
+            archiveAllRead.mutate(undefined, { onError: onError(tInbox(($) => $.errors.archive_all_read_failed)) })
+          }
+        >
+          <BookCheck className="size-4" />
+          {tInbox(($) => $.menu.archive_all_read)}
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() =>
+            archiveCompleted.mutate(undefined, { onError: onError(tInbox(($) => $.errors.archive_completed_failed)) })
+          }
+        >
+          <ListChecks className="size-4" />
+          {tInbox(($) => $.menu.archive_completed)}
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() =>
+            archiveAll.mutate(undefined, { onError: onError(tInbox(($) => $.errors.archive_all_failed)) })
+          }
+        >
+          <Archive className="size-4" />
+          {tInbox(($) => $.menu.archive_all)}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

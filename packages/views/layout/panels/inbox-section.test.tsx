@@ -11,7 +11,14 @@ import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 import { InboxSection, useInboxSectionRows } from "./inbox-section";
 
-const state = vi.hoisted(() => ({ unread: 0, archive: vi.fn() }));
+const state = vi.hoisted(() => ({
+  unread: 0,
+  archive: vi.fn(),
+  markAllRead: vi.fn(),
+  archiveAll: vi.fn(),
+  archiveAllRead: vi.fn(),
+  archiveCompleted: vi.fn(),
+}));
 
 vi.mock("@multica/core/paths", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@multica/core/paths")>();
@@ -23,6 +30,10 @@ vi.mock("@multica/core/inbox/queries", async (importOriginal) => ({
 }));
 vi.mock("@multica/core/inbox/mutations", () => ({
   useArchiveInbox: () => ({ mutate: state.archive }),
+  useMarkAllInboxRead: () => ({ mutate: state.markAllRead }),
+  useArchiveAllInbox: () => ({ mutate: state.archiveAll }),
+  useArchiveAllReadInbox: () => ({ mutate: state.archiveAllRead }),
+  useArchiveCompletedInbox: () => ({ mutate: state.archiveCompleted }),
 }));
 vi.mock("@multica/ui/components/common/tooltip-hint", () => ({
   TooltipHint: ({ children }: { children: ReactNode }) => <>{children}</>,
@@ -50,28 +61,32 @@ function item(overrides: Partial<InboxItem> & { id: string }): InboxItem {
   };
 }
 
-const adapter: NavigationAdapter = {
-  push: vi.fn(),
-  replace: vi.fn(),
-  back: vi.fn(),
-  pathname: "/acme/issues",
-  searchParams: new URLSearchParams(),
-  hash: "",
-  getShareableUrl: (path) => path,
-};
-
-function Harness({ activeIssueId }: { activeIssueId: string | null }) {
-  const rows = useInboxSectionRows("ws-1");
-  return <InboxSection wsId="ws-1" rows={rows} pathname="/acme/issues" activeIssueId={activeIssueId} />;
+function adapter(url: string): NavigationAdapter {
+  const [pathname, search = ""] = url.split("?");
+  return {
+    push: vi.fn(),
+    replace: vi.fn(),
+    back: vi.fn(),
+    pathname: pathname!,
+    searchParams: new URLSearchParams(search),
+    hash: "",
+    getShareableUrl: (path) => path,
+  };
 }
 
-function renderSection(items: InboxItem[], activeIssueId: string | null = null) {
+function Harness({ activeIssueId, pathname }: { activeIssueId: string | null; pathname: string }) {
+  const rows = useInboxSectionRows("ws-1");
+  return <InboxSection wsId="ws-1" rows={rows} pathname={pathname} activeIssueId={activeIssueId} />;
+}
+
+function renderSection(items: InboxItem[], activeIssueId: string | null = null, url = "/acme/issues") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   client.setQueryData(["inbox", "ws-1", "list"], items);
+  const nav = adapter(url);
   return renderWithI18n(
     <QueryClientProvider client={client}>
-      <NavigationProvider value={adapter}>
-        <Harness activeIssueId={activeIssueId} />
+      <NavigationProvider value={nav}>
+        <Harness activeIssueId={activeIssueId} pathname={nav.pathname} />
       </NavigationProvider>
     </QueryClientProvider>,
   );
@@ -81,7 +96,9 @@ const rows = () => Array.from(document.querySelectorAll<HTMLElement>("[data-inbo
 
 beforeEach(() => {
   state.unread = 0;
-  state.archive.mockReset();
+  for (const spy of [state.archive, state.markAllRead, state.archiveAll, state.archiveAllRead, state.archiveCompleted]) {
+    spy.mockReset();
+  }
   useSidebarTreeStore.setState({ inboxCollapsed: false, inboxSettings: DEFAULT_SIDEBAR_INBOX_SETTINGS });
 });
 
@@ -103,7 +120,7 @@ describe("InboxSection", () => {
     expect(rows()[1]!.querySelector("[data-mc='unread-dot']")).toBeNull();
   });
 
-  it("opens the issue at the comment it is about, and an issue-less notice in the full Inbox", () => {
+  it("opens the issue at the comment it is about, and an issue-less notice on the Inbox page", () => {
     renderSection([
       item({ id: "n1", issue_id: "issue-a", title: "Commented", details: { comment_id: "c-1" } }),
       item({ id: "n2", issue_id: "issue-b", title: "Assigned", type: "issue_assigned", created_at: "2026-11-09T08:00:00Z" }),
@@ -165,9 +182,45 @@ describe("InboxSection", () => {
     expect(rows()).toHaveLength(0);
   });
 
-  it("links to the full Inbox, empty or not", () => {
+  it("is the whole list: no link out to another one, and a plain line when empty", () => {
+    const { unmount } = renderSection([item({ id: "n1", issue_id: "issue-a", title: "Only one" })]);
+    expect(screen.queryByRole("link", { name: "All notifications" })).toBeNull();
+    expect(screen.getAllByRole("link").map((link) => link.getAttribute("href"))).toEqual(["/acme/issues/issue-a"]);
+    unmount();
+
     renderSection([]);
     expect(rows()).toHaveLength(0);
-    expect(screen.getByRole("link", { name: "No notifications" })).toHaveAttribute("href", "/acme/inbox");
+    expect(screen.getByText("No notifications")).not.toHaveAttribute("href");
+    expect(screen.queryByRole("link")).toBeNull();
+  });
+
+  it("lights the row the Inbox page has open", () => {
+    renderSection(
+      [
+        item({ id: "n1", issue_id: null, title: "Autopilot paused", type: "autopilot_paused" }),
+        item({ id: "n2", issue_id: "issue-b", title: "Other one", created_at: "2026-11-09T08:00:00Z" }),
+      ],
+      null,
+      "/acme/inbox?issue=n1",
+    );
+    expect(screen.getByRole("link", { name: "Autopilot paused" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "Other one" })).not.toHaveAttribute("aria-current");
+  });
+
+  it("offers the bulk actions from the section header", async () => {
+    renderSection([item({ id: "n1", issue_id: "issue-a" })]);
+    const open = async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Inbox actions" }));
+      return screen.findByRole("menu");
+    };
+
+    fireEvent.click(within(await open()).getByRole("menuitem", { name: "Mark all as read" }));
+    expect(state.markAllRead).toHaveBeenCalledTimes(1);
+    fireEvent.click(within(await open()).getByRole("menuitem", { name: "Archive all read" }));
+    expect(state.archiveAllRead).toHaveBeenCalledTimes(1);
+    fireEvent.click(within(await open()).getByRole("menuitem", { name: "Archive completed" }));
+    expect(state.archiveCompleted).toHaveBeenCalledTimes(1);
+    fireEvent.click(within(await open()).getByRole("menuitem", { name: "Archive all" }));
+    expect(state.archiveAll).toHaveBeenCalledTimes(1);
   });
 });

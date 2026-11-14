@@ -145,7 +145,7 @@
       "project_issues_retry": "Повторить",
       "unread": "Непрочитанные",
       "new_issue_here": "Новая задача в этом проекте",
-      "inbox_all": "Все уведомления",
+      "inbox_actions": "Действия со входящими",
       "inbox_empty": "Нет уведомлений",
       "inbox_settings": "Отображение входящих",
       "inbox_show_count": "Число непрочитанных",

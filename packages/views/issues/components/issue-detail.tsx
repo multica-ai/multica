@@ -1228,10 +1228,9 @@ interface IssueDetailProps {
   /**
    * Bump to replay the `highlightCommentId` landing on an already-mounted
    * detail. A remount replays it by itself (fresh mount, cleared memento
-   * entry); this token is for the one path with neither remount nor
-   * guaranteed re-render — re-clicking the notification row that is already
-   * open (see InboxPage.handleSelect). The bump both re-arms the landing
-   * guard and forces the render that re-reads the cleared memento entry.
+   * entry); this token is for a host that asks again with neither remount
+   * nor guaranteed re-render. The bump both re-arms the landing guard and
+   * forces the render that re-reads the cleared memento entry.
    */
   highlightRequestToken?: number;
   /** The app confirmation an Inbox notification points at; its card scrolls

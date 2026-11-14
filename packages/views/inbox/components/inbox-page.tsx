@@ -97,9 +97,7 @@ import { useIsCompact } from "@multica/ui/hooks/use-mobile";
 import { cn } from "@multica/ui/lib/utils";
 import { CollapsedNavTrigger, PAGE_GUTTER, PageHeader } from "../../layout/page-header";
 import { PanelHeader } from "../../layout/panel-nav";
-import { useListColumnCollapsed } from "../../layout/app-shell-context";
 import { InboxDeleteDialog } from "./inbox-delete-dialog";
-import { ListColumn } from "../../layout/list-column";
 import { useTimeAgo } from "./inbox-list-item";
 import { InboxList } from "./inbox-list";
 import { InboxFilterMenu } from "./inbox-filter-menu";
@@ -375,7 +373,6 @@ export function InboxPage() {
   ]);
 
   const isCompact = useIsCompact();
-  const listCollapsed = useListColumnCollapsed();
   const unreadCount = useInboxUnreadCount(wsId);
 
   const markReadMutation = useMarkInboxRead();
@@ -470,26 +467,15 @@ export function InboxPage() {
   }, [unreadOnlyActive]);
 
   const writeViewState = useViewStateWriter();
-  // Bumped when the already-open notification row is re-clicked; threaded to
-  // IssueDetail so it replays the comment-highlight landing without a
-  // remount. Selection changes don't need it — they remount the detail (key
-  // by issue) and a fresh mount with a cleared memento entry lands by itself.
-  const [highlightRequestToken, setHighlightRequestToken] = useState(0);
   const handleSelect = (item: InboxItem) => {
-    const nextKey = item.issue_id ?? item.id;
     // Every click on a notification row is a fresh deep-link intent: clear
     // the "highlight already landed" memento entry so the comment jump runs
     // again even if this issue's detail was opened (and its landing
     // consumed) before. Selection restored from the URL on a remount goes
     // through the effects above, not through here, so a tab switch back
     // keeps the entry and does NOT re-jump.
-    if (item.issue_id) {
-      writeViewState(issueHighlightMementoKey(item.issue_id), undefined);
-      if (nextKey === selectedKey) {
-        setHighlightRequestToken((t) => t + 1);
-      }
-    }
-    setSelectedKey(nextKey);
+    if (item.issue_id) writeViewState(issueHighlightMementoKey(item.issue_id), undefined);
+    setSelectedKey(item.issue_id ?? item.id);
   };
 
   const handleMarkRead = (id: string) => {
@@ -903,17 +889,13 @@ export function InboxPage() {
           defaultSidebarOpen={false}
           layoutId="multica_inbox_issue_detail_layout"
           highlightCommentId={detailItem.details?.comment_id ?? undefined}
-          highlightRequestToken={highlightRequestToken}
           highlightAppRequestId={
             detailItem.type.startsWith("app_") ? (detailItem.details?.request_id ?? undefined) : undefined
           }
           // The inbox reads the row it selected itself (see the auto-read
           // effect above), and must keep a row marked unread while it is open.
           readsInbox={false}
-          // The split layout already has a nav trigger in the list header.
-          // Explicit false suppresses the detail header's fallback trigger,
-          // which is the way back once the list column is collapsed.
-          leadingAction={compactBackAction ?? (listCollapsed ? undefined : false)}
+          leadingAction={compactBackAction}
           onDelete={() => {
             // Issue deletion CASCADE-deletes the inbox item server-side, and the
             // issue:deleted WS event prunes it from the inbox cache. Just clear
@@ -1105,46 +1087,25 @@ export function InboxPage() {
     return <div className="flex flex-1 flex-col min-h-0">{listPanel}</div>;
   }
 
-  // -- Desktop layout: list column + detail ----------------------------------
+  // -- Desktop layout: detail only --------------------------------------------
+  // The list is the Inbox section of the Work panel beside this page.
 
   if (viewLoading) {
     return (
-      <div className="flex min-h-0 flex-1">
-        <ListColumn collapsed={listCollapsed} width="list">
-          <div className="flex h-12 shrink-0 items-center pl-5 pr-2.5">
-            <Skeleton className="h-5 w-16" />
-          </div>
-          <div className="flex-1 min-h-0 overflow-y-auto space-y-1 p-2">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-3 px-2 py-2.5">
-                <Skeleton className="h-7 w-7 shrink-0 rounded-full" />
-                <div className="flex-1 space-y-2">
-                  <Skeleton className="h-4 w-3/4" />
-                  <Skeleton className="h-3 w-1/2" />
-                </div>
-              </div>
-            ))}
-          </div>
-        </ListColumn>
-        <div className="min-w-0 flex-1 p-6">
-          <Skeleton className="h-6 w-48" />
-          <Skeleton className="mt-4 h-4 w-32" />
-        </div>
+      <div className="min-w-0 flex-1 p-6">
+        <Skeleton className="h-6 w-48" />
+        <Skeleton className="mt-4 h-4 w-32" />
       </div>
     );
   }
 
   return (
-    <div className="flex min-h-0 flex-1">
-      <ListColumn collapsed={listCollapsed} width="list">{listPanel}</ListColumn>
-      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-        {detailContent ?? (
-          <>
-          {listCollapsed && (
-            <PageHeader>
-              <h1 className="text-body font-semibold">{t(($) => $.page.title)}</h1>
-            </PageHeader>
-          )}
+    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
+      {detailContent ?? (
+        <>
+          <PageHeader>
+            <h1 className="text-body font-semibold">{t(($) => $.page.title)}</h1>
+          </PageHeader>
           <div className="relative flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden text-muted-foreground">
             {inboxZeroCount === 0 ? (
               <MulticaBleedMark
@@ -1163,9 +1124,8 @@ export function InboxPage() {
                   : t(($) => $.detail.empty)}
             </p>
           </div>
-          </>
-        )}
-      </div>
+        </>
+      )}
     </div>
   );
 }
