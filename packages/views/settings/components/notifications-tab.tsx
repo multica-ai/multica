@@ -16,18 +16,22 @@ import {
   SettingsTab,
 } from "./settings-layout";
 
-// Inbox event groups rendered in the per-event toggle list. `system_notifications`
-// is a sibling preference key but lives in its own section below.
-const INBOX_GROUP_KEYS = [
-  "assignments",
-  "status_changes",
+// What is addressed to the user: always delivered, so these rows have no
+// switch. The Inbox files them under "Needs you" (MUL-9215).
+const ALWAYS_ON_KEYS = ["mentions", "assignments", "runs", "your_issues"] as const;
+
+// Activity on what the user only follows, filed under "Updates". Each kind can
+// be switched off. `system_notifications` is a sibling preference key but
+// lives in its own section below.
+const UPDATE_GROUP_KEYS = [
   "comments",
-  "mentions",
+  "status_changes",
+  "assignments",
   "updates",
   "new_issues",
   "agent_activity",
 ] as const;
-type InboxGroupKey = (typeof INBOX_GROUP_KEYS)[number];
+type SwitchGroupKey = (typeof UPDATE_GROUP_KEYS)[number] | "mentions";
 
 export function NotificationsTab() {
   const { t } = useT("settings");
@@ -56,34 +60,53 @@ export function NotificationsTab() {
     });
   };
 
+  const groupSwitch = (key: SwitchGroupKey) => (
+    <SettingsRow
+      key={key}
+      anchor={key}
+      label={t(($) => $.notifications.groups[key].label)}
+      description={t(($) => $.notifications.groups[key].description)}
+    >
+      <Switch
+        checked={preferences[key] !== "muted"}
+        aria-label={t(($) => $.notifications.groups[key].label)}
+        onCheckedChange={(checked) => handleToggle(key, checked)}
+      />
+    </SettingsRow>
+  );
+
   const systemEnabled = preferences.system_notifications !== "muted";
 
   return (
     <SettingsTab title={t(($) => $.page.tabs.notifications)} scope="workspace-only">
       <SettingsSection
-        title={t(($) => $.notifications.title)}
-        description={t(($) => $.notifications.description)}
+        title={t(($) => $.notifications.needs_you.title)}
+        description={t(($) => $.notifications.needs_you.description)}
         anchor="inbox"
       >
         <SettingsCard>
-            {INBOX_GROUP_KEYS.map((key: InboxGroupKey) => {
-              const enabled = preferences[key] !== "muted";
-              return (
-                <SettingsRow
-                  key={key}
-                  anchor={key}
-                  label={t(($) => $.notifications.groups[key].label)}
-                  description={t(($) => $.notifications.groups[key].description)}
-                >
-                  <Switch
-                    checked={enabled}
-                    aria-label={t(($) => $.notifications.groups[key].label)}
-                    onCheckedChange={(checked) => handleToggle(key, checked)}
-                  />
-                </SettingsRow>
-              );
-            })}
+          {ALWAYS_ON_KEYS.map((key) => (
+            <SettingsRow
+              key={key}
+              label={t(($) => $.notifications.needs_you[key].label)}
+              description={t(($) => $.notifications.needs_you[key].description)}
+            >
+              <span className="shrink-0 text-caption text-muted-foreground">
+                {t(($) => $.notifications.needs_you.always_on)}
+              </span>
+            </SettingsRow>
+          ))}
+          {/* The one choice here: a mention of a group is addressed to everyone
+              in it, so the user decides whether that counts as theirs. */}
+          {groupSwitch("mentions")}
         </SettingsCard>
+      </SettingsSection>
+
+      <SettingsSection
+        title={t(($) => $.notifications.updates.title)}
+        description={t(($) => $.notifications.updates.description)}
+      >
+        <SettingsCard>{UPDATE_GROUP_KEYS.map(groupSwitch)}</SettingsCard>
       </SettingsSection>
 
       <SettingsSection
@@ -94,6 +117,7 @@ export function NotificationsTab() {
           <SettingsRow
             anchor="system"
             label={t(($) => $.notifications.system.label)}
+            description={t(($) => $.notifications.system.description)}
           >
             <Switch
               checked={systemEnabled}

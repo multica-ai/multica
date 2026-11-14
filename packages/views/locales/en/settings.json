@@ -829,25 +829,48 @@
     "toast_profile_failed": "Failed to update profile"
   },
   "notifications": {
-    "title": "Inbox Notifications",
-    "description": "Muted events remain visible on the issue.",
     "toast_failed": "Failed to update notification settings",
-    "groups": {
+    "needs_you": {
+      "title": "Needs you",
+      "description": "Anything addressed to you stays under Needs you in the Inbox until you handle or archive it. These can't be turned off.",
+      "always_on": "Always on",
+      "mentions": {
+        "label": "Mentions",
+        "description": "When someone @mentions you"
+      },
       "assignments": {
         "label": "Assignments",
-        "description": "When you are assigned or unassigned from an issue"
+        "description": "When an issue is assigned to you"
       },
-      "status_changes": {
-        "label": "Status changes",
-        "description": "When an issue you follow changes status (e.g. todo, in progress, done)"
+      "runs": {
+        "label": "Runs you started",
+        "description": "When the agent finishes, fails, asks you something, or the run is cancelled"
+      },
+      "your_issues": {
+        "label": "Issues you created or are assigned",
+        "description": "New comments, or a status that waits on you"
+      }
+    },
+    "updates": {
+      "title": "Updates",
+      "description": "Activity on issues you follow. Not counted in the badge, and gone from the Inbox once read. What you turn off stays visible on the issue."
+    },
+    "groups": {
+      "mentions": {
+        "label": "@all and @squad",
+        "description": "Group mentions also go to Needs you. When off, they go to Updates."
       },
       "comments": {
         "label": "Comments",
         "description": "New comments on issues you follow"
       },
-      "mentions": {
-        "label": "Mentions",
-        "description": "When someone @mentions you, including @all and @squad"
+      "status_changes": {
+        "label": "Status changes",
+        "description": "When an issue you follow changes status (e.g. todo, in progress, done)"
+      },
+      "assignments": {
+        "label": "Assignment changes",
+        "description": "When you are unassigned, or an issue you follow is reassigned"
       },
       "updates": {
         "label": "Priority & Due date",
@@ -858,8 +881,8 @@
         "description": "When an issue is created in a project you subscribe to"
       },
       "agent_activity": {
-        "label": "Agent activity",
-        "description": "When an agent run fails"
+        "label": "Agent runs",
+        "description": "When an agent run fails or gets blocked on an issue you follow"
       },
       "chat_replies": {
         "label": "Include chat replies"
@@ -867,7 +890,8 @@
     },
     "system": {
       "title": "System Notifications",
-      "label": "Show system notifications when Multica is in the background"
+      "label": "Show system notifications when Multica is in the background",
+      "description": "From the Inbox, only Needs you shows a banner. Updates never do."
     },
     "browser": {
       "label": "Browser notifications",

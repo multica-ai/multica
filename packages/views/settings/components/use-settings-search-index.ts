@@ -6,11 +6,12 @@ import type { SettingsSearchEntry } from "./settings-search";
 import { CHANNEL_INTEGRATIONS } from "./settings-navigation";
 import { browserNotificationSettingAvailable } from "./browser-notification-setting";
 
+// The notification kinds that have a switch, in the order the page lists them.
 const NOTIFICATION_GROUPS = [
-  "assignments",
-  "status_changes",
-  "comments",
   "mentions",
+  "comments",
+  "status_changes",
+  "assignments",
   "updates",
   "new_issues",
   "agent_activity",
@@ -190,6 +191,7 @@ export function useSettingsSearchIndex(
         tab: "notifications",
         anchor: "system",
         title: t(($) => $.notifications.system.label),
+        description: t(($) => $.notifications.system.description),
       },
       // Web-only row: absent on desktop and without the Notification API.
       ...(browserNotificationSettingAvailable()
