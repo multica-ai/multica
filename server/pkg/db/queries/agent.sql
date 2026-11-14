@@ -1047,6 +1047,10 @@ SET status = 'completed', completed_at = now(), result = $2,
     retired_session_id = COALESCE(sqlc.narg('retired_session_id'), retired_session_id),
     prepare_lease_expires_at = NULL
 WHERE id = $1 AND status = 'running'
+  AND (
+    sqlc.narg('expected_dispatched_at')::timestamptz IS NULL
+    OR dispatched_at = sqlc.narg('expected_dispatched_at')::timestamptz
+  )
 RETURNING *;
 
 -- name: GetLastTaskSession :one
@@ -1211,6 +1215,10 @@ SET status = 'failed',
     retired_session_id = COALESCE(sqlc.narg('retired_session_id'), retired_session_id),
     prepare_lease_expires_at = NULL
 WHERE id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory')
+  AND (
+    sqlc.narg('expected_dispatched_at')::timestamptz IS NULL
+    OR dispatched_at = sqlc.narg('expected_dispatched_at')::timestamptz
+  )
 RETURNING *;
 
 -- name: UpdateAgentTaskSession :exec

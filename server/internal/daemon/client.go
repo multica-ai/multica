@@ -637,11 +637,11 @@ func (c *Client) ReportTaskMessages(ctx context.Context, taskID string, messages
 	}, nil)
 }
 
-func (c *Client) CompleteTask(ctx context.Context, taskID, output, branchName, sessionID, workDir string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string) error {
-	return c.completeTaskWithRetrySchedule(ctx, taskID, output, branchName, sessionID, workDir, sessionRolloutMissing, retiredSessionID, durableWorkDir, defaultTerminalRetrySchedule)
+func (c *Client) CompleteTask(ctx context.Context, taskID, output, branchName, sessionID, workDir string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string, claimDispatchedAt string) error {
+	return c.completeTaskWithRetrySchedule(ctx, taskID, output, branchName, sessionID, workDir, sessionRolloutMissing, retiredSessionID, durableWorkDir, claimDispatchedAt, defaultTerminalRetrySchedule)
 }
 
-func (c *Client) completeTaskWithRetrySchedule(ctx context.Context, taskID, output, branchName, sessionID, workDir string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string, schedule []time.Duration) error {
+func (c *Client) completeTaskWithRetrySchedule(ctx context.Context, taskID, output, branchName, sessionID, workDir string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string, claimDispatchedAt string, schedule []time.Duration) error {
 	body := map[string]any{"output": output}
 	if branchName != "" {
 		body["branch_name"] = branchName
@@ -660,6 +660,9 @@ func (c *Client) completeTaskWithRetrySchedule(ctx context.Context, taskID, outp
 	}
 	if retiredSessionID != "" {
 		body["retired_session_id"] = retiredSessionID
+	}
+	if claimDispatchedAt != "" {
+		body["expected_dispatched_at"] = claimDispatchedAt
 	}
 	return c.postJSONWithRetry(ctx, fmt.Sprintf("/api/daemon/tasks/%s/complete", taskID), body, nil, schedule)
 }
@@ -773,11 +776,11 @@ func (c *Client) ReportTaskUsageSnapshot(ctx context.Context, taskID string, usa
 	}, nil)
 }
 
-func (c *Client) FailTask(ctx context.Context, taskID, errMsg, sessionID, workDir, branchName, failureReason string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string) error {
-	return c.failTaskWithRetrySchedule(ctx, taskID, errMsg, sessionID, workDir, branchName, failureReason, sessionRolloutMissing, retiredSessionID, durableWorkDir, defaultTerminalRetrySchedule)
+func (c *Client) FailTask(ctx context.Context, taskID, errMsg, sessionID, workDir, branchName, failureReason string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir, claimDispatchedAt string) error {
+	return c.failTaskWithRetrySchedule(ctx, taskID, errMsg, sessionID, workDir, branchName, failureReason, sessionRolloutMissing, retiredSessionID, durableWorkDir, claimDispatchedAt, defaultTerminalRetrySchedule)
 }
 
-func (c *Client) failTaskWithRetrySchedule(ctx context.Context, taskID, errMsg, sessionID, workDir, branchName, failureReason string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string, schedule []time.Duration) error {
+func (c *Client) failTaskWithRetrySchedule(ctx context.Context, taskID, errMsg, sessionID, workDir, branchName, failureReason string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string, claimDispatchedAt string, schedule []time.Duration) error {
 	body := map[string]any{"error": errMsg}
 	if sessionID != "" {
 		body["session_id"] = sessionID
@@ -803,7 +806,24 @@ func (c *Client) failTaskWithRetrySchedule(ctx context.Context, taskID, errMsg, 
 	if retiredSessionID != "" {
 		body["retired_session_id"] = retiredSessionID
 	}
+	if claimDispatchedAt != "" {
+		body["expected_dispatched_at"] = claimDispatchedAt
+	}
 	return c.postJSONWithRetry(ctx, fmt.Sprintf("/api/daemon/tasks/%s/fail", taskID), body, nil, schedule)
+}
+
+func isStaleClaimGenerationError(err error) bool {
+	var reqErr *requestError
+	if !errors.As(err, &reqErr) || reqErr.StatusCode != http.StatusConflict {
+		return false
+	}
+	var body struct {
+		Code string `json:"code"`
+	}
+	if json.Unmarshal([]byte(reqErr.Body), &body) != nil {
+		return false
+	}
+	return body.Code == protocol.DaemonTaskClaimGenerationMismatchCode
 }
 
 // PinTaskSession persists the agent's session_id and work_dir on the task
