@@ -484,7 +484,9 @@ function PullRequestRow({
 /**
  * One PR on a single line — state icon, `#number`, verdict pill — for
  * surfaces with no room for PullRequestRow, such as the issue hover card.
- * Not a link: the hover card that hosts it is read-only.
+ * A plain link to the PR on GitHub, like PullRequestRow, so the browser owns
+ * Enter, modifier and middle clicks. The hover card stops click bubbling, so
+ * opening the PR never also follows the mention it hangs off.
  */
 export function PullRequestInlineSummary({ pr }: { pr: GitHubPullRequest }) {
   const { t } = useT("issues");
@@ -494,11 +496,18 @@ export function PullRequestInlineSummary({ pr }: { pr: GitHubPullRequest }) {
   const isTerminal = pr.state === "merged" || pr.state === "closed";
   const stale = !isTerminal && pr.snapshot_stale === true;
   return (
-    <span className="flex min-w-0 items-center gap-1.5" title={pr.title}>
+    <a
+      data-testid="pull-request-inline-summary"
+      href={pr.html_url}
+      target="_blank"
+      rel="noreferrer noopener"
+      title={pr.title}
+      className="-mx-1 flex min-w-0 items-center gap-1.5 rounded-sm px-1 transition-colors hover:bg-accent/50 focus-visible:outline-2 focus-visible:outline-ring"
+    >
       <StateIcon className={cn("size-3.5 shrink-0", cfg.className)} />
       <span className="shrink-0 font-medium tabular-nums">{prLabel(pr)}</span>
       {pill ? <VerdictPill pill={pill} stale={stale} inline /> : null}
-    </span>
+    </a>
   );
 }
 

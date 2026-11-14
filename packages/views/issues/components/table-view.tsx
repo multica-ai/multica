@@ -1332,7 +1332,7 @@ function PullRequestsCell({ issueId }: { issueId: string }) {
   const { t } = useT("issues");
   const pullRequests = useIssuePullRequestSummaries(issueId, true);
   return pullRequests.length > 0 ? (
-    <IssuePullRequestChips pullRequests={pullRequests} max={3} linked />
+    <IssuePullRequestChips pullRequests={pullRequests} max={3} />
   ) : (
     <span className="text-muted-foreground">{t(($) => $.table.empty_value)}</span>
   );
