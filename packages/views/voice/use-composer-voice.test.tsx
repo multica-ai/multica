@@ -1,6 +1,7 @@
 import { act, cleanup, render, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  DEFAULT_VOICE_SETTINGS,
   cancelVoice,
   connectVoiceRuntime,
   getVoiceState,
@@ -8,6 +9,7 @@ import {
   releaseVoice,
   stopVoice,
   useVoiceModelsStore,
+  useVoiceSettingsStore,
   type VoiceModels,
 } from "@multica/core/voice";
 import { createShortcutChord, useShortcutStore } from "@multica/core/shortcuts";
@@ -58,12 +60,14 @@ beforeEach(() => {
   engine.started = 0;
   engine.transcribe.mockReset();
   act(() => useVoiceModelsStore.getState().setModels(INSTALLED));
+  act(() => useVoiceSettingsStore.getState().update({ enabled: true }));
   useShortcutStore.getState().setShortcut("voiceInput", createShortcutChord("Space", { alt: true }));
 });
 
 afterEach(() => {
   useShortcutStore.getState().resetShortcut("voiceInput");
   act(() => cancelVoice());
+  act(() => useVoiceSettingsStore.getState().update(DEFAULT_VOICE_SETTINGS));
   cleanup();
 });
 
@@ -117,6 +121,25 @@ describe("useComposerVoice", () => {
     hook.rerender({ insert, submit: undefined, scope: "session-a:agent-1" });
     await act(async () => stopVoice(false));
     await waitFor(() => expect(insert).toHaveBeenCalledWith("still here"));
+  });
+
+  it("hides the mic and ignores the shortcut until voice input is turned on, and turning it off cancels a recording", async () => {
+    act(() => useVoiceSettingsStore.getState().update({ enabled: false }));
+    const hook = renderHook((options: ComposerVoiceOptions) => useComposerVoice(options), {
+      initialProps: { insert: () => true },
+    });
+    expect(hook.result.current.available).toBe(false);
+    await act(async () => shortcut());
+    expect(getVoiceState().phase).toBe("idle");
+    expect(engine.started).toBe(0);
+
+    act(() => useVoiceSettingsStore.getState().update({ enabled: true }));
+    expect(hook.result.current.available).toBe(true);
+    await act(async () => shortcut());
+    expect(getVoiceState().phase).toBe("recording");
+
+    act(() => useVoiceSettingsStore.getState().update({ enabled: false }));
+    expect(getVoiceState().phase).toBe("idle");
   });
 
   it("does not listen while hidden, and hiding cancels a recording", async () => {

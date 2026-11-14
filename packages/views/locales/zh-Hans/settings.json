@@ -1872,6 +1872,10 @@
     "model_title": "语音模型",
     "model_hint": "模型在这台电脑上运行。下载一个，或在已下载的模型之间切换。",
     "engine_unavailable": "这台电脑暂不支持本地语音转写。",
+    "enabled": {
+      "title": "语音输入",
+      "hint": "在对话、评论和回复中显示麦克风按钮，并启用语音快捷键。"
+    },
     "input_title": "输入",
     "shortcut": {
       "title": "快捷键",

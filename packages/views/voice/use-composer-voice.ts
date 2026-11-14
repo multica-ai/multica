@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useId, useRef, useSyncExternalStore } from "react";
-import { noteVoiceFocus, registerVoiceTarget, useVoiceState, type VoiceState } from "@multica/core/voice";
+import {
+  noteVoiceFocus,
+  registerVoiceTarget,
+  useVoiceSettingsStore,
+  useVoiceState,
+  type VoiceState,
+} from "@multica/core/voice";
 import { useVoiceModels } from "./engine";
 import { voiceInputSupported } from "./recorder";
 
@@ -23,7 +29,7 @@ export interface ComposerVoiceOptions {
 
 export interface ComposerVoice {
   id: string;
-  /** Show the mic: this app has a speech engine and can record. */
+  /** Show the mic: voice input is on, and this app has a speech engine and can record. */
   available: boolean;
   /** The session, when this composer owns it. */
   session: VoiceState | null;
@@ -61,9 +67,10 @@ export function useComposerVoice({
   disabled = false,
 }: ComposerVoiceOptions): ComposerVoice {
   const id = useId();
+  const enabled = useVoiceSettingsStore((s) => s.enabled);
   const engineAvailable = useVoiceModels()?.engineAvailable ?? false;
   const supported = useSyncExternalStore(noSubscribe, voiceInputSupported, () => false);
-  const available = engineAvailable && supported && !disabled;
+  const available = enabled && engineAvailable && supported && !disabled;
   const listening = available && !hidden;
 
   const callbacks = useRef({ insert, submit, activate });

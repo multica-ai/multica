@@ -1893,6 +1893,10 @@
     "model_title": "Modelo de voz",
     "model_hint": "Los modelos se ejecutan en este ordenador. Descarga uno o cambia entre los que tienes.",
     "engine_unavailable": "La transcripción en el dispositivo no está disponible en este ordenador.",
+    "enabled": {
+      "title": "Entrada de voz",
+      "hint": "Muestra el micrófono en el chat, los comentarios y las respuestas, y activa el atajo de voz."
+    },
     "input_title": "Entrada",
     "shortcut": {
       "title": "Atajo",

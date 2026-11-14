@@ -1893,6 +1893,10 @@
     "model_title": "Modèle vocal",
     "model_hint": "Les modèles s’exécutent sur cet ordinateur. Téléchargez-en un, ou passez de l’un à l’autre.",
     "engine_unavailable": "La transcription sur l’appareil n’est pas disponible sur cet ordinateur.",
+    "enabled": {
+      "title": "Saisie vocale",
+      "hint": "Affiche le micro dans le chat, les commentaires et les réponses, et active le raccourci vocal."
+    },
     "input_title": "Saisie",
     "shortcut": {
       "title": "Raccourci",

@@ -1893,6 +1893,10 @@
     "model_title": "Speech model",
     "model_hint": "Models run on this computer. Download one, or switch between the ones you have.",
     "engine_unavailable": "On-device transcription isn't available for this computer.",
+    "enabled": {
+      "title": "Voice input",
+      "hint": "Show the mic in chat, comments and replies, and turn on the voice shortcut."
+    },
     "input_title": "Input",
     "shortcut": {
       "title": "Shortcut",

@@ -220,6 +220,12 @@ export function useSettingsSearchIndex(
       },
       {
         tab: "voice-input",
+        anchor: "voice-enabled",
+        title: t(($) => $.voice_input.enabled.title),
+        description: t(($) => $.voice_input.enabled.hint),
+      },
+      {
+        tab: "voice-input",
         anchor: "voice-model",
         title: t(($) => $.voice_input.model_title),
         description: t(($) => $.voice_input.model_hint),
