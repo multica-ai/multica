@@ -27,7 +27,6 @@ export * from "./local-fonts";
 export * from "./theme-archive";
 export * from "./theme-export";
 export * from "./safe-mode";
-export * from "./theme-agent";
 
 /**
  * Appearance sits on top of light/dark mode: a theme (see ./themes) with its

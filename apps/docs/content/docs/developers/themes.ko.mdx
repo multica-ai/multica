@@ -217,11 +217,11 @@ pnpm theme:preview path/to/paper --out preview   # preview/light.png와 preview/
 
 작업 중에 테마 때문에 인터페이스가 가려지거나 깨지면 `?theme=default`를 붙여 앱을 열거나, 로드 직후 **Shift**를 누르고 있으세요. [테마 때문에 화면이 깨졌을 때](/themes#테마-때문에-화면이-깨졌을-때)를 참고하세요.
 
-검사기는 저장소를 설치하지 않고도 스파스 클론과 Node 22.18 이상으로 실행할 수 있습니다. **에이전트에게 요청**이 에이전트에게 주는 명령도 이것입니다.
+검사기는 저장소를 설치하지 않고도 스파스 클론과 Node 22.18 이상으로 실행할 수 있습니다. 에이전트도 기본 제공 Multica 스킬에서 같은 명령을 받습니다.
 
 ```bash
 git clone --depth 1 --filter=blob:none --sparse https://github.com/multica-ai/multica.git multica-themes
-git -C multica-themes sparse-checkout set docs scripts packages/core/appearance packages/ui/styles
+git -C multica-themes sparse-checkout set docs scripts packages/core packages/ui
 node multica-themes/scripts/theme-check.mjs path/to/paper
 ```
 

@@ -441,32 +441,28 @@ kept. If a check fails, the import dialog lists every problem.
 
 ### Ask an agent
 
-**Ask an agent** next to **Import theme** takes a description of the look
-you want and an agent, and starts a chat with that agent. The first message
-is the request in full: the description, the theme's id, this guide, the
-checker and where to deliver, so you can see exactly what the agent was
-told. The agent must pass `theme:check` with 0 errors before it delivers,
-and attaches `theme:preview` screenshots when it can run them.
+Any agent can build a theme: ask for one in a chat, an issue or a comment.
+The theme reference in Multica's built-in platform skill tells the agent to
+read this guide, to pass `theme:check` with 0 errors before it delivers, and
+to attach `theme:preview` screenshots when it can run them. It is a reference
+inside the existing skill rather than a skill of its own, so it adds a line
+to the skill's routing table instead of an entry to every agent's skill list.
 
-- **On Desktop**, the request names the themes folder. An agent on the
-  same computer writes the theme there: Multica switches to it as soon as it
-  passes the checks, and every later change you ask for shows up within a
-  second.
-- **On the web, or with an agent on another machine**, the agent attaches
+- **Desktop on the agent's computer.** The agent writes the theme into the
+  themes folder. Multica switches to a theme the first time it appears there
+  and passes the checks, and applies every later save within a second, so
+  ask for changes and watch them land.
+- **On the web, or with an agent on another machine.** The agent attaches
   the theme as a `.zip`. **Install theme** on the attachment reads it with
-  the same checks and confirmation as **Import theme**.
-
-Ask for changes in the same chat: the theme keeps its id, so each version
-replaces the last. The knowledge of the format travels with the request
-instead of being a skill every agent carries: an agent reads this guide
-only when it is asked for a theme.
+  the same checks and confirmation as **Import theme**; a newer version of
+  the same id replaces the old one.
 
 The checker runs without installing the repository, from a sparse clone
 and Node 22.18 or newer:
 
 ```sh
 git clone --depth 1 --filter=blob:none --sparse https://github.com/multica-ai/multica.git multica-themes
-git -C multica-themes sparse-checkout set docs scripts packages/core/appearance packages/ui/styles
+git -C multica-themes sparse-checkout set docs scripts packages/core packages/ui
 node multica-themes/scripts/theme-check.mjs path/to/paper
 ```
 

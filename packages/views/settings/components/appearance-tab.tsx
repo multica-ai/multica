@@ -14,7 +14,6 @@ import {
   Monitor,
   Moon,
   RotateCcw,
-  Sparkles,
   Sun,
   TriangleAlert,
 } from "@multica/ui/icons";
@@ -94,7 +93,6 @@ import { docsLocalePrefix } from "../../common/docs-locale";
 import { openExternal } from "../../platform/open-external";
 import { themeFolderAPI } from "../../platform/theme-folder";
 import { useThemeInstallDialog } from "../../common/theme-install-dialog";
-import { ThemeAgentDialog } from "./theme-agent-dialog";
 import { ThemesButton, useStoreThemeInstall } from "./themes-dialog";
 import { ThemeSwatch, useAppliedMode, useColorThemes, useThemeLabel, type PreviewMode } from "./theme-swatch";
 import {
@@ -435,7 +433,6 @@ function OwnThemeRow({ theme }: { theme: Theme }) {
   const install = useInstalledThemesStore((s) => s.install);
   const set = useAppearanceStore((s) => s.set);
   const folder = themeFolderAPI();
-  const [asking, setAsking] = useState(false);
 
   const duplicate = async () => {
     const taken = [...BUILT_IN_THEMES, ...useInstalledThemesStore.getState().themes].map((t) => t.id);
@@ -501,11 +498,6 @@ function OwnThemeRow({ theme }: { theme: Theme }) {
             <FolderOpen />
           </Button>
         ) : null}
-        <Button variant="outline" size="sm" onClick={() => setAsking(true)}>
-          <Sparkles data-icon="inline-start" />
-          {t(($) => $.appearance.agent.button)}
-        </Button>
-        <ThemeAgentDialog open={asking} onOpenChange={setAsking} />
         <DropdownMenu>
           <DropdownMenuTrigger render={<Button variant="outline" size="sm" />}>
             {t(($) => $.appearance.import.button)}

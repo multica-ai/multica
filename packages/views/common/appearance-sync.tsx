@@ -98,7 +98,9 @@ function useStateClasses() {
 /**
  * On Desktop, installs the themes in the themes folder and reinstalls them
  * whenever main reports a change, so a theme being edited updates as it is
- * saved. Reads never overlap; a change during a read triggers one more.
+ * saved. A theme that first passes after the opening read, such as one an
+ * agent just wrote, is switched to. Reads never overlap; a change during a
+ * read triggers one more.
  */
 function useThemeFolderSync() {
   useEffect(() => {
@@ -107,6 +109,7 @@ function useThemeFolderSync() {
     let stopped = false;
     let reading = false;
     let again = false;
+    let known: Set<string> | null = null;
     const read = async () => {
       if (reading) {
         again = true;
@@ -123,13 +126,14 @@ function useThemeFolderSync() {
         );
         if (stopped) return;
         useInstalledThemesStore.getState().syncFolder(entries);
-        const { awaiting } = useThemeFolderStatus.getState();
-        const arrived = awaiting !== null && entries.some(({ result }) => result.ok && result.theme.id === awaiting);
-        if (arrived) useAppearanceStore.getState().set({ theme: awaiting });
+        const passing = entries.flatMap(({ result }) => (result.ok ? [result.theme.id] : []));
+        const seen = known;
+        const arrived = seen ? passing.find((id) => !seen.has(id)) : undefined;
+        known = new Set([...(seen ?? []), ...passing]);
+        if (arrived) useAppearanceStore.getState().set({ theme: arrived });
         useThemeFolderStatus.setState({
           path: snapshot.path,
           problems: entries.flatMap(({ folder, result }) => (result.ok ? [] : [{ folder, errors: result.errors }])),
-          ...(arrived ? { awaiting: null } : {}),
         });
       } catch {
         // The folder could not be read; installed themes stay as they are.

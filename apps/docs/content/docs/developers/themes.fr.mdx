@@ -217,11 +217,11 @@ pnpm theme:preview path/to/paper --out preview   # preview/light.png et preview/
 
 Si un thème masque ou casse une partie de l'interface pendant que vous travaillez dessus, ouvrez l'app avec `?theme=default`, ou maintenez **Maj** juste après le chargement ; voir [Quand un thème casse quelque chose](/themes#quand-un-thème-casse-quelque-chose).
 
-Le vérificateur fonctionne aussi sans installer le dépôt, depuis un clone partiel et Node 22.18 ou plus récent. **Demander à un agent** donne ces commandes aux agents :
+Le vérificateur fonctionne aussi sans installer le dépôt, depuis un clone partiel et Node 22.18 ou plus récent. Les agents reçoivent les mêmes commandes dans leur skill Multica intégré :
 
 ```bash
 git clone --depth 1 --filter=blob:none --sparse https://github.com/multica-ai/multica.git multica-themes
-git -C multica-themes sparse-checkout set docs scripts packages/core/appearance packages/ui/styles
+git -C multica-themes sparse-checkout set docs scripts packages/core packages/ui
 node multica-themes/scripts/theme-check.mjs path/to/paper
 ```
 

@@ -217,11 +217,11 @@ pnpm theme:preview path/to/paper --out preview   # preview/light.png と preview
 
 作業中にテーマでインターフェースが隠れたり崩れたりしたら、`?theme=default` を付けてアプリを開くか、読み込み直後に **Shift** を押し続けます。[テーマで表示が崩れたとき](/themes#テーマで表示が崩れたとき)を参照してください。
 
-チェッカーはリポジトリをインストールしなくても、スパースクローンと Node 22.18 以降で実行できます。**エージェントに頼む** がエージェントに渡すのもこのコマンドです。
+チェッカーはリポジトリをインストールしなくても、スパースクローンと Node 22.18 以降で実行できます。エージェントも、組み込みの Multica スキルで同じコマンドを使います。
 
 ```bash
 git clone --depth 1 --filter=blob:none --sparse https://github.com/multica-ai/multica.git multica-themes
-git -C multica-themes sparse-checkout set docs scripts packages/core/appearance packages/ui/styles
+git -C multica-themes sparse-checkout set docs scripts packages/core packages/ui
 node multica-themes/scripts/theme-check.mjs path/to/paper
 ```
 

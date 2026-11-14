@@ -217,11 +217,11 @@ pnpm theme:preview path/to/paper --out preview   # preview/light.png and preview
 
 If a theme hides or breaks part of the interface while you work on it, open the app with `?theme=default`, or hold **Shift** right after it loads; see [When a theme breaks something](/themes#when-a-theme-breaks-something).
 
-The checker also runs without installing the repository, from a sparse clone and Node 22.18 or newer. **Ask an agent** gives agents these commands:
+The checker also runs without installing the repository, from a sparse clone and Node 22.18 or newer. Agents get the same commands from their built-in Multica skill:
 
 ```bash
 git clone --depth 1 --filter=blob:none --sparse https://github.com/multica-ai/multica.git multica-themes
-git -C multica-themes sparse-checkout set docs scripts packages/core/appearance packages/ui/styles
+git -C multica-themes sparse-checkout set docs scripts packages/core packages/ui
 node multica-themes/scripts/theme-check.mjs path/to/paper
 ```
 
