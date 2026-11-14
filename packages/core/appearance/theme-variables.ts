@@ -24,6 +24,7 @@ export type ThemeVariableSection =
   | "typography"
   | "controls"
   | "navigation"
+  | "backdrop"
   | "layout"
   | "issues"
   | "editor"
@@ -50,6 +51,7 @@ export const THEME_VARIABLE_SECTIONS: Record<ThemeVariableSection, string> = {
   typography: "Typography",
   controls: "Controls and overlays",
   navigation: "Navigation and page",
+  backdrop: "Backdrop and glass",
   layout: "Layout and spacing",
   issues: "Issues",
   editor: "Editor content",
@@ -69,6 +71,7 @@ const DEFAULT_TEXT: Record<string, string> = {
   "button-primary-border": "`--button-primary`",
   ...Object.fromEntries(PALETTE_SLOTS.map((slot) => [`palette-${slot}`, "the colour as picked"])),
   "label-chip-color": "dark or light, whichever reads on the picked colour",
+  backdrop: "`none`",
 };
 
 function section(name: ThemeVariableSection, entries: readonly Entry[]): ThemeVariable[] {
@@ -264,6 +267,15 @@ const NAVIGATION: Entry[] = [
   ["nav-item-active-color", "Text of the current row.", "var(--surface-selected-foreground)"],
 ];
 
+const BACKDROP: Entry[] = [
+  ["backdrop", "What the window shows behind the frame and the page, as `background` layers: colours, gradients and images in the theme folder, such as `url(sky.svg) center / cover no-repeat`. An SVG's own CSS animation plays. It shows through the glass below."],
+  ["backdrop-color", "Solid colour under the backdrop: shown while it loads, and the colour `theme:check` measures the glass on. Required with a backdrop; use the colour the backdrop averages to.", "var(--app-shell)"],
+  ["glass-opacity", "How much of the page's own colour covers the backdrop: `100%` is solid, lower lets the backdrop through. Only applies with a backdrop.", "100%"],
+  ["glass-blur", "Blur of the backdrop seen through the page.", "0px"],
+  ["frame-glass-opacity", "How much of `app-shell` covers the backdrop in the frame: rail, toolbar, tab bar and bottom bar.", "var(--glass-opacity, 100%)"],
+  ["frame-glass-blur", "Blur of the backdrop seen through the frame.", "var(--glass-blur, 0px)"],
+];
+
 const LAYOUT: Entry[] = [
   ["space-xs", "Spacing step: the gap between board cards.", "0.5rem"],
   ["space-sm", "Spacing step: board card padding, the issue page's side padding on phones.", "0.75rem"],
@@ -399,6 +411,7 @@ export const THEME_VARIABLES: readonly ThemeVariable[] = [
   ...section("typography", TYPOGRAPHY),
   ...section("controls", CONTROLS),
   ...section("navigation", NAVIGATION),
+  ...section("backdrop", BACKDROP),
   ...section("layout", LAYOUT),
   ...section("issues", ISSUES),
   ...section("editor", EDITOR),

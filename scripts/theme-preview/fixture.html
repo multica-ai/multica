@@ -14,7 +14,7 @@
   packages/ui/styles/theme-variables.css. Class names here are only for the
   fixture; themes must not rely on them.
 -->
-<div class="flex h-screen bg-app-shell font-sans text-body text-foreground antialiased" style="--sidebar-width: 240px">
+<div data-slot="sidebar-wrapper" class="flex h-screen bg-app-shell font-sans text-body text-foreground antialiased" style="--sidebar-width: 240px">
   <nav data-slot="app-rail" data-mc="app-rail" class="flex h-full w-14 shrink-0 flex-col items-center overflow-hidden pt-[15px] pb-2.5">
     <span class="inline-flex size-[34px] shrink-0 items-center justify-center rounded-lg border border-surface-border bg-surface-raised text-body font-semibold text-foreground shadow-[var(--surface-shadow)]">A</span>
     <div class="my-2 flex flex-col items-center gap-1">

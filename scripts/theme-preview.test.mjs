@@ -96,6 +96,12 @@ const EXPECTED = [
     source: "packages/views/layout/panel-nav.tsx",
   },
   {
+    what: "the frame",
+    find: (els) => els.filter((el) => el.attrs["data-slot"] === "sidebar-wrapper"),
+    classes: ["bg-app-shell"],
+    source: "packages/views/layout/dashboard-layout.tsx",
+  },
+  {
     what: "the page",
     find: (els) => anchors(els, "page"),
     classes: ["rounded-page", "bg-page-canvas", "ring-page-border"],

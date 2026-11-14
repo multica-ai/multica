@@ -149,6 +149,27 @@ Les id d'option font 1 à 48 caractères parmi `a-z`, `0-9` et `-`, et commencen
 [data-mc="content"] { max-width: var(--page-width); }
 ```
 
+## Arrière-plan et verre
+
+Un thème peut placer une image derrière l’application — un dégradé, une image ou un SVG animé — et transformer le cadre et la page en verre par-dessus. Définissez ces variables par mode :
+
+```css
+.theme-dark {
+  --backdrop: url(night.svg) center / cover no-repeat;
+  --backdrop-color: #1e1e4a;
+  --glass-opacity: 72%;
+  --glass-blur: 18px;
+  --frame-glass-opacity: 0%;
+  --frame-glass-blur: 0px;
+}
+```
+
+- `--backdrop` est une valeur CSS `background` peinte sous toute la fenêtre, sur le bureau comme sur le web. Les images doivent être dans le dossier du thème ; l’animation propre d’un SVG est jouée.
+- `--backdrop-color` est obligatoire avec un arrière-plan : la couleur unie affichée pendant le chargement, et celle sur laquelle `theme:check` mesure le verre.
+- `--glass-opacity` et `--glass-blur` fixent la part de la couleur de la page qui couvre l’arrière-plan et le flou de l’arrière-plan derrière elle. `--frame-glass-opacity` et `--frame-glass-blur` font de même pour le rail, la barre d’outils de la fenêtre, la barre d’onglets et la barre du bas.
+
+Utilisez-les plutôt qu’un `--app-shell` transparent ou un `background` sur `body` : l’application change alors d’arrière-plan sans faire clignoter la fenêtre. [`examples/themes/night-sky`](https://github.com/multica-ai/multica/tree/main/examples/themes/night-sky) en est un exemple complet.
+
 ## Sélecteurs
 
 Ciblez les ancres, les slots et les attributs d'état — pas les noms de classes ni la structure du DOM, qui changent sans préavis. Ancres, slots et attributs d'état restent stables jusqu'au prochain `apiVersion`.
@@ -178,7 +199,7 @@ Tout ce qui charge une ressource est refusé, car le CSS peut lire le contenu de
 - utilise une variable non publique, sauf si c'est un id d'option ou si le thème la lit lui-même avec `var()` ;
 - définit des variables ailleurs que sur `.theme-light` et `.theme-dark` sans sélecteur descendant, ce qui empêche le sélecteur de thème de relire ses couleurs ;
 - nomme une famille générique (`sans-serif`, `serif`, …) ou un mot-clé `ui-*` dans une pile de polices, ce qui écraserait la police CJK choisie ;
-- n'atteint pas le contraste WCAG AA dans un des modes : `--foreground` et `--muted-foreground` demandent 4,5:1 sur chaque surface, `--brand` 4,5:1 sur les surfaces de lecture, le libellé du bouton principal 4,5:1 sur le bouton, et `--faint-foreground` 3:1. Le texte des infobulles demande 4,5:1 sur `--tooltip`, et celui d'une puce d'affichage enfoncée 4,5:1 sur son fond. Les infobulles utilisent toujours le texte du mode sombre : définissez `--tooltip-foreground` pour le changer. Une puce enfoncée prend `--input` comme fond, sauf si vous définissez `--display-chip-pressed-background`.
+- n'atteint pas le contraste WCAG AA dans un des modes : `--foreground` et `--muted-foreground` demandent 4,5:1 sur chaque surface, `--brand` 4,5:1 sur les surfaces de lecture, le libellé du bouton principal 4,5:1 sur le bouton, et `--faint-foreground` 3:1. Le texte des infobulles demande 4,5:1 sur `--tooltip`, et celui d'une puce d'affichage enfoncée 4,5:1 sur son fond. Les infobulles utilisent toujours le texte du mode sombre : définissez `--tooltip-foreground` pour le changer. Une puce enfoncée prend `--input` comme fond, sauf si vous définissez `--display-chip-pressed-background`. Avec un arrière-plan, le cadre et la page sont mesurés comme du verre posé sur `--backdrop-color`.
 
 ## Vérifier et prévisualiser
 
@@ -195,6 +216,14 @@ pnpm theme:preview path/to/paper --out preview   # preview/light.png et preview/
 `theme:preview` produit les captures que montre la boutique : une liste de tâches à côté d'une tâche ouverte, construite avec les styles de l'app, avec le thème à ses options par défaut.
 
 Si un thème masque ou casse une partie de l'interface pendant que vous travaillez dessus, ouvrez l'app avec `?theme=default`, ou maintenez **Maj** juste après le chargement ; voir [Quand un thème casse quelque chose](/themes#quand-un-thème-casse-quelque-chose).
+
+Le vérificateur fonctionne aussi sans installer le dépôt, depuis un clone partiel et Node 22.18 ou plus récent. Les agents reçoivent les mêmes commandes dans leur skill Multica intégré :
+
+```bash
+git clone --depth 1 --filter=blob:none --sparse https://github.com/multica-ai/multica.git multica-themes
+git -C multica-themes sparse-checkout set docs scripts packages/core packages/ui
+node multica-themes/scripts/theme-check.mjs path/to/paper
+```
 
 ## Publier dans la boutique
 

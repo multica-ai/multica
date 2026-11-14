@@ -149,6 +149,27 @@ paper/
 [data-mc="content"] { max-width: var(--page-width); }
 ```
 
+## 배경과 유리
+
+테마는 앱 뒤에 그라데이션, 이미지, 애니메이션 SVG 같은 그림을 두고, 프레임과 페이지를 그 위의 유리로 바꿀 수 있습니다. 모드별로 설정합니다.
+
+```css
+.theme-dark {
+  --backdrop: url(night.svg) center / cover no-repeat;
+  --backdrop-color: #1e1e4a;
+  --glass-opacity: 72%;
+  --glass-blur: 18px;
+  --frame-glass-opacity: 0%;
+  --frame-glass-blur: 0px;
+}
+```
+
+- `--backdrop`은 창 전체 아래에 그려지는 CSS `background` 값으로, 데스크톱과 웹 모두에 표시됩니다. 이미지는 테마 폴더 안에 있어야 하며, SVG 자체의 애니메이션은 재생됩니다.
+- 배경을 쓸 때는 `--backdrop-color`가 필수입니다. 로딩 중에 보이는 단색이며, `theme:check`가 유리의 대비를 잴 때 쓰는 바탕색이기도 합니다.
+- `--glass-opacity`와 `--glass-blur`는 페이지 자체 색이 배경을 얼마나 덮는지, 페이지 뒤의 배경을 얼마나 흐리게 할지 정합니다. `--frame-glass-opacity`와 `--frame-glass-blur`는 레일, 창 도구 모음, 탭 바, 하단 바에 같은 역할을 합니다.
+
+`--app-shell`을 투명하게 하거나 `body`에 `background`를 지정하는 대신 이 변수들을 쓰세요. 그러면 배경을 바꿔도 창이 깜빡이지 않습니다. [`examples/themes/night-sky`](https://github.com/multica-ai/multica/tree/main/examples/themes/night-sky)가 완전한 예입니다.
+
 ## 선택자
 
 클래스 이름이나 DOM 구조가 아니라 앵커, 슬롯, 상태 훅을 대상으로 하세요. 클래스 이름과 DOM 구조는 예고 없이 바뀝니다. 앵커, 슬롯, 훅은 다음 `apiVersion`까지 유지됩니다.
@@ -178,7 +199,7 @@ paper/
 - 공개되지 않은 변수를 쓰는 경우. 옵션 id이거나 테마가 직접 `var()`로 읽는 변수는 예외입니다.
 - `.theme-light`와 `.theme-dark`가 아닌 곳에 하위 선택자 없이 변수를 설정한 경우. 테마 선택기가 테마의 색을 읽어 올 수 없게 됩니다.
 - 글꼴 스택에 일반 글꼴 계열(`sans-serif`, `serif`, …)이나 `ui-*` 키워드를 쓴 경우. 사용자가 고른 CJK 글꼴이 적용되지 않게 됩니다.
-- 어느 한 모드에서 WCAG AA 대비를 충족하지 못하는 경우: `--foreground`와 `--muted-foreground`는 모든 표면에서 4.5:1, `--brand`는 읽기 표면에서 4.5:1, 기본 버튼 라벨은 버튼 위에서 4.5:1, `--faint-foreground`는 3:1이 필요합니다. 툴팁 글자는 `--tooltip` 위에서 4.5:1, 눌린 표시 설정 칩의 글자는 칩 배경 위에서 4.5:1이 필요합니다. 툴팁은 항상 다크 모드 글자색을 쓰므로 바꾸려면 `--tooltip-foreground`를 설정하세요. 눌린 칩은 `--display-chip-pressed-background`를 설정하지 않으면 `--input`으로 채워집니다.
+- 어느 한 모드에서 WCAG AA 대비를 충족하지 못하는 경우: `--foreground`와 `--muted-foreground`는 모든 표면에서 4.5:1, `--brand`는 읽기 표면에서 4.5:1, 기본 버튼 라벨은 버튼 위에서 4.5:1, `--faint-foreground`는 3:1이 필요합니다. 툴팁 글자는 `--tooltip` 위에서 4.5:1, 눌린 표시 설정 칩의 글자는 칩 배경 위에서 4.5:1이 필요합니다. 툴팁은 항상 다크 모드 글자색을 쓰므로 바꾸려면 `--tooltip-foreground`를 설정하세요. 눌린 칩은 `--display-chip-pressed-background`를 설정하지 않으면 `--input`으로 채워집니다. 배경이 있으면 프레임과 페이지는 `--backdrop-color` 위의 유리로 측정됩니다.
 
 ## 검사와 미리보기
 
@@ -195,6 +216,14 @@ pnpm theme:preview path/to/paper --out preview   # preview/light.png와 preview/
 `theme:preview`는 테마 스토어가 보여 주는 스크린샷을 렌더링합니다. 앱 자체 스타일로 만든 태스크 목록과 열린 태스크를, 옵션을 기본값으로 둔 테마로 보여 줍니다.
 
 작업 중에 테마 때문에 인터페이스가 가려지거나 깨지면 `?theme=default`를 붙여 앱을 열거나, 로드 직후 **Shift**를 누르고 있으세요. [테마 때문에 화면이 깨졌을 때](/themes#테마-때문에-화면이-깨졌을-때)를 참고하세요.
+
+검사기는 저장소를 설치하지 않고도 스파스 클론과 Node 22.18 이상으로 실행할 수 있습니다. 에이전트도 기본 제공 Multica 스킬에서 같은 명령을 받습니다.
+
+```bash
+git clone --depth 1 --filter=blob:none --sparse https://github.com/multica-ai/multica.git multica-themes
+git -C multica-themes sparse-checkout set docs scripts packages/core packages/ui
+node multica-themes/scripts/theme-check.mjs path/to/paper
+```
 
 ## 테마 스토어에 게시하기
 

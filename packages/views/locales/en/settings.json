@@ -277,7 +277,7 @@
     },
     "own": {
       "title": "Make your own",
-      "description": "Import a theme as a .zip or folder, or start from a copy of the current one."
+      "description": "Ask any agent to build one in a chat or an issue, import a theme as a .zip or folder, or start from a copy of the current one."
     },
     "tools": {
       "duplicate": "Duplicate “{{name}}” as a new theme",

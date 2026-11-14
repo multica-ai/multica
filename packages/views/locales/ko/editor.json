@@ -53,6 +53,8 @@
     "zoom_actual": "실제 크기"
   },
   "attachment": {
+    "install_theme": "테마 설치",
+    "install_theme_failed": "첨부 파일을 읽을 수 없습니다. 잠시 후 다시 시도하세요.",
     "download_failed": "다운로드 링크를 가져오지 못했습니다. 잠시 후 다시 시도하세요.",
     "preview": "미리보기",
     "preview_loading": "미리보기 불러오는 중...",

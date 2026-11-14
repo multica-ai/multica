@@ -277,7 +277,7 @@
     },
     "own": {
       "title": "Créer le vôtre",
-      "description": "Importez un thème au format .zip ou depuis un dossier, ou partez d’une copie du thème actuel."
+      "description": "Demandez à n’importe quel agent d’en créer un dans un chat ou une tâche, importez un thème au format .zip ou depuis un dossier, ou partez d’une copie du thème actuel."
     },
     "tools": {
       "duplicate": "Dupliquer « {{name}} » en nouveau thème",

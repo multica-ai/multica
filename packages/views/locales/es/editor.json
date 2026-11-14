@@ -53,6 +53,8 @@
     "zoom_actual": "Tamaño real"
   },
   "attachment": {
+    "install_theme": "Instalar tema",
+    "install_theme_failed": "No se pudo leer el adjunto. Inténtalo de nuevo en un momento.",
     "download_failed": "No se ha podido obtener un enlace de descarga. Inténtalo de nuevo en un momento.",
     "preview": "Vista previa",
     "preview_loading": "Cargando vista previa…",

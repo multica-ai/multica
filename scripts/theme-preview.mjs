@@ -78,6 +78,32 @@ function page(theme, mode, appCss) {
   return `<!doctype html><html lang="en" class="${mode} theme-${mode} is-web is-focused"${attrs}><head><meta charset="utf-8">${style(appCss)}${style(themeCss(theme))}${style(adjustments)}</head><body>${fixture}</body></html>`;
 }
 
+/**
+ * Paints the mode's `--backdrop` as the app does (packages/views/common/backdrop-layer.ts),
+ * from the browser side because the page runs no script of its own.
+ */
+async function paintBackdrop(tab) {
+  await tab.evaluate(async () => {
+    const root = document.documentElement;
+    const value = getComputedStyle(root).getPropertyValue("--backdrop").trim();
+    if (value === "" || value === "none") return;
+    root.setAttribute("data-backdrop", "");
+    const layer = document.createElement("div");
+    layer.id = "multica-backdrop";
+    const image = layer.appendChild(document.createElement("div"));
+    document.body.prepend(layer);
+    const urls = [...value.matchAll(/url\(\s*(["']?)(.*?)\1\s*\)/g)].map((m) => m[2]).filter(Boolean);
+    await Promise.all(
+      urls.map((url) => {
+        const img = new Image();
+        img.src = url;
+        return img.decode().catch(() => undefined);
+      }),
+    );
+    image.style.background = value;
+  });
+}
+
 const args = parseArgs(process.argv.slice(2));
 if (args.targets.length !== 1 || args.modes.length === 0) {
   console.error("Usage: pnpm theme:preview <theme folder or .zip> [--out <dir>] [--modes light,dark]");
@@ -108,6 +134,7 @@ try {
   for (const mode of args.modes) {
     const tab = await context.newPage();
     await tab.setContent(page(result.theme, mode, appCss), { waitUntil: "load" });
+    await paintBackdrop(tab);
     const file = join(out, `${mode}.png`);
     writeFileSync(file, await tab.screenshot({ animations: "disabled" }));
     await tab.close();

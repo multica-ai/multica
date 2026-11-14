@@ -149,6 +149,27 @@ Option ids are 1–48 characters of `a-z`, `0-9`, and `-`, starting with a lette
 [data-mc="content"] { max-width: var(--page-width); }
 ```
 
+## Backdrop and glass
+
+A theme can put a picture behind the app — a gradient, an image, or an animated SVG — and turn the frame and the page into glass over it. Set these per mode:
+
+```css
+.theme-dark {
+  --backdrop: url(night.svg) center / cover no-repeat;
+  --backdrop-color: #1e1e4a;
+  --glass-opacity: 72%;
+  --glass-blur: 18px;
+  --frame-glass-opacity: 0%;
+  --frame-glass-blur: 0px;
+}
+```
+
+- `--backdrop` is a CSS `background` value painted under the whole window, on desktop and on the web. Images must be in the theme folder; an SVG's own animation plays.
+- `--backdrop-color` is required with a backdrop: the solid color shown while it loads, and the color `theme:check` measures the glass on.
+- `--glass-opacity` and `--glass-blur` set how much of the page's own color covers the backdrop and how much the backdrop blurs behind it. `--frame-glass-opacity` and `--frame-glass-blur` do the same for the rail, window toolbar, tab bar, and bottom bar.
+
+Use these instead of a transparent `--app-shell` or a `background` on `body`: the app then changes backdrops without flashing the window. [`examples/themes/night-sky`](https://github.com/multica-ai/multica/tree/main/examples/themes/night-sky) is a complete example.
+
 ## Selectors
 
 Target anchors, slots, and state hooks — not class names or DOM structure, which change without notice. Anchors, slots, and hooks stay until the next `apiVersion`.
@@ -178,7 +199,7 @@ Escapes, case, and comments don't get around the check; it reads the CSS the way
 - uses a variable that isn't public, unless it is an option id or the theme reads it itself with `var()`;
 - sets variables anywhere other than `.theme-light` and `.theme-dark` without a descendant selector, so the theme picker can't read the theme's colors back;
 - names a generic family (`sans-serif`, `serif`, …) or a `ui-*` keyword in a font stack, which would override the person's CJK font;
-- misses WCAG AA contrast in either mode: `--foreground` and `--muted-foreground` need 4.5:1 on every surface, `--brand` 4.5:1 on reading surfaces, the primary button label 4.5:1 on the button, and `--faint-foreground` 3:1. Tooltip text needs 4.5:1 on `--tooltip`, and a pressed display chip's text 4.5:1 on its fill. Tooltips always use dark-mode text, so set `--tooltip-foreground` to change it; pressed chips fill with `--input` unless you set `--display-chip-pressed-background`.
+- misses WCAG AA contrast in either mode: `--foreground` and `--muted-foreground` need 4.5:1 on every surface, `--brand` 4.5:1 on reading surfaces, the primary button label 4.5:1 on the button, and `--faint-foreground` 3:1. Tooltip text needs 4.5:1 on `--tooltip`, and a pressed display chip's text 4.5:1 on its fill. Tooltips always use dark-mode text, so set `--tooltip-foreground` to change it; pressed chips fill with `--input` unless you set `--display-chip-pressed-background`. With a backdrop, the frame and the page are measured as glass over `--backdrop-color`.
 
 ## Check and preview
 
@@ -195,6 +216,14 @@ pnpm theme:preview path/to/paper --out preview   # preview/light.png and preview
 `theme:preview` renders the screenshots the theme store shows: an issue list next to an open issue, built from the app's own styles, with the theme at its option defaults.
 
 If a theme hides or breaks part of the interface while you work on it, open the app with `?theme=default`, or hold **Shift** right after it loads; see [When a theme breaks something](/themes#when-a-theme-breaks-something).
+
+The checker also runs without installing the repository, from a sparse clone and Node 22.18 or newer. Agents get the same commands from their built-in Multica skill:
+
+```bash
+git clone --depth 1 --filter=blob:none --sparse https://github.com/multica-ai/multica.git multica-themes
+git -C multica-themes sparse-checkout set docs scripts packages/core packages/ui
+node multica-themes/scripts/theme-check.mjs path/to/paper
+```
 
 ## Publish to the theme store
 

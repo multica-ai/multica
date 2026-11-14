@@ -53,6 +53,8 @@
     "zoom_actual": "Actual size"
   },
   "attachment": {
+    "install_theme": "Install theme",
+    "install_theme_failed": "Couldn't read the attachment. Try again in a moment.",
     "download_failed": "Couldn't fetch a download link. Try again in a moment.",
     "preview": "Preview",
     "preview_loading": "Loading preview…",

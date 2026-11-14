@@ -277,7 +277,7 @@
     },
     "own": {
       "title": "Crea el tuyo",
-      "description": "Importa un tema como .zip o carpeta, o empieza con una copia del actual."
+      "description": "Pide a cualquier agente que cree uno en un chat o una tarea, importa un tema como .zip o carpeta, o empieza con una copia del actual."
     },
     "tools": {
       "duplicate": "Duplicar «{{name}}» como tema nuevo",

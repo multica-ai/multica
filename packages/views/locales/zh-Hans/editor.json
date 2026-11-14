@@ -53,6 +53,8 @@
     "zoom_actual": "实际大小"
   },
   "attachment": {
+    "install_theme": "安装主题",
+    "install_theme_failed": "无法读取附件，请稍后重试。",
     "download_failed": "下载链接获取失败，请稍后重试。",
     "preview": "预览",
     "preview_loading": "加载预览中…",
