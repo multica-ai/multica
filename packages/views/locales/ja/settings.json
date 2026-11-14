@@ -992,6 +992,8 @@
     "feature_pr_sidebar_label": "Pull request サイドバー",
     "feature_pr_sidebar_description": "リンクされた Pull request をタスク詳細サイドバーに表示します。",
     "feature_co_author_label": "Co-authored-by トレーラー",
+    "feature_commit_author_label": "実行開始者をコミット作成者にする",
+    "feature_commit_author_description": "管理対象のチェックアウトで新規コミットの作成者に、実行を開始したユーザーの名前とメールアドレスを使用します。コミッターはランタイムの Git ID のままです。既定ではオフです。",
     "feature_co_author_description_prefix": "エージェントが作成したコミットに",
     "feature_co_author_description_suffix": "を追加します。",
     "feature_auto_link_label": "タスクと PR を自動リンク",

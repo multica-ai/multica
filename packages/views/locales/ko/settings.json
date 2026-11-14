@@ -992,6 +992,8 @@
     "feature_pr_sidebar_label": "Pull request 사이드바",
     "feature_pr_sidebar_description": "연결된 Pull request를 태스크 상세 사이드바에 표시합니다.",
     "feature_co_author_label": "Co-authored-by 트레일러",
+    "feature_commit_author_label": "실행 시작자를 커밋 작성자로 사용",
+    "feature_commit_author_description": "관리되는 체크아웃의 새 커밋에 실행을 시작한 사용자의 이름과 이메일을 사용합니다. 커미터는 런타임의 Git 신원으로 유지됩니다. 기본적으로 꺼져 있습니다.",
     "feature_co_author_description_prefix": "에이전트가 작성한 커밋에",
     "feature_co_author_description_suffix": "을(를) 추가합니다.",
     "feature_auto_link_label": "태스크와 PR 자동 연결",

@@ -51,6 +51,7 @@ type GitHubSettingsKey =
   | "github_enabled"
   | "github_pr_sidebar_enabled"
   | "co_authored_by_enabled"
+  | "commit_author_is_initiator_enabled"
   | "github_auto_link_prs_enabled";
 
 /**
@@ -302,6 +303,18 @@ export function CodeTab() {
             />
           </SettingsRow>
           <PRMergeStatusRow canManage={isManager} />
+          <SettingsRow
+            anchor="commit-author"
+            label={t(($) => $.github.feature_commit_author_label)}
+            description={t(($) => $.github.feature_commit_author_description)}
+          >
+            <Switch
+              checked={flags.commitAuthorIsInitiator}
+              disabled={featureDisabled("commit_author_is_initiator_enabled")}
+              onCheckedChange={(v) => persistSetting("commit_author_is_initiator_enabled", v)}
+              aria-label={t(($) => $.github.feature_commit_author_label)}
+            />
+          </SettingsRow>
         </SettingsCard>
       </SettingsSection>
 

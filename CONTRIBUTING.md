@@ -472,10 +472,17 @@ conditional includes evaluated in the checkout. Agent names determine branch
 names, not commit authors. The optional `Co-authored-by` trailer is independent
 of author and committer identity.
 
+Workspaces can opt into `commit_author_is_initiator_enabled` in Settings → Code.
+Daemon-managed checkouts then use a valid human run initiator as the commit
+author while retaining the runtime's committer identity. The override is private
+to the checkout and is removed on reuse when the setting or identity no longer
+applies. It does not change CLI checkouts outside an active daemon run.
+
 Linked worktrees mask the shared cache's `user`, `author`, and `committer`
 name/email settings with private defaults in `multica-identity.config`, included
-first by their `config.worktree`. Repeating checkout refreshes these defaults;
-explicit worktree settings and Git command/environment overrides take precedence.
+first by their `config.worktree`. Repeating checkout refreshes these defaults.
+Explicit worktree settings override these defaults; opt-in initiator attribution
+overrides the author settings only. Git command/environment overrides take precedence.
 Conditional identities are snapshots: switching branches or changing global
 config takes effect in these defaults on the next checkout call, not at commit time.
 Use `git config --worktree user.name "Your Name"` and

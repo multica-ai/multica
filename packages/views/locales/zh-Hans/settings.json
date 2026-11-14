@@ -992,6 +992,8 @@
     "feature_pr_sidebar_label": "Pull Request 侧栏",
     "feature_pr_sidebar_description": "在任务详情侧栏中展示关联的 Pull Request。",
     "feature_co_author_label": "Co-authored-by trailer",
+    "feature_commit_author_label": "将运行发起人设为 commit 作者",
+    "feature_commit_author_description": "在托管检出目录中创建 commit 时，使用发起运行的用户姓名和邮箱。提交者仍为运行环境的 Git 身份。默认关闭。",
     "feature_co_author_description_prefix": "在智能体提交的 commit 中追加",
     "feature_co_author_description_suffix": "。",
     "feature_auto_link_label": "任务 ↔ PR 自动关联",

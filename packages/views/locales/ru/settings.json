@@ -1018,6 +1018,8 @@
     "feature_pr_sidebar_label": "Боковая панель pull request'ов",
     "feature_pr_sidebar_description": "Показывать связанные pull request'ы в боковой панели карточки задачи.",
     "feature_co_author_label": "Трейлер Co-authored-by",
+    "feature_commit_author_label": "Указывать инициатора запуска автором коммитов",
+    "feature_commit_author_description": "Для новых коммитов в управляемых рабочих копиях используются имя и почта пользователя, начавшего запуск. Коммиттером остаётся Git-пользователь среды выполнения. По умолчанию выключено.",
     "feature_co_author_description_prefix": "Добавлять",
     "feature_co_author_description_suffix": "к коммитам, созданным агентами.",
     "feature_auto_link_label": "Автосвязывание задач и PR",

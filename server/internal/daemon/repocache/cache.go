@@ -733,13 +733,17 @@ func setFetchRefspecContext(ctx context.Context, barePath, refspec string) error
 
 // WorktreeParams holds inputs for creating a worktree from a cached bare clone.
 type WorktreeParams struct {
-	WorkspaceID         string // workspace that owns the repo
-	RepoURL             string // remote URL to look up in the cache
-	WorkDir             string // parent directory for the worktree (e.g. task workdir)
-	Ref                 string // optional branch, tag, or commit to base the worktree on
-	AgentName           string // for branch naming
-	TaskID              string // for branch naming uniqueness
-	CoAuthoredByEnabled bool   // install prepare-commit-msg hook for Co-authored-by trailer
+	WorkspaceID                    string // workspace that owns the repo
+	RepoURL                        string // remote URL to look up in the cache
+	WorkDir                        string // parent directory for the worktree (e.g. task workdir)
+	Ref                            string // optional branch, tag, or commit to base the worktree on
+	AgentName                      string // for branch naming
+	TaskID                         string // for branch naming uniqueness
+	CoAuthoredByEnabled            bool   // install prepare-commit-msg hook for Co-authored-by trailer
+	CommitAuthorIsInitiatorEnabled bool
+	InitiatorType                  string
+	InitiatorName                  string
+	InitiatorEmail                 string
 	// LockWaitTimeout bounds only the wait for another same-repository
 	// operation. Zero preserves the historical unbounded wait for internal and
 	// older callers; retry-aware HTTP checkout requests set a finite value.
@@ -936,6 +940,9 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 			return nil, fmt.Errorf("isolate checkout Git identity: %w", err)
 		}
 		c.applyCoAuthoredBySettingContext(ctx, worktreePath, params)
+		if err := applyInitiatorAuthorContext(ctx, worktreePath, params); err != nil {
+			return nil, fmt.Errorf("configure initiator commit author: %w", err)
+		}
 		if err := ctx.Err(); err != nil {
 			return nil, context.Cause(ctx)
 		}
@@ -966,6 +973,9 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 		// must actively remove it when disabled — otherwise a previously
 		// installed hook keeps appending the trailer to every commit even
 		// after the user toggles the setting off.
+		if err := applyInitiatorAuthorContext(ctx, worktreePath, params); err != nil {
+			return nil, fmt.Errorf("configure initiator commit author: %w", err)
+		}
 		c.applyCoAuthoredBySettingContext(ctx, worktreePath, params)
 		if err := ctx.Err(); err != nil {
 			return nil, context.Cause(ctx)
@@ -995,6 +1005,9 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 	// Reconcile the Co-authored-by hook and the workspace's recorded setting.
 	// See the existing-worktree branch above for why removal is required when
 	// the setting is disabled.
+	if err := applyInitiatorAuthorContext(ctx, worktreePath, params); err != nil {
+		return nil, fmt.Errorf("configure initiator commit author: %w", err)
+	}
 	c.applyCoAuthoredBySettingContext(ctx, worktreePath, params)
 	if err := ctx.Err(); err != nil {
 		return nil, context.Cause(ctx)

@@ -124,12 +124,15 @@ type repoCheckoutRequest struct {
 }
 
 type activeRepoCheckoutTask struct {
-	WorkspaceID string
-	TaskID      string
-	IssueID     string
-	AgentID     string
-	AgentName   string
-	WorkDir     string
+	InitiatorType  string
+	InitiatorName  string
+	InitiatorEmail string
+	WorkspaceID    string
+	TaskID         string
+	IssueID        string
+	AgentID        string
+	AgentName      string
+	WorkDir        string
 }
 
 // registerActiveRepoCheckoutTask binds checkout identity to the active task.
@@ -565,15 +568,19 @@ func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
 		}
 
 		params := repocache.WorktreeParams{
-			WorkspaceID:         req.WorkspaceID,
-			RepoURL:             req.URL,
-			WorkDir:             req.WorkDir,
-			Ref:                 checkoutRef,
-			AgentName:           req.AgentName,
-			TaskID:              req.TaskID,
-			CoAuthoredByEnabled: d.workspaceCoAuthoredByEnabled(req.WorkspaceID),
-			IsolatedGitMetadata: req.CheckoutMode == repoCheckoutModeIsolated,
-			Fresh:               req.Fresh,
+			WorkspaceID:                    req.WorkspaceID,
+			RepoURL:                        req.URL,
+			WorkDir:                        req.WorkDir,
+			Ref:                            checkoutRef,
+			AgentName:                      req.AgentName,
+			TaskID:                         req.TaskID,
+			CoAuthoredByEnabled:            d.workspaceCoAuthoredByEnabled(req.WorkspaceID),
+			CommitAuthorIsInitiatorEnabled: d.workspaceCommitAuthorIsInitiatorEnabled(req.WorkspaceID),
+			InitiatorType:                  activeTask.InitiatorType,
+			InitiatorName:                  activeTask.InitiatorName,
+			InitiatorEmail:                 activeTask.InitiatorEmail,
+			IsolatedGitMetadata:            req.CheckoutMode == repoCheckoutModeIsolated,
+			Fresh:                          req.Fresh,
 		}
 		if req.RetryBusy {
 			params.LockWaitTimeout = repoCheckoutLockWaitTimeout
