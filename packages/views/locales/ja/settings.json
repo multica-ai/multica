@@ -387,6 +387,7 @@
     "reserved_error": "ブラウザまたはデスクトップウィンドウで予約されています。",
     "send_error": "送信には Enter または Mod+Enter のみ使用できます。",
     "unsafe_error": "このキーは文字入力や基本的なキーボード操作と競合します。",
+    "unrecognized_error": "このキーの組み合わせは記録できません。別の組み合わせをお試しください。",
     "send_enter_hint": "Shift+Enterで段落の挿入、リストの継続、コードブロック内の改行ができます。",
     "categories": {
       "general": "一般",

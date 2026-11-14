@@ -393,6 +393,7 @@
     "reserved_error": "Réservé par le navigateur ou la fenêtre de bureau.",
     "send_error": "Envoyer ne peut utiliser que Entrée ou Mod+Entrée.",
     "unsafe_error": "Cette touche gênerait la saisie ou la navigation clavier de base.",
+    "unrecognized_error": "Impossible d'enregistrer cette combinaison. Essayez-en une autre.",
     "send_enter_hint": "Maj+Entrée insère un paragraphe, poursuit une liste, ou ajoute un saut de ligne dans un bloc de code.",
     "categories": {
       "general": "Général",

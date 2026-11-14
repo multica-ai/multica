@@ -393,6 +393,7 @@
     "reserved_error": "Reservado por el navegador o la ventana de escritorio.",
     "send_error": "Enviar solo puede usar Enter o Mod+Enter.",
     "unsafe_error": "Esta tecla interferiría con la escritura o la navegación básica del teclado.",
+    "unrecognized_error": "No se puede grabar esta combinación. Prueba con otra.",
     "send_enter_hint": "Shift+Enter inserta un párrafo, continúa una lista o añade un salto de línea en un bloque de código.",
     "categories": {
       "general": "General",

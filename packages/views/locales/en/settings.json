@@ -393,6 +393,7 @@
     "reserved_error": "Reserved by the browser or desktop window.",
     "send_error": "Send can only use Enter or Mod+Enter.",
     "unsafe_error": "This key would interfere with typing or basic keyboard navigation.",
+    "unrecognized_error": "This key combination can't be recorded. Try another one.",
     "send_enter_hint": "Shift+Enter inserts a paragraph, continues a list, or adds a code-block newline.",
     "categories": {
       "general": "General",

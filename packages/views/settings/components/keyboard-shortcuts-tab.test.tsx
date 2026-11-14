@@ -87,6 +87,46 @@ describe("KeyboardShortcutsTab", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
+  it("records macOS Option chords by physical key, including dead keys", () => {
+    configureShortcutPlatform("macos");
+    renderWithI18n(<KeyboardShortcutsTab />);
+    const recorder = screen.getByRole("button", {
+      name: "Change shortcut for Open search",
+    });
+
+    fireEvent.click(recorder);
+    fireEvent.keyDown(recorder, {
+      key: "Dead",
+      code: "KeyE",
+      metaKey: true,
+      altKey: true,
+    });
+
+    expect(getShortcut("openSearch")).toEqual(
+      createShortcutChord("E", { primary: true, alt: true }),
+    );
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("explains a key it cannot record instead of ignoring it", () => {
+    renderWithI18n(<KeyboardShortcutsTab />);
+    const recorder = screen.getByRole("button", {
+      name: "Change shortcut for Open search",
+    });
+
+    fireEvent.click(recorder);
+    fireEvent.keyDown(recorder, { key: "Control", ctrlKey: true });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    fireEvent.keyDown(recorder, { key: "Unidentified", ctrlKey: true });
+    expect(getShortcut("openSearch")).toEqual(
+      createShortcutChord("K", { primary: true }),
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "This key combination can't be recorded. Try another one.",
+    );
+  });
+
   it("only captures keys while the recorder is active", () => {
     renderWithI18n(<KeyboardShortcutsTab />);
     const recorder = screen.getByRole("button", {

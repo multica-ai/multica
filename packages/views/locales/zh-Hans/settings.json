@@ -387,6 +387,7 @@
     "reserved_error": "该快捷键已被浏览器或桌面窗口占用。",
     "send_error": "发送只能使用 Enter 或 Mod + Enter。",
     "unsafe_error": "这个按键会干扰文字输入或基础键盘导航。",
+    "unrecognized_error": "无法录制这个组合键，请换一个试试。",
     "send_enter_hint": "Shift+Enter 可插入段落、继续列表，或在代码块中换行。",
     "categories": {
       "general": "常规",
