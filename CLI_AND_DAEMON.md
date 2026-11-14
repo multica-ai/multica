@@ -968,9 +968,10 @@ belongs to a workspace and can optionally have a lead (member or agent).
 multica project list
 multica project list --status in_progress
 multica project list --output json
+multica project list --archived
 ```
 
-Available filters: `--status`.
+Available filters: `--status`, `--archived` (only archived projects; they are hidden by default).
 
 ### Get Project
 
@@ -1004,6 +1005,18 @@ multica project status <id> in_progress
 ```
 
 Valid statuses: `planned`, `in_progress`, `paused`, `completed`, `cancelled`.
+
+### Archive and Restore
+
+```bash
+multica project archive <id>
+multica project restore <id>
+```
+
+Archiving hides a project from lists and pickers and stops new issues from being
+filed into it (HTTP 409 `project_archived`); existing issues stay editable.
+Active autopilots that file into the project are paused, and restoring does not
+resume them. Archiving is independent of status.
 
 ### Delete Project
 

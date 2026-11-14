@@ -52,6 +52,24 @@ var projectDeleteCmd = &cobra.Command{
 	RunE:  runProjectDelete,
 }
 
+var projectArchiveCmd = &cobra.Command{
+	Use:   "archive <id>",
+	Short: "Archive a project: hide it from default lists and stop new issues from being filed into it",
+	Long: `Archive a project. It disappears from default project lists and pickers and
+accepts no new issues; its existing issues stay readable and editable, and its
+status is unchanged. Autopilots that file into it are paused. Undo with
+` + "`multica project restore <id>`" + `.`,
+	Args: exactArgs(1),
+	RunE: runProjectArchive,
+}
+
+var projectRestoreCmd = &cobra.Command{
+	Use:   "restore <id>",
+	Short: "Restore an archived project (paused autopilots stay paused)",
+	Args:  exactArgs(1),
+	RunE:  runProjectRestore,
+}
+
 var projectStatusCmd = &cobra.Command{
 	Use:   "status <id> <status>",
 	Short: "Change project status",
@@ -152,6 +170,8 @@ func init() {
 	projectCmd.AddCommand(projectUpdateCmd)
 	projectCmd.AddCommand(projectDeleteCmd)
 	projectCmd.AddCommand(projectStatusCmd)
+	projectCmd.AddCommand(projectArchiveCmd)
+	projectCmd.AddCommand(projectRestoreCmd)
 	projectCmd.AddCommand(projectResourceCmd)
 
 	projectResourceCmd.AddCommand(projectResourceListCmd)
@@ -170,6 +190,7 @@ func init() {
 	projectListCmd.Flags().String("output", "table", "Output format: table or json")
 	projectListCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
 	projectListCmd.Flags().String("status", "", "Filter by status")
+	projectListCmd.Flags().Bool("archived", false, "List archived projects instead of active ones")
 
 	// project get
 	projectGetCmd.Flags().String("output", "json", "Output format: table or json")
@@ -240,6 +261,10 @@ func init() {
 
 	// project status
 	projectStatusCmd.Flags().String("output", "table", "Output format: table or json")
+
+	// project archive / restore
+	projectArchiveCmd.Flags().String("output", "table", "Output format: table or json")
+	projectRestoreCmd.Flags().String("output", "table", "Output format: table or json")
 }
 
 // Project commands
@@ -260,6 +285,10 @@ func runProjectList(cmd *cobra.Command, _ []string) error {
 	if v, _ := cmd.Flags().GetString("status"); v != "" {
 		params.Set("status", v)
 	}
+	archivedOnly, _ := cmd.Flags().GetBool("archived")
+	if archivedOnly {
+		params.Set("include_archived", "true")
+	}
 
 	path := "/api/projects"
 	if len(params) > 0 {
@@ -272,6 +301,15 @@ func runProjectList(cmd *cobra.Command, _ []string) error {
 	}
 
 	projectsRaw, _ := result["projects"].([]any)
+	if archivedOnly {
+		archived := make([]any, 0, len(projectsRaw))
+		for _, raw := range projectsRaw {
+			if p, ok := raw.(map[string]any); ok && strVal(p, "archived_at") != "" {
+				archived = append(archived, raw)
+			}
+		}
+		projectsRaw = archived
+	}
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
@@ -335,12 +373,13 @@ func runProjectGet(cmd *cobra.Command, args []string) error {
 	if output == "table" {
 		actors := loadActorDisplayLookup(ctx, client)
 		lead := formatLead(project, actors)
-		headers := []string{"ID", "TITLE", "STATUS", "LEAD", "DESCRIPTION"}
+		headers := []string{"ID", "TITLE", "STATUS", "LEAD", "ARCHIVED", "DESCRIPTION"}
 		rows := [][]string{{
 			strVal(project, "id"),
 			strVal(project, "title"),
 			strVal(project, "status"),
 			lead,
+			formatProjectArchived(project),
 			strVal(project, "description"),
 		}}
 		cli.PrintTable(os.Stdout, headers, rows)
@@ -536,6 +575,84 @@ func runProjectDelete(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Fprintf(os.Stderr, "Project %s deleted.\n", projectRef.Display)
+	return nil
+}
+
+// formatProjectArchived renders the archive date for table output, or "-"
+// for an active project.
+func formatProjectArchived(project map[string]any) string {
+	archivedAt := strVal(project, "archived_at")
+	if archivedAt == "" {
+		return "-"
+	}
+	if len(archivedAt) >= 10 {
+		return archivedAt[:10]
+	}
+	return archivedAt
+}
+
+func runProjectArchive(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	projectRef, err := resolveProjectID(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve project: %w", err)
+	}
+
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/projects/"+projectRef.ID+"/archive", map[string]any{}, &result); err != nil {
+		return fmt.Errorf("archive project: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "Project %s archived. Restore it with `multica project restore %s`.\n", strVal(result, "title"), strVal(result, "id"))
+	if paused, _ := result["paused_autopilot_ids"].([]any); len(paused) > 0 {
+		ids := make([]string, 0, len(paused))
+		for _, id := range paused {
+			if s, ok := id.(string); ok {
+				ids = append(ids, s)
+			}
+		}
+		fmt.Fprintf(os.Stderr, "Paused %d autopilot(s) that file into it: %s\n", len(ids), strings.Join(ids, ", "))
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+	return nil
+}
+
+func runProjectRestore(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	projectRef, err := resolveProjectID(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve project: %w", err)
+	}
+
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/projects/"+projectRef.ID+"/restore", map[string]any{}, &result); err != nil {
+		return fmt.Errorf("restore project: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "Project %s restored.\n", strVal(result, "title"))
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
 	return nil
 }
 

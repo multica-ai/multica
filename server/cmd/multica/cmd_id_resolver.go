@@ -357,7 +357,10 @@ func fetchProjectCandidates(ctx context.Context, client *cli.APIClient) ([]idCan
 	if client.WorkspaceID == "" {
 		return nil, fmt.Errorf("workspace_id is required to resolve project id prefixes")
 	}
-	params := url.Values{"workspace_id": {client.WorkspaceID}}
+	// Archived projects resolve too, so get / restore / issue list --project
+	// work on them; writes into one are refused server-side with 409
+	// project_archived.
+	params := url.Values{"workspace_id": {client.WorkspaceID}, "include_archived": {"true"}}
 	var result map[string]any
 	if err := client.GetJSON(ctx, "/api/projects?"+params.Encode(), &result); err != nil {
 		return nil, err
@@ -369,10 +372,14 @@ func fetchProjectCandidates(ctx context.Context, client *cli.APIClient) ([]idCan
 		if !ok {
 			continue
 		}
+		detail := strVal(p, "status")
+		if strVal(p, "archived_at") != "" {
+			detail += ", archived"
+		}
 		candidates = append(candidates, idCandidate{
 			ID:      strVal(p, "id"),
 			Display: strVal(p, "title"),
-			Detail:  strVal(p, "status"),
+			Detail:  detail,
 		})
 	}
 	return candidates, nil
