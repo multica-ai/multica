@@ -433,6 +433,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 		var streamResultUsage *antigravityStreamUsage
 		streamStepUsage := make(map[int]TokenUsage)
 		streamTools := make(map[int]antigravityToolState)
+		streamDiagnostics := make(map[int]struct{})
 		turn := antigravityTurn{steps: make(map[int]antigravityStepSummary)}
 		finalStatus := "completed"
 		var finalError string
@@ -466,6 +467,20 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 						turn.steps[*idx] = antigravityStepSummary{
 							kind: step.StepType, state: strings.ToUpper(step.State),
 							hasText: turn.steps[*idx].hasText || strings.TrimSpace(step.TextDelta) != "",
+						}
+						if step.StepType == "error_message" && !turn.invalid && turn.start != nil && *idx > *turn.start {
+							if _, sent := streamDiagnostics[*idx]; !sent {
+								// agy can replay old steps and repeat state snapshots.
+								// Report each current-turn error once without guessing
+								// undocumented error fields or exposing provider logs.
+								message := Message{Type: MessageDiagnostic, Content: fmt.Sprintf("Antigravity reported a runtime error at step %d; waiting for recovery.", *idx)}
+								select {
+								case msgCh <- message:
+									streamDiagnostics[*idx] = struct{}{}
+								case <-runCtx.Done():
+									break streamLoop
+								}
+							}
 						}
 					}
 					if event.StepUpdate.ConversationID != "" {

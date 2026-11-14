@@ -71,6 +71,7 @@ func TestTaskPhaseRecorderClassifiesOutputReceived(t *testing.T) {
 		{name: "empty text", msg: agent.Message{Type: agent.MessageText}, want: false},
 		{name: "text", msg: agent.Message{Type: agent.MessageText, Content: "working"}, want: true},
 		{name: "tool use", msg: agent.Message{Type: agent.MessageToolUse, Tool: "shell"}, want: true},
+		{name: "runtime diagnostic", msg: agent.Message{Type: agent.MessageDiagnostic, Content: "retrying"}, want: true},
 	}
 
 	for _, tc := range cases {
