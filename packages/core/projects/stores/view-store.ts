@@ -1,5 +1,7 @@
 "use client";
 
+import type { ProjectLifecycleView } from "../lifecycle";
+
 import {
   createCollectionViewStore,
   type CollectionSortDirection,
@@ -8,9 +10,8 @@ import {
 
 // Projects is the one dual-view list: a dense table (compact) and a card
 // grid (comfortable), toggled by viewMode. Sort + filters feed both views;
-// hiddenColumns only applies to the table. No scope (lead is optional and
-// often an agent, so there's no strong personal axis; status is a 5-value
-// lifecycle better expressed as a filter). Search stays session-local.
+// hiddenColumns only applies to the table. Lifecycle scopes and explicit
+// status filters share one persisted preference. Search stays session-local.
 export type ProjectViewMode = "compact" | "comfortable";
 
 export type ProjectSortField = "name" | "priority" | "status" | "progress" | "created";
@@ -58,6 +59,8 @@ export interface ProjectViewState
     ProjectColumnKey,
     ProjectListFilters
   > {
+  lifecycleView: ProjectLifecycleView;
+  setLifecycleView: (view: ProjectLifecycleView) => void;
   viewMode: ProjectViewMode;
   setViewMode: (mode: ProjectViewMode) => void;
 }
@@ -66,14 +69,33 @@ export const useProjectViewStore = createCollectionViewStore<
   ProjectSortField,
   ProjectColumnKey,
   ProjectListFilters,
-  { viewMode: ProjectViewMode },
-  { setViewMode: (mode: ProjectViewMode) => void }
+  { viewMode: ProjectViewMode; lifecycleView: ProjectLifecycleView },
+  { setViewMode: (mode: ProjectViewMode) => void; setLifecycleView: (view: ProjectLifecycleView) => void }
 >({
   name: "multica_projects_view",
+  version: 1,
+  migrate: (persisted) => {
+    const p = persisted as Omit<Partial<ProjectViewState>, "lifecycleView"> & { lifecycleView?: string };
+    return {
+      ...p,
+      lifecycleView: p.lifecycleView === "active" || p.lifecycleView === "all"
+        ? p.lifecycleView
+        : p.lifecycleView === "closed" || p.lifecycleView === "completed"
+          ? "closed"
+          : p.filters?.statuses?.length ? "all" : "active",
+    };
+  },
   defaultSortField: "created",
   sortDefaultDirection: PROJECT_SORT_DEFAULT_DIRECTION,
   defaultHiddenColumns: PROJECT_DEFAULT_HIDDEN_COLUMNS,
   emptyFilters: EMPTY_PROJECT_FILTERS,
-  extraState: { viewMode: "compact" },
-  extraActions: (set) => ({ setViewMode: (mode) => set({ viewMode: mode }) }),
+  extraState: { viewMode: "compact", lifecycleView: "active" },
+  onToggleFilter: (_state, key) => key === "statuses" ? { lifecycleView: "all" } : {},
+  extraActions: (set) => ({
+    setViewMode: (mode) => set({ viewMode: mode }),
+    setLifecycleView: (lifecycleView) => set((state) => ({
+      lifecycleView,
+      filters: { ...state.filters, statuses: [] },
+    })),
+  }),
 });

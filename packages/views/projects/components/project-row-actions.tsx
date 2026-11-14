@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ExternalLink, Link2, Pencil, Pin, PinOff, Trash2 } from "@multica/ui/icons";
@@ -32,20 +32,45 @@ import { useT } from "../../i18n";
 import { useIntentNavigate, useNavigation } from "../../navigation";
 import { CollectionRowMenu } from "../../layout/collection-list";
 
+export interface ProjectDeletionContext {
+  key: string;
+  projects: Project[];
+  selectedIds: string[];
+}
+
 export function DeleteProjectsDialog({
   rows,
   open,
   onOpenChange,
   onDeleted,
+  context,
 }: {
   rows: Project[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onDeleted?: () => void;
+  context?: ProjectDeletionContext;
 }) {
   const { t } = useT("projects");
   const deleteProject = useDeleteProject();
   const [deleting, setDeleting] = useState(false);
+  const previousContext = useRef(context);
+  const deletedIds = useRef(new Set<string>());
+
+  useEffect(() => {
+    const contextKey = (value: ProjectDeletionContext | undefined) => value && JSON.stringify([
+      value.key,
+      value.projects.filter((project) => !deletedIds.current.has(project.id)),
+      value.selectedIds.filter((id) => !deletedIds.current.has(id)),
+    ]);
+    // Account for this batch's successful deletions even when Query notifies
+    // React after a later deletion has failed and the retry dialog is idle.
+    if (contextKey(previousContext.current) !== contextKey(context) && !deleting) {
+      onOpenChange(false);
+    }
+    previousContext.current = context;
+    if (!open) deletedIds.current.clear();
+  }, [context, deleting, onOpenChange, open]);
 
   const handleDelete = async () => {
     if (deleting) return;
@@ -53,6 +78,7 @@ export function DeleteProjectsDialog({
     try {
       for (const project of rows) {
         await deleteProject.mutateAsync(project.id);
+        deletedIds.current.add(project.id);
       }
       onOpenChange(false);
       onDeleted?.();

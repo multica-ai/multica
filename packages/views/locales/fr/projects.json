@@ -224,5 +224,12 @@
     "publish_description": "Tous les membres pourront voir ce projet, ses tâches, commentaires et pièces jointes.",
     "done": "Terminé",
     "retry": "Réessayer"
+  },
+  "lifecycle": {
+    "empty": {
+      "active": "Aucun projet actif",
+      "all": "Aucun projet pour le moment",
+      "closed": "Aucun projet fermé"
+    }
   }
 }

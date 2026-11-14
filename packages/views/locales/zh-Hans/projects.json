@@ -224,5 +224,12 @@
     "publish_description": "工作区所有成员都将能查看这个项目及其中的任务、评论和附件。",
     "done": "完成",
     "retry": "重试"
+  },
+  "lifecycle": {
+    "empty": {
+      "active": "没有活跃项目",
+      "all": "暂无项目",
+      "closed": "暂无已关闭项目"
+    }
   }
 }
