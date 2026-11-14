@@ -65,6 +65,62 @@ func (fakeAudienceQuerier) ListWorkspaceManagerUserIDs(context.Context, pgtype.U
 	return []pgtype.UUID{ppUUID(ppAdmin)}, nil
 }
 
+func (fakeAudienceQuerier) ListWorkspaceOwnerUserIDs(context.Context, pgtype.UUID) ([]pgtype.UUID, error) {
+	return nil, nil
+}
+
+// hideFromAdminsAudienceQuerier adds ppHidden, a private project that hides
+// from admins, and a workspace owner.
+type hideFromAdminsAudienceQuerier struct{ fakeAudienceQuerier }
+
+const (
+	ppHidden = "00000000-0000-0000-0000-0000000000b4"
+	ppOwner  = "00000000-0000-0000-0000-0000000000c4"
+)
+
+func (q hideFromAdminsAudienceQuerier) ListPrivateProjectAudience(ctx context.Context, ws pgtype.UUID) ([]db.ListPrivateProjectAudienceRow, error) {
+	rows, err := q.fakeAudienceQuerier.ListPrivateProjectAudience(ctx, ws)
+	return append(rows, db.ListPrivateProjectAudienceRow{ProjectID: ppUUID(ppHidden), HideFromAdmins: true, UserID: ppUUID(ppMember)}), err
+}
+
+func (hideFromAdminsAudienceQuerier) ListWorkspaceManagerUserIDs(context.Context, pgtype.UUID) ([]pgtype.UUID, error) {
+	return []pgtype.UUID{ppUUID(ppOwner), ppUUID(ppAdmin)}, nil
+}
+
+func (hideFromAdminsAudienceQuerier) ListWorkspaceOwnerUserIDs(context.Context, pgtype.UUID) ([]pgtype.UUID, error) {
+	return []pgtype.UUID{ppUUID(ppOwner)}, nil
+}
+
+func TestRegisterListeners_HideFromAdminsLeavesAdminsOutOfTheAudience(t *testing.T) {
+	for _, tc := range []struct {
+		projectID string
+		want      []string
+	}{
+		{ppHidden, []string{ppMember, ppOwner}},
+		{ppPrivate, []string{ppMember, ppAdmin, ppOwner}},
+	} {
+		bus := events.New()
+		fb := &fakeBroadcaster{}
+		registerListeners(bus, fb, newPrivateProjectAudience(hideFromAdminsAudienceQuerier{}))
+		bus.Publish(events.Event{Type: protocol.EventIssueUpdated, WorkspaceID: ppWorkspace,
+			Payload: map[string]any{"issue": map[string]any{"id": "i", "project_id": tc.projectID}}})
+		want := make([]string, 0, len(tc.want))
+		for _, id := range tc.want {
+			want = append(want, realtime.WorkspaceMemberScopeID(ppWorkspace, id))
+		}
+		sort.Strings(want)
+		got := privateAudienceScopes(fb)
+		if len(fb.workspaceCalls) != 0 || len(got) != len(want) {
+			t.Fatalf("%s: workspace=%d scoped=%v, want %v", tc.projectID, len(fb.workspaceCalls), got, want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("%s: delivered to %v, want %v", tc.projectID, got, want)
+			}
+		}
+	}
+}
+
 func (fakeAudienceQuerier) GetIssueProjectID(_ context.Context, id pgtype.UUID) (pgtype.UUID, error) {
 	switch util.UUIDToString(id) {
 	case ppSecretIssue:

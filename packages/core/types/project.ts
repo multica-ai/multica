@@ -23,6 +23,12 @@ export interface Project {
   workspace_id: string;
   title: string;
   visibility?: ProjectVisibility;
+  /**
+   * On a private project, also hides it from workspace admins who are not
+   * project members; owners still see it. Optional because older servers do
+   * not send it.
+   */
+  hide_from_admins?: boolean;
   description: string | null;
   icon: string | null;
   status: ProjectStatus;
@@ -71,6 +77,8 @@ export interface UpdateProjectRequest {
   title?: string;
   visibility?: ProjectVisibility;
   member_ids?: string[];
+  /** Turning it on needs the project to be private after the update. */
+  hide_from_admins?: boolean;
   description?: string | null;
   icon?: string | null;
   status?: ProjectStatus;

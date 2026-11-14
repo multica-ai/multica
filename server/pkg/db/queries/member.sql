@@ -8,6 +8,11 @@ SELECT user_id FROM member
 WHERE workspace_id = $1 AND role IN ('owner', 'admin')
 ORDER BY created_at ASC;
 
+-- name: ListWorkspaceOwnerUserIDs :many
+SELECT user_id FROM member
+WHERE workspace_id = $1 AND role = 'owner'
+ORDER BY created_at ASC;
+
 -- name: GetMember :one
 SELECT * FROM member
 WHERE id = $1;

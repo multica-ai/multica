@@ -234,12 +234,14 @@ FROM (
       AND i.recipient_id = $1
       AND i.archived = false
       -- MUL-8472: issues in private projects the recipient is outside of
-      -- (neither a project member nor a workspace owner/admin) do not count.
-      AND NOT (m.role NOT IN ('owner', 'admin') AND EXISTS (
+      -- (neither a project member, a workspace owner, nor an admin the project
+      -- does not hide from) do not count.
+      AND NOT (m.role <> 'owner' AND EXISTS (
           SELECT 1 FROM issue private_issue
           JOIN project private_project ON private_project.id = private_issue.project_id
           WHERE private_issue.id = i.issue_id
             AND private_project.visibility = 'private'
+            AND (m.role <> 'admin' OR private_project.hide_from_admins)
             AND NOT EXISTS (
                 SELECT 1 FROM project_member pm
                 WHERE pm.project_id = private_project.id AND pm.user_id = i.recipient_id
@@ -311,7 +313,8 @@ AND NOT ($2::text = 'member' AND EXISTS (
       AND NOT EXISTS (
           SELECT 1 FROM member manager
           WHERE manager.workspace_id = $1 AND manager.user_id = $3
-            AND manager.role IN ('owner', 'admin')
+            AND (manager.role = 'owner'
+                 OR (manager.role = 'admin' AND NOT private_project.hide_from_admins))
       )
 ))
 RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, section, snoozed_until
@@ -335,7 +338,7 @@ type CreateInboxItemParams struct {
 // A missing recipient is a quiet skip (pgx.ErrNoRows), not a delivery failure.
 // Check the insertion snapshot without adding recipient row locks.
 // MUL-8472: a member outside a private project gets no notification about its
-// issues. Owners/admins and project members do.
+// issues. Owners, project members and (unless hide_from_admins) admins do.
 func (q *Queries) CreateInboxItem(ctx context.Context, arg CreateInboxItemParams) (InboxItem, error) {
 	row := q.db.QueryRow(ctx, createInboxItem,
 		arg.WorkspaceID,

@@ -53,27 +53,31 @@ type ProjectResponse struct {
 	// Visibility is "workspace" (every member) or "private" (project members
 	// plus workspace owners/admins). (MUL-8472)
 	Visibility string `json:"visibility"`
+	// HideFromAdmins, on a private project, hides it from workspace admins
+	// who are not its members; owners still see it. (MUL-9284)
+	HideFromAdmins bool `json:"hide_from_admins"`
 }
 
 func projectToResponse(p db.Project) ProjectResponse {
 	return ProjectResponse{
-		ID:          uuidToString(p.ID),
-		WorkspaceID: uuidToString(p.WorkspaceID),
-		Title:       p.Title,
-		Description: textToPtr(p.Description),
-		Icon:        textToPtr(p.Icon),
-		Status:      p.Status,
-		Priority:    p.Priority,
-		LeadType:    textToPtr(p.LeadType),
-		LeadID:      uuidToPtr(p.LeadID),
-		CreatorType: textToPtr(p.CreatorType),
-		CreatorID:   uuidToPtr(p.CreatorID),
-		StartDate:   dateToPtr(p.StartDate),
-		DueDate:     dateToPtr(p.DueDate),
-		CreatedAt:   timestampToString(p.CreatedAt),
-		UpdatedAt:   timestampToString(p.UpdatedAt),
-		WorkflowID:  uuidToPtr(p.WorkflowID),
-		Visibility:  projectVisibilityOrDefault(p.Visibility),
+		ID:             uuidToString(p.ID),
+		WorkspaceID:    uuidToString(p.WorkspaceID),
+		Title:          p.Title,
+		Description:    textToPtr(p.Description),
+		Icon:           textToPtr(p.Icon),
+		Status:         p.Status,
+		Priority:       p.Priority,
+		LeadType:       textToPtr(p.LeadType),
+		LeadID:         uuidToPtr(p.LeadID),
+		CreatorType:    textToPtr(p.CreatorType),
+		CreatorID:      uuidToPtr(p.CreatorID),
+		StartDate:      dateToPtr(p.StartDate),
+		DueDate:        dateToPtr(p.DueDate),
+		CreatedAt:      timestampToString(p.CreatedAt),
+		UpdatedAt:      timestampToString(p.UpdatedAt),
+		WorkflowID:     uuidToPtr(p.WorkflowID),
+		Visibility:     projectVisibilityOrDefault(p.Visibility),
+		HideFromAdmins: p.HideFromAdmins,
 	}
 }
 
@@ -165,6 +169,9 @@ type UpdateProjectRequest struct {
 	// MemberIDs is only read together with a switch to "private".
 	Visibility *string  `json:"visibility"`
 	MemberIDs  []string `json:"member_ids,omitempty"`
+	// HideFromAdmins needs the project to be private after the update.
+	// (MUL-9284)
+	HideFromAdmins *bool `json:"hide_from_admins"`
 }
 
 func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
@@ -719,7 +726,7 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 		newLeadID = params.LeadID
 	}
 	leadChanged := newLeadType != prevProject.LeadType || newLeadID != prevProject.LeadID
-	access, ok := h.prepareProjectAccessUpdate(w, r, prevProject, req.Visibility, req.MemberIDs, newLeadType, newLeadID, leadChanged)
+	access, ok := h.prepareProjectAccessUpdate(w, r, prevProject, req.Visibility, req.MemberIDs, req.HideFromAdmins, newLeadType, newLeadID, leadChanged)
 	if !ok {
 		return
 	}
@@ -957,7 +964,7 @@ func buildProjectSearchQuery(phrase string, terms []string, includeClosed bool, 
 	query := fmt.Sprintf(`SELECT p.id, p.workspace_id, p.title, p.description, p.icon,
 		p.status, p.priority, p.lead_type, p.lead_id,
 		p.start_date, p.due_date,
-		p.created_at, p.updated_at, p.visibility, p.creator_type, p.creator_id,
+		p.created_at, p.updated_at, p.visibility, p.hide_from_admins, p.creator_type, p.creator_id,
 		%s AS match_source
 	FROM project p
 	WHERE p.workspace_id = %s AND %s
@@ -1042,6 +1049,7 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 				&row.project.CreatedAt,
 				&row.project.UpdatedAt,
 				&row.project.Visibility,
+				&row.project.HideFromAdmins,
 				&row.project.CreatorType,
 				&row.project.CreatorID,
 				&row.matchSource,

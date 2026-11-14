@@ -5,11 +5,13 @@ SELECT id FROM project
 WHERE workspace_id = $1 AND visibility = 'private';
 
 -- name: ListHiddenProjectIDsForUser :many
--- Private projects a regular (non owner/admin) workspace member cannot see.
--- Owners and admins see every project; callers skip this query for them.
+-- Private projects a non-owner workspace member cannot see. Owners see every
+-- project; callers skip this query for them. Admins (is_admin) are hidden only
+-- from projects that set hide_from_admins.
 SELECT p.id FROM project p
 WHERE p.workspace_id = sqlc.arg('workspace_id')
   AND p.visibility = 'private'
+  AND (NOT sqlc.arg('is_admin')::bool OR p.hide_from_admins)
   AND NOT EXISTS (
       SELECT 1 FROM project_member pm
       WHERE pm.project_id = p.id AND pm.user_id = sqlc.arg('user_id')
@@ -18,7 +20,7 @@ WHERE p.workspace_id = sqlc.arg('workspace_id')
 -- name: ListPrivateProjectAudience :many
 -- Realtime fanout for private-project events: each private project with its
 -- member user ids (NULL user_id when the project has no members yet).
-SELECT p.id AS project_id, pm.user_id
+SELECT p.id AS project_id, p.hide_from_admins, pm.user_id
 FROM project p
 LEFT JOIN project_member pm ON pm.project_id = p.id
 WHERE p.workspace_id = $1 AND p.visibility = 'private';
@@ -63,6 +65,11 @@ WHERE workspace_id = sqlc.arg('workspace_id') AND user_id = sqlc.arg('user_id');
 
 -- name: UpdateProjectVisibility :one
 UPDATE project SET visibility = sqlc.arg('visibility'), updated_at = now()
+WHERE id = sqlc.arg('id') AND workspace_id = sqlc.arg('workspace_id')
+RETURNING *;
+
+-- name: UpdateProjectHideFromAdmins :one
+UPDATE project SET hide_from_admins = sqlc.arg('hide_from_admins'), updated_at = now()
 WHERE id = sqlc.arg('id') AND workspace_id = sqlc.arg('workspace_id')
 RETURNING *;
 

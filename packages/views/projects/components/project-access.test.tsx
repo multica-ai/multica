@@ -139,6 +139,44 @@ it("requires confirmation before making private content visible to the workspace
   await waitFor(() => expect(api.updateProject).toHaveBeenCalledWith("p1", { visibility: "workspace", member_ids: ["owner", "lead", "member"] }));
 });
 
+it("hides a private project from admins in one switch and lets admin members be removed", async () => {
+  members.push({ id: "5", workspace_id: "ws", user_id: "admin", name: "Admin Person", email: "admin@test", role: "admin", avatar_url: null, created_at: "" });
+  ids = ["owner", "lead", "member", "admin"];
+  try {
+    const user = userEvent.setup();
+    const view = renderControl();
+    await user.click(screen.getByRole("button", { name: "Access" }));
+    await screen.findByText("admin@test");
+    expect(screen.queryByRole("button", { name: "Remove Admin Person" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("switch", { name: /Hide from workspace admins/ }));
+    await waitFor(() => expect(api.updateProject).toHaveBeenCalledWith("p1", { hide_from_admins: true }));
+
+    view.rerender(<QueryClientProvider client={qc}><ProjectAccessControl project={{ ...project, hide_from_admins: true }} /></QueryClientProvider>);
+    expect(screen.getByRole("switch", { name: /Hide from workspace admins/ })).toBeChecked();
+    expect(screen.getByText("Workspace owners always have access.")).toBeVisible();
+    expect(screen.queryByText(/owners and admins always have access/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove Admin Person" })).toBeEnabled();
+  } finally {
+    members.pop();
+  }
+});
+
+it("offers hiding from admins only once the project is private", async () => {
+  const user = userEvent.setup();
+  renderControl({ ...project, visibility: "workspace" });
+  await user.click(screen.getByRole("button", { name: "Access" }));
+  await user.click(await screen.findByRole("radio", { name: "Project members only" }));
+  expect(screen.queryByRole("switch")).not.toBeInTheDocument();
+});
+
+it("keeps the admin switch read-only for a regular member", async () => {
+  state.viewer = "member";
+  renderControl();
+  await userEvent.click(screen.getByRole("button", { name: "Access" }));
+  await screen.findByText("member@test");
+  expect(screen.getByRole("switch", { name: /Hide from workspace admins/ })).toHaveAttribute("aria-disabled", "true");
+});
+
 it("keeps new-project access in the draft until the project is created", async () => {
   const changed = vi.fn();
   const user = userEvent.setup();

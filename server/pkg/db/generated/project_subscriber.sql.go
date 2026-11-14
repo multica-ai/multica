@@ -99,7 +99,8 @@ JOIN member m ON m.workspace_id = ps.workspace_id AND m.user_id = ps.user_id
 WHERE target.id = $1
   AND (
       p.visibility <> 'private'
-      OR m.role IN ('owner', 'admin')
+      OR m.role = 'owner'
+      OR (m.role = 'admin' AND NOT p.hide_from_admins)
       OR EXISTS (
           SELECT 1 FROM project_member pm
           WHERE pm.project_id = p.id AND pm.user_id = ps.user_id

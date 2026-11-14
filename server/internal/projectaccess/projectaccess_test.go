@@ -17,20 +17,23 @@ func uid(b byte) pgtype.UUID {
 	return id
 }
 
-// fakeQuerier: private projects p1 and p2; user 1 is an admin, user 2 is a
-// member of p1 only, user 3 is a member of nothing, user 4 is not in the
-// workspace.
+// fakeQuerier: private projects p1 and p2, and p3, which also hides from
+// admins; user 1 is an admin, user 2 is a member of p1 only, user 3 is a
+// member of nothing, user 4 is not in the workspace, user 5 is the owner.
 type fakeQuerier struct{}
 
 var (
-	p1, p2                                = uid(101), uid(102)
+	p1, p2, p3                            = uid(101), uid(102), uid(103)
 	admin, p1Member, nonMember, notInWork = uid(1), uid(2), uid(3), uid(4)
+	owner                                 = uid(5)
 )
 
 func (fakeQuerier) GetMemberByUserAndWorkspace(_ context.Context, arg db.GetMemberByUserAndWorkspaceParams) (db.Member, error) {
 	switch arg.UserID {
 	case admin:
 		return db.Member{UserID: admin, Role: "admin"}, nil
+	case owner:
+		return db.Member{UserID: owner, Role: "owner"}, nil
 	case p1Member, nonMember:
 		return db.Member{UserID: arg.UserID, Role: "member"}, nil
 	}
@@ -38,14 +41,17 @@ func (fakeQuerier) GetMemberByUserAndWorkspace(_ context.Context, arg db.GetMemb
 }
 
 func (fakeQuerier) ListHiddenProjectIDsForUser(_ context.Context, arg db.ListHiddenProjectIDsForUserParams) ([]pgtype.UUID, error) {
-	if arg.UserID == p1Member {
-		return []pgtype.UUID{p2}, nil
+	if arg.IsAdmin {
+		return []pgtype.UUID{p3}, nil
 	}
-	return []pgtype.UUID{p1, p2}, nil
+	if arg.UserID == p1Member {
+		return []pgtype.UUID{p2, p3}, nil
+	}
+	return []pgtype.UUID{p1, p2, p3}, nil
 }
 
 func (fakeQuerier) ListPrivateProjectIDs(context.Context, pgtype.UUID) ([]pgtype.UUID, error) {
-	return []pgtype.UUID{p1, p2}, nil
+	return []pgtype.UUID{p1, p2, p3}, nil
 }
 
 func TestForPrincipals(t *testing.T) {
@@ -55,14 +61,17 @@ func TestForPrincipals(t *testing.T) {
 		principals []pgtype.UUID
 		seeP1      bool
 		seeP2      bool
+		seeP3      bool
 	}{
-		{"admin sees every project", []pgtype.UUID{admin}, true, true},
-		{"member sees their project only", []pgtype.UUID{p1Member}, true, false},
-		{"run needs both humans: admin and member", []pgtype.UUID{admin, p1Member}, true, false},
-		{"run needs both humans: member and outsider", []pgtype.UUID{p1Member, nonMember}, false, false},
-		{"principal outside the workspace sees nothing private", []pgtype.UUID{admin, notInWork}, false, false},
-		{"no principal sees nothing private", nil, false, false},
-		{"invalid principals are ignored", []pgtype.UUID{{}, p1Member}, true, false},
+		{"owner sees every project", []pgtype.UUID{owner}, true, true, true},
+		{"admin sees every project that does not hide from admins", []pgtype.UUID{admin}, true, true, false},
+		{"member sees their project only", []pgtype.UUID{p1Member}, true, false, false},
+		{"run needs both humans: admin and member", []pgtype.UUID{admin, p1Member}, true, false, false},
+		{"run needs both humans: owner and admin", []pgtype.UUID{owner, admin}, true, true, false},
+		{"run needs both humans: member and outsider", []pgtype.UUID{p1Member, nonMember}, false, false, false},
+		{"principal outside the workspace sees nothing private", []pgtype.UUID{admin, notInWork}, false, false, false},
+		{"no principal sees nothing private", nil, false, false, false},
+		{"invalid principals are ignored", []pgtype.UUID{{}, p1Member}, true, false, false},
 	} {
 		hidden, err := ForPrincipals(context.Background(), fakeQuerier{}, ws, tc.principals...)
 		if err != nil {
@@ -73,6 +82,9 @@ func TestForPrincipals(t *testing.T) {
 		}
 		if got := hidden.CanSeeProject(p2); got != tc.seeP2 {
 			t.Errorf("%s: p2 visible = %v, want %v", tc.name, got, tc.seeP2)
+		}
+		if got := hidden.CanSeeProject(p3); got != tc.seeP3 {
+			t.Errorf("%s: p3 visible = %v, want %v", tc.name, got, tc.seeP3)
 		}
 		if !hidden.CanSeeProject(pgtype.UUID{}) {
 			t.Errorf("%s: an object outside any project must stay visible", tc.name)

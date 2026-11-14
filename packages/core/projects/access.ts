@@ -6,7 +6,8 @@ import type { Project, ProjectVisibility } from "../types";
 
 // Mirrors the server: owners/admins, or the member lead of a private project.
 // Anyone may set the lead of a workspace-visible project, so leading one
-// grants nothing; making it private takes an owner/admin.
+// grants nothing; making it private takes an owner/admin. An admin a project
+// hides from never loads it, so this need not check hide_from_admins.
 export function canManageProjectAccess(project: Pick<Project, "lead_type" | "lead_id" | "visibility">, userId: string | null | undefined, role: string | null | undefined): boolean {
   if (!userId) return false;
   if (role === "owner" || role === "admin") return true;
@@ -21,6 +22,7 @@ export function canChangeProjectLead(project: Pick<Project, "lead_type" | "lead_
 
 type AccessChange =
   | { type: "visibility"; visibility: ProjectVisibility; memberIds: string[] }
+  | { type: "hide_from_admins"; hideFromAdmins: boolean }
   | { type: "add"; userId: string }
   | { type: "remove"; userId: string };
 
@@ -33,6 +35,8 @@ export function useProjectAccessMutation(wsId: string, projectId: string) {
       if (!onlineManager.isOnline()) throw new Error("You're offline. Reconnect and try again.");
       if (change.type === "visibility") {
         await api.updateProject(projectId, { visibility: change.visibility, member_ids: change.memberIds });
+      } else if (change.type === "hide_from_admins") {
+        await api.updateProject(projectId, { hide_from_admins: change.hideFromAdmins });
       } else if (change.type === "add") {
         await api.addProjectMembers(projectId, [change.userId]);
       } else {
