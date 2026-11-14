@@ -88,9 +88,7 @@
   },
   "inbox": {
     "archive": "Archive",
-    "mark_unread": "Mark as unread",
-    "mark_all_read": "Mark all inbox items as read",
-    "archive_all_read": "Archive all read inbox items"
+    "mark_unread": "Mark as unread"
   },
   "chat": {
     "link_project": "Link to project...",

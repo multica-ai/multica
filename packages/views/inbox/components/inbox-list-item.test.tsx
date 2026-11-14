@@ -2,10 +2,11 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { WorkspaceSlugProvider } from "@multica/core/paths";
 import { buildIssueStatusCatalog } from "@multica/core/issue-statuses";
+import type { InboxSectionRow } from "@multica/core/inbox/sections";
 import type { InboxItem, IssueStatusEntry } from "@multica/core/types";
 import { NavigationProvider } from "../../navigation";
 import type { NavigationAdapter } from "../../navigation";
-import { InboxListItem } from "./inbox-list-item";
+import { InboxListItem, type InboxRowSection } from "./inbox-list-item";
 
 // The catalog is server state; these suites render leaves without a
 // QueryClientProvider, so it is stubbed like the other data hooks. The real
@@ -77,7 +78,15 @@ vi.mock("./inbox-detail-label", () => ({
     autopilot_quota_exceeded: "Autopilot run limit reached",
   }),
 }));
-vi.mock("../../i18n", () => ({ useT: () => ({ t: () => "label" }) }));
+vi.mock("./inbox-reason-label", () => ({
+  InboxReasonLabel: ({ reason, preview }: { reason: InboxItem; preview?: InboxItem | null }) => (
+    <span data-testid="reason" data-reason-id={reason.id} data-preview-id={preview?.id ?? ""} />
+  ),
+}));
+vi.mock("@multica/core/workspace/hooks", () => ({
+  useActorName: () => ({ getActorName: (type: string, id: string) => `${type}:${id}` }),
+}));
+vi.mock("../../i18n", () => ({ useT: () => ({ t: () => "label" }), useLocale: () => "en-GB" }));
 
 function item(overrides: Partial<InboxItem> = {}): InboxItem {
   return {
@@ -121,6 +130,8 @@ function renderRow(props: {
   view: "inbox" | "archived";
   adapter?: NavigationAdapter;
   onClick?: () => void;
+  section?: InboxRowSection;
+  row?: Partial<InboxSectionRow>;
   isSelected?: boolean;
 }) {
   return render(
@@ -132,6 +143,12 @@ function renderRow(props: {
           isSelected={props.isSelected ?? false}
           onClick={props.onClick ?? vi.fn()}
           onAction={vi.fn()}
+          section={props.section}
+          row={
+            props.section
+              ? { item: props.item, reason: null, snoozedUntil: null, preview: null, ...props.row }
+              : undefined
+          }
         />
       </NavigationProvider>
     </WorkspaceSlugProvider>,
@@ -162,6 +179,108 @@ describe("InboxListItem unread affordance", () => {
     const { container } = renderRow({
       item: item({ read: false, archived: true }),
       view: "archived",
+    });
+
+    expect(unreadDot(container)).toBeNull();
+    expect(title(container)?.className).not.toContain("font-medium");
+  });
+});
+
+describe("InboxListItem under Needs you", () => {
+  it("keeps a read row at full strength: it is read, not handled", () => {
+    const { container } = renderRow({ item: item({ read: true }), view: "inbox", section: "needs_you" });
+
+    expect(unreadDot(container)).toBeNull();
+    expect(title(container)?.className).not.toContain("font-medium");
+    expect(title(container)?.className).not.toContain("text-muted-foreground");
+  });
+
+  it("still marks an unread row", () => {
+    const { container } = renderRow({ item: item({ read: false }), view: "inbox", section: "needs_you" });
+
+    expect(unreadDot(container)).not.toBeNull();
+    expect(title(container)?.className).toContain("font-medium");
+  });
+
+  it("leads with why the issue waits, and shows who is waiting", () => {
+    const reason = item({ id: "inbox-ask", type: "agent_blocked", actor_id: "agent-asking" });
+    const preview = item({ id: "inbox-said", body: "Which region?" });
+    const { getByTestId } = renderRow({
+      item: item({ id: "inbox-latest", type: "status_changed", actor_type: "member", actor_id: "member-9" }),
+      view: "inbox",
+      section: "needs_you",
+      row: { reason, preview },
+    });
+
+    expect(getByTestId("reason").getAttribute("data-reason-id")).toBe("inbox-ask");
+    expect(getByTestId("reason").getAttribute("data-preview-id")).toBe("inbox-said");
+    expect(getByTestId("actor-avatar").getAttribute("data-actor-id")).toBe("agent-asking");
+  });
+
+  it("keeps the status glyph and the agent badge beside the time", () => {
+    const { getByTestId } = renderRow({
+      item: item({ issue_status: "in_review" }),
+      view: "inbox",
+      section: "needs_you",
+    });
+
+    expect(getByTestId("status-icon").getAttribute("data-status")).toBe("in_review");
+    expect(getByTestId("issue-agent-activity")).toBeInTheDocument();
+  });
+});
+
+describe("InboxListItem under Updates", () => {
+  it("is a quieter row: who did it, and no status or agent badge", () => {
+    const { container, queryByTestId, getByText } = renderRow({
+      item: item({ read: true, issue_status: "in_review", actor_type: "member", actor_id: "member-9" }),
+      view: "inbox",
+      section: "updates",
+    });
+
+    expect(title(container)?.className).toContain("text-muted-foreground");
+    expect(getByText("member:member-9")).toBeInTheDocument();
+    expect(queryByTestId("status-icon")).toBeNull();
+    expect(queryByTestId("issue-agent-activity")).toBeNull();
+    expect(queryByTestId("reason")).toBeNull();
+  });
+
+  it("still marks an unread update", () => {
+    const { container } = renderRow({ item: item({ read: false }), view: "inbox", section: "updates" });
+
+    expect(unreadDot(container)).not.toBeNull();
+  });
+});
+
+describe("InboxListItem under Snoozed", () => {
+  it("is one line: the title and when it comes back", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 5, 17, 14, 20));
+    try {
+      const { container, queryByTestId, getByText } = renderRow({
+        item: item({ read: true, issue_status: "todo" }),
+        view: "inbox",
+        section: "snoozed",
+        row: { snoozedUntil: new Date(2026, 5, 17, 18, 0).toISOString() },
+      });
+
+      expect(getByText("18:00")).toBeInTheDocument();
+      expect(title(container)?.className).toContain("text-muted-foreground");
+      expect(queryByTestId("actor-avatar")).toBeNull();
+      expect(queryByTestId("status-icon")).toBeNull();
+      expect(container.querySelector("p")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("InboxListItem under Snoozed, while unread", () => {
+  it("shows no unread mark: snoozing made it unread so it returns as new", () => {
+    const { container } = renderRow({
+      item: item({ read: false }),
+      view: "inbox",
+      section: "snoozed",
+      row: { snoozedUntil: new Date(Date.now() + 3_600_000).toISOString() },
     });
 
     expect(unreadDot(container)).toBeNull();

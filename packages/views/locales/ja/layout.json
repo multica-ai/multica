@@ -107,8 +107,6 @@
     "copy_link": "リンクをコピー",
     "link_copied": "リンクをコピーしました",
     "workspace_settings": "ワークスペース設定",
-    "mark_all_read": "すべて既読にする",
-    "mark_all_read_failed": "すべて既読にできませんでした",
     "reset_order": "デフォルトの順序に戻す",
     "copy_workspace_link": "ワークスペースのリンクをコピー",
     "workspace_meta_other": "{{slug}} · メンバー {{count}} 人"
@@ -119,9 +117,7 @@
   },
   "panels": {
     "work": {
-      "my_agents": "マイエージェントの作業",
       "all_issues": "すべてのタスク",
-      "unread": "未読",
       "views": "ビュー",
       "new_project": "新規プロジェクト",
       "new_issue_in_project": "{{name}} に新規タスク",

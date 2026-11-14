@@ -1489,6 +1489,23 @@ describe("InboxUnreadSummarySchema", () => {
     ]);
   });
 
+  it("carries the needs-you count, and reads a malformed one as absent", () => {
+    const parsed = parseWithFallback(
+      [
+        { workspace_id: "ws-1", count: 2, needs_you: 5 },
+        { workspace_id: "ws-2", count: 1, needs_you: "many" },
+        { workspace_id: "ws-3", count: 4 },
+      ],
+      InboxUnreadSummarySchema,
+      EMPTY_INBOX_UNREAD_SUMMARY,
+      ENDPOINT,
+    );
+    // An absent count is what an older server sends: the badge then falls
+    // back to `count`, so one bad value must not blank every workspace.
+    expect(parsed.map((entry) => entry.needs_you)).toEqual([5, undefined, undefined]);
+    expect(parsed.map((entry) => entry.count)).toEqual([2, 1, 4]);
+  });
+
   it("returns the empty fallback (dot hidden) for a non-array body", () => {
     expect(
       parseWithFallback({ rows: [] }, InboxUnreadSummarySchema, EMPTY_INBOX_UNREAD_SUMMARY, ENDPOINT),
@@ -1560,6 +1577,29 @@ describe("InboxItemListSchema", () => {
       ENDPOINT,
     );
     expect(parsed).toHaveLength(1);
+  });
+
+  it("carries the section and snooze time, and reads malformed ones as unset", () => {
+    const parsed = parseWithFallback(
+      [
+        row({ id: "a", section: "needs_you", snoozed_until: "2026-06-16T09:00:00Z" }),
+        row({ id: "b", section: "updates", snoozed_until: null }),
+        row({ id: "c", section: "some_future_section", snoozed_until: 12 }),
+        row({ id: "d" }),
+      ],
+      InboxItemListSchema,
+      EMPTY_INBOX_ITEMS,
+      ENDPOINT,
+    );
+    // A section this client does not know must not blank the whole inbox.
+    expect(parsed).toHaveLength(4);
+    expect(parsed.map((item) => item.section)).toEqual(["needs_you", "updates", undefined, undefined]);
+    expect(parsed.map((item) => item.snoozed_until)).toEqual([
+      "2026-06-16T09:00:00Z",
+      null,
+      undefined,
+      undefined,
+    ]);
   });
 
   it("accepts rows that omit the nullable optional fields", () => {

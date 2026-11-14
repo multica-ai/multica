@@ -6,8 +6,7 @@ import { setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
 import { builtinSidebarSource, viewSidebarSource } from "@multica/core/issues/sidebar-list";
-import { issueUnreadOptions } from "@multica/core/issues/unread";
-import { issueViewContainerKey, useActiveIssueViewStore } from "@multica/core/issue-views/active-view-store";
+import { useActiveIssueViewStore } from "@multica/core/issue-views/active-view-store";
 import { UNREAD_VIEW_ID } from "@multica/core/issue-views/unread-view";
 import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
@@ -188,7 +187,7 @@ const mark = (issueId: string) => ({
   created_at: "2026-01-01T00:00:00Z",
 });
 
-describe("ViewsSection built-in Unread view", () => {
+describe("ViewsSection without a built-in Unread view", () => {
   beforeEach(() => {
     actions.sidebar.items = [
       { id: "builtin:all_issues", kind: "builtin", key: "all_issues" },
@@ -197,60 +196,12 @@ describe("ViewsSection built-in Unread view", () => {
     useSidebarTreeStore.setState({ viewsCollapsed: false, expanded: [] });
   });
 
-  it("is not in the sidebar until starred, even with unread issues", async () => {
+  it("has no Unread row of its own, even with unread issues", async () => {
     listIssueUnread.mockResolvedValue([mark("a"), mark("b")]);
     renderSection();
     await waitFor(() => expect(listIssueUnread).toHaveBeenCalled());
     await screen.findByRole("link", { name: "All issues" });
     expect(screen.queryByRole("link", { name: /^Unread/ })).toBeNull();
-  });
-
-  describe("once starred", () => {
-    beforeEach(() => {
-      actions.sidebar.items = [...actions.sidebar.items, { id: "builtin:unread", kind: "builtin", key: "unread" }];
-    });
-
-    it("sits where it was starred, with the unread count", async () => {
-      listIssueUnread.mockResolvedValue([mark("a"), mark("b")]);
-      renderSection();
-      const link = await screen.findByRole("link", { name: /^Unread/ });
-      expect(link).toHaveAttribute("href", "/acme/issues?view=unread");
-      await waitFor(() => expect(link.closest("li")).toHaveTextContent(/^Unread2/));
-      const names = screen.getAllByRole("link").map((l) => l.textContent);
-      expect(names.slice(0, 3)).toEqual(["All issues", "Mine unread", "Unread"]);
-    });
-
-    it("stays when the count reaches 0", async () => {
-      listIssueUnread.mockResolvedValue([mark("a")]);
-      const { qc } = renderSection({ activeIssueId: "a" });
-      const link = await screen.findByRole("link", { name: /^Unread/ });
-      await waitFor(() => expect(link.closest("li")).toHaveTextContent(/^Unread1/));
-
-      qc.setQueryData(issueUnreadOptions("ws-1").queryKey, []);
-      await waitFor(() => expect(link.closest("li")).toHaveTextContent(/^Unread$/));
-      expect(screen.getByRole("link", { name: /^Unread/ })).toBe(link);
-    });
-
-    it("lights while its page is open", async () => {
-      listIssueUnread.mockResolvedValue([]);
-      useActiveIssueViewStore
-        .getState()
-        .setActive(issueViewContainerKey("ws-1", { scope_type: "workspace" }), UNREAD_VIEW_ID);
-      renderSection();
-      const link = await screen.findByRole("link", { name: /^Unread/ });
-      expect(link).toHaveAttribute("aria-current", "page");
-      expect(screen.getByRole("link", { name: /^All issues/ })).not.toHaveAttribute("aria-current");
-    });
-
-    it("is removed from the sidebar from its row menu", async () => {
-      listIssueUnread.mockResolvedValue([]);
-      renderSection();
-      const link = await screen.findByRole("link", { name: /^Unread/ });
-
-      fireEvent.contextMenu(link);
-      fireEvent.click(await screen.findByRole("menuitem", { name: "Remove from sidebar" }));
-      expect(actions.sidebar.unstar).toHaveBeenCalledWith("builtin:unread");
-    });
   });
 });
 

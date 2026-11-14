@@ -84,8 +84,6 @@
     "copy_link": "Копировать ссылку",
     "link_copied": "Ссылка скопирована",
     "workspace_settings": "Настройки рабочего пространства",
-    "mark_all_read": "Отметить все как прочитанные",
-    "mark_all_read_failed": "Не удалось отметить все как прочитанные",
     "reset_order": "Вернуть порядок по умолчанию",
     "copy_workspace_link": "Копировать ссылку на рабочее пространство",
     "workspace_meta_one": "{{slug}} · {{count}} участник",
@@ -102,7 +100,6 @@
   },
   "panels": {
     "work": {
-      "my_agents": "Работа моих агентов",
       "all_issues": "Все задачи",
       "views": "Представления",
       "new_project": "Новый проект",
@@ -144,7 +141,6 @@
       "all_projects_few": "Всего {{count}} проекта",
       "all_projects_many": "Всего {{count}} проектов",
       "project_issues_retry": "Повторить",
-      "unread": "Непрочитанные",
       "new_issue_here": "Новая задача в этом проекте"
     },
     "team": {

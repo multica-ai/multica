@@ -54,6 +54,8 @@ const (
 	EventInboxDeleted       = "inbox:deleted"
 	EventInboxBatchRead     = "inbox:batch-read"
 	EventInboxBatchArchived = "inbox:batch-archived"
+	EventInboxSnoozed       = "inbox:snoozed"
+	EventInboxUnsnoozed     = "inbox:unsnoozed"
 
 	// Workspace events
 	EventWorkspaceUpdated = "workspace:updated"

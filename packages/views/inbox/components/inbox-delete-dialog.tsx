@@ -14,16 +14,14 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { Button } from "@multica/ui/components/ui/button";
 import { useT } from "../../i18n";
-import type { InboxView } from "./inbox-view";
 
+/** Confirms deleting an archived notification, or an issue's archived ones. */
 export function InboxDeleteDialog({
   item,
-  view,
   onClose,
   onDeleted,
 }: {
   item: InboxItem;
-  view: InboxView;
   onClose: () => void;
   onDeleted: (id: string) => void;
 }) {
@@ -54,9 +52,7 @@ export function InboxDeleteDialog({
           <AlertDialogTitle>{t(($) => $.delete_dialog.title)}</AlertDialogTitle>
           <AlertDialogDescription>
             {item.issue_id
-              ? view === "inbox"
-                ? t(($) => $.delete_dialog.active_issue_description)
-                : t(($) => $.delete_dialog.issue_description)
+              ? t(($) => $.delete_dialog.issue_description)
               : t(($) => $.delete_dialog.description)}
           </AlertDialogDescription>
         </AlertDialogHeader>

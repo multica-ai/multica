@@ -20,7 +20,7 @@ WITH base AS MATERIALIZED (
                WHEN i.type IN ('issue_assigned', 'unassigned', 'assignee_changed', 'issue_subscribed') THEN 'assign'
                WHEN i.type = 'review_requested' THEN 'review'
                WHEN i.type IN ('issue_created', 'status_changed', 'priority_changed', 'start_date_changed', 'due_date_changed', 'children_done') THEN 'change'
-               WHEN i.type IN ('task_completed', 'task_failed', 'agent_blocked', 'agent_completed') THEN 'run'
+               WHEN i.type IN ('task_completed', 'task_failed', 'task_cancelled', 'agent_blocked', 'agent_completed') THEN 'run'
                ELSE 'system'
            END AS type_group,
            CASE WHEN i.actor_type = 'system' THEN 'system'
@@ -215,7 +215,7 @@ WITH base AS MATERIALIZED (
                WHEN i.type IN ('issue_assigned', 'unassigned', 'assignee_changed', 'issue_subscribed') THEN 'assign'
                WHEN i.type = 'review_requested' THEN 'review'
                WHEN i.type IN ('issue_created', 'status_changed', 'priority_changed', 'start_date_changed', 'due_date_changed', 'children_done') THEN 'change'
-               WHEN i.type IN ('task_completed', 'task_failed', 'agent_blocked', 'agent_completed') THEN 'run'
+               WHEN i.type IN ('task_completed', 'task_failed', 'task_cancelled', 'agent_blocked', 'agent_completed') THEN 'run'
                ELSE 'system'
            END AS type_group,
            CASE WHEN i.actor_type = 'system' THEN 'system'
@@ -290,7 +290,7 @@ WITH base AS MATERIALIZED (
     ORDER BY created_at DESC, id DESC
     LIMIT $19::int
 )
-SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.section, selected.issue_status, selected.issue_priority,
+SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.section, i.snoozed_until, selected.issue_status, selected.issue_priority,
        iss.project_id AS issue_project_id,
        iss.assignee_type AS issue_assignee_type,
        iss.assignee_id AS issue_assignee_id,
@@ -403,6 +403,7 @@ func (q *Queries) ListArchivedInboxPage(ctx context.Context, arg ListArchivedInb
 			&i.InboxItem.ActorID,
 			&i.InboxItem.Details,
 			&i.InboxItem.Section,
+			&i.InboxItem.SnoozedUntil,
 			&i.IssueStatus,
 			&i.IssuePriority,
 			&i.IssueProjectID,

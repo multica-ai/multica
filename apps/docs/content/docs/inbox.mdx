@@ -44,37 +44,59 @@ The inbox is only for workspace members. Even when an agent is the assignee or a
 
 @-mentioning an agent in a comment, assigning an issue to it, or triggering an autopilot creates a run directly; no notification is left for the agent. `@all` notifies members only.
 
+## Sections
+
+The inbox lists each issue once, under whose turn it is:
+
+- **Needs you** — the issue is waiting on you. You were @-mentioned or assigned, an agent run you started finished, failed, or was cancelled, or something happened on an issue you created or are assigned to: a new comment, a failed run, or a status that waits on a person, such as `in_review` or `blocked`. Each row says why, for example **Ready for review**, **Waiting for your answer**, or **Run failed**.
+- **Working** — an agent is working on the issue because you asked: you assigned it, commented, or reran it. The row shows the agent and how long the run has been going, or **Queued**. Runs you didn't start yourself, such as an autopilot's or another member's, aren't listed.
+- **Updates** — everything else: activity on issues you subscribe to that doesn't wait on you. Only unread ones are listed; an update moves to **Archived** once you've read it.
+- **Snoozed** — issues you put away until a later time.
+
+An issue that fits more than one section appears in the first of them, in the order above. **Updates** and **Snoozed** stay folded until you open them; each header shows how many issues it holds.
+
+The inbox badge counts the issues under **Needs you**. Reading one doesn't take it off the count: it stays until you hand it to an agent, snooze it, or archive it.
+
+When your comment or assignment starts an agent run, the issue leaves **Needs you** and shows under **Working**. When the run finishes, fails, or is cancelled, it comes back to **Needs you**, unless the issue is already closed.
+
+A cancelled run comes back as **Run cancelled**. If you stopped it yourself, the row is already read and says **You stopped this run**; if someone else did, it is unread and names them. It doesn't come back while another run you started is active on the issue, as when you rerun it: the issue stays under **Working**.
+
 ## Handle notifications
 
-Selecting a notification marks it as read. Archive it when you're done; archiving doesn't modify or delete the corresponding issue.
+Selecting a notification marks it as read. Under **Needs you**, reading isn't handling: the row stays until you act on the issue. Archive it when you're done, with **Archive** in the header of the open issue or `E`; archiving doesn't modify or delete the corresponding issue.
 
 <InboxDemo />
 
 Once an issue reaches a status that hands it back to a person, its **Run failed** notifications archive automatically. Those statuses are `in_review`, custom statuses in the `started` category, and any status in the `done` or `closed` category. `blocked` is the exception: it hands the issue over too, but the work is still stuck, so the earlier failures are still worth reading.
 
-Right-click a notification for **Mark as read** / **Mark as unread** and **Archive** (**Unarchive** in the Archived view). Mark as unread is the "I looked, but I'm not done with this" action: the notification goes back to unread and raises the unread count again, and it stays unread even while you keep it open; opening it again later marks it read as usual. Archived notifications keep their read state, so restoring one brings it back exactly as you left it.
+An issue moved to a status in the `done` or `closed` category leaves everyone's inbox; what remains is one entry under **Updates** saying it closed.
 
-From the inbox menu you can also:
+Right-click a notification for **Mark as read** / **Mark as unread**, snoozing, and **Archive** (**Unarchive** in the Archived view). Mark as unread is the "I looked, but I'm not done with this" action: the notification goes back to unread, and it stays unread even while you keep it open; opening it again later marks it read as usual. Archived notifications keep their read state, so restoring one brings it back exactly as you left it. An update is the exception: it comes back unread, because a read update would leave again. **Delete** removes a notification for good, and is offered in the Archived view only.
 
-- mark all as read;
-- archive all, or archive all read;
-- archive notifications for issues in `done` or `cancelled`;
-- open Archived and restore a notification.
+Under **Updates**, reading is handling: open one and it moves to **Archived** when you move on to something else. **Clear** on the section header archives every update listed, read or not. Nothing leaves **Needs you** in bulk: an issue goes when you handle it, archive it, or snooze it.
 
-Open **Archived** at the bottom of the inbox to browse older notifications. More records load as you scroll. Filters apply to the entire archive, including records that have not loaded yet.
+Open **Archived** from the menu on the inbox title to browse older notifications and restore one. More records load as you scroll.
+
+### Filter
+
+The inbox filters by the issue: status, priority, project, assignee, label, and due date. A filter applies to every section, **Working** included. **Archived** can also be filtered by the notification itself: read state, type, sender, and when it was received. Its filters apply to the entire archive, including records that have not loaded yet.
+
+### Snooze
+
+Snooze an issue to put it away until a time you choose. Open it and use **Snooze** in the header (or press `H`), or right-click it in the list. The choices are **In 1 hour**, **Later today**, **Tomorrow**, and **Next Monday**; the header menu also has **Pick a time...** for any time within the next year.
+
+A snoozed issue moves to **Snoozed** and stops counting on the badge. When the time comes, it returns to the section it was in, as unread. It comes back early if something new needs you on that issue, such as a mention or a failed run; activity that only lands under **Updates** doesn't bring it back. To bring it back yourself, use **Unsnooze** in the same menus.
 
 ## Tune notification types
 
-Open **Settings → Notifications** to toggle each group separately:
+Open **Settings → Notifications**. The page follows the inbox's sections:
 
-- assignments;
-- status changes;
-- comments;
-- mentions;
-- priority and dates;
-- agent activity.
+- **Needs you** — mentions, assignments, runs you started, and activity on issues you created or are assigned to. These are always delivered. The one switch is **@all and @squad**: turn it off and group mentions are filed under **Updates** instead of **Needs you**.
+- **Updates** — comments, status changes, assignment changes, priority and due date, new issues, and agent runs on issues you follow. Each can be turned off.
 
-Turning a group off doesn't stop the changes from being recorded on the issue — it only stops the inbox notifications. A few types, such as reactions, quick-create results, and autopilot pauses, sit outside these six groups and are always delivered. System and browser notifications control desktop banners and don't change the inbox itself.
+Turning a kind off doesn't stop the changes from being recorded on the issue — it only stops the inbox notifications. A few types, such as reactions, quick-create results, and autopilot pauses, have no switch and are always delivered.
+
+System and browser notifications control desktop banners and don't change the inbox itself. From the inbox, only an unread notification under **Needs you** raises a banner; updates never do.
 
 ## Next steps
 

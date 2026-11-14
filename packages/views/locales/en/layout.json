@@ -108,8 +108,6 @@
     "copy_link": "Copy link",
     "link_copied": "Link copied",
     "workspace_settings": "Workspace settings",
-    "mark_all_read": "Mark all as read",
-    "mark_all_read_failed": "Couldn't mark all as read",
     "reset_order": "Reset to default order",
     "copy_workspace_link": "Copy workspace link",
     "workspace_meta_one": "{{slug}} · {{count}} member",
@@ -122,9 +120,7 @@
   },
   "panels": {
     "work": {
-      "my_agents": "My agents' work",
       "all_issues": "All issues",
-      "unread": "Unread",
       "views": "Views",
       "new_project": "New project",
       "new_issue_in_project": "New issue in {{name}}",

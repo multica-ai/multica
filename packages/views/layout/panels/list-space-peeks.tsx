@@ -9,6 +9,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import {
   effectiveInboxFilters,
   filterInboxItems,
+  inboxFilterCount,
   inboxIssueFieldsSupport,
   inboxPriorityFilterSupport,
   useInboxFilters,
@@ -23,8 +24,8 @@ import type { Agent, ChatSession, InboxItem } from "@multica/core/types";
 import { agentListOptions } from "@multica/core/workspace/queries";
 import { ChatThreadList } from "../../chat/components/chat-thread-list";
 import { useT } from "../../i18n";
-import { InboxList } from "../../inbox/components/inbox-list";
-import { useIssueSurfaceActivity } from "../../issues/surface/activity";
+import { InboxSectionedList } from "../../inbox/components/inbox-sectioned-list";
+import { useInboxSections } from "../../inbox/components/use-inbox-sections";
 import { useNavigation } from "../../navigation";
 import { PanelCount, PanelHeader } from "../panel-nav";
 
@@ -33,8 +34,9 @@ const EMPTY_SESSIONS: ChatSession[] = [];
 const EMPTY_AGENTS: Agent[] = [];
 
 /**
- * Inbox previewed from another space: the list the Inbox page shows, under
- * the same saved filters. Opening a row lands on it in the Inbox.
+ * Inbox previewed from another space: the list the Inbox page shows, in the
+ * same sections and under the same saved filters. Opening a row lands on it
+ * in the Inbox.
  */
 export function InboxPeek() {
   const { t } = useT("inbox");
@@ -43,19 +45,21 @@ export function InboxPeek() {
   const { push } = useNavigation();
   const { data: rawItems = EMPTY_INBOX } = useQuery(inboxListOptions(wsId));
   const filters = useInboxFilters(wsId);
-  const { activityByIssueId } = useIssueSurfaceActivity();
   const unreadCount = useInboxUnreadCount(wsId);
   const archive = useArchiveInbox();
 
-  const items = useMemo(() => {
-    const effective = effectiveInboxFilters(filters, {
-      priority: inboxPriorityFilterSupport(rawItems),
-      issueFields: inboxIssueFieldsSupport(rawItems),
-    });
-    return filterInboxItems(rawItems.filter((item) => !item.archived), effective, {
-      activeIssueIds: effective.agent ? new Set(activityByIssueId.keys()) : undefined,
-    });
-  }, [rawItems, filters, activityByIssueId]);
+  const activeRows = useMemo(() => rawItems.filter((item) => !item.archived), [rawItems]);
+  const effective = useMemo(
+    () =>
+      effectiveInboxFilters(filters, {
+        priority: inboxPriorityFilterSupport(rawItems),
+        issueFields: inboxIssueFieldsSupport(rawItems),
+      }),
+    [rawItems, filters],
+  );
+  const rows = useMemo(() => filterInboxItems(activeRows, effective), [activeRows, effective]);
+  const filtered = inboxFilterCount(effective) > 0;
+  const sections = useInboxSections(wsId, rows, activeRows, { filters: effective });
 
   const open = (params: Record<string, string>) =>
     push(`${p.inbox()}?${new URLSearchParams(params).toString()}`);
@@ -66,13 +70,15 @@ export function InboxPeek() {
         title={t(($) => $.page.title)}
         meta={<PanelCount value={unreadCount} className="text-muted-foreground" />}
       />
-      <InboxList
-        items={items}
-        view="inbox"
+      <InboxSectionedList
+        sections={sections}
         selectedKey=""
+        filtered={filtered}
         scrollRestoration={false}
         onSelect={(item) => open({ issue: item.issue_id ?? item.id })}
+        onSelectIssue={(issueId) => open({ issue: issueId })}
         onAction={(id) => archive.mutate(id)}
+        emptyLabel={filtered ? t(($) => $.filters.empty) : undefined}
       />
     </>
   );

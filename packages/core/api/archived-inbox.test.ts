@@ -15,11 +15,9 @@ describe("archived inbox API", () => {
   it("sends cursor, lookup and every archive filter dimension and maps the page", async () => {
     const fetch = respond({ items: [], next_cursor: null, has_more: false });
     const api = new ApiClient("https://api.example.test");
-    // The archive has no agent dimension; a selection carried in from the
-    // active inbox must not reach the server.
     const filters: InboxFilters = {
       ...EMPTY_INBOX_FILTERS,
-      statuses: ["in_review"], priorities: ["high"], actors: ["system"], unreadOnly: true, agent: "idle",
+      statuses: ["in_review"], priorities: ["high"], actors: ["system"], unreadOnly: true,
       labels: ["label-1"], negated: ["label"],
     };
     await expect(api.listArchivedInboxPage(filters, { cursor: "cursor-value", groupId: "group" })).resolves.toEqual({ items: [], nextCursor: null, hasMore: false });

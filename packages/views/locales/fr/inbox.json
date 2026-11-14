@@ -3,12 +3,6 @@
     "title": "Boîte de réception",
     "back": "Boîte de réception"
   },
-  "menu": {
-    "mark_all_read": "Tout marquer comme lu",
-    "archive_all": "Tout archiver",
-    "archive_all_read": "Archiver tout ce qui est lu",
-    "archive_completed": "Archiver les éléments terminés"
-  },
   "filters": {
     "tooltip": "Filtrer la boîte de réception",
     "active_count_one": "{{count}} filtre actif",
@@ -33,8 +27,7 @@
     "type_system": "Système",
     "received_today": "Aujourd'hui",
     "received_last_7_days": "7 derniers jours",
-    "received_last_30_days": "30 derniers jours",
-    "agent_idle": "Inactif"
+    "received_last_30_days": "30 derniers jours"
   },
   "context_menu": {
     "mark_read": "Marquer comme lu",
@@ -42,7 +35,12 @@
     "archive": "Archiver",
     "unarchive": "Désarchiver",
     "open_in_new_tab": "Ouvrir dans un nouvel onglet",
-    "delete": "Supprimer"
+    "delete": "Supprimer",
+    "snooze_in_one_hour": "Reporter d'1 heure",
+    "snooze_later_today": "Reporter à plus tard aujourd'hui",
+    "snooze_tomorrow": "Reporter à demain",
+    "snooze_next_week": "Reporter à lundi prochain",
+    "unsnooze": "Annuler le report"
   },
   "list": {
     "loading_selection": "Chargement de la notification…",
@@ -65,14 +63,15 @@
   },
   "detail": {
     "select_prompt": "Sélectionnez une notification pour afficher les détails",
-    "empty": "Votre boîte de réception est vide",
     "original_input": "Saisie d'origine",
     "retry_with_context": "Réessayer avec le contexte",
     "edit_advanced": "Modifier en mode avancé",
     "autopilot_quota_exceeded_body": "Cet espace de travail a atteint sa limite de {{limit}} exécutions d'automatisation pour la période actuelle. Les prochaines exécutions d'automatisation ne démarreront qu'après la réinitialisation du quota {{resetAt}}.",
     "autopilot_quota_upgrade": "Voir les options de mise à niveau",
     "archive": "Archiver",
-    "unarchive": "Désarchiver"
+    "unarchive": "Désarchiver",
+    "nothing_needs_you": "Rien à traiter",
+    "nothing_needs_you_hint": "Les tâches apparaissent à gauche lorsqu'un agent rend un résultat ou que quelqu'un vous mentionne."
   },
   "types": {
     "issue_assigned": "Assigné",
@@ -89,6 +88,7 @@
     "review_requested": "Relecture demandée",
     "task_completed": "Exécution terminée",
     "task_failed": "Exécution en échec",
+    "task_cancelled": "Exécution annulée",
     "agent_blocked": "Agent bloqué",
     "agent_completed": "Agent terminé",
     "reaction_added": "Réaction",
@@ -122,7 +122,8 @@
     "source_context_retry_started": "Nouvelle tentative démarrée avec le contexte d'origine",
     "archived": "Notification archivée",
     "unarchived": "Notification restaurée",
-    "deleted": "Notification supprimée"
+    "deleted": "Notification supprimée",
+    "snoozed": "Reportée jusqu'à {{time}}"
   },
   "errors": {
     "archived_lookup_failed": "Échec du chargement de la notification liée",
@@ -132,20 +133,53 @@
     "mark_unread_failed": "Échec du marquage comme non lu",
     "archive_failed": "Échec de l'archivage",
     "mark_done_failed": "Échec du marquage comme traité",
-    "mark_all_read_failed": "Échec du marquage global comme lu",
-    "archive_all_failed": "Échec de l'archivage global",
-    "archive_all_read_failed": "Échec de l'archivage des éléments lus",
-    "archive_completed_failed": "Échec de l'archivage des éléments terminés",
     "unarchive_failed": "Échec du désarchivage",
     "archived_load_failed": "Échec du chargement des notifications archivées",
     "filters_load_failed": "Impossible de charger les filtres",
-    "delete_failed": "Impossible de supprimer la notification. Réessayez."
+    "delete_failed": "Impossible de supprimer la notification. Réessayez.",
+    "snooze_failed": "Impossible de reporter",
+    "unsnooze_failed": "Impossible d'annuler le report"
   },
   "delete_dialog": {
     "title": "Supprimer la notification ?",
     "description": "Cette notification sera supprimée définitivement. Les tâches et exécutions associées seront conservées.",
     "issue_description": "Les notifications de cette tâche dans cette vue seront supprimées définitivement. La tâche et ses exécutions seront conservées.",
-    "cancel": "Annuler",
-    "active_issue_description": "Les notifications actives de cette tâche seront supprimées définitivement. Les notifications précédemment archivées seront conservées et réapparaîtront dans les archives. La tâche et ses exécutions seront conservées."
+    "cancel": "Annuler"
+  },
+  "sections": {
+    "needs_you": "À traiter",
+    "working": "En cours",
+    "updates": "Mises à jour",
+    "snoozed": "Reportées",
+    "clear_updates": "Effacer",
+    "queued": "En file d'attente",
+    "caught_up": "Tout est traité",
+    "still_working_one": "{{count}} agent travaille encore. Les résultats reviendront ici.",
+    "still_working_other": "{{count}} agents travaillent encore. Les résultats reviendront ici."
+  },
+  "reasons": {
+    "review": "À valider",
+    "question": "Attend votre réponse",
+    "mention": "Vous mentionne",
+    "failed": "Exécution en échec",
+    "cancelled": "Exécution annulée",
+    "assigned": "Assignée à vous",
+    "comment": "Nouveau commentaire",
+    "finished": "Exécution terminée",
+    "stopped_by_you": "Vous avez arrêté cette exécution",
+    "stopped_by": "{{name}} a arrêté cette exécution",
+    "stopped_by_system": "Arrêtée par le système"
+  },
+  "snooze": {
+    "action": "Reporter",
+    "unsnooze": "Annuler le report",
+    "in_one_hour": "Dans 1 heure",
+    "later_today": "Plus tard aujourd'hui",
+    "tomorrow": "Demain",
+    "next_week": "Lundi prochain",
+    "pick_time": "Choisir une date...",
+    "hint": "Revient plus tôt si un nouvel élément demande votre attention, comme une mention ou une exécution en échec.",
+    "custom_title": "Reporter jusqu'à",
+    "custom_invalid": "Choisissez une date future, à moins d'un an."
   }
 }

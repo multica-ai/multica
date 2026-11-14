@@ -170,6 +170,67 @@ export function useArchiveInbox() {
   });
 }
 
+/**
+ * Snooze an issue until a time. Issue-level, like archive: every active
+ * notification on the issue is put away with it, and the one snoozed from is
+ * unread again so it reads as new when it comes back.
+ */
+export function useSnoozeInbox() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ id, until }: { id: string; until: string }) => api.snoozeInbox(id, until),
+    onMutate: async ({ id, until }) => {
+      await qc.cancelQueries({ queryKey: inboxKeys.list(wsId) });
+      const prev = qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId));
+      const issueId = prev?.find((item) => item.id === id)?.issue_id;
+      qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), (old) =>
+        old?.map((item) => {
+          if (item.archived) return item;
+          if (item.id === id) return { ...item, snoozed_until: until, read: false };
+          return issueId && item.issue_id === issueId ? { ...item, snoozed_until: until } : item;
+        }),
+      );
+      return { prev };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(inboxKeys.list(wsId), ctx.prev);
+    },
+    onSettled: () => {
+      // A snoozed issue leaves the badge until it comes back.
+      refreshInboxAfterWrite(qc, wsId);
+    },
+  });
+}
+
+/** Bring a snoozed issue back now. */
+export function useUnsnoozeInbox() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (id: string) => api.unsnoozeInbox(id),
+    onMutate: async (id) => {
+      await qc.cancelQueries({ queryKey: inboxKeys.list(wsId) });
+      const prev = qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId));
+      const issueId = prev?.find((item) => item.id === id)?.issue_id;
+      qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), (old) =>
+        old?.map((item) =>
+          !item.archived && (item.id === id || (issueId && item.issue_id === issueId))
+            ? { ...item, snoozed_until: null }
+            : item,
+        ),
+      );
+      return { prev };
+    },
+    onError: (_err, _id, ctx) => {
+      if (ctx?.prev) qc.setQueryData(inboxKeys.list(wsId), ctx.prev);
+    },
+    onSettled: () => {
+      refreshInboxAfterWrite(qc, wsId);
+    },
+  });
+}
+
 export function useDeleteInbox() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
@@ -220,17 +281,28 @@ export function useUnarchiveInbox() {
   });
 }
 
-export function useMarkAllInboxRead() {
+/**
+ * Move issues that only carry updates to the archive: what reading an update
+ * comes to (`readOnly`), and what clearing the section does to the rest.
+ * `groups` are list keys (`issue_id ?? id`).
+ *
+ * The rows leave at once. Which of them the server really archived is its
+ * call — an issue that gained something addressed to the user in the meantime
+ * stays — so the list is refreshed on settle rather than trusted.
+ */
+export function useArchiveInboxUpdates() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   return useMutation({
-    mutationFn: () => api.markAllInboxRead(),
-    onMutate: async () => {
+    mutationFn: ({ groups, readOnly }: { groups: readonly string[]; readOnly: boolean }) =>
+      api.archiveInboxUpdates(groups, readOnly),
+    onMutate: async ({ groups }) => {
       await qc.cancelQueries({ queryKey: inboxKeys.list(wsId) });
       const prev = qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId));
+      const keys = new Set(groups);
       qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), (old) =>
         old?.map((item) =>
-          !item.archived ? { ...item, read: true } : item,
+          !item.archived && keys.has(item.issue_id ?? item.id) ? { ...item, archived: true } : item,
         ),
       );
       return { prev };
@@ -238,42 +310,6 @@ export function useMarkAllInboxRead() {
     onError: (_err, _vars, ctx) => {
       if (ctx?.prev) qc.setQueryData(inboxKeys.list(wsId), ctx.prev);
     },
-    onSettled: () => {
-      refreshInboxAfterWrite(qc, wsId);
-    },
-  });
-}
-
-// The three batch-archive mutations below all move items into the archive, so
-// each invalidates BOTH lists on settle — plus the unread summary, since an
-// archived unread group leaves the badge.
-export function useArchiveAllInbox() {
-  const qc = useQueryClient();
-  const wsId = useWorkspaceId();
-  return useMutation({
-    mutationFn: () => api.archiveAllInbox(),
-    onSettled: () => {
-      refreshInboxAfterWrite(qc, wsId);
-    },
-  });
-}
-
-export function useArchiveAllReadInbox() {
-  const qc = useQueryClient();
-  const wsId = useWorkspaceId();
-  return useMutation({
-    mutationFn: () => api.archiveAllReadInbox(),
-    onSettled: () => {
-      refreshInboxAfterWrite(qc, wsId);
-    },
-  });
-}
-
-export function useArchiveCompletedInbox() {
-  const qc = useQueryClient();
-  const wsId = useWorkspaceId();
-  return useMutation({
-    mutationFn: () => api.archiveCompletedInbox(),
     onSettled: () => {
       refreshInboxAfterWrite(qc, wsId);
     },

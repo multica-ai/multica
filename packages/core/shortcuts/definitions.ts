@@ -14,6 +14,7 @@ export type ShortcutActionId =
   | "newChat"
   | "findInIssue"
   | "archiveInboxItem"
+  | "snoozeInboxItem"
   | "send"
   | "goBack"
   | "goForward"
@@ -107,6 +108,12 @@ export const SHORTCUT_ACTIONS: readonly ShortcutActionDefinition[] = [
     id: "archiveInboxItem",
     category: "general",
     defaultShortcut: createShortcutChord("E"),
+    allowInEditable: false,
+  },
+  {
+    id: "snoozeInboxItem",
+    category: "general",
+    defaultShortcut: createShortcutChord("H"),
     allowInEditable: false,
   },
   { id: "send", category: "general", defaultShortcut: primary("Enter"), allowInEditable: true },

@@ -3,12 +3,6 @@
     "title": "Inbox",
     "back": "Inbox"
   },
-  "menu": {
-    "mark_all_read": "Mark all as read",
-    "archive_all": "Archive all",
-    "archive_all_read": "Archive all read",
-    "archive_completed": "Archive completed"
-  },
   "filters": {
     "tooltip": "Filter inbox",
     "active_count_one": "{{count}} active filter",
@@ -33,8 +27,7 @@
     "type_system": "System",
     "received_today": "Today",
     "received_last_7_days": "Last 7 days",
-    "received_last_30_days": "Last 30 days",
-    "agent_idle": "Idle"
+    "received_last_30_days": "Last 30 days"
   },
   "context_menu": {
     "mark_read": "Mark as read",
@@ -42,7 +35,12 @@
     "archive": "Archive",
     "unarchive": "Unarchive",
     "open_in_new_tab": "Open in new tab",
-    "delete": "Delete"
+    "delete": "Delete",
+    "snooze_in_one_hour": "Snooze for 1 hour",
+    "snooze_later_today": "Snooze until later today",
+    "snooze_tomorrow": "Snooze until tomorrow",
+    "snooze_next_week": "Snooze until next Monday",
+    "unsnooze": "Unsnooze"
   },
   "list": {
     "loading_selection": "Loading notification…",
@@ -65,14 +63,15 @@
   },
   "detail": {
     "select_prompt": "Select a notification to view details",
-    "empty": "Your inbox is empty",
     "original_input": "Original input",
     "retry_with_context": "Retry with context",
     "edit_advanced": "Edit as advanced form",
     "autopilot_quota_exceeded_body": "This workspace has reached its limit of {{limit}} autopilot runs for the current period. Further autopilot runs will not start until the allowance resets {{resetAt}}.",
     "autopilot_quota_upgrade": "View upgrade options",
     "archive": "Archive",
-    "unarchive": "Unarchive"
+    "unarchive": "Unarchive",
+    "nothing_needs_you": "Nothing needs you",
+    "nothing_needs_you_hint": "Issues appear on the left when an agent hands back a result or someone mentions you."
   },
   "types": {
     "issue_assigned": "Assigned",
@@ -89,6 +88,7 @@
     "review_requested": "Review requested",
     "task_completed": "Run completed",
     "task_failed": "Run failed",
+    "task_cancelled": "Run cancelled",
     "agent_blocked": "Agent blocked",
     "agent_completed": "Agent completed",
     "reaction_added": "Reacted",
@@ -122,7 +122,8 @@
     "source_context_retry_started": "Retry started with the original context",
     "archived": "Notification archived",
     "unarchived": "Notification restored",
-    "deleted": "Notification deleted"
+    "deleted": "Notification deleted",
+    "snoozed": "Snoozed until {{time}}"
   },
   "errors": {
     "archived_lookup_failed": "Failed to load the linked notification",
@@ -132,20 +133,53 @@
     "mark_unread_failed": "Failed to mark as unread",
     "archive_failed": "Failed to archive",
     "mark_done_failed": "Failed to mark as done",
-    "mark_all_read_failed": "Failed to mark all as read",
-    "archive_all_failed": "Failed to archive all",
-    "archive_all_read_failed": "Failed to archive read items",
-    "archive_completed_failed": "Failed to archive completed",
     "unarchive_failed": "Failed to unarchive",
     "archived_load_failed": "Failed to load archived notifications",
     "filters_load_failed": "Could not load filters",
-    "delete_failed": "Failed to delete notification. Try again."
+    "delete_failed": "Failed to delete notification. Try again.",
+    "snooze_failed": "Failed to snooze",
+    "unsnooze_failed": "Failed to unsnooze"
   },
   "delete_dialog": {
     "title": "Delete notification?",
     "description": "This permanently deletes this notification. Related issues and runs are kept.",
     "issue_description": "This permanently deletes the notifications for this issue in this view. The issue and its runs are kept.",
-    "cancel": "Cancel",
-    "active_issue_description": "This permanently deletes the active notifications for this issue. Previously archived notifications remain and will be visible again in Archived. The issue and its runs are kept."
+    "cancel": "Cancel"
+  },
+  "sections": {
+    "needs_you": "Needs you",
+    "working": "Working",
+    "updates": "Updates",
+    "snoozed": "Snoozed",
+    "clear_updates": "Clear",
+    "queued": "Queued",
+    "caught_up": "All caught up",
+    "still_working_one": "{{count}} agent is still working. Results come back here.",
+    "still_working_other": "{{count}} agents are still working. Results come back here."
+  },
+  "reasons": {
+    "review": "Ready for review",
+    "question": "Waiting for your answer",
+    "mention": "Mentioned you",
+    "failed": "Run failed",
+    "cancelled": "Run cancelled",
+    "assigned": "Assigned to you",
+    "comment": "New comment",
+    "finished": "Run finished",
+    "stopped_by_you": "You stopped this run",
+    "stopped_by": "{{name}} stopped this run",
+    "stopped_by_system": "Stopped by the system"
+  },
+  "snooze": {
+    "action": "Snooze",
+    "unsnooze": "Unsnooze",
+    "in_one_hour": "In 1 hour",
+    "later_today": "Later today",
+    "tomorrow": "Tomorrow",
+    "next_week": "Next Monday",
+    "pick_time": "Pick a time...",
+    "hint": "Comes back early if something new needs you, such as a mention or a failed run.",
+    "custom_title": "Snooze until",
+    "custom_invalid": "Choose a time in the future, within a year."
   }
 }

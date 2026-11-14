@@ -3,12 +3,6 @@
     "title": "收件箱",
     "back": "收件箱"
   },
-  "menu": {
-    "mark_all_read": "全部標為已讀",
-    "archive_all": "歸檔全部",
-    "archive_all_read": "歸檔全部已讀",
-    "archive_completed": "歸檔已完成"
-  },
   "filters": {
     "tooltip": "篩選收件箱",
     "active_count_other": "{{count}} 個篩選條件",
@@ -31,8 +25,7 @@
     "type_system": "系統",
     "received_today": "今天",
     "received_last_7_days": "最近 7 天",
-    "received_last_30_days": "最近 30 天",
-    "agent_idle": "閒置"
+    "received_last_30_days": "最近 30 天"
   },
   "context_menu": {
     "mark_read": "標為已讀",
@@ -40,7 +33,12 @@
     "archive": "歸檔",
     "unarchive": "取消歸檔",
     "open_in_new_tab": "在新標籤頁開啟",
-    "delete": "刪除"
+    "delete": "刪除",
+    "snooze_in_one_hour": "延後 1 小時",
+    "snooze_later_today": "延後到今天稍晚",
+    "snooze_tomorrow": "延後到明天",
+    "snooze_next_week": "延後到下週一",
+    "unsnooze": "取消延後"
   },
   "list": {
     "loading_selection": "正在載入通知…",
@@ -63,14 +61,15 @@
   },
   "detail": {
     "select_prompt": "選擇一條通知檢視詳情",
-    "empty": "收件箱為空",
     "original_input": "原始輸入",
     "retry_with_context": "保留上下文重試",
     "edit_advanced": "在完整表單中編輯",
     "autopilot_quota_exceeded_body": "當前週期的 {{limit}} 次自動化執行額度已用完。在 {{resetAt}} 重置前，後續自動化執行將不會啟動。",
     "autopilot_quota_upgrade": "檢視升級方案",
     "archive": "歸檔",
-    "unarchive": "取消歸檔"
+    "unarchive": "取消歸檔",
+    "nothing_needs_you": "沒有需要你處理的任務",
+    "nothing_needs_you_hint": "AI 代理交回結果、有人 @ 你時，會出現在左側。"
   },
   "types": {
     "issue_assigned": "已分配",
@@ -87,6 +86,7 @@
     "review_requested": "請求審查",
     "task_completed": "執行已完成",
     "task_failed": "執行失敗",
+    "task_cancelled": "執行已取消",
     "agent_blocked": "AI 代理被阻塞",
     "agent_completed": "AI 代理已完成",
     "reaction_added": "新增了表情反應",
@@ -120,7 +120,8 @@
     "source_context_retry_started": "已使用原始上下文開始重試",
     "archived": "已歸檔通知",
     "unarchived": "已恢復通知",
-    "deleted": "通知已刪除"
+    "deleted": "通知已刪除",
+    "snoozed": "已延後到 {{time}}"
   },
   "errors": {
     "archived_lookup_failed": "無法載入連結指向的通知",
@@ -130,20 +131,52 @@
     "mark_unread_failed": "標為未讀失敗",
     "archive_failed": "歸檔失敗",
     "mark_done_failed": "標為已完成失敗",
-    "mark_all_read_failed": "全部標為已讀失敗",
-    "archive_all_failed": "歸檔全部失敗",
-    "archive_all_read_failed": "歸檔已讀失敗",
-    "archive_completed_failed": "歸檔已完成失敗",
     "unarchive_failed": "取消歸檔失敗",
     "archived_load_failed": "無法載入已歸檔通知",
     "filters_load_failed": "無法載入篩選項",
-    "delete_failed": "無法刪除通知，請重試。"
+    "delete_failed": "無法刪除通知，請重試。",
+    "snooze_failed": "無法延後",
+    "unsnooze_failed": "無法取消延後"
   },
   "delete_dialog": {
     "title": "刪除通知？",
     "description": "此通知將被永久刪除，相關任務和執行記錄不受影響。",
     "issue_description": "目前檢視中此任務的通知將被永久刪除，任務和執行記錄不受影響。",
-    "cancel": "取消",
-    "active_issue_description": "此任務在收件箱中的通知將被永久刪除。先前歸檔的通知會保留，並重新顯示在已歸檔檢視中。任務和執行記錄不受影響。"
+    "cancel": "取消"
+  },
+  "sections": {
+    "needs_you": "需要你處理",
+    "working": "執行中",
+    "updates": "動態",
+    "snoozed": "已延後",
+    "clear_updates": "清空",
+    "queued": "排隊中",
+    "caught_up": "都處理完了",
+    "still_working_other": "{{count}} 個 AI 代理還在執行，有結果會回到這裡。"
+  },
+  "reasons": {
+    "review": "等你驗收",
+    "question": "等你回答",
+    "mention": "提到你",
+    "failed": "執行失敗",
+    "cancelled": "執行已取消",
+    "assigned": "分配給你",
+    "comment": "新評論",
+    "finished": "執行完成",
+    "stopped_by_you": "你停止了這次執行",
+    "stopped_by": "{{name}} 停止了這次執行",
+    "stopped_by_system": "系統停止了這次執行"
+  },
+  "snooze": {
+    "action": "延後",
+    "unsnooze": "取消延後",
+    "in_one_hour": "1 小時後",
+    "later_today": "今天稍晚",
+    "tomorrow": "明天",
+    "next_week": "下週一",
+    "pick_time": "選擇時間...",
+    "hint": "有新的事需要你處理時會提前回來，例如有人 @ 你，或 AI 代理執行失敗。",
+    "custom_title": "延後到",
+    "custom_invalid": "請選擇一年內的未來時間。"
   }
 }

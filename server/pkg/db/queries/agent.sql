@@ -1693,6 +1693,19 @@ SELECT EXISTS (SELECT 1 FROM agent_task_queue WHERE issue_id = $1);
 SELECT count(*) > 0 AS has_active FROM agent_task_queue
 WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory');
 
+-- name: HasOtherActiveRunStartedByMember :one
+-- Whether the member has another run of their own still active on the issue,
+-- besides the given task. The Inbox keeps the issue under "Working" while one
+-- is (MUL-9215), so a cancelled sibling does not hand the issue back.
+SELECT EXISTS (
+    SELECT 1 FROM agent_task_queue
+    WHERE issue_id = sqlc.arg(issue_id)
+      AND id <> sqlc.arg(task_id)
+      AND originator_user_id = sqlc.arg(originator_user_id)
+      AND originator_source = 'direct_human'
+      AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+) AS has_other;
+
 -- name: HasPendingTaskForIssue :one
 -- Returns true if there is a queued or dispatched (but not yet running) task for the issue.
 -- Used by the coalescing queue: allow enqueue when a task is running (so

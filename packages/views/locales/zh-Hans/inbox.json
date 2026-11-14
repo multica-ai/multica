@@ -3,12 +3,6 @@
     "title": "收件箱",
     "back": "收件箱"
   },
-  "menu": {
-    "mark_all_read": "全部标为已读",
-    "archive_all": "归档全部",
-    "archive_all_read": "归档全部已读",
-    "archive_completed": "归档已完成"
-  },
   "filters": {
     "tooltip": "筛选收件箱",
     "active_count_other": "{{count}} 个筛选条件",
@@ -31,8 +25,7 @@
     "type_system": "系统",
     "received_today": "今天",
     "received_last_7_days": "最近 7 天",
-    "received_last_30_days": "最近 30 天",
-    "agent_idle": "空闲"
+    "received_last_30_days": "最近 30 天"
   },
   "context_menu": {
     "mark_read": "标为已读",
@@ -40,7 +33,12 @@
     "archive": "归档",
     "unarchive": "取消归档",
     "open_in_new_tab": "在新标签页打开",
-    "delete": "删除"
+    "delete": "删除",
+    "snooze_in_one_hour": "推迟 1 小时",
+    "snooze_later_today": "推迟到今天晚些时候",
+    "snooze_tomorrow": "推迟到明天",
+    "snooze_next_week": "推迟到下周一",
+    "unsnooze": "取消推迟"
   },
   "list": {
     "loading_selection": "正在加载通知…",
@@ -63,14 +61,15 @@
   },
   "detail": {
     "select_prompt": "选择一条通知查看详情",
-    "empty": "收件箱为空",
     "original_input": "原始输入",
     "retry_with_context": "保留上下文重试",
     "edit_advanced": "在完整表单中编辑",
     "autopilot_quota_exceeded_body": "当前周期的 {{limit}} 次自动化执行额度已用完。在 {{resetAt}} 重置前，后续自动化执行将不会启动。",
     "autopilot_quota_upgrade": "查看升级方案",
     "archive": "归档",
-    "unarchive": "取消归档"
+    "unarchive": "取消归档",
+    "nothing_needs_you": "没有需要你处理的任务",
+    "nothing_needs_you_hint": "智能体交回结果、有人 @ 你时，会出现在左侧。"
   },
   "types": {
     "issue_assigned": "已分配",
@@ -87,6 +86,7 @@
     "review_requested": "请求审查",
     "task_completed": "运行已完成",
     "task_failed": "运行失败",
+    "task_cancelled": "运行已取消",
     "agent_blocked": "智能体被阻塞",
     "agent_completed": "智能体已完成",
     "reaction_added": "添加了表情反应",
@@ -120,7 +120,8 @@
     "source_context_retry_started": "已使用原始上下文开始重试",
     "archived": "已归档通知",
     "unarchived": "已恢复通知",
-    "deleted": "通知已删除"
+    "deleted": "通知已删除",
+    "snoozed": "已推迟到 {{time}}"
   },
   "errors": {
     "archived_lookup_failed": "无法加载链接指向的通知",
@@ -130,20 +131,52 @@
     "mark_unread_failed": "标为未读失败",
     "archive_failed": "归档失败",
     "mark_done_failed": "标为已完成失败",
-    "mark_all_read_failed": "全部标为已读失败",
-    "archive_all_failed": "归档全部失败",
-    "archive_all_read_failed": "归档已读失败",
-    "archive_completed_failed": "归档已完成失败",
     "unarchive_failed": "取消归档失败",
     "archived_load_failed": "无法加载已归档通知",
     "filters_load_failed": "无法加载筛选项",
-    "delete_failed": "无法删除通知，请重试。"
+    "delete_failed": "无法删除通知，请重试。",
+    "snooze_failed": "无法推迟",
+    "unsnooze_failed": "无法取消推迟"
   },
   "delete_dialog": {
     "title": "删除通知？",
     "description": "此通知将被永久删除，关联任务和运行记录不受影响。",
     "issue_description": "当前视图中此任务的通知将被永久删除，任务和运行记录不受影响。",
-    "cancel": "取消",
-    "active_issue_description": "此任务在收件箱中的通知将被永久删除。此前归档的通知会保留，并重新显示在归档视图中。任务和运行记录不受影响。"
+    "cancel": "取消"
+  },
+  "sections": {
+    "needs_you": "要你处理",
+    "working": "运行中",
+    "updates": "动态",
+    "snoozed": "已推迟",
+    "clear_updates": "清空",
+    "queued": "排队中",
+    "caught_up": "都处理完了",
+    "still_working_other": "{{count}} 个智能体还在运行，有结果会回到这里。"
+  },
+  "reasons": {
+    "review": "等你验收",
+    "question": "等你回答",
+    "mention": "提到你",
+    "failed": "运行失败",
+    "cancelled": "运行已取消",
+    "assigned": "分配给你",
+    "comment": "新评论",
+    "finished": "运行完成",
+    "stopped_by_you": "你停止了这次运行",
+    "stopped_by": "{{name}} 停止了这次运行",
+    "stopped_by_system": "系统停止了这次运行"
+  },
+  "snooze": {
+    "action": "推迟",
+    "unsnooze": "取消推迟",
+    "in_one_hour": "1 小时后",
+    "later_today": "今天晚些时候",
+    "tomorrow": "明天",
+    "next_week": "下周一",
+    "pick_time": "选择时间...",
+    "hint": "有新的事需要你处理时会提前回来，比如有人 @ 你，或智能体运行失败。",
+    "custom_title": "推迟到",
+    "custom_invalid": "请选择一年内的未来时间。"
   }
 }

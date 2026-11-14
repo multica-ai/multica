@@ -141,17 +141,6 @@ describe("deduplicateArchivedInboxItems", () => {
 });
 
 describe("archived inbox options", () => {
-  it("keeps an agent selection out of archive query keys", () => {
-    const idle: InboxFilters = { ...EMPTY_INBOX_FILTERS, agent: "idle" };
-
-    expect(archivedInboxPagesOptions("ws", idle).queryKey).toEqual(
-      archivedInboxPagesOptions("ws", EMPTY_INBOX_FILTERS).queryKey,
-    );
-    expect(archivedInboxFacetsOptions("ws", idle).queryKey).toEqual(
-      archivedInboxFacetsOptions("ws", EMPTY_INBOX_FILTERS).queryKey,
-    );
-  });
-
   it("carries the previous result across a filter change but never across workspaces", () => {
     const todo: InboxFilters = { ...EMPTY_INBOX_FILTERS, statuses: ["todo"] };
     for (const options of [archivedInboxPagesOptions, archivedInboxFacetsOptions]) {
@@ -273,5 +262,33 @@ describe("unreadCountForWorkspace", () => {
 
   it("returns zero for an empty summary", () => {
     expect(unreadCountForWorkspace([], "ws-1")).toBe(0);
+  });
+});
+
+describe("the badge on a server that counts what needs the user", () => {
+  // `needs_you` is the issues waiting on the user, read or not; `count` is
+  // the unread ones. The badge and the workspace dots follow the first.
+  const summary: InboxWorkspaceUnread[] = [
+    { workspace_id: "read-but-waiting", count: 0, needs_you: 2 },
+    { workspace_id: "only-updates", count: 5, needs_you: 0 },
+    { workspace_id: "older-server", count: 3 },
+  ];
+
+  it("counts issues that wait on the user even when they are read", () => {
+    expect(unreadCountForWorkspace(summary, "read-but-waiting")).toBe(2);
+  });
+
+  it("does not count unread updates", () => {
+    expect(unreadCountForWorkspace(summary, "only-updates")).toBe(0);
+  });
+
+  it("keeps counting unread issues when the server sends no needs-you count", () => {
+    expect(unreadCountForWorkspace(summary, "older-server")).toBe(3);
+  });
+
+  it("lights the workspace dots by the same number", () => {
+    expect([...unreadWorkspaceIds(summary)].sort()).toEqual(["older-server", "read-but-waiting"]);
+    expect(hasOtherWorkspaceUnread(summary.slice(0, 2), "read-but-waiting")).toBe(false);
+    expect(hasOtherWorkspaceUnread(summary.slice(0, 2), "only-updates")).toBe(true);
   });
 });

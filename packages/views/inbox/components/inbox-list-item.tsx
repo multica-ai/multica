@@ -7,10 +7,14 @@ import {
 } from "../../issues/components/issue-agent-activity-indicator";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { DeferredTooltip } from "../../common/deferred-tooltip";
-import { Archive, ArchiveRestore } from "@multica/ui/icons";
+import { Archive, ArchiveRestore, Clock } from "@multica/ui/icons";
+import type { InboxSectionRow } from "@multica/core/inbox/sections";
 import type { InboxItem } from "@multica/core/types";
+import { useActorName } from "@multica/core/workspace/hooks";
 import type { InboxView } from "./inbox-view";
 import { InboxDetailLabel, useTypeLabels } from "./inbox-detail-label";
+import { InboxReasonLabel } from "./inbox-reason-label";
+import { formatSnoozeTime } from "./inbox-snooze-time";
 import {
   getInboxDisplayTitle,
   isAutopilotQuotaNotice,
@@ -19,7 +23,7 @@ import { useInboxContextMenu } from "./inbox-context-menu";
 import { useStatusLabel } from "../../issues/utils/status-label";
 import { InboxRowMenu } from "./inbox-row-menu";
 import { handleRowActivationKey } from "../../common/row-actions-menu";
-import { useT } from "../../i18n";
+import { useLocale, useT } from "../../i18n";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import { resolveClickIntent, useIntentNavigate } from "../../navigation";
 
@@ -40,12 +44,34 @@ export function useTimeAgo() {
   };
 }
 
+// The two below are components so that only the rows that show them
+// subscribe to what they read: the workspace's people, and the locale.
+
+function InboxActorName({ actorType, actorId }: { actorType: string; actorId: string }) {
+  const { getActorName } = useActorName();
+  return <span className="shrink-0">{getActorName(actorType, actorId)}</span>;
+}
+
+function InboxSnoozeTime({ until }: { until: string }) {
+  const locale = useLocale();
+  return (
+    <span className="text-caption text-muted-foreground">
+      {formatSnoozeTime(new Date(until), new Date(), locale)}
+    </span>
+  );
+}
+
+/** The section a row is listed under, which decides how much of it shows. */
+export type InboxRowSection = "needs_you" | "updates" | "snoozed";
+
 export function InboxListItem({
   item,
   view,
   isSelected,
   onClick,
   onAction,
+  section,
+  row,
 }: {
   item: InboxItem;
   view: InboxView;
@@ -54,6 +80,14 @@ export function InboxListItem({
   // Archive in the main list, unarchive in the archived one — the row action is
   // always the reversal of the current view, so the two lists share this row.
   onAction: () => void;
+  /**
+   * Set by the sectioned main list. "Needs you" rows are the full two lines
+   * and lead with why the issue waits; "Updates" and "Snoozed" rows are
+   * smaller and quieter, because nothing in them is waiting. Absent in the
+   * archive, whose rows are as they always were.
+   */
+  section?: InboxRowSection;
+  row?: InboxSectionRow;
 }) {
   const { t } = useT("inbox");
   const timeAgo = useTimeAgo();
@@ -80,12 +114,19 @@ export function InboxListItem({
   // Archiving deliberately leaves `read` untouched so unarchiving restores the
   // real unread state, so archived rows would otherwise keep an unread marker
   // the user cannot clear from this view. Suppress the affordance here only.
-  const showUnread = item.read !== true && !isArchivedView;
+  // A snoozed row is unread on purpose, so the issue comes back as new when
+  // its time passes; until then it is put away and shows nothing to do.
+  const showUnread = item.read !== true && !isArchivedView && section !== "snoozed";
   const ActionIcon = isArchivedView ? ArchiveRestore : Archive;
   const actionLabel = isArchivedView
     ? t(($) => $.list.unarchive_tooltip)
     : t(($) => $.list.archive_tooltip);
-  const actorType = item.actor_type ?? item.recipient_type;
+  // A "Needs you" row shows who is waiting, which is whoever sent the
+  // notification that put it there, not whoever touched the issue last.
+  const actor = (section === "needs_you" ? row?.reason : null) ?? item;
+  const actorType = actor.actor_type ?? actor.recipient_type;
+  const actorId = actor.actor_id ?? actor.recipient_id;
+  const compact = section === "updates" || section === "snoozed";
   // The glyph is per CATEGORY, so it alone cannot tell "In Review" from a
   // custom "Human Review" — moving between two statuses of the same category
   // left this row pixel-identical and read as "the inbox never updated"
@@ -129,18 +170,28 @@ export function InboxListItem({
       onContextMenu={
         openContextMenu ? (e) => openContextMenu(item, e) : undefined
       }
-      className={`group flex w-full cursor-default select-none items-center gap-2.5 rounded-md px-2 py-2.5 text-left outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ring ${
+      data-section={section}
+      className={`group flex w-full cursor-default select-none items-center rounded-md px-2 text-left outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ring ${
+        compact ? "gap-2 py-1.5" : "gap-2.5 py-2.5"
+      } ${
         isSelected
           ? "bg-accent"
           : "hover:bg-accent/50 data-[popup-open]:bg-accent/50"
       }`}
     >
-      <ActorAvatar
-        actorType={actorType}
-        actorId={item.actor_id ?? item.recipient_id}
-        size="lg"
-        enableHoverCard
-      />
+      {section === "snoozed" ? (
+        // The row's width matches the small avatar the rows above it carry.
+        <span className="flex size-5 shrink-0 items-center justify-center text-muted-foreground">
+          <Clock className="h-3.5 w-3.5" />
+        </span>
+      ) : (
+        <ActorAvatar
+          actorType={actorType}
+          actorId={actorId}
+          size={compact ? "sm" : "lg"}
+          enableHoverCard
+        />
+      )}
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-1.5">
@@ -148,7 +199,15 @@ export function InboxListItem({
               <span data-mc="unread-dot" className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand" />
             )}
             <span
-              className={`truncate text-body ${showUnread ? "font-medium" : "text-muted-foreground"}`}
+              className={`truncate text-body ${
+                showUnread
+                  ? "font-medium"
+                  : // Read is not handled: a "Needs you" row keeps its colour
+                    // until the issue leaves the section.
+                    section === "needs_you"
+                    ? ""
+                    : "text-muted-foreground"
+              }`}
             >
               {displayTitle}
             </span>
@@ -175,12 +234,37 @@ export function InboxListItem({
               }
             />
             <InboxRowMenu item={item} view={view} />
+            {section === "snoozed" && row?.snoozedUntil && (
+              <InboxSnoozeTime until={row.snoozedUntil} />
+            )}
           </div>
         </div>
+        {section !== "snoozed" && (
         <div className="mt-0.5 flex items-center justify-between gap-2">
-          <p className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-caption ${showUnread ? "text-muted-foreground" : "text-muted-foreground"}`}>
-            <InboxDetailLabel item={item} />
+          <p className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-caption text-muted-foreground">
+            {section === "needs_you" && row?.reason ? (
+              <InboxReasonLabel reason={row.reason} latest={item} preview={row.preview} />
+            ) : section === "updates" ? (
+              // Who did what: the avatar is too small here to carry the name.
+              <span className="flex min-w-0 items-center gap-1">
+                {item.actor_id && (
+                  <InboxActorName actorType={item.actor_type ?? "member"} actorId={item.actor_id} />
+                )}
+                <span className="min-w-0 truncate">
+                  <InboxDetailLabel item={item} />
+                </span>
+              </span>
+            ) : (
+              <InboxDetailLabel item={item} />
+            )}
           </p>
+          {section === "updates" ? (
+            // Only when: nothing here waits on the user, so the row carries
+            // neither the issue's status nor the agent badge.
+            <span className="shrink-0 text-caption text-muted-foreground">
+              {timeAgo(item.created_at)}
+            </span>
+          ) : (
           <div className="flex shrink-0 items-center gap-1.5">
             {/* Badge only, no hover card (MUL-5189). "An agent is on this"
                 is worth showing while triaging; the card behind it adds only
@@ -212,11 +296,13 @@ export function InboxListItem({
                 />
               </span>
             )}
-            <span className={`text-caption ${showUnread ? "text-muted-foreground" : "text-muted-foreground"}`}>
+            <span className="text-caption text-muted-foreground">
               {timeAgo(item.created_at)}
             </span>
           </div>
+          )}
         </div>
+        )}
       </div>
     </div>
   );

@@ -82,19 +82,44 @@ func TestNotification_MalformedMemberMentionPreservesValidRecipients(t *testing.
 			if items[0].Type != "mentioned" || util.UUIDToString(items[0].IssueID) != issueID {
 				t.Fatalf("unexpected mention inbox item: %+v", items[0])
 			}
+			if items[0].Section.String != "needs_you" {
+				t.Fatalf("mention section = %q, want needs_you", items[0].Section.String)
+			}
 			var details map[string]string
 			if err := json.Unmarshal(items[0].Details, &details); err != nil || details["comment_id"] != commentID {
 				t.Fatalf("mention details = %s, error = %v; want comment_id %s", items[0].Details, err, commentID)
 			}
-			if count := fx.Count(t, `SELECT count(*) FROM inbox_item WHERE issue_id = $1`, issueID); count != 1 {
-				t.Fatalf("issue has %d inbox items, want only the valid, unmuted recipient", count)
+			// A mention is never dropped (MUL-9215). The member who asked for
+			// group mentions to be updates gets one by name under "Needs you"
+			// like anyone else, and one through @all as an update.
+			mutedItems := inboxItemsForRecipient(t, queries, mutedID)
+			wantMutedSection := "needs_you"
+			if tc.mentionAll {
+				wantMutedSection = "updates"
 			}
-			if len(inboxEvents) != 1 {
-				t.Fatalf("got %d inbox:new events, want 1", len(inboxEvents))
+			if len(mutedItems) != 1 || mutedItems[0].Type != "mentioned" || mutedItems[0].Section.String != wantMutedSection {
+				t.Fatalf("muted recipient's items = %+v, want one mention in %s", mutedItems, wantMutedSection)
 			}
-			item := inboxEvents[0].Payload.(map[string]any)["item"].(map[string]any)
-			if item["recipient_id"] != recipientID || item["type"] != "mentioned" || item["issue_status"] != "todo" {
-				t.Fatalf("unexpected inbox:new item: %+v", item)
+			if count := fx.Count(t, `SELECT count(*) FROM inbox_item WHERE issue_id = $1`, issueID); count != 2 {
+				t.Fatalf("issue has %d inbox items, want one per valid recipient", count)
+			}
+			if len(inboxEvents) != 2 {
+				t.Fatalf("got %d inbox:new events, want 2", len(inboxEvents))
+			}
+			for _, e := range inboxEvents {
+				item := e.Payload.(map[string]any)["item"].(map[string]any)
+				if item["type"] != "mentioned" || item["issue_status"] != "todo" {
+					t.Fatalf("unexpected inbox:new item: %+v", item)
+				}
+				wantSection := "needs_you"
+				if item["recipient_id"] == mutedID {
+					wantSection = wantMutedSection
+				} else if item["recipient_id"] != recipientID {
+					t.Fatalf("inbox:new for an unexpected recipient: %+v", item)
+				}
+				if item["section"] != wantSection {
+					t.Fatalf("inbox:new section = %v, want %s: %+v", item["section"], wantSection, item)
+				}
 			}
 		})
 	}

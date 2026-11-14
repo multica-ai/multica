@@ -117,12 +117,18 @@ function renderRow({
 }
 
 describe("inbox row context menu", () => {
-  it.each(["inbox", "archived"] as const)("offers deletion in the %s view", async (view) => {
+  it("offers deletion in the archive", async () => {
     const onDelete = vi.fn();
-    const { row } = renderRow({ view, actions: { onDelete } });
+    const { row } = renderRow({ view: "archived", actions: { onDelete } });
     fireEvent.contextMenu(row);
     fireEvent.click(await screen.findByText("Delete"));
     expect(onDelete).toHaveBeenCalledWith("inbox-1");
+  });
+  it("keeps deletion out of the main view, where archiving is the way out", async () => {
+    const { row } = renderRow();
+    fireEvent.contextMenu(row);
+    await screen.findByText("Archive");
+    expect(screen.queryByText("Delete")).toBeNull();
   });
   it("offers mark-as-unread on a read row and reports the item id", async () => {
     const onMarkUnread = vi.fn();
@@ -173,6 +179,70 @@ describe("inbox row context menu", () => {
     expect(screen.queryByText("Mark as read")).toBeNull();
   });
 
+  describe("snooze", () => {
+    // A Wednesday afternoon, with the evening still more than an hour away.
+    const now = new Date(2026, 5, 17, 14, 20);
+    const frozen = (run: () => Promise<void>) => async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(now);
+      try {
+        await run();
+      } finally {
+        vi.useRealTimers();
+      }
+    };
+
+    it("puts the issue away until the time picked", frozen(async () => {
+      const onSnooze = vi.fn();
+      const { row } = renderRow({ entry: item({ id: "inbox-4" }), actions: { onSnooze } });
+
+      fireEvent.contextMenu(row);
+      expect(await screen.findByText("Snooze for 1 hour")).toBeInTheDocument();
+      expect(screen.getByText("Snooze until later today")).toBeInTheDocument();
+      expect(screen.getByText("Snooze until next Monday")).toBeInTheDocument();
+      fireEvent.click(screen.getByText("Snooze until tomorrow"));
+
+      expect(onSnooze).toHaveBeenCalledWith("inbox-4", new Date(2026, 5, 18, 9));
+    }));
+
+    it("offers only the way back on an issue that is snoozed", frozen(async () => {
+      const onUnsnooze = vi.fn();
+      const { row } = renderRow({
+        entry: item({ id: "inbox-5", snoozed_until: new Date(2026, 5, 18, 9).toISOString() }),
+        actions: { onSnooze: vi.fn(), onUnsnooze },
+      });
+
+      fireEvent.contextMenu(row);
+      fireEvent.click(await screen.findByText("Unsnooze"));
+
+      expect(onUnsnooze).toHaveBeenCalledWith("inbox-5");
+      expect(screen.queryByText("Snooze until tomorrow")).toBeNull();
+    }));
+
+    it("offers to snooze again once the time has passed", frozen(async () => {
+      const { row } = renderRow({
+        entry: item({ snoozed_until: new Date(2026, 5, 17, 9).toISOString() }),
+        actions: { onSnooze: vi.fn(), onUnsnooze: vi.fn() },
+      });
+
+      fireEvent.contextMenu(row);
+
+      expect(await screen.findByText("Snooze until tomorrow")).toBeInTheDocument();
+      expect(screen.queryByText("Unsnooze")).toBeNull();
+    }));
+
+    it("is not offered in the archive, or where the list cannot snooze", async () => {
+      const archived = renderRow({
+        entry: item({ archived: true }),
+        view: "archived",
+        actions: { onSnooze: vi.fn() },
+      });
+      fireEvent.contextMenu(archived.row);
+      expect(await screen.findByText("Unarchive")).toBeInTheDocument();
+      expect(screen.queryByText("Snooze until tomorrow")).toBeNull();
+    });
+  });
+
   it("suppresses the browser's native menu so ours is the only one", async () => {
     const { row } = renderRow();
 
@@ -208,9 +278,9 @@ describe("inbox row context menu", () => {
 // A touch pointer has neither hover nor right-click, so the row's compact menu
 // is the only way in. It must therefore offer what right-click offers.
 describe("inbox row compact menu", () => {
-  it("offers deletion without selecting the row", async () => {
+  it("offers deletion in the archive without selecting the row", async () => {
     const onDelete = vi.fn();
-    renderRow({ actions: { onDelete } });
+    renderRow({ view: "archived", actions: { onDelete } });
     fireEvent.click(screen.getByRole("button", { name: "Notification actions" }));
     fireEvent.click(await screen.findByText("Delete"));
     expect(onDelete).toHaveBeenCalledWith("inbox-1");

@@ -3,12 +3,6 @@
     "title": "Bandeja de entrada",
     "back": "Bandeja de entrada"
   },
-  "menu": {
-    "mark_all_read": "Marcar todo como leído",
-    "archive_all": "Archivar todo",
-    "archive_all_read": "Archivar todo lo leído",
-    "archive_completed": "Archivar lo completado"
-  },
   "filters": {
     "tooltip": "Filtrar bandeja",
     "active_count_one": "{{count}} filtro activo",
@@ -33,8 +27,7 @@
     "type_system": "Sistema",
     "received_today": "Hoy",
     "received_last_7_days": "Últimos 7 días",
-    "received_last_30_days": "Últimos 30 días",
-    "agent_idle": "Inactivo"
+    "received_last_30_days": "Últimos 30 días"
   },
   "context_menu": {
     "mark_read": "Marcar como leído",
@@ -42,7 +35,12 @@
     "archive": "Archivar",
     "unarchive": "Desarchivar",
     "open_in_new_tab": "Abrir en una pestaña nueva",
-    "delete": "Eliminar"
+    "delete": "Eliminar",
+    "snooze_in_one_hour": "Posponer 1 hora",
+    "snooze_later_today": "Posponer hasta más tarde hoy",
+    "snooze_tomorrow": "Posponer hasta mañana",
+    "snooze_next_week": "Posponer hasta el próximo lunes",
+    "unsnooze": "Cancelar posposición"
   },
   "list": {
     "loading_selection": "Cargando notificación…",
@@ -65,14 +63,15 @@
   },
   "detail": {
     "select_prompt": "Selecciona una notificación para ver los detalles",
-    "empty": "Tu bandeja de entrada está vacía",
     "original_input": "Entrada original",
     "retry_with_context": "Reintentar con contexto",
     "edit_advanced": "Editar como formulario avanzado",
     "autopilot_quota_exceeded_body": "Este espacio de trabajo ha alcanzado su límite de {{limit}} ejecuciones de automatizaciones para el periodo actual. No se iniciarán más ejecuciones de automatizaciones hasta que se reinicie la cuota {{resetAt}}.",
     "autopilot_quota_upgrade": "Ver opciones de mejora del plan",
     "archive": "Archivar",
-    "unarchive": "Desarchivar"
+    "unarchive": "Desarchivar",
+    "nothing_needs_you": "Nada pendiente de ti",
+    "nothing_needs_you_hint": "Las tareas aparecen a la izquierda cuando un agente entrega un resultado o alguien te menciona."
   },
   "types": {
     "issue_assigned": "Asignada",
@@ -89,6 +88,7 @@
     "review_requested": "Revisión solicitada",
     "task_completed": "Ejecución completada",
     "task_failed": "Ejecución fallida",
+    "task_cancelled": "Ejecución cancelada",
     "agent_blocked": "Agente bloqueado",
     "agent_completed": "Agente completado",
     "reaction_added": "Reaccionó",
@@ -122,7 +122,8 @@
     "source_context_retry_started": "Reintento iniciado con el contexto original",
     "archived": "Notificación archivada",
     "unarchived": "Notificación restaurada",
-    "deleted": "Notificación eliminada"
+    "deleted": "Notificación eliminada",
+    "snoozed": "Pospuesta hasta {{time}}"
   },
   "errors": {
     "archived_lookup_failed": "No se ha podido cargar la notificación enlazada",
@@ -132,20 +133,53 @@
     "mark_unread_failed": "No se ha podido marcar como no leído",
     "archive_failed": "No se ha podido archivar",
     "mark_done_failed": "No se ha podido marcar como hecho",
-    "mark_all_read_failed": "No se ha podido marcar todo como leído",
-    "archive_all_failed": "No se ha podido archivar todo",
-    "archive_all_read_failed": "No se ha podido archivar los elementos leídos",
-    "archive_completed_failed": "No se ha podido archivar lo completado",
     "unarchive_failed": "No se ha podido desarchivar",
     "archived_load_failed": "No se han podido cargar las notificaciones archivadas",
     "filters_load_failed": "No se han podido cargar los filtros",
-    "delete_failed": "No se pudo eliminar la notificación. Inténtalo de nuevo."
+    "delete_failed": "No se pudo eliminar la notificación. Inténtalo de nuevo.",
+    "snooze_failed": "No se pudo posponer",
+    "unsnooze_failed": "No se pudo cancelar la posposición"
   },
   "delete_dialog": {
     "title": "¿Eliminar notificación?",
     "description": "Esta notificación se eliminará permanentemente. Las tareas y ejecuciones relacionadas se conservarán.",
     "issue_description": "Las notificaciones de esta tarea en esta vista se eliminarán permanentemente. La tarea y sus ejecuciones se conservarán.",
-    "cancel": "Cancelar",
-    "active_issue_description": "Las notificaciones activas de esta tarea se eliminarán permanentemente. Las notificaciones archivadas anteriormente se conservarán y volverán a aparecer en Archivadas. La tarea y sus ejecuciones se conservarán."
+    "cancel": "Cancelar"
+  },
+  "sections": {
+    "needs_you": "Pendientes de ti",
+    "working": "En curso",
+    "updates": "Novedades",
+    "snoozed": "Pospuestas",
+    "clear_updates": "Vaciar",
+    "queued": "En cola",
+    "caught_up": "Todo al día",
+    "still_working_one": "{{count}} agente sigue trabajando. Los resultados volverán aquí.",
+    "still_working_other": "{{count}} agentes siguen trabajando. Los resultados volverán aquí."
+  },
+  "reasons": {
+    "review": "Lista para revisar",
+    "question": "Espera tu respuesta",
+    "mention": "Te mencionó",
+    "failed": "Ejecución fallida",
+    "cancelled": "Ejecución cancelada",
+    "assigned": "Asignada a ti",
+    "comment": "Nuevo comentario",
+    "finished": "Ejecución terminada",
+    "stopped_by_you": "Detuviste esta ejecución",
+    "stopped_by": "{{name}} detuvo esta ejecución",
+    "stopped_by_system": "Detenida por el sistema"
+  },
+  "snooze": {
+    "action": "Posponer",
+    "unsnooze": "Cancelar posposición",
+    "in_one_hour": "En 1 hora",
+    "later_today": "Más tarde hoy",
+    "tomorrow": "Mañana",
+    "next_week": "El próximo lunes",
+    "pick_time": "Elegir fecha y hora...",
+    "hint": "Vuelve antes si algo nuevo requiere tu atención, como una mención o una ejecución fallida.",
+    "custom_title": "Posponer hasta",
+    "custom_invalid": "Elige una fecha futura, dentro de un año."
   }
 }

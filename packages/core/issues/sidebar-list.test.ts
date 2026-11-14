@@ -156,13 +156,12 @@ describe("builtinSidebarRequest", () => {
     });
     expect(request("my_issues", "created")?.scope).toEqual({ kind: "my", relation: "created" });
     expect(request("my_issues", "all")?.scope).toEqual({ kind: "my", relation: "any" });
-    expect(request("my_agents", "assigned")?.scope).toEqual({ kind: "my", relation: "involved" });
   });
 
   it("ignores the project-only assignee setting and lists nothing when every status is hidden", () => {
     for (const assignee of ["me", "my_agents", "me_and_my_agents"] as const) {
       const settings = { ...DEFAULT_SIDEBAR_ISSUE_SETTINGS, hiddenStatuses: [], assignee };
-      expect(builtinSidebarRequest("my_agents", "assigned", settings, STATUSES)?.table.filters).toEqual({
+      expect(builtinSidebarRequest("my_issues", "assigned", settings, STATUSES)?.table.filters).toEqual({
         include_sub_issues: true,
       });
     }

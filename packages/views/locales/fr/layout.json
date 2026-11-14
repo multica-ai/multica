@@ -108,8 +108,6 @@
     "copy_link": "Copier le lien",
     "link_copied": "Lien copié",
     "workspace_settings": "Paramètres de l’espace de travail",
-    "mark_all_read": "Tout marquer comme lu",
-    "mark_all_read_failed": "Impossible de tout marquer comme lu",
     "reset_order": "Rétablir l’ordre par défaut",
     "copy_workspace_link": "Copier le lien de l’espace de travail",
     "workspace_meta_one": "{{slug}} · {{count}} membre",
@@ -122,9 +120,7 @@
   },
   "panels": {
     "work": {
-      "my_agents": "Travail de mes agents",
       "all_issues": "Toutes les tâches",
-      "unread": "Non lues",
       "views": "Vues",
       "new_project": "Nouveau projet",
       "new_issue_in_project": "Nouvelle tâche dans {{name}}",

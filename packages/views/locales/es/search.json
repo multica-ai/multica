@@ -110,9 +110,7 @@
   },
   "inbox": {
     "archive": "Archivar",
-    "mark_unread": "Marcar como no leído",
-    "mark_all_read": "Marcar toda la bandeja de entrada como leída",
-    "archive_all_read": "Archivar todos los elementos leídos de la bandeja de entrada"
+    "mark_unread": "Marcar como no leído"
   },
   "chat": {
     "link_project": "Vincular a proyecto...",

@@ -107,8 +107,6 @@
     "copy_link": "複製連結",
     "link_copied": "已複製連結",
     "workspace_settings": "工作區設定",
-    "mark_all_read": "全部標為已讀",
-    "mark_all_read_failed": "全部標為已讀失敗",
     "reset_order": "恢復預設順序",
     "copy_workspace_link": "複製工作區連結",
     "workspace_meta_other": "{{slug}} · {{count}} 位成員"
@@ -119,9 +117,7 @@
   },
   "panels": {
     "work": {
-      "my_agents": "我的 AI 代理在做",
       "all_issues": "全部任務",
-      "unread": "未讀",
       "views": "檢視",
       "new_project": "新建專案",
       "new_issue_in_project": "在 {{name}} 中新建任務",

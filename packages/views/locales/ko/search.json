@@ -85,9 +85,7 @@
   },
   "inbox": {
     "archive": "보관",
-    "mark_unread": "읽지 않음으로 표시",
-    "mark_all_read": "인박스 모두 읽음으로 표시",
-    "archive_all_read": "읽은 인박스 항목 모두 보관"
+    "mark_unread": "읽지 않음으로 표시"
   },
   "chat": {
     "link_project": "프로젝트에 연결...",

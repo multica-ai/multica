@@ -850,6 +850,11 @@ func (o *Outbound) handleInboxNew(e events.Event) {
 	if rt, _ := item["recipient_type"].(string); rt != "member" {
 		return
 	}
+	// A row written as read reports the member's own action (a run they
+	// stopped themselves), so there is nothing to tell them.
+	if read, _ := item["read"].(bool); read {
+		return
+	}
 	recipientIDStr, _ := item["recipient_id"].(string)
 	workspaceIDStr, _ := item["workspace_id"].(string)
 	if recipientIDStr == "" || workspaceIDStr == "" {

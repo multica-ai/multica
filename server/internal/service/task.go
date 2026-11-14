@@ -2749,7 +2749,9 @@ func (s *TaskService) CancelTasksForIssue(ctx context.Context, issueID pgtype.UU
 	}
 	for _, t := range cancelled {
 		s.captureTaskCancelled(ctx, t)
-		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
+		// The issue is about to be deleted, so the cancelled run has nowhere to
+		// be handed back to (notifyRunCancelled).
+		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t, map[string]any{"issue_deleted": true})
 	}
 	// Reconcile once per distinct agent instead of once per cancelled row:
 	// cancelling an issue often stops several tasks owned by the same agent,
@@ -3442,6 +3444,8 @@ func (s *TaskService) finalizeCancelledChatMessage(ctx context.Context, task db.
 // cancel time, BEFORE the daemon's ack — clients may have refetched a row
 // without the delivery and will not refetch again on their own. Consumers
 // treat task:cancelled as idempotent cache invalidation, so a replay is safe.
+// The event says it is a replay for the one consumer that acts once per
+// cancellation: the Inbox hand-back (notifyRunCancelled).
 func (s *TaskService) RebroadcastCancelledTask(ctx context.Context, taskID pgtype.UUID) {
 	task, err := s.Queries.GetAgentTask(ctx, taskID)
 	if err != nil {
@@ -3454,7 +3458,7 @@ func (s *TaskService) RebroadcastCancelledTask(ctx context.Context, taskID pgtyp
 		// carrying the row's final fields; nothing stale to refresh.
 		return
 	}
-	s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, task)
+	s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, task, map[string]any{"replay": true})
 }
 
 // RetireCancelledTaskSession records, on a CANCELLED task, a session the daemon

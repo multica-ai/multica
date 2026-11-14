@@ -58,6 +58,7 @@
     "review_requested": "请求审查",
     "task_completed": "运行完成",
     "task_failed": "运行失败",
+    "task_cancelled": "运行已取消",
     "agent_blocked": "智能体受阻",
     "agent_completed": "智能体已完成",
     "reaction_added": "添加了表情",

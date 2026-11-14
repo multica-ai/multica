@@ -8,6 +8,7 @@ import { EMPTY_INBOX_FILTERS, filterInboxItems, useInboxFilterStore, type InboxF
 import { archivedInboxLookupOptions, inboxKeys } from "@multica/core/inbox/queries";
 import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
 import { onInboxIssueDeleted, patchInboxIssueProjection } from "@multica/core/inbox/ws-updaters";
+import type { InboxSections } from "@multica/core/inbox/sections";
 import type { ArchivedInboxPage } from "@multica/core/types/inbox";
 import type { InboxItem } from "@multica/core/types";
 import { InboxPage } from "./inbox-page";
@@ -47,6 +48,17 @@ vi.mock("./inbox-list", () => ({
     ))}</div>
   ),
 }));
+vi.mock("./inbox-sectioned-list", () => ({
+  InboxSectionedList: ({ sections, onSelect }: { sections: InboxSections; onSelect: (item: InboxItem) => void }) => (
+    <div>{[...sections.needsYou, ...sections.updates, ...sections.snoozed].map(({ item: row }) => (
+      <button key={row.id} data-read={row.read} onClick={() => onSelect(row)}>{row.id}</button>
+    ))}</div>
+  ),
+}));
+vi.mock("@multica/core/auth", () => ({
+  useAuthStore: (selector: (state: { user: { id: string } }) => unknown) =>
+    selector({ user: { id: "member-1" } }),
+}));
 const filterMenuUnmounted = vi.hoisted(() => vi.fn());
 vi.mock("./inbox-filter-menu", () => ({
   InboxFilterMenu: () => {
@@ -65,7 +77,7 @@ vi.mock("./inbox-context-menu", () => ({
 vi.mock("./inbox-detail-label", () => ({ useTypeLabels: () => ({}) }));
 vi.mock("../../i18n", () => {
   const t = () => "Inbox";
-  return { useT: () => ({ t }) };
+  return { useT: () => ({ t }), useLocale: () => "en" };
 });
 
 function item(overrides: Partial<InboxItem> = {}): InboxItem {
@@ -272,26 +284,6 @@ async function openArchived(fixture: ReturnType<typeof archivedFixture>, viaUrl 
   await waitFor(() => expect(fixture.listArchivedInboxPage.mock.calls.some((call) => call[1].groupId === "issue-a")).toBe(true));
   return detail;
 }
-
-it("keeps the active read selection until moving to another notification", async () => {
-  let rows = [item(), item({ id: "inbox-b", issue_id: "issue-b" })];
-  const listInbox = vi.fn(async () => rows);
-  const markInboxRead = vi.fn(async (id: string) => {
-    rows = rows.map((row) => row.id === id ? { ...row, read: true } : row);
-    return rows.find((row) => row.id === id)!;
-  });
-  setApiInstance({ listInbox, markInboxRead, getInboxUnreadSummary: async () => [] } as unknown as ApiClient);
-  renderPage();
-  fireEvent.click(await screen.findByText("inbox-a"));
-  await waitFor(() => expect(listInbox).toHaveBeenCalledTimes(2));
-  expect(screen.getByText("inbox-a")).toHaveAttribute("data-read", "true");
-  expect(screen.getByTestId("detail")).toHaveTextContent("issue-a");
-  fireEvent.click(screen.getByText("inbox-b"));
-  await waitFor(() => expect(listInbox).toHaveBeenCalledTimes(3));
-  expect(screen.getByTestId("detail")).toHaveTextContent("issue-b");
-  expect(screen.queryByText("inbox-a")).not.toBeInTheDocument();
-  expect(screen.getByText("inbox-b")).toHaveAttribute("data-read", "true");
-});
 
 it.each(["click", "url"])("keeps the archived row and detail mounted through refetch and slow lookup after %s selection, then releases the pin", async (selection) => {
   const fixture = archivedFixture();

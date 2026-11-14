@@ -190,14 +190,14 @@ export function viewSidebarRequest(
  * issues a built-in lists. `null` when the settings leave nothing to list.
  */
 export function builtinSidebarRequest(
-  builtin: Exclude<BuiltinViewKey, "unread">,
+  builtin: BuiltinViewKey,
   myRelation: MyIssuesRelation,
   settings: SidebarIssueSettings,
   statuses: readonly StatusRef[],
 ): SidebarIssuesRequest | null {
   const shown = shownSidebarStatuses(settings, statuses);
   if (shown.length === 0) return null;
-  const relation = builtin === "my_agents" ? "involved" : myRelation === "all" ? "any" : myRelation;
+  const relation = myRelation === "all" ? "any" : myRelation;
   return {
     table: {
       scope: builtin === "all_issues" ? { kind: "workspace" } : { kind: "my", relation },

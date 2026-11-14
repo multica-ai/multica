@@ -20,11 +20,10 @@ const view = (id: string, owner_id: string): IssueView => ({
 });
 
 describe("defaultSidebarViewOrder", () => {
-  it("lists built-ins except Unread, own views, then previously pinned views once", () => {
+  it("lists built-ins, own views, then previously pinned views once", () => {
     const views = [view("a", "me"), view("b", "other"), view("c", "other")];
     expect(defaultSidebarViewOrder(views, "me", ["c", "a"])).toEqual([
       "builtin:my_issues",
-      "builtin:my_agents",
       "builtin:all_issues",
       "view:a",
       "view:c",
@@ -42,10 +41,12 @@ describe("resolveSidebarViewItems", () => {
     expect(items[1]).toMatchObject({ kind: "builtin", key: "all_issues" });
   });
 
-  it("resolves a starred Unread like any other built-in", () => {
-    const items = resolveSidebarViewItems(["builtin:all_issues", "view:a", "builtin:unread"], [view("a", "me")]);
-    expect(items.map((item) => item.id)).toEqual(["builtin:all_issues", "view:a", "builtin:unread"]);
-    expect(items[2]).toMatchObject({ kind: "builtin", key: "unread" });
+  it("drops the built-ins the Inbox replaced from an order saved before", () => {
+    const items = resolveSidebarViewItems(
+      ["builtin:my_agents", "builtin:all_issues", "view:a", "builtin:unread"],
+      [view("a", "me")],
+    );
+    expect(items.map((item) => item.id)).toEqual(["builtin:all_issues", "view:a"]);
   });
 });
 
