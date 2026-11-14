@@ -4,14 +4,22 @@ import { useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   DndContext,
+  KeyboardSensor,
   PointerSensor,
   closestCenter,
   useSensor,
   useSensors,
   type DragEndEvent,
+  type KeyboardCodes,
 } from "@dnd-kit/core";
 import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-kit/modifiers";
-import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { CheckCheck, ExternalLink, Link2, RotateCcw, Settings, Users, type IconComponent } from "@multica/ui/icons";
 import { toast } from "sonner";
@@ -344,11 +352,20 @@ function SortableRailItem({ id, children }: { id: RailSpaceId; children: React.R
 
 const DRAG_MODIFIERS = [restrictToVerticalAxis, restrictToFirstScrollableAncestor];
 
+// Space picks a focused space up and drops it, the arrows move it, Escape puts
+// it back. Enter only drops: it is how a focused space opens, so it must not
+// start a drag the way dnd-kit's default start keys would.
+const RAIL_KEYBOARD_CODES: KeyboardCodes = {
+  start: ["Space"],
+  cancel: ["Escape"],
+  end: ["Space", "Enter"],
+};
+
 /**
  * The app rail: workspaces, New issue and search, the four spaces in the
- * user's order (drag to reorder), then help, settings and the account. It
- * sits on the app shell, outside the content card, and stays put while the
- * panel beside it collapses.
+ * user's order (drag, or Space and the arrow keys, to reorder), then help,
+ * settings and the account. It sits on the app shell, outside the content
+ * card, and stays put while the panel beside it collapses.
  */
 export function AppRail({
   topSlot,
@@ -375,7 +392,13 @@ export function AppRail({
     () => (docsEnabled ? order : order.filter((id) => id !== "docs")),
     [docsEnabled, order],
   );
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+      keyboardCodes: RAIL_KEYBOARD_CODES,
+    }),
+  );
   const { arm: armClickGuard, release: releaseClickGuard } = useDragClickGuard();
 
   const onDragEnd = useCallback(

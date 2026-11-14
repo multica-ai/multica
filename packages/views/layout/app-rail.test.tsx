@@ -202,6 +202,51 @@ describe("AppRail order", () => {
     await new Promise((resolve) => setTimeout(resolve, 60));
     expect(fireEvent.click(chat)).toBe(true);
   });
+
+  // The move itself needs real layout and is covered by e2e/rail-order.spec.ts;
+  // here the keys are checked: Space picks up and Escape puts back, while
+  // Enter and the arrows on a resting space keep their browser meaning.
+  describe("from the keyboard", () => {
+    const press = (target: Element, code: string, key = code === "Space" ? " " : code) =>
+      fireEvent.keyDown(target, { code, key });
+    // dnd-kit's live region narrates the drag; its wording depends on layout.
+    const announced = (pattern: RegExp) =>
+      Array.from(document.querySelectorAll("[aria-live]"), (el) => el.textContent ?? "").some((text) => pattern.test(text));
+
+    it("picks a focused space up with Space and puts it back with Escape", async () => {
+      renderRail();
+      const before = railOrder();
+      const chat = link("/acme/chat")!;
+      chat.focus();
+
+      let notCancelled = true;
+      await act(async () => {
+        notCancelled = press(chat, "Space");
+      });
+      expect(notCancelled).toBe(false);
+      await waitFor(() => expect(announced(/draggable item chat/i)).toBe(true));
+
+      await act(async () => {
+        press(document.activeElement ?? chat, "Escape");
+      });
+      await waitFor(() => expect(announced(/cancel/i)).toBe(true));
+      expect(railOrder()).toEqual(before);
+      expect(useRailOrderStore.getState().order).toBeNull();
+    });
+
+    it("leaves Enter to open the focused space", () => {
+      renderRail();
+      const before = railOrder();
+      const chat = link("/acme/chat")!;
+      chat.focus();
+
+      // Not cancelled: the browser goes on to follow the link.
+      expect(press(chat, "Enter")).toBe(true);
+      expect(press(chat, "ArrowUp")).toBe(true);
+      expect(railOrder()).toEqual(before);
+      expect(useRailOrderStore.getState().order).toBeNull();
+    });
+  });
 });
 
 describe("AppRail spaces", () => {
