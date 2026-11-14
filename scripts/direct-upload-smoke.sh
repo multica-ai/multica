@@ -828,22 +828,7 @@ if [ $EMPTY_STATUS -eq 0 ]; then
 else
   bad "zero-byte upload failed: $(tail -3 "$LOG_DIR/cli-empty.log" | tr '\n' ' ')"
 fi
-# The fallback is what makes the upload work, so prove the direct path was not
-# used at all: a presign that had succeeded would have written an upload session
-# row for this issue, and there must be none. Counting rows is deterministic,
-# unlike grepping a client log whose verbosity is not part of the contract.
 EMPTY_ISSUE_ID="$(printf '%s' "$EMPTY_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("id",""))' 2>/dev/null)"
-if [ -n "$EMPTY_ISSUE_ID" ]; then
-  EMPTY_SESSIONS="$(docker exec "$PG_CONTAINER" psql -U "$POSTGRES_USER" -d "$DB_NAME" -Atqc \
-    "SELECT count(*) FROM attachment_upload_session WHERE issue_id = '$EMPTY_ISSUE_ID'" 2>/dev/null)"
-  if [ "$EMPTY_SESSIONS" = "0" ]; then
-    ok "the zero-byte upload created no upload session (it never used the presigned path)"
-  else
-    bad "the zero-byte upload created $EMPTY_SESSIONS upload session row(s): it went through the presigned path"
-  fi
-else
-  bad "issue create returned no id for the zero-byte upload: $EMPTY_JSON"
-fi
 EMPTY_ATTACHMENT_ID=""
 if [ -n "$EMPTY_ISSUE_ID" ]; then
   EMPTY_ATTACHMENT_ID="$(curl -s "$API_URL/api/issues/$EMPTY_ISSUE_ID/attachments" \
@@ -851,6 +836,15 @@ if [ -n "$EMPTY_ISSUE_ID" ]; then
     | python3 -c 'import json,sys; rows=json.load(sys.stdin); print(rows[0]["id"] if rows else "")' 2>/dev/null)"
 fi
 if [ -n "$EMPTY_ATTACHMENT_ID" ]; then
+  # Issue creation uploads before the issue exists. Direct-upload sessions keep
+  # a NULL issue_id after attachment binding, but share the final attachment ID.
+  EMPTY_SESSIONS="$(docker exec "$PG_CONTAINER" psql -U "$POSTGRES_USER" -d "$DB_NAME" -Atqc \
+    "SELECT count(*) FROM attachment_upload_session WHERE id = '$EMPTY_ATTACHMENT_ID'" 2>/dev/null)"
+  if [ "$EMPTY_SESSIONS" = "0" ]; then
+    ok "the zero-byte attachment has no upload session (multipart fallback)"
+  else
+    bad "the zero-byte attachment has $EMPTY_SESSIONS upload session row(s), want 0"
+  fi
   EMPTY_DL="$WORK/empty-download.bin"
   if curl -sL -o "$EMPTY_DL" -w '%{http_code}' "$PROXY_URL/api/attachments/$EMPTY_ATTACHMENT_ID/download" \
       -H "Authorization: Bearer $pat" | grep -q 200; then

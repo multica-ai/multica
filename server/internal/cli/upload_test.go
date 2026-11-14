@@ -637,15 +637,29 @@ func TestSanitizeUploadTransportError_StripsSignedURL(t *testing.T) {
 	}
 }
 
-// TestUploadAttachmentFile_EmptyFileFallsBackToMultipart pins the whole
-// observable behaviour for a real zero-byte file. A presigned PUT for length 0
-// binds no size — SigV4 signs content-length only when it is non-zero — so the
-// server refuses that one size with its existing capability code, and the client
-// must reach the legacy endpoint without ever sending bytes to the bucket.
-//
-// The assertions are on the requests, not on the outcome alone: an empty file
-// that quietly PUT to storage and completed would still look successful here,
-// which is the failure this test exists to catch.
+// Older servers can still issue an empty-file credential. Keep the zero-length
+// wire framing compatible while new servers route these uploads to multipart.
+func TestUploadAttachmentFile_OldServerEmptyFileIsNotChunked(t *testing.T) {
+	fake, server := newFakeDirectUploadServer(t)
+	client := NewAPIClient(server.URL, "ws-1", "test-token")
+	path := writeTestFile(t, "empty.bin", 0)
+	if _, err := client.UploadAttachmentFile(context.Background(), path, "issue-1"); err != nil {
+		t.Fatalf("UploadAttachmentFile against an old server: %v", err)
+	}
+	if len(fake.putRequests) != 1 {
+		t.Fatalf("PUT count = %d, want 1", len(fake.putRequests))
+	}
+	put := fake.putRequests[0]
+	if len(put.transferEncoding) != 0 {
+		t.Fatalf("empty upload used Transfer-Encoding %v", put.transferEncoding)
+	}
+	if put.contentLength != 0 || len(put.body) != 0 {
+		t.Fatalf("empty upload has Content-Length %d and body length %d", put.contentLength, len(put.body))
+	}
+}
+
+// A new server declines empty-file presigning. The client must publish the file
+// through multipart without sending a storage PUT or completion request.
 func TestUploadAttachmentFile_EmptyFileFallsBackToMultipart(t *testing.T) {
 	fake, server := newFakeDirectUploadServer(t)
 	// Model the real server: a zero-size declaration is declined as a
