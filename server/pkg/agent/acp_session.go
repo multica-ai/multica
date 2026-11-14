@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -38,6 +39,9 @@ func isACPResumeRejected(err error) bool {
 	if !errors.As(err, &rpcErr) {
 		return false
 	}
+	if acpDataDetailsNotFound(rpcErr.Data) {
+		return true
+	}
 	// No isACPSessionErrorCode gate here, unlike isACPSessionNotFound, and that
 	// is a deliberate narrowing of what this fix depends on. The reported
 	// qodercli frame is invalid_params (-32602) — inside the accepted set — but
@@ -68,6 +72,23 @@ func isACPResumeRejected(err error) bool {
 	// answered true before the scrub ever ran.
 	text = acpSessionRequestComplaintRe.ReplaceAllString(text, " ")
 	return acpSessionNotFoundWording(text) || acpSessionUnusableRe.MatchString(text)
+}
+
+// acpDataDetailsNotFound reports whether an error's `data` is the structured
+// {"details":"not_found"} that Hermes' gateway-backed ACP adapter (v0.22+)
+// returns under a bare -32603 "Internal error" when session/resume names a
+// session the gateway does not know (GH #10071). None of the wording checks
+// can see it: the message says nothing, and the only evidence is this token.
+//
+// It is an exact match on a parsed field, not a word search, because the same
+// envelope carries other gateway codes that are not about the id —
+// {"details":"not_ready"} is a gateway still starting (GH #9272), and retiring
+// a pointer over that would fork a healthy conversation.
+func acpDataDetailsNotFound(data string) bool {
+	var payload struct {
+		Details string `json:"details"`
+	}
+	return json.Unmarshal([]byte(data), &payload) == nil && payload.Details == "not_found"
 }
 
 // acpSessionUnusableRe matches a runtime saying the session id itself is no
