@@ -39,6 +39,7 @@ import {
   Unlink,
   Users,
   ArrowDown,
+  ArrowUp,
 } from "@multica/ui/icons";
 import { BreadcrumbHeader, type BreadcrumbSegment } from "../../layout/breadcrumb-header";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
@@ -212,6 +213,7 @@ import { useIssueDetailScrollRestore } from "../hooks/use-issue-detail-scroll-re
 import { useIssueTimelineAnchor } from "../hooks/use-issue-timeline-anchor";
 import { scrollToTimelineComment } from "../utils/scroll-to-timeline-comment";
 import { useJumpToLatest } from "../hooks/use-jump-to-latest";
+import { useBackToTop } from "../hooks/use-back-to-top";
 import { useNewCommentsWhileAway } from "../hooks/use-new-comments-while-away";
 import { useInPageFind } from "../hooks/use-in-page-find";
 import { useStickyComposer } from "../hooks/use-sticky-composer";
@@ -636,7 +638,7 @@ function JumpToLatestButton({
       variant="outline"
       size="sm"
       onClick={onClick}
-      className="absolute bottom-full left-1/2 mb-6 -translate-x-1/2 bg-background shadow-md dark:bg-background dark:hover:bg-muted"
+      className="bg-background shadow-md dark:bg-background dark:hover:bg-muted"
     >
       {hasNew ? (
         <>
@@ -651,6 +653,36 @@ function JumpToLatestButton({
         </>
       )}
     </Button>
+  );
+}
+
+function BackToTopButton({ onClick, label }: { onClick: () => void; label: string }) {
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      onClick={onClick}
+      className="bg-background shadow-md dark:bg-background dark:hover:bg-muted"
+    >
+      <ArrowUp />
+      {label}
+    </Button>
+  );
+}
+
+// The centered stack of timeline-jump affordances floating just above the
+// composer's top edge (MUL-8324). "Back to top" and "Jump to latest" are the
+// two ends of the same gesture, so they share the slot. Since MUL-8951 the
+// zones overlap mid-page on desktop (jump to latest shows whenever the newest
+// entry is a screen away), so the stack carries both there — back to top
+// above, its arrow pointing the way; on mobile the near-top rule keeps the
+// zones complementary.
+function TimelineJumpPills({ children }: { children: ReactNode }) {
+  return (
+    <div className="absolute bottom-full left-1/2 mb-6 flex -translate-x-1/2 flex-col items-center gap-2">
+      {children}
+    </div>
   );
 }
 
@@ -1633,10 +1665,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const stickyComposer = useStickyComposer();
   // Read by the image rules in editor/styles/attachment.css.
   const commentImageLayout = useCommentComposerStore((s) => s.imageLayout);
-  // Mobile shows it only near the top of the page, where it covers the text
-  // column the least; desktop shows it whenever the latest entry is more than
-  // a screen away.
+  // Mobile shows "Jump to latest" only near the top of the page, where it
+  // covers the text column the least; desktop shows it whenever the latest
+  // entry is more than a screen away.
   const jumpToLatest = useJumpToLatest(scrollContainerEl, { nearTopOnly: isMobile });
+  // All platforms: the ThreadMinimap rail has no tick for the top of the
+  // document, and it is not rendered on mobile or in the peek.
+  const backToTop = useBackToTop(scrollContainerEl);
 
   // Per-session: which resolved threads the user has temporarily expanded.
   // Not persisted (matches Linear) — reload collapses everything back to bars.
@@ -4228,13 +4263,24 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               page background and is invisible), and pb-4 so the card floats
               off the viewport edge — with -mb-4 giving the padding back to
               the column's py-8 so the at-rest layout doesn't shift. */}
-          {/* "Jump to latest" (MUL-8324, MUL-8951) floats centered just above the
-              composer's top edge. With the sticky composer it rides the
+          {/* Timeline-jump pills (MUL-8324, MUL-8951 and its mirror) float
+              centered just above the composer's top edge. "Jump to latest"
+              shows while the latest entry is more than a screen away (near
+              the top only on mobile); "Back to top" once the reader is a
+              viewport deep — mid-page both stack in one slot. With the
+              sticky composer they ride the
               composer itself; without it, a zero-height sticky anchor pins
-              it to the viewport bottom until the composer scrolls in. */}
-          {!stickyComposer && jumpToLatest.visible && (
+              them to the viewport bottom until the composer scrolls in. */}
+          {!stickyComposer && (jumpToLatest.visible || backToTop.visible) && (
             <div className="sticky bottom-0 z-10 h-0">
-              <JumpToLatestButton onClick={onJumpToLatest} label={jumpToLatestLabel} hasNew={!!firstNewCommentId} />
+              <TimelineJumpPills>
+                {backToTop.visible && (
+                  <BackToTopButton onClick={backToTop.toTop} label={t(($) => $.timeline.back_to_top)} />
+                )}
+                {jumpToLatest.visible && (
+                  <JumpToLatestButton onClick={onJumpToLatest} label={jumpToLatestLabel} hasNew={!!firstNewCommentId} />
+                )}
+              </TimelineJumpPills>
             </div>
           )}
           <IssueAppRequests issueId={id} highlightId={highlightAppRequestId} highlightToken={highlightRequestToken} />
@@ -4252,8 +4298,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 keeps the previous issue's in-memory content and the
                 next keystroke would flush it into the new issue's
                 draft key. */}
-            {stickyComposer && jumpToLatest.visible && (
-              <JumpToLatestButton onClick={onJumpToLatest} label={jumpToLatestLabel} hasNew={!!firstNewCommentId} />
+            {stickyComposer && (jumpToLatest.visible || backToTop.visible) && (
+              <TimelineJumpPills>
+                {backToTop.visible && (
+                  <BackToTopButton onClick={backToTop.toTop} label={t(($) => $.timeline.back_to_top)} />
+                )}
+                {jumpToLatest.visible && (
+                  <JumpToLatestButton onClick={onJumpToLatest} label={jumpToLatestLabel} hasNew={!!firstNewCommentId} />
+                )}
+              </TimelineJumpPills>
             )}
             <CommentInput
               key={id}

@@ -623,6 +623,7 @@
   "timeline": {
     "loading": "Загрузка...",
     "jump_to_latest": "К последним событиям",
+    "back_to_top": "Наверх",
     "new_comments_one": "{{count}} новый комментарий",
     "new_comments_few": "{{count}} новых комментария",
     "new_comments_many": "{{count}} новых комментариев",

@@ -606,6 +606,7 @@
   "timeline": {
     "loading": "Chargement...",
     "jump_to_latest": "Aller au plus récent",
+    "back_to_top": "Revenir en haut",
     "new_comments_one": "{{count}} nouveau commentaire",
     "new_comments_other": "{{count}} nouveaux commentaires"
   },

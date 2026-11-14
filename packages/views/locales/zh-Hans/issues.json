@@ -597,6 +597,7 @@
   "timeline": {
     "loading": "加载中…",
     "jump_to_latest": "跳到最新",
+    "back_to_top": "回到顶部",
     "new_comments_other": "{{count}} 条新评论"
   },
   "activity": {

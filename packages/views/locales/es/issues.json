@@ -589,6 +589,7 @@
   "timeline": {
     "loading": "Cargando...",
     "jump_to_latest": "Ir a lo más reciente",
+    "back_to_top": "Volver arriba",
     "new_comments_one": "{{count}} comentario nuevo",
     "new_comments_other": "{{count}} comentarios nuevos"
   },

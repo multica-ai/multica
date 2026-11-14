@@ -597,6 +597,7 @@
   "timeline": {
     "loading": "불러오는 중...",
     "jump_to_latest": "최신으로 이동",
+    "back_to_top": "맨 위로",
     "new_comments_other": "새 댓글 {{count}}개"
   },
   "activity": {

@@ -597,6 +597,7 @@
   "timeline": {
     "loading": "載入中…",
     "jump_to_latest": "跳到最新",
+    "back_to_top": "回到頂部",
     "new_comments_other": "{{count}} 則新評論"
   },
   "activity": {

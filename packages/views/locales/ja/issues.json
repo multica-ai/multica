@@ -597,6 +597,7 @@
   "timeline": {
     "loading": "読み込み中...",
     "jump_to_latest": "最新に移動",
+    "back_to_top": "先頭に戻る",
     "new_comments_other": "新しいコメント {{count}} 件"
   },
   "activity": {
