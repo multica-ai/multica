@@ -5,6 +5,9 @@ import { create } from "zustand";
 interface InboxSelectionState {
   lastResolvedKeyByWorkspace: Record<string, string>;
   rememberResolvedKey: (wsId: string, key: string) => void;
+  /** The issue last opened from the Work panel's Inbox section. */
+  sidebarIssueByWorkspace: Record<string, string | null>;
+  rememberSidebarIssue: (wsId: string, issueId: string | null) => void;
 }
 
 // Keep only the last resolved pointer per workspace, for this client run.
@@ -14,5 +17,10 @@ export const useInboxSelectionStore = create<InboxSelectionState>()((set) => ({
   rememberResolvedKey: (wsId, key) =>
     set((state) => state.lastResolvedKeyByWorkspace[wsId] === key ? state : {
       lastResolvedKeyByWorkspace: { ...state.lastResolvedKeyByWorkspace, [wsId]: key },
+    }),
+  sidebarIssueByWorkspace: {},
+  rememberSidebarIssue: (wsId, issueId) =>
+    set((state) => (state.sidebarIssueByWorkspace[wsId] ?? null) === issueId ? state : {
+      sidebarIssueByWorkspace: { ...state.sidebarIssueByWorkspace, [wsId]: issueId },
     }),
 }));

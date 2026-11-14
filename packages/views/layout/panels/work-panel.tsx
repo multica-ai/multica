@@ -6,6 +6,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { isIssueUuid } from "@multica/core/issues/canonical-id";
 import { issueDetailOptions } from "@multica/core/issues/queries";
+import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
 import { projectSidebarSource, sidebarProjects } from "@multica/core/issues/sidebar-list";
 import { useSidebarProjectPrefs } from "@multica/core/issues/sidebar-project-prefs";
 import { useSidebarKeptStore } from "@multica/core/issues/stores/sidebar-kept-store";
@@ -98,13 +99,16 @@ export function WorkPanel() {
     (clickedIssue.segment === currentIssueId || clickedIssue.segment === currentIssue?.identifier)
       ? clickedIssue.list
       : undefined;
-  const treeClaimsIssue = clickedList !== undefined && clickedList !== PINS_LIST;
-  const pins = usePanelPins(wsId, userId, pathname, treeClaimsIssue ? null : currentIssueId);
   const inboxRows = useInboxSectionRows(wsId);
-  // An issue opened from the Inbox lights there while the section still
-  // shows it; once archived, it falls back to the other lists.
+  // An issue opened from the Inbox, by a row or by the issue header moving on
+  // to the next notification, lights there while the section still shows it;
+  // once archived, it falls back to the other lists.
+  const inboxIssueId = useInboxSelectionStore((s) => (wsId ? s.sidebarIssueByWorkspace[wsId] : null));
+  const rememberSidebarIssue = useInboxSelectionStore((s) => s.rememberSidebarIssue);
   const inboxClaimsIssue =
-    clickedList === INBOX_LIST && !!currentIssueId && inboxRows.shownIssueIds.has(currentIssueId);
+    !!currentIssueId && inboxIssueId === currentIssueId && inboxRows.shownIssueIds.has(currentIssueId);
+  const treeClaimsIssue = inboxClaimsIssue || (clickedList !== undefined && clickedList !== PINS_LIST);
+  const pins = usePanelPins(wsId, userId, pathname, treeClaimsIssue ? null : currentIssueId);
   const requestLocate = useSidebarTreeStore((s) => s.requestLocate);
   const rememberClickedIssue = (event: React.MouseEvent) => {
     const link = (event.target as HTMLElement).closest("a[href]");
@@ -116,6 +120,8 @@ export function WorkPanel() {
       ? PINS_LIST
       : (link.closest("[data-sidebar-list]")?.getAttribute("data-sidebar-list") ?? null);
     setClickedIssue(segment ? { segment, list } : null);
+    // Inbox rows link by issue id, which is what the issue header compares.
+    if (segment && wsId) rememberSidebarIssue(wsId, list === INBOX_LIST ? segment : null);
   };
 
   const { projectSettings, projectOrder } = useSidebarProjectPrefs(wsId ?? "");

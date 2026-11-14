@@ -8,6 +8,7 @@ import { useActiveIssueViewStore } from "@multica/core/issue-views/active-view-s
 import { issueViewPreferenceOptions } from "@multica/core/issue-views/preferences";
 import { issueViewEverywhereOptions } from "@multica/core/issue-views/queries";
 import { inboxListOptions } from "@multica/core/inbox/queries";
+import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
 import { issueDetailOptions, issueKeys } from "@multica/core/issues/queries";
 import { issueUnreadOptions } from "@multica/core/issues/unread";
 import { SIDEBAR_PROJECTS_SCOPE } from "@multica/core/issues/sidebar-project-prefs";
@@ -226,6 +227,7 @@ beforeEach(() => {
   });
   useActiveIssueViewStore.setState({ active: {} });
   useSidebarKeptStore.setState({ held: {} });
+  useInboxSelectionStore.setState({ sidebarIssueByWorkspace: {} });
   apiMock.listIssueTableRows.mockResolvedValue({
     rows: [ISSUE, OTHER].map((issue) => ({ issue })),
     total: 2,
@@ -287,6 +289,16 @@ describe("WorkPanel Inbox highlight", () => {
 
     expect(within(inMyIssues()).getByRole("link", { name: ISSUE.title })).toHaveAttribute("aria-current", "page");
     expect(within(inInbox()).getByRole("link", { name: ISSUE.title })).not.toHaveAttribute("aria-current");
+  });
+
+  it("lights the issue the issue header moved on to from the Inbox", async () => {
+    useInboxSelectionStore.setState({ sidebarIssueByWorkspace: { "ws-1": ISSUE.id } });
+    renderPanel(`/acme/issues/${ISSUE.id}`, [], [], [], [inboxItem(ISSUE)]);
+
+    await waitFor(() =>
+      expect(within(inInbox()).getByRole("link", { name: ISSUE.title })).toHaveAttribute("aria-current", "page"),
+    );
+    expect(allIssues()).not.toHaveAttribute("aria-current");
   });
 
   it("falls back to the other lists once the notification is archived", async () => {

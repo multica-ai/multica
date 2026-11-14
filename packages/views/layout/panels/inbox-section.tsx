@@ -23,12 +23,12 @@ import {
 } from "@multica/core/inbox/mutations";
 import { deduplicateInboxItems, inboxListOptions, useInboxUnreadCount } from "@multica/core/inbox/queries";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
-import { useWorkspacePaths, type WorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths } from "@multica/core/paths";
 import type { InboxItem } from "@multica/core/types";
 import { AppLink, useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 import { INBOX_TYPE_ICONS } from "../../inbox/components/inbox-filter-options";
-import { getInboxDisplayTitle, isAutopilotQuotaNotice } from "../../inbox/components/inbox-display";
+import { getInboxDisplayTitle, inboxRowHref, isAutopilotQuotaNotice } from "../../inbox/components/inbox-display";
 import { useTypeLabels } from "../../inbox/components/inbox-detail-label";
 import { useTimeAgo } from "../../inbox/components/inbox-list-item";
 import { PANEL_ROW_CLASS, PanelCount, PanelList, PanelSection, panelRowAnchor, panelRowStateClass } from "../panel-nav";
@@ -39,18 +39,6 @@ const EMPTY_INBOX: InboxItem[] = [];
 
 /** The Inbox rows' place in the clicked-issue record, apart from every sidebar source. */
 export const INBOX_LIST = "inbox";
-
-/**
- * Where a notification row leads: its issue, at the comment it is about when
- * it names one. An issue-less notification opens on the Inbox page, which
- * shows the detail of the row picked here.
- */
-function inboxRowHref(p: WorkspacePaths, item: InboxItem): string {
-  if (!item.issue_id) return `${p.inbox()}?${new URLSearchParams({ issue: item.id }).toString()}`;
-  const issueHref = p.issueDetail(item.issue_id);
-  const commentId = item.details?.comment_id;
-  return commentId ? `${issueHref}#comment-${commentId}` : issueHref;
-}
 
 /**
  * The Inbox section's rows: one per issue, newest first, read and unread

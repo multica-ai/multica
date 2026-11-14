@@ -98,7 +98,7 @@ import { AssigneePicker } from "./pickers/assignee-picker";
 import { LabelPicker } from "./pickers/label-picker";
 import { CustomPropertyValueEditor, CustomPropertyValueDisplay } from "./pickers/custom-property-picker";
 import { Switch } from "@multica/ui/components/ui/switch";
-import { IssueActionsDropdown, useIssuePageMenu, useIssueActions, useArchivedInboxItemId, IssueActionsContextMenu, IssueContextMenuProvider } from "../actions";
+import { IssueActionsDropdown, useIssuePageMenu, useIssueActions, useArchivedInboxItemId, IssueActionsContextMenu, IssueContextMenuProvider, IssueInboxActions } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { SubIssuesAgentWorkingChip } from "./sub-issues-agent-working-chip";
@@ -3538,6 +3538,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 It self-hides when no agent is active. */}
             <IssueAgentHeaderChip issueId={id} onJumpToRun={jumpToRun} />
             <IssueWakeupHeaderChip issueId={id} onOpen={openWakeups} />
+            {!onDone && !isPeek && <IssueInboxActions issueId={id} />}
             {onDone && !issueBehavesAsAny(issue, ["done", "closed"]) && (
               <IconButton
                 label={t(($) => $.detail.mark_done_tooltip)}
