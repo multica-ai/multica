@@ -14,7 +14,9 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/events"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // ── Setup helpers ───────────────────────────────────────────────────────────
@@ -203,6 +205,38 @@ func TestWebhookHandler_DedupeViaIdempotencyKey(t *testing.T) {
 	}
 	if int(deliveries[0]["attempt_count"].(float64)) != 2 {
 		t.Fatalf("attempt_count: %v", deliveries[0]["attempt_count"])
+	}
+}
+
+func TestWebhookDeliveryWorker_DistinctDeliveriesCreateSameTitleIssues(t *testing.T) {
+	agentID := createWebhookTestAgent(t, "MR review agent")
+	apID := createWebhookTestAutopilot(t, agentID, "active", "create_issue")
+	trig := createWebhookTriggerViaHandler(t, apID)
+	seen := make(map[pgtype.UUID]bool)
+	for _, event := range []struct {
+		iid    int
+		action string
+		key    string
+	}{
+		{658, "update", "mr-658"},
+		{704, "open", "mr-704"},
+		{704, "open", ""},
+		{704, "open", ""},
+	} {
+		body := map[string]any{"object_kind": "merge_request", "object_attributes": map[string]any{"iid": event.iid, "action": event.action}}
+		headers := map[string]string{"X-Gitlab-Event": "Merge Request Hook"}
+		if event.key != "" {
+			headers["Idempotency-Key"] = event.key
+		}
+		w := postWebhook(t, *trig.WebhookToken, body, headers)
+		delivery := processQueuedWebhookDelivery(t, requireAcceptedWebhookResponse(t, w))
+		run, err := testHandler.Queries.GetAutopilotRun(context.Background(), delivery.AutopilotRunID)
+		if err != nil || !run.IssueID.Valid || seen[run.IssueID] {
+			t.Fatalf("MR !%d %s (key %q): issue=%v status=%s reason=%s err=%v", event.iid, event.action, event.key, run.IssueID, run.Status, run.ReasonCode.String, err)
+		}
+		seen[run.IssueID] = true
+		dbfx.Cleanup(t, `DELETE FROM issue WHERE id = $1`, run.IssueID)
+		dbfx.Cleanup(t, `DELETE FROM agent_task_queue WHERE issue_id = $1`, run.IssueID)
 	}
 }
 
@@ -867,6 +901,69 @@ func TestWebhookDeliveryWorker_RepairsCreateIssueTaskCrashWindow(t *testing.T) {
 	if taskCount != 1 {
 		t.Fatalf("expected one repaired issue task, got %d", taskCount)
 	}
+}
+
+func TestWebhookDeliveryWorker_OverlappingWorkersReuseIssue(t *testing.T) {
+	ctx := context.Background()
+	agentID := createWebhookTestAgent(t, "Worker overlap agent")
+	apID := createWebhookTestAutopilot(t, agentID, "active", "create_issue")
+	trig := createWebhookTriggerViaHandler(t, apID)
+	w := postWebhook(t, *trig.WebhookToken, map[string]any{"event": "overlap"}, nil)
+	deliveryID := parseUUID(requireAcceptedWebhookResponse(t, w))
+	ap, err := testHandler.Queries.GetAutopilot(ctx, parseUUID(apID))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	admitted, err := testHandler.Queries.GetAutopilotRunByWebhookDelivery(ctx, deliveryID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `SELECT id FROM workspace WHERE id = $1 FOR UPDATE`, ap.WorkspaceID); err != nil {
+		t.Fatal(err)
+	}
+
+	// The first worker holds the run lock while it waits for an issue number.
+	// The second must wait for the first worker before reading the issue link.
+	svc := *testHandler.AutopilotService
+	svc.Bus = events.New()
+	started := make(chan struct{}, 2)
+	svc.Bus.Subscribe(protocol.EventAutopilotRunStart, func(events.Event) { started <- struct{}{} })
+	done := make(chan error, 2)
+	dispatch := func() {
+		_, err := svc.DispatchAutopilotForWebhookDelivery(ctx, ap, parseUUID(trig.ID), nil, deliveryID)
+		done <- err
+	}
+	go dispatch()
+	waitForBlockedQuery(t, done, "IncrementIssueCounter")
+	go dispatch()
+	waitForBlockedQuery(t, done, "LockIssueDuplicateKey")
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+	run, err := testHandler.Queries.GetAutopilotRun(ctx, admitted.ID)
+	if err != nil || !run.IssueID.Valid || run.Status != "issue_created" {
+		t.Fatalf("reclaimed delivery: run=%+v err=%v", run, err)
+	}
+	if len(started) != 1 {
+		t.Fatalf("got %d run start events, want 1", len(started))
+	}
+	var count int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM issue WHERE origin_type = 'autopilot' AND origin_id = $1`, ap.ID).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("reclaimed delivery: got %d issues, want 1, err=%v", count, err)
+	}
+	dbfx.Cleanup(t, `DELETE FROM issue WHERE id = $1`, run.IssueID)
+	dbfx.Cleanup(t, `DELETE FROM agent_task_queue WHERE issue_id = $1`, run.IssueID)
 }
 
 func TestWebhookHandler_InvalidSignatureCountsAgainstRateLimit(t *testing.T) {
