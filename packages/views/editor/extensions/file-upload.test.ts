@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { Markdown } from "@tiptap/markdown";
@@ -77,31 +77,6 @@ function makeUpload(
     ...overrides,
   };
 }
-
-// jsdom lays nothing out, so ProseMirror's scrollToSelection (reached via the
-// `focus()` in the fileCard insert) throws on the missing rect APIs. Same stub
-// set as suggestion-popup.test.tsx.
-beforeAll(() => {
-  const rect = () => new DOMRect(0, 0, 0, 0);
-  const rectList = () =>
-    ({ length: 0, item: () => null, [Symbol.iterator]: function* () {} }) as DOMRectList;
-  Object.defineProperty(Range.prototype, "getBoundingClientRect", {
-    configurable: true,
-    value: rect,
-  });
-  Object.defineProperty(Range.prototype, "getClientRects", {
-    configurable: true,
-    value: rectList,
-  });
-  Object.defineProperty(HTMLElement.prototype, "getClientRects", {
-    configurable: true,
-    value: rectList,
-  });
-  Object.defineProperty(Text.prototype, "getClientRects", {
-    configurable: true,
-    value: rectList,
-  });
-});
 
 beforeEach(() => {
   originalCreateObjectURL = URL.createObjectURL;

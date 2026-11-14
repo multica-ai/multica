@@ -1,7 +1,6 @@
 import { createRef } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
-import { EditorView } from "@tiptap/pm/view";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cancelVoice,
@@ -29,9 +28,6 @@ const annotation: ReplyAnnotation = {
 };
 
 beforeAll(() => {
-  // jsdom has no layout, so ProseMirror's post-dispatch scroll walks
-  // coordsAtPos into getClientRects() on nodes jsdom does not implement.
-  (EditorView.prototype as unknown as { scrollToSelection: () => void }).scrollToSelection = () => {};
   connectVoiceRuntime(() => ({
     record: () => ({
       start: () => Promise.resolve(),

@@ -1,9 +1,8 @@
-import { describe, it, expect, beforeAll, vi } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { Editor, Extension } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { Markdown } from "@tiptap/markdown";
 import { Suggestion } from "@tiptap/suggestion";
-import { EditorView } from "@tiptap/pm/view";
 import type { QueryClient } from "@tanstack/react-query";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { createMarkdownPasteExtension } from "./markdown-paste";
@@ -126,14 +125,6 @@ function picker(editor: Editor, config: ReturnType<typeof createMentionSuggestio
     | undefined;
   return { active: state?.active ?? false, query: state?.query ?? null };
 }
-
-beforeAll(() => {
-  // jsdom has no layout, so ProseMirror's post-dispatch scroll walks
-  // coordsAtPos into getClientRects() on nodes jsdom does not implement.
-  (EditorView.prototype as unknown as { scrollToSelection: () => void }).scrollToSelection =
-    () => {};
-  Element.prototype.scrollIntoView = () => {};
-});
 
 describe("mention picker boundary", () => {
   describe("opens where an @ starts a token", () => {

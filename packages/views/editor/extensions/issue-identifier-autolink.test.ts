@@ -3,7 +3,6 @@ import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import Link from "@tiptap/extension-link";
 import { Markdown } from "@tiptap/markdown";
-import { EditorView } from "@tiptap/pm/view";
 import type { RefObject } from "react";
 import { BaseMentionExtension } from "./mention-extension";
 import { createMarkdownPasteExtension } from "./markdown-paste";
@@ -86,10 +85,6 @@ function typeAt1(ed: Editor, text: string): void {
 
 beforeEach(() => {
   resolveMock.mockReset();
-  // jsdom has no layout; ProseMirror's post-dispatch scroll needs client rects.
-  (EditorView.prototype as unknown as { scrollToSelection: () => void }).scrollToSelection =
-    () => {};
-  Element.prototype.scrollIntoView = () => {};
 });
 
 afterEach(() => {
