@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -49,6 +50,11 @@ func TestIssueUnread_RunEndMarksSubscribedMembers(t *testing.T) {
 	outsider := createTestUser(t, emails[3])
 
 	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	fx := testutil.New(testPool, testWorkspaceID, testUserID)
+	fx.Insert(t, "inbox_item", testutil.Cols{
+		"workspace_id": testWorkspaceID, "recipient_type": "member", "recipient_id": subscriber,
+		"issue_id": issueID, "type": "new_comment", "severity": "info", "title": "Unread result",
+	})
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), `DELETE FROM issue_unread WHERE issue_id = $1`, issueID)
 		cleanupTestIssue(t, issueID)
@@ -94,5 +100,71 @@ func TestIssueUnread_RunEndMarksSubscribedMembers(t *testing.T) {
 	runEnded(protocol.EventTaskFailed, "00000000-0000-4000-8000-0000000000b3", map[string]any{"retry_pending": false})
 	if row := issueUnreadRows(t, issueID)[subscriber]; row != [2]string{"failed", "00000000-0000-4000-8000-0000000000b3"} {
 		t.Fatalf("a later run should replace the unread row's run details, got %v", row)
+	}
+}
+
+func TestIssueUnread_RunEndDoesNotRestoreAcknowledgedResults(t *testing.T) {
+	fx := testutil.New(testPool, testWorkspaceID, testUserID)
+	for _, outcome := range []string{protocol.EventTaskCompleted, protocol.EventTaskFailed} {
+		for _, state := range []string{"unread", "read", "archived", "missing", "older unread"} {
+			t.Run(outcome+"/"+state, func(t *testing.T) {
+				issueID := createTestIssue(t, testWorkspaceID, testUserID)
+				t.Cleanup(func() {
+					testPool.Exec(context.Background(), "DELETE FROM issue_unread WHERE issue_id = $1", issueID)
+					cleanupTestIssue(t, issueID)
+				})
+				addTestSubscriber(t, issueID, "member", testUserID, "manual")
+				if state != "missing" {
+					fx.Insert(t, "inbox_item", testutil.Cols{
+						"workspace_id": testWorkspaceID, "recipient_type": "member", "recipient_id": testUserID,
+						"issue_id": issueID, "type": "new_comment", "severity": "info", "title": "Result",
+						"read": state == "read" || state == "older unread", "archived": state == "archived",
+					})
+				}
+				if state == "older unread" {
+					fx.Insert(t, "inbox_item", testutil.Cols{
+						"workspace_id": testWorkspaceID, "recipient_type": "member", "recipient_id": testUserID,
+						"issue_id": issueID, "type": "new_comment", "severity": "info", "title": "Old result",
+						"created_at": testutil.Raw("now() - interval '1 minute'"),
+					})
+				}
+				bus := events.New()
+				registerIssueUnreadListeners(bus, db.New(testPool))
+				bus.Publish(events.Event{Type: outcome, WorkspaceID: testWorkspaceID, Payload: map[string]any{"issue_id": issueID}})
+				got := issueUnreadRows(t, issueID)
+				want := 0
+				if state == "unread" {
+					want = 1
+				}
+				if len(got) != want {
+					t.Fatalf("run end produced unread rows %v for Inbox state %s", got, state)
+				}
+			})
+		}
+	}
+}
+
+func TestIssueUnread_InboxAcknowledgementsNotifyExistingClients(t *testing.T) {
+	bus := events.New()
+	registerIssueUnreadListeners(bus, db.New(testPool))
+	var changed []events.Event
+	bus.Subscribe(protocol.EventIssueUnreadChanged, func(e events.Event) { changed = append(changed, e) })
+	for _, eventType := range []string{
+		protocol.EventInboxRead, protocol.EventInboxArchived, protocol.EventInboxDeleted,
+		protocol.EventInboxBatchRead, protocol.EventInboxBatchArchived,
+	} {
+		bus.Publish(events.Event{
+			Type: eventType, WorkspaceID: testWorkspaceID, ActorType: "member", ActorID: testUserID,
+			Payload: map[string]any{"recipient_id": testUserID, "issue_id": "acknowledged-issue", "count": int64(0)},
+		})
+		if len(changed) != 1 {
+			t.Fatalf("%s sent %d unread refreshes", eventType, len(changed))
+		}
+		e := changed[0]
+		payload := e.Payload.(map[string]any)
+		if e.WorkspaceID != testWorkspaceID || payload["workspace_id"] != testWorkspaceID || payload["recipient_id"] != testUserID || payload["unread"] != false {
+			t.Fatalf("%s sent an incorrectly scoped unread refresh: %+v", eventType, e)
+		}
+		changed = nil
 	}
 }

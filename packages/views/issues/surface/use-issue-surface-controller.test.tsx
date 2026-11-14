@@ -1898,7 +1898,7 @@ describe("useIssueSurfaceController", () => {
     expect(result.current.tableQuerySpec.filters.unread_issue_ids).toEqual(["todo-1"]);
   });
 
-  it("keeps issues read under the unread filter until the filter turns off", async () => {
+  it("removes acknowledged issues while the unread filter stays open", async () => {
     mockListByStatus({ todo: [makeIssue({ id: "todo-1", status: "todo" })] });
     listIssueUnread.mockResolvedValue([unreadMark("b"), unreadMark("a")]);
     const store = getIssueSurfaceViewStore("project:p1");
@@ -1914,17 +1914,21 @@ describe("useIssueSurfaceController", () => {
       // Query observers notify on a timer; let the read reach the hook.
       await new Promise((resolve) => setTimeout(resolve, 20));
     });
-    expect(result.current.tableQuerySpec.filters.unread_issue_ids).toEqual(["a", "b"]);
+    expect(result.current.tableQuerySpec.filters.unread_issue_ids).toEqual(["b"]);
 
     act(() => qc.setQueryData(issueUnreadKeys.all("ws-1"), [unreadMark("b"), unreadMark("c")]));
     await waitFor(() =>
-      expect(result.current.tableQuerySpec.filters.unread_issue_ids).toEqual(["a", "b", "c"]),
+      expect(result.current.tableQuerySpec.filters.unread_issue_ids).toEqual(["b", "c"]),
     );
+
+    listIssueUnread.mockResolvedValue([]);
+    act(() => qc.setQueryData(issueUnreadKeys.all("ws-1"), []));
+    await waitFor(() => expect(result.current.tableQuerySpec.filters.unread_issue_ids).toEqual([]));
 
     act(() => store.getState().toggleUnreadFilter());
     expect(result.current.tableQuerySpec.filters.unread_issue_ids).toBeUndefined();
     act(() => store.getState().toggleUnreadFilter());
-    expect(result.current.tableQuerySpec.filters.unread_issue_ids).toEqual(["b", "c"]);
+    expect(result.current.tableQuerySpec.filters.unread_issue_ids).toEqual([]);
   });
 
   it("keeps swimlane chrome bounded while descriptors retain hidden-status counts", async () => {

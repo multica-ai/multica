@@ -357,16 +357,6 @@ func (h *Handler) ArchiveInboxItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Archive all sibling inbox items for the same issue (issue-level archive)
-	if item.IssueID.Valid {
-		h.Queries.ArchiveInboxByIssue(r.Context(), db.ArchiveInboxByIssueParams{
-			WorkspaceID:   item.WorkspaceID,
-			RecipientType: item.RecipientType,
-			RecipientID:   item.RecipientID,
-			IssueID:       item.IssueID,
-		})
-	}
-
 	userID := requestUserID(r)
 	workspaceID := uuidToString(item.WorkspaceID)
 	h.publish(protocol.EventInboxArchived, workspaceID, "member", userID, map[string]any{
@@ -536,7 +526,7 @@ func (h *Handler) MarkIssueInboxRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	count, err := h.Queries.MarkInboxReadByIssue(r.Context(), db.MarkInboxReadByIssueParams{
+	result, err := h.Queries.MarkInboxReadByIssue(r.Context(), db.MarkInboxReadByIssueParams{
 		WorkspaceID: wsUUID,
 		RecipientID: parseUUID(userID),
 		IssueID:     issueUUID,
@@ -548,15 +538,15 @@ func (h *Handler) MarkIssueInboxRead(w http.ResponseWriter, r *http.Request) {
 
 	// Opening an issue with nothing unread is the common case. It changes no
 	// row, so it must not make every open client refetch its inbox.
-	if count > 0 {
+	if result.Count > 0 || result.UnreadCount > 0 {
 		h.publish(protocol.EventInboxBatchRead, workspaceID, "member", userID, map[string]any{
 			"recipient_id": userID,
-			"count":        count,
+			"count":        result.Count,
 			"issue_id":     uuidToString(issueUUID),
 		})
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"count": count})
+	writeJSON(w, http.StatusOK, map[string]any{"count": result.Count})
 }
 
 func (h *Handler) ArchiveAllInbox(w http.ResponseWriter, r *http.Request) {
