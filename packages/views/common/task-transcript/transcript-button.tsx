@@ -32,10 +32,19 @@ interface TranscriptButtonProps {
    * cache so the dialog keeps growing as new events arrive.
    */
   items?: TimelineItem[];
+  /** Current read state for a parent-owned timeline. */
+  contentState?: React.ReactNode;
   isLive?: boolean;
   className?: string;
   title?: string;
   renderButton?: boolean;
+  /** URL-owned dialogs follow their route instead of the content-link bridge. */
+  closeOnNavigate?: boolean;
+  /**
+   * Request-error UI for a route that owns the read-only log. Live cached
+   * events stay hidden until this session's current read succeeds.
+   */
+  renderLoadError?: (error: unknown, retry: () => void) => React.ReactNode;
   open?: boolean;
   /**
    * `fromKeyboard` reports how the open was requested, so a parent that hosts
@@ -75,10 +84,13 @@ export function TranscriptButton({
   task,
   agentName,
   items: providedItems,
+  contentState,
   isLive = false,
   className,
   title = "View transcript",
   renderButton = true,
+  closeOnNavigate = true,
+  renderLoadError,
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
   finalFocus,
@@ -160,7 +172,7 @@ export function TranscriptButton({
   );
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || !closeOnNavigate) return;
 
     const handleGlobalNavigate = () => {
       setOpen(false);
@@ -170,7 +182,7 @@ export function TranscriptButton({
     return () => {
       window.removeEventListener("multica:navigate", handleGlobalNavigate);
     };
-  }, [open, setOpen]);
+  }, [open, setOpen, closeOnNavigate]);
 
   return (
     <>
@@ -202,6 +214,7 @@ export function TranscriptButton({
             task={task}
             agentName={agentName}
             isLive={isLive}
+            renderLoadError={renderLoadError}
             onOpenChange={setOpen}
             finalFocus={returnFocus}
             headerSlot={headerSlot}
@@ -212,6 +225,7 @@ export function TranscriptButton({
             onOpenChange={setOpen}
             task={task}
             items={items}
+            contentState={contentState}
             agentName={agentName}
             isLive={isLive}
             finalFocus={returnFocus}
@@ -223,6 +237,7 @@ export function TranscriptButton({
 }
 
 interface LiveTranscriptDialogProps {
+  renderLoadError?: TranscriptButtonProps["renderLoadError"];
   task: AgentTask;
   agentName: string;
   isLive: boolean;
@@ -243,6 +258,7 @@ interface LiveTranscriptDialogProps {
  * whereas the backfill merges by seq.
  */
 function LiveTranscriptDialog({
+  renderLoadError,
   task,
   agentName,
   isLive,
@@ -251,6 +267,19 @@ function LiveTranscriptDialog({
   headerSlot,
 }: LiveTranscriptDialogProps) {
   const queryClient = useQueryClient();
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [readResult, setReadResult] = useState<{
+    taskId: string;
+    isLive: boolean;
+    attempt: number;
+    error: unknown;
+  } | null>(null);
+  const currentRead =
+    readResult?.taskId === task.id &&
+    readResult.isLive === isLive &&
+    readResult.attempt === loadAttempt
+      ? readResult
+      : null;
   const { data } = useQuery({
     ...taskMessagesOptions(task.id),
     enabled: false,
@@ -265,6 +294,7 @@ function LiveTranscriptDialog({
   useEffect(() => {
     if (!isTaskMessageTaskId(task.id)) return;
     let cancelled = false;
+    setReadResult(null);
     api
       .listTaskMessages(task.id)
       .then((msgs) => {
@@ -273,16 +303,31 @@ function LiveTranscriptDialog({
           chatKeys.taskMessages(task.id),
           msgs,
         );
+        setReadResult({
+          taskId: task.id, isLive, attempt: loadAttempt, error: null,
+        });
       })
       .catch((err) => {
+        if (cancelled) return;
         console.error(err);
+        setReadResult({
+          taskId: task.id, isLive, attempt: loadAttempt, error: err,
+        });
       });
     return () => {
       cancelled = true;
     };
-  }, [task.id, isLive, queryClient]);
+  }, [task.id, isLive, queryClient, loadAttempt]);
 
-  const items = useMemo(() => buildTimeline(data ?? []), [data]);
+  // URL-owned readers must confirm this session's read before exposing any
+  // cached events, including copy, outcome summaries and selected details.
+  // Keep the shared cache intact for other readers and realtime seq merging.
+  const canDisplay =
+    !renderLoadError || (currentRead !== null && !currentRead.error);
+  const items = useMemo(
+    () => buildTimeline(canDisplay ? (data ?? []) : []),
+    [canDisplay, data],
+  );
 
   return (
     <AgentTranscriptDialog
@@ -290,6 +335,13 @@ function LiveTranscriptDialog({
       onOpenChange={onOpenChange}
       task={task}
       items={items}
+      contentState={
+        currentRead?.error
+          ? renderLoadError?.(currentRead.error, () => setLoadAttempt((attempt) => attempt + 1))
+          : renderLoadError && !currentRead
+            ? <Loader2 className="h-4 w-4 animate-spin" role="status" />
+            : undefined
+      }
       agentName={agentName}
       isLive={isLive}
       finalFocus={finalFocus}
