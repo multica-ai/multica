@@ -334,6 +334,8 @@ export function ChatPage() {
           messages={c.messages}
           pendingTask={c.pendingTask}
           availability={c.availability}
+          onEditQueuedTask={c.handleEditQueuedTask}
+          onRemoveQueuedTask={c.handleRemoveQueuedTask}
           firstItemIndex={c.firstItemIndex}
           hasOlderMessages={c.hasOlderMessages}
           isFetchingOlderMessages={c.isFetchingOlderMessages}

@@ -21,6 +21,8 @@ export function ChatWindowMessages({
   onQuickAction,
   quickActionsDisabled,
   quickActionsPendingMessageId,
+  onEditQueuedTask,
+  onRemoveQueuedTask,
   onReady,
   annotations,
   children,
@@ -32,6 +34,8 @@ export function ChatWindowMessages({
   onQuickAction: (action: ChatQuickAction) => void | Promise<unknown>;
   quickActionsDisabled: boolean;
   quickActionsPendingMessageId: string | null;
+  onEditQueuedTask?: (taskId: string) => Promise<void> | void;
+  onRemoveQueuedTask?: (taskId: string) => Promise<void> | void;
   /** This area has something to show — the window can fade in around it. */
   onReady?: () => void;
   annotations?: ComponentProps<typeof ChatMessageList>["annotations"];
@@ -83,6 +87,8 @@ export function ChatWindowMessages({
           onRevealed={onReady}
           messages={messages}
           pendingTask={pendingTask}
+          onEditQueuedTask={onEditQueuedTask}
+          onRemoveQueuedTask={onRemoveQueuedTask}
           availability={availability}
           firstItemIndex={messages.length > 0
             ? CHAT_VIRTUOSO_INITIAL_FIRST_ITEM_INDEX - olderMessageCount
