@@ -22,6 +22,7 @@ import {
   type VoiceModel,
 } from "@multica/core/voice";
 import { formatBytes } from "../common/format-bytes";
+import { useEditorOverlayOwner } from "../editor/overlay-owner";
 import { useLocale, useT } from "../i18n";
 import { localVoiceAPI } from "../platform/local-voice";
 import { openExternal } from "../platform/open-external";
@@ -187,6 +188,8 @@ export function VoiceSetupDialog({ voice }: { voice: ComposerVoice }) {
   const preferred = useVoiceSettingsStore((state) => state.modelId);
   const update = useVoiceSettingsStore((state) => state.update);
   const ready = pickVoiceModel(snapshot, preferred) !== null;
+  // Opened from a popover composer (an annotation), it must not dismiss it.
+  const overlayOwner = useEditorOverlayOwner();
   return (
     <Dialog
       open={voice.showSetup}
@@ -194,7 +197,7 @@ export function VoiceSetupDialog({ voice }: { voice: ComposerVoice }) {
         if (!open) cancelVoice();
       }}
     >
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-lg" data-editor-overlay-owner={overlayOwner}>
         <DialogHeader>
           <DialogTitle>{t(($) => $.voice.setup.title)}</DialogTitle>
           <DialogDescription>{t(($) => $.voice.setup.description)}</DialogDescription>
