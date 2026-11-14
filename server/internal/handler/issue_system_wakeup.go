@@ -56,9 +56,10 @@ type systemWakeupResponse struct {
 	WorkspaceDefault bool `json:"workspace_default"`
 }
 
-// childDoneSystemWakeup describes what the parent is waiting for. It returns
-// nil when there is nothing left to wait for: no sub-issues, every sub-issue
-// closed, or the parent itself closed.
+// childDoneSystemWakeup describes what the parent is waiting for, counting
+// only the sub-issues the request may see (MUL-8472). It returns nil when
+// there is nothing left to wait for: no sub-issues, every sub-issue closed,
+// or the parent itself closed.
 func (h *Handler) childDoneSystemWakeup(r *http.Request, parent db.Issue) (*systemWakeupResponse, error) {
 	ctx := r.Context()
 	categories := map[string]string{}
@@ -80,6 +81,11 @@ func (h *Handler) childDoneSystemWakeup(r *http.Request, parent db.Issue) (*syst
 	if err != nil || len(children) == 0 {
 		return nil, err
 	}
+	hidden, err := h.hiddenProjects(r, uuidToString(parent.WorkspaceID))
+	if err != nil {
+		return nil, err
+	}
+	children = filterVisibleIssues(hidden, children)
 	open := make([]db.Issue, 0, len(children))
 	var stage pgtype.Int4
 	for _, c := range children {
