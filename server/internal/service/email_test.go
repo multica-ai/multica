@@ -511,6 +511,12 @@ type testSMTPServer struct {
 	ExpectedPass string
 	// If true, advertise STARTTLS in EHLO
 	AdvertiseSTARTTLS bool
+
+	// ReceivedMailFrom captures the raw MAIL FROM command line, and ReceivedData
+	// the complete DATA payload, so tests can assert on the envelope and the
+	// message headers independently — they have different grammars.
+	ReceivedMailFrom chan string
+	ReceivedData     chan string
 }
 
 func startTestSMTPServer(t *testing.T, cfg testSMTPServer) (*testSMTPServer, func()) {
@@ -521,6 +527,12 @@ func startTestSMTPServer(t *testing.T, cfg testSMTPServer) (*testSMTPServer, fun
 	}
 	cfg.Listener = l
 	cfg.Addr = l.Addr().String()
+	if cfg.ReceivedMailFrom == nil {
+		cfg.ReceivedMailFrom = make(chan string, 4)
+	}
+	if cfg.ReceivedData == nil {
+		cfg.ReceivedData = make(chan string, 4)
+	}
 
 	done := make(chan struct{})
 	go func() {
@@ -608,6 +620,10 @@ func (s *testSMTPServer) handleConn(conn net.Conn) {
 			}
 
 		case strings.HasPrefix(upper, "MAIL FROM:"):
+			select {
+			case s.ReceivedMailFrom <- line:
+			default:
+			}
 			writeLine("250 OK")
 
 		case strings.HasPrefix(upper, "RCPT TO:"):
@@ -616,11 +632,17 @@ func (s *testSMTPServer) handleConn(conn net.Conn) {
 		case upper == "DATA":
 			writeLine("354 Start mail input; end with <CRLF>.<CRLF>")
 			// Read until line containing only "."
+			var dataLines []string
 			for {
 				dataLine := readLine()
 				if dataLine == "." {
 					break
 				}
+				dataLines = append(dataLines, dataLine)
+			}
+			select {
+			case s.ReceivedData <- strings.Join(dataLines, "\r\n"):
+			default:
 			}
 			writeLine("250 OK")
 
@@ -726,5 +748,251 @@ func TestSendSMTP_LoginAuthRejectsUnencryptedRemote(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unencrypted connection") {
 		t.Errorf("expected 'unencrypted connection' error, got: %v", err)
+	}
+}
+
+// --- SMTP sender: envelope vs From: header (GH #7568) ---
+
+func TestParseFromEmail(t *testing.T) {
+	tests := []struct {
+		name        string
+		raw         string
+		wantAddress string
+		wantHeader  string
+		wantOK      bool
+	}{
+		{
+			name:        "bare address stays byte-identical",
+			raw:         "sender@example.com",
+			wantAddress: "sender@example.com",
+			wantHeader:  "sender@example.com",
+			wantOK:      true,
+		},
+		{
+			name:        "quoted display name splits into two forms",
+			raw:         `"Example Team" <sender@example.com>`,
+			wantAddress: "sender@example.com",
+			wantHeader:  `"Example Team" <sender@example.com>`,
+			wantOK:      true,
+		},
+		{
+			name:        "unquoted display name is normalized",
+			raw:         "Example Team <sender@example.com>",
+			wantAddress: "sender@example.com",
+			wantHeader:  `"Example Team" <sender@example.com>`,
+			wantOK:      true,
+		},
+		{
+			name:        "non-ASCII display name is RFC 2047 encoded",
+			raw:         "多利卡 <verify@multica.ai>",
+			wantAddress: "verify@multica.ai",
+			wantHeader:  "=?utf-8?q?=E5=A4=9A=E5=88=A9=E5=8D=A1?= <verify@multica.ai>",
+			wantOK:      true,
+		},
+		{
+			name:        "surrounding whitespace is trimmed",
+			raw:         "  sender@example.com  ",
+			wantAddress: "sender@example.com",
+			wantHeader:  "sender@example.com",
+			wantOK:      true,
+		},
+		{
+			name:        "internal hostname without a dot is accepted",
+			raw:         "noreply@mail-internal",
+			wantAddress: "noreply@mail-internal",
+			wantHeader:  "noreply@mail-internal",
+			wantOK:      true,
+		},
+		{
+			// Some local MTAs accept a bare local part. It cannot be parsed, so it
+			// is passed through rather than turned into a hard startup failure.
+			name:        "bare local part passes through unparsed",
+			raw:         "root",
+			wantAddress: "root",
+			wantHeader:  "root",
+			wantOK:      false,
+		},
+		{
+			// Note this is a pass-through, not a sanitization: parseFromEmail
+			// returns unparseable input verbatim. Such a value never reaches the
+			// header block because net/smtp.Client.Mail rejects CR/LF before the
+			// envelope is sent — see TestSendSMTP_CRLFInSenderAbortsBeforeData.
+			name:        "CRLF payload passes through unparsed",
+			raw:         "Team <sender@example.com>\r\nBcc: evil@example.com",
+			wantAddress: "Team <sender@example.com>\r\nBcc: evil@example.com",
+			wantHeader:  "Team <sender@example.com>\r\nBcc: evil@example.com",
+			wantOK:      false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			address, header, ok := parseFromEmail(tt.raw)
+			if address != tt.wantAddress {
+				t.Errorf("address = %q, want %q", address, tt.wantAddress)
+			}
+			if header != tt.wantHeader {
+				t.Errorf("header = %q, want %q", header, tt.wantHeader)
+			}
+			if ok != tt.wantOK {
+				t.Errorf("ok = %v, want %v", ok, tt.wantOK)
+			}
+		})
+	}
+}
+
+// sendViaTestServer runs one sendSMTP against a capturing mock relay and returns
+// the MAIL FROM command line and the DATA payload.
+func sendViaTestServer(t *testing.T, fromEmail string) (mailFrom, data string) {
+	t.Helper()
+	srv, cleanup := startTestSMTPServer(t, testSMTPServer{})
+	defer cleanup()
+	host, port, _ := net.SplitHostPort(srv.Addr)
+
+	s := &EmailService{
+		fromEmail: fromEmail,
+		smtpHost:  host,
+		smtpPort:  port,
+	}
+	if err := s.sendSMTP("to@example.com", "Test Subject", "<p>Hello</p>"); err != nil {
+		t.Fatalf("sendSMTP failed: %v", err)
+	}
+	return <-srv.ReceivedMailFrom, <-srv.ReceivedData
+}
+
+func TestSendSMTP_DisplayNameSplitsEnvelopeAndHeader(t *testing.T) {
+	mailFrom, data := sendViaTestServer(t, `"Example Team" <sender@example.com>`)
+
+	// The envelope must carry the addr-spec only. Before the fix this was
+	// MAIL FROM:<"Example Team" <sender@example.com>>, which strict relays reject.
+	if !strings.HasPrefix(mailFrom, "MAIL FROM:<sender@example.com>") {
+		t.Errorf("envelope = %q, want addr-spec only", mailFrom)
+	}
+	if strings.Contains(mailFrom, "Example Team") {
+		t.Errorf("envelope must not carry the display name, got %q", mailFrom)
+	}
+
+	// The header keeps the full mailbox.
+	if !strings.Contains(data, "From: \"Example Team\" <sender@example.com>\r\n") {
+		t.Errorf("From: header missing the display name, got:\n%s", data)
+	}
+}
+
+func TestSendSMTP_NonASCIIDisplayNameIsEncoded(t *testing.T) {
+	_, data := sendViaTestServer(t, "多利卡 <verify@multica.ai>")
+
+	if !strings.Contains(data, "From: =?utf-8?q?=E5=A4=9A=E5=88=A9=E5=8D=A1?= <verify@multica.ai>\r\n") {
+		t.Errorf("From: header not RFC 2047 encoded, got:\n%s", data)
+	}
+	if strings.Contains(data, "From: 多利卡") {
+		t.Errorf("raw UTF-8 leaked into the From: header:\n%s", data)
+	}
+}
+
+// Bare addresses are the configurations that are not broken today, so the bytes
+// on the wire must not change for them.
+func TestSendSMTP_BareAddressWireFormatUnchanged(t *testing.T) {
+	mailFrom, data := sendViaTestServer(t, "sender@example.com")
+
+	if !strings.HasPrefix(mailFrom, "MAIL FROM:<sender@example.com>") {
+		t.Errorf("envelope = %q", mailFrom)
+	}
+	if !strings.Contains(data, "From: sender@example.com\r\n") {
+		t.Errorf("From: header should stay a bare address, got:\n%s", data)
+	}
+}
+
+func TestSendSMTP_UnparseableFromIsPassedThrough(t *testing.T) {
+	mailFrom, data := sendViaTestServer(t, "root")
+
+	if !strings.HasPrefix(mailFrom, "MAIL FROM:<root>") {
+		t.Errorf("envelope = %q, want the value passed through unchanged", mailFrom)
+	}
+	if !strings.Contains(data, "From: root\r\n") {
+		t.Errorf("From: header = unexpected, got:\n%s", data)
+	}
+}
+
+// The configured sender is operator-controlled, so this is defense in depth
+// rather than a user-facing trust boundary. parseFromEmail does NOT sanitize —
+// it returns an unparseable value verbatim. What actually stops a CRLF payload
+// is net/smtp.Client.Mail, which rejects CR/LF before the envelope goes out, so
+// the send aborts at MAIL FROM and nothing reaches the header block.
+func TestSendSMTP_CRLFInSenderAbortsBeforeData(t *testing.T) {
+	srv, cleanup := startTestSMTPServer(t, testSMTPServer{})
+	defer cleanup()
+	host, port, _ := net.SplitHostPort(srv.Addr)
+
+	s := &EmailService{
+		fromEmail: "Team <sender@example.com>\r\nBcc: evil@example.com",
+		smtpHost:  host,
+		smtpPort:  port,
+	}
+	err := s.sendSMTP("to@example.com", "Test Subject", "<p>Hello</p>")
+	if err == nil {
+		t.Fatal("expected sendSMTP to reject a CR/LF sender")
+	}
+	if !strings.Contains(err.Error(), "MAIL FROM") {
+		t.Errorf("expected the failure at MAIL FROM, got: %v", err)
+	}
+	select {
+	case data := <-srv.ReceivedData:
+		t.Fatalf("no message should have been delivered, got:\n%s", data)
+	default:
+	}
+}
+
+// --- Message-ID provenance (MUL-6225 / GH #7014) ---
+
+func TestSendSMTP_MessageIDUsesSenderDomainNotRelayHost(t *testing.T) {
+	_, data := sendViaTestServer(t, `"Example Team" <sender@example.com>`)
+
+	var msgID string
+	for _, line := range strings.Split(data, "\r\n") {
+		if strings.HasPrefix(line, "Message-ID: ") {
+			msgID = strings.TrimPrefix(line, "Message-ID: ")
+			break
+		}
+	}
+	if msgID == "" {
+		// RFC 5322 makes Date mandatory and Message-ID a SHOULD, and a plain
+		// RFC 5321 relay must not add them on our behalf.
+		t.Fatalf("Message-ID header is missing:\n%s", data)
+	}
+	if !strings.HasSuffix(msgID, "@example.com>") {
+		t.Errorf("Message-ID = %q, want it rooted at the sender's domain", msgID)
+	}
+	// 127.0.0.1 is the relay host in this test; it must not appear in the ID.
+	if strings.Contains(msgID, "127.0.0.1") {
+		t.Errorf("Message-ID = %q, must not be rooted at the relay hostname", msgID)
+	}
+	if !strings.Contains(data, "Date: ") {
+		t.Errorf("Date header is mandatory under RFC 5322, missing from:\n%s", data)
+	}
+}
+
+func TestSendSMTP_MessageIDIsUniquePerSend(t *testing.T) {
+	seen := make(map[string]bool)
+	for i := 0; i < 3; i++ {
+		_, data := sendViaTestServer(t, "sender@example.com")
+		for _, line := range strings.Split(data, "\r\n") {
+			if strings.HasPrefix(line, "Message-ID: ") {
+				id := strings.TrimPrefix(line, "Message-ID: ")
+				if seen[id] {
+					t.Fatalf("duplicate Message-ID across sends: %q", id)
+				}
+				seen[id] = true
+			}
+		}
+	}
+	if len(seen) != 3 {
+		t.Fatalf("expected 3 distinct Message-IDs, got %d", len(seen))
+	}
+}
+
+func TestNewMessageID_FallsBackWhenSenderHasNoDomain(t *testing.T) {
+	id := newMessageID("root", "relay.internal")
+	if !strings.HasSuffix(id, "@relay.internal>") {
+		t.Errorf("newMessageID = %q, want the fallback domain", id)
 	}
 }
