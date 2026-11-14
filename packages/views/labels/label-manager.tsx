@@ -43,6 +43,7 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { ColorPicker, COLOR_PICKER_PRESETS } from "../common/color-picker";
 import { useLocale, useT } from "../i18n";
+import { paletteColor } from "@multica/core/appearance";
 
 /**
  * Label catalogs a user can manage. Narrower than `LabelResourceType`:
@@ -144,7 +145,7 @@ export function LabelManager({ scope }: { scope: LabelScope }) {
                   <div className="flex min-w-0 items-center gap-3">
                     <span
                       className="size-2.5 shrink-0 rounded-full"
-                      style={{ backgroundColor: label.color }}
+                      style={{ backgroundColor: paletteColor(label.color) }}
                     />
                     <span className="truncate text-body font-medium">{label.name}</span>
                   </div>

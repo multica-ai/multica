@@ -27,6 +27,16 @@ import type {
   WorkspacePathOptions,
   WorkspacePathRequest,
 } from "../shared/workspace-window";
+import type {
+  VoiceHistoryAudio,
+  VoiceHistoryEntry,
+  VoiceHistorySaveRequest,
+  VoiceHistoryUpdate,
+  VoiceModelRequest,
+  VoiceModelsSnapshot,
+  VoiceTranscribeRequest,
+  VoiceTranscribeResult,
+} from "../shared/voice";
 
 interface DesktopAPI {
   /** App version + normalized OS, captured synchronously at preload time. */
@@ -131,6 +141,35 @@ interface DesktopAPI {
   openThemeFolder: (name?: string) => Promise<{ ok: boolean; error?: string }>;
   /** Create a theme folder from files; never replaces an existing one. */
   writeThemeFolder: (name: string, files: ThemeFolderFile[]) => Promise<ThemeFolderWriteResult>;
+  /** On-device voice input: speech models and transcription in main. */
+  voice: {
+    listModels: () => Promise<VoiceModelsSnapshot>;
+    /** Called on every model status or download-progress change. Returns an unsubscribe function. */
+    onModelsChanged: (callback: (snapshot: VoiceModelsSnapshot) => void) => () => void;
+    /** Start a download; progress arrives through onModelsChanged. */
+    downloadModel: (id: string) => Promise<void>;
+    cancelDownload: (id: string) => Promise<void>;
+    deleteModel: (id: string) => Promise<void>;
+    /** Load the model while the user is still speaking. */
+    prepare: (request: VoiceModelRequest) => void;
+    transcribe: (request: VoiceTranscribeRequest) => Promise<VoiceTranscribeResult>;
+    /** Recordings and their transcripts, kept on this device. */
+    history: {
+      /** Newest first. */
+      list: () => Promise<VoiceHistoryEntry[]>;
+      /** Called after any change. Returns an unsubscribe function. */
+      onChanged: (callback: () => void) => () => void;
+      /** Null when the request is invalid. */
+      save: (request: VoiceHistorySaveRequest) => Promise<VoiceHistoryEntry | null>;
+      update: (id: string, patch: VoiceHistoryUpdate) => Promise<void>;
+      audio: (id: string) => Promise<VoiceHistoryAudio | null>;
+      remove: (id: string) => Promise<void>;
+      /** Remember how many days to keep (0 keeps none, null forever) and drop older entries now. */
+      setRetention: (keepDays: number | null) => Promise<void>;
+      /** Delete every entry, including one still being transcribed. */
+      clear: () => Promise<void>;
+    };
+  };
   /** Listen for Cmd/Ctrl+W tab-close requests from the main process.
    *  Returns an unsubscribe function. */
   onCloseActiveTab: (callback: () => void) => () => void;

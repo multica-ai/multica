@@ -15,6 +15,18 @@ import enIssues from "../../locales/en/issues.json";
 // link/markdownLink fields are ignored by the engine, which re-derives them).
 const mockApiUploadFile = vi.hoisted(() => vi.fn());
 const mockToastInfo = vi.hoisted(() => vi.fn());
+const voiceOptions = vi.hoisted(() => ({ last: null as { scope?: string; hidden?: boolean } | null }));
+
+vi.mock("../../voice/use-composer-voice", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../voice/use-composer-voice")>();
+  return {
+    ...actual,
+    useComposerVoice: (options: Parameters<typeof actual.useComposerVoice>[0]) => {
+      voiceOptions.last = options;
+      return actual.useComposerVoice(options);
+    },
+  };
+});
 vi.mock("sonner", () => ({
   toast: Object.assign(vi.fn(), { info: mockToastInfo, error: vi.fn(), success: vi.fn() }),
 }));
@@ -535,6 +547,43 @@ describe("ChatInput new-chat draft identity", () => {
     // Real sessions stay isolated — unifying the NEW-chat draft must not bleed
     // one conversation's context into another.
     expect(state.inputDrafts).toEqual({ "session-a": "for A", "session-b": "for B" });
+  });
+});
+
+// The editor is shared across sessions and agents, so voice input is scoped to
+// what the composer is writing to: changing it cancels dictation in flight.
+describe("ChatInput voice scope", () => {
+  const state = () =>
+    useChatStore.getState() as unknown as { activeSessionId: string | null; selectedAgentId: string };
+
+  it("changes when the conversation or the agent changes", () => {
+    state().activeSessionId = "session-a";
+    const { rerender } = render(element({}));
+    expect(voiceOptions.last?.scope).toBe("session-a:agent-1");
+
+    state().activeSessionId = "session-b";
+    rerender(element({}));
+    expect(voiceOptions.last?.scope).toBe("session-b:agent-1");
+
+    state().activeSessionId = null;
+    rerender(element({}));
+    expect(voiceOptions.last?.scope).toBe("__draft_new__:agent-1");
+
+    state().selectedAgentId = "agent-2";
+    rerender(element({}));
+    expect(voiceOptions.last?.scope).toBe("__draft_new__:agent-2");
+  });
+
+  it("uses an embedded surface's own draft key", () => {
+    render(element({ draftKeyOverride: "builder:agent-9" }));
+    expect(voiceOptions.last?.scope).toBe("builder:agent-9");
+  });
+
+  it("passes hidden through so a closed window stops listening", () => {
+    const { rerender } = render(element({}));
+    expect(voiceOptions.last?.hidden).toBe(false);
+    rerender(element({ hidden: true }));
+    expect(voiceOptions.last?.hidden).toBe(true);
   });
 });
 

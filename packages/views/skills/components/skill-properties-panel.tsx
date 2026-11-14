@@ -31,7 +31,7 @@ function ReadOnlySkillLabels({ skillId }: { skillId: string }) {
   const { data: labels = [] } = useQuery(resourceLabelsOptions(wsId, "skill", skillId));
   if (labels.length === 0) return <span className="text-muted-foreground">—</span>;
   return (
-    <div className="flex min-w-0 flex-wrap gap-1">
+    <div className="flex min-w-0 flex-wrap gap-1 py-1.5">
       {labels.map((label) => (
         <LabelChip key={label.id} label={label} />
       ))}

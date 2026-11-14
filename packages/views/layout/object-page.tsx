@@ -34,9 +34,14 @@ import {
 import { BreadcrumbHeader, type BreadcrumbSegment } from "./breadcrumb-header";
 
 /** The reading column of an object page; the header above it stays full width. */
-export const OBJECT_PAGE_BODY = "mx-auto w-full max-w-[760px] px-6 py-8";
+export const OBJECT_PAGE_BODY =
+  "mx-auto w-full max-w-[var(--object-page-max-width,760px)] px-[var(--space-lg,1.5rem)] py-[var(--space-xl,2rem)]";
+
+/** What an object page shows, as themes see it on `data-type`. */
+export type ObjectPageType = "project" | "agent" | "squad" | "runtime" | "member" | "autopilot" | "skill";
 
 interface ObjectPageProps {
+  type: ObjectPageType;
   /** The lists this object was opened from, each one a link back. */
   segments: BreadcrumbSegment[];
   /** The object's own crumb. */
@@ -65,7 +70,7 @@ interface ObjectPageProps {
  * right panel the header toggles — the layout the issue page already uses.
  * There are no tabs: what a tab would hold is a section of the body.
  */
-export function ObjectPage({ segments, leaf, actions, panel, layoutId, children, scrollRef }: ObjectPageProps) {
+export function ObjectPage({ type, segments, leaf, actions, panel, layoutId, children, scrollRef }: ObjectPageProps) {
   const { t } = useT("layout");
   const isMobile = useIsMobile();
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({ id: layoutId });
@@ -134,7 +139,7 @@ export function ObjectPage({ segments, leaf, actions, panel, layoutId, children,
 
   if (!panel) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col">
+      <div data-mc="object-page" data-type={type} className="flex min-h-0 flex-1 flex-col">
         {header}
         {body}
       </div>
@@ -142,7 +147,7 @@ export function ObjectPage({ segments, leaf, actions, panel, layoutId, children,
   }
 
   return (
-    <div ref={shortcutTargetRef} className="flex min-h-0 flex-1 flex-col">
+    <div ref={shortcutTargetRef} data-mc="object-page" data-type={type} className="flex min-h-0 flex-1 flex-col">
       {header}
       <ResizablePanelGroup
         orientation="horizontal"
@@ -311,6 +316,8 @@ export function ObjectSectionEmpty({
 }) {
   return (
     <div
+      data-mc="empty-state"
+      data-variant="section"
       className={cn(
         "flex min-h-13 items-center gap-3 rounded-lg border border-dashed border-input py-2.5 pr-2.5 pl-3.5 text-muted-foreground",
         className,
@@ -361,14 +368,20 @@ export function ObjectPanelSection({
   );
 }
 
-/** One label and value in the properties panel; the value may be a picker. */
+/**
+ * One label and value in the properties panel; the value may be a picker.
+ *
+ * Top-aligned like `PropRow`: the label is one 32px line and the value centres
+ * within at least that height, so a value that wraps (several label chips)
+ * keeps the label beside its first line.
+ */
 export function ObjectProperty({ label, children }: { label: ReactNode; children: ReactNode }) {
   return (
-    <div className="-mx-2 flex min-h-8 items-center gap-2 rounded-md px-2 transition-colors hover:bg-accent/50">
+    <div className="-mx-2 flex min-h-8 items-start gap-2 rounded-md px-2 transition-colors hover:bg-accent/50">
       <TruncatedTooltip content={label} focusable>
-        <span className="w-20 shrink-0 truncate text-caption text-muted-foreground">{label}</span>
+        <span className="w-20 shrink-0 truncate text-caption leading-8 text-muted-foreground">{label}</span>
       </TruncatedTooltip>
-      <div className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-caption">{children}</div>
+      <div className="flex min-h-8 min-w-0 flex-1 items-center gap-1.5 truncate text-caption">{children}</div>
     </div>
   );
 }

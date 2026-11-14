@@ -355,7 +355,7 @@
     },
     "density": {
       "title": "Density",
-      "description": "Row height in issue lists and search.",
+      "description": "Row height in issue lists, search and the sidebar, and spacing on the board.",
       "compact": "Compact",
       "default": "Default",
       "comfortable": "Comfortable"
@@ -393,6 +393,7 @@
     "reserved_error": "Reserved by the browser or desktop window.",
     "send_error": "Send can only use Enter or Mod+Enter.",
     "unsafe_error": "This key would interfere with typing or basic keyboard navigation.",
+    "unrecognized_error": "This key combination can't be recorded. Try another one.",
     "send_enter_hint": "Shift+Enter inserts a paragraph, continues a list, or adds a code-block newline.",
     "categories": {
       "general": "General",
@@ -490,6 +491,10 @@
       "goSettings": {
         "label": "Go to Settings",
         "description": "Open workspace settings."
+      },
+      "voiceInput": {
+        "label": "Voice input",
+        "description": "Dictate into the composer you used last. Hold to talk."
       }
     },
     "fixed": {
@@ -586,7 +591,8 @@
       "code": "Code",
       "channels": "Messaging",
       "apps": "Connected apps",
-      "workflows": "Workflows"
+      "workflows": "Workflows",
+      "voice_input": "Voice input"
     },
     "groups": {
       "personal": "Personal",
@@ -1852,6 +1858,101 @@
       "cancel": "Cancel",
       "admin_required": "A workspace admin can restore access.",
       "account_link": "This account has saved action restrictions. Restore access in Connected apps."
+    }
+  },
+  "voice_input": {
+    "description": "Dictate into chat, comments and replies. Speech is transcribed on this computer and never leaves it.",
+    "model_title": "Speech model",
+    "model_hint": "Models run on this computer. Download one, or switch between the ones you have.",
+    "engine_unavailable": "On-device transcription isn't available for this computer.",
+    "input_title": "Input",
+    "shortcut": {
+      "title": "Shortcut",
+      "hint": "Works whenever a composer is on screen, even if it isn't focused.",
+      "change": "Change",
+      "unassigned": "Not set"
+    },
+    "activation": {
+      "title": "Activation",
+      "auto": "Tap or hold",
+      "toggle": "Tap",
+      "hold": "Hold",
+      "hints": {
+        "auto": "Tap to start and tap again to insert. Hold to talk and release to insert.",
+        "toggle": "Tap to start, tap again to insert.",
+        "hold": "Hold to talk, release to insert."
+      }
+    },
+    "recognition_title": "Recognition",
+    "language": {
+      "title": "Spoken language",
+      "hint": "Auto-detect handles most speech. Pick a language if short phrases come out in the wrong one.",
+      "auto": "Auto-detect"
+    },
+    "fillers": {
+      "title": "Remove filler words",
+      "hint": "Drop “um”, “uh” and similar hesitations."
+    },
+    "vocabulary": {
+      "title": "Vocabulary",
+      "hint": "Names and terms to spell your way, such as product or teammate names. Up to {{max}}.",
+      "placeholder": "Add a word",
+      "remove": "Remove {{word}}"
+    },
+    "microphone_title": "Microphone",
+    "device": {
+      "title": "Input device",
+      "default": "System default",
+      "unnamed": "Microphone {{index}}",
+      "permission_hint": "Test the microphone once to see device names."
+    },
+    "test": {
+      "title": "Test microphone",
+      "hint": "Speak to check the level. Nothing is recorded.",
+      "blocked": "Microphone access is blocked. Allow it in your browser or system settings.",
+      "start": "Test",
+      "stop": "Stop"
+    },
+    "history": {
+      "title": "History",
+      "description": "Recordings and their text stay on this computer and are never uploaded. One that failed or was interrupted can be transcribed again from its audio.",
+      "keep": {
+        "title": "Keep history",
+        "hint": "How long recordings stay on this computer.",
+        "options": {
+          "off": "Don't keep",
+          "1d": "1 day",
+          "7d": "7 days",
+          "30d": "30 days",
+          "forever": "Forever"
+        }
+      },
+      "clear": "Clear all",
+      "clear_dialog": {
+        "title": "Clear voice history?",
+        "description": "Every recording and transcript kept on this computer will be deleted.",
+        "cancel": "Cancel"
+      },
+      "empty": "Your dictations will appear here.",
+      "off": "History is off. New recordings are not kept.",
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "status": {
+        "transcribing": "Transcribing…",
+        "failed": "Transcription failed",
+        "interrupted": "Interrupted before it was transcribed"
+      },
+      "actions": {
+        "play": "Play recording",
+        "pause": "Pause",
+        "retranscribe": "Transcribe again",
+        "copy": "Copy text",
+        "delete": "Delete"
+      },
+      "copied": "Copied",
+      "copy_failed": "Couldn't copy",
+      "retry_failed": "Couldn't transcribe this recording",
+      "show_more": "Show more"
     }
   }
 }

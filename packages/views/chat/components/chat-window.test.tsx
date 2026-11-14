@@ -61,7 +61,13 @@ vi.mock("./use-chat-resize", () => ({
 vi.mock("./use-chat-context-items", () => ({ useChatContextItems: () => [] }));
 vi.mock("./chat-window-messages", () => ({ ChatWindowMessages: () => null }));
 vi.mock("../../common/app-requests", () => ({ ChatAppRequests: () => null }));
-vi.mock("./chat-input", () => ({ ChatInput: () => null }));
+const chatInputProps = vi.hoisted(() => ({ last: null as { hidden?: boolean } | null }));
+vi.mock("./chat-input", () => ({
+  ChatInput: (props: { hidden?: boolean }) => {
+    chatInputProps.last = props;
+    return null;
+  },
+}));
 vi.mock("./chat-queue", () => ({ ChatQueue: () => null }));
 vi.mock("./chat-empty-state", () => ({ EmptyState: () => null }));
 vi.mock("./session-history-list", () => ({ SessionHistoryList: () => null }));
@@ -165,5 +171,14 @@ describe("ChatWindow minimize and close", () => {
     expect(state.isOpen).toBe(false);
     expect(state.chatBarKept).toEqual([]);
     expect(state.chatBarDismissed).toEqual({ [session.id]: session.updated_at });
+  });
+
+  it("turns off voice input in the composer while the window is closed", () => {
+    renderWindow();
+    expect(chatInputProps.last?.hidden).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: enChat.window.minimize_tooltip }));
+
+    expect(chatInputProps.last?.hidden).toBe(true);
   });
 });

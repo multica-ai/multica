@@ -21,6 +21,7 @@ import {
 } from "./daemon-manager";
 import { setupLocalDirectory } from "./local-directory";
 import { setupThemeFolder } from "./theme-folder";
+import { setupVoiceInput } from "./voice";
 import { configureLinuxFileDialogs } from "./linux-file-dialog";
 import { openExternalSafely, downloadURLSafely } from "./external-url";
 import { installContextMenu } from "./context-menu";
@@ -44,6 +45,7 @@ import {
   type RendererRecoveryWindow,
 } from "./renderer-recovery";
 import { createBestEffortDevLog } from "./dev-log";
+import { ignoreBrokenStdio } from "./stdio-guard";
 import { appendMissingPathDirs } from "./path-fallback";
 import {
   writeFreezeBreadcrumb,
@@ -152,6 +154,9 @@ if (process.platform !== "win32") {
     join(homedir(), ".local/bin"),
   ]);
 }
+
+// Before anything can log: release builds write to stdout/stderr too.
+ignoreBrokenStdio();
 
 const PROTOCOL = "multica";
 const devLog = is.dev ? createBestEffortDevLog() : undefined;
@@ -1094,6 +1099,7 @@ if (!gotTheLock) {
     );
     setupLocalDirectory(() => mainWindows.mostRecent());
     setupThemeFolder();
+    setupVoiceInput();
 
     // Registered after the updater and daemon gates, so a quit they hold
     // (busy daemon, pending install) leaves the session writable; only the

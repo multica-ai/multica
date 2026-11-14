@@ -413,6 +413,7 @@ export function ChatWindow() {
        *  agent has been archived (read-only); locked out entirely when there's
        *  no agent (the EmptyState above carries the CTA). */}
       <ChatInput
+        hidden={!isOpen}
         onSend={c.handleSend}
         restoreDraftRequest={c.restoreDraftRequest}
         conversationStarterRequest={c.conversationStarterRequest}

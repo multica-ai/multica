@@ -11,6 +11,7 @@ export {
   isPortalLayerShortcutTarget,
   isReservedShortcut,
   isShortcutAllowedForAction,
+  isShortcutModifierKey,
   type ShortcutActionDefinition,
   type ShortcutActionId,
   type ShortcutCategory,

@@ -163,17 +163,21 @@ describe("AppearanceTab", () => {
   });
 
   describe("content font size", () => {
-    const sizeSliders = () =>
-      screen.getAllByLabelText("Font size").map((root) => within(root).getByRole("slider", { hidden: true }));
+    const sizeSliders = () => screen.getAllByRole("slider", { name: "Font size" });
     const follow = () => screen.getByRole("switch", { name: "Match interface size" });
     const press = async (slider: HTMLElement, key: string) => {
       act(() => slider.focus());
       await userEvent.setup().keyboard(key);
     };
-
-    it("follows the interface by default, with the same slider", () => {
-      useAppearanceStore.setState({ fontSize: 15 });
+    // Base UI keeps edge-aligned thumbs visibility: hidden until a microtask has measured them.
+    const renderTab = async () => {
       render(<AppearanceTab />, { wrapper: Wrapper });
+      await screen.findAllByRole("slider", { name: "Font size" });
+    };
+
+    it("follows the interface by default, with the same slider", async () => {
+      useAppearanceStore.setState({ fontSize: 15 });
+      await renderTab();
 
       const [, content] = sizeSliders();
       expect(content).toHaveValue("15");
@@ -183,7 +187,7 @@ describe("AppearanceTab", () => {
 
     it("keeps a size equal to the interface independent of later interface changes", async () => {
       useAppearanceStore.setState({ fontSize: 14, contentSize: 15 });
-      render(<AppearanceTab />, { wrapper: Wrapper });
+      await renderTab();
       expect(follow()).not.toBeChecked();
 
       await press(sizeSliders()[1]!, "{ArrowLeft}");
@@ -198,7 +202,7 @@ describe("AppearanceTab", () => {
     it("pins the current size when following is turned off, and follows again only when turned on", async () => {
       const user = userEvent.setup();
       useAppearanceStore.setState({ fontSize: 13 });
-      render(<AppearanceTab />, { wrapper: Wrapper });
+      await renderTab();
 
       await user.click(follow());
       expect(state().contentSize).toBe(13);
@@ -456,6 +460,7 @@ describe("AppearanceTab", () => {
     expect(screen.getByText("The paper itself.")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Type" })).toBeInTheDocument();
     expect(screen.getByLabelText("Paper (Dark)")).toHaveValue("#1d1b16");
+    expect(await screen.findByRole("slider", { name: "Width" })).toHaveValue("46");
     expect(screen.getByText("46rem")).toBeInTheDocument();
 
     const font = () => screen.getByRole("textbox", { name: "Heading font" });
