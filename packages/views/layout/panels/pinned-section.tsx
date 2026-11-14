@@ -37,6 +37,7 @@ import {
   ISSUE_ROW_LINK_CLASS,
   IssueAgentBadge,
   IssueUnreadDot,
+  PrivateProjectLock,
   SIDEBAR_SHIMMER_CLASS,
   SidebarIssueStatus,
   issueRowMenuOpenClass,
@@ -208,6 +209,7 @@ function SortablePinItem({
   active,
   running = false,
   unread = false,
+  labelSuffix,
   trailing,
   issue,
 }: {
@@ -221,6 +223,8 @@ function SortablePinItem({
   running?: boolean;
   /** Brightens the label while the issue has an unread agent result. */
   unread?: boolean;
+  /** Right after the label, which truncates before it. */
+  labelSuffix?: React.ReactNode;
   trailing?: React.ReactNode;
   /** A pinned issue's row opens the issue context menu on right-click. */
   issue?: Issue;
@@ -248,12 +252,15 @@ function SortablePinItem({
         aria-current={active ? "page" : undefined}
         className={cn(ISSUE_ROW_LINK_CLASS, "gap-2.5")}
       >
-        <ShimmerText
-          active={running}
-          className={cn("min-w-0 flex-1 truncate", SIDEBAR_SHIMMER_CLASS, unread && "text-foreground")}
-        >
-          {label}
-        </ShimmerText>
+        <span className="flex min-w-0 flex-1 items-center gap-1.5">
+          <ShimmerText
+            active={running}
+            className={cn("min-w-0 truncate", SIDEBAR_SHIMMER_CLASS, unread && "text-foreground")}
+          >
+            {label}
+          </ShimmerText>
+          {labelSuffix}
+        </span>
         {/* Holds the same right-edge slot as a tree row's avatars, and yields
             it to the unpin button on hover. */}
         {trailing && (
@@ -373,6 +380,7 @@ function PinRow({
       onUnpin={onUnpin}
       label={project.title}
       active={active}
+      labelSuffix={project.visibility === "private" && <PrivateProjectLock />}
       iconNode={
         project.icon ? <ProjectIcon project={project} size="md" /> : <Folder className="size-4 shrink-0" />
       }

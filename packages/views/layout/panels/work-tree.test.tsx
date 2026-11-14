@@ -131,6 +131,13 @@ describe("ProjectsSection", () => {
     expect(iconSlot("Mobile")?.querySelector("svg")).not.toBeNull();
   });
 
+  it("marks a private project with a lock inside its link", () => {
+    renderSection([{ ...project("p1", "Desktop"), visibility: "private" }, { ...project("p2", "Mobile"), visibility: "workspace" }]);
+    const lock = screen.getByRole("img", { name: "Only project members can see this" });
+    expect(lock.closest("a")).toHaveTextContent("Desktop");
+    expect(screen.getAllByRole("img", { name: "Only project members can see this" })).toHaveLength(1);
+  });
+
   it("expands a project in place, keeping its count", () => {
     renderSection();
     expect(screen.getAllByText("3")).toHaveLength(3);
