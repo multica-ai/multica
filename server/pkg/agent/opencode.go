@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -402,7 +403,7 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		// attribute all usage to the configured model (or "unknown").
 		var usage map[string]TokenUsage
 		u := scanResult.usage
-		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0 {
+		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0 || u.CostUSDTicks > 0 {
 			model := opts.Model
 			if model == "" {
 				model = "unknown"
@@ -449,6 +450,8 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 	var output strings.Builder
 	var sessionID string
 	var usage TokenUsage
+	allStepsAccounted := true
+	sawAccountedStep := false
 	separateReasoning := opencodeSeparatesReasoning(b.cfg)
 	finalStatus := "completed"
 	var finalError string
@@ -551,10 +554,8 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 			awaitingContinuation = event.Part.Reason == "tool-calls" ||
 				(event.Part.Reason != "" && stepHasContinuationTool)
 			stepHasContinuationTool = false
-			// Accumulate token usage from step_finish events. Only the fields
-			// TokenUsage models are billed; every reported field additionally
-			// counts as proof the provider round-trip happened, which is what
-			// keeps a productive step out of the void-step guard below.
+			// OpenCode prices each step from gateway-reported cost when present,
+			// otherwise from its model catalog. Preserve its accounted amount.
 			if t := event.Part.Tokens; t != nil {
 				usage.InputTokens += t.Input
 				usage.OutputTokens += t.Output
@@ -565,6 +566,17 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 					usage.CacheReadTokens += t.Cache.Read
 					usage.CacheWriteTokens += t.Cache.Write
 				}
+			}
+			if cost := event.Part.Cost; cost != nil && *cost >= 0 && *cost < float64(math.MaxInt64)/CostUSDTicksPerUSD {
+				ticks := int64(math.Round(*cost * CostUSDTicksPerUSD))
+				if ticks <= math.MaxInt64-usage.CostUSDTicks {
+					usage.CostUSDTicks += ticks
+					sawAccountedStep = true
+				} else {
+					allStepsAccounted = false
+				}
+			} else {
+				allStepsAccounted = false
 			}
 			if stepReportedUsage(&event.Part) {
 				stepProducedOutput = true
@@ -622,6 +634,11 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 		}
 	}
 
+	// A missing final step would make this a partial run total. OpenCode's
+	// final-step reconciliation is required before the sum can be trusted.
+	if !sawAccountedStep || !allStepsAccounted || openStep || awaitingContinuation {
+		usage.CostUSDTicks = 0
+	}
 	return eventResult{
 		status:           finalStatus,
 		errMsg:           finalError,
@@ -652,7 +669,7 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 // processEvents separately normalizes reasoning into output for releases whose
 // output excludes it; the aggregate total is never added to the usage buckets.
 func stepReportedUsage(part *opencodeEventPart) bool {
-	if part.Cost > 0 {
+	if part.Cost != nil && *part.Cost > 0 {
 		return true
 	}
 	t := part.Tokens
@@ -837,10 +854,9 @@ type opencodeEventPart struct {
 	// step_finish token usage
 	Tokens *opencodeTokens `json:"tokens,omitempty"`
 
-	// step_finish cost, a sibling of the token block rather than a member of
-	// it. Read only as round-trip evidence by stepReportedUsage; opencode's
-	// billing figures come from the token counters above.
-	Cost float64 `json:"cost,omitempty"`
+	// OpenCode's accounted step cost, a gateway charge when usage.cost was
+	// reported and a catalog estimate otherwise. nil means absent; zero is valid.
+	Cost *float64 `json:"cost,omitempty"`
 
 	// step_finish reason (FinishReason: "stop", "tool-calls", …). Absent on
 	// older opencode versions whose step-finish parts predate the field.
