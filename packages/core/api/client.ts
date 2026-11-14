@@ -1921,6 +1921,16 @@ export class ApiClient {
     return this.fetch(`/api/comments/${commentId}/resolve`, { method: "POST" });
   }
 
+  async pinComment(commentId: string): Promise<Comment> {
+    const data = await this.fetch(`/api/comments/${commentId}/pin`, { method: "POST" });
+    return parseWithFallback(data, CommentSchema, EMPTY_COMMENT, { endpoint: "POST /api/comments/:id/pin" });
+  }
+
+  async unpinComment(commentId: string): Promise<Comment> {
+    const data = await this.fetch(`/api/comments/${commentId}/pin`, { method: "DELETE" });
+    return parseWithFallback(data, CommentSchema, EMPTY_COMMENT, { endpoint: "DELETE /api/comments/:id/pin" });
+  }
+
   async unresolveComment(commentId: string): Promise<Comment> {
     return this.fetch(`/api/comments/${commentId}/resolve`, { method: "DELETE" });
   }

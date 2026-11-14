@@ -32,6 +32,9 @@ export interface TimelineEntry {
   resolved_at?: string | null;
   resolved_by_type?: CommentAuthorType | null;
   resolved_by_id?: string | null;
+  pinned_at?: string | null;
+  pinned_by_type?: CommentAuthorType | null;
+  pinned_by_id?: string | null;
   source_task_id?: string | null;
   /** Every running turn this comment steered, one receipt per run. */
   supplements?: CommentSupplementReceipt[];

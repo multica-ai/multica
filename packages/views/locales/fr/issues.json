@@ -676,6 +676,14 @@
     "environment_started": "a démarré l'environnement {{name}}"
   },
   "comment": {
+    "pins": {
+      "pin": "Épingler le commentaire",
+      "unpin": "Désépingler le commentaire",
+      "jump": "Aller au commentaire de {{author}}",
+      "bar_label": "Commentaires épinglés",
+      "limit": "Un ticket peut avoir au plus {{count}} commentaires épinglés. Désépinglez-en un d’abord.",
+      "error": "Impossible de modifier l’épingle"
+    },
     "add_reaction": "Ajouter une réaction",
     "collapse_thread": "Replier le fil",
     "expand_thread": "Développer le fil",

@@ -1250,7 +1250,15 @@ const CommentSupplementReceiptsSchema = z.array(z.unknown()).optional().catch(un
     return parsed.success ? [parsed.data] : [];
   }));
 
+function normalizeCommentPin<T extends { pinned_at?: string | null; pinned_by_type?: string | null; pinned_by_id?: string | null }>(entry: T): T {
+  if (entry.pinned_at && entry.pinned_by_type && entry.pinned_by_id) return entry;
+  return { ...entry, pinned_at: null, pinned_by_type: null, pinned_by_id: null };
+}
+
 const TimelineEntrySchema = z.object({
+  pinned_at: z.string().datetime({ offset: true }).nullable().optional().catch(null),
+  pinned_by_type: z.enum(["member", "agent", "system"]).nullable().optional().catch(null),
+  pinned_by_id: z.string().uuid().nullable().optional().catch(null),
   type: z.string(),
   id: z.string(),
   actor_type: z.string(),
@@ -1277,7 +1285,7 @@ const TimelineEntrySchema = z.object({
   // comment instead of failing the whole timeline.
   deleted_at: z.string().nullable().optional().catch(undefined),
   coalesced_count: z.number().optional(),
-}).loose();
+}).loose().transform(normalizeCommentPin);
 
 // /timeline returns a flat array of TimelineEntry, oldest first. The
 // previously cursor-paginated wrapper was removed (#1929) — at observed data
@@ -1472,6 +1480,9 @@ export const EMPTY_CREATE_FEEDBACK_RESPONSE: CreateFeedbackResponse = {
 };
 
 export const CommentSchema = z.object({
+  pinned_at: z.string().datetime({ offset: true }).nullable().optional().catch(null),
+  pinned_by_type: z.enum(["member", "agent", "system"]).nullable().optional().catch(null),
+  pinned_by_id: z.string().uuid().nullable().optional().catch(null),
   id: z.string(),
   issue_id: z.string(),
   author_type: z.string(),
@@ -1493,7 +1504,7 @@ export const CommentSchema = z.object({
   // Set only on comments a quick action produced (MUL-5465). Server-only.
   quick_action_id: z.string().nullable().optional(),
   deleted_at: z.string().nullable().optional().catch(undefined),
-}).loose();
+}).loose().transform(normalizeCommentPin);
 
 export const CommentsListSchema = z.array(CommentSchema);
 

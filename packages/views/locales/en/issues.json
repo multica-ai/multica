@@ -676,6 +676,14 @@
     "environment_started": "started the environment {{name}}"
   },
   "comment": {
+    "pins": {
+      "pin": "Pin comment",
+      "unpin": "Unpin comment",
+      "jump": "Jump to comment by {{author}}",
+      "bar_label": "Pinned comments",
+      "limit": "An issue can have up to {{count}} pinned comments. Unpin one first.",
+      "error": "Could not update the pin"
+    },
     "add_reaction": "Add reaction",
     "collapse_thread": "Collapse thread",
     "expand_thread": "Expand thread",

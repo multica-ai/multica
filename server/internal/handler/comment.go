@@ -40,6 +40,9 @@ type CommentResponse struct {
 	ResolvedAt     *string `json:"resolved_at"`
 	ResolvedByType *string `json:"resolved_by_type"`
 	ResolvedByID   *string `json:"resolved_by_id"`
+	PinnedAt       *string `json:"pinned_at"`
+	PinnedByType   *string `json:"pinned_by_type"`
+	PinnedByID     *string `json:"pinned_by_id"`
 	SourceTaskID   *string `json:"source_task_id,omitempty"`
 	// DeletedAt marks a tombstone: a comment deleted while it still had
 	// replies (#8296). Its content is empty and it carries no attachments or
@@ -130,6 +133,9 @@ func commentToResponse(c db.Comment, reactions []ReactionResponse, attachments [
 		ResolvedAt:     timestampToPtr(c.ResolvedAt),
 		ResolvedByType: textToPtr(c.ResolvedByType),
 		ResolvedByID:   uuidToPtr(c.ResolvedByID),
+		PinnedAt:       timestampToPtr(c.PinnedAt),
+		PinnedByType:   textToPtr(c.PinnedByType),
+		PinnedByID:     uuidToPtr(c.PinnedByID),
 		SourceTaskID:   uuidToPtr(c.SourceTaskID),
 		DeletedAt:      timestampToPtr(c.DeletedAt),
 		QuickActionID:  uuidToPtr(c.QuickActionID),
@@ -766,10 +772,11 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 					ResolvedAt:     r.ResolvedAt,
 					ResolvedByType: r.ResolvedByType,
 					ResolvedByID:   r.ResolvedByID,
-					SourceTaskID:   r.SourceTaskID,
-					QuickActionID:  r.QuickActionID,
-					Revision:       r.Revision,
-					DeletedAt:      r.DeletedAt,
+					PinnedAt:       r.PinnedAt, PinnedByType: r.PinnedByType, PinnedByID: r.PinnedByID,
+					SourceTaskID:  r.SourceTaskID,
+					QuickActionID: r.QuickActionID,
+					Revision:      r.Revision,
+					DeletedAt:     r.DeletedAt,
 				}
 				if !r.ParentID.Valid {
 					root := c
@@ -861,10 +868,11 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 				ResolvedAt:     r.ResolvedAt,
 				ResolvedByType: r.ResolvedByType,
 				ResolvedByID:   r.ResolvedByID,
-				SourceTaskID:   r.SourceTaskID,
-				QuickActionID:  r.QuickActionID,
-				Revision:       r.Revision,
-				DeletedAt:      r.DeletedAt,
+				PinnedAt:       r.PinnedAt, PinnedByType: r.PinnedByType, PinnedByID: r.PinnedByID,
+				SourceTaskID:  r.SourceTaskID,
+				QuickActionID: r.QuickActionID,
+				Revision:      r.Revision,
+				DeletedAt:     r.DeletedAt,
 			}
 			if !r.ParentID.Valid {
 				root := c
@@ -950,10 +958,11 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 				ResolvedAt:     r.ResolvedAt,
 				ResolvedByType: r.ResolvedByType,
 				ResolvedByID:   r.ResolvedByID,
-				SourceTaskID:   r.SourceTaskID,
-				QuickActionID:  r.QuickActionID,
-				Revision:       r.Revision,
-				DeletedAt:      r.DeletedAt,
+				PinnedAt:       r.PinnedAt, PinnedByType: r.PinnedByType, PinnedByID: r.PinnedByID,
+				SourceTaskID:  r.SourceTaskID,
+				QuickActionID: r.QuickActionID,
+				Revision:      r.Revision,
+				DeletedAt:     r.DeletedAt,
 			})
 		}
 
@@ -1012,6 +1021,7 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 					Content: r.Content, Type: r.Type, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 					ParentID: r.ParentID, WorkspaceID: r.WorkspaceID, ResolvedAt: r.ResolvedAt,
 					ResolvedByType: r.ResolvedByType, ResolvedByID: r.ResolvedByID,
+					PinnedAt: r.PinnedAt, PinnedByType: r.PinnedByType, PinnedByID: r.PinnedByID,
 					SourceTaskID: r.SourceTaskID, QuickActionID: r.QuickActionID, Revision: r.Revision,
 					DeletedAt: r.DeletedAt,
 				}
@@ -1048,6 +1058,7 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 				Content: r.Content, Type: r.Type, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 				ParentID: r.ParentID, WorkspaceID: r.WorkspaceID, ResolvedAt: r.ResolvedAt,
 				ResolvedByType: r.ResolvedByType, ResolvedByID: r.ResolvedByID,
+				PinnedAt: r.PinnedAt, PinnedByType: r.PinnedByType, PinnedByID: r.PinnedByID,
 				SourceTaskID: r.SourceTaskID, QuickActionID: r.QuickActionID, Revision: r.Revision,
 				DeletedAt: r.DeletedAt,
 			}

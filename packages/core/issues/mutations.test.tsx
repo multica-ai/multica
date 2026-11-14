@@ -18,6 +18,7 @@ import {
   useDeleteComment,
   useDeleteIssue,
   useResolveComment,
+  usePinComment,
   useUpdateComment,
   useUpdateIssue,
 } from "./mutations";
@@ -1445,6 +1446,33 @@ describe("comment mutations — owner revision and last activity", () => {
     });
 
     expect(qc.getQueryData<TimelineEntry[]>(issueKeys.timeline(issueId))).toBe(before);
+    qc.clear();
+  });
+});
+
+describe("usePinComment", () => {
+  it.each([true, false])("routes pinned=%s and invalidates the timeline after the server responds", async pinned => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const pinComment = vi.fn().mockResolvedValue({ id: "c1" });
+    const unpinComment = vi.fn().mockResolvedValue({ id: "c1" });
+    setApiInstance({ pinComment, unpinComment } as unknown as ApiClient);
+    qc.setQueryData(issueKeys.timeline("issue-1"), []);
+    const { result } = renderHook(() => usePinComment("issue-1"), { wrapper: createWrapper(qc) });
+    await act(async () => { await result.current.mutateAsync({ commentId: "c1", pinned }); });
+    expect(pinned ? pinComment : unpinComment).toHaveBeenCalledWith("c1");
+    expect(pinned ? unpinComment : pinComment).not.toHaveBeenCalled();
+    expect(qc.getQueryState(issueKeys.timeline("issue-1"))?.isInvalidated).toBe(true);
+    qc.clear();
+  });
+  it("keeps cached pins intact on an error and requests reconciliation", async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    setApiInstance({ pinComment: vi.fn().mockRejectedValue(new Error("denied")) } as unknown as ApiClient);
+    const before = [{ id: "c1", pinned_at: null }];
+    qc.setQueryData(issueKeys.timeline("issue-1"), before);
+    const { result } = renderHook(() => usePinComment("issue-1"), { wrapper: createWrapper(qc) });
+    await act(async () => { await expect(result.current.mutateAsync({ commentId: "c1", pinned: true })).rejects.toThrow("denied"); });
+    expect(qc.getQueryData(issueKeys.timeline("issue-1"))).toEqual(before);
+    expect(qc.getQueryState(issueKeys.timeline("issue-1"))?.isInvalidated).toBe(true);
     qc.clear();
   });
 });

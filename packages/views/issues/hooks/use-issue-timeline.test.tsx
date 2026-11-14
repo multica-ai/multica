@@ -12,6 +12,7 @@ const stableHandles = vi.hoisted(() => ({
   updateMutateAsync: vi.fn(async () => ({})),
   deleteMutateAsync: vi.fn(async () => ({})),
   resolveMutateAsync: vi.fn(async () => ({})),
+  pinMutateAsync: vi.fn(async () => ({})),
   toggleMutate: vi.fn(),
 }));
 
@@ -20,6 +21,7 @@ const stableHandles = vi.hoisted(() => ({
 const wsHandlers = vi.hoisted(() => new Map<string, (payload: unknown) => void>());
 
 vi.mock("@multica/core/issues/mutations", () => ({
+  usePinComment: () => ({ mutateAsync: stableHandles.pinMutateAsync }),
   useCreateComment: () => ({
     mutateAsync: stableHandles.createMutateAsync,
     mutate: vi.fn(),
@@ -296,6 +298,21 @@ describe("useIssueTimeline", () => {
     });
     // setQueryData should not have been invoked for a non-matching issue.
     expect(cacheUpdates.last).toBeNull();
+  });
+
+  it.each(["comment:pinned", "comment:unpinned"])("%s patches full snapshots, ignores other issues and stale revisions", (event) => {
+    const current = { type: "comment", id: "c1", actor_type: "member", actor_id: "u", content: "latest", revision: 4, actor_name: "Former member" };
+    queryState.data = [current];
+    renderHook(() => useIssueTimeline("issue-1", "user-1"));
+    const comment = { id: "c1", issue_id: "issue-1", author_type: "member", author_id: "u", content: "latest", revision: 5, pinned_at: event === "comment:pinned" ? "2026-11-12T08:00:00Z" : null, pinned_by_type: "member", pinned_by_id: "u" };
+    act(() => wsHandlers.get(event)!({ comment: { ...comment, issue_id: "other" } }));
+    expect(cacheUpdates.last).toBeNull();
+    act(() => wsHandlers.get(event)!({ comment: { ...comment, revision: 3 } }));
+    expect(cacheUpdates.last).toEqual([current]);
+    act(() => wsHandlers.get(event)!({ comment }));
+    expect(cacheUpdates.last).toMatchObject([{ pinned_at: comment.pinned_at, revision: 5, actor_name: "Former member" }]);
+    act(() => wsHandlers.get(event)!({ comment: { ...comment, revision: undefined } }));
+    expect(cacheUpdates.invalidations).toBeGreaterThan(0);
   });
 
   it("rejects a delayed comment update older than the cached revision", () => {

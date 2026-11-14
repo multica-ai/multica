@@ -16,6 +16,8 @@ const (
 	EventCommentUpdated       = "comment:updated"
 	EventCommentDeleted       = "comment:deleted"
 	EventCommentResolved      = "comment:resolved"
+	EventCommentPinned        = "comment:pinned"
+	EventCommentUnpinned      = "comment:unpinned"
 	EventCommentUnresolved    = "comment:unresolved"
 	EventReactionAdded        = "reaction:added"
 	EventReactionRemoved      = "reaction:removed"

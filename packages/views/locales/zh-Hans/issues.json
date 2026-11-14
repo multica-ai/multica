@@ -659,6 +659,14 @@
     "environment_started": "启动了环境 {{name}}"
   },
   "comment": {
+    "pins": {
+      "pin": "置顶评论",
+      "unpin": "取消置顶",
+      "jump": "跳转到 {{author}} 的评论",
+      "bar_label": "置顶评论",
+      "limit": "每个任务最多置顶 {{count}} 条评论，请先取消一条",
+      "error": "无法更新置顶状态"
+    },
     "add_reaction": "添加表情回应",
     "collapse_thread": "收起讨论",
     "expand_thread": "展开讨论",

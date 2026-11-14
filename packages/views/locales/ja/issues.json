@@ -659,6 +659,14 @@
     "environment_started": "環境 {{name}} を起動しました"
   },
   "comment": {
+    "pins": {
+      "pin": "コメントを固定",
+      "unpin": "コメントの固定を解除",
+      "jump": "{{author}}のコメントに移動",
+      "bar_label": "固定したコメント",
+      "limit": "固定できるコメントは1件の課題につき{{count}}件までです。先にいずれかの固定を解除してください。",
+      "error": "固定状態を更新できませんでした"
+    },
     "add_reaction": "リアクションを追加",
     "collapse_thread": "スレッドを折りたたむ",
     "expand_thread": "スレッドを展開",

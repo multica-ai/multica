@@ -659,6 +659,14 @@
     "environment_started": "啟動了環境 {{name}}"
   },
   "comment": {
+    "pins": {
+      "pin": "置頂留言",
+      "unpin": "取消置頂",
+      "jump": "跳至 {{author}} 的留言",
+      "bar_label": "置頂留言",
+      "limit": "每個任務最多置頂 {{count}} 則留言，請先取消一則",
+      "error": "無法更新置頂狀態"
+    },
     "add_reaction": "新增表情回應",
     "collapse_thread": "收起討論",
     "expand_thread": "展開討論",

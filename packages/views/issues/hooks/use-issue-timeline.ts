@@ -32,6 +32,7 @@ import {
   useUpdateComment,
   useDeleteComment,
   useResolveComment,
+  usePinComment,
   useToggleCommentReaction,
   type ToggleCommentReactionVars,
 } from "@multica/core/issues/mutations";
@@ -119,6 +120,7 @@ export function useIssueTimeline(issueId: string, userId?: string, focusCommentI
   const { mutateAsync: updateComment } = useUpdateComment(issueId);
   const { mutateAsync: deleteCommentAsync } = useDeleteComment(issueId);
   const { mutateAsync: resolveCommentAsync } = useResolveComment(issueId);
+  const { mutateAsync: pinCommentAsync } = usePinComment(issueId);
   const { mutate: toggleCommentReaction } = useToggleCommentReaction(issueId);
 
   // Reconnect recovery: invalidate so the next render refetches the full
@@ -159,6 +161,15 @@ export function useIssueTimeline(issueId: string, userId?: string, focusCommentI
       [qc, issueId],
     ),
   );
+
+  useWSEvent("comment:pinned", useCallback((payload: unknown) => {
+    const { comment } = payload as CommentResolvedPayload;
+    if (comment?.issue_id === issueId) applyCommentSnapshot(qc, issueId, comment);
+  }, [qc, issueId]));
+  useWSEvent("comment:unpinned", useCallback((payload: unknown) => {
+    const { comment } = payload as CommentResolvedPayload;
+    if (comment?.issue_id === issueId) applyCommentSnapshot(qc, issueId, comment);
+  }, [qc, issueId]));
 
   // Granular handlers for comment:resolved / comment:unresolved. The payload
   // carries the full Comment with the new resolved_at/resolved_by_* fields,
@@ -523,6 +534,7 @@ export function useIssueTimeline(issueId: string, userId?: string, focusCommentI
     editComment,
     deleteComment,
     toggleResolveComment,
+    togglePinComment: pinCommentAsync,
     toggleReaction,
   };
 }

@@ -659,6 +659,14 @@
     "environment_started": "환경 {{name}}을(를) 시작했습니다"
   },
   "comment": {
+    "pins": {
+      "pin": "댓글 고정",
+      "unpin": "댓글 고정 해제",
+      "jump": "{{author}}님의 댓글로 이동",
+      "bar_label": "고정된 댓글",
+      "limit": "이슈당 댓글은 최대 {{count}}개까지 고정할 수 있습니다. 먼저 하나를 고정 해제하세요.",
+      "error": "댓글 고정 상태를 변경하지 못했습니다"
+    },
     "add_reaction": "반응 추가",
     "collapse_thread": "스레드 접기",
     "expand_thread": "스레드 펼치기",
