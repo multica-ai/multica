@@ -153,6 +153,22 @@ describe("RichTable", () => {
     expect(copyText).toHaveBeenCalledWith(table.join("\n"));
   });
 
+  it("sorts long integers in the expanded Markdown table", async () => {
+    render(<RichContent content={[
+      "| Value |", "| --- |", "| 9007199254740993 |", "| 9007199254740992 |",
+      "| -9007199254740992 |", "| -9007199254740993 |",
+    ].join("\n")} />);
+    await userEvent.click(screen.getByRole("button", { name: "Expand table" }));
+    const dialog = await screen.findByRole("dialog");
+    const values = () => within(dialog).getAllByRole("row").slice(1)
+      .map((row) => within(row).getAllByRole("cell")[1]?.textContent);
+
+    await userEvent.click(within(dialog).getByRole("button", { name: "Value" }));
+    expect(values()).toEqual(["-9007199254740993", "-9007199254740992", "9007199254740992", "9007199254740993"]);
+    await userEvent.click(within(dialog).getByRole("button", { name: "Value" }));
+    expect(values()).toEqual(["9007199254740993", "9007199254740992", "-9007199254740992", "-9007199254740993"]);
+  });
+
   it("expands into a sortable, filterable view of the same cells", async () => {
     renderTable();
     await userEvent.click(screen.getByRole("button", { name: "Expand table" }));
