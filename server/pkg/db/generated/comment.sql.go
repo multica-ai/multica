@@ -427,6 +427,82 @@ func (q *Queries) GetComment(ctx context.Context, id pgtype.UUID) (Comment, erro
 	return i, err
 }
 
+const getCommentBySourceTaskAndContent = `-- name: GetCommentBySourceTaskAndContent :one
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision, recovery_settled_at, deleted_at, suppressed_agent_ids FROM comment
+WHERE issue_id = $1
+  AND workspace_id = $2
+  AND source_task_id = $3
+  AND author_type = $4
+  AND content = $5
+  AND type = $6
+  AND parent_id IS NOT DISTINCT FROM $7
+  AND deleted_at IS NULL
+ORDER BY created_at ASC, id ASC
+LIMIT 1
+`
+
+type GetCommentBySourceTaskAndContentParams struct {
+	IssueID      pgtype.UUID `json:"issue_id"`
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+	SourceTaskID pgtype.UUID `json:"source_task_id"`
+	AuthorType   string      `json:"author_type"`
+	Content      string      `json:"content"`
+	Type         string      `json:"type"`
+	ParentID     pgtype.UUID `json:"parent_id"`
+}
+
+// Duplicate guard for agent-authored comments: one run posting the same body
+// twice on the same issue is a re-send, not a second comment. A run has no
+// legitimate reason to post byte-identical content twice on one issue, so
+// (issue, source task, content) is a durable idempotency key that needs no new
+// column, no API contract change, and no new index — idx_comment_issue already
+// serves the issue_id predicate, and the source_task_id equality keeps the
+// scanned set to the handful of comments one run wrote here.
+//
+// Deliberately NOT keyed on an Idempotency-Key header: Request.isReplayable
+// treats the presence of that header as a license for net/http to transparently
+// retry a POST on a reused dead connection, so adding it to make duplicates
+// detectable would also make them likelier. Content equality is checked in SQL
+// rather than Go so the comparison happens where the rows already are.
+//
+// parent_id is part of the key: the same text posted top-level and as a reply
+// are different placements, and only a re-send repeats both.
+func (q *Queries) GetCommentBySourceTaskAndContent(ctx context.Context, arg GetCommentBySourceTaskAndContentParams) (Comment, error) {
+	row := q.db.QueryRow(ctx, getCommentBySourceTaskAndContent,
+		arg.IssueID,
+		arg.WorkspaceID,
+		arg.SourceTaskID,
+		arg.AuthorType,
+		arg.Content,
+		arg.Type,
+		arg.ParentID,
+	)
+	var i Comment
+	err := row.Scan(
+		&i.ID,
+		&i.IssueID,
+		&i.AuthorType,
+		&i.AuthorID,
+		&i.Content,
+		&i.Type,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ParentID,
+		&i.WorkspaceID,
+		&i.ResolvedAt,
+		&i.ResolvedByType,
+		&i.ResolvedByID,
+		&i.SourceTaskID,
+		&i.QuickActionID,
+		&i.ViaPluginID,
+		&i.Revision,
+		&i.RecoverySettledAt,
+		&i.DeletedAt,
+		&i.SuppressedAgentIds,
+	)
+	return i, err
+}
+
 const getCommentInWorkspace = `-- name: GetCommentInWorkspace :one
 SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision, recovery_settled_at, deleted_at, suppressed_agent_ids FROM comment
 WHERE id = $1 AND workspace_id = $2
