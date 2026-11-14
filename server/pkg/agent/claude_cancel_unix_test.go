@@ -170,8 +170,8 @@ done
 // stopped after the grace period: the run fails with the result's error
 // instead of hanging until the background task ends.
 func TestClaudeErrorResultTerminatesLingeringProcess(t *testing.T) {
-	claudeErrorResultGraceNanos.Store(int64(200 * time.Millisecond))
-	t.Cleanup(func() { claudeErrorResultGraceNanos.Store(0) })
+	claudeResultExitGraceNanos.Store(int64(200 * time.Millisecond))
+	t.Cleanup(func() { claudeResultExitGraceNanos.Store(0) })
 
 	tempDir := t.TempDir()
 	pidFile := filepath.Join(tempDir, "pids")
