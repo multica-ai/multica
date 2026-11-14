@@ -486,6 +486,39 @@ describe("theme check with a backdrop", () => {
     expect(report.issues.filter((i) => i.message.startsWith("Contrast not checked"))).toEqual([]);
   });
 
+  it("keeps the opaque colour for variables on <html> that read a glass surface", () => {
+    const report = checkBackdrop(`.theme-light {
+  --backdrop: #ffffff;
+  --backdrop-color: #ffffff;
+  --app-shell: #000000;
+  --frame-glass-opacity: 0%;
+  --glass-opacity: 90%;
+  --button-primary: #000000;
+  --button-primary-foreground: var(--app-shell);
+}`);
+    expect(report.ok).toBe(false);
+    expect(pair(report, "light", "--button-primary-foreground", "--button-primary")).toMatchObject({ ratio: 1 });
+    expect(report.issues).toEqual([
+      { level: "error", message: "Contrast, light mode: --button-primary-foreground is below 4.5:1 on --button-primary (1.00:1)." },
+    ]);
+  });
+
+  it("measures an alias of a glass surface, and portals, on the opaque colour", () => {
+    const report = checkBackdrop(
+      ".theme-light { --backdrop: url(sky.svg); --backdrop-color: #000000; --page-canvas: #ffffff; --background: #ffffff; --surface: var(--page-canvas); --tooltip: var(--background); --tooltip-foreground: #000000; --glass-opacity: 50%; }",
+    );
+    const foreground = resolveColor(base.light, "--foreground");
+    if (!("color" in foreground)) throw new Error("tokens.css has no light --foreground");
+    const white = { r: 255, g: 255, b: 255, a: 1 };
+    const opaque = Math.round(contrastRatio(foreground.color, white) * 100) / 100;
+    expect(pair(report, "light", "--foreground", "--surface")).toMatchObject({ ratio: opaque });
+    expect(pair(report, "light", "--foreground", "--surface")?.glass).toBeUndefined();
+    expect(pair(report, "light", "--foreground", "--page-canvas")?.ratio).toBeLessThan(opaque);
+    const tooltip = report.contrast.find((c) => c.mode === "light" && c.area === "tooltip" && !c.variant);
+    expect(tooltip?.glass).toBeUndefined();
+    expect(tooltip).toMatchObject({ foreground: "--tooltip-foreground", ratio: 21 });
+  });
+
   it("names the glass when text fails on it", () => {
     const found = checkBackdrop(".theme-light { --backdrop: url(sky.svg); --backdrop-color: #101010; --frame-glass-opacity: 0%; }")
       .issues.filter((i) => i.level === "error")

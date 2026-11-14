@@ -289,8 +289,6 @@ class ScopePalette extends ReadTracker {
   }
 }
 
-const rgb = ({ r, g, b }: Rgba) => `rgb(${r} ${g} ${b})`;
-
 /** A percentage, following var() chains, as 0–1; null when it is not one. */
 function resolveShare(palette: Map<string, string>, name: string, fallback: string): number | null {
   let value = palette.get(name) ?? fallback;
@@ -311,7 +309,7 @@ function resolveShare(palette: Map<string, string>, name: string, fallback: stri
 const GLASS_SURFACES = ["--app-shell", "--page-canvas", "--background"] as const;
 
 type GlassResult =
-  | { glass: Set<string>; solid: boolean }
+  | { fills: Map<string, Rgba>; solid: boolean }
   | { error: string }
   | { unresolved: string }
   | null;
@@ -320,10 +318,12 @@ type GlassResult =
  * With a backdrop the frame and the page are glass, the way appearance.css
  * paints them: the frame is --app-shell at --frame-glass-opacity over
  * --backdrop-color, and the page's colours sit at --glass-opacity over the
- * frame. Writes those mixes into the palette, so every pair on them is
- * measured on what the app paints. Null without a backdrop.
+ * frame. Returns those mixes by surface. They replace the three variables
+ * only inside the frame: a variable on <html> that reads one of them, and
+ * everything in a portal, still sees the opaque value, so the palette keeps
+ * it. Null without a backdrop.
  */
-function applyGlass(palette: Map<string, string>): GlassResult {
+function glassFills(palette: Map<string, string>): GlassResult {
   const backdrop = palette.get("--backdrop")?.trim();
   if (!backdrop || backdrop === "none") return null;
   if (!palette.has("--backdrop-color")) {
@@ -349,10 +349,12 @@ function applyGlass(palette: Map<string, string>): GlassResult {
   }
   const glassOver = (color: Rgba, share: number, bottom: Rgba) => paintOver({ ...color, a: color.a * share }, bottom);
   const frame = glassOver(colors.get("--app-shell")!, frameShare, under.color);
-  palette.set("--app-shell", rgb(frame));
-  palette.set("--page-canvas", rgb(glassOver(colors.get("--page-canvas")!, pageShare, frame)));
-  palette.set("--background", rgb(glassOver(colors.get("--background")!, pageShare, frame)));
-  return { glass: new Set(GLASS_SURFACES), solid: frameShare === 1 && pageShare === 1 };
+  const fills = new Map<string, Rgba>([
+    ["--app-shell", frame],
+    ["--page-canvas", glassOver(colors.get("--page-canvas")!, pageShare, frame)],
+    ["--background", glassOver(colors.get("--background")!, pageShare, frame)],
+  ]);
+  return { fills, solid: frameShare === 1 && pageShare === 1 };
 }
 
 /** Declarations by name, the most specific winning and, at equal specificity, the later one. */
@@ -557,8 +559,13 @@ function measureContrast(
   for (const m of ["light", "dark"] as const) {
     // Option values are written after the theme as `:root.theme-<mode>`, so they win.
     const palette = new ReadTracker(read, [...cascadeValues(cascade[m]), ...Object.entries(options[m])]);
-    const glassed = applyGlass(palette);
-    const glass = glassed && "glass" in glassed ? glassed.glass : new Set<string>();
+    const glassed = glassFills(palette);
+    const fills = glassed && "fills" in glassed ? glassed.fills : new Map<string, Rgba>();
+    /** A surface as painted: the glass mix when it is a glass surface in the frame, holding the theme's own colour. */
+    const paint = (surface: Map<string, string>, name: string, inFrame: boolean): ReturnType<typeof resolveColor> => {
+      const fill = inFrame ? fills.get(name) : undefined;
+      return fill && surface.get(name) === palette.get(name) ? { color: fill } : resolveColor(surface, name);
+    };
     if (glassed && "error" in glassed) backdrop.set(`Backdrop, ${m} mode: ${glassed.error}`, "error");
     if (glassed && "unresolved" in glassed) unresolved.add(`${m}: the backdrop's glass, because ${glassed.unresolved}`);
     if (glassed && "solid" in glassed && glassed.solid) {
@@ -573,8 +580,16 @@ function measureContrast(
       foreground: string,
       backgrounds: readonly string[],
       required: number,
-      /** Where the backgrounds are resolved, when not where the text is; and what a translucent one sits on. */
-      { surface = p, under, defaulted }: { surface?: Map<string, string>; under?: string; defaulted?: boolean } = {},
+      /**
+       * Where the backgrounds are resolved, when not where the text is; what a
+       * translucent one sits on; and whether it is outside the frame, in a portal.
+       */
+      {
+        surface = p,
+        under,
+        defaulted,
+        portal = false,
+      }: { surface?: Map<string, string>; under?: string; defaulted?: boolean; portal?: boolean } = {},
     ) => {
       const fg = resolveColor(p, foreground);
       if ("unresolved" in fg) {
@@ -582,14 +597,14 @@ function measureContrast(
         return;
       }
       for (const background of backgrounds) {
-        const bg = resolveColor(surface, background);
+        const bg = paint(surface, background, !portal);
         if ("unresolved" in bg) {
           unresolved.add(`${m}: ${bg.unresolved}`);
           continue;
         }
         let fill: Rgba = bg.color;
         if (fill.a < 1 && under) {
-          const floor = resolveColor(surface, under);
+          const floor = paint(surface, under, !portal);
           if ("color" in floor && floor.color.a === 1) fill = paintOver(fill, floor.color);
         }
         if (fill.a < 1) {
@@ -606,7 +621,7 @@ function measureContrast(
           required,
           ...(variant ? { variant } : {}),
           ...(defaulted ? { defaulted } : {}),
-          ...(glass.has(background) && surface.get(background) === palette.get(background) ? { glass: true } : {}),
+          ...(!portal && fills.has(background) && surface.get(background) === palette.get(background) ? { glass: true } : {}),
         });
       }
     };
@@ -620,7 +635,7 @@ function measureContrast(
       else {
         // The default hover is --sidebar-accent at 60% over the shell.
         const accent = resolveColor(p, "--sidebar-accent");
-        const shell = resolveColor(p, "--app-shell");
+        const shell = paint(p, "--app-shell", true);
         if ("color" in accent && "color" in shell && shell.color.a === 1) {
           const { r, g, b } = paintOver({ ...accent.color, a: accent.color.a * 0.6 }, shell.color);
           p.set("--rail-item-hover-background", `rgb(${r} ${g} ${b})`);
@@ -667,7 +682,7 @@ function measureContrast(
     // --tooltip-foreground. Its fill is resolved outside, in the page's mode.
     const tooltip = new ScopePalette(read, palette, cascadeValues(slots["tooltip-content"][m]));
     const tipText = tooltip.has("--tooltip-foreground") ? "--tooltip-foreground" : "--foreground";
-    measure("tooltip", tooltip, tipText, ["--tooltip"], TEXT, { surface: palette });
+    measure("tooltip", tooltip, tipText, ["--tooltip"], TEXT, { surface: palette, portal: true });
 
     // Display chips sit in popovers; pressed, they fill with
     // --display-chip-pressed-background, which defaults to --input (translucent
@@ -675,7 +690,7 @@ function measureContrast(
     const popover = new ScopePalette(read, palette, cascadeValues(slots["popover-content"][m]));
     const chipText = popover.has("--display-chip-pressed-color") ? "--display-chip-pressed-color" : "--foreground";
     const chipFill = popover.has("--display-chip-pressed-background") ? "--display-chip-pressed-background" : "--input";
-    measure("display chip", popover, chipText, [chipFill], TEXT, { under: "--surface-raised" });
+    measure("display chip", popover, chipText, [chipFill], TEXT, { under: "--surface-raised", portal: true });
 
     // A label paints its slot's colour behind --label-chip-color. When that is
     // unset the app picks dark or light text by the colour as picked, and every

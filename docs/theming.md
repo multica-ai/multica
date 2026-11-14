@@ -231,7 +231,10 @@ set the glass directly: an option with the id `glass-opacity` sets
 
 `theme:check` measures text over glass: the frame's text on `--app-shell` at
 `--frame-glass-opacity` over `--backdrop-color`, and the page's on
-`--page-canvas` at `--glass-opacity` over it. A backdrop without a solid
+`--page-canvas` at `--glass-opacity` over it. A variable that reads one of
+these colours, such as `--surface: var(--page-canvas)`, keeps the opaque
+colour, as it does in the app, and so does everything in dialogs, menus and
+tooltips, which sit outside the frame. A backdrop without a solid
 `--backdrop-color` is an error. The colour is a stand-in for the picture,
 so look at the brightest and darkest parts of the backdrop too, and raise
 the glass opacity or blur where the text gets hard to read.
