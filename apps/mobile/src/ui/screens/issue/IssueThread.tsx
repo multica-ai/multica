@@ -146,13 +146,13 @@ function Files({ files }: { files: readonly FileModel[] }) {
   );
 }
 
-function Comment({ comment, reply, onMenu, handlers }: { comment: CommentModel; reply: boolean; onMenu: () => void; handlers: CommentHandlers }) {
+function Comment({ comment, onMenu, handlers }: { comment: CommentModel; onMenu: () => void; handlers: CommentHandlers }) {
   const strings = useStrings();
   const palette = useTheme();
   return (
     <Pressable accessible={false} onLongPress={onMenu} delayLongPress={300} style={styles.commentBody}>
       <View style={styles.commentHead}>
-        <Avatar actor={comment.actor} size={reply ? 18 : 20} />
+        <Avatar actor={comment.actor} size={20} />
         <Txt variant="metaStrong" numberOfLines={1} style={styles.flexShrink}>
           {comment.actor.name}
         </Txt>
@@ -245,10 +245,10 @@ export function Thread({ thread, handlers }: { thread: Extract<TimelineModel, { 
 
   return (
     <View style={[styles.card, { backgroundColor: palette.grouped }]}>
-      <Comment comment={thread.root} reply={false} handlers={handlers} onMenu={() => void menu(thread.root, context)} />
+      <Comment comment={thread.root} handlers={handlers} onMenu={() => void menu(thread.root, context)} />
       {thread.replies.map((reply) => (
         <View key={reply.id} style={[styles.divider, { borderTopColor: palette.separator }]}>
-          <Comment comment={reply} reply handlers={handlers} onMenu={() => void menu(reply, context)} />
+          <Comment comment={reply} handlers={handlers} onMenu={() => void menu(reply, context)} />
         </View>
       ))}
       {thread.run ? <RunBlock run={thread.run} onStop={handlers.onStop} inline /> : null}
@@ -278,7 +278,7 @@ const styles = StyleSheet.create({
   collapsed: { flexDirection: "row", alignItems: "center", gap: 8, paddingBottom: 12 },
   commentBody: { gap: 8, paddingBottom: 8 },
   runInline: { paddingBottom: 8 },
-  divider: { borderTopWidth: StyleSheet.hairlineWidth, marginLeft: 26, paddingTop: 10 },
+  divider: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 10 },
   commentHead: { flexDirection: "row", alignItems: "center", gap: 8 },
   reactions: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
   reaction: { height: 28, borderRadius: 14, borderWidth: 1, flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 9 },
