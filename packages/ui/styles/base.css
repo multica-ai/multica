@@ -452,6 +452,15 @@ html[data-sidebar-resizing="true"] {
   margin-top: 2.5px;
 }
 
+/* Sonner's phone layout sizes a toast with the left offset on both sides.
+   The offsets carry the safe-area insets (components/ui/sonner.tsx), which
+   differ left and right on iPhone Duo, so each side takes its own. */
+@media (max-width: 600px) {
+  [data-mc="toaster"] [data-sonner-toaster] [data-sonner-toast] {
+    width: calc(100% - var(--mobile-offset-left) - var(--mobile-offset-right));
+  }
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

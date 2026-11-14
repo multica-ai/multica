@@ -54,7 +54,14 @@ export function DashboardLayout({
           </div>
         }
       >
-        <SidebarProvider className="h-svh bg-app-shell [--sidebar-wrapper-fill:var(--app-shell)]">
+        {/* Fills the screen with its content inside the safe area, so the
+            strips match what borders them: the card below `md`, where it is
+            the whole window, the app shell from `md` up. `data-app-shell`
+            lifts the body's side insets (apps/web/app/globals.css). */}
+        <SidebarProvider
+          data-app-shell=""
+          className="h-svh bg-page-canvas pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] [--sidebar-wrapper-fill:var(--page-canvas)] md:bg-app-shell md:[--sidebar-wrapper-fill:var(--app-shell)]"
+        >
           <AppShellProvider>
             <ShellRouteDataPrefetch>
               <GlobalShortcuts />

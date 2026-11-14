@@ -76,3 +76,21 @@ html[lang="zh-TW"] {
     "Microsoft YaHei", "Noto Sans CJK SC", "Apple SD Gothic Neo", "Malgun Gothic",
     "Noto Sans CJK KR", sans-serif;
 }
+
+/* Safe area. viewport-fit=cover (app/layout.tsx) lets the page reach under
+   the camera and rounded corners, so every page keeps its content clear of
+   the left and right insets here. Top and bottom are left to whatever is
+   pinned to those edges: centred pages never reach them, and shrinking the
+   body would clip the `h-svh` layouts inside it. The app shell insets all
+   four sides itself, painting the strips in its own colours. Each side reads
+   its own inset: on iPhone Duo the camera reserves only one of them. */
+@layer base {
+  body {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+  body:has([data-app-shell]) {
+    padding-left: 0;
+    padding-right: 0;
+  }
+}
