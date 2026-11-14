@@ -7,7 +7,14 @@
 import { availableParallelism } from "os";
 import { createRequire } from "module";
 import { join } from "path";
-import { recognizerConfig, type LoadSpec, type WorkerRequest, type WorkerResponse } from "./worker-protocol";
+import {
+  joinTranscripts,
+  recognizerConfig,
+  splitAtPauses,
+  type LoadSpec,
+  type WorkerRequest,
+  type WorkerResponse,
+} from "./worker-protocol";
 
 interface SherpaAddon {
   createOfflineRecognizer(config: Record<string, unknown>): unknown;
@@ -31,14 +38,21 @@ function recognizerFor(spec: LoadSpec): unknown {
   return loaded.recognizer;
 }
 
+function decode(recognizer: unknown, samples: Float32Array, sampleRate: number): string {
+  const stream = addon!.createOfflineStream(recognizer);
+  addon!.acceptWaveformOffline(stream, { samples, sampleRate });
+  addon!.decodeOfflineStream(recognizer, stream);
+  const result = JSON.parse(addon!.getOfflineStreamResultAsJson(stream)) as { text?: unknown };
+  return typeof result.text === "string" ? result.text : "";
+}
+
 function handle(request: WorkerRequest): WorkerResponse {
   const recognizer = recognizerFor(request.spec);
   if (request.type === "load") return { id: request.id, ok: true };
-  const stream = addon!.createOfflineStream(recognizer);
-  addon!.acceptWaveformOffline(stream, { samples: request.samples, sampleRate: request.sampleRate });
-  addon!.decodeOfflineStream(recognizer, stream);
-  const result = JSON.parse(addon!.getOfflineStreamResultAsJson(stream)) as { text?: unknown };
-  return { id: request.id, ok: true, text: typeof result.text === "string" ? result.text : "" };
+  const parts = splitAtPauses(request.samples, request.sampleRate).map((segment) =>
+    decode(recognizer, segment, request.sampleRate),
+  );
+  return { id: request.id, ok: true, text: joinTranscripts(parts) };
 }
 
 process.parentPort.on("message", (event) => {

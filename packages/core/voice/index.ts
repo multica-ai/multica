@@ -9,6 +9,7 @@ export {
   type VoiceSettings,
 } from "./store";
 export { applyVocabulary, dictationSeparator, removeSpokenFillers } from "./text";
+export { MAX_VOICE_HOTWORDS, setVoiceContextWords, voiceHotwords } from "./hotwords";
 export {
   pickVoiceModel,
   useVoiceModelsStore,
@@ -31,6 +32,7 @@ export {
   useVoiceMeter,
   useVoiceState,
   type VoiceClip,
+  type VoiceDecodeOptions,
   type VoiceErrorKind,
   type VoiceMeter,
   type VoiceRecorder,

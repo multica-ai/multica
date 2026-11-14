@@ -29,6 +29,8 @@ export interface VoiceModelInfo {
   languages: string[];
   /** The model takes a spoken-language hint; others always detect. */
   languageHint: boolean;
+  /** What the model is best at, shown as a badge. */
+  highlight?: "accurate" | "fast";
   sizeBytes: number;
   status: VoiceModelStatus;
   /** Bytes on disk so far while downloading. */
@@ -47,6 +49,8 @@ export interface VoiceModelRequest {
   modelId: string;
   /** A VOICE_LANGUAGES value; ignored by models without a language hint. */
   language: string;
+  /** Names and terms to favour; ignored by models without hotword support. */
+  hotwords?: string[];
 }
 
 export interface VoiceTranscribeRequest extends VoiceModelRequest {

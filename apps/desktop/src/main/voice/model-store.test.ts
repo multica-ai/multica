@@ -12,6 +12,7 @@ const encoder = new TextEncoder();
 const FILES: Record<string, Uint8Array> = {
   "model.onnx": encoder.encode("weights ".repeat(4000)),
   "tokens.txt": encoder.encode("a b c"),
+  "tokenizer/vocab.json": encoder.encode('{"a":1}'),
 };
 
 function sha256(data: Uint8Array) {
@@ -27,6 +28,7 @@ const MODEL: CatalogModel = {
   revision: "rev1",
   languages: ["en"],
   languageHint: false,
+  hotwords: false,
   recognizer: "sense-voice",
   files: Object.entries(FILES).map(([name, data]) => ({ name, size: data.byteLength, sha256: sha256(data) })),
 };
@@ -41,7 +43,7 @@ function server(options: { failHosts?: string[]; failAfter?: number; corrupt?: s
     requests.push({ url, range: init.headers.Range });
     const host = new URL(url).host;
     if (options.failHosts?.includes(host)) return new Response("down", { status: 503 });
-    const name = url.split("/").pop()!;
+    const name = url.split("/resolve/rev1/")[1]!;
     let data = FILES[name]!;
     if (options.corrupt === name) data = encoder.encode("x".repeat(data.byteLength));
     const start = init.headers.Range ? Number(/bytes=(\d+)-/.exec(init.headers.Range)![1]) : 0;
@@ -89,16 +91,18 @@ describe("ModelStore", () => {
     const { fetch, requests } = server();
     const models = store(fetch);
     await models.init();
-    expect(models.list()[0]).toMatchObject({ status: "absent", sizeBytes: 32005 });
+    expect(models.list()[0]).toMatchObject({ status: "absent", sizeBytes: 32012 });
 
     await models.download("tiny");
     expect(models.isReady("tiny")).toBe(true);
     expect(models.list()[0]).toMatchObject({ status: "ready" });
     expect(await readFile(join(root, "tiny", "tokens.txt"), "utf8")).toBe("a b c");
+    expect(await readFile(join(root, "tiny", "tokenizer", "vocab.json"), "utf8")).toBe('{"a":1}');
     expect(existsSync(join(root, ".partial", "tiny"))).toBe(false);
     expect(requests.map((r) => r.url)).toEqual([
       "https://primary.test/org/tiny/resolve/rev1/model.onnx",
       "https://primary.test/org/tiny/resolve/rev1/tokens.txt",
+      "https://primary.test/org/tiny/resolve/rev1/tokenizer/vocab.json",
     ]);
 
     const reopened = store(fetch);
@@ -111,7 +115,7 @@ describe("ModelStore", () => {
     const models = store(fetch);
     await models.download("tiny");
     expect(models.isReady("tiny")).toBe(true);
-    expect(requests.filter((r) => r.url.startsWith("https://mirror.test"))).toHaveLength(2);
+    expect(requests.filter((r) => r.url.startsWith("https://mirror.test"))).toHaveLength(3);
   });
 
   it("resumes a cut-off download with a Range request", async () => {

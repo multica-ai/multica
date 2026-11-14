@@ -7,6 +7,7 @@ import { useEffect } from "react";
 import {
   connectVoiceRuntime,
   useVoiceModelsStore,
+  type VoiceDecodeOptions,
   type VoiceModel,
   type VoiceModels,
   type VoiceRuntime,
@@ -32,12 +33,16 @@ async function decodeClip(clip: Blob): Promise<Float32Array> {
 function desktopVoiceRuntime(): VoiceRuntime | null {
   const api = localVoiceAPI();
   if (!api) return null;
-  const request = (model: VoiceModel, language: string) => ({ modelId: model.id, language });
+  const request = (model: VoiceModel, { language, hotwords }: VoiceDecodeOptions) => ({
+    modelId: model.id,
+    language,
+    hotwords,
+  });
   return {
     record: (onMeter, onLimit) => new Recording(onMeter, onLimit),
-    prepare: (model, language) => api.prepare(request(model, language)),
-    transcribe: async (clip, model, language) =>
-      api.transcribe({ ...request(model, language), samples: await decodeClip(clip) }),
+    prepare: (model, options) => api.prepare(request(model, options)),
+    transcribe: async (clip, model, options) =>
+      api.transcribe({ ...request(model, options), samples: await decodeClip(clip) }),
     watchModels: (onChange) => {
       let changed = false;
       api.onModelsChanged((models) => {

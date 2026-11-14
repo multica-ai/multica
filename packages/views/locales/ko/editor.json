@@ -204,6 +204,8 @@
       "more_languages": "그 외 {{more}}개 언어",
       "in_use": "사용 중",
       "recommended": "추천",
+      "most_accurate": "가장 정확함",
+      "fastest": "가장 빠름",
       "by": "제공: {{author}}",
       "license": "라이선스",
       "downloading": "다운로드 중 {{percent}}%",

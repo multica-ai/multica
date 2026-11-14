@@ -14,7 +14,7 @@ import {
 const MAX_RECORDING_MS = 120_000;
 /** Shorter clips, or clips that never rise above the noise floor, are not sent. */
 const MIN_RECORDING_MS = 400;
-const SPEECH_LEVEL = 0.06;
+const SPEECH_LEVEL = 0.04;
 /** Enough history to fill a full-width strip at the waveform's 5 px pitch. */
 const LEVEL_HISTORY = 288;
 export const METER_INTERVAL_MS = 50;
@@ -39,7 +39,9 @@ function failureOf(err: unknown): VoiceRecorderFailure {
 }
 
 async function openMicrophone(deviceId: string | null): Promise<MediaStream> {
-  const base = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+  // Noise suppression and gain control are tuned for calls; they smear
+  // consonants and pump the level, which costs recognition accuracy.
+  const base = { echoCancellation: true, noiseSuppression: false, autoGainControl: false };
   if (deviceId) {
     try {
       return await navigator.mediaDevices.getUserMedia({ audio: { ...base, deviceId: { exact: deviceId } } });

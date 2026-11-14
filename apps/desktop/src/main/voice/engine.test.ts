@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { VoiceEngine, type WorkerProcess } from "./engine";
 import type { LoadSpec, WorkerRequest } from "./worker-protocol";
 
-const SPEC: LoadSpec = { key: "m@1:auto", recognizer: "sense-voice", dir: "/models/m", language: "auto" };
+const SPEC: LoadSpec = { key: "m@1:auto:", recognizer: "sense-voice", dir: "/models/m", language: "auto", hotwords: "" };
 
 class FakeWorker extends EventEmitter implements WorkerProcess {
   sent: WorkerRequest[] = [];

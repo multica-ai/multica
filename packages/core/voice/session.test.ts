@@ -2,6 +2,7 @@
  * @vitest-environment jsdom
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { setVoiceContextWords } from "./hotwords";
 import { useVoiceModelsStore, type VoiceModel, type VoiceModels } from "./models";
 import {
   cancelVoice,
@@ -109,7 +110,7 @@ describe("voice session", () => {
     await untilPhase("recording");
     expect(getVoiceState()).toMatchObject({ targetId: "chat", mode: "strip" });
     expect(chat.activate).toHaveBeenCalled();
-    expect(engine.prepare).toHaveBeenCalledWith(MODEL, "auto");
+    expect(engine.prepare).toHaveBeenCalledWith(MODEL, { language: "auto", hotwords: [] });
 
     pressVoice("chat");
     await untilPhase("idle");
@@ -309,5 +310,20 @@ describe("voice session", () => {
     pressVoice("chat");
     await untilPhase("idle");
     expect(chat.inserted).toEqual(["assign it to Lambda"]);
+  });
+
+  it("offers vocabulary and workspace names to the model as hotwords", async () => {
+    useVoiceSettingsStore.getState().update({ vocabulary: ["Multica"], language: "zh" });
+    setVoiceContextWords(["Lambda", "multica", "Jiayuan"]);
+    target("chat");
+    pressVoice("chat");
+    releaseVoice();
+    await untilPhase("recording");
+    pressVoice("chat");
+    await untilPhase("idle");
+    const options = { language: "zh", hotwords: ["Multica", "Lambda", "Jiayuan"] };
+    expect(engine.prepare).toHaveBeenCalledWith(MODEL, options);
+    expect(engine.transcribe).toHaveBeenCalledWith(expect.any(Blob), MODEL, options);
+    setVoiceContextWords([]);
   });
 });

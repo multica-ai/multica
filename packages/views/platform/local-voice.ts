@@ -5,6 +5,7 @@ import type { VoiceModels, VoiceTranscription } from "@multica/core/voice";
 export interface LocalVoiceRequest {
   modelId: string;
   language: string;
+  hotwords: string[];
 }
 
 export interface LocalVoiceAPI {

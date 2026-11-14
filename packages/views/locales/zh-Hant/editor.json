@@ -204,6 +204,8 @@
       "more_languages": "其他 {{more}} 種語言",
       "in_use": "使用中",
       "recommended": "推薦",
+      "most_accurate": "最準確",
+      "fastest": "最快",
       "by": "來自 {{author}}",
       "license": "授權條款",
       "downloading": "正在下載，{{percent}}%",

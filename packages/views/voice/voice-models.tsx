@@ -82,6 +82,13 @@ function ModelRow({
           {model.name}
           {active && <Badge variant="secondary">{t(($) => $.voice.models.in_use)}</Badge>}
           {recommended && !active && <Badge variant="outline">{t(($) => $.voice.models.recommended)}</Badge>}
+          {model.highlight && (
+            <Badge variant="outline">
+              {model.highlight === "accurate"
+                ? t(($) => $.voice.models.most_accurate)
+                : t(($) => $.voice.models.fastest)}
+            </Badge>
+          )}
         </div>
         <div className="mt-0.5 text-caption leading-5 text-muted-foreground">
           {languages} · <span className="whitespace-nowrap">{formatBytes(model.sizeBytes)}</span>
@@ -156,7 +163,7 @@ export function VoiceModelRows({
   const locale = useLocale();
   if (!snapshot) return null;
   const active = pickVoiceModel(snapshot, preferred);
-  const recommended = active ? undefined : recommendedModel(snapshot.models, locale);
+  const recommended = recommendedModel(snapshot.models, locale);
   return (
     <>
       {snapshot.models.map((model) => (

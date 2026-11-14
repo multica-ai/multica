@@ -216,6 +216,8 @@
       "more_languages": "ещё {{more}}",
       "in_use": "Используется",
       "recommended": "Рекомендуется",
+      "most_accurate": "Самая точная",
+      "fastest": "Самая быстрая",
       "by": "Автор: {{author}}",
       "license": "Лицензия",
       "downloading": "Загрузка, {{percent}}%",

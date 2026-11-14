@@ -17,6 +17,7 @@ import { create } from "zustand";
 import { getShortcut } from "../shortcuts/store";
 import { shortcutMatchesEvent } from "../shortcuts/definitions";
 import { activeVoiceModel, useVoiceModelsStore, type VoiceModel, type VoiceModels, type VoiceTranscription } from "./models";
+import { voiceHotwords } from "./hotwords";
 import { useVoiceSettingsStore } from "./store";
 import { applyVocabulary, removeSpokenFillers } from "./text";
 
@@ -48,12 +49,19 @@ export interface VoiceRecorder {
   discard: () => void;
 }
 
+export interface VoiceDecodeOptions {
+  /** A VOICE_LANGUAGES value. */
+  language: string;
+  /** Names and terms to favour, for models that take them. */
+  hotwords: string[];
+}
+
 export interface VoiceRuntime {
   /** `onLimit` fires when the recording hits its length cap. */
   record: (onMeter: (meter: VoiceMeter) => void, onLimit: () => void) => VoiceRecorder;
   /** Load the model while the user is still talking. */
-  prepare: (model: VoiceModel, language: string) => void;
-  transcribe: (clip: Blob, model: VoiceModel, language: string) => Promise<VoiceTranscription>;
+  prepare: (model: VoiceModel, options: VoiceDecodeOptions) => void;
+  transcribe: (clip: Blob, model: VoiceModel, options: VoiceDecodeOptions) => Promise<VoiceTranscription>;
   /** Report the model list now and whenever it changes. */
   watchModels: (onChange: (models: VoiceModels) => void) => void;
 }
@@ -147,6 +155,11 @@ function isCapturing() {
   return phase === "requesting" || phase === "recording";
 }
 
+function decodeOptions(): VoiceDecodeOptions {
+  const { language, vocabulary } = useVoiceSettingsStore.getState();
+  return { language, hotwords: voiceHotwords(vocabulary) };
+}
+
 function clearHold() {
   held = false;
   heldByKey = false;
@@ -163,7 +176,7 @@ function begin(targetId: string, mode: VoiceMode) {
     return;
   }
   target.activate?.();
-  runtime.prepare(model, useVoiceSettingsStore.getState().language);
+  runtime.prepare(model, decodeOptions());
   const token = ++session;
   recording?.discard();
   lastClip = null;
@@ -228,7 +241,7 @@ async function transcribe(token: number) {
     return;
   }
   const settings = useVoiceSettingsStore.getState();
-  const result = await runtime.transcribe(clip, model, settings.language).catch(() => null);
+  const result = await runtime.transcribe(clip, model, decodeOptions()).catch(() => null);
   if (token !== session) return;
   if (!result?.ok) {
     if (result?.reason === "model-missing" && targetId) openSetup(targetId);

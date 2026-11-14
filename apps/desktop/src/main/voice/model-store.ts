@@ -1,7 +1,7 @@
 import { createHash } from "crypto";
 import { createReadStream, createWriteStream } from "fs";
 import { mkdir, readFile, rename, rm, stat, writeFile } from "fs/promises";
-import { join } from "path";
+import { dirname, join } from "path";
 import { once } from "events";
 import type { VoiceModelInfo } from "../../shared/voice";
 import {
@@ -102,6 +102,7 @@ export class ModelStore {
         licenseUrl: model.licenseUrl,
         languages: [...model.languages],
         languageHint: model.languageHint,
+        ...(model.highlight ? { highlight: model.highlight } : {}),
         sizeBytes: modelSize(model),
         status: download ? "downloading" : this.installed.has(model.id) ? "ready" : "absent",
         receivedBytes: received,
@@ -122,6 +123,7 @@ export class ModelStore {
     try {
       await mkdir(partialDir, { recursive: true });
       for (const file of model.files) {
+        await mkdir(dirname(join(partialDir, file.name)), { recursive: true });
         download.bytes.set(file.name, await sizeOf(join(partialDir, file.name)));
       }
       for (const file of model.files) {

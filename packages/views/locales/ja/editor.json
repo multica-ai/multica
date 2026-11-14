@@ -204,6 +204,8 @@
       "more_languages": "ほか {{more}} 言語",
       "in_use": "使用中",
       "recommended": "おすすめ",
+      "most_accurate": "高精度",
+      "fastest": "高速",
       "by": "提供: {{author}}",
       "license": "ライセンス",
       "downloading": "ダウンロード中 {{percent}}%",

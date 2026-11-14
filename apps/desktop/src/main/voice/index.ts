@@ -16,7 +16,7 @@ import {
 import { findVoiceModel } from "./catalog";
 import { VoiceEngine } from "./engine";
 import { ModelStore } from "./model-store";
-import type { LoadSpec } from "./worker-protocol";
+import { hotwordList, type LoadSpec } from "./worker-protocol";
 import workerPath from "./worker?modulePath";
 
 /** Matches VOICE_LANGUAGES in @multica/core/voice. */
@@ -50,11 +50,18 @@ export function setupVoiceInput(): void {
 
   const loadSpec = (request: unknown): LoadSpec | null => {
     if (!request || typeof request !== "object") return null;
-    const { modelId, language } = request as { modelId?: unknown; language?: unknown };
+    const { modelId, language, hotwords } = request as { modelId?: unknown; language?: unknown; hotwords?: unknown };
     const model = typeof modelId === "string" ? findVoiceModel(modelId) : undefined;
     if (!model) return null;
     const hint = model.languageHint && typeof language === "string" && LANGUAGES.has(language) ? language : "auto";
-    return { key: `${model.id}@${model.revision}:${hint}`, recognizer: model.recognizer, dir: store.modelDir(model.id), language: hint };
+    const words = model.hotwords ? hotwordList(hotwords) : "";
+    return {
+      key: `${model.id}@${model.revision}:${hint}:${words}`,
+      recognizer: model.recognizer,
+      dir: store.modelDir(model.id),
+      language: hint,
+      hotwords: words,
+    };
   };
   const modelIdOf = (request: unknown) => (request as { modelId: string }).modelId;
 

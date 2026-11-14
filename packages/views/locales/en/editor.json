@@ -208,6 +208,8 @@
       "more_languages": "{{more}} more",
       "in_use": "In use",
       "recommended": "Recommended",
+      "most_accurate": "Most accurate",
+      "fastest": "Fastest",
       "by": "By {{author}}",
       "license": "License",
       "downloading": "Downloading, {{percent}}%",

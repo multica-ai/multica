@@ -15,6 +15,8 @@ export interface VoiceModel {
   languages: string[];
   /** The model takes a spoken-language hint; others always detect. */
   languageHint: boolean;
+  /** What the model is best at, shown as a badge. */
+  highlight?: "accurate" | "fast";
   sizeBytes: number;
   status: VoiceModelStatus;
   receivedBytes: number;
