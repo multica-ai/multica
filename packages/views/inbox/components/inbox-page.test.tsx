@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import { ApiError } from "@multica/core/api";
 import type { InboxSections } from "@multica/core/inbox/sections";
-import type { AgentTask, InboxItem } from "@multica/core/types";
+import type { AgentTask, InboxItem, Issue } from "@multica/core/types";
 import { useInboxFilterStore } from "@multica/core/inbox/filter-store";
 import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
 import { InboxPage } from "./inbox-page";
@@ -22,11 +22,14 @@ const listData: {
   lookup?: InboxItem[];
   tasks: AgentTask[];
   tasksPending: boolean;
+  /** Issue details already in the cache, by id. One that is absent is loading. */
+  issues: Record<string, Partial<Issue>>;
 } = {
   active: [],
   archived: [],
   tasks: [],
   tasksPending: false,
+  issues: {},
 };
 
 const queryCalls: Array<{ queryKey: readonly unknown[]; enabled?: boolean }> = [];
@@ -47,6 +50,20 @@ vi.mock("@tanstack/react-query", () => ({
     ...(options.queryKey.includes("lookup") ? lookupState : {}),
     ...(options.queryKey.includes("agent-task-snapshot") ? { isPending: listData.tasksPending } : {}),
   }); },
+  // "Working" rows are tested against their issue under a filter.
+  useQueries: ({
+    queries,
+    combine,
+  }: {
+    queries: Array<{ queryKey: readonly unknown[] }>;
+    combine: (results: Array<{ data: unknown; isPending: boolean }>) => unknown;
+  }) =>
+    combine(
+      queries.map((query) => {
+        const issue = listData.issues[String(query.queryKey.at(-1))];
+        return { data: issue, isPending: !issue };
+      }),
+    ),
   useInfiniteQuery: (options: { queryKey: readonly unknown[]; enabled?: boolean }) => {
     queryCalls.push(options);
     return ({
@@ -97,6 +114,7 @@ const archiveMutate = vi.fn();
 const unarchiveMutate = vi.fn();
 const snoozeMutate = vi.fn();
 const unsnoozeMutate = vi.fn();
+const archiveUpdatesMutate = vi.fn();
 const retrySourceContextMutateAsync = vi.fn();
 const showIssueLimitUpgradePrompt = vi.hoisted(() => vi.fn());
 const showAutopilotQuotaRecoveryPrompt = vi.hoisted(() => vi.fn());
@@ -109,7 +127,6 @@ vi.mock("../../modals/use-issue-limit-upgrade-prompt", () => ({
 }));
 
 vi.mock("@multica/core/inbox/mutations", () => {
-  const mutation = () => ({ mutate: vi.fn() });
   return {
     useMarkInboxRead: () => ({ mutate: markReadMutate }),
     useMarkInboxUnread: () => ({ mutate: markUnreadMutate }),
@@ -117,10 +134,7 @@ vi.mock("@multica/core/inbox/mutations", () => {
     useUnarchiveInbox: () => ({ mutate: unarchiveMutate }),
     useSnoozeInbox: () => ({ mutate: snoozeMutate }),
     useUnsnoozeInbox: () => ({ mutate: unsnoozeMutate }),
-    useMarkAllInboxRead: mutation,
-    useArchiveAllInbox: mutation,
-    useArchiveAllReadInbox: mutation,
-    useArchiveCompletedInbox: mutation,
+    useArchiveInboxUpdates: () => ({ mutate: archiveUpdatesMutate }),
     useRetrySourceContextQuickCreate: () => ({
       mutateAsync: retrySourceContextMutateAsync,
       isPending: false,
@@ -228,12 +242,14 @@ vi.mock("./inbox-sectioned-list", () => ({
     sections,
     onSelect,
     onSelectIssue,
+    onClearUpdates,
     emptyLabel,
     emptyAction,
   }: {
     sections: InboxSections;
     onSelect: (item: InboxItem) => void;
     onSelectIssue: (issueId: string) => void;
+    onClearUpdates?: () => void;
     emptyLabel?: string;
     emptyAction?: React.ReactNode;
   }) => {
@@ -264,6 +280,9 @@ vi.mock("./inbox-sectioned-list", () => ({
             </button>
           )),
         )}
+        {sections.updates.length > 0 && (
+          <button type="button" data-testid="clear-updates" onClick={onClearUpdates} />
+        )}
         {empty && emptyLabel && <p>{emptyLabel}</p>}
         {empty && emptyAction}
       </div>
@@ -279,8 +298,8 @@ vi.mock("./inbox-filter-menu", () => ({
 }));
 vi.mock("./inbox-list-item", () => ({ useTimeAgo: () => vi.fn() }));
 vi.mock("./inbox-filter-options", () => ({
-  InboxFilterChipsBar: ({ filters }: { filters: { types: string[]; agent: string | null } }) => (
-    <div data-testid="filter-chips" data-types={filters.types.join(",")} data-agent={filters.agent ?? ""} />
+  InboxFilterChipsBar: ({ filters }: { filters: { types: string[] } }) => (
+    <div data-testid="filter-chips" data-types={filters.types.join(",")} />
   ),
 }));
 
@@ -353,6 +372,7 @@ function reset() {
   listData.lookup = undefined;
   listData.tasks = [];
   listData.tasksPending = false;
+  listData.issues = {};
   lookupState.isLoading = false;
   lookupState.isError = false;
   lookupState.refetch.mockClear();
@@ -365,6 +385,7 @@ function reset() {
   unarchiveMutate.mockClear();
   snoozeMutate.mockClear();
   unsnoozeMutate.mockClear();
+  archiveUpdatesMutate.mockClear();
   retrySourceContextMutateAsync.mockReset();
   retrySourceContextMutateAsync.mockResolvedValue({});
   showIssueLimitUpgradePrompt.mockClear();
@@ -379,55 +400,6 @@ function reset() {
 }
 
 describe("InboxPage", () => {
-  it.each([false, true])("enabling idle hides an already busy row with unread pin=%s", (unreadOnly) => {
-    reset();
-    layout.width = DESKTOP;
-    listData.active = [item({ id: "busy-row", issue_id: "busy-issue", read: !unreadOnly })];
-    listData.tasks = [{ id: "task-a", agent_id: "agent-1", issue_id: "busy-issue", status: "running" }] as AgentTask[];
-    if (unreadOnly) useInboxFilterStore.getState().toggleUnreadOnly("workspace-1");
-    markReadMutate.mockImplementation(() => {
-      listData.active = listData.active.map((current) => ({ ...current, read: true }));
-    });
-    const { rerender } = render(<InboxPage />);
-    fireEvent.click(screen.getByTestId("row"));
-    rerender(<InboxPage />);
-    expect(screen.getByTestId("row")).toHaveTextContent("busy-row");
-
-    act(() => useInboxFilterStore.getState().setAgent("workspace-1", "idle"));
-
-    expect(screen.queryByTestId("row")).toBeNull();
-  });
-
-  it("enabling unread hides a read row pinned by idle", () => {
-    reset();
-    layout.width = DESKTOP;
-    listData.active = [item({ id: "read-row", issue_id: "idle-issue", read: true })];
-    useInboxFilterStore.getState().setAgent("workspace-1", "idle");
-    render(<InboxPage />);
-    fireEvent.click(screen.getByTestId("row"));
-
-    act(() => useInboxFilterStore.getState().toggleUnreadOnly("workspace-1"));
-
-    expect(screen.queryByTestId("row")).toBeNull();
-  });
-
-  it("re-enabling idle evaluates current activity after disabling it", () => {
-    reset();
-    layout.width = DESKTOP;
-    listData.active = [item({ id: "was-idle", issue_id: "issue-a", read: true })];
-    useInboxFilterStore.getState().setAgent("workspace-1", "idle");
-    const { rerender } = render(<InboxPage />);
-    fireEvent.click(screen.getByTestId("row"));
-    act(() => useInboxFilterStore.getState().setAgent("workspace-1", "idle"));
-    listData.tasks = [{ id: "task-a", agent_id: "agent-1", issue_id: "issue-a", status: "running" }] as AgentTask[];
-    rerender(<InboxPage />);
-    expect(screen.getByTestId("row")).toHaveTextContent("was-idle");
-
-    act(() => useInboxFilterStore.getState().setAgent("workspace-1", "idle"));
-
-    expect(screen.queryByTestId("row")).toBeNull();
-  });
-
   // Inbox rows need more room than the nav's labels, so the list is sized by
   // the list width rather than the space panel's.
   it("sizes the desktop list with the list column width", () => {
@@ -486,87 +458,41 @@ describe("InboxPage", () => {
     expect(screen.getByTestId("row")).toHaveTextContent("done-low");
   });
 
-  it("hides read notifications while the unread filter is on", () => {
+  it("leaves the filters that describe a notification to the archive", () => {
+    // Read state, type, sender and age are what the sections already sort by.
+    // A choice made in the archive is kept for it, and does nothing here.
     reset();
     listData.active = [
-      item({ id: "unread-row", issue_id: "issue-1", read: false }),
-      item({ id: "read-row", issue_id: "issue-2", read: true }),
+      item({ id: "unread-mention", issue_id: "issue-1", type: "mentioned", read: false, actor_type: "member", actor_id: "alice" }),
+      item({ id: "read-comment", issue_id: "issue-2", type: "new_comment", read: true, actor_type: "agent", actor_id: "bob" }),
     ];
-    useInboxFilterStore.getState().toggleUnreadOnly("workspace-1");
+    const filters = useInboxFilterStore.getState();
+    filters.toggleUnreadOnly("workspace-1");
+    filters.toggleActorFilter("workspace-1", "member:alice");
+    filters.toggleFilterValue("workspace-1", "type", "mention");
+    filters.setReceived("workspace-1", "today");
 
     render(<InboxPage />);
 
-    expect(screen.getAllByTestId("row")).toHaveLength(1);
-    expect(screen.getByTestId("row")).toHaveTextContent("unread-row");
+    expect(screen.getAllByTestId("row").map((row) => row.textContent)).toEqual(["unread-mention", "read-comment"]);
+    expect(screen.getByTestId("filter-chips").dataset.types).toBe("");
+    expect(useInboxFilterStore.getState().filtersByWorkspace["workspace-1"]).toMatchObject({
+      unreadOnly: true,
+      types: ["mention"],
+    });
   });
 
-  it("filters by the actor the row carries", () => {
+  it("keeps a notification filter in force in the archive", () => {
     reset();
-    listData.active = [
-      item({ id: "from-alice", issue_id: "issue-1", actor_type: "member", actor_id: "alice" }),
-      item({ id: "from-bob", issue_id: "issue-2", actor_type: "agent", actor_id: "bob" }),
-    ];
-    useInboxFilterStore.getState().toggleActorFilter("workspace-1", "member:alice");
-
-    render(<InboxPage />);
-
-    expect(screen.getAllByTestId("row")).toHaveLength(1);
-    expect(screen.getByTestId("row")).toHaveTextContent("from-alice");
-  });
-
-  it("matches a type on any notification of an issue and shows the newest match", () => {
-    reset();
-    listData.active = [
-      item({ id: "newest-comment", issue_id: "issue-1", type: "new_comment", created_at: "2026-06-15T09:00:00Z" }),
-      item({ id: "older-mention", issue_id: "issue-1", type: "mentioned", created_at: "2026-06-15T08:00:00Z" }),
-      item({ id: "other-comment", issue_id: "issue-2", type: "new_comment" }),
+    searchParams = new URLSearchParams("view=archived");
+    listData.archived = [
+      item({ id: "mention", issue_id: "issue-1", type: "mentioned", archived: true, issue_label_ids: [] }),
     ];
     useInboxFilterStore.getState().toggleFilterValue("workspace-1", "type", "mention");
 
     render(<InboxPage />);
 
-    expect(screen.getAllByTestId("row")).toHaveLength(1);
-    expect(screen.getByTestId("row")).toHaveTextContent("older-mention");
     expect(screen.getByTestId("filter-chips").dataset.types).toBe("mention");
-  });
-
-  it("keeps a type filtered out with is not", () => {
-    reset();
-    listData.active = [
-      item({ id: "mention", issue_id: "issue-1", type: "mentioned" }),
-      item({ id: "comment", issue_id: "issue-2", type: "new_comment" }),
-    ];
-    const filters = useInboxFilterStore.getState();
-    filters.toggleFilterValue("workspace-1", "type", "mention");
-    filters.setFilterNegated("workspace-1", "type", true);
-
-    render(<InboxPage />);
-
-    expect(screen.getAllByTestId("row")).toHaveLength(1);
-    expect(screen.getByTestId("row")).toHaveTextContent("comment");
-  });
-
-  it("hides issues an agent is running or queued on while the idle filter is on", () => {
-    reset();
-    listData.active = [
-      item({ id: "running", issue_id: "issue-1" }),
-      item({ id: "queued", issue_id: "issue-2" }),
-      item({ id: "finished", issue_id: "issue-3" }),
-      item({ id: "untouched", issue_id: "issue-4" }),
-    ];
-    listData.tasks = [
-      { id: "task-1", agent_id: "agent-1", issue_id: "issue-1", status: "running" },
-      { id: "task-2", agent_id: "agent-1", issue_id: "issue-2", status: "queued" },
-      { id: "task-3", agent_id: "agent-1", issue_id: "issue-3", status: "completed" },
-    ] as AgentTask[];
-    useInboxFilterStore.getState().setAgent("workspace-1", "idle");
-
-    render(<InboxPage />);
-
-    expect(screen.getAllByTestId("row").map((row) => row.textContent)).toEqual([
-      "finished",
-      "untouched",
-    ]);
   });
 
   it("offers to clear filters when they hide every notification", () => {
@@ -585,7 +511,7 @@ describe("InboxPage", () => {
     render(<InboxPage />);
 
     expect(screen.queryByTestId("row")).toBeNull();
-    // The test's `useT` names every control "Inbox"; the header's batch menu
+    // The test's `useT` names every control "Inbox"; the title's view switch
     // shares the name, so skip the menu trigger.
     const clearFilters = screen
       .getAllByRole("button", { name: "Inbox" })
@@ -716,33 +642,13 @@ describe("InboxPage", () => {
     expect(screen.getByTestId("list").dataset.view).toBe("archived");
   });
 
-  it("hides the batch-actions menu in the archived view", () => {
-    // Every batch action archives from the MAIN inbox; offering them over the
-    // archived list would read as "archive all of these" and do the opposite.
+  it("has no batch menu: nothing leaves Needs you in bulk", () => {
     reset();
-    listData.archived = [item({ id: "archived-1", archived: true })];
-    const batchMenu = ':not(h1) > [aria-haspopup="menu"]';
-    const { container: mainView } = render(<InboxPage />);
-    expect(mainView.querySelector(batchMenu)).not.toBeNull();
+    listData.active = [item({ id: "active-1" })];
+    const { container } = render(<InboxPage />);
 
-    searchParams = new URLSearchParams("view=archived");
-    const { container: archivedView } = render(<InboxPage />);
-    expect(archivedView.querySelector(batchMenu)).toBeNull();
-  });
-
-  it("ignores a carried-over idle selection in the archive", () => {
-    reset();
-    searchParams = new URLSearchParams("view=archived");
-    listData.archived = [item({ id: "archived-busy", issue_id: "issue-1", archived: true })];
-    listData.tasks = [
-      { id: "task-1", agent_id: "agent-1", issue_id: "issue-1", status: "running" },
-    ] as AgentTask[];
-    useInboxFilterStore.getState().setAgent("workspace-1", "idle");
-
-    render(<InboxPage />);
-
-    expect(screen.getByTestId("row")).toHaveTextContent("archived-busy");
-    expect(screen.getByTestId("filter-chips").dataset.agent).toBe("");
+    // The title's view switch is the only menu the header opens.
+    expect(container.querySelector(':not(h1) > [aria-haspopup="menu"]')).toBeNull();
   });
 
   it("keeps the archive open when it is empty", () => {
@@ -923,18 +829,19 @@ describe("InboxPage", () => {
     expect(markReadMutate).toHaveBeenCalledWith("inbox-a", expect.anything());
   });
 
-  it("keeps an unread-filtered notification open after it is marked read", () => {
+  it("keeps an unread-filtered archived notification open after it is marked read", () => {
     // Opening a row marks it read. With the unread filter on, that would drop
     // the row before its detail renders and clear the selection, so the click
     // looked like it only made the notification disappear.
     reset();
     layout.width = DESKTOP;
-    listData.active = [
-      item({ id: "inbox-a", issue_id: "issue-a", read: false }),
+    searchParams = new URLSearchParams("view=archived");
+    listData.archived = [
+      item({ id: "inbox-a", issue_id: "issue-a", read: false, archived: true }),
     ];
     useInboxFilterStore.getState().toggleUnreadOnly("workspace-1");
     markReadMutate.mockImplementation((id: string) => {
-      listData.active = listData.active.map((current) =>
+      listData.archived = listData.archived.map((current) =>
         current.id === id ? { ...current, read: true } : current,
       );
     });
@@ -943,35 +850,9 @@ describe("InboxPage", () => {
     fireEvent.click(screen.getByTestId("row"));
     rerender(<InboxPage />);
 
+    expect(markReadMutate).toHaveBeenCalledWith("inbox-a", expect.anything());
     expect(screen.getByTestId("row")).toHaveTextContent("inbox-a");
-    expect(replace).not.toHaveBeenCalledWith("/acme/inbox");
-  });
-
-  it("keeps an idle-filtered notification open after an agent starts on it", () => {
-    // Replying from the detail can start an agent on the open issue. With the
-    // idle filter on, that would drop the row the user is working in.
-    reset();
-    layout.width = DESKTOP;
-    listData.active = [
-      item({ id: "inbox-a", issue_id: "issue-a", read: true }),
-      item({ id: "inbox-b", issue_id: "issue-b", read: true }),
-    ];
-    useInboxFilterStore.getState().setAgent("workspace-1", "idle");
-
-    const { rerender } = render(<InboxPage />);
-    fireEvent.click(screen.getAllByTestId("row")[0]!);
-    rerender(<InboxPage />);
-    listData.tasks = [
-      { id: "task-a", agent_id: "agent-1", issue_id: "issue-a", status: "queued" },
-      { id: "task-b", agent_id: "agent-1", issue_id: "issue-b", status: "running" },
-    ] as AgentTask[];
-    rerender(<InboxPage />);
-
-    // The open row stays; another row that turned busy is still filtered.
-    expect(screen.getAllByTestId("row").map((row) => row.textContent)).toEqual([
-      "inbox-a",
-    ]);
-    expect(replace).not.toHaveBeenCalledWith("/acme/inbox");
+    expect(replace).not.toHaveBeenCalledWith("/acme/inbox?view=archived");
   });
 
   it("keeps an explicitly unread row unread while it stays open", () => {
@@ -1269,7 +1150,7 @@ describe("InboxPage", () => {
       reset();
       layout.width = DESKTOP;
       listData.active = [
-        item({ id: "update", issue_id: "issue-u", section: "updates" }),
+        item({ id: "update", issue_id: "issue-u", section: "updates", read: false }),
         item({ id: "needs", issue_id: "issue-n", section: "needs_you" }),
         item({
           id: "snoozed",
@@ -1294,17 +1175,148 @@ describe("InboxPage", () => {
       expect(screen.getAllByTestId("working-row").map((row) => row.textContent)).toEqual(["issue-w"]);
     });
 
-    it("leaves Working out while a filter is on: the list is the matches", () => {
+    it("narrows Working by the issue itself, once the issue has loaded", () => {
       reset();
       layout.width = DESKTOP;
-      listData.active = [item({ id: "inbox-a", issue_id: "issue-a", read: false })];
-      listData.tasks = [ownRun("issue-w")];
-      useInboxFilterStore.getState().toggleUnreadOnly("workspace-1");
+      listData.active = [item({ id: "inbox-a", issue_id: "issue-a", issue_priority: "high" })];
+      listData.tasks = [ownRun("issue-high"), ownRun("issue-low"), ownRun("issue-loading")];
+      listData.issues = {
+        "issue-high": { id: "issue-high", status: "in_progress", priority: "high", labels: [] },
+        "issue-low": { id: "issue-low", status: "in_progress", priority: "low", labels: [] },
+      };
+      useInboxFilterStore.getState().togglePriorityFilter("workspace-1", "high");
 
       render(<InboxPage />);
 
       expect(listed()).toEqual(["needs_you:inbox-a"]);
-      expect(screen.queryByTestId("working-row")).toBeNull();
+      expect(screen.getAllByTestId("working-row").map((row) => row.textContent)).toEqual(["issue-high"]);
+    });
+
+    it("does not call a link to a Working issue broken while its issue loads under a filter", () => {
+      reset();
+      layout.width = DESKTOP;
+      searchParams = new URLSearchParams("issue=issue-w");
+      listData.tasks = [ownRun("issue-w")];
+      useInboxFilterStore.getState().togglePriorityFilter("workspace-1", "high");
+
+      const { rerender } = render(<InboxPage />);
+      expect(replace).not.toHaveBeenCalled();
+
+      listData.issues = { "issue-w": { id: "issue-w", status: "in_progress", priority: "high", labels: [] } };
+      rerender(<InboxPage />);
+      expect(issueDetailProps.at(-1)).toMatchObject({ issueId: "issue-w" });
+      expect(replace).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("updates", () => {
+    const update = (id: string, overrides: Partial<InboxItem> = {}) =>
+      item({ id, issue_id: `issue-${id}`, section: "updates", read: false, ...overrides });
+
+    it("lists the unread ones and sends the read ones to the archive", () => {
+      reset();
+      layout.width = DESKTOP;
+      listData.active = [
+        update("new"),
+        update("seen", { read: true }),
+        item({ id: "needs", issue_id: "issue-n", section: "needs_you", read: true }),
+      ];
+
+      const { rerender } = render(<InboxPage />);
+
+      expect(listed()).toEqual(["needs_you:needs", "updates:new"]);
+      expect(archiveUpdatesMutate).toHaveBeenCalledTimes(1);
+      expect(archiveUpdatesMutate).toHaveBeenCalledWith({ groups: ["issue-seen"], readOnly: true });
+
+      // The same set is asked for once, however often the page renders.
+      rerender(<InboxPage />);
+      expect(archiveUpdatesMutate).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps an update listed while it is open, and lets it go when the user moves on", () => {
+      reset();
+      layout.width = DESKTOP;
+      listData.active = [update("a"), update("b")];
+      markReadMutate.mockImplementation((id: string) => {
+        listData.active = listData.active.map((current) =>
+          current.id === id ? { ...current, read: true } : current,
+        );
+      });
+
+      const { rerender } = render(<InboxPage />);
+      fireEvent.click(screen.getByText("a"));
+      rerender(<InboxPage />);
+
+      expect(listed()).toEqual(["updates:a", "updates:b"]);
+      expect(archiveUpdatesMutate).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByText("b"));
+      rerender(<InboxPage />);
+
+      expect(listed()).toEqual(["updates:b"]);
+      expect(archiveUpdatesMutate).toHaveBeenCalledWith({ groups: ["issue-a"], readOnly: true });
+    });
+
+    it("leaves the archive alone while the archive is what is open", () => {
+      reset();
+      searchParams = new URLSearchParams("view=archived");
+      listData.active = [update("seen", { read: true })];
+
+      render(<InboxPage />);
+
+      expect(archiveUpdatesMutate).not.toHaveBeenCalled();
+    });
+
+    it("clears the listed updates, read or not, and closes the one that was open", () => {
+      reset();
+      layout.width = DESKTOP;
+      listData.active = [
+        update("a"),
+        update("b"),
+        item({ id: "needs", issue_id: "issue-n", section: "needs_you" }),
+      ];
+      render(<InboxPage />);
+      fireEvent.click(screen.getByText("a"));
+      replace.mockClear();
+
+      fireEvent.click(screen.getByTestId("clear-updates"));
+
+      expect(archiveUpdatesMutate).toHaveBeenLastCalledWith(
+        { groups: ["issue-a", "issue-b"], readOnly: false },
+        expect.anything(),
+      );
+      expect(replace).toHaveBeenCalledWith("/acme/inbox");
+      expect(archiveMutate).not.toHaveBeenCalled();
+    });
+
+    it("clears only what a filter shows", () => {
+      reset();
+      layout.width = DESKTOP;
+      listData.active = [
+        update("high", { issue_priority: "high" }),
+        update("low", { issue_priority: "low" }),
+      ];
+      useInboxFilterStore.getState().togglePriorityFilter("workspace-1", "high");
+      render(<InboxPage />);
+
+      fireEvent.click(screen.getByTestId("clear-updates"));
+
+      expect(archiveUpdatesMutate).toHaveBeenLastCalledWith(
+        { groups: ["issue-high"], readOnly: false },
+        expect.anything(),
+      );
+    });
+
+    it("reports a failed clear", () => {
+      reset();
+      listData.active = [update("a")];
+      render(<InboxPage />);
+      fireEvent.click(screen.getByTestId("clear-updates"));
+
+      const options = archiveUpdatesMutate.mock.calls.at(-1)?.[1] as { onError: (err: unknown) => void };
+      act(() => options.onError(new Error("boom")));
+
+      expect(toast.error).toHaveBeenCalledWith("boom");
     });
   });
 
@@ -1422,7 +1434,7 @@ describe("InboxPage", () => {
       listData.active = [
         item({ id: "inbox-a", issue_id: "issue-a", section: "needs_you" }),
         item({ id: "inbox-b", issue_id: "issue-b", section: "needs_you" }),
-        item({ id: "inbox-u", issue_id: "issue-u", section: "updates" }),
+        item({ id: "inbox-u", issue_id: "issue-u", section: "updates", read: false }),
       ];
       const view = render(<InboxPage />);
       fireEvent.click(screen.getAllByTestId("row")[0]!);

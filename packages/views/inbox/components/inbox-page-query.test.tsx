@@ -285,26 +285,6 @@ async function openArchived(fixture: ReturnType<typeof archivedFixture>, viaUrl 
   return detail;
 }
 
-it("keeps the active read selection until moving to another notification", async () => {
-  let rows = [item(), item({ id: "inbox-b", issue_id: "issue-b" })];
-  const listInbox = vi.fn(async () => rows);
-  const markInboxRead = vi.fn(async (id: string) => {
-    rows = rows.map((row) => row.id === id ? { ...row, read: true } : row);
-    return rows.find((row) => row.id === id)!;
-  });
-  setApiInstance({ listInbox, markInboxRead, getInboxUnreadSummary: async () => [] } as unknown as ApiClient);
-  renderPage();
-  fireEvent.click(await screen.findByText("inbox-a"));
-  await waitFor(() => expect(listInbox).toHaveBeenCalledTimes(2));
-  expect(screen.getByText("inbox-a")).toHaveAttribute("data-read", "true");
-  expect(screen.getByTestId("detail")).toHaveTextContent("issue-a");
-  fireEvent.click(screen.getByText("inbox-b"));
-  await waitFor(() => expect(listInbox).toHaveBeenCalledTimes(3));
-  expect(screen.getByTestId("detail")).toHaveTextContent("issue-b");
-  expect(screen.queryByText("inbox-a")).not.toBeInTheDocument();
-  expect(screen.getByText("inbox-b")).toHaveAttribute("data-read", "true");
-});
-
 it.each(["click", "url"])("keeps the archived row and detail mounted through refetch and slow lookup after %s selection, then releases the pin", async (selection) => {
   const fixture = archivedFixture();
   const detail = await openArchived(fixture, selection === "url");

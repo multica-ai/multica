@@ -108,13 +108,14 @@ const working = (issueId: string, agentId = "agent-1"): InboxWorkingRow => ({
   since: "2026-06-15T08:00:00Z",
 });
 
-const EMPTY: InboxSections = { needsYou: [], working: [], updates: [], snoozed: [] };
+const EMPTY: InboxSections = { needsYou: [], working: [], updates: [], snoozed: [], readUpdates: [] };
 
 const FULL: InboxSections = {
   needsYou: [row("a"), row("b")],
   working: [working("issue-w")],
   updates: [row("u", { read: false })],
   snoozed: [row("s")],
+  readUpdates: [],
 };
 
 function renderList(
@@ -161,21 +162,30 @@ describe("InboxSectionedList sections", () => {
     expect(rows()).toEqual(["needs_you:a", "needs_you:b", "working:issue-w"]);
     expect(header("needs_you")).toHaveTextContent(/^Needs you2$/);
     expect(header("working")).toHaveTextContent(/^Working1$/);
+    expect(header("updates")).toHaveTextContent(/^Updates1$/);
     expect(header("snoozed")).toHaveTextContent(/^Snoozed1$/);
   });
 
-  it("marks unread updates with a dot instead of a count", () => {
-    renderList(FULL);
+  it("clears the updates from the header once they are in view", () => {
+    const onClearUpdates = vi.fn();
+    renderList(FULL, { onClearUpdates });
+    // Folded, nothing is listed to clear.
+    expect(screen.queryByRole("button", { name: "Clear" })).toBeNull();
 
-    const updates = header("updates")!;
-    expect(updates).toHaveTextContent(/^Updates$/);
-    expect(within(updates).getByRole("img", { name: "Unread updates" })).toBeInTheDocument();
+    fireEvent.click(within(header("updates")!).getByRole("button", { name: /Updates/ }));
+    fireEvent.click(within(header("updates")!).getByRole("button", { name: "Clear" }));
+
+    expect(onClearUpdates).toHaveBeenCalledOnce();
+    // Clearing is not folding.
+    expect(useInboxSectionStore.getState().open.updates).toBe(true);
+    expect(within(header("snoozed")!).queryByRole("button", { name: "Clear" })).toBeNull();
   });
 
-  it("leaves the dot off once every update is read", () => {
-    renderList({ ...FULL, updates: [row("u")] });
+  it("offers no Clear where the list is only a preview", () => {
+    useInboxSectionStore.setState({ open: { updates: true, snoozed: false } });
+    renderList(FULL);
 
-    expect(within(header("updates")!).queryByRole("img")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Clear" })).toBeNull();
   });
 
   it("opens a folded section from its header and remembers it", () => {

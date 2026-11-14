@@ -3,12 +3,6 @@
     "title": "收件箱",
     "back": "收件箱"
   },
-  "menu": {
-    "mark_all_read": "全部標為已讀",
-    "archive_all": "歸檔全部",
-    "archive_all_read": "歸檔全部已讀",
-    "archive_completed": "歸檔已完成"
-  },
   "filters": {
     "tooltip": "篩選收件箱",
     "active_count_other": "{{count}} 個篩選條件",
@@ -31,8 +25,7 @@
     "type_system": "系統",
     "received_today": "今天",
     "received_last_7_days": "最近 7 天",
-    "received_last_30_days": "最近 30 天",
-    "agent_idle": "閒置"
+    "received_last_30_days": "最近 30 天"
   },
   "context_menu": {
     "mark_read": "標為已讀",
@@ -93,6 +86,7 @@
     "review_requested": "請求審查",
     "task_completed": "執行已完成",
     "task_failed": "執行失敗",
+    "task_cancelled": "執行已取消",
     "agent_blocked": "AI 代理被阻塞",
     "agent_completed": "AI 代理已完成",
     "reaction_added": "新增了表情反應",
@@ -137,10 +131,6 @@
     "mark_unread_failed": "標為未讀失敗",
     "archive_failed": "歸檔失敗",
     "mark_done_failed": "標為已完成失敗",
-    "mark_all_read_failed": "全部標為已讀失敗",
-    "archive_all_failed": "歸檔全部失敗",
-    "archive_all_read_failed": "歸檔已讀失敗",
-    "archive_completed_failed": "歸檔已完成失敗",
     "unarchive_failed": "取消歸檔失敗",
     "archived_load_failed": "無法載入已歸檔通知",
     "filters_load_failed": "無法載入篩選項",
@@ -152,15 +142,14 @@
     "title": "刪除通知？",
     "description": "此通知將被永久刪除，相關任務和執行記錄不受影響。",
     "issue_description": "目前檢視中此任務的通知將被永久刪除，任務和執行記錄不受影響。",
-    "cancel": "取消",
-    "active_issue_description": "此任務在收件箱中的通知將被永久刪除。先前歸檔的通知會保留，並重新顯示在已歸檔檢視中。任務和執行記錄不受影響。"
+    "cancel": "取消"
   },
   "sections": {
     "needs_you": "需要你處理",
     "working": "執行中",
     "updates": "動態",
     "snoozed": "已延後",
-    "updates_unread": "有未讀動態",
+    "clear_updates": "清空",
     "queued": "排隊中",
     "caught_up": "都處理完了",
     "still_working_other": "{{count}} 個 AI 代理還在執行，有結果會回到這裡。"
@@ -170,9 +159,13 @@
     "question": "等你回答",
     "mention": "提到你",
     "failed": "執行失敗",
+    "cancelled": "執行已取消",
     "assigned": "分配給你",
     "comment": "新評論",
-    "finished": "執行完成"
+    "finished": "執行完成",
+    "stopped_by_you": "你停止了這次執行",
+    "stopped_by": "{{name}} 停止了這次執行",
+    "stopped_by_system": "系統停止了這次執行"
   },
   "snooze": {
     "action": "延後",

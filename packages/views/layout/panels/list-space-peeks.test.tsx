@@ -1,7 +1,9 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
+import { setApiInstance } from "@multica/core/api";
+import type { ApiClient } from "@multica/core/api/client";
 import { useInboxFilterStore } from "@multica/core/inbox/filter-store";
 import { inboxKeys } from "@multica/core/inbox/queries";
 import type { InboxSections } from "@multica/core/inbox/sections";
@@ -26,9 +28,6 @@ vi.mock("@multica/core/inbox/queries", async (importOriginal) => ({
 }));
 vi.mock("@multica/core/inbox/mutations", () => ({ useArchiveInbox: () => ({ mutate: archive }) }));
 vi.mock("../../navigation", () => ({ useNavigation: () => ({ push }) }));
-vi.mock("../../issues/surface/activity", () => ({
-  useIssueSurfaceActivity: () => ({ activityByIssueId: new Map() }),
-}));
 vi.mock("../../chat/components/chat-thread-list", () => ({ ChatThreadList: () => null }));
 
 // The list itself has its own tests. Here it is the sections it was handed
@@ -120,7 +119,9 @@ describe("InboxPeek", () => {
     renderPeek(
       [
         item("needs", { section: "needs_you" }),
-        item("update", { section: "updates" }),
+        item("update", { section: "updates", read: false }),
+        // Read, so on its way to the archive.
+        item("seen", { section: "updates" }),
         item("later", { section: "needs_you", snoozed_until: new Date(Date.now() + 3_600_000).toISOString() }),
         item("gone", { section: "needs_you", archived: true }),
       ],
@@ -168,23 +169,32 @@ describe("InboxPeek", () => {
     expect(archive).toHaveBeenCalledWith("needs");
   });
 
-  it("follows the Inbox's saved filters, which leave Working out", () => {
-    useInboxFilterStore.getState().toggleUnreadOnly("ws-1");
+  it("follows the Inbox's saved filters, Working included", async () => {
+    setApiInstance({
+      getIssue: async (id: string) => ({ id, status: "todo", priority: id === "issue-w" ? "high" : "low", labels: [] }),
+    } as unknown as ApiClient);
+    const filters = useInboxFilterStore.getState();
+    filters.togglePriorityFilter("ws-1", "high");
+    // A filter for the archive, which the Inbox leaves alone.
+    filters.toggleUnreadOnly("ws-1");
+    const run = (issueId: string) =>
+      ({
+        id: `task-${issueId}`,
+        agent_id: "agent-1",
+        issue_id: issueId,
+        status: "running",
+        created_at: "2026-06-15T08:00:00Z",
+        attribution: { source: "direct_human", precise: true, originator: { id: "member-1" } },
+      }) as AgentTask;
     renderPeek(
-      [item("read", { section: "needs_you" }), item("unread", { section: "needs_you", read: false })],
       [
-        {
-          id: "task-1",
-          agent_id: "agent-1",
-          issue_id: "issue-w",
-          status: "running",
-          created_at: "2026-06-15T08:00:00Z",
-          attribution: { source: "direct_human", precise: true, originator: { id: "member-1" } },
-        } as AgentTask,
+        item("high", { section: "needs_you", issue_priority: "high" }),
+        item("low", { section: "needs_you", issue_priority: "low", read: false }),
       ],
+      [run("issue-w"), run("issue-other")],
     );
 
-    expect(rows()).toEqual(["needsYou:unread"]);
+    await waitFor(() => expect(rows()).toEqual(["needsYou:high", "working:issue-w"]));
     expect(screen.getByTestId("list")).toHaveAttribute("data-filtered", "true");
   });
 });

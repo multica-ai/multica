@@ -107,8 +107,6 @@
     "copy_link": "リンクをコピー",
     "link_copied": "リンクをコピーしました",
     "workspace_settings": "ワークスペース設定",
-    "mark_all_read": "すべて既読にする",
-    "mark_all_read_failed": "すべて既読にできませんでした",
     "reset_order": "デフォルトの順序に戻す",
     "copy_workspace_link": "ワークスペースのリンクをコピー",
     "workspace_meta_other": "{{slug}} · メンバー {{count}} 人"

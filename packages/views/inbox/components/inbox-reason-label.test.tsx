@@ -42,6 +42,7 @@ describe("InboxReasonLabel", () => {
     [{ type: "agent_blocked" }, "question", "Waiting for your answer"],
     [{ type: "mentioned" }, "mention", "Mentioned you"],
     [{ type: "task_failed" }, "failed", "Run failed"],
+    [{ type: "task_cancelled" }, "cancelled", "Run cancelled"],
     [{ type: "issue_assigned" }, "assigned", "Assigned to you"],
     [{ type: "new_comment" }, "comment", "New comment"],
     [{ type: "agent_completed", issue_status: "in_progress" }, "finished", "Run finished"],
@@ -122,6 +123,44 @@ describe("InboxReasonLabel", () => {
     );
 
     expect(screen.getByTestId("change")).toHaveTextContent("inbox-moved");
+  });
+
+  it.each([
+    [{ cancelled_by_type: "member", cancelled_by_id: "member-1", cancelled_by_name: "Me" }, "You stopped this run"],
+    [{ cancelled_by_type: "member", cancelled_by_id: "member-2", cancelled_by_name: "Ada" }, "Ada stopped this run"],
+    [{ cancelled_by_type: "agent", cancelled_by_id: "agent-2", cancelled_by_name: "Lambda" }, "Lambda stopped this run"],
+    [{ cancelled_by_type: "system" }, "Stopped by the system"],
+  ])("says who stopped a cancelled run: %o", (details, text) => {
+    const reason = item({ type: "task_cancelled", details: { task_id: "task-1", ...details } });
+    renderWithI18n(<InboxReasonLabel reason={reason} latest={reason} />);
+
+    expect(screen.getByText(text)).toBeInTheDocument();
+  });
+
+  it("shows a cancelled run alone when nothing says who stopped it", () => {
+    const reason = item({ type: "task_cancelled", details: { task_id: "task-1" } });
+    const { container } = renderWithI18n(<InboxReasonLabel reason={reason} latest={reason} />);
+
+    expect(container).toHaveTextContent(/^Run cancelled$/);
+  });
+
+  it("keeps who stopped the run until something is said after it", () => {
+    const reason = item({
+      type: "task_cancelled",
+      created_at: "2026-06-15T10:00:00Z",
+      details: { cancelled_by_type: "member", cancelled_by_id: "member-1" },
+    });
+    const earlier = item({ id: "inbox-earlier", body: "Started on the migration", created_at: "2026-06-15T09:00:00Z" });
+    const later = item({ id: "inbox-later", body: "Can you pick this back up?", created_at: "2026-06-15T11:00:00Z" });
+
+    const { unmount } = renderWithI18n(<InboxReasonLabel reason={reason} latest={reason} preview={earlier} />);
+    expect(screen.getByText("You stopped this run")).toBeInTheDocument();
+    expect(screen.queryByText("Started on the migration")).toBeNull();
+    unmount();
+
+    renderWithI18n(<InboxReasonLabel reason={reason} latest={later} preview={later} />);
+    expect(screen.getByText("Can you pick this back up?")).toBeInTheDocument();
+    expect(screen.queryByText("You stopped this run")).toBeNull();
   });
 
   it("shows the reason alone when it is also the latest notification", () => {

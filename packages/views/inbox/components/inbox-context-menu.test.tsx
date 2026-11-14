@@ -117,12 +117,18 @@ function renderRow({
 }
 
 describe("inbox row context menu", () => {
-  it.each(["inbox", "archived"] as const)("offers deletion in the %s view", async (view) => {
+  it("offers deletion in the archive", async () => {
     const onDelete = vi.fn();
-    const { row } = renderRow({ view, actions: { onDelete } });
+    const { row } = renderRow({ view: "archived", actions: { onDelete } });
     fireEvent.contextMenu(row);
     fireEvent.click(await screen.findByText("Delete"));
     expect(onDelete).toHaveBeenCalledWith("inbox-1");
+  });
+  it("keeps deletion out of the main view, where archiving is the way out", async () => {
+    const { row } = renderRow();
+    fireEvent.contextMenu(row);
+    await screen.findByText("Archive");
+    expect(screen.queryByText("Delete")).toBeNull();
   });
   it("offers mark-as-unread on a read row and reports the item id", async () => {
     const onMarkUnread = vi.fn();
@@ -272,9 +278,9 @@ describe("inbox row context menu", () => {
 // A touch pointer has neither hover nor right-click, so the row's compact menu
 // is the only way in. It must therefore offer what right-click offers.
 describe("inbox row compact menu", () => {
-  it("offers deletion without selecting the row", async () => {
+  it("offers deletion in the archive without selecting the row", async () => {
     const onDelete = vi.fn();
-    renderRow({ actions: { onDelete } });
+    renderRow({ view: "archived", actions: { onDelete } });
     fireEvent.click(screen.getByRole("button", { name: "Notification actions" }));
     fireEvent.click(await screen.findByText("Delete"));
     expect(onDelete).toHaveBeenCalledWith("inbox-1");

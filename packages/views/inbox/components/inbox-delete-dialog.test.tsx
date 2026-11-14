@@ -7,12 +7,11 @@ import type { ApiClient } from "@multica/core/api/client";
 import type { InboxItem } from "@multica/core/types";
 import enInbox from "../../locales/en/inbox.json";
 import { InboxDeleteDialog } from "./inbox-delete-dialog";
-import type { InboxView } from "./inbox-view";
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "workspace-1" }));
 
 const entry = { id: "notification-1", title: "Create with agent failed", issue_id: null } as InboxItem;
-function setup(remove = vi.fn(async () => ({ count: 1 })), issueId: string | null = null, view: InboxView = "inbox") {
+function setup(remove = vi.fn(async () => ({ count: 1 })), issueId: string | null = null) {
   setApiInstance({ deleteInbox: remove } as unknown as ApiClient);
   const onClose = vi.fn();
   const onDeleted = vi.fn();
@@ -20,7 +19,7 @@ function setup(remove = vi.fn(async () => ({ count: 1 })), issueId: string | nul
   render(
     <QueryClientProvider client={qc}>
       <I18nProvider locale="en" resources={{ en: { inbox: enInbox } }}>
-        <InboxDeleteDialog item={{ ...entry, issue_id: issueId }} view={view} onClose={onClose} onDeleted={onDeleted} />
+        <InboxDeleteDialog item={{ ...entry, issue_id: issueId }} onClose={onClose} onDeleted={onDeleted} />
       </I18nProvider>
     </QueryClientProvider>,
   );
@@ -64,20 +63,13 @@ describe("inbox deletion confirmation", () => {
     expect(remove).toHaveBeenCalledTimes(2);
   });
 
-  it("explains that deleting active issue notifications makes old archived history visible again", () => {
-    setup(undefined, "issue-1", "inbox");
-    expect(screen.getByRole("alertdialog")).toHaveTextContent("Previously archived notifications remain and will be visible again in Archived.");
-  });
-
-  it("explains the archived group scope without promising to retain the deleted history", () => {
-    setup(undefined, "issue-1", "archived");
+  it("explains that an issue's archived notifications go together", () => {
+    setup(undefined, "issue-1");
     expect(screen.getByText(enInbox.delete_dialog.issue_description)).toBeInTheDocument();
-    expect(screen.getByRole("alertdialog")).not.toHaveTextContent("Previously archived notifications");
   });
 
-  it("does not mention archived history for an issue-less active notification", () => {
+  it("describes a single notification when it has no issue", () => {
     setup();
     expect(screen.getByText(enInbox.delete_dialog.description)).toBeInTheDocument();
-    expect(screen.getByRole("alertdialog")).not.toHaveTextContent("Previously archived notifications");
   });
 });

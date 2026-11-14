@@ -2,11 +2,9 @@
 
 import { useQuery } from "@tanstack/react-query";
 import {
-  Activity,
   AtSign,
   Bell,
   Bot,
-  BotOff,
   CalendarClock,
   CircleDot,
   Clock,
@@ -29,7 +27,6 @@ import {
   activeInboxFilterKeys,
   inboxActorKeyParts,
   useInboxFilterStore,
-  type InboxAgentFilter,
   type InboxFilterKey,
   type InboxFilters,
   type InboxReceivedFilter,
@@ -50,7 +47,6 @@ export const INBOX_FILTER_ICONS: Record<InboxFilterKey, IconComponent> = {
   received: Clock,
   status: CircleDot,
   priority: SignalHigh,
-  agent: Bot,
   project: FolderKanban,
   assignee: User,
   label: Tag,
@@ -67,11 +63,6 @@ export const INBOX_TYPE_ICONS: Record<InboxTypeGroup, IconComponent> = {
   system: Settings,
 };
 
-export const INBOX_AGENT_ICONS: Record<InboxAgentFilter, IconComponent> = {
-  running: Activity,
-  idle: BotOff,
-};
-
 /** Display names for every dimension and the values that have no directory. */
 export function useInboxFilterLabels() {
   const { t } = useT("inbox");
@@ -83,7 +74,6 @@ export function useInboxFilterLabels() {
     received: t(($) => $.filters.received),
     status: tIssues(($) => $.filters.section_status),
     priority: tIssues(($) => $.filters.section_priority),
-    agent: tIssues(($) => $.filters.section_agent_status),
     project: tIssues(($) => $.filters.section_project),
     assignee: tIssues(($) => $.filters.section_assignee),
     label: tIssues(($) => $.filters.section_label),
@@ -103,15 +93,10 @@ export function useInboxFilterLabels() {
     last_7_days: t(($) => $.filters.received_last_7_days),
     last_30_days: t(($) => $.filters.received_last_30_days),
   };
-  const agent: Record<InboxAgentFilter, string> = {
-    running: tIssues(($) => $.filters.agent_status_running),
-    idle: t(($) => $.filters.agent_idle),
-  };
   return {
     dimension,
     type,
     received,
-    agent,
     unread: tIssues(($) => $.filters.read_state_unread),
     noProject: tIssues(($) => $.filters.no_project),
     noAssignee: tIssues(($) => $.filters.no_assignee),
@@ -153,8 +138,6 @@ export function useInboxFilterChips(wsId: string, filters: InboxFilters): Filter
         );
       case "priority":
         return filters.priorities.map((priority) => tIssues(($) => $.priority[priority]));
-      case "agent":
-        return filters.agent ? [labels.agent[filters.agent]] : [];
       case "project":
         return filters.projects.map((id) =>
           id === FILTER_NONE_VALUE ? labels.noProject : projects.find((p) => p.id === id)?.title ?? "",

@@ -107,8 +107,6 @@
     "copy_link": "複製連結",
     "link_copied": "已複製連結",
     "workspace_settings": "工作區設定",
-    "mark_all_read": "全部標為已讀",
-    "mark_all_read_failed": "全部標為已讀失敗",
     "reset_order": "恢復預設順序",
     "copy_workspace_link": "複製工作區連結",
     "workspace_meta_other": "{{slug}} · {{count}} 位成員"

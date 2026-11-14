@@ -107,8 +107,6 @@
     "copy_link": "复制链接",
     "link_copied": "链接已复制",
     "workspace_settings": "工作区设置",
-    "mark_all_read": "全部标为已读",
-    "mark_all_read_failed": "全部标为已读失败",
     "reset_order": "恢复默认顺序",
     "copy_workspace_link": "复制工作区链接",
     "workspace_meta_other": "{{slug}} · {{count}} 位成员"

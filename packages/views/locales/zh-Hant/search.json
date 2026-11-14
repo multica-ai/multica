@@ -85,9 +85,7 @@
   },
   "inbox": {
     "archive": "封存",
-    "mark_unread": "標為未讀",
-    "mark_all_read": "收件箱全部標為已讀",
-    "archive_all_read": "封存收件箱全部已讀"
+    "mark_unread": "標為未讀"
   },
   "chat": {
     "link_project": "關聯到專案...",

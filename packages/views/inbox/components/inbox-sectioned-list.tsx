@@ -37,7 +37,7 @@ const INBOX_ROW_ESTIMATED_HEIGHT = 58;
 type SectionKey = "needs_you" | "working" | InboxFoldingSection;
 
 type Entry =
-  | { kind: "header"; section: SectionKey; count: number | null; unread: boolean; folding: boolean; open: boolean }
+  | { kind: "header"; section: SectionKey; count: number | null; folding: boolean; open: boolean }
   | { kind: "item"; section: InboxRowSection; row: InboxSectionRow }
   | { kind: "working"; row: InboxWorkingRow }
   | { kind: "caught-up"; agents: number };
@@ -56,6 +56,9 @@ function entryKey(entry: Entry): string | null {
  * leaving the column to look broken. "Working" follows, then "Updates" and
  * "Snoozed", which start folded: nothing in them is waiting.
  *
+ * "Updates" holds what has not been read yet. Opening one reads it and it
+ * leaves for the archive; "Clear" sends the rest there unread.
+ *
  * The sections are one virtualized list rather than four, so the column has a
  * single scroller and the arrow keys walk straight through. Under a filter
  * the list is the matches: folded sections open and empty ones are left out.
@@ -67,6 +70,7 @@ export function InboxSectionedList({
   onSelect,
   onSelectIssue,
   onAction,
+  onClearUpdates,
   emptyLabel,
   emptyAction,
   scrollRestoration = true,
@@ -79,6 +83,8 @@ export function InboxSectionedList({
   /** Open an issue that has no notification: a "Working" row. */
   onSelectIssue: (issueId: string) => void;
   onAction: (id: string) => void;
+  /** Archive every update listed. Absent where the list is only a preview. */
+  onClearUpdates?: () => void;
   emptyLabel?: string;
   emptyAction?: ReactNode;
   /**
@@ -106,8 +112,8 @@ export function InboxSectionedList({
   const entries = useMemo(() => {
     const out: Entry[] = [];
     const { needsYou, working, updates, snoozed } = sections;
-    const header = (section: SectionKey, count: number | null, open = true, unread = false) =>
-      out.push({ kind: "header", section, count, unread, folding: !filtered && section !== "needs_you" && section !== "working", open });
+    const header = (section: SectionKey, count: number | null, open = true) =>
+      out.push({ kind: "header", section, count, folding: !filtered && section !== "needs_you" && section !== "working", open });
 
     if (needsYou.length > 0 || !filtered) {
       header("needs_you", needsYou.length > 0 ? needsYou.length : null);
@@ -122,8 +128,7 @@ export function InboxSectionedList({
     }
     if (updates.length > 0) {
       const open = filtered || stored.updates;
-      // Updates are not counted: a number there would read as a to-do.
-      header("updates", null, open, updates.some((row) => row.item.read !== true));
+      header("updates", updates.length, open);
       if (open) for (const row of updates) out.push({ kind: "item", section: "updates", row });
     }
     if (snoozed.length > 0) {
@@ -211,35 +216,50 @@ export function InboxSectionedList({
         <>
           <span className="text-foreground">{sectionLabel[entry.section]}</span>
           {entry.count != null && <span className="tabular-nums">{entry.count}</span>}
-          {entry.unread && (
-            <span
-              role="img"
-              aria-label={t(($) => $.sections.updates_unread)}
-              className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand"
-            />
-          )}
         </>
       );
-      const className = cn(
-        "flex w-full items-center gap-1.5 px-2 pb-1 text-caption font-medium text-muted-foreground",
-        index === 0 ? "pt-1.5" : "pt-3",
+      const className =
+        "flex min-w-0 flex-1 items-center gap-1.5 py-1 text-caption font-medium text-muted-foreground";
+      // A button cannot hold another, so "Clear" sits beside the fold toggle
+      // rather than inside it.
+      const clear = entry.section === "updates" && entry.open && onClearUpdates && (
+        <button
+          type="button"
+          onClick={onClearUpdates}
+          className="shrink-0 rounded-md px-1.5 py-0.5 text-caption text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
+        >
+          {t(($) => $.sections.clear_updates)}
+        </button>
       );
       return (
-        <div role="heading" aria-level={2} data-section-header={entry.section}>
+        <div
+          role="heading"
+          aria-level={2}
+          data-section-header={entry.section}
+          className={cn("flex items-center gap-1 px-2", index === 0 ? "pt-0.5" : "pt-2")}
+        >
           {entry.folding ? (
-            <button
-              type="button"
-              aria-expanded={entry.open}
-              onClick={() => toggle(entry.section as InboxFoldingSection)}
-              className={cn(className, "rounded-md text-left outline-none focus-visible:ring-1 focus-visible:ring-ring")}
-            >
-              {label}
+            <>
+              <button
+                type="button"
+                aria-expanded={entry.open}
+                onClick={() => toggle(entry.section as InboxFoldingSection)}
+                className={cn(className, "rounded-md text-left outline-none focus-visible:ring-1 focus-visible:ring-ring")}
+              >
+                {label}
+              </button>
+              {clear}
               <ChevronRight
-                className={cn("ml-auto h-3.5 w-3.5 transition-transform", entry.open && "rotate-90")}
+                aria-hidden
+                onClick={() => toggle(entry.section as InboxFoldingSection)}
+                className={cn("h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform", entry.open && "rotate-90")}
               />
-            </button>
+            </>
           ) : (
-            <div className={className}>{label}</div>
+            <>
+              <div className={className}>{label}</div>
+              {clear}
+            </>
           )}
         </div>
       );

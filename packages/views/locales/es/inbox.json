@@ -3,12 +3,6 @@
     "title": "Bandeja de entrada",
     "back": "Bandeja de entrada"
   },
-  "menu": {
-    "mark_all_read": "Marcar todo como leído",
-    "archive_all": "Archivar todo",
-    "archive_all_read": "Archivar todo lo leído",
-    "archive_completed": "Archivar lo completado"
-  },
   "filters": {
     "tooltip": "Filtrar bandeja",
     "active_count_one": "{{count}} filtro activo",
@@ -33,8 +27,7 @@
     "type_system": "Sistema",
     "received_today": "Hoy",
     "received_last_7_days": "Últimos 7 días",
-    "received_last_30_days": "Últimos 30 días",
-    "agent_idle": "Inactivo"
+    "received_last_30_days": "Últimos 30 días"
   },
   "context_menu": {
     "mark_read": "Marcar como leído",
@@ -95,6 +88,7 @@
     "review_requested": "Revisión solicitada",
     "task_completed": "Ejecución completada",
     "task_failed": "Ejecución fallida",
+    "task_cancelled": "Ejecución cancelada",
     "agent_blocked": "Agente bloqueado",
     "agent_completed": "Agente completado",
     "reaction_added": "Reaccionó",
@@ -139,10 +133,6 @@
     "mark_unread_failed": "No se ha podido marcar como no leído",
     "archive_failed": "No se ha podido archivar",
     "mark_done_failed": "No se ha podido marcar como hecho",
-    "mark_all_read_failed": "No se ha podido marcar todo como leído",
-    "archive_all_failed": "No se ha podido archivar todo",
-    "archive_all_read_failed": "No se ha podido archivar los elementos leídos",
-    "archive_completed_failed": "No se ha podido archivar lo completado",
     "unarchive_failed": "No se ha podido desarchivar",
     "archived_load_failed": "No se han podido cargar las notificaciones archivadas",
     "filters_load_failed": "No se han podido cargar los filtros",
@@ -154,15 +144,14 @@
     "title": "¿Eliminar notificación?",
     "description": "Esta notificación se eliminará permanentemente. Las tareas y ejecuciones relacionadas se conservarán.",
     "issue_description": "Las notificaciones de esta tarea en esta vista se eliminarán permanentemente. La tarea y sus ejecuciones se conservarán.",
-    "cancel": "Cancelar",
-    "active_issue_description": "Las notificaciones activas de esta tarea se eliminarán permanentemente. Las notificaciones archivadas anteriormente se conservarán y volverán a aparecer en Archivadas. La tarea y sus ejecuciones se conservarán."
+    "cancel": "Cancelar"
   },
   "sections": {
     "needs_you": "Pendientes de ti",
     "working": "En curso",
     "updates": "Novedades",
     "snoozed": "Pospuestas",
-    "updates_unread": "Novedades sin leer",
+    "clear_updates": "Vaciar",
     "queued": "En cola",
     "caught_up": "Todo al día",
     "still_working_one": "{{count}} agente sigue trabajando. Los resultados volverán aquí.",
@@ -173,9 +162,13 @@
     "question": "Espera tu respuesta",
     "mention": "Te mencionó",
     "failed": "Ejecución fallida",
+    "cancelled": "Ejecución cancelada",
     "assigned": "Asignada a ti",
     "comment": "Nuevo comentario",
-    "finished": "Ejecución terminada"
+    "finished": "Ejecución terminada",
+    "stopped_by_you": "Detuviste esta ejecución",
+    "stopped_by": "{{name}} detuvo esta ejecución",
+    "stopped_by_system": "Detenida por el sistema"
   },
   "snooze": {
     "action": "Posponer",

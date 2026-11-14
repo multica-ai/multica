@@ -107,8 +107,6 @@
     "copy_link": "링크 복사",
     "link_copied": "링크를 복사했습니다",
     "workspace_settings": "작업 공간 설정",
-    "mark_all_read": "모두 읽음으로 표시",
-    "mark_all_read_failed": "모두 읽음으로 표시하지 못했습니다",
     "reset_order": "기본 순서로 재설정",
     "copy_workspace_link": "작업 공간 링크 복사",
     "workspace_meta_other": "{{slug}} · 멤버 {{count}}명"

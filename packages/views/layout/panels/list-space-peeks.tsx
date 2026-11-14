@@ -26,7 +26,6 @@ import { ChatThreadList } from "../../chat/components/chat-thread-list";
 import { useT } from "../../i18n";
 import { InboxSectionedList } from "../../inbox/components/inbox-sectioned-list";
 import { useInboxSections } from "../../inbox/components/use-inbox-sections";
-import { useIssueSurfaceActivity } from "../../issues/surface/activity";
 import { useNavigation } from "../../navigation";
 import { PanelCount, PanelHeader } from "../panel-nav";
 
@@ -46,24 +45,21 @@ export function InboxPeek() {
   const { push } = useNavigation();
   const { data: rawItems = EMPTY_INBOX } = useQuery(inboxListOptions(wsId));
   const filters = useInboxFilters(wsId);
-  const { activityByIssueId } = useIssueSurfaceActivity();
   const unreadCount = useInboxUnreadCount(wsId);
   const archive = useArchiveInbox();
 
   const activeRows = useMemo(() => rawItems.filter((item) => !item.archived), [rawItems]);
-  const { rows, filtered } = useMemo(() => {
-    const effective = effectiveInboxFilters(filters, {
-      priority: inboxPriorityFilterSupport(rawItems),
-      issueFields: inboxIssueFieldsSupport(rawItems),
-    });
-    return {
-      rows: filterInboxItems(activeRows, effective, {
-        activeIssueIds: effective.agent ? new Set(activityByIssueId.keys()) : undefined,
+  const effective = useMemo(
+    () =>
+      effectiveInboxFilters(filters, {
+        priority: inboxPriorityFilterSupport(rawItems),
+        issueFields: inboxIssueFieldsSupport(rawItems),
       }),
-      filtered: inboxFilterCount(effective) > 0,
-    };
-  }, [rawItems, activeRows, filters, activityByIssueId]);
-  const sections = useInboxSections(wsId, rows, activeRows, { filtered });
+    [rawItems, filters],
+  );
+  const rows = useMemo(() => filterInboxItems(activeRows, effective), [activeRows, effective]);
+  const filtered = inboxFilterCount(effective) > 0;
+  const sections = useInboxSections(wsId, rows, activeRows, { filters: effective });
 
   const open = (params: Record<string, string>) =>
     push(`${p.inbox()}?${new URLSearchParams(params).toString()}`);

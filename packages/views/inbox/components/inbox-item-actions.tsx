@@ -18,6 +18,7 @@ export interface InboxRowActions {
    * reversal-of-the-current-view the row's inline button performs.
    */
   onAction: (id: string) => void;
+  /** Delete for good. Offered in the archive only. */
   onDelete: (id: string) => void;
   /** Put the row's issue away until a time. Absent where snoozing is not offered. */
   onSnooze?: (id: string, until: Date) => void;
@@ -141,15 +142,19 @@ export function useInboxItemActions(
     },
   ]);
 
-  groups.push([
-    {
-      key: "delete",
-      label: t(($) => $.context_menu.delete),
-      icon: <Trash2 className="h-4 w-4" />,
-      danger: true,
-      onSelect: () => actions.onDelete(item.id),
-    },
-  ]);
+  // Deleting is for the archive. In the main list a row leaves by being
+  // handled, archived or snoozed, all of which can be undone.
+  if (isArchivedView) {
+    groups.push([
+      {
+        key: "delete",
+        label: t(($) => $.context_menu.delete),
+        icon: <Trash2 className="h-4 w-4" />,
+        danger: true,
+        onSelect: () => actions.onDelete(item.id),
+      },
+    ]);
+  }
 
   return groups;
 }

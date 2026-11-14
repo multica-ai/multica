@@ -3,12 +3,6 @@
     "title": "인박스",
     "back": "인박스"
   },
-  "menu": {
-    "mark_all_read": "모두 읽음으로 표시",
-    "archive_all": "모두 보관",
-    "archive_all_read": "읽은 항목 모두 보관",
-    "archive_completed": "완료된 항목 보관"
-  },
   "filters": {
     "tooltip": "인박스 필터",
     "active_count_other": "필터 {{count}}개 적용됨",
@@ -31,8 +25,7 @@
     "type_system": "시스템",
     "received_today": "오늘",
     "received_last_7_days": "최근 7일",
-    "received_last_30_days": "최근 30일",
-    "agent_idle": "유휴"
+    "received_last_30_days": "최근 30일"
   },
   "context_menu": {
     "mark_read": "읽음으로 표시",
@@ -93,6 +86,7 @@
     "review_requested": "리뷰 요청됨",
     "task_completed": "실행 완료됨",
     "task_failed": "실행 실패함",
+    "task_cancelled": "실행 취소됨",
     "agent_blocked": "에이전트 막힘",
     "agent_completed": "에이전트 완료됨",
     "reaction_added": "반응 추가됨",
@@ -137,10 +131,6 @@
     "mark_unread_failed": "읽지 않음 표시를 하지 못했습니다",
     "archive_failed": "보관하지 못했습니다",
     "mark_done_failed": "완료 표시를 하지 못했습니다",
-    "mark_all_read_failed": "모두 읽음으로 표시하지 못했습니다",
-    "archive_all_failed": "모두 보관하지 못했습니다",
-    "archive_all_read_failed": "읽은 항목을 보관하지 못했습니다",
-    "archive_completed_failed": "완료된 항목을 보관하지 못했습니다",
     "unarchive_failed": "보관 해제에 실패했습니다",
     "archived_load_failed": "보관된 알림을 불러오지 못했습니다",
     "filters_load_failed": "필터를 불러올 수 없습니다",
@@ -152,15 +142,14 @@
     "title": "알림을 삭제할까요?",
     "description": "이 알림은 영구적으로 삭제됩니다. 관련 작업과 실행 기록은 유지됩니다.",
     "issue_description": "이 보기에서 해당 작업의 알림이 영구적으로 삭제됩니다. 작업과 실행 기록은 유지됩니다.",
-    "cancel": "취소",
-    "active_issue_description": "이 작업의 받은편지함 알림은 영구적으로 삭제됩니다. 이전에 보관한 알림은 유지되며 보관함에 다시 표시됩니다. 작업과 실행 기록은 유지됩니다."
+    "cancel": "취소"
   },
   "sections": {
     "needs_you": "처리 필요",
     "working": "실행 중",
     "updates": "업데이트",
     "snoozed": "미룬 항목",
-    "updates_unread": "읽지 않은 업데이트 있음",
+    "clear_updates": "비우기",
     "queued": "대기 중",
     "caught_up": "모두 처리했습니다",
     "still_working_other": "에이전트 {{count}}개가 아직 실행 중입니다. 결과는 여기로 돌아옵니다."
@@ -170,9 +159,13 @@
     "question": "답변 대기",
     "mention": "멘션",
     "failed": "실행 실패",
+    "cancelled": "실행 취소됨",
     "assigned": "나에게 할당됨",
     "comment": "새 댓글",
-    "finished": "실행 완료"
+    "finished": "실행 완료",
+    "stopped_by_you": "내가 이 실행을 중지했습니다",
+    "stopped_by": "{{name}} 님이 이 실행을 중지했습니다",
+    "stopped_by_system": "시스템이 이 실행을 중지했습니다"
   },
   "snooze": {
     "action": "미루기",

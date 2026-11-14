@@ -3,12 +3,6 @@
     "title": "Inbox",
     "back": "Inbox"
   },
-  "menu": {
-    "mark_all_read": "Mark all as read",
-    "archive_all": "Archive all",
-    "archive_all_read": "Archive all read",
-    "archive_completed": "Archive completed"
-  },
   "filters": {
     "tooltip": "Filter inbox",
     "active_count_one": "{{count}} active filter",
@@ -33,8 +27,7 @@
     "type_system": "System",
     "received_today": "Today",
     "received_last_7_days": "Last 7 days",
-    "received_last_30_days": "Last 30 days",
-    "agent_idle": "Idle"
+    "received_last_30_days": "Last 30 days"
   },
   "context_menu": {
     "mark_read": "Mark as read",
@@ -95,6 +88,7 @@
     "review_requested": "Review requested",
     "task_completed": "Run completed",
     "task_failed": "Run failed",
+    "task_cancelled": "Run cancelled",
     "agent_blocked": "Agent blocked",
     "agent_completed": "Agent completed",
     "reaction_added": "Reacted",
@@ -139,10 +133,6 @@
     "mark_unread_failed": "Failed to mark as unread",
     "archive_failed": "Failed to archive",
     "mark_done_failed": "Failed to mark as done",
-    "mark_all_read_failed": "Failed to mark all as read",
-    "archive_all_failed": "Failed to archive all",
-    "archive_all_read_failed": "Failed to archive read items",
-    "archive_completed_failed": "Failed to archive completed",
     "unarchive_failed": "Failed to unarchive",
     "archived_load_failed": "Failed to load archived notifications",
     "filters_load_failed": "Could not load filters",
@@ -154,15 +144,14 @@
     "title": "Delete notification?",
     "description": "This permanently deletes this notification. Related issues and runs are kept.",
     "issue_description": "This permanently deletes the notifications for this issue in this view. The issue and its runs are kept.",
-    "cancel": "Cancel",
-    "active_issue_description": "This permanently deletes the active notifications for this issue. Previously archived notifications remain and will be visible again in Archived. The issue and its runs are kept."
+    "cancel": "Cancel"
   },
   "sections": {
     "needs_you": "Needs you",
     "working": "Working",
     "updates": "Updates",
     "snoozed": "Snoozed",
-    "updates_unread": "Unread updates",
+    "clear_updates": "Clear",
     "queued": "Queued",
     "caught_up": "All caught up",
     "still_working_one": "{{count}} agent is still working. Results come back here.",
@@ -173,9 +162,13 @@
     "question": "Waiting for your answer",
     "mention": "Mentioned you",
     "failed": "Run failed",
+    "cancelled": "Run cancelled",
     "assigned": "Assigned to you",
     "comment": "New comment",
-    "finished": "Run finished"
+    "finished": "Run finished",
+    "stopped_by_you": "You stopped this run",
+    "stopped_by": "{{name}} stopped this run",
+    "stopped_by_system": "Stopped by the system"
   },
   "snooze": {
     "action": "Snooze",
