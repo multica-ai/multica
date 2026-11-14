@@ -345,6 +345,32 @@ func BuildPrompt(task Task, provider string, options ...PromptOption) string {
 	return body
 }
 
+// buildCodexCommentPrompt keeps comment bodies out of the trusted platform
+// envelope. Construct each part from task fields, never by parsing user text.
+func buildCodexCommentPrompt(task Task, options ...PromptOption) (string, string) {
+	metadata := task
+	metadata.TriggerCommentContent = "[Current comment content is supplied in the user input.]"
+	metadata.CoalescedComments = append([]CoalescedCommentData(nil), task.CoalescedComments...)
+	for i := range metadata.CoalescedComments {
+		metadata.CoalescedComments[i].Content = "[Comment content is supplied in the user input.]"
+	}
+	metadata.ProjectWorkflow = nil
+	metadata.WakeupJoined = ""
+
+	var user strings.Builder
+	user.WriteString(task.TriggerCommentContent)
+	for _, comment := range task.CoalescedComments {
+		fmt.Fprintf(&user, "\n\n[Earlier comment %s, thread %s]\n%s", comment.ID, comment.ThreadID, comment.Content)
+	}
+	if task.ProjectWorkflow != nil {
+		user.WriteString("\n\n" + buildProjectWorkflowBlock(task))
+	}
+	if task.WakeupJoined != "" {
+		user.WriteString("\n\n" + buildJoinedWakeupsBlock(task.WakeupJoined))
+	}
+	return user.String(), BuildPrompt(metadata, "codex", options...)
+}
+
 func buildPromptBody(task Task, provider string) string {
 	if task.WakeupID != "" {
 		var b strings.Builder

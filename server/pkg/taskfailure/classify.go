@@ -115,6 +115,11 @@ func Classify(rawError string) Reason {
 	}
 
 	switch {
+	case strings.Contains(lower, "reason: content_filter"),
+		strings.Contains(lower, `"reason":"content_filter"`),
+		strings.Contains(lower, `"reason": "content_filter"`):
+		return ReasonAgentContentFilter
+
 	// A concurrent-request rejection can contain both "access token" and HTTP
 	// 403. Its specific semantic witness must beat the broader context and auth
 	// rules below; this classification does not itself make the reason retryable.

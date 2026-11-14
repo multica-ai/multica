@@ -40,7 +40,10 @@ type ExecOptions struct {
 	//
 	// A backend must therefore NOT assume this is populated, and adding a new
 	// backend that only reads SystemPrompt will silently receive nothing.
-	SystemPrompt              string
+	SystemPrompt string
+	// DeveloperInstructions carries trusted per-run platform instructions.
+	// User-authored task and comment content must remain in the user prompt.
+	DeveloperInstructions     string
 	ThreadName                string
 	MaxTurns                  int
 	Timeout                   time.Duration
