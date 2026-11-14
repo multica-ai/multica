@@ -298,6 +298,39 @@ Qoder Cloud Agents는 할당된 태스크를 원격 세션으로 실행합니다
 
 초기 버전은 태스크 실행, 채팅, 진행 상황 동기화, 취소, 영구 실행 기록을 통한 복구를 지원합니다. 태스크와 채팅 메시지에 첨부한 파일과 이미지는 PDF와 Office 문서를 포함해 파일당 5 MB까지 세션에 전달됩니다. 그보다 큰 파일은 전달되지 않으며, 에이전트에게는 파일이 있다는 사실만 알립니다. 로컬 디렉터리와 Qoder Cloud Agents 에이전트 생성은 지원하지 않습니다. 자세한 내용은 [README](https://github.com/multica-ai/multica/blob/main/server/cmd/qoder-runtime/README.md)를 참고하세요. 채팅에서 에이전트가 DeliverArtifacts로 전달한 파일은 파일당 10 MB까지 답장에 첨부됩니다.
 
+## Claude Managed Agents 원격 런타임
+
+Claude Managed Agents는 할당된 태스크를 Claude가 호스팅하는 세션에서 실행합니다. Multica 서버가 기존 데몬 태스크 프로토콜을 사용하는 브리지를 관리하므로, 이 런타임에는 사용자가 운영하는 로컬 데몬이 필요하지 않습니다.
+
+### 시작하기 전에
+
+- 워크스페이스 관리자여야 합니다. 워크스페이스마다 Claude Managed Agents 연결은 하나입니다.
+- Claude environment와 에이전트를 소유한 Anthropic workspace의 API 키, 최소 하나의 environment, 사용할 Claude 에이전트를 준비하세요. 모델, 도구, skill은 Multica가 아니라 Claude 에이전트에서 설정합니다. 브리지는 도구 확인에 응답할 수 없으므로 모든 도구의 권한 정책을 `always_allow`로 설정하세요.
+- 셀프 호스팅은 서버에 `MULTICA_VCS_SECRET_KEY`(base64로 인코딩된 32바이트 키로, 재시작해도 같은 값)를 설정해야 합니다. 설정하지 않으면 Claude Managed Agents에 연결할 수 없습니다.
+
+### Claude Managed Agents 연결
+
+1. **런타임** 페이지에서 **추가**를 클릭하고 **클라우드 서비스**에서 **Claude Managed Agents**를 선택합니다.
+2. 키를 **Anthropic API key**에 붙여넣습니다. **Environment** 목록이 Anthropic에서 로드되면 하나를 선택합니다.
+3. 선택 사항: **Vault IDs**를 쉼표로 구분해 추가합니다. 모든 세션에 연결되며, 예를 들어 GitHub MCP 자격 증명을 넣으면 에이전트가 풀 리퀘스트를 만들 수 있습니다.
+4. 선택 사항: **GitHub 저장소**에서 에이전트가 push할 수 있는 저장소마다 URL과 토큰을 추가합니다.
+5. 선택 사항: **동시 실행 수**와 **실행 제한 시간**을 설정합니다.
+6. **연결**을 클릭합니다. Claude Managed Agents가 런타임 페이지의 클라우드 섹션에 나타나고 몇 초 안에 온라인이 됩니다.
+
+### 에이전트 추가
+
+평소처럼 에이전트를 만들고 런타임으로 **Claude Managed Agents**를 선택한 다음, **Claude 에이전트**에서 연결할 Claude 에이전트를 고릅니다. 기존 에이전트는 Claude 에이전트 설정에서 연결된 에이전트나 기본 저장소를 바꿀 수 있습니다. 여러 Multica 에이전트가 하나의 연결을 공유할 수 있으며, 각각 다른 Claude 에이전트에 연결합니다.
+
+연결 자격 증명은 암호화되어 워크스페이스 안에서 공유됩니다. 저장된 비밀 값은 브라우저로 반환되지 않습니다. 관리자는 Claude Managed Agents 페이지에서 연결을 수정하고, **일시 중지**로 자격 증명과 에이전트는 유지한 채 새 태스크 전송을 멈추며, **연결 해제**로 저장된 자격 증명을 삭제하고 런타임을 제거하며 에이전트 연결을 해제할 수 있습니다.
+
+### 실행 방식
+
+동시 실행 한도를 넘는 실행은 대기열에서 기다립니다. 같은 태스크의 후속 실행은 이전 Claude 세션이 유휴 상태이면 그 세션을 이어 갑니다. 에이전트에게는 태스크 식별자를 딴 이름으로 브랜치를 push하라고 요청합니다. PR까지 만들려면 Claude 에이전트에 GitHub MCP 서버를 추가하고 그 자격 증명이 든 vault를 연결하세요. 에이전트에 기본 저장소를 설정하면 태스크의 프로젝트에 저장소가 없을 때 사용됩니다. 첫 버전은 태스크 실행만 지원하며 채팅, 빠른 생성, 첨부 파일, 로컬 디렉터리는 거부됩니다.
+
+### 독립 실행형 브리지
+
+Multica와 Anthropic API에 모두 접근할 수 있는 서버에서 `claude-managed-runtime`으로 브리지를 직접 실행할 수도 있습니다. 이 경우 워크스페이스 관리자의 개인 액세스 토큰(PAT)과 GitHub 저장소마다 토큰 파일이 필요합니다. 해당 런타임의 에이전트는 에이전트 폼이나 `multica agent create --runtime-config`와 `{"claude_agent_id": "agent_..."}`로 만듭니다. 독립 실행형 브리지는 런타임 페이지에 머신으로 표시됩니다. 설정과 제한은 [Claude Managed Agents runtime README](https://github.com/multica-ai/multica/blob/main/server/cmd/claude-managed-runtime/README.md)를 참고하세요.
+
 ## 런타임 오프라인 문제 해결
 
 다음 순서로 확인하세요.

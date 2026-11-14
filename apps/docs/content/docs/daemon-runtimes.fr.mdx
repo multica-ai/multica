@@ -300,6 +300,39 @@ Cette première version prend en charge l'exécution des tickets, le chat, le su
 
 Pour le déploiement du pont autonome et ses limites opérationnelles, consultez le [README du runtime Qoder](https://github.com/multica-ai/multica/blob/main/server/cmd/qoder-runtime/README.md).
 
+## Runtime distant Claude Managed Agents
+
+Claude Managed Agents exécute les tickets assignés dans des sessions hébergées par Claude. Le serveur Multica supervise un pont qui utilise le protocole de tâches existant du daemon ; aucun daemon local n'est nécessaire pour ce runtime.
+
+### Avant de commencer
+
+- Vous devez être administrateur de l'espace de travail. Chaque espace de travail a une seule connexion Claude Managed Agents.
+- Préparez une clé API Anthropic issue du workspace Anthropic qui possède votre environment et vos agents Claude, au moins un environment et les agents Claude à utiliser. Les modèles, outils et skills se configurent sur l'agent Claude, pas dans Multica. Réglez la politique de permission de chaque outil sur `always_allow` : le pont ne peut pas répondre aux confirmations d'outil.
+- Les installations auto-hébergées doivent définir `MULTICA_VCS_SECRET_KEY` sur le serveur : une clé de 32 octets encodée en base64, identique d'un redémarrage à l'autre. Sans elle, Claude Managed Agents ne peut pas être connecté.
+
+### Connecter Claude Managed Agents
+
+1. Sur la page **Runtimes**, cliquez sur **Ajouter** et choisissez **Claude Managed Agents** sous **Services cloud**.
+2. Collez la clé dans **Anthropic API key**. La liste **Environment** se charge depuis Anthropic ; choisissez-en un.
+3. Facultatif : ajoutez des **Vault IDs** séparés par des virgules. Ils sont attachés à chaque session, par exemple un identifiant GitHub MCP pour que les agents puissent ouvrir des pull requests.
+4. Facultatif : sous **Dépôts GitHub**, ajoutez l'URL et un jeton pour chaque dépôt sur lequel les agents peuvent pousser.
+5. Facultatif : réglez les **exécutions simultanées** et le **délai d'exécution**.
+6. Cliquez sur **Connecter**. Claude Managed Agents apparaît dans la section cloud de la page Runtimes et passe en ligne en quelques secondes.
+
+### Ajouter un agent
+
+Créez un agent comme d'habitude, choisissez **Claude Managed Agents** comme runtime, puis sélectionnez l'agent Claude sous **Agent Claude**. Pour un agent existant, changez l'agent Claude lié ou son dépôt par défaut dans les réglages Claude de l'agent. Plusieurs agents Multica peuvent partager une connexion, chacun lié à un agent Claude différent.
+
+Les identifiants de connexion sont chiffrés et partagés dans l'espace de travail ; les secrets enregistrés ne sont jamais renvoyés au navigateur. Sur la page Claude Managed Agents, les administrateurs peuvent modifier la connexion, **Mettre en pause** pour ne plus envoyer de nouvelles tâches tout en gardant identifiants et agents, ou **Déconnecter** pour supprimer les identifiants enregistrés, retirer le runtime et délier ses agents.
+
+### Fonctionnement des exécutions
+
+Les exécutions au-delà de la limite de simultanéité attendent dans la file. Un suivi sur le même ticket reprend la session Claude précédente si elle est inactive. L'agent doit pousser une branche nommée d'après l'identifiant du ticket. Pour ouvrir aussi la pull request, ajoutez le serveur GitHub MCP à l'agent Claude et attachez un vault contenant son identifiant. Un agent peut définir un dépôt par défaut, utilisé quand le projet du ticket n'en a pas. Cette première version ne gère que les exécutions de tickets : le chat, la création rapide, les pièces jointes et les dossiers locaux sont refusés.
+
+### Pont autonome
+
+Vous pouvez aussi exécuter vous-même le pont, `claude-managed-runtime`, sur un serveur qui atteint à la fois Multica et l'API Anthropic. Cela demande le jeton d'accès personnel (PAT) d'un administrateur de l'espace de travail et un fichier de jeton par dépôt GitHub. Créez les agents de ce runtime depuis le formulaire d'agent, ou avec `multica agent create --runtime-config` et `{"claude_agent_id": "agent_..."}`. Un pont autonome apparaît comme une machine sur la page Runtimes. Pour la configuration et les limites, voir le [README du runtime Claude Managed Agents](https://github.com/multica-ai/multica/blob/main/server/cmd/claude-managed-runtime/README.md).
+
 ## Dépanner un runtime hors ligne
 
 Vérifiez dans cet ordre :

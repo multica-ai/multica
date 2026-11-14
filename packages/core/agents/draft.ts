@@ -1,4 +1,5 @@
 import { qoderAgentId } from "./qoder-runtime-config";
+import { claudeAgentId } from "./claude-runtime-config";
 import { isRuntimeUsableForUser } from "../runtimes/access";
 import type {
   Agent,
@@ -19,6 +20,7 @@ import {
 export type { AgentPermissionScope };
 
 const QODER_PROVIDER = "qoder_cloud";
+const CLAUDE_MANAGED_PROVIDER = "claude_managed";
 
 /**
  * The in-progress configuration of an agent being created. Shared by every
@@ -33,6 +35,7 @@ export interface AgentDraft {
   avatarUrl: string | null;
   runtimeId: string;
   qoderAgentId: string;
+  claudeAgentId: string;
   model: string;
   /** Runtime-native reasoning/effort token, scoped to `model`. */
   thinkingLevel: string;
@@ -53,6 +56,7 @@ export const EMPTY_AGENT_DRAFT: AgentDraft = {
   avatarUrl: null,
   runtimeId: "",
   qoderAgentId: "",
+  claudeAgentId: "",
   model: "",
   thinkingLevel: "",
   serviceTier: "",
@@ -79,6 +83,7 @@ export function applyDraftRuntimeChange(
     ...draft,
     runtimeId,
     qoderAgentId: "",
+    claudeAgentId: "",
     model: "",
     thinkingLevel: "",
     serviceTier: "",
@@ -201,6 +206,7 @@ export function buildDuplicateDraft(
       ? (source.runtime_id as string)
       : options.fallbackRuntimeId,
     qoderAgentId: keepsRuntime ? qoderAgentId(source.runtime_config) : "",
+    claudeAgentId: keepsRuntime ? claudeAgentId(source.runtime_config) : "",
     model: keepsRuntime ? source.model ?? "" : "",
     thinkingLevel: keepsRuntime ? source.thinking_level ?? "" : "",
     serviceTier: keepsRuntime ? source.service_tier ?? "" : "",
@@ -226,19 +232,25 @@ export function buildCreateAgentRequest(options: {
 }): CreateAgentRequest {
   const { runtimeId, runtimeProvider, template, duplicateSource } = options;
   const qoder = runtimeProvider === QODER_PROVIDER;
-  // The Qoder bridge refuses skills and execution overrides, and the form
-  // hides them once Qoder is chosen.
-  const draft: AgentDraft = qoder
-    ? {
-        ...options.draft,
-        model: "",
-        thinkingLevel: "",
-        serviceTier: "",
-        skillIds: new Set(),
-      }
-    : runtimeProvider
-      ? { ...options.draft, qoderAgentId: "" }
-      : options.draft;
+  const claude = runtimeProvider === CLAUDE_MANAGED_PROVIDER;
+  // Cloud agent bridges refuse skills and execution overrides, and the form
+  // hides them once one is chosen (Claude Managed Agents also has no chat, so
+  // no conversation starters). Each keeps only its own remote agent binding.
+  const draft: AgentDraft =
+    qoder || claude
+      ? {
+          ...options.draft,
+          conversationStarters: claude ? [] : options.draft.conversationStarters,
+          model: "",
+          thinkingLevel: "",
+          serviceTier: "",
+          skillIds: new Set(),
+          qoderAgentId: qoder ? options.draft.qoderAgentId : "",
+          claudeAgentId: claude ? options.draft.claudeAgentId : "",
+        }
+      : runtimeProvider
+        ? { ...options.draft, qoderAgentId: "", claudeAgentId: "" }
+        : options.draft;
   const request: CreateAgentRequest = {
     name: draft.name.trim(),
     description: draft.description.trim(),
@@ -254,6 +266,7 @@ export function buildCreateAgentRequest(options: {
     avatar_url: draft.avatarUrl ?? undefined,
     runtime_id: runtimeId,
     ...(draft.qoderAgentId ? { runtime_config: { qoder_agent_id: draft.qoderAgentId } } : {}),
+    ...(draft.claudeAgentId ? { runtime_config: { claude_agent_id: draft.claudeAgentId } } : {}),
     model: draft.model.trim() || undefined,
     thinking_level: draft.thinkingLevel.trim() || undefined,
     service_tier: draft.serviceTier.trim() || undefined,
@@ -264,7 +277,7 @@ export function buildCreateAgentRequest(options: {
     template,
   };
   if (duplicateSource) {
-    if (!qoder && duplicateSource.custom_args.length > 0) {
+    if (!qoder && !claude && duplicateSource.custom_args.length > 0) {
       request.custom_args = duplicateSource.custom_args;
     }
     const sourceConcurrency = duplicateSource.max_concurrent_tasks;

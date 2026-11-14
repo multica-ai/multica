@@ -67,8 +67,8 @@ func (h *Handler) requireDaemonWorkspaceAccess(w http.ResponseWriter, r *http.Re
 			writeError(w, http.StatusNotFound, "not found")
 			return false
 		}
-		if strings.HasPrefix(middleware.DaemonIDFromContext(r.Context()), "qoder-managed-") {
-			allowed, err := h.qoderCredentialAllowed(r, workspaceID, middleware.DaemonIDFromContext(r.Context()))
+		if isManagedDaemonID(middleware.DaemonIDFromContext(r.Context())) {
+			allowed, err := h.managedCredentialAllowed(r, workspaceID, middleware.DaemonIDFromContext(r.Context()))
 			if err != nil {
 				writeError(w, http.StatusServiceUnavailable, "runtime authorization unavailable")
 				return false
@@ -137,7 +137,7 @@ func daemonRuntimeBindingAllowed(r *http.Request, daemonID pgtype.Text, ownerID 
 			strings.TrimSpace(daemonID.String) == "" || daemonID.String != tokenDaemonID {
 			return false
 		}
-		if isQoderManagedDaemonID(tokenDaemonID) {
+		if isManagedDaemonID(tokenDaemonID) {
 			return true
 		}
 		tokenOwnerID := middleware.DaemonTokenOwnerIDFromContext(ctx)
@@ -147,10 +147,10 @@ func daemonRuntimeBindingAllowed(r *http.Request, daemonID pgtype.Text, ownerID 
 	return userID != "" && ownerID.Valid && uuidToString(ownerID) == userID
 }
 
-// isQoderManagedDaemonID reports the reserved daemon_id namespace of the
-// server-run Qoder bridge.
-func isQoderManagedDaemonID(daemonID string) bool {
-	return strings.HasPrefix(daemonID, "qoder-managed-")
+// isManagedDaemonID reports the reserved daemon_id namespaces of the
+// server-run cloud agent bridges (Qoder, Claude Managed Agents).
+func isManagedDaemonID(daemonID string) bool {
+	return middleware.ManagedDaemonProvider(daemonID) != ""
 }
 
 // requireDaemonRuntimeAuthorized combines workspace access with the runtime
@@ -304,8 +304,8 @@ func (h *Handler) verifyDaemonWorkspaceAccess(r *http.Request, workspaceID strin
 		}
 		// Same revocation rule as requireDaemonWorkspaceAccess; an
 		// unavailable check skips the item rather than allowing it.
-		if daemonID := middleware.DaemonIDFromContext(r.Context()); strings.HasPrefix(daemonID, "qoder-managed-") {
-			allowed, err := h.qoderCredentialAllowed(r, workspaceID, daemonID)
+		if daemonID := middleware.DaemonIDFromContext(r.Context()); isManagedDaemonID(daemonID) {
+			allowed, err := h.managedCredentialAllowed(r, workspaceID, daemonID)
 			return err == nil && allowed
 		}
 		return true
@@ -620,8 +620,9 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 	// tokens under this prefix were issued for ordinary runtimes and carry no
 	// such binding. The bridge only ever registers one built-in qoder_cloud
 	// runtime, so anything else under this namespace is refused too.
-	if tokenDaemonID := middleware.DaemonIDFromContext(r.Context()); tokenDaemonID != "" && isQoderManagedDaemonID(tokenDaemonID) {
-		allowed, err := h.qoderCredentialAllowed(r, req.WorkspaceID, req.DaemonID)
+	if tokenDaemonID := middleware.DaemonIDFromContext(r.Context()); tokenDaemonID != "" && isManagedDaemonID(tokenDaemonID) {
+		managedProvider := middleware.ManagedDaemonProvider(tokenDaemonID)
+		allowed, err := h.managedCredentialAllowed(r, req.WorkspaceID, req.DaemonID)
 		if err != nil {
 			writeError(w, http.StatusServiceUnavailable, "runtime authorization unavailable")
 			return
@@ -631,22 +632,22 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if len(req.FailedProfiles) > 0 {
-			writeError(w, http.StatusForbidden, "managed runtime registration must be a single qoder_cloud runtime")
+			writeError(w, http.StatusForbidden, "managed runtime registration must be a single "+managedProvider+" runtime")
 			return
 		}
 		for _, rt := range req.Runtimes {
-			if normalizeProvider(rt.Type) != "qoder_cloud" || strings.TrimSpace(rt.ProfileID) != "" {
-				writeError(w, http.StatusForbidden, "managed runtime registration must be a single qoder_cloud runtime")
+			if normalizeProvider(rt.Type) != managedProvider || strings.TrimSpace(rt.ProfileID) != "" {
+				writeError(w, http.StatusForbidden, "managed runtime registration must be a single "+managedProvider+" runtime")
 				return
 			}
 		}
 	}
 	for _, rt := range req.Runtimes {
-		if normalizeProvider(rt.Type) != "qoder_cloud" {
+		if !isCloudAgentProvider(normalizeProvider(rt.Type)) {
 			continue
 		}
 		if middleware.DaemonIDFromContext(r.Context()) != "" {
-			allowed, err := h.qoderCredentialAllowed(r, req.WorkspaceID, req.DaemonID)
+			allowed, err := h.managedCredentialAllowed(r, req.WorkspaceID, req.DaemonID)
 			if err != nil || !allowed {
 				writeError(w, http.StatusForbidden, "managed runtime credential required")
 				return
@@ -680,7 +681,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "workspace not found")
 			return
 		}
-		if !isQoderManagedDaemonID(req.DaemonID) {
+		if !isManagedDaemonID(req.DaemonID) {
 			tokenOwner := middleware.DaemonTokenOwnerIDFromContext(r.Context())
 			if tokenOwner == "" {
 				writeError(w, http.StatusForbidden, "daemon credential is not bound to a runtime owner")
@@ -704,7 +705,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		// The Qoder-managed namespace is reserved for the server's bridge
 		// and its daemon token, which is not owner-bound; a member must not
 		// be able to own a runtime that token would reach (MUL-8154).
-		if isQoderManagedDaemonID(req.DaemonID) {
+		if isManagedDaemonID(req.DaemonID) {
 			writeError(w, http.StatusForbidden, "reserved daemon_id")
 			return
 		}

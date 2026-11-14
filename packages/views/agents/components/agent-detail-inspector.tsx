@@ -138,6 +138,8 @@ export function AgentDetailInspector({
 
   const {
     qoderRuntime,
+    claudeRuntime,
+    cloudRuntime,
     canDiscoverRuntimeModels,
     runtimeOptions,
     changeModel,
@@ -146,7 +148,8 @@ export function AgentDetailInspector({
   const conversationStartersEnabled = useConfigStore(
     (state) => state.agentConversationStartersSupported,
   );
-  const showStarters = conversationStartersEnabled;
+  // Claude Managed Agents never opens a chat, so nothing chat-facing applies.
+  const showStarters = conversationStartersEnabled && !claudeRuntime;
   const startersComplete = starters.every(
     (item) => item.label.trim() && item.prompt.trim(),
   );
@@ -284,7 +287,11 @@ export function AgentDetailInspector({
           <SettingsSection
             title={t(($) => $.inspector.section_execution)}
             description={
-              qoderRuntime ? t(($) => $.inspector.qoder_execution_note) : undefined
+              qoderRuntime
+                ? t(($) => $.inspector.qoder_execution_note)
+                : claudeRuntime
+                  ? t(($) => $.inspector.claude_execution_note)
+                  : undefined
             }
           >
             <SettingsCard>
@@ -299,11 +306,11 @@ export function AgentDetailInspector({
                   runtimes={runtimeOptions}
                   members={members}
                   currentUserId={currentUserId}
-                  canEdit={canEdit && !qoderRuntime}
+                  canEdit={canEdit && !cloudRuntime}
                   onChange={changeRuntime}
                 />
               </SettingsRow>
-              {qoderRuntime ? null : (
+              {cloudRuntime ? null : (
                 <>
                   <SettingsRow
                     label={t(($) => $.inspector.prop_model)}

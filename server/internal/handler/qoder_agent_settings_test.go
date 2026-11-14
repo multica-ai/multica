@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 	"testing"
 
@@ -44,4 +45,38 @@ func TestQoderAgentWritesValidateEffectiveSettings(t *testing.T) {
 	put(testHandler.UpdateAgentEnv, qoderAgent, "/env", map[string]any{"custom_env": map[string]string{"API_KEY": "x"}}).Want(http.StatusBadRequest)
 	put(testHandler.SetAgentSkills, qoderAgent, "/skills", map[string]any{"skill_ids": []string{skillID}}).Want(http.StatusBadRequest)
 	put(testHandler.SetAgentSkills, qoderAgent, "/skills", map[string]any{"skill_ids": []string{}}).Want(http.StatusOK)
+}
+
+func TestClaudeManagedAgentWritesValidateEffectiveSettings(t *testing.T) {
+	if testPool == nil {
+		t.Skip("database not available")
+	}
+	claudeRuntime := dbfx.Runtime(t, "claude settings runtime", testutil.Cols{"provider": "claude_managed"})
+	localRuntime := dbfx.Runtime(t, "local claude settings runtime")
+	modelAgent := dbfx.Agent(t, "local model agent for claude", localRuntime, testutil.Cols{"model": "gpt-5"})
+	plainAgent := dbfx.Agent(t, "local plain agent for claude", localRuntime)
+	binding := map[string]any{"claude_agent_id": "agent_01abc"}
+
+	create := func(body map[string]any) *testutil.Response {
+		body["name"] = "claude settings " + t.Name() + fmt.Sprint(len(body))
+		body["runtime_id"] = claudeRuntime
+		return testutil.Call(t, testHandler.CreateAgent, newRequest(http.MethodPost, "/api/agents", body))
+	}
+	create(map[string]any{}).Want(http.StatusBadRequest)
+	create(map[string]any{"runtime_config": map[string]any{"claude_agent_id": "not-an-agent"}}).Want(http.StatusBadRequest)
+	create(map[string]any{"runtime_config": map[string]any{"claude_agent_id": "agent_01abc", "repository": map[string]any{"url": "http://example.com/x"}}}).Want(http.StatusBadRequest)
+	create(map[string]any{"runtime_config": binding, "model": "claude-sonnet-5-5"}).Want(http.StatusBadRequest)
+	var created AgentResponse
+	create(map[string]any{"runtime_config": binding}).Want(http.StatusCreated).JSON(&created)
+	dbfx.Cleanup(t, `DELETE FROM agent WHERE id = $1`, created.ID)
+
+	put := func(agentID string, body map[string]any) *testutil.Response {
+		return testutil.Call(t, testHandler.UpdateAgent, withURLParam(newRequest(http.MethodPut, "/api/agents/"+agentID, body), "id", agentID))
+	}
+	put(created.ID, map[string]any{"custom_args": []string{"--verbose"}}).Want(http.StatusBadRequest)
+	put(created.ID, map[string]any{"runtime_config": map[string]any{}}).Want(http.StatusBadRequest)
+	put(created.ID, map[string]any{"description": "still fine"}).Want(http.StatusOK)
+	put(modelAgent, map[string]any{"runtime_id": claudeRuntime, "runtime_config": binding}).Want(http.StatusBadRequest)
+	put(plainAgent, map[string]any{"runtime_id": claudeRuntime}).Want(http.StatusBadRequest)
+	put(plainAgent, map[string]any{"runtime_id": claudeRuntime, "runtime_config": binding}).Want(http.StatusOK)
 }
