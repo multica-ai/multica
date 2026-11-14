@@ -292,30 +292,27 @@ function ReplyInput({
         actorType={avatarType}
         actorId={avatarId}
         size={avatarSize}
-        className={cn("shrink-0", size === "sm" ? "mt-1.5" : "mt-1")}
+        className="mt-0.5 shrink-0"
       />
       <div
         {...dropZoneProps}
         {...focusProps}
         ref={bindComposer}
-        className={cn(
-          "relative flex min-w-0 flex-1 flex-col rounded-md bg-card ring-1 transition-shadow",
-          focused ? "ring-foreground/25" : "ring-border",
-        )}
+        className="relative flex min-w-0 flex-1 flex-col"
         onFocusCapture={voice.onFocusCapture}
       >
-        {attachmentsBlockSteer && <div className="px-2.5 pt-1.5"><SteerAttachmentNotice /></div>}
-        {draftKey && annotations.length > 0 && <div className="px-2.5 pt-1.5">
+        {attachmentsBlockSteer && <SteerAttachmentNotice />}
+        {draftKey && annotations.length > 0 && <>
           {targetMissing && <p role="alert" className="mb-2 text-caption text-destructive">{t(($) => $.reply.annotations.target_deleted)}</p>}
           <ReplyAnnotations draftKey={draftKey} annotations={annotations}
             disabled={submitting} onEditAnnotation={onEditAnnotation} />
-        </div>}
+        </>}
         <div className="flex min-h-0 flex-1 items-center">
         {/* Lock the editor while the reply is in flight — see CommentInput. */}
         {lazy.active && (
         <div
           className={cn(
-            "min-w-0 flex-1 min-h-0 overflow-y-auto px-2.5 py-1",
+            "min-w-0 flex-1 min-h-0 overflow-y-auto",
             submitting && "pointer-events-none opacity-60",
             !lazy.ready && "hidden",
           )}
@@ -353,7 +350,7 @@ function ReplyInput({
             role="button"
             tabIndex={0}
             aria-label={placeholderText}
-            className="min-w-0 flex-1 cursor-text px-2.5 py-1 rich-text-editor text-body"
+            className="min-w-0 flex-1 cursor-text rich-text-editor text-body"
             onClick={() => lazy.activate()}
             onKeyDown={(e) => {
               if (e.key === "Enter" || e.key === " ") {
@@ -367,13 +364,13 @@ function ReplyInput({
             <p className="text-muted-foreground">{placeholderText}</p>
           </div>
         )}
-        {!expanded && <ComposerIdleTools className="pr-1" voice={voice} onAttach={(file) => lazy.uploadOrQueue([file])} />}
+        {!expanded && <ComposerIdleTools className="-my-1" voice={voice} onAttach={(file) => lazy.uploadOrQueue([file])} />}
         </div>
         <VoiceHud voice={voice} />
         <VoiceSetupDialog voice={voice} />
-        <VoiceErrorRow voice={voice} className="mx-1.5 mb-1" />
+        <VoiceErrorRow voice={voice} className="mt-1" />
         {expanded && <ComposerToolbar
-          className="px-1 pb-1"
+          className="mt-1 animate-in fade-in slide-in-from-top-1 duration-150"
           voice={voice}
           hasRecipients={showsTriggerChips}
           recipients={<CommentTriggerChips

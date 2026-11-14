@@ -100,7 +100,7 @@ export function ComposerToolbar({
 }) {
   return (
     <div
-      className={cn("flex h-9 items-center gap-1 animate-in fade-in slide-in-from-top-1 duration-150", className)}
+      className={cn("flex h-9 items-center gap-1", className)}
       onMouseDown={keepFocus}
     >
       {hasRecipients && (

@@ -21,11 +21,9 @@ import {
 } from "../../voice";
 import { CommentTriggerChips } from "./comment-trigger-chips";
 import {
-  ComposerIdleTools,
   ComposerToolbar,
   ComposerTools,
   QUIET_SEND_CLASS,
-  useComposerExpanded,
   useComposerFocus,
 } from "./composer-frame";
 import { commentTriggerPreviewSignature, useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
@@ -246,12 +244,6 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation, annotat
   });
   const { focused, focusProps } = useComposerFocus();
   const showsTriggerChips = recipients.length > 0 || triggerPreview.blocked.length > 0 || triggerPreview.hasAllMembersMention;
-  // One line at rest; the toolbar with recipients and send appears once the
-  // user is writing here.
-  const expanded = useComposerExpanded(
-    focused || !isEmpty || annotations.length > 0 || showsTriggerChips || voice.showStrip || submitting || gate.uploading,
-    voice,
-  );
 
   return (<>
     {annotationComposer?.render({
@@ -278,7 +270,6 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation, annotat
         <ReplyAnnotations draftKey={draftKey} annotations={annotations} disabled={submitting}
           onEditAnnotation={onEditAnnotation} />
       </div>}
-      <div className="flex min-h-0 flex-1 items-center">
       {/* Lock the editor while the send is in flight. ContentEditor can't
           toggle Tiptap's `editable` post-mount (see its docstring), so the
           documented way to make it non-interactive is a pointer-events-none +
@@ -286,7 +277,7 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation, annotat
       {lazy.active && (
       <div
         className={cn(
-          "min-w-0 flex-1 min-h-0 overflow-y-auto px-3 py-2",
+          "flex-1 min-h-0 overflow-y-auto px-3 py-2",
           // Pinned to the viewport bottom the composer grows upward; cap it
           // so a long draft can't swallow the whole timeline (the editor
           // area scrolls internally instead).
@@ -331,7 +322,7 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation, annotat
           role="button"
           tabIndex={0}
           aria-label={t(($) => $.comment.leave_comment_placeholder)}
-          className="min-w-0 flex-1 cursor-text px-3 py-2"
+          className="flex-1 min-h-0 cursor-text px-3 py-2"
           onClick={() => lazy.activate()}
           onKeyDown={(e) => {
             if (e.key === "Enter" || e.key === " ") {
@@ -348,12 +339,10 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation, annotat
           </div>
         </div>
       )}
-      {!expanded && <ComposerIdleTools className="pr-1.5" voice={voice} onAttach={(file) => lazy.uploadOrQueue([file])} />}
-      </div>
       <VoiceHud voice={voice} />
       <VoiceSetupDialog voice={voice} />
       <VoiceErrorRow voice={voice} className="mx-2 mb-1" />
-      {expanded && <ComposerToolbar
+      <ComposerToolbar
         className="px-1.5 pb-1"
         voice={voice}
         hasRecipients={showsTriggerChips}
@@ -399,7 +388,7 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation, annotat
             ? tEditor(($) => $.upload.in_progress)
             : t(($) => $.comment.send_tooltip)}
         />}
-      />}
+      />
       {isDragOver && <FileDropOverlay />}
     </div>
   </>);
