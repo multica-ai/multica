@@ -372,6 +372,37 @@ func (q *Queries) CreateInboxItem(ctx context.Context, arg CreateInboxItemParams
 	return i, err
 }
 
+const deleteInboxGroup = `-- name: DeleteInboxGroup :execrows
+WITH target AS (
+    SELECT selected.id, selected.workspace_id, selected.recipient_type, selected.recipient_id, selected.type, selected.severity, selected.issue_id, selected.title, selected.body, selected.read, selected.archived, selected.created_at, selected.actor_type, selected.actor_id, selected.details, selected.section FROM inbox_item selected
+    WHERE selected.id = $1 AND selected.workspace_id = $2
+      AND selected.recipient_type = 'member' AND selected.recipient_id = $3
+)
+DELETE FROM inbox_item item USING target
+WHERE item.workspace_id = target.workspace_id
+  AND item.recipient_type = target.recipient_type
+  AND item.recipient_id = target.recipient_id
+  AND item.archived = target.archived
+  AND (item.id = target.id OR item.issue_id = target.issue_id)
+`
+
+type DeleteInboxGroupParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	RecipientID pgtype.UUID `json:"recipient_id"`
+}
+
+// A visible inbox row groups notifications on an issue. Remove that group
+// only in the selected view, so older siblings cannot bring the row back and
+// deleting an active row does not erase its archived history.
+func (q *Queries) DeleteInboxGroup(ctx context.Context, arg DeleteInboxGroupParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteInboxGroup, arg.ID, arg.WorkspaceID, arg.RecipientID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getInboxItem = `-- name: GetInboxItem :one
 SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, section FROM inbox_item
 WHERE id = $1

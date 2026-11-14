@@ -848,6 +848,9 @@
       "agent_activity": {
         "label": "에이전트 활동",
         "description": "에이전트 실행이 실패할 때"
+      },
+      "chat_replies": {
+        "label": "채팅 답변 포함"
       }
     },
     "system": {
@@ -856,7 +859,7 @@
     },
     "browser": {
       "label": "브라우저 알림",
-      "hint": "이 브라우저에서 새 인박스 항목에 대한 알림 배너를 표시하도록 허용합니다.",
+      "hint": "이 브라우저에서 받은편지함 알림과 채팅 답변의 배너를 표시하도록 허용합니다.",
       "enable": "사용",
       "granted": "이 브라우저에서 알림 배너를 표시할 수 있습니다.",
       "denied": "브라우저에서 차단되었습니다. 브라우저 설정에서 이 사이트의 알림을 허용하세요.",
@@ -1664,7 +1667,6 @@
     "platform_label": "플랫폼",
     "region_label": "지역",
     "method_label": "연결 방식",
-    "continue": "계속",
     "feishu": "Feishu(중국)",
     "lark": "Lark(국제)",
     "setup_guide": "설정 가이드",

@@ -16,7 +16,7 @@ Two resource types are supported today:
 | Resource | Best for | Where runs happen |
 |---|---|---|
 | **GitHub repository** | Code shared by the team, with checkouts managed by the runtime | A runtime-managed working directory |
-| **Local directory** | An existing checkout, a very large repository, or when you want to inspect local changes directly | The original directory on a specific computer |
+| **Local directory** | An existing checkout, a very large repository, or when you want to inspect local changes directly | The original folder or an isolated worktree on a specific computer |
 
 ## How resources enter a run
 
@@ -24,11 +24,11 @@ When an agent works an issue inside the project, Multica adds the project name, 
 
 The workspace's linked repository list is always included in the run context. Repositories linked to the project additionally specify the code and default ref this body of work uses.
 
-A local directory only applies to the daemon it is bound to. When the daemon executing a run has a matching local directory, the agent works directly in that directory; other computers keep using the project's GitHub repositories or the workspace repositories.
+A local directory only applies to the daemon it is bound to. When the daemon executing a run has a matching local directory, the agent uses it in `in_place` mode or an isolated worktree of it in `worktree` mode; other computers keep using the project's GitHub repositories or the workspace repositories.
 
 ## Add a GitHub repository
 
-Open the project and choose "Add resource" under **Resources**. Pick a repository already linked to the workspace, or paste a Git URL. Workspace repositories are managed in **Settings → Code**; once GitHub is connected, the same page offers **Pick from GitHub** to import repositories the App is authorized for.
+Open the project and click **Add repository** in **Resources → Repositories**. Search for a repository already linked to the workspace, or paste a Git URL. Workspace repositories are managed in **Settings → Code**; once GitHub is connected, the same page offers **Pick from GitHub** to import repositories the App is authorized for.
 
 Repositories are not limited to GitHub: any Git URL the runtime can reach works as a repository resource. Self-hosted Multica can also connect self-hosted Forgejo, Gitea, or GitLab under **Settings → Code**; see [Self-hosted Git hosting](/vcs-integration).
 
@@ -54,17 +54,17 @@ Make sure Desktop's local daemon is online.
 </Step>
 <Step>
 
-Open the project's **Resources**, or the **Local directory** tab of the create-project dialog. The same choice is available there before the project exists.
+For an existing project, open **Resources → Local folders** and follow the steps below. When creating a project, use the **Local folder** tab instead; the folder and mode are saved when you create the project.
 
 </Step>
 <Step>
 
-Choose "Add local directory", then pick the folder to use.
+Under your computer, click **Choose folder...**, then pick the folder to use.
 
 </Step>
 <Step>
 
-Pick how runs should use it: **Direct** or **Parallel**, described under [How runs share the directory](#how-runs-share-the-directory). Desktop preselects **Parallel** when the folder is a git repository the runtime on that machine can isolate, and **Direct** otherwise. Change it right there, or later from **Resources** with the pencil next to the directory.
+Pick **Edit directly** or **Run in parallel**, described under [How runs share the directory](#how-runs-share-the-directory), then click **Add folder**. Desktop preselects **Run in parallel** when the folder is a git repository the runtime on that machine can isolate, and **Edit directly** otherwise. To change it later, click the folder's mode label in **Resources** and choose another mode; the selection saves immediately.
 
 </Step>
 </Steps>
@@ -83,7 +83,7 @@ In the default `in_place` mode a local directory is not an isolated environment:
 
 ## How runs share the directory
 
-A local directory has two execution modes, set per resource with `execution_mode`. Desktop labels them **Direct** and **Parallel**; the API, the CLI and the rest of this page use the identifiers.
+A local directory has two execution modes, set per resource with `execution_mode`. Desktop shows them as **Edit directly** and **Run in parallel** when you add a folder, and as **Direct** and **Parallel** on the folder's mode label; the API, the CLI and the rest of this page use the identifiers.
 
 <LocalDirModeDemo />
 

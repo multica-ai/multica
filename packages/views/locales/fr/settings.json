@@ -857,6 +857,9 @@
       "agent_activity": {
         "label": "Activité des agents",
         "description": "Lorsqu'une exécution d'agent échoue"
+      },
+      "chat_replies": {
+        "label": "Inclure les réponses du chat"
       }
     },
     "system": {
@@ -865,7 +868,7 @@
     },
     "browser": {
       "label": "Notifications du navigateur",
-      "hint": "Autoriser ce navigateur à afficher des bannières de notification pour les nouveaux éléments de la boîte de réception.",
+      "hint": "Autorisez ce navigateur à afficher des bannières pour les notifications de la boîte de réception et les réponses du chat.",
       "enable": "Activer",
       "granted": "Ce navigateur peut afficher des bannières de notification.",
       "denied": "Bloqué par votre navigateur. Activez les notifications pour ce site dans ses réglages.",
@@ -1679,7 +1682,6 @@
     "platform_label": "Plateforme",
     "region_label": "Région",
     "method_label": "Méthode de connexion",
-    "continue": "Continuer",
     "feishu": "Feishu (Chine)",
     "lark": "Lark (international)",
     "setup_guide": "Guide de configuration",

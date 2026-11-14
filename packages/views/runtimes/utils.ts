@@ -311,6 +311,8 @@ const MODEL_PRICING: Record<
   //    Image, Omni and Embedding SKUs stay unmapped because aggregate tokens
   //    cannot distinguish their rates. Mirror server/internal/metrics/pricing.go. --
   "gemini-4-argon": { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2 },
+  // Gemini 4 Carbon shares Argon's intro rate through 2026-11-30 (checked 2026-11-11).
+  "gemini-4-carbon": { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2 },
   "gemini-3.8-flash": { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0.75 },
   "gemini-3.7-flash": { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0.75 },
   "gemini-3.6-flash": { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0.75 },
@@ -378,10 +380,24 @@ const MODEL_PRICING: Record<
   // Kimi Code CLI reports the same model as `kimi-code/k3`; provider-qualified
   // because `k3` is a generic id (see the provider-qualified keys note above).
   "kimi/k3":            { input: 3.0,  output: 15.0,  cacheRead: 0.30,   cacheWrite: 3.0 },
+  // Kimi K3.1 Pro (platform.kimi.ai/docs/pricing/chat via models.dev
+  // providers/moonshotai/models/kimi-k3.1-pro.toml, 2026-11-11); default 5m
+  // cache write is 1x input, like kimi-k3. `k3.1-pro` is generic, so it prices
+  // only under the provider-qualified `kimi/k3.1-pro` key (also covering
+  // Kimi Code's `kimi-code/k3.1-pro`); the highspeed SKU and CodeBuddy's
+  // `kimi-k3-1` stay unmapped.
+  "kimi-k3.1-pro":      { input: 2.0,  output: 10.0,  cacheRead: 0.20,   cacheWrite: 2.0 },
+  "kimi/k3.1-pro":      { input: 2.0,  output: 10.0,  cacheRead: 0.20,   cacheWrite: 2.0 },
+  // `kimi-for-coding` is a Kimi Code subscription route alias, not an API
+  // SKU with a published rate, so it stays unmapped.
 
   // -- Zhipu z.ai (docs.z.ai/guides/overview/pricing). Free flash tiers
   //    are priced at 0 so they resolve cleanly instead of falling through
   //    to the "unmapped" diagnostic. --
+  // GLM-5.3 and GLM-5.3-Flash (2026-11-11); the 5.3 Flash tier is paid,
+  // unlike the free 4.x flashes below.
+  "glm-5.3":            { input: 1.4,  output: 4.4,  cacheRead: 0.26,   cacheWrite: 1.4 },
+  "glm-5.3-flash":      { input: 0.15, output: 0.5,  cacheRead: 0.03,   cacheWrite: 0.15 },
   "glm-5.1":            { input: 1.4,  output: 4.4,  cacheRead: 0.26,   cacheWrite: 1.4 },
   "glm-5":              { input: 1.0,  output: 3.2,  cacheRead: 0.2,    cacheWrite: 1.0 },
   "glm-5-turbo":        { input: 1.2,  output: 4.0,  cacheRead: 0.24,   cacheWrite: 1.2 },
@@ -630,6 +646,7 @@ function pricingCandidates(model: string, provider?: string): string[] {
   const p = normalizeProvider(provider);
   if (!p) return base;
   if (p === "cursor") return cursorPricingCandidates(model, base);
+  if (p === "antigravity") return antigravityPricingCandidates(model, base, p);
   return [...base.map((c) => qualify(p, c)), ...base];
 }
 
@@ -665,6 +682,31 @@ function cursorPricingCandidates(model: string, canonical: string[]): string[] {
   const qualified = canonical.map((c) => qualify("cursor", c));
   if (!base) return [...qualified, ...canonical];
   return [...new Set([...qualified, `cursor/${base}`, base, ...canonical])];
+}
+
+// Antigravity labels Claude models with the reasoning effort, as a slug
+// suffix (`claude-opus-5-5-high`) or a display label (`Claude Opus 5.5
+// (High)`); effort selects reasoning, not a SKU, so both price at the base
+// tier like canonGemini, scoped to antigravity — a bare `claude-opus-5-5-high`
+// elsewhere stays unmapped; mirrors priceForAntigravityModel in pricing.go.
+const ANTIGRAVITY_CLAUDE_DISPLAY =
+  /^(?:[a-z][a-z0-9_-]*[/:])*claude (opus|sonnet|haiku|fable) (\d+(?:[.-]\d+)?)(?: \((?:minimal|low|medium|high)\))?$/i;
+const ANTIGRAVITY_CLAUDE_EFFORT =
+  /^(?:[a-z][a-z0-9_-]*[/:])*(claude-(?:opus|sonnet|haiku|fable)-\d+(?:[.-]\d+)?)-(?:minimal|low|medium|high)$/i;
+
+function antigravityClaudeBase(model: string): string | undefined {
+  const id = model.trim().replace(/\[[^\]]+\]$/, "");
+  const display = ANTIGRAVITY_CLAUDE_DISPLAY.exec(id);
+  if (display) return `claude-${display[1]}-${display[2]!.replace(/\./g, "-")}`.toLowerCase();
+  const effort = ANTIGRAVITY_CLAUDE_EFFORT.exec(id);
+  return effort?.[1]?.replace(/\./g, "-").toLowerCase();
+}
+// antigravityPricingCandidates appends the Claude base id (one trailing
+// context tag tolerated), keeping the qualified-first lookup order.
+function antigravityPricingCandidates(model: string, base: string[], provider: string): string[] {
+  const claude = antigravityClaudeBase(model);
+  if (!claude) return [...base.map((c) => qualify(provider, c)), ...base];
+  return [...base.map((c) => qualify(provider, c)), `${provider}/${claude}`, ...base, claude];
 }
 
 // The canonical storage/diagnostic key for a (model, provider) pair: the
@@ -772,9 +814,9 @@ function canonicalCandidates(model: string): string[] {
   // Antigravity's display labels and effort-suffixed IDs refer to the same
   // Gemini SKU. Match only recognized shapes; never strip arbitrary variants.
   const canonGemini = (s: string) => {
-    const display = /^gemini (\d+(?:\.\d+)?) (flash(?:-lite)?|pro|argon)(?: \((?:minimal|low|medium|high)\))?$/i.exec(s);
+    const display = /^gemini (\d+(?:\.\d+)?) (flash(?:-lite)?|pro|argon|carbon)(?: \((?:minimal|low|medium|high)\))?$/i.exec(s);
     if (display) return `gemini-${display[1]}-${display[2]}`.toLowerCase();
-    const slug = /^(gemini-\d+(?:\.\d+)?-(?:flash(?:-lite)?|pro|argon))(?:-(?:minimal|low|medium|high))?$/i.exec(s);
+    const slug = /^(gemini-\d+(?:\.\d+)?-(?:flash(?:-lite)?|pro|argon|carbon))(?:-(?:minimal|low|medium|high))?$/i.exec(s);
     return slug ? slug[1]!.toLowerCase() : s;
   };
 
@@ -1390,9 +1432,11 @@ export function sliceWindow(
   days: number,
   tz: string,
 ): { filtered: RuntimeUsage[]; prevFiltered: RuntimeUsage[] } {
+  // `days` calendar days including today. The backend's `days=N` series
+  // starts one day earlier on purpose, so the cutoff must not be today - N.
   const today = todayIso(tz);
-  const isoCurrent = addDaysIso(today, -days);
-  const isoPrev = addDaysIso(today, -days * 2);
+  const isoCurrent = addDaysIso(today, -(days - 1));
+  const isoPrev = addDaysIso(today, -(days * 2 - 1));
   return {
     filtered: usage.filter((u) => u.date >= isoCurrent),
     prevFiltered: usage.filter(
