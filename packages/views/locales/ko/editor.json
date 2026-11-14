@@ -129,6 +129,13 @@
     "view_source": "소스 보기",
     "copy_error": "오류 복사"
   },
+  "drawio": {
+    "title": "draw.io 다이어그램",
+    "error": "이 draw.io 다이어그램을 표시할 수 없습니다",
+    "invalid": "올바른 draw.io XML이 아닙니다.",
+    "too_large": "다이어그램이 너무 커서 여기서 미리 볼 수 없습니다.",
+    "unreachable": "{{origin}}의 draw.io 뷰어에 연결할 수 없습니다."
+  },
   "file_card": {
     "uploading": "{{filename}} 업로드 중"
   },

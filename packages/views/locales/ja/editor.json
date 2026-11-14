@@ -129,6 +129,13 @@
     "view_source": "ソースを表示",
     "copy_error": "エラーをコピー"
   },
+  "drawio": {
+    "title": "draw.io 図",
+    "error": "この draw.io 図を表示できませんでした",
+    "invalid": "有効な draw.io XML ではありません。",
+    "too_large": "図が大きすぎるため、ここではプレビューできません。",
+    "unreachable": "{{origin}} の draw.io ビューアーに接続できませんでした。"
+  },
   "file_card": {
     "uploading": "{{filename}} をアップロード中"
   },

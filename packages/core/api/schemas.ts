@@ -1072,6 +1072,10 @@ export interface AppConfigResponse {
    * /api/theme-store. Off when the operator turned it off, and absent on older
    * servers, so the app shows no Browse entry and makes no store requests. */
   theme_store_enabled?: boolean;
+  /** draw.io viewer base URL for diagram previews. Absent or empty means the
+   * operator turned the embedded preview off (and is what older servers send),
+   * so clients show the XML instead. */
+  drawio_viewer_url?: string;
   server_version?: string;
 }
 
@@ -1361,6 +1365,7 @@ export const AppConfigSchema = z.object({
   issue_create_properties_supported: BooleanWithDefaultSchema(false),
   comment_delete_keep_replies_supported: BooleanWithDefaultSchema(false),
   theme_store_enabled: BooleanWithDefaultSchema(false),
+  drawio_viewer_url: OptionalStringSchema,
   server_version: OptionalStringSchema,
 }).loose();
 
@@ -1385,6 +1390,8 @@ export const EMPTY_APP_CONFIG: AppConfigResponse = {
   // Fail closed: old servers delete a comment's replies with it.
   comment_delete_keep_replies_supported: false,
   theme_store_enabled: false,
+  // Fail closed: no viewer means diagrams render as XML.
+  drawio_viewer_url: "",
   feature_flags: {},
 };
 

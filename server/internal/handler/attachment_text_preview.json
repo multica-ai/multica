@@ -27,6 +27,8 @@
     "jsonl",
     "ndjson",
     "xml",
+    "drawio",
+    "dio",
     "yml",
     "yaml",
     "toml",

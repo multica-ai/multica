@@ -136,6 +136,13 @@
     "view_source": "查看源码",
     "copy_error": "复制错误"
   },
+  "drawio": {
+    "title": "draw.io 图",
+    "error": "无法显示这张 draw.io 图",
+    "invalid": "这不是有效的 draw.io XML。",
+    "too_large": "这张图太大，无法在这里预览。",
+    "unreachable": "无法连接 {{origin}} 上的 draw.io 查看器。"
+  },
   "file_card": {
     "uploading": "正在上传 {{filename}}"
   },

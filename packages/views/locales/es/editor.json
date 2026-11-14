@@ -170,6 +170,13 @@
     "view_source": "Ver fuente",
     "copy_error": "Copiar error"
   },
+  "drawio": {
+    "title": "Diagrama de draw.io",
+    "error": "No se ha podido mostrar este diagrama de draw.io",
+    "invalid": "No es un XML de draw.io válido.",
+    "too_large": "Este diagrama es demasiado grande para previsualizarlo aquí.",
+    "unreachable": "No se ha podido conectar con el visor de draw.io en {{origin}}."
+  },
   "table": {
     "reset_widths": "Restablecer anchos",
     "expand": "Expandir tabla",

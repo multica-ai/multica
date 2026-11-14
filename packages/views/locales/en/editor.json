@@ -140,6 +140,13 @@
     "view_source": "View source",
     "copy_error": "Copy error"
   },
+  "drawio": {
+    "title": "draw.io diagram",
+    "error": "Couldn't show this draw.io diagram",
+    "invalid": "This isn't valid draw.io XML.",
+    "too_large": "This diagram is too large to preview here.",
+    "unreachable": "Couldn't reach the draw.io viewer at {{origin}}."
+  },
   "file_card": {
     "uploading": "Uploading {{filename}}"
   },
