@@ -90,6 +90,7 @@ func init() {
 	rootCmd.AddCommand(repoCmd)
 	rootCmd.AddCommand(environmentCmd)
 	rootCmd.AddCommand(skillCmd)
+	rootCmd.AddCommand(newEmbeddedSkillsCommand())
 	rootCmd.AddCommand(squadCmd)
 	rootCmd.AddCommand(chatCmd)
 	rootCmd.AddCommand(daemonCmd)
