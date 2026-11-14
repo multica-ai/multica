@@ -358,10 +358,10 @@ func TestSourceContextRetryTransfersSingleAttachAuthority(t *testing.T) {
 		t.Fatalf("clone count after retry = %d, err=%v", cloneCount, err)
 	}
 
-	secondChild, err := q.CreateRetryTask(ctx, db.CreateRetryTaskParams{NewTaskID: dbid.NewV7(), ID: parentID})
-	if err != nil {
-		t.Fatalf("create competing retry child: %v", err)
+	if _, err := q.CreateRetryTask(ctx, db.CreateRetryTaskParams{NewTaskID: dbid.NewV7(), ID: parentID}); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("competing retry child error = %v, want pgx.ErrNoRows", err)
 	}
+	secondChild := db.AgentTaskQueue{ID: dbid.NewV7()}
 	if err := transferPendingSourceContextToRetry(ctx, q, parent, secondChild); !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("second transfer error = %v, want pgx.ErrNoRows", err)
 	}

@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_agent_task_one_codex_retry_child ON agent_task_queue (retry_of_task_id) WHERE retry_of_task_id IS NOT NULL AND context->>'codex_retry_model' IS NOT NULL;

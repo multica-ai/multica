@@ -324,7 +324,10 @@ LIMIT @page_limit;
 -- head_sha stamps the commit under review into the task's context JSONB so the
 -- reviewer-loop dedup (HasPendingTaskForIssueAndAgent) can tell a pending run
 -- against an OLD head apart from a fresh request against a NEW head (TEN-356).
--- Empty/absent head_sha leaves context NULL unless fresh_rerun is requested.
+-- Empty/absent head_sha leaves context NULL unless fresh_rerun, retry_route,
+-- or workflow_handoff_revision is requested. retry_route snapshots the exact
+-- comment revision and route used by Codex overload recovery; missing evidence
+-- fails closed.
 -- fresh_rerun disables source session/workdir reuse without losing rerun lineage.
 -- Issue-linked tasks never hit quick-create context
 -- parsing (parseQuickCreateContext short-circuits on IssueID.Valid), so this
@@ -364,7 +367,20 @@ SELECT
         WHEN COALESCE(sqlc.narg('fresh_rerun')::boolean, FALSE)
         THEN '{"fresh_rerun":true}'::jsonb
         ELSE '{}'::jsonb
-    END || CASE
+    END || CASE WHEN COALESCE(sqlc.narg('retry_route')::text, '') <> ''
+        THEN jsonb_build_object('codex_retry_source', COALESCE((
+            SELECT jsonb_build_object(
+                'route', sqlc.narg('retry_route')::text,
+                'comment_id', c.id, 'revision', c.revision,
+                'parent_id', c.parent_id, 'parent_revision', parent.revision,
+                'root_id', root.id, 'root_revision', root.revision)
+            FROM comment c
+            LEFT JOIN comment parent ON parent.id = c.parent_id
+            LEFT JOIN comment root ON root.id = comment_thread_root_id(c.id)
+            WHERE c.id = sqlc.narg(trigger_comment_id)::uuid
+              AND c.issue_id = $3 AND c.deleted_at IS NULL
+        ), jsonb_build_object('route', sqlc.narg('retry_route')::text)))
+        ELSE '{}'::jsonb END || CASE
         WHEN sqlc.narg(workflow_handoff_revision)::bigint IS NOT NULL
         THEN jsonb_build_object('workflow_handoff_revision', sqlc.narg(workflow_handoff_revision)::bigint)
         ELSE '{}'::jsonb
@@ -412,7 +428,8 @@ SELECT
     sqlc.narg(squad_id),
     jsonb_strip_nulls(jsonb_build_object(
         'head_sha', NULLIF(COALESCE(sqlc.narg('head_sha')::text, ''), ''),
-        'channel_issue_media_pending', TRUE
+        'channel_issue_media_pending', TRUE,
+        'codex_retry_source', jsonb_build_object('route', 'issue_assignee')
     )),
     sqlc.narg(originator_user_id),
     sqlc.narg(accountable_user_id),
@@ -553,10 +570,52 @@ SELECT
     COALESCE(sqlc.narg('new_task_id')::uuid, gen_random_uuid())
 FROM agent_task_queue p
 WHERE p.id = $1
+  AND NOT EXISTS (SELECT 1 FROM agent_task_queue child WHERE child.retry_of_task_id = p.id)
+  AND (p.failure_reason IS DISTINCT FROM 'agent_error.codex_server_overloaded' OR (
+    p.context->>'codex_retry_model' IS NOT NULL
+    AND (p.context->>'codex_retry_deadline')::timestamptz > COALESCE(sqlc.narg(fire_at)::timestamptz, now())
+    AND EXISTS (SELECT 1 FROM agent a WHERE a.id = p.agent_id AND a.archived_at IS NULL AND a.runtime_id = p.runtime_id AND a.model = p.context->>'codex_retry_model')
+    AND (p.issue_id IS NULL OR (
+        EXISTS (SELECT 1 FROM issue i WHERE i.id = p.issue_id AND i.status <> 'cancelled' AND (
+            i.status IN ('todo', 'in_progress')
+            OR (p.context #>> '{codex_retry_source,route}' = 'workflow_squad_handoff'
+                AND p.workflow_step IS NOT NULL AND i.status = p.workflow_step
+                AND i.revision::text = p.context->>'workflow_handoff_revision')))
+        AND (p.trigger_comment_id IS NULL OR EXISTS (SELECT 1 FROM comment c
+            WHERE c.id = p.trigger_comment_id AND c.issue_id = p.issue_id AND c.deleted_at IS NULL
+              AND c.id::text = p.context #>> '{codex_retry_source,comment_id}'
+              AND c.revision::text = p.context #>> '{codex_retry_source,revision}'))
+        AND (
+            (p.context #>> '{codex_retry_source,route}' = 'issue_assignee'
+             AND EXISTS (SELECT 1 FROM issue i WHERE i.id = p.issue_id AND (
+                 (i.assignee_type = 'agent' AND i.assignee_id = p.agent_id)
+                 OR (i.assignee_type = 'squad' AND i.assignee_id = p.squad_id
+                     AND EXISTS (SELECT 1 FROM squad s
+                         WHERE s.id = i.assignee_id AND s.leader_id = p.agent_id AND s.archived_at IS NULL)))))
+            OR (p.context #>> '{codex_retry_source,route}' IN ('mention_agent', 'mention_squad_leader', 'thread_parent', 'conversation', 'conversation_continuation')
+                AND p.trigger_comment_id IS NOT NULL)
+            OR (p.context #>> '{codex_retry_source,route}' = 'workflow_squad_handoff'
+                AND p.trigger_comment_id IS NULL AND p.is_leader_task AND p.squad_id IS NOT NULL
+                AND EXISTS (SELECT 1 FROM issue i JOIN squad s ON s.id = p.squad_id JOIN agent a ON a.id = p.agent_id
+                    WHERE i.id = p.issue_id AND i.assignee_type = 'squad' AND i.assignee_id = p.squad_id
+                      AND i.workspace_id = s.workspace_id AND a.workspace_id = i.workspace_id
+                      AND s.archived_at IS NULL AND s.leader_id = p.agent_id
+                      AND p.workflow_step IS NOT NULL AND i.status = p.workflow_step
+                      AND i.revision::text = p.context->>'workflow_handoff_revision'
+                      AND ((p.originator_user_id IS NOT NULL
+                          AND EXISTS (SELECT 1 FROM member m WHERE m.workspace_id = i.workspace_id AND m.user_id = p.originator_user_id)
+                          AND (a.owner_id = p.originator_user_id OR (a.permission_mode = 'public_to'
+                              AND EXISTS (SELECT 1 FROM agent_invocation_target t WHERE t.agent_id = a.id
+                                  AND ((t.target_type = 'member' AND t.target_id = p.originator_user_id)
+                                      OR (t.target_type = 'workspace' AND t.target_id = i.workspace_id))))))
+                        OR (p.originator_user_id IS NULL AND a.permission_mode = 'public_to'
+                            AND EXISTS (SELECT 1 FROM agent_invocation_target t WHERE t.agent_id = a.id
+                                AND t.target_type = 'workspace' AND t.target_id = i.workspace_id)))))
+        )
+    ))
+  ))
   AND lock_task_owner_rows(p.agent_id, p.issue_id, p.runtime_id)
-ON CONFLICT (issue_id, agent_id, (COALESCE(comment_thread_id, '00000000-0000-0000-0000-000000000000'::uuid))) WHERE status IN ('queued', 'dispatched')
-       OR (status = 'deferred' AND context->>'channel_issue_media_pending' = 'true')
-DO NOTHING
+ON CONFLICT DO NOTHING
 RETURNING *;
 
 -- name: SetTaskWorkflowStep :exec
@@ -1203,6 +1262,12 @@ SET status = 'failed',
     completed_at = now(),
     error = $2,
     failure_reason = COALESCE(sqlc.narg('failure_reason'), 'agent_error'),
+    context = CASE WHEN sqlc.narg('failure_reason')::text = 'agent_error.codex_server_overloaded'
+      AND NULLIF(sqlc.narg('selected_model')::text, '') IS NOT NULL THEN
+      COALESCE(context, '{}'::jsonb) || jsonb_build_object(
+        'codex_retry_model', sqlc.narg('selected_model')::text,
+        'codex_retry_deadline', COALESCE(context->>'codex_retry_deadline', to_jsonb(now() + interval '30 minutes') #>> '{}'))
+      ELSE context END,
     session_id = CASE WHEN sqlc.arg('session_rollout_missing') THEN NULL ELSE COALESCE(sqlc.narg('session_id'), session_id) END,
     work_dir = COALESCE(sqlc.narg('work_dir'), work_dir),
     durable_work_dir = COALESCE(sqlc.narg('durable_work_dir'), durable_work_dir),
@@ -1823,6 +1888,19 @@ SET coalesced_comment_ids = (
         WHERE e IS NOT NULL AND e <> @new_trigger_comment_id::uuid
     ),
     trigger_comment_id = @new_trigger_comment_id::uuid,
+    context = jsonb_set(COALESCE(context, '{}'::jsonb), '{codex_retry_source}',
+        COALESCE((
+            SELECT jsonb_build_object(
+                'route', sqlc.narg('retry_route')::text,
+                'comment_id', c.id, 'revision', c.revision,
+                'parent_id', c.parent_id, 'parent_revision', parent.revision,
+                'root_id', root.id, 'root_revision', root.revision)
+            FROM comment c
+            LEFT JOIN comment parent ON parent.id = c.parent_id
+            LEFT JOIN comment root ON root.id = comment_thread_root_id(c.id)
+            WHERE c.id = @new_trigger_comment_id::uuid
+              AND c.issue_id = @issue_id AND c.deleted_at IS NULL
+        ), jsonb_build_object('route', 'unknown')), true),
     trigger_summary = COALESCE(sqlc.narg('new_trigger_summary'), trigger_summary),
     -- Re-attribution is ATOMIC (MUL-4302): folding a newly-arrived comment moves the
     -- WHOLE attribution snapshot to that comment's human — person columns, source

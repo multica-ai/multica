@@ -275,6 +275,7 @@ type terminalTaskReport struct {
 	workDir        string
 	durableWorkDir string
 	failureReason  string
+	selectedModel  string
 	// sessionRolloutMissing is true when the daemon withheld this task's Codex
 	// session because its rollout was not in the store (MUL-5305). The server
 	// clears the resume pointer and flags the continuity gap for the next claim.
@@ -6517,6 +6518,7 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 			// they want to see how far it got.
 			branchName:            result.BranchName,
 			failureReason:         failureReason,
+			selectedModel:         result.SelectedModel,
 			sessionRolloutMissing: result.SessionRolloutMissing,
 			retiredSessionID:      result.RetiredSessionID,
 		}); err != nil {
@@ -6620,7 +6622,7 @@ func (d *Daemon) sendTerminalTaskReport(ctx context.Context, report terminalTask
 	case terminalTaskReportComplete:
 		return d.client.completeTaskWithRetrySchedule(ctx, report.taskID, report.output, report.branchName, report.sessionID, report.workDir, report.sessionRolloutMissing, report.retiredSessionID, report.durableWorkDir, schedule)
 	case terminalTaskReportFail:
-		return d.client.failTaskWithRetrySchedule(ctx, report.taskID, report.errorMessage, report.sessionID, report.workDir, report.branchName, report.failureReason, report.sessionRolloutMissing, report.retiredSessionID, report.durableWorkDir, schedule)
+		return d.client.failTaskWithRetrySchedule(ctx, report.taskID, report.errorMessage, report.sessionID, report.workDir, report.branchName, report.failureReason, report.sessionRolloutMissing, report.retiredSessionID, report.durableWorkDir, schedule, report.selectedModel)
 	default:
 		return fmt.Errorf("unsupported terminal task report kind %d", report.kind)
 	}
@@ -8794,11 +8796,18 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	claudeResumeReady := provider == "claude" && migrateClaudeWorktreeTranscript(
 		env, task.PriorSessionID, env.WorkDir, task.PriorWorkDir, sanitizeAgentEnv(agentEnvOverrides), taskLog,
 	)
+	codexWorktreeResume := provider == "codex" && codexWorktreeResumeEligible(env, execenv.CodexSessionStorePath(d.cfg.Profile, taskCtx))
+	if task.CodexRetryMustResume && env.LocalWorktree != nil && env.CodexHome != "" &&
+		execenv.CodexSessionStorePath(d.cfg.Profile, taskCtx) != "" && task.CodexRetryExpectedBranch == "" {
+		// Finalize drops a new branch when an overloaded turn changed no files.
+		// The stable session store still makes that read-only turn resumable.
+		codexWorktreeResume = true
+	}
 	resumeReachable := gateResumeToReachableSession(
 		&task, &taskCtx, provider, env.WorkDir,
 		sessionHomeReachable(provider, env, envReused),
 		providerRefusesMissingSessionCwd(provider, !usesCustomProfileCommand),
-		provider == "codex" && codexWorktreeResumeEligible(env, execenv.CodexSessionStorePath(d.cfg.Profile, taskCtx)),
+		codexWorktreeResume,
 		claudeResumeReady,
 		taskLog,
 	)
@@ -8809,6 +8818,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// conversation Codex will silently restart from scratch.
 	if resumeReachable {
 		gateCodexResumeToRolloutPresence(&task, &taskCtx, provider, env.CodexHome, taskLog)
+	}
+	if task.CodexRetryMustResume {
+		if task.CodexRetryExpectedBranch != "" && (env.LocalWorktree == nil ||
+			!env.LocalWorktree.Continued || env.LocalWorktree.Branch != task.CodexRetryExpectedBranch) {
+			return TaskResult{Status: "blocked", Comment: "Codex overload retry stopped: the previous worktree branch was not restored.", FailureReason: taskfailure.ReasonInvalidTaskIdentity.String()}, nil
+		}
+		if task.PriorSessionID == "" {
+			return TaskResult{Status: "blocked", Comment: "Codex overload retry stopped: the previous session rollout is unavailable.", FailureReason: taskfailure.ReasonInvalidTaskIdentity.String()}, nil
+		}
 	}
 
 	// Build the runtime brief and inject it into the provider-specific
@@ -9105,6 +9123,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		TurnInterruptTimeout:       d.cfg.CodexTurnInterruptTimeout,
 		ThreadHandshakeTimeout:     d.cfg.CodexThreadHandshakeTimeout,
 		ResumeSessionID:            task.PriorSessionID,
+		CodexRetryMustResume:       task.CodexRetryMustResume,
 		// Post-gate intent: PriorSessionID here already reflects the pre-flight
 		// resume gates (a dropped resume is surfaced via the prompt instead). If it
 		// survived to here, the backend must disclose the loss when the live
@@ -9252,7 +9271,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}
 	}
 
-	if shouldRetryWithFreshSession(result, task.PriorSessionID, tools, provider) {
+	if !task.CodexRetryMustResume && shouldRetryWithFreshSession(result, task.PriorSessionID, tools, provider) {
 		firstResult := result
 		firstUsage := result.Usage
 		firstTools := tools
@@ -9530,6 +9549,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				retiredSessionID = task.PriorSessionID
 			}
 		}
+		if failureReason == "" && provider == "codex" && result.CodexServerOverloaded && !sessionRolloutMissing {
+			failureReason = taskfailure.ReasonCodexServerOverloaded.String()
+		}
 		if failureReason == "" {
 			failureReason, _ = classifyPoisonedError(errMsg)
 		}
@@ -9561,7 +9583,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			}
 		}
 		if failureReason != "" {
-			taskLog.Warn("agent failed with a resume-unsafe error, retiring the session",
+			taskLog.Warn("agent failed with a structured error reason",
 				"failure_reason", failureReason,
 			)
 		} else {
@@ -9594,6 +9616,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			EnvRoot:       env.RootDir,
 			Usage:         usageEntries,
 			FailureReason: failureReason,
+			SelectedModel: model,
 		}, nil
 	}
 }

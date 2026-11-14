@@ -54,6 +54,7 @@ type persistedTerminalTaskReport struct {
 	WorkDir               string    `json:"work_dir,omitempty"`
 	DurableWorkDir        string    `json:"durable_work_dir,omitempty"`
 	FailureReason         string    `json:"failure_reason,omitempty"`
+	SelectedModel         string    `json:"selected_model,omitempty"`
 	SessionRolloutMissing bool      `json:"session_rollout_missing,omitempty"`
 	RetiredSessionID      string    `json:"retired_session_id,omitempty"`
 
@@ -144,6 +145,7 @@ func persistedTerminalReport(report terminalTaskReport, createdAt time.Time) (pe
 		WorkDir:               report.workDir,
 		DurableWorkDir:        report.durableWorkDir,
 		FailureReason:         report.failureReason,
+		SelectedModel:         report.selectedModel,
 		SessionRolloutMissing: report.sessionRolloutMissing,
 		RetiredSessionID:      report.retiredSessionID,
 	}, nil
@@ -175,6 +177,7 @@ func (record persistedTerminalTaskReport) terminalReport() (terminalTaskReport, 
 		workDir:               record.WorkDir,
 		durableWorkDir:        record.DurableWorkDir,
 		failureReason:         record.FailureReason,
+		selectedModel:         record.SelectedModel,
 		sessionRolloutMissing: record.SessionRolloutMissing,
 		retiredSessionID:      record.RetiredSessionID,
 	}, nil
