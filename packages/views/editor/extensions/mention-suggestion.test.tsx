@@ -685,7 +685,7 @@ describe("createMentionSuggestion", () => {
       .getByText("MUL-6956")
       .closest("button")
       ?.querySelector("svg");
-    expect(statusIcon).toHaveStyle({ color: "#f97316" });
+    expect(statusIcon?.style.color).toBe("var(--palette-orange, #f97316)");
   });
 
   it("does not inject current/recent chat context into the normal @ results", () => {

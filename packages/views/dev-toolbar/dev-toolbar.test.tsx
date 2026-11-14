@@ -96,6 +96,7 @@ describe("DevToolbar", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     resetDevRecorder();
     vi.unstubAllGlobals();
     setCurrentWorkspace(null, null);
@@ -225,6 +226,9 @@ describe("DevToolbar", () => {
   });
 
   it("keeps the cache fetch counter in place while queries load and settle", async () => {
+    // Stop the toolbar's 1s clock so only the query cache can move the counter;
+    // racing that tick against waitFor's 1s timeout made this test flaky.
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
     const { queryClient } = renderToolbar();
     const counter = screen.getByTestId("dev-toolbar-cache-fetching");
     expect(counter).toHaveTextContent("↻0");

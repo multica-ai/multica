@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { type ComponentProps, useState } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "../dialog";
 import { CommandDialog, Command, CommandInput } from "../command";
 
@@ -50,5 +50,55 @@ describe("nested dialog dismissal", () => {
     await click(screen.getByRole("button", { name: "Open dialog" }));
     await click(document.querySelector("[data-slot=dialog-overlay]")!);
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+});
+
+describe("extension popup dismissal", () => {
+  it.each(["body", "html"])("preserves a draft when a disappearing extension popup retargets its click to %s", async (tag) => {
+    const onOpenChange = vi.fn();
+    render(
+      <Dialog defaultOpen onOpenChange={onOpenChange}>
+        <DialogContent>
+          <DialogTitle>Create issue</DialogTitle>
+          <input aria-label="Issue title" defaultValue="Keep my draft" />
+        </DialogContent>
+      </Dialog>,
+    );
+    // An extension lives outside the dialog's React tree. Hiding its
+    // suggestion during a press can send the final click to a document root.
+    const host = document.createElement("grammarly-extension");
+    document.body.append(host);
+    const suggestion = document.createElement("button");
+    host.attachShadow({ mode: "closed" }).append(suggestion);
+    fireEvent.pointerDown(suggestion, { pointerType: "mouse", button: 0, composed: true });
+    fireEvent.mouseDown(suggestion, { button: 0, composed: true });
+    host.hidden = true;
+    const target = tag === "body" ? document.body : document.documentElement;
+    fireEvent.pointerUp(target, { pointerType: "mouse", button: 0 });
+    fireEvent.mouseUp(target, { button: 0 });
+    fireEvent.click(target, { button: 0 });
+    host.remove();
+
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: "Create issue" })).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "Issue title" })).toHaveValue("Keep my draft");
+
+    await click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(onOpenChange).toHaveBeenCalledWith(false, expect.objectContaining({ reason: "close-press" }));
+  });
+
+  it("keeps document-root outside dismissal for non-modal dialogs", async () => {
+    render(<Dialog defaultOpen modal={false}><DialogContent><DialogTitle>Non-modal</DialogTitle></DialogContent></Dialog>);
+    await click(document.body);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("lets the caller cancel an ordinary backdrop dismissal", async () => {
+    const onOpenChange = vi.fn<NonNullable<ComponentProps<typeof Dialog>["onOpenChange"]>>((_open, details) => details.cancel());
+    render(<Dialog defaultOpen onOpenChange={onOpenChange}><DialogContent><DialogTitle>Keep open</DialogTitle></DialogContent></Dialog>);
+    await click(document.querySelector("[data-slot=dialog-overlay]")!);
+    expect(onOpenChange).toHaveBeenCalledWith(false, expect.objectContaining({ reason: "outside-press" }));
+    expect(screen.getByRole("dialog", { name: "Keep open" })).toBeVisible();
   });
 });

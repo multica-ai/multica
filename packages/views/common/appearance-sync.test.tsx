@@ -87,6 +87,7 @@ describe("AppearanceSync", () => {
     expect(html().style.getPropertyValue("--font-content-cjk")).toBe("var(--font-cjk-serif)");
     expect(html().style.getPropertyValue("--font-scale")).toBe(String(15 / 14));
     expect(html().style.getPropertyValue("--issue-row-height")).toBe("42px");
+    expect(html().style.getPropertyValue("--nav-item-height")).toBe("2.25rem");
     expect(themeCss()?.textContent).toContain("--button-primary:");
     expect(themeCss()?.textContent).toContain('[data-mc="issue-group-header"]');
     expect(sheet()?.textContent).toContain("--muted-foreground: color-mix(");

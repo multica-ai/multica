@@ -79,6 +79,7 @@ import {
 } from "../../common/property-icon";
 import { useLocale, useT } from "../../i18n";
 import { SettingsReadOnlyNotice, SettingsTab } from "./settings-layout";
+import { paletteColor } from "@multica/core/appearance";
 
 const MAX_ACTIVE_PROPERTIES = 20;
 
@@ -240,7 +241,7 @@ export function PropertiesTab() {
                       >
                         <span
                           className="size-2 rounded-full"
-                          style={{ backgroundColor: option.color }}
+                          style={{ backgroundColor: paletteColor(option.color) }}
                         />
                         {option.name}
                       </span>

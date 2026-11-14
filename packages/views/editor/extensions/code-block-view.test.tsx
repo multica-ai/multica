@@ -28,6 +28,15 @@ vi.mock("@tiptap/react", () => {
   return { NodeViewWrapper, NodeViewContent };
 });
 
+// jsdom resolves no theme, so the embed theme reports a scheme the test sets.
+const embedScheme = vi.hoisted(() => ({ current: "light" as "light" | "dark" }));
+vi.mock("../../common/embed-theme", () => ({
+  readEmbedTheme: () => ({
+    tokens: { "--color-scheme": embedScheme.current },
+    colorScheme: embedScheme.current,
+  }),
+}));
+
 vi.mock("../mermaid-diagram", () => ({
   MermaidDiagram: () => null,
 }));
@@ -92,6 +101,52 @@ describe("CodeBlockView — html language toggle", () => {
     expect(pre?.className).toContain("sr-only");
   });
 
+  it("gives the preview the embed tokens, like a read-only html block", () => {
+    render(
+      <CodeBlockView {...makeProps("html", '<p style="color: var(--foreground)">hi</p>')} />,
+    );
+    act(() => {
+      vi.advanceTimersByTime(250);
+    });
+    const srcdoc = document.querySelector("iframe")?.getAttribute("srcdoc") ?? "";
+    expect(srcdoc).toMatch(/^<style>:root\{[^}]*--color-scheme:light;color-scheme:light\}<\/style>/);
+    expect(srcdoc).toContain('<p style="color: var(--foreground)">hi</p>');
+  });
+
+  it("keeps the document of HTML that reads no token across a theme switch", async () => {
+    render(<CodeBlockView {...makeProps("html", '<input value="initial">')} />);
+    act(() => {
+      vi.advanceTimersByTime(250);
+    });
+    const frame = document.querySelector("iframe")!;
+    const before = frame.getAttribute("srcdoc");
+    expect(before).toMatch(/^<style>:root\{\}<\/style>/);
+
+    embedScheme.current = "dark";
+    document.documentElement.classList.add("dark");
+    await act(() => Promise.resolve());
+    expect(document.querySelector("iframe")).toBe(frame);
+    expect(frame.getAttribute("srcdoc")).toBe(before);
+    document.documentElement.classList.remove("dark");
+    embedScheme.current = "light";
+  });
+
+  it("rebuilds the document of HTML that reads a token when the theme switches", async () => {
+    render(<CodeBlockView {...makeProps("html", '<p style="color: var(--foreground)">hi</p>')} />);
+    act(() => {
+      vi.advanceTimersByTime(250);
+    });
+    const frame = document.querySelector("iframe")!;
+    expect(frame.getAttribute("srcdoc")).toContain("color-scheme:light");
+
+    embedScheme.current = "dark";
+    document.documentElement.classList.add("dark");
+    await act(() => Promise.resolve());
+    expect(frame.getAttribute("srcdoc")).toContain("color-scheme:dark");
+    document.documentElement.classList.remove("dark");
+    embedScheme.current = "light";
+  });
+
   it("toggles to source view without unloading the preview or editor content", () => {
     render(<CodeBlockView {...makeProps("html", "<p>hello</p>")} />);
     act(() => {
@@ -129,7 +184,7 @@ describe("CodeBlockView — html language toggle", () => {
     const frame = dialog.querySelector("iframe");
     expect(frame).toBe(original);
     expect(document.querySelectorAll("iframe")).toHaveLength(1);
-    expect(frame?.getAttribute("srcdoc")).toBe("<p>latest</p>");
+    expect(frame?.getAttribute("srcdoc")).toContain("<p>latest</p>");
     expect(frame?.getAttribute("sandbox")).toBe("allow-scripts");
     expect(screen.getByTestId("nvc")).toBe(editorContent);
     expect(document.querySelector("iframe")).toBe(original);
@@ -164,7 +219,7 @@ describe("CodeBlockView — html language toggle", () => {
     fireEvent.click(screen.getByRole("button", { name: "Reload" }));
     const inline = document.querySelector("iframe");
     expect(inline).not.toBe(original);
-    expect(inline?.getAttribute("srcdoc")).toBe("<p>hello</p>");
+    expect(inline?.getAttribute("srcdoc")).toContain("<p>hello</p>");
     expect(screen.getByTestId("nvc")).toBe(content);
 
     fireEvent.click(screen.getByRole("button", { name: "Show source" }));
@@ -193,23 +248,23 @@ describe("CodeBlockView — html language toggle", () => {
     rerender(<CodeBlockView {...makeProps("html", "<p>pending</p>")} />);
     fireEvent.click(screen.getByRole("button", { name: "Show source" }));
     act(() => vi.advanceTimersByTime(250));
-    expect(frame.getAttribute("srcdoc")).toBe("<p>initial</p>");
+    expect(frame.getAttribute("srcdoc")).toContain("<p>initial</p>");
     rerender(<CodeBlockView {...makeProps("html", "<p>edited</p>")} />);
     act(() => vi.advanceTimersByTime(250));
-    expect(frame.getAttribute("srcdoc")).toBe("<p>initial</p>");
+    expect(frame.getAttribute("srcdoc")).toContain("<p>initial</p>");
 
     fireEvent.click(screen.getByRole("button", { name: "Fullscreen" }));
     act(() => vi.advanceTimersByTime(250));
-    expect(frame.getAttribute("srcdoc")).toBe("<p>edited</p>");
+    expect(frame.getAttribute("srcdoc")).toContain("<p>edited</p>");
     expect(screen.getByRole("dialog").querySelector("iframe")).toBe(frame);
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
 
     rerender(<CodeBlockView {...makeProps("html", "<p>latest</p>")} />);
     act(() => vi.advanceTimersByTime(250));
-    expect(frame.getAttribute("srcdoc")).toBe("<p>edited</p>");
+    expect(frame.getAttribute("srcdoc")).toContain("<p>edited</p>");
     fireEvent.click(screen.getByRole("button", { name: "Show preview" }));
     act(() => vi.advanceTimersByTime(250));
-    expect(frame.getAttribute("srcdoc")).toBe("<p>latest</p>");
+    expect(frame.getAttribute("srcdoc")).toContain("<p>latest</p>");
     expect(document.querySelector("iframe")).toBe(frame);
     expect(screen.getByTestId("nvc")).toBe(editorContent);
   });

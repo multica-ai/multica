@@ -44,8 +44,16 @@ function formatDate(date: string, locale: string): string {
   return formatDateOnly(date, { month: "short", day: "numeric" }, locale);
 }
 
+/** A row's position within its status group, for themes that stripe rows. */
+export type RowParity = "even" | "odd";
+
+export function rowParity(index: number): RowParity {
+  return index % 2 === 0 ? "even" : "odd";
+}
+
 function ListRowContent({
   issue,
+  parity,
   childProgress,
   project,
   isDragging,
@@ -55,6 +63,7 @@ function ListRowContent({
   checkboxProps,
 }: {
   issue: Issue;
+  parity: RowParity;
   childProgress?: ChildProgress;
   project?: Project;
   isDragging?: boolean;
@@ -97,6 +106,8 @@ function ListRowContent({
         data-status={issue.status}
         data-priority={issue.priority}
         data-assignee-type={issue.assignee_type ?? "none"}
+        data-parity={parity}
+        data-selected={selected ? "true" : "false"}
         {...{ [PEEK_TARGET_ATTR]: issue.id }}
         data-peeked={peeked ? "" : undefined}
         style={containerStyle}
@@ -216,16 +227,19 @@ function ListRowContent({
 
 export const ListRow = memo(function ListRow({
   issue,
+  parity,
   childProgress,
   project,
 }: {
   issue: Issue;
+  parity: RowParity;
   childProgress?: ChildProgress;
   project?: Project;
 }) {
   return (
     <ListRowContent
       issue={issue}
+      parity={parity}
       childProgress={childProgress}
       project={project}
     />
@@ -244,11 +258,13 @@ const stopDrag = (e: React.SyntheticEvent) => {
 
 export const DraggableListRow = memo(function DraggableListRow({
   issue,
+  parity,
   childProgress,
   project,
   disableSorting,
 }: {
   issue: Issue;
+  parity: RowParity;
   childProgress?: ChildProgress;
   project?: Project;
   disableSorting?: boolean;
@@ -275,6 +291,7 @@ export const DraggableListRow = memo(function DraggableListRow({
   return (
     <ListRowContent
       issue={issue}
+      parity={parity}
       childProgress={childProgress}
       project={project}
       isDragging={isDragging}

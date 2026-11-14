@@ -294,6 +294,31 @@ describe("theme check", () => {
     ]);
   });
 
+  it("measures label text on the colour slots the theme declares", () => {
+    expect(errors(".theme-light { --palette-blue: #bfdbfe; }")).toEqual([
+      expect.stringMatching(
+        /^Contrast, light mode \(label\): --label-chip-color is below 4\.5:1 on --palette-blue \(1\.\d\d:1\)\. Without --label-chip-color/,
+      ),
+    ]);
+    expect(check(".theme-light { --palette-blue: #bfdbfe; --label-chip-color: #111827; }")).toMatchObject({ ok: true, issues: [] });
+    expect(errors(".theme-dark { --palette-yellow: #fde68a; --palette-red: #fecaca; --label-chip-color: #ffffff; }")).toEqual([
+      expect.stringMatching(/^Contrast, dark mode \(label\): --label-chip-color is below 4\.5:1 on --palette-red \(.*\) and --palette-yellow \([\d.]+:1\)\.$/),
+    ]);
+    expect(check(".theme-light { --radius: 0; }").contrast.some((c) => c.area === "label")).toBe(false);
+  });
+
+  it("measures the worse of the dark and light label text a slot can get", () => {
+    // A label picked as #fecaca falls in the red slot with dark text, which a
+    // dark red slot cannot carry, although the red preset itself takes light text.
+    const checked = check(".theme-light { --palette-red: #7f1d1d; }");
+    expect(checked.contrast.filter((c) => c.area === "label")).toEqual([
+      expect.objectContaining({ background: "--palette-red", ratio: 1.77, defaulted: true }),
+    ]);
+    expect(errors(".theme-light { --palette-red: #7f1d1d; }")).toEqual([
+      expect.stringMatching(/^Contrast, light mode \(label\): --label-chip-color is below 4\.5:1 on --palette-red \(1\.77:1\)\./),
+    ]);
+  });
+
   it("measures pressed display chips in the popover they sit in", () => {
     expect(errors(".theme-light { --input: #111111; }")).toEqual([
       expect.stringMatching(

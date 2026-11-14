@@ -41,6 +41,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { StatusIcon } from "./status-icon";
 import { PriorityIcon } from "./priority-icon";
+import { paletteColor } from "@multica/core/appearance";
 
 export const FILTER_FIELD_ICONS: Record<NegatableFilterDimension, IconComponent> = {
   status: CircleDot,
@@ -224,7 +225,7 @@ export function useFilterValueCatalog(
       label: labels.map((l) => ({
         value: l.id,
         label: l.name,
-        icon: <span className="size-2 rounded-full" style={{ backgroundColor: l.color }} />,
+        icon: <span className="size-2 rounded-full" style={{ backgroundColor: paletteColor(l.color) }} />,
       })),
       relation: ISSUE_RELATION_FILTERS.map((relation) => {
         const Icon = RELATION_ICONS[relation];

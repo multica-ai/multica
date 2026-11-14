@@ -162,6 +162,62 @@ describe("AppearanceTab", () => {
     expect(contentLatin).toHaveTextContent("Geist Mono");
   });
 
+  describe("content font size", () => {
+    const sizeSliders = () => screen.getAllByRole("slider", { name: "Font size" });
+    const follow = () => screen.getByRole("switch", { name: "Match interface size" });
+    const press = async (slider: HTMLElement, key: string) => {
+      act(() => slider.focus());
+      await userEvent.setup().keyboard(key);
+    };
+    // Base UI keeps edge-aligned thumbs visibility: hidden until a microtask has measured them.
+    const renderTab = async () => {
+      render(<AppearanceTab />, { wrapper: Wrapper });
+      await screen.findAllByRole("slider", { name: "Font size" });
+    };
+
+    it("follows the interface by default, with the same slider", async () => {
+      useAppearanceStore.setState({ fontSize: 15 });
+      await renderTab();
+
+      const [, content] = sizeSliders();
+      expect(content).toHaveValue("15");
+      expect(follow()).toBeChecked();
+      expect(screen.getByText("15 px · Default")).toBeInTheDocument();
+    });
+
+    it("keeps a size equal to the interface independent of later interface changes", async () => {
+      useAppearanceStore.setState({ fontSize: 14, contentSize: 15 });
+      await renderTab();
+      expect(follow()).not.toBeChecked();
+
+      await press(sizeSliders()[1]!, "{ArrowLeft}");
+      expect(state().contentSize).toBe(14);
+      expect(follow()).not.toBeChecked();
+
+      await press(sizeSliders()[0]!, "{ArrowRight}");
+      expect(state()).toMatchObject({ fontSize: 15, contentSize: 14 });
+      expect(sizeSliders()[1]).toHaveValue("14");
+    });
+
+    it("pins the current size when following is turned off, and follows again only when turned on", async () => {
+      const user = userEvent.setup();
+      useAppearanceStore.setState({ fontSize: 13 });
+      await renderTab();
+
+      await user.click(follow());
+      expect(state().contentSize).toBe(13);
+
+      await user.click(follow());
+      expect(state().contentSize).toBe("ui");
+      await press(sizeSliders()[0]!, "{ArrowRight}");
+      expect(sizeSliders()[1]).toHaveValue("14");
+
+      await press(sizeSliders()[1]!, "{ArrowRight}");
+      expect(state().contentSize).toBe(15);
+      expect(follow()).not.toBeChecked();
+    });
+  });
+
   it("names the theme's fonts when the default choice keeps them", () => {
     useAppearanceStore.setState({ theme: "github" });
     const { unmount } = render(<AppearanceTab />, { wrapper: Wrapper });
@@ -404,6 +460,7 @@ describe("AppearanceTab", () => {
     expect(screen.getByText("The paper itself.")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Type" })).toBeInTheDocument();
     expect(screen.getByLabelText("Paper (Dark)")).toHaveValue("#1d1b16");
+    expect(await screen.findByRole("slider", { name: "Width" })).toHaveValue("46");
     expect(screen.getByText("46rem")).toBeInTheDocument();
 
     const font = () => screen.getByRole("textbox", { name: "Heading font" });

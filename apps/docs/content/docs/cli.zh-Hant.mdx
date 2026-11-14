@@ -145,6 +145,19 @@ multica issue comment add MUL-123 --content-file note.md --steer-active
 
 一個任務要依次提交多個 PR 時，用 `issue create --title "..." --pr-auto-complete off` 或 `issue update <id> --pr-auto-complete off`，讓這個任務在 PR 合併後保持原狀態。用 `--pr-auto-complete on` 恢復工作區規則，從下一次 PR 事件起生效。`issue pull-requests <id>` 會顯示任務開關、工作區開關、目標狀態和判斷結果，沒有關聯 PR 時也會顯示。支援該欄位的伺服器會在建立交易內儲存開關；舊伺服器會補呼叫一次 PUT，失敗時 CLI 會提供已建立的任務 ID 和重試用的 update 命令，請勿重複建立。
 
+### 刪除任務
+
+刪除一條任務，或傳入多個任務編號、完整 UUID 批次刪除：
+
+```bash
+multica issue delete MUL-123
+multica issue delete MUL-123 MUL-124 --yes --output json
+```
+
+刪除無法復原：評論和附件會被移除，進行中的執行會被取消，關聯的自動化執行會被標記為失敗，指向這些任務的重複標記會被清除；子任務會解除關聯，但不會被刪除。確認前會先解析所有 ID；遇到不存在或無權存取的任務時，命令會中止，不執行刪除。
+
+命令會要求確認。`--yes` 跳過確認；不加此參數時，無法回答提示的非互動執行會報錯退出，不刪除任何任務。
+
 ### 時間線
 
 `issue get` 給出任務現在的狀態；`issue timeline` 按時間順序列出狀態、優先順序、負責人、標題、日期的改動和執行結果，並混排評論，用來回答"什麼時候進入 in_review""卡在當前狀態多久了"：
@@ -262,7 +275,7 @@ multica runtime profile create --display-name "內部 Claude 封裝" \
   --command-name ccms --runtime-type claude
 ```
 
-`daemon autostart` 為當前 profile 登記開機自啟，平臺差異見[開機自啟](/daemon-runtimes#autostart)。`runtime usage` 預設統計 90 天，`--days` 最多 365。`runtime update` 讓那臺電腦上的守護程序把 CLI 更新到指定版本，`--wait` 會一直等到更新結束。`runtime profile create` 用 `--runtime-type` 指定相容的工具（舊的 `--protocol-family` 仍可用）；固定引數目前只能在網頁端填寫。
+`daemon autostart` 為當前 profile 登記開機自啟，平臺差異見[開機自啟](/daemon-runtimes#autostart)。`runtime usage` 預設統計 90 天，`--days` 最多 365。`runtime update` 讓那臺電腦上的守護程序把 CLI 更新到指定版本，`--wait` 等待更新結束；更新失敗、更新逾時或等待本身逾時時，命令會以非零狀態退出。`runtime profile create` 用 `--runtime-type` 指定相容的工具（舊的 `--protocol-family` 仍可用）；固定引數目前只能在網頁端填寫。
 
 刪除仍繫結活躍 AI 代理的執行時時，命令預設拒絕。`multica runtime delete <id> --cascade` 會解綁這些 AI 代理、保留其配置與歷史記錄，並取消它們的活動執行。
 
@@ -379,6 +392,7 @@ CLI 配置檔案包含可代表你訪問 Multica 的令牌。不要提交到倉�
 | | `get <id>` | 檢視單個任務 | `--resolve-properties`（僅 JSON；在儲存的 id 旁附上屬性、選項和成員名稱） |
 | | `create` | 建立任務 | `--title`（必填）、`--description` / `--description-stdin` / `--description-file`、`--pr-auto-complete on/off`、`--status`、`--priority`、`--assignee`、`--parent`、`--stage`、`--project`、`--start-date`、`--due-date`、`--attachment`（可重複）、`--property`（可重複）、`--allow-duplicate`（已有同名未關閉任務時仍建立） |
 | | `update <id>` | 更新任務欄位 | 與 `create` 同類欄位，另有 `--position`、`--no-start`、`--duplicate-of` |
+| | `delete <id>...` | 永久刪除一條或多條任務 | `--yes` 跳過確認；接受任務編號或完整 UUID |
 | | `assign <id>` | 指派或取消指派 | `--to`（名稱模糊匹配成員、AI 代理或小隊）、`--to-id`、`--unassign`、`--no-start` |
 | | `status <id> <status>` | 修改狀態 | `--no-start`、`--duplicate-of` |
 | | `reorder <id>` | 在列內移動 | |
@@ -406,7 +420,7 @@ CLI 配置檔案包含可代表你訪問 Multica 的令牌。不要提交到倉�
 | `issue-status` | `list/get/create/update/archive` | 管理工作區狀態目錄，即所有工作流共用的狀態。修改任務目前狀態請用 `issue status` | `create`：`--name`、`--category`、`--color`、`--key`、`--icon`；`update`：`--name`、`--description`、`--color`、`--icon`（空值恢復為分類預設圖示）、`--position`；`list`：`--include-archived`。變更需要工作區擁有者或管理員權限 |
 | `label` | `list/get/create/update/delete` | 管理工作區標籤 | `list`：`--resource-type`（`issue` 或 `skill`）、`--full-id`；`create`：`--name`、`--color`、`--resource-type`（`issue` 或 `skill`）、`--description` |
 | `property` | `list/get/create/update/archive/unarchive` | 管理工作區自定義屬性 | `create`：`--name`、`--type`（`text`、`number`、`select`、`multi_select`、`date`、`checkbox`、`url`、`actor`、`multi_actor`、`multi_text`、`multi_url`）、`--option`（可重複，僅 select 型別）；`list`：`--include-archived`；型別建立後不可修改 |
-| `view` | `list/get/issues` | 讀取你能開啟的檢視（自己的和工作區共享的）；`issues` 按檢視儲存的排序列出檢視裡的任務，檢視儲存的全部篩選條件都由服務端執行。在 AI 代理執行中，看到的檢視和其中「我的」條件都屬於執行時的所有者 | `<view>` 接受 ID、ID 字首或完整名稱；`list`：`--scope`（`workspace`、`my`、`project`）、`--project`、`--full-id`；`issues`：`--limit`（最多 100）、`--cursor`（上一頁的 `next_cursor`）、`--today`（相對到期日篩選按哪一天計算，預設今天）、`--fields`（僅 JSON）、`--full-id` |
+| `view` | `list/get/issues/create/update/duplicate/delete` | 讀取你能開啟的檢視（自己的和工作區共享的）；`issues` 按檢視儲存的排序列出檢視裡的任務，檢視儲存的全部篩選條件都由服務端執行。`create`、`update`、`duplicate`、`delete` 按應用儲存檢視的同一格式寫入，檢視會出現在側邊欄並可繼續在應用裡編輯；`update` 只改傳入的參數，檢視在讀取後被他人改過時拒絕覆寫。只有擁有者（共享檢視還包括工作區擁有者和管理員）能修改或刪除檢視。在 AI 代理執行中，看到的檢視和其中「我的」條件都屬於執行時的所有者 | `<view>` 接受 ID、ID 字首或完整名稱；`list`：`--scope`（`workspace`、`my`、`project`）、`--project`、`--full-id`；`issues`：`--limit`（最多 100）、`--cursor`（上一頁的 `next_cursor`）、`--today`（相對到期日篩選按哪一天計算，預設今天）、`--fields`（僅 JSON）、`--full-id`；`create`：`--name`、`--scope`、`--project`、`--scope-variant`、`--visibility`；`create/update/duplicate` 篩選：`--status`、`--priority`、`--assignee`、`--creator`、`--label`、`--project-filter`、`--property "Name=Value"`、`--negate <filter>` 等；顯示：`--view-mode`、`--grouping`、`--sort`、`--direction`、`--show-sub-issues` 等；`--definition-file`、`--clear-filters`、`--dry-run` |
 | `agent` | `list/get/create/update/archive/restore` | 管理 AI 代理 | `--name`、`--runtime-id`（`create` 必填）、`--instructions`、`--conversation-starters`、`--model`、`--thinking-level`、`--custom-env` / `--custom-env-file` / `--custom-env-stdin`（僅 `create`）、`--custom-args`、`--mcp-config` / `--mcp-config-file` / `--mcp-config-stdin`、`--permission-mode`、`--visibility`（舊寫法）、`--max-concurrent-tasks` |
 | | `copy <agent-id>` | 複製為新 AI 代理，原 AI 代理不受影響 | `--name`（預設為原名加 ` (copy)`）、`--runtime-id`（複製到其他執行時時必須同時指定 `--model`）、`--no-skills`；`custom_env`、`mcp_config`、`runtime_config` 等機密配置不會複製，需用與 `create` 相同的 flag 重新提供 |
 | | `tasks <id>` | 檢視 AI 代理的執行 | |

@@ -7,8 +7,22 @@ import { cn } from "@multica/ui/lib/utils"
 import { Button } from "@multica/ui/components/ui/button"
 import { XIcon } from "@multica/ui/icons"
 
-function Dialog({ ...props }: DialogPrimitive.Root.Props) {
-  return <DialogPrimitive.Root data-slot="dialog" {...props} />
+function Dialog({ onOpenChange, modal = true, ...props }: DialogPrimitive.Root.Props) {
+  const handleOpenChange: NonNullable<DialogPrimitive.Root.Props["onOpenChange"]> = (open, details) => {
+    const target = details.event.target
+    // Extensions can hide a suggestion during a press, retargeting the click
+    // to body/html. A modal's outside click should land on its backdrop.
+    if (
+      !open && modal && details.reason === "outside-press" &&
+      target instanceof Element && target.matches("html, body")
+    ) {
+      details.cancel()
+      return
+    }
+    onOpenChange?.(open, details)
+  }
+
+  return <DialogPrimitive.Root data-slot="dialog" {...props} modal={modal} onOpenChange={handleOpenChange} />
 }
 
 function DialogTrigger({ ...props }: DialogPrimitive.Trigger.Props) {

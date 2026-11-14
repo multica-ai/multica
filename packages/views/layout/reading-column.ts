@@ -9,4 +9,4 @@
  * Everything in the column shares its edges, prose included. The upper bound
  * is what keeps lines of text readable, so raise it with that in mind.
  */
-export const READING_COLUMN = "mx-auto w-full max-w-[clamp(56rem,70cqi,70rem)]";
+export const READING_COLUMN = "mx-auto w-full max-w-[var(--content-max-width,clamp(56rem,70cqi,70rem))]";

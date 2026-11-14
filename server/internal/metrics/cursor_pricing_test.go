@@ -12,6 +12,7 @@ func TestPriceForRuntimeModelCursorVariants(t *testing.T) {
 		{"claude-opus-5-thinking-max", "claude-opus-5"},
 		{"claude-4.6-sonnet-medium-thinking", "claude-4.6-sonnet"},
 		{"claude-fable-5-1-thinking-high", "claude-fable-5-1"},
+		{"claude-fable-5-2-xhigh", "claude-fable-5-2"},
 		{"gpt-5.5-extra-high", "gpt-5.5"},
 		{"gpt-5.6-sol-none", "gpt-5.6-sol"},
 		{"gpt-5.3-codex-xhigh", "gpt-5.3-codex"},
@@ -53,9 +54,13 @@ func TestPriceForRuntimeModelCursorRates(t *testing.T) {
 		{"claude-opus-4-7-high-fast", 30, 150, 3, 37.5},
 		{"claude-opus-5-5-high-fast", 8, 40, 0.4, 10},
 		{"claude-opus-5-high-fast", 10, 50, 1, 12.5},
+		{"claude-fable-5-2-xhigh", 8, 40, 0.2, 10},
 		{"gpt-5.5-high-fast", 12.5, 75, 1.25, 0},
 		{"gemini-3.6-flash-high", 1.5, 7.5, 0.15, 0},
 		{"gemini-3.5-flash", 1.5, 9, 0.15, 0},
+		{"gemini-4-hydrogen-high", 1.5, 7.5, 0.075, 0},
+		{"gemini-4-hydrogen-xhigh", 1.5, 7.5, 0.075, 0},
+		{"gemini-4-carbon-medium", 4, 20, 0.2, 0},
 	} {
 		got, ok := PriceForRuntimeModel("cursor", tc.model)
 		if !ok {
@@ -74,6 +79,7 @@ func TestPriceForRuntimeModelCursorFastNeverBorrowsStandardRate(t *testing.T) {
 		"claude-sonnet-5[fast=true]",
 		"kimi-k3-fast",
 		"gemini-4-argon-fast",
+		"gemini-4-hydrogen-high-fast",
 	} {
 		if got, ok := PriceForRuntimeModel("cursor", model); ok {
 			t.Errorf("PriceForRuntimeModel(cursor, %q) = %+v; want unmapped", model, got)

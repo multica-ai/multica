@@ -335,8 +335,8 @@
     },
     "content_size": {
       "title": "字号",
-      "description": "只改内容文字，界面不变。",
-      "follow": "跟随界面（{{size}} px）"
+      "description": "只改内容文字，默认跟随界面。",
+      "follow": "跟随界面字号"
     },
     "content_leading": {
       "title": "行高",
@@ -349,7 +349,7 @@
     },
     "density": {
       "title": "信息密度",
-      "description": "任务列表和搜索结果的行高。",
+      "description": "任务列表、搜索结果和侧边栏的行高，以及看板的间距。",
       "compact": "紧凑",
       "default": "标准",
       "comfortable": "宽松"

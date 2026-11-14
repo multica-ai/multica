@@ -72,6 +72,7 @@ export function MemberDetailPage({ userId }: { userId: string }) {
   if (isLoading) {
     return (
       <ObjectPage
+        type="member"
         layoutId={LAYOUT_ID}
         segments={segments}
         leaf={<Skeleton className="h-4 w-32" />}
@@ -88,6 +89,7 @@ export function MemberDetailPage({ userId }: { userId: string }) {
 
   return (
     <ObjectPage
+      type="member"
       layoutId={LAYOUT_ID}
       segments={segments}
       leaf={
@@ -131,6 +133,7 @@ function MemberIssues({
 
   return (
     <ObjectPage
+      type="member"
       layoutId={LAYOUT_ID}
       segments={segments}
       leaf={

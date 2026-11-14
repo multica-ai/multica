@@ -14,7 +14,21 @@ describe("issue icons", () => {
     const geometry = container.querySelector("svg")!.innerHTML;
     rerender(<StatusIcon status="qa" category="closed" color="#123456" icon={icon} />);
     expect(container.querySelector("svg")!.innerHTML).toBe(geometry);
-    expect(container.querySelector("svg")).toHaveStyle({ color: "#123456" });
+    expect(container.querySelector("svg")!.style.color).toBe("var(--palette-blue, #123456)");
+  });
+
+  it("names a custom colour's slot so a theme can recolour it", () => {
+    const { container, rerender } = render(<StatusIcon status="qa" category="started" color="#ef4444" />);
+    const svg = container.querySelector("svg")!;
+    expect(svg).toHaveAttribute("data-color", "#ef4444");
+    expect(svg).toHaveAttribute("data-palette", "red");
+    expect(svg.style.color).toBe("var(--palette-red, #ef4444)");
+    rerender(<StatusIcon status="qa" category="started" color="#ef4444" inheritColor />);
+    expect(svg).toHaveAttribute("data-palette", "red");
+    expect(svg.style.color).toBe("");
+    rerender(<StatusIcon status="done" color="#ef4444" />);
+    expect(svg).not.toHaveAttribute("data-color");
+    expect(svg).not.toHaveAttribute("data-palette");
   });
 
   it("keeps built-in geometry and token color locked", () => {

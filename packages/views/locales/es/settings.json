@@ -341,8 +341,8 @@
     },
     "content_size": {
       "title": "Tamaño de letra",
-      "description": "Solo el texto del contenido; la interfaz mantiene su tamaño.",
-      "follow": "Igual que la interfaz ({{size}} px)"
+      "description": "Solo el texto del contenido. Por defecto, igual que la interfaz.",
+      "follow": "Seguir el tamaño de la interfaz"
     },
     "content_leading": {
       "title": "Interlineado",
@@ -355,7 +355,7 @@
     },
     "density": {
       "title": "Densidad",
-      "description": "Altura de las filas en listas de incidencias y búsqueda.",
+      "description": "Altura de las filas en listas de incidencias, búsqueda y la barra lateral, y espaciado en el tablero.",
       "compact": "Compacta",
       "default": "Predeterminada",
       "comfortable": "Amplia"

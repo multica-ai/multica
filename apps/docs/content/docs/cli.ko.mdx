@@ -145,6 +145,19 @@ multica issue comment add MUL-123 --content-file note.md --steer-active
 
 여러 PR을 순서대로 만드는 태스크는 `issue create --title "..." --pr-auto-complete off` 또는 `issue update <id> --pr-auto-complete off`로 병합 후에도 상태를 유지할 수 있습니다. `--pr-auto-complete on`으로 워크스페이스 규칙을 복원하면 다음 PR 이벤트부터 적용됩니다. `issue pull-requests <id>`는 연결된 PR이 없어도 태스크 설정, 워크스페이스 설정, 대상 상태와 판단 결과를 표시합니다. 지원 서버는 생성 트랜잭션 안에서 설정을 저장하고, 이전 서버에는 추가 PUT을 보냅니다. 실패하면 생성된 태스크 ID와 재시도할 update 명령이 표시되므로 create를 반복하지 마세요.
 
+### 태스크 삭제
+
+태스크 하나를 삭제하거나, 여러 태스크 번호 또는 전체 UUID를 전달해 한 번에 삭제합니다.
+
+```bash
+multica issue delete MUL-123
+multica issue delete MUL-123 MUL-124 --yes --output json
+```
+
+삭제는 되돌릴 수 없습니다. 댓글과 첨부 파일이 삭제되고, 진행 중인 실행은 취소되며, 연결된 자동화 실행은 실패로 처리됩니다. 삭제한 태스크를 가리키는 중복 표시는 해제됩니다. 하위 태스크는 연결만 해제되고 삭제되지 않습니다. 확인 전에 모든 ID를 조회하며, 존재하지 않거나 접근할 수 없는 태스크가 있으면 삭제하지 않고 명령을 중단합니다.
+
+명령은 확인을 요청합니다. `--yes`를 붙이면 확인을 건너뜁니다. 이 옵션 없이 확인에 답할 수 없는 비대화형 실행은 아무것도 삭제하지 않고 오류로 종료됩니다.
+
 ### 타임라인
 
 `issue get`은 태스크의 현재 상태를 보여 줍니다. `issue timeline`은 상태, 우선순위, 담당자, 제목, 날짜 변경과 실행 결과를 시간순으로 나열하고 댓글도 섞어 보여 줍니다. "언제 in_review로 바뀌었나", "지금 상태에 얼마나 머물러 있나"를 확인할 때 씁니다.
@@ -265,7 +278,7 @@ multica runtime profile create --display-name "사내 Claude 래퍼" \
   --command-name ccms --runtime-type claude
 ```
 
-`daemon autostart`는 현재 profile이 로그인할 때 시작되도록 등록합니다. 플랫폼별 차이는 [로그인 시 자동 시작](/daemon-runtimes#autostart)을 참고하세요. `runtime usage`는 기본적으로 90일을 집계하며 `--days`는 최대 365입니다. `runtime update`는 해당 컴퓨터의 데몬이 CLI를 지정한 버전으로 업데이트하게 하고, `--wait`를 붙이면 업데이트가 끝날 때까지 기다립니다. `runtime profile create`는 호환 도구를 `--runtime-type`으로 지정합니다(예전 `--protocol-family`도 쓸 수 있음). 고정 인수는 현재 웹 앱에서만 설정할 수 있습니다.
+`daemon autostart`는 현재 profile이 로그인할 때 시작되도록 등록합니다. 플랫폼별 차이는 [로그인 시 자동 시작](/daemon-runtimes#autostart)을 참고하세요. `runtime usage`는 기본적으로 90일을 집계하며 `--days`는 최대 365입니다. `runtime update`는 해당 컴퓨터의 데몬이 CLI를 지정한 버전으로 업데이트하게 하고, `--wait`를 붙이면 업데이트가 끝날 때까지 기다립니다. 업데이트 실패, 업데이트 시간 초과 또는 대기 자체의 시간 초과 시 종료 코드는 0이 아닙니다. `runtime profile create`는 호환 도구를 `--runtime-type`으로 지정합니다(예전 `--protocol-family`도 쓸 수 있음). 고정 인수는 현재 웹 앱에서만 설정할 수 있습니다.
 
 활성 에이전트가 계속 연결된 런타임을 삭제하면 명령이 기본적으로 거부됩니다. `multica runtime delete <id> --cascade`는 에이전트의 런타임 연결을 해제하고 설정과 기록을 보존하며 활성 실행을 취소합니다.
 
@@ -374,6 +387,7 @@ CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 t
 | | `get <id>` | 태스크 하나 확인 | `--resolve-properties`(JSON 전용; 저장된 id와 함께 속성, 옵션, 멤버 이름을 반환) |
 | | `create` | 태스크 생성 | `--title`(필수), `--description` / `--description-stdin` / `--description-file`, `--pr-auto-complete on/off`, `--status`, `--priority`, `--assignee`, `--parent`, `--stage`, `--project`, `--start-date`, `--due-date`, `--attachment`(반복 가능), `--property`(반복 가능), `--allow-duplicate`(같은 제목의 닫히지 않은 태스크가 있어도 생성) |
 | | `update <id>` | 태스크 필드 업데이트 | `create`와 같은 종류의 필드에 `--position`, `--no-start`, `--duplicate-of` 추가 |
+| | `delete <id>...` | 하나 이상의 태스크를 영구 삭제 | `--yes`로 확인 생략. 태스크 번호 또는 전체 UUID 사용 |
 | | `assign <id>` | 할당 또는 할당 해제 | `--to`(이름으로 멤버, 에이전트, 스쿼드 fuzzy match), `--to-id`, `--unassign`, `--no-start` |
 | | `status <id> <status>` | 상태 변경 | `--no-start`, `--duplicate-of` |
 | | `reorder <id>` | 열 안에서 이동 | |
@@ -397,7 +411,7 @@ CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 t
 | | `resource list/add/update/remove` | 프로젝트 추가 리소스 관리 | `--type`, `--url`, `--default-branch-hint`, `--ref`, `--local-path`, `--daemon-id`, `--execution-mode`(로컬 디렉터리의 `in_place` / `worktree`) |
 | `label` | `list/get/create/update/delete` | 워크스페이스 라벨 관리 | `list`: `--resource-type`(`issue` 또는 `skill`), `--full-id`; `create`: `--name`, `--color`, `--resource-type`(`issue` 또는 `skill`), `--description` |
 | `property` | `list/get/create/update/archive/unarchive` | 워크스페이스 사용자 지정 속성 관리 | `create`: `--name`, `--type`(`text`, `number`, `select`, `multi_select`, `date`, `checkbox`, `url`, `actor`, `multi_actor`, `multi_text`, `multi_url`), `--option`(반복 가능, select 유형만). `list`: `--include-archived`. 유형은 생성 후 변경 불가 |
-| `view` | `list/get/issues` | 열 수 있는 뷰(내 뷰와 워크스페이스에 공유된 뷰)를 읽고, `issues`로 뷰에 보이는 태스크를 저장된 정렬 순서대로 나열(저장된 필터는 모두 서버에서 적용). 에이전트 실행 중에는 뷰와 '나' 조건이 런타임 소유자 기준 | `<view>`는 ID, ID 접두사 또는 정확한 이름을 받음. `list`: `--scope`(`workspace`, `my`, `project`), `--project`, `--full-id`. `issues`: `--limit`(최대 100), `--cursor`(이전 페이지의 `next_cursor`), `--today`(상대 마감일 필터의 기준일, 기본값은 오늘), `--fields`(JSON 전용), `--full-id` |
+| `view` | `list/get/issues/create/update/duplicate/delete` | 열 수 있는 뷰(내 뷰와 워크스페이스에 공유된 뷰)를 읽고, `issues`로 뷰에 보이는 태스크를 저장된 정렬 순서대로 나열(저장된 필터는 모두 서버에서 적용). `create`, `update`, `duplicate`, `delete`는 앱과 같은 형식으로 뷰를 저장하므로 사이드바에 보이고 앱에서 계속 편집할 수 있음. `update`는 지정한 항목만 바꾸며, 읽은 뒤 다른 사람이 바꾼 뷰는 덮어쓰지 않고 거부함. 소유자(공유 뷰는 워크스페이스 소유자와 관리자도)만 수정하거나 삭제할 수 있음. 에이전트 실행 중에는 뷰와 '나' 조건이 런타임 소유자 기준 | `<view>`는 ID, ID 접두사 또는 정확한 이름을 받음. `list`: `--scope`(`workspace`, `my`, `project`), `--project`, `--full-id`. `issues`: `--limit`(최대 100), `--cursor`(이전 페이지의 `next_cursor`), `--today`(상대 마감일 필터의 기준일, 기본값은 오늘), `--fields`(JSON 전용), `--full-id`. `create`: `--name`, `--scope`, `--project`, `--scope-variant`, `--visibility`. `create/update/duplicate` 필터: `--status`, `--priority`, `--assignee`, `--creator`, `--label`, `--project-filter`, `--property "Name=Value"`, `--negate <filter>` 등. 표시: `--view-mode`, `--grouping`, `--sort`, `--direction`, `--show-sub-issues` 등. `--definition-file`, `--clear-filters`, `--dry-run` |
 | `agent` | `list/get/create/update/archive/restore` | 에이전트 관리 | `--name`, `--runtime-id`(`create`에서 필수), `--instructions`, `--conversation-starters`, `--model`, `--thinking-level`, `--custom-env` / `--custom-env-file` / `--custom-env-stdin`(`create` 전용), `--custom-args`, `--mcp-config` / `--mcp-config-file` / `--mcp-config-stdin`, `--permission-mode`, `--visibility`(예전 방식), `--max-concurrent-tasks` |
 | | `copy <agent-id>` | 원래 에이전트에 영향 없이 새 에이전트로 복사 | `--name`(기본값은 원래 이름 + ` (copy)`), `--runtime-id`(다른 런타임으로 복사할 때 `--model`도 필수), `--no-skills`. `custom_env`, `mcp_config`, `runtime_config` 같은 기밀 설정은 복사되지 않으며 `create`와 같은 flag로 다시 제공해야 함 |
 | | `tasks <id>` | 에이전트 실행 확인 | |

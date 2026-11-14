@@ -138,7 +138,11 @@ export const SlashCommandList = forwardRef<
     // `--suggestion-available-height` from suggestion-popup.tsx's size
     // middleware), falling back to the design max when rendered standalone.
     // Single height authority — mirrors MentionList.
-    <div className="rounded-md border bg-popover py-1 shadow-md w-72 max-h-[min(300px,var(--suggestion-available-height,300px))] overflow-y-auto">
+    <div
+      data-mc="editor-menu"
+      data-kind="slash"
+      className="rounded-md border bg-popover py-1 shadow-md w-72 max-h-[min(300px,var(--suggestion-available-height,300px))] overflow-y-auto"
+    >
       {items.map((item, index) => {
         const description = describe(item);
         return (

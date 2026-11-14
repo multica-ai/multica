@@ -335,8 +335,8 @@
     },
     "content_size": {
       "title": "文字サイズ",
-      "description": "本文だけ。インターフェースは変わりません。",
-      "follow": "インターフェースと同じ（{{size}} px）"
+      "description": "本文だけ。初期設定ではインターフェースと同じです。",
+      "follow": "インターフェースの文字サイズに合わせる"
     },
     "content_leading": {
       "title": "行の高さ",
@@ -349,7 +349,7 @@
     },
     "density": {
       "title": "表示密度",
-      "description": "課題リストと検索結果の行の高さ。",
+      "description": "課題リスト、検索結果、サイドバーの行の高さと、ボードの余白。",
       "compact": "コンパクト",
       "default": "標準",
       "comfortable": "ゆったり"

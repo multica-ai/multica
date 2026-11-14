@@ -15,6 +15,9 @@ function Reader() {
   return null;
 }
 
+/** No stored width: the theme's, or 240px when it sets none. */
+const UNSTORED_SIDEBAR_WIDTH = "clamp(200px, var(--sidebar-panel-width, 240px), 320px)";
+
 describe("ListColumn", () => {
   it("collapses the list column from its edge, like the space panel", () => {
     const { container } = renderWithI18n(
@@ -61,7 +64,7 @@ describe("ListColumn", () => {
     expect(localStorage.getItem("list_column_width")).toBe("480");
     expect(localStorage.getItem("sidebar_width")).toBeNull();
     expect(wrapper.style.getPropertyValue("--list-column-width")).toBe("480px");
-    expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe("240px");
+    expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe(UNSTORED_SIDEBAR_WIDTH);
   });
 
   it("restores a stored list width within its bounds", () => {
