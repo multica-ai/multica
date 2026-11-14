@@ -397,14 +397,18 @@ const MACOS_PRIMARY_RESERVED_VARIANTS: Record<string, ReservedVariants> = {
   Space: "any", Tab: "any",
   // Hide / Hide Others and Minimize / Minimize All.
   H: ["", "alt"], M: ["", "alt"],
-  // Control+Command+F toggles full screen; Option+Command+I is Toggle
-  // Developer Tools in Electron's default menu, whose accelerators fire even
-  // when the page handles the keydown.
-  F: ["control"], I: ["alt"],
+  // Control+Command+F toggles full screen.
+  F: ["control"],
 };
 
-const OTHER_PRIMARY_RESERVED_VARIANTS: Record<string, ReservedVariants> = {
-  // Toggle Developer Tools in Electron's default menu.
+// Toggle Developer Tools in Electron's default menu, whose accelerators fire
+// even when the page handles the keydown. Browsers let a page claim the same
+// chord, so these stay recordable on web.
+const MACOS_DESKTOP_PRIMARY_RESERVED_VARIANTS: Record<string, ReservedVariants> = {
+  I: ["alt"],
+};
+
+const OTHER_DESKTOP_PRIMARY_RESERVED_VARIANTS: Record<string, ReservedVariants> = {
   I: ["shift"],
 };
 
@@ -449,10 +453,14 @@ export function isReservedShortcut(
     if (BROWSER_ONLY_PRIMARY_RESERVED_KEYS.has(key)) {
       if (runtime !== "desktop" || extraModifiers(modifiers) !== "") return true;
     }
-    const platformVariants = platform === "macos"
-      ? MACOS_PRIMARY_RESERVED_VARIANTS
-      : OTHER_PRIMARY_RESERVED_VARIANTS;
-    if (isReservedIn(platformVariants, shortcut)) return true;
+    const mac = platform === "macos";
+    if (mac && isReservedIn(MACOS_PRIMARY_RESERVED_VARIANTS, shortcut)) return true;
+    if (runtime === "desktop") {
+      const desktopVariants = mac
+        ? MACOS_DESKTOP_PRIMARY_RESERVED_VARIANTS
+        : OTHER_DESKTOP_PRIMARY_RESERVED_VARIANTS;
+      if (isReservedIn(desktopVariants, shortcut)) return true;
+    }
   }
 
   if (platform === "macos") {

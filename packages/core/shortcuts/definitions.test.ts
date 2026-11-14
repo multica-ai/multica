@@ -339,7 +339,6 @@ describe("keyboard shortcut definitions", () => {
       createShortcutChord("H", { primary: true, alt: true }),
       createShortcutChord("M", { primary: true, alt: true }),
       createShortcutChord("F", { primary: true, control: true }),
-      createShortcutChord("I", { primary: true, alt: true }),
       createShortcutChord("W", { primary: true, alt: true }),
       createShortcutChord("3", { primary: true, shift: true }),
     ];
@@ -351,9 +350,17 @@ describe("keyboard shortcut definitions", () => {
         ).toBe(true);
       }
     }
+  });
+
+  it("reserves Electron's DevTools accelerator on desktop only", () => {
+    const macDevTools = createShortcutChord("I", { primary: true, alt: true });
+    expect(isReservedShortcut(macDevTools, "macos", "desktop")).toBe(true);
+    expect(isShortcutAllowedForAction("openSearch", macDevTools, "macos", "web")).toBe(true);
     const devTools = createShortcutChord("I", { primary: true, shift: true });
-    expect(isReservedShortcut(devTools, "windows", "desktop")).toBe(true);
-    expect(isReservedShortcut(devTools, "linux", "desktop")).toBe(true);
+    for (const platform of ["windows", "linux"] as const) {
+      expect(isReservedShortcut(devTools, platform, "desktop")).toBe(true);
+      expect(isShortcutAllowedForAction("openSearch", devTools, platform, "web")).toBe(true);
+    }
     // Browser DevTools chords a page can claim stay recordable.
     expect(
       isReservedShortcut(createShortcutChord("C", { primary: true, shift: true }), "macos", "web"),

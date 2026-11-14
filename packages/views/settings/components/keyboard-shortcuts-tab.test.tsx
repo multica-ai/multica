@@ -108,6 +108,30 @@ describe("KeyboardShortcutsTab", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
+  it("reports a conflict with an Option chord saved under its glyph", () => {
+    configureShortcutPlatform("macos");
+    const legacy = createShortcutChord("©", { primary: true, alt: true });
+    useShortcutStore.getState().setShortcut("openSearch", legacy);
+    renderWithI18n(<KeyboardShortcutsTab />);
+    const recorder = screen.getByRole("button", {
+      name: "Change shortcut for Create issue",
+    });
+
+    fireEvent.click(recorder);
+    fireEvent.keyDown(recorder, {
+      key: "©",
+      code: "KeyG",
+      metaKey: true,
+      altKey: true,
+    });
+
+    expect(getShortcut("createIssue")).toEqual(createShortcutChord("C"));
+    expect(getShortcut("openSearch")).toEqual(legacy);
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Already used by Open search.",
+    );
+  });
+
   it("explains a key it cannot record instead of ignoring it", () => {
     renderWithI18n(<KeyboardShortcutsTab />);
     const recorder = screen.getByRole("button", {

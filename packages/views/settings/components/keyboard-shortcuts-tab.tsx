@@ -108,7 +108,7 @@ export function KeyboardShortcutsTab() {
       setCaptureError({ kind: actionId === "send" ? "send" : "unsafe" });
       return;
     }
-    const conflict = findShortcutConflict(actionId, shortcut);
+    const conflict = findShortcutConflict(actionId, shortcut, event.nativeEvent);
     if (conflict) {
       setCaptureError({ kind: "conflict", actionId: conflict });
       return;
