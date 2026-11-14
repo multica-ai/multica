@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 
 import { providerSupportsMcpConfig } from "./mcp-support";
@@ -7,9 +9,9 @@ describe("providerSupportsMcpConfig", () => {
     expect(providerSupportsMcpConfig("claude")).toBe(true);
     expect(providerSupportsMcpConfig("devin")).toBe(true);
     expect(providerSupportsMcpConfig("zcode")).toBe(true);
+    expect(providerSupportsMcpConfig("antigravity")).toBe(true);
   });
   it("rejects providers whose runtime ignores mcp_config", () => {
-    expect(providerSupportsMcpConfig("antigravity")).toBe(false);
     expect(providerSupportsMcpConfig("copilot")).toBe(false);
     expect(providerSupportsMcpConfig("droid")).toBe(false);
     expect(providerSupportsMcpConfig("amp")).toBe(false);
