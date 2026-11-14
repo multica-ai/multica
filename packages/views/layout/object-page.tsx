@@ -361,14 +361,20 @@ export function ObjectPanelSection({
   );
 }
 
-/** One label and value in the properties panel; the value may be a picker. */
+/**
+ * One label and value in the properties panel; the value may be a picker.
+ *
+ * Top-aligned like `PropRow`: the label is one 32px line and the value centres
+ * within at least that height, so a value that wraps (several label chips)
+ * keeps the label beside its first line.
+ */
 export function ObjectProperty({ label, children }: { label: ReactNode; children: ReactNode }) {
   return (
-    <div className="-mx-2 flex min-h-8 items-center gap-2 rounded-md px-2 transition-colors hover:bg-accent/50">
+    <div className="-mx-2 flex min-h-8 items-start gap-2 rounded-md px-2 transition-colors hover:bg-accent/50">
       <TruncatedTooltip content={label} focusable>
-        <span className="w-20 shrink-0 truncate text-caption text-muted-foreground">{label}</span>
+        <span className="w-20 shrink-0 truncate text-caption leading-8 text-muted-foreground">{label}</span>
       </TruncatedTooltip>
-      <div className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-caption">{children}</div>
+      <div className="flex min-h-8 min-w-0 flex-1 items-center gap-1.5 truncate text-caption">{children}</div>
     </div>
   );
 }
