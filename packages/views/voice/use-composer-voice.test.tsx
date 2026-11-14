@@ -10,6 +10,7 @@ import {
   useVoiceModelsStore,
   type VoiceModels,
 } from "@multica/core/voice";
+import { createShortcutChord, useShortcutStore } from "@multica/core/shortcuts";
 import { useComposerVoice, type ComposerVoiceOptions } from "./use-composer-voice";
 
 const INSTALLED: VoiceModels = {
@@ -57,9 +58,11 @@ beforeEach(() => {
   engine.started = 0;
   engine.transcribe.mockReset();
   act(() => useVoiceModelsStore.getState().setModels(INSTALLED));
+  useShortcutStore.getState().setShortcut("voiceInput", createShortcutChord("Space", { alt: true }));
 });
 
 afterEach(() => {
+  useShortcutStore.getState().resetShortcut("voiceInput");
   act(() => cancelVoice());
   cleanup();
 });

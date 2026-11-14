@@ -353,13 +353,11 @@ describe("keyboard shortcut definitions", () => {
     expect(allowed("Space", { shift: true })).toBe(false);
     // Spotlight.
     expect(allowed("Space", { primary: true })).toBe(false);
-    expect(SHORTCUT_ACTION_BY_ID.voiceInput.defaultShortcut).toEqual(
-      createShortcutChord("Space", { alt: true }),
-    );
+    expect(SHORTCUT_ACTION_BY_ID.voiceInput.defaultShortcut).toBeNull();
     // macOS reports Option+Space as a non-breaking space.
     expect(
       shortcutMatchesEvent(
-        SHORTCUT_ACTION_BY_ID.voiceInput.defaultShortcut,
+        createShortcutChord("Space", { alt: true }),
         keyEvent("\u00a0", { altKey: true }),
         "macos",
       ),

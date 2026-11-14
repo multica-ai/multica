@@ -113,12 +113,12 @@ export const SHORTCUT_ACTIONS: readonly ShortcutActionDefinition[] = [
   { id: "send", category: "general", defaultShortcut: primary("Enter"), allowInEditable: true },
   // Voice input works where the caret is, so it must fire inside editors. It
   // is matched on keydown AND keyup (holding it is push-to-talk), so the voice
-  // layer handles it rather than the global dispatcher. Option+Space types a
-  // non-breaking space on macOS, which nobody means to type.
+  // layer handles it rather than the global dispatcher. Unassigned by default:
+  // users pick their own chord in Settings.
   {
     id: "voiceInput",
     category: "general",
-    defaultShortcut: createShortcutChord("Space", { alt: true }),
+    defaultShortcut: null,
     allowInEditable: true,
   },
   // Browser-style history navigation (Mod+[ / Mod+]). Neither bracket is

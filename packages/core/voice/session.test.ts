@@ -16,6 +16,8 @@ import {
   type VoiceTarget,
 } from "./session";
 import { DEFAULT_VOICE_SETTINGS, useVoiceSettingsStore } from "./store";
+import { createShortcutChord } from "../shortcuts/definitions";
+import { useShortcutStore } from "../shortcuts/store";
 
 const MODEL: VoiceModel = {
   id: "sensevoice-small",
@@ -89,9 +91,11 @@ beforeEach(() => {
   engine.transcribe.mockReset();
   engine.transcribe.mockResolvedValue({ ok: true, text: "hello world" });
   useVoiceSettingsStore.getState().update(DEFAULT_VOICE_SETTINGS);
+  useShortcutStore.getState().setShortcut("voiceInput", createShortcutChord("Space", { alt: true }));
 });
 
 afterEach(() => {
+  useShortcutStore.getState().resetShortcut("voiceInput");
   cancelVoice();
   unregister.splice(0).forEach((fn) => fn());
   vi.useRealTimers();
@@ -141,6 +145,15 @@ describe("voice session", () => {
     key("keydown", { key: "Escape" });
     expect(getVoiceState().phase).toBe("idle");
     expect(engine.transcribe).toHaveBeenCalledTimes(1);
+  });
+
+  it("has no shortcut until the user assigns one", () => {
+    useShortcutStore.getState().resetShortcut("voiceInput");
+    target("chat");
+    noteVoiceFocus("chat");
+    shortcut();
+    expect(getVoiceState().phase).toBe("idle");
+    expect(recordings.started).toBe(0);
   });
 
   it("the shortcut dictates into the composer focused last", async () => {
