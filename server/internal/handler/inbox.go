@@ -407,9 +407,11 @@ func (h *Handler) ArchiveInboxItem(w http.ResponseWriter, r *http.Request) {
 // one item archives every sibling for the same issue, so restoring brings the
 // whole group back.
 //
-// `read` is untouched on purpose. An item archived while unread comes back
-// unread, which raises the unread badge again — the badge only ever counted
-// non-archived items, so restoring one is a real addition, not a bug.
+// `read` is untouched on purpose for an issue that needs the member. An item
+// archived while unread comes back unread, which raises the unread badge again
+// — the badge only ever counted non-archived items, so restoring one is a real
+// addition, not a bug. An update comes back unread whatever it was: see
+// MarkRestoredInboxUpdateUnread.
 func (h *Handler) UnarchiveInboxItem(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	prev, ok := h.loadInboxItemForUser(w, r, id)
@@ -430,6 +432,17 @@ func (h *Handler) UnarchiveInboxItem(w http.ResponseWriter, r *http.Request) {
 			RecipientID:   item.RecipientID,
 			IssueID:       item.IssueID,
 		})
+	}
+
+	if flipped, err := h.Queries.MarkRestoredInboxUpdateUnread(r.Context(), db.MarkRestoredInboxUpdateUnreadParams{
+		ID:            item.ID,
+		NeedsYouTypes: inbox.NeedsYouTypes,
+	}); err != nil {
+		slog.Warn("inbox: mark restored update unread failed", append(logger.RequestAttrs(r), "item_id", id, "error", err)...)
+	} else if flipped > 0 {
+		if fresh, err := h.Queries.GetInboxItem(r.Context(), item.ID); err == nil {
+			item = fresh
+		}
 	}
 
 	userID := requestUserID(r)
@@ -749,6 +762,82 @@ func (h *Handler) ArchiveAllReadInbox(w http.ResponseWriter, r *http.Request) {
 		"recipient_id": userID,
 		"count":        count,
 	})
+
+	writeJSON(w, http.StatusOK, map[string]any{"count": count})
+}
+
+// inboxArchiveUpdatesMaxGroups bounds one archive-updates request. A client
+// with more groups to put away sends them in several requests.
+const inboxArchiveUpdatesMaxGroups = 500
+
+type ArchiveInboxUpdatesRequest struct {
+	// The issues to archive, by issue id. A notification without an issue is
+	// named by its own id, which is how the Inbox keys its rows.
+	Groups []string `json:"groups"`
+	// Archive only the groups that have been read.
+	ReadOnly bool `json:"read_only"`
+}
+
+// ArchiveInboxUpdates archives the listed issues as long as they are still
+// only updates for the caller (see ArchiveInboxUpdateGroups). The Inbox calls
+// it with read_only for the updates the member has read, which leave the list
+// once read, and without it when the member clears the "Updates" section.
+//
+// A listed issue that needs the caller, is snoozed, or (with read_only) has
+// become unread again is left alone, so the count can be lower than the
+// number of groups sent.
+func (h *Handler) ArchiveInboxUpdates(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := ctxWorkspaceID(r.Context())
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	var req ArchiveInboxUpdatesRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if len(req.Groups) > inboxArchiveUpdatesMaxGroups {
+		writeError(w, http.StatusBadRequest, "too many groups")
+		return
+	}
+	groupIDs := make([]pgtype.UUID, 0, len(req.Groups))
+	for _, group := range req.Groups {
+		groupID, ok := parseUUIDOrBadRequest(w, group, "group id")
+		if !ok {
+			return
+		}
+		groupIDs = append(groupIDs, groupID)
+	}
+	if len(groupIDs) == 0 {
+		writeJSON(w, http.StatusOK, map[string]any{"count": 0})
+		return
+	}
+
+	count, err := h.Queries.ArchiveInboxUpdateGroups(r.Context(), db.ArchiveInboxUpdateGroupsParams{
+		WorkspaceID:   wsUUID,
+		RecipientID:   parseUUID(userID),
+		GroupIds:      groupIDs,
+		NeedsYouTypes: inbox.NeedsYouTypes,
+		ReadOnly:      req.ReadOnly,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to archive inbox updates")
+		return
+	}
+
+	// Nothing archived changes no row, so it must not make every open client
+	// refetch its inbox.
+	if count > 0 {
+		h.publish(protocol.EventInboxBatchArchived, workspaceID, "member", userID, map[string]any{
+			"recipient_id": userID,
+			"count":        count,
+		})
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"count": count})
 }

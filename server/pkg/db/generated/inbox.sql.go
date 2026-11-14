@@ -227,6 +227,73 @@ func (q *Queries) ArchiveInboxItem(ctx context.Context, id pgtype.UUID) (InboxIt
 	return i, err
 }
 
+const archiveInboxUpdateGroups = `-- name: ArchiveInboxUpdateGroups :execrows
+WITH candidates AS (
+    SELECT i.id, COALESCE(i.issue_id, i.id) AS group_id, i.read, i.created_at,
+           i.snoozed_until, i.section, i.type
+    FROM inbox_item i
+    WHERE i.workspace_id = $1
+      AND i.recipient_type = 'member'
+      AND i.recipient_id = $2
+      AND i.archived = false
+      AND (i.issue_id = ANY($3::uuid[])
+           OR (i.issue_id IS NULL AND i.id = ANY($3::uuid[])))
+), update_groups AS (
+    SELECT c.group_id
+    FROM candidates c
+    GROUP BY c.group_id
+    -- COALESCE: a row from before sections were stored has none, and a NULL
+    -- comparison would leave the whole test NULL.
+    HAVING NOT bool_or(
+               COALESCE(c.section, '') = 'needs_you'
+               OR (COALESCE(c.section, '') NOT IN ('needs_you', 'updates')
+                   AND c.read = false
+                   AND c.type = ANY($4::text[])))
+       AND NOT bool_or(c.snoozed_until IS NOT NULL AND c.snoozed_until > now())
+       AND (NOT $5::boolean
+            OR (array_agg(c.read ORDER BY c.created_at DESC, c.id DESC))[1])
+)
+UPDATE inbox_item i SET archived = true
+FROM candidates c
+JOIN update_groups g ON g.group_id = c.group_id
+WHERE i.id = c.id
+`
+
+type ArchiveInboxUpdateGroupsParams struct {
+	WorkspaceID   pgtype.UUID   `json:"workspace_id"`
+	RecipientID   pgtype.UUID   `json:"recipient_id"`
+	GroupIds      []pgtype.UUID `json:"group_ids"`
+	NeedsYouTypes []string      `json:"needs_you_types"`
+	ReadOnly      bool          `json:"read_only"`
+}
+
+// Archives the listed issue groups (items without an issue group on their own
+// id) as long as they are still only updates: nothing in the group is addressed
+// to the member, and the group is not snoozed. With read_only, a group also has
+// to be read, which is the state of its newest active row, the one the Inbox
+// renders.
+//
+// The Inbox drops an update once it has been read and clears the section on
+// request (MUL-9215). Both name the groups the member was looking at, and the
+// conditions are checked again here, so a mention or a new unread update that
+// arrived in between keeps its group in the Inbox.
+//
+// "Addressed to the member" follows inbox.EffectiveSection, as
+// CountNeedsYouInboxByWorkspace does. Keep the three in step.
+func (q *Queries) ArchiveInboxUpdateGroups(ctx context.Context, arg ArchiveInboxUpdateGroupsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, archiveInboxUpdateGroups,
+		arg.WorkspaceID,
+		arg.RecipientID,
+		arg.GroupIds,
+		arg.NeedsYouTypes,
+		arg.ReadOnly,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const countNeedsYouInboxByWorkspace = `-- name: CountNeedsYouInboxByWorkspace :many
 SELECT i.workspace_id, count(DISTINCT COALESCE(i.issue_id, i.id)) AS count
 FROM inbox_item i
@@ -410,9 +477,9 @@ const createInboxItem = `-- name: CreateInboxItem :one
 INSERT INTO inbox_item (
     workspace_id, recipient_type, recipient_id,
     type, severity, issue_id, title, body,
-    actor_type, actor_id, details, id, section
+    actor_type, actor_id, details, id, section, read
 )
-SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE($12::uuid, gen_random_uuid()), $13::text
+SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE($12::uuid, gen_random_uuid()), $13::text, COALESCE($14::boolean, false)
 WHERE (($2::text = 'member' AND EXISTS (
     SELECT 1 FROM member WHERE workspace_id = $1 AND user_id = $3
 )) OR ($2::text = 'agent' AND EXISTS (
@@ -450,10 +517,15 @@ type CreateInboxItemParams struct {
 	Details       []byte      `json:"details"`
 	ID            pgtype.UUID `json:"id"`
 	Section       pgtype.Text `json:"section"`
+	Read          pgtype.Bool `json:"read"`
 }
 
 // A missing recipient is a quiet skip (pgx.ErrNoRows), not a delivery failure.
 // Check the insertion snapshot without adding recipient row locks.
+//
+// `read` is set only for a row that reports the recipient's own action (a run
+// they stopped themselves): it belongs in their Inbox, and there is nothing in
+// it they have not seen.
 // MUL-8472: a member outside a private project gets no notification about its
 // issues. Owners/admins and project members do.
 func (q *Queries) CreateInboxItem(ctx context.Context, arg CreateInboxItemParams) (InboxItem, error) {
@@ -471,6 +543,7 @@ func (q *Queries) CreateInboxItem(ctx context.Context, arg CreateInboxItemParams
 		arg.Details,
 		arg.ID,
 		arg.Section,
+		arg.Read,
 	)
 	var i InboxItem
 	err := row.Scan(
@@ -1004,6 +1077,52 @@ func (q *Queries) MarkInboxUnread(ctx context.Context, id pgtype.UUID) (InboxIte
 		&i.SnoozedUntil,
 	)
 	return i, err
+}
+
+const markRestoredInboxUpdateUnread = `-- name: MarkRestoredInboxUpdateUnread :execrows
+WITH target AS (
+    SELECT t.id, t.workspace_id, t.recipient_type, t.recipient_id, t.issue_id
+    FROM inbox_item t
+    WHERE t.id = $1
+), restored AS (
+    SELECT i.id, i.created_at,
+           (COALESCE(i.section, '') = 'needs_you'
+            OR (COALESCE(i.section, '') NOT IN ('needs_you', 'updates')
+                AND i.read = false
+                AND i.type = ANY($2::text[]))) AS needs_you
+    FROM inbox_item i
+    JOIN target
+      ON i.workspace_id = target.workspace_id
+     AND i.recipient_type = target.recipient_type
+     AND i.recipient_id = target.recipient_id
+    WHERE i.archived = false
+      AND (i.id = target.id OR i.issue_id = target.issue_id)
+)
+UPDATE inbox_item u SET read = false
+WHERE u.id = (SELECT r.id FROM restored r ORDER BY r.created_at DESC, r.id DESC LIMIT 1)
+  AND u.read = true
+  AND NOT EXISTS (SELECT 1 FROM restored r WHERE r.needs_you)
+`
+
+type MarkRestoredInboxUpdateUnreadParams struct {
+	ID            pgtype.UUID `json:"id"`
+	NeedsYouTypes []string    `json:"needs_you_types"`
+}
+
+// A restored update comes back unread. The Inbox drops an update once it is
+// read (MUL-9215), so one restored as read would leave again at once.
+//
+// Flips the newest active row on the item's issue, the one the Inbox renders,
+// and only while the group is an update: nothing in it is addressed to the
+// member (same test as ArchiveInboxUpdateGroups). An issue that needs the
+// member stays listed whatever its read state, so it keeps the state it was
+// archived in (UnarchiveInboxItem).
+func (q *Queries) MarkRestoredInboxUpdateUnread(ctx context.Context, arg MarkRestoredInboxUpdateUnreadParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markRestoredInboxUpdateUnread, arg.ID, arg.NeedsYouTypes)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const snoozeInboxGroup = `-- name: SnoozeInboxGroup :execrows

@@ -1,47 +1,69 @@
 package main
 
-import "testing"
+import (
+	"testing"
 
-// TestIsNotifMutedGroupSplit pins the contract the `mentions` group exists for:
-// muting comment VOLUME must never silence someone asking for you BY NAME.
-// `new_comment` and `mentioned` shared the `comments` group until #6468, so a
-// user who muted comment churn also lost every mention — and a muted item is
-// never created, so it was unrecoverable rather than merely delayed.
-func TestIsNotifMutedGroupSplit(t *testing.T) {
+	"github.com/multica-ai/multica/server/internal/inbox"
+)
+
+// TestIsNotifMuted pins what a preference group can switch off: an update, and
+// never a row addressed to the member (MUL-9215). A muted row is never created,
+// so muting one that waits on the member would strand the issue with nothing in
+// their Inbox to say so.
+func TestIsNotifMuted(t *testing.T) {
 	cases := []struct {
 		name      string
 		prefs     map[string]string
 		notifType string
+		section   string
 		want      bool
 	}{
-		// The regression this split fixes.
-		{"muted comments still delivers mentions", map[string]string{"comments": "muted"}, "mentioned", false},
-		{"muted comments drops new_comment", map[string]string{"comments": "muted"}, "new_comment", true},
-		{"muted mentions drops mentioned", map[string]string{"mentions": "muted"}, "mentioned", true},
-		{"muted mentions still delivers new_comment", map[string]string{"mentions": "muted"}, "new_comment", false},
-		{"both muted drops both", map[string]string{"comments": "muted", "mentions": "muted"}, "mentioned", true},
+		{"muted comments drops a comment on a followed issue", map[string]string{"comments": "muted"}, "new_comment", inbox.SectionUpdates, true},
+		{"muted comments keeps a comment on the member's own issue", map[string]string{"comments": "muted"}, "new_comment", inbox.SectionNeedsYou, false},
+		{"muted status drops a status change on a followed issue", map[string]string{"status_changes": "muted"}, "status_changed", inbox.SectionUpdates, true},
+		{"muted status keeps a status that waits on the member", map[string]string{"status_changes": "muted"}, "status_changed", inbox.SectionNeedsYou, false},
+		{"muted assignments drops a reassignment", map[string]string{"assignments": "muted"}, "assignee_changed", inbox.SectionUpdates, true},
+		{"muted assignments keeps an assignment to the member", map[string]string{"assignments": "muted"}, "issue_assigned", inbox.SectionNeedsYou, false},
+		{"muted agent activity drops a failed run on a followed issue", map[string]string{"agent_activity": "muted"}, "task_failed", inbox.SectionUpdates, true},
+		{"muted agent activity keeps the member's own failed run", map[string]string{"agent_activity": "muted"}, "task_failed", inbox.SectionNeedsYou, false},
 
-		// Absent key means the default "all" — preferences are stored sparse,
-		// which is why existing `{"comments":"muted"}` rows need no migration.
-		{"empty prefs delivers mentions", map[string]string{}, "mentioned", false},
-		{"empty prefs delivers comments", map[string]string{}, "new_comment", false},
-		{"explicit all delivers", map[string]string{"comments": "all"}, "new_comment", false},
+		// Groups stay separate: muting comment volume leaves the rest alone.
+		{"muted comments leaves status changes alone", map[string]string{"comments": "muted"}, "status_changed", inbox.SectionUpdates, false},
 
-		// Other groups are unaffected by the split.
-		{"assignments group intact", map[string]string{"assignments": "muted"}, "issue_assigned", true},
-		{"status group intact", map[string]string{"status_changes": "muted"}, "status_changed", true},
-		{"muting comments leaves assignments alone", map[string]string{"comments": "muted"}, "issue_assigned", false},
+		// A mention is never dropped; `mentions` only says where a group
+		// mention is filed (groupMentionsAreUpdates).
+		{"mentions is not a mute group", map[string]string{"mentions": "muted"}, "mentioned", inbox.SectionUpdates, false},
+
+		// Absent key means the default "all" — preferences are stored sparse.
+		{"empty prefs delivers", map[string]string{}, "new_comment", inbox.SectionUpdates, false},
+		{"explicit all delivers", map[string]string{"comments": "all"}, "new_comment", inbox.SectionUpdates, false},
 
 		// Types outside the map are always delivered.
-		{"unconfigurable type always delivered", map[string]string{"comments": "muted"}, "reaction_added", false},
+		{"unconfigurable type always delivered", map[string]string{"comments": "muted"}, "reaction_added", inbox.SectionUpdates, false},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := isNotifMuted(tc.prefs, tc.notifType); got != tc.want {
-				t.Fatalf("isNotifMuted(%v, %q) = %v, want %v",
-					tc.prefs, tc.notifType, got, tc.want)
+			if got := isNotifMuted(tc.prefs, tc.notifType, tc.section); got != tc.want {
+				t.Fatalf("isNotifMuted(%v, %q, %q) = %v, want %v",
+					tc.prefs, tc.notifType, tc.section, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestGroupMentionsAreUpdates(t *testing.T) {
+	for _, tc := range []struct {
+		prefs map[string]string
+		want  bool
+	}{
+		{map[string]string{}, false},
+		{map[string]string{"mentions": "all"}, false},
+		{map[string]string{"mentions": "muted"}, true},
+		{map[string]string{"comments": "muted"}, false},
+	} {
+		if got := groupMentionsAreUpdates(tc.prefs); got != tc.want {
+			t.Fatalf("groupMentionsAreUpdates(%v) = %v, want %v", tc.prefs, got, tc.want)
+		}
 	}
 }

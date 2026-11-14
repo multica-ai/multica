@@ -116,12 +116,16 @@ WHERE id = $1 AND workspace_id = $2;
 -- name: CreateInboxItem :one
 -- A missing recipient is a quiet skip (pgx.ErrNoRows), not a delivery failure.
 -- Check the insertion snapshot without adding recipient row locks.
+--
+-- `read` is set only for a row that reports the recipient's own action (a run
+-- they stopped themselves): it belongs in their Inbox, and there is nothing in
+-- it they have not seen.
 INSERT INTO inbox_item (
     workspace_id, recipient_type, recipient_id,
     type, severity, issue_id, title, body,
-    actor_type, actor_id, details, id, section
+    actor_type, actor_id, details, id, section, read
 )
-SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE(sqlc.narg('id')::uuid, gen_random_uuid()), sqlc.narg('section')::text
+SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE(sqlc.narg('id')::uuid, gen_random_uuid()), sqlc.narg('section')::text, COALESCE(sqlc.narg('read')::boolean, false)
 WHERE (($2::text = 'member' AND EXISTS (
     SELECT 1 FROM member WHERE workspace_id = $1 AND user_id = $3
 )) OR ($2::text = 'agent' AND EXISTS (
@@ -431,6 +435,82 @@ WHERE i.workspace_id = $1
   AND i.recipient_id = $2
   AND i.archived = false
   AND COALESCE(i.issue_id, i.id) = selected.group_id;
+
+-- name: ArchiveInboxUpdateGroups :execrows
+-- Archives the listed issue groups (items without an issue group on their own
+-- id) as long as they are still only updates: nothing in the group is addressed
+-- to the member, and the group is not snoozed. With read_only, a group also has
+-- to be read, which is the state of its newest active row, the one the Inbox
+-- renders.
+--
+-- The Inbox drops an update once it has been read and clears the section on
+-- request (MUL-9215). Both name the groups the member was looking at, and the
+-- conditions are checked again here, so a mention or a new unread update that
+-- arrived in between keeps its group in the Inbox.
+--
+-- "Addressed to the member" follows inbox.EffectiveSection, as
+-- CountNeedsYouInboxByWorkspace does. Keep the three in step.
+WITH candidates AS (
+    SELECT i.id, COALESCE(i.issue_id, i.id) AS group_id, i.read, i.created_at,
+           i.snoozed_until, i.section, i.type
+    FROM inbox_item i
+    WHERE i.workspace_id = sqlc.arg(workspace_id)
+      AND i.recipient_type = 'member'
+      AND i.recipient_id = sqlc.arg(recipient_id)
+      AND i.archived = false
+      AND (i.issue_id = ANY(sqlc.arg(group_ids)::uuid[])
+           OR (i.issue_id IS NULL AND i.id = ANY(sqlc.arg(group_ids)::uuid[])))
+), update_groups AS (
+    SELECT c.group_id
+    FROM candidates c
+    GROUP BY c.group_id
+    -- COALESCE: a row from before sections were stored has none, and a NULL
+    -- comparison would leave the whole test NULL.
+    HAVING NOT bool_or(
+               COALESCE(c.section, '') = 'needs_you'
+               OR (COALESCE(c.section, '') NOT IN ('needs_you', 'updates')
+                   AND c.read = false
+                   AND c.type = ANY(sqlc.arg(needs_you_types)::text[])))
+       AND NOT bool_or(c.snoozed_until IS NOT NULL AND c.snoozed_until > now())
+       AND (NOT sqlc.arg(read_only)::boolean
+            OR (array_agg(c.read ORDER BY c.created_at DESC, c.id DESC))[1])
+)
+UPDATE inbox_item i SET archived = true
+FROM candidates c
+JOIN update_groups g ON g.group_id = c.group_id
+WHERE i.id = c.id;
+
+-- name: MarkRestoredInboxUpdateUnread :execrows
+-- A restored update comes back unread. The Inbox drops an update once it is
+-- read (MUL-9215), so one restored as read would leave again at once.
+--
+-- Flips the newest active row on the item's issue, the one the Inbox renders,
+-- and only while the group is an update: nothing in it is addressed to the
+-- member (same test as ArchiveInboxUpdateGroups). An issue that needs the
+-- member stays listed whatever its read state, so it keeps the state it was
+-- archived in (UnarchiveInboxItem).
+WITH target AS (
+    SELECT t.id, t.workspace_id, t.recipient_type, t.recipient_id, t.issue_id
+    FROM inbox_item t
+    WHERE t.id = sqlc.arg(id)
+), restored AS (
+    SELECT i.id, i.created_at,
+           (COALESCE(i.section, '') = 'needs_you'
+            OR (COALESCE(i.section, '') NOT IN ('needs_you', 'updates')
+                AND i.read = false
+                AND i.type = ANY(sqlc.arg(needs_you_types)::text[]))) AS needs_you
+    FROM inbox_item i
+    JOIN target
+      ON i.workspace_id = target.workspace_id
+     AND i.recipient_type = target.recipient_type
+     AND i.recipient_id = target.recipient_id
+    WHERE i.archived = false
+      AND (i.id = target.id OR i.issue_id = target.issue_id)
+)
+UPDATE inbox_item u SET read = false
+WHERE u.id = (SELECT r.id FROM restored r ORDER BY r.created_at DESC, r.id DESC LIMIT 1)
+  AND u.read = true
+  AND NOT EXISTS (SELECT 1 FROM restored r WHERE r.needs_you);
 
 -- name: ArchiveCompletedInbox :execrows
 UPDATE inbox_item i SET archived = true

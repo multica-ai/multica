@@ -439,3 +439,274 @@ func TestInboxSection_DelegatedSubscriberAnswersForTheIssue(t *testing.T) {
 
 	wantSingleRow(t, "delegated owner", inboxRowsOnIssue(t, delegatedID, f.issueID), "status_changed", "needs_you")
 }
+
+// cancelInboxTask records who cancelled a run. An empty byType leaves the
+// columns unset, as a cancel without an actor does.
+func cancelInboxTask(t *testing.T, taskID, byType, byID, byName string) {
+	t.Helper()
+	if _, err := testPool.Exec(context.Background(), `
+		UPDATE agent_task_queue
+		SET status = 'cancelled', completed_at = now(),
+		    cancelled_by_type = NULLIF($2, ''), cancelled_by_id = NULLIF($3, '')::uuid,
+		    cancelled_by_name = NULLIF($4, '')
+		WHERE id = $1
+	`, taskID, byType, byID, byName); err != nil {
+		t.Fatalf("cancel task: %v", err)
+	}
+}
+
+type cancelledInboxRow struct {
+	section  string
+	read     bool
+	archived bool
+	taskID   string
+	byType   string
+	byID     string
+	byName   string
+}
+
+func cancelledInboxRows(t *testing.T, recipientID, issueID string) []cancelledInboxRow {
+	t.Helper()
+	rows, err := testPool.Query(context.Background(), `
+		SELECT coalesce(section, ''), read, archived,
+		       coalesce(details->>'task_id', ''), coalesce(details->>'cancelled_by_type', ''),
+		       coalesce(details->>'cancelled_by_id', ''), coalesce(details->>'cancelled_by_name', '')
+		FROM inbox_item
+		WHERE recipient_type = 'member' AND recipient_id = $1 AND issue_id = $2 AND type = 'task_cancelled'
+		ORDER BY created_at, id
+	`, recipientID, issueID)
+	if err != nil {
+		t.Fatalf("cancelledInboxRows: %v", err)
+	}
+	defer rows.Close()
+	var out []cancelledInboxRow
+	for rows.Next() {
+		var row cancelledInboxRow
+		if err := rows.Scan(&row.section, &row.read, &row.archived, &row.taskID, &row.byType, &row.byID, &row.byName); err != nil {
+			t.Fatalf("cancelledInboxRows scan: %v", err)
+		}
+		out = append(out, row)
+	}
+	return out
+}
+
+// A cancelled run comes back to the member who started it. They have read it
+// already when they stopped it themselves, and not when someone else did.
+func TestInbox_RunCancelledHandsBackToTheMemberWhoStartedIt(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	for _, tc := range []struct {
+		name     string
+		byType   string
+		byMember string // "starter", "other" or ""
+		byName   string
+		wantRead bool
+	}{
+		{"stopped by the starter", "member", "starter", "Starter", true},
+		{"stopped by another member", "member", "other", "Someone Else", false},
+		{"stopped by the system", "system", "", "", false},
+		{"no actor recorded", "", "", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newInboxSectionsIssue(t, "run-cancelled-"+tc.byType+"-"+tc.byMember)
+			starterID := f.followerID
+			byID := map[string]string{"starter": starterID, "other": f.authorID, "": ""}[tc.byMember]
+
+			var announced []map[string]any
+			bus.Subscribe(protocol.EventInboxNew, func(e events.Event) {
+				payload, _ := e.Payload.(map[string]any)
+				item, _ := payload["item"].(map[string]any)
+				if item["recipient_id"] == starterID && item["type"] == "task_cancelled" {
+					announced = append(announced, item)
+				}
+			})
+
+			task := seedInboxTask(t, f.issueID, starterID, "direct_human", "running", "")
+			cancelInboxTask(t, task, tc.byType, byID, tc.byName)
+			publishTaskEvent(bus, protocol.EventTaskCancelled, f.issueID, task, nil)
+
+			rows := cancelledInboxRows(t, starterID, f.issueID)
+			if len(rows) != 1 {
+				t.Fatalf("starter: %d cancelled rows, want 1: %+v", len(rows), rows)
+			}
+			row := rows[0]
+			if row.section != "needs_you" || row.archived || row.read != tc.wantRead {
+				t.Fatalf("starter: row = %+v, want an active needs_you row with read=%v", row, tc.wantRead)
+			}
+			if row.taskID != task || row.byType != tc.byType || row.byID != byID || row.byName != tc.byName {
+				t.Fatalf("starter: row = %+v, want it to name run %s cancelled by %s %s %q", row, task, tc.byType, byID, tc.byName)
+			}
+			if len(announced) != 1 || announced[0]["read"] != tc.wantRead || announced[0]["section"] != "needs_you" {
+				t.Fatalf("inbox:new = %+v, want one needs_you item with read=%v", announced, tc.wantRead)
+			}
+			// Nobody else hears about a cancelled run.
+			for who, id := range map[string]string{"creator": testUserID, "assignee": f.assigneeID, "author": f.authorID} {
+				if rows := cancelledInboxRows(t, id, f.issueID); len(rows) != 0 {
+					t.Fatalf("%s: rows = %+v, want none", who, rows)
+				}
+			}
+
+			// The same cancellation announced again hands nothing more back.
+			publishTaskEvent(bus, protocol.EventTaskCancelled, f.issueID, task, map[string]any{"replay": true})
+			if rows := cancelledInboxRows(t, starterID, f.issueID); len(rows) != 1 {
+				t.Fatalf("after a replay: %d cancelled rows, want still 1", len(rows))
+			}
+		})
+	}
+}
+
+// A cancelled run hands nothing back when the issue is not coming back to the
+// member who started it.
+func TestInbox_RunCancelledHandsNothingBack(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	t.Run("a run nobody started by hand", func(t *testing.T) {
+		f := newInboxSectionsIssue(t, "cancel-delegated")
+		task := seedInboxTask(t, f.issueID, f.followerID, "delegation", "running", "")
+		cancelInboxTask(t, task, "system", "", "")
+		publishTaskEvent(bus, protocol.EventTaskCancelled, f.issueID, task, nil)
+		if rows := cancelledInboxRows(t, f.followerID, f.issueID); len(rows) != 0 {
+			t.Fatalf("rows = %+v, want none", rows)
+		}
+	})
+
+	t.Run("the issue is being deleted", func(t *testing.T) {
+		f := newInboxSectionsIssue(t, "cancel-deleted")
+		task := seedInboxTask(t, f.issueID, f.followerID, "direct_human", "running", "")
+		cancelInboxTask(t, task, "system", "", "")
+		publishTaskEvent(bus, protocol.EventTaskCancelled, f.issueID, task, map[string]any{"issue_deleted": true})
+		if rows := cancelledInboxRows(t, f.followerID, f.issueID); len(rows) != 0 {
+			t.Fatalf("rows = %+v, want none", rows)
+		}
+	})
+
+	t.Run("the issue is closed", func(t *testing.T) {
+		f := newInboxSectionsIssue(t, "cancel-closed")
+		if _, err := testPool.Exec(context.Background(), `UPDATE issue SET status = 'cancelled' WHERE id = $1`, f.issueID); err != nil {
+			t.Fatalf("close issue: %v", err)
+		}
+		task := seedInboxTask(t, f.issueID, f.followerID, "direct_human", "running", "")
+		cancelInboxTask(t, task, "member", f.followerID, "Starter")
+		publishTaskEvent(bus, protocol.EventTaskCancelled, f.issueID, task, nil)
+		if rows := cancelledInboxRows(t, f.followerID, f.issueID); len(rows) != 0 {
+			t.Fatalf("rows = %+v, want none", rows)
+		}
+	})
+
+	t.Run("another run the member started is still active", func(t *testing.T) {
+		f := newInboxSectionsIssue(t, "cancel-still-working")
+		seedInboxTask(t, f.issueID, f.followerID, "direct_human", "running", "")
+		cancelled := seedInboxTask(t, f.issueID, f.followerID, "direct_human", "running", "")
+		cancelInboxTask(t, cancelled, "member", f.followerID, "Starter")
+		publishTaskEvent(bus, protocol.EventTaskCancelled, f.issueID, cancelled, nil)
+		if rows := cancelledInboxRows(t, f.followerID, f.issueID); len(rows) != 0 {
+			t.Fatalf("rows = %+v, want none while the other run is active", rows)
+		}
+
+		// That run is the follower's. For another member the issue is not
+		// with the agent, so their cancelled run comes back.
+		other := seedInboxTask(t, f.issueID, f.authorID, "direct_human", "running", "")
+		cancelInboxTask(t, other, "system", "", "")
+		publishTaskEvent(bus, protocol.EventTaskCancelled, f.issueID, other, nil)
+		if rows := cancelledInboxRows(t, f.authorID, f.issueID); len(rows) != 1 {
+			t.Fatalf("author: rows = %+v, want their cancelled run handed back", rows)
+		}
+	})
+}
+
+// A rerun or an edited comment cancels the pending run before queueing its
+// replacement. The replacement's start takes the cancelled row out again, so
+// the issue ends up under "Working" and not under "Needs you".
+func TestInbox_RunCancelledThenRestartedLeavesNothing(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+	f := newInboxSectionsIssue(t, "cancel-rerun")
+
+	pending := seedInboxTask(t, f.issueID, f.followerID, "direct_human", "queued", "")
+	cancelInboxTask(t, pending, "system", "", "")
+	publishTaskEvent(bus, protocol.EventTaskCancelled, f.issueID, pending, nil)
+	replacement := seedInboxTask(t, f.issueID, f.followerID, "direct_human", "queued", "")
+	publishTaskEvent(bus, protocol.EventTaskQueued, f.issueID, replacement, nil)
+
+	rows := cancelledInboxRows(t, f.followerID, f.issueID)
+	if len(rows) != 1 || !rows[0].archived {
+		t.Fatalf("rows = %+v, want the cancelled row archived by the new run", rows)
+	}
+}
+
+func muteNotifications(t *testing.T, userID, preferences string) {
+	t.Helper()
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO notification_preference (workspace_id, user_id, preferences)
+		VALUES ($1, $2, $3::jsonb)
+	`, testWorkspaceID, userID, preferences); err != nil {
+		t.Fatalf("seed notification preference: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM notification_preference WHERE user_id = $1`, userID)
+	})
+}
+
+// A switched-off kind stops reaching the people who only follow the issue. The
+// people who answer for it still get it: it is waiting on them.
+func TestInbox_MutingSilencesUpdatesOnly(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	t.Run("comments", func(t *testing.T) {
+		f := newInboxSectionsIssue(t, "mute-comments")
+		muteNotifications(t, f.assigneeID, `{"comments":"muted"}`)
+		muteNotifications(t, f.followerID, `{"comments":"muted"}`)
+
+		publishSectionsComment(bus, f.issueID, f.authorID, "todo")
+
+		wantSingleRow(t, "assignee", inboxRowsOnIssue(t, f.assigneeID, f.issueID), "new_comment", "needs_you")
+		if rows := inboxRowsOnIssue(t, f.followerID, f.issueID); len(rows) != 0 {
+			t.Fatalf("follower: rows = %+v, want none", rows)
+		}
+	})
+
+	t.Run("status changes", func(t *testing.T) {
+		f := newInboxSectionsIssue(t, "mute-status")
+		muteNotifications(t, f.assigneeID, `{"status_changes":"muted"}`)
+		muteNotifications(t, f.followerID, `{"status_changes":"muted"}`)
+
+		// in_progress waits on nobody, so it is an update for the assignee too.
+		publishStatusChange(bus, f.issueID, "in_progress", "todo")
+		for who, id := range map[string]string{"assignee": f.assigneeID, "follower": f.followerID} {
+			if rows := inboxRowsOnIssue(t, id, f.issueID); len(rows) != 0 {
+				t.Fatalf("%s: rows = %+v after a status nobody waits on, want none", who, rows)
+			}
+		}
+
+		publishStatusChange(bus, f.issueID, "in_review", "in_progress")
+		wantSingleRow(t, "assignee", inboxRowsOnIssue(t, f.assigneeID, f.issueID), "status_changed", "needs_you")
+		if rows := inboxRowsOnIssue(t, f.followerID, f.issueID); len(rows) != 0 {
+			t.Fatalf("follower: rows = %+v, want none", rows)
+		}
+	})
+
+	t.Run("agent activity", func(t *testing.T) {
+		f := newInboxSectionsIssue(t, "mute-agent")
+		muteNotifications(t, f.assigneeID, `{"agent_activity":"muted"}`)
+		muteNotifications(t, f.followerID, `{"agent_activity":"muted"}`)
+		muteNotifications(t, f.authorID, `{"agent_activity":"muted"}`)
+
+		// The author started the run, so both its outcomes are theirs.
+		failed := seedInboxTask(t, f.issueID, f.authorID, "direct_human", "failed", "")
+		publishTaskEvent(bus, protocol.EventTaskFailed, f.issueID, failed, map[string]any{"retry_pending": false})
+		wantSingleRow(t, "starter", inboxRowsOnIssue(t, f.authorID, f.issueID), "task_failed", "needs_you")
+		wantSingleRow(t, "assignee", inboxRowsOnIssue(t, f.assigneeID, f.issueID), "task_failed", "needs_you")
+		if rows := inboxRowsOnIssue(t, f.followerID, f.issueID); len(rows) != 0 {
+			t.Fatalf("follower: rows = %+v, want none", rows)
+		}
+
+		completed := seedInboxTask(t, f.issueID, f.authorID, "direct_human", "completed", "")
+		publishTaskEvent(bus, protocol.EventTaskCompleted, f.issueID, completed, nil)
+		if active := activeInboxRows(inboxRowsOnIssue(t, f.authorID, f.issueID)); len(active) != 2 || active[1].notifType != "agent_completed" {
+			t.Fatalf("starter: active rows = %+v, want the finished run handed back too", active)
+		}
+	})
+}

@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/attribution"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -153,15 +155,18 @@ func deliverToSubscriber(reason, notifType string, statusIsHandoff bool) bool {
 	return statusIsHandoff
 }
 
-// notifTypeToGroup maps each InboxItemType to a user-configurable preference
-// group. Types not in this map are always delivered (not configurable).
+// notifTypeToGroup maps each InboxItemType to the preference group that can
+// switch it off. Types not in this map are always delivered (not configurable).
+//
+// A group only ever silences updates: see isNotifMuted. Mentions are not here,
+// since their one choice is where a group mention is filed
+// (groupMentionsAreUpdates).
 var notifTypeToGroup = map[string]string{
 	"issue_assigned":     "assignments",
 	"unassigned":         "assignments",
 	"assignee_changed":   "assignments",
 	"status_changed":     "status_changes",
 	"new_comment":        "comments",
-	"mentioned":          "mentions",
 	"priority_changed":   "updates",
 	"start_date_changed": "updates",
 	"due_date_changed":   "updates",
@@ -172,14 +177,33 @@ var notifTypeToGroup = map[string]string{
 	"issue_created":      "new_issues",
 }
 
-// isNotifMuted returns true if the given notification type is muted for a user
-// based on their parsed preferences map.
-func isNotifMuted(prefs map[string]string, notifType string) bool {
+// isNotifMuted returns true if the user switched this notification off, based
+// on their parsed preferences map.
+//
+// Only an update can be switched off (MUL-9215). A row filed under "Needs you"
+// is addressed to the user: a mention, an assignment, a run they started, or
+// activity on an issue they created or are assigned. Dropping one would leave
+// the issue waiting on them with nothing in their Inbox to say so.
+func isNotifMuted(prefs map[string]string, notifType, section string) bool {
+	if section != inbox.SectionUpdates {
+		return false
+	}
 	group, ok := notifTypeToGroup[notifType]
 	if !ok {
 		return false // unconfigurable types are always delivered
 	}
 	return prefs[group] == "muted"
+}
+
+// groupMentionsAreUpdates reports whether the user asked for @all and @squad
+// mentions to be filed as updates instead of under "Needs you". A mention by
+// name is always addressed to them.
+//
+// The choice is stored under the `mentions` key, which used to switch every
+// mention off. Whoever muted it keeps the quieter Inbox they asked for, and
+// gets the mentions by name back.
+func groupMentionsAreUpdates(prefs map[string]string) bool {
+	return prefs["mentions"] == "muted"
 }
 
 // loadUserPrefs loads notification preferences for a set of user IDs in a
@@ -447,6 +471,126 @@ func notifyRunEnded(ctx context.Context, queries *db.Queries, bus *events.Bus, e
 	)
 }
 
+// notifyRunCancelled hands an issue back to the member whose own action
+// started a run that was then cancelled. Without it the issue leaves "Working"
+// and appears nowhere: the run's start archived what the member had on it, and
+// a cancelled run reports nothing else.
+//
+// The row is read when the member stopped the run themselves, since it tells
+// them nothing new, and unread when someone else or the system did. It names
+// who in its details.
+//
+// Nothing is handed back when the issue is not coming back to the member: it
+// is being deleted, it is closed, or another run they started on it is still
+// active. A rerun or an edited comment cancels the pending run before queueing
+// its replacement, so the row is written and the replacement's task:queued
+// archives it again (archiveInboxOnRunStart).
+func notifyRunCancelled(ctx context.Context, queries *db.Queries, bus *events.Bus, e events.Event) {
+	payload, ok := e.Payload.(map[string]any)
+	if !ok {
+		return
+	}
+	// A replay re-announces a run that was already handed back, and a deleted
+	// issue takes its Inbox rows with it.
+	if replay, _ := payload["replay"].(bool); replay {
+		return
+	}
+	if deleted, _ := payload["issue_deleted"].(bool); deleted {
+		return
+	}
+	issueID, _ := payload["issue_id"].(string)
+	taskID, _ := payload["task_id"].(string)
+	issueUUID, err := util.ParseUUID(issueID)
+	if err != nil {
+		return
+	}
+	taskUUID, err := util.ParseUUID(taskID)
+	if err != nil {
+		return
+	}
+	task, err := queries.GetAgentTask(ctx, taskUUID)
+	if err != nil {
+		slog.Error("run cancelled notification: failed to get task", "task_id", taskID, "error", err)
+		return
+	}
+	originator, ok := memberStartedRun(task)
+	if !ok {
+		return
+	}
+	issue, err := queries.GetIssue(ctx, issueUUID)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Error("run cancelled notification: failed to get issue", "issue_id", issueID, "error", err)
+		}
+		return
+	}
+	// Same rule as notifyRunEnded: an unresolved custom status still hands back.
+	if category, err := issuestatus.CategoryWithError(ctx, queries, issue.WorkspaceID, issue.Status); err == nil &&
+		(category == issuestatus.CategoryDone || category == issuestatus.CategoryClosed) {
+		return
+	}
+	stillWorking, err := queries.HasOtherActiveRunStartedByMember(ctx, db.HasOtherActiveRunStartedByMemberParams{
+		IssueID:          issueUUID,
+		TaskID:           taskUUID,
+		OriginatorUserID: task.OriginatorUserID,
+	})
+	if err != nil {
+		slog.Error("run cancelled notification: failed to check active runs", "issue_id", issueID, "error", err)
+		return
+	}
+	if stillWorking {
+		return
+	}
+
+	details := map[string]string{"task_id": taskID}
+	cancelledByID := ""
+	if task.CancelledByType.Valid {
+		details["cancelled_by_type"] = task.CancelledByType.String
+	}
+	if task.CancelledByID.Valid {
+		cancelledByID = util.UUIDToString(task.CancelledByID)
+		details["cancelled_by_id"] = cancelledByID
+	}
+	if task.CancelledByName.Valid {
+		details["cancelled_by_name"] = task.CancelledByName.String
+	}
+	detailsJSON, _ := json.Marshal(details)
+	stoppedByMember := task.CancelledByType.String == "member" && cancelledByID == originator
+
+	agentID := util.UUIDToString(task.AgentID)
+	item, inserted, err := inbox.CreateIfEligible(ctx, queries, db.CreateInboxItemParams{
+		ID:            dbid.NewV7(),
+		WorkspaceID:   parseUUID(e.WorkspaceID),
+		RecipientType: "member",
+		RecipientID:   task.OriginatorUserID,
+		Type:          "task_cancelled",
+		Severity:      "info",
+		IssueID:       issueUUID,
+		Title:         issue.Title,
+		ActorType:     util.StrToText("agent"),
+		ActorID:       optionalUUID(agentID),
+		Details:       detailsJSON,
+		Read:          pgtype.Bool{Bool: stoppedByMember, Valid: true},
+	})
+	if err != nil {
+		slog.Error("run cancelled notification: creation failed",
+			"issue_id", issueID, "recipient_id", originator, "error", err)
+		return
+	}
+	if !inserted {
+		return
+	}
+	resp := inboxItemToResponse(item)
+	resp["issue_status"] = issue.Status
+	bus.Publish(events.Event{
+		Type:        protocol.EventInboxNew,
+		WorkspaceID: e.WorkspaceID,
+		ActorType:   "agent",
+		ActorID:     agentID,
+		Payload:     map[string]any{"item": resp},
+	})
+}
+
 // memberAnswersForIssue reports whether the member created the issue or has it
 // assigned: the two relations that make what happens on it theirs to handle.
 func memberAnswersForIssue(issue db.Issue, memberID string) bool {
@@ -604,7 +748,7 @@ func notifyProjectSubscribers(
 	userPrefs := loadUserPrefs(ctx, queries, workspaceID, recipients)
 
 	for _, subID := range recipients {
-		if prefs, ok := userPrefs[subID]; ok && isNotifMuted(prefs, notifType) {
+		if prefs, ok := userPrefs[subID]; ok && isNotifMuted(prefs, notifType, inbox.SectionUpdates) {
 			continue
 		}
 		// Watching a project is following it: whoever answers for the issue
@@ -757,8 +901,14 @@ func notifyIssueSubscribers(
 			continue
 		}
 
-		// Skip if this notification type is muted by the user
-		if prefs, ok := userPrefs[subID]; ok && isNotifMuted(prefs, notifType) {
+		// A delegated subscription means an agent filed the issue on this
+		// member's behalf, so it is theirs as much as one they created.
+		addressed := sub.Reason == "delegated" || targetIssueErr != nil ||
+			memberAnswersForIssue(targetIssue, subID)
+		section := inbox.SubscriberSection(notifType, addressed, statusWaitsOnHuman)
+
+		// Skip if the user switched this kind of update off
+		if prefs, ok := userPrefs[subID]; ok && isNotifMuted(prefs, notifType, section) {
 			continue
 		}
 
@@ -768,12 +918,6 @@ func notifyIssueSubscribers(
 			tierSuppressed[subID] = true
 			continue
 		}
-
-		// A delegated subscription means an agent filed the issue on this
-		// member's behalf, so it is theirs as much as one they created.
-		addressed := sub.Reason == "delegated" || targetIssueErr != nil ||
-			memberAnswersForIssue(targetIssue, subID)
-		section := inbox.SubscriberSection(notifType, addressed, statusWaitsOnHuman)
 
 		if createMemberInboxItem(ctx, queries, bus, subID, workspaceID, e, targetIssueID, issueStatus,
 			notifType, severity, title, body, details, section) {
@@ -807,10 +951,11 @@ func notifyDirect(
 		return
 	}
 
-	// Check notification preferences for member recipients.
-	if recipientType == "member" {
+	// Check notification preferences for member recipients. The row is filed
+	// by its type (inbox.CreateIfEligible), and only an update can be muted.
+	if section := inbox.DefaultSection(notifType); recipientType == "member" && section == inbox.SectionUpdates {
 		prefs := loadUserPrefs(ctx, queries, workspaceID, []string{recipientID})
-		if p, ok := prefs[recipientID]; ok && isNotifMuted(p, notifType) {
+		if p, ok := prefs[recipientID]; ok && isNotifMuted(p, notifType, section) {
 			return
 		}
 	}
@@ -864,7 +1009,8 @@ func notifyMentionedMembers(
 	skip map[string]bool,
 	details []byte,
 ) {
-	// Collect the set of member IDs to notify.
+	// Collect the set of member IDs to notify. The value records whether the
+	// member was mentioned by name, rather than only through @all or a squad.
 	recipientIDs := map[string]bool{}
 
 	hasAll := false
@@ -899,8 +1045,8 @@ func notifyMentionedMembers(
 			continue
 		}
 		for _, sm := range members {
-			if sm.MemberType == "member" {
-				recipientIDs[util.UUIDToString(sm.MemberID)] = true
+			if id := util.UUIDToString(sm.MemberID); sm.MemberType == "member" && !recipientIDs[id] {
+				recipientIDs[id] = false
 			}
 		}
 	}
@@ -912,7 +1058,9 @@ func notifyMentionedMembers(
 			slog.Error("failed to list members for @all mention", "workspace_id", e.WorkspaceID, "error", err)
 		} else {
 			for _, m := range members {
-				recipientIDs[util.UUIDToString(m.UserID)] = true
+				if id := util.UUIDToString(m.UserID); !recipientIDs[id] {
+					recipientIDs[id] = false
+				}
 			}
 		}
 	}
@@ -926,15 +1074,16 @@ func notifyMentionedMembers(
 	}
 	mentionPrefs := loadUserPrefs(context.Background(), queries, e.WorkspaceID, mentionUserIDs)
 
-	for id := range recipientIDs {
+	for id, byName := range recipientIDs {
 		if id == e.ActorID || skip[id] {
 			continue
 		}
-		// Skip if mentions are muted by this user. This is deliberately a
-		// different group from `comments`: muting comment volume must not
-		// silence someone asking for you by name.
-		if p, ok := mentionPrefs[id]; ok && isNotifMuted(p, "mentioned") {
-			continue
+		// A mention is never dropped. One that reached the member only through
+		// @all or a squad is an update when they asked for that; everything
+		// else is addressed to them.
+		section := inbox.SectionNeedsYou
+		if p, ok := mentionPrefs[id]; ok && !byName && groupMentionsAreUpdates(p) {
+			section = inbox.SectionUpdates
 		}
 		item, inserted, err := inbox.CreateIfEligible(context.Background(), queries, db.CreateInboxItemParams{
 			ID:            dbid.NewV7(),
@@ -948,6 +1097,7 @@ func notifyMentionedMembers(
 			ActorType:     util.StrToText(e.ActorType),
 			ActorID:       optionalUUID(e.ActorID),
 			Details:       details,
+			Section:       util.StrToText(section),
 		})
 		if err != nil {
 			slog.Error("mention inbox creation failed", "mentioned_id", id, "error", err)
@@ -1359,6 +1509,11 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 	// task:completed — hand the issue back to the member who started the run
 	bus.Subscribe(protocol.EventTaskCompleted, func(e events.Event) {
 		notifyRunEnded(ctx, queries, bus, e)
+	})
+
+	// task:cancelled — hand the issue back to the member who started the run
+	bus.Subscribe(protocol.EventTaskCancelled, func(e events.Event) {
+		notifyRunCancelled(ctx, queries, bus, e)
 	})
 
 	// task:failed — notify all subscribers except the agent, once the failure

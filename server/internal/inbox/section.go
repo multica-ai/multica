@@ -34,6 +34,7 @@ var NeedsYouTypes = []string{
 	"agent_completed",
 	"agent_blocked",
 	"task_failed",
+	"task_cancelled",
 	"children_done",
 	"app_action_requested",
 	"app_action_reminder",

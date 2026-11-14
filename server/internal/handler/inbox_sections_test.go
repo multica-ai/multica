@@ -380,3 +380,212 @@ func TestUnarchiveInboxItemDropsASnooze(t *testing.T) {
 		t.Errorf("needs_you = %d, want the restored issue", f.summary().NeedsYou)
 	}
 }
+
+func (f inboxSectionsFixture) archiveUpdates(body any) *testutil.Response {
+	f.t.Helper()
+	req := testutil.WithHeaders(
+		testutil.JSONRequest(http.MethodPost, "/api/inbox/archive-updates", body),
+		"X-User-ID", testUserID,
+		"X-Workspace-ID", f.workspaceID,
+	)
+	return testutil.Call(f.t, inboxWorkspaceHandler(testHandler.ArchiveInboxUpdates), req)
+}
+
+func (f inboxSectionsFixture) archivedRows(ids ...string) int {
+	f.t.Helper()
+	return dbfx.Count(f.t, `SELECT count(*) FROM inbox_item WHERE id = ANY($1::uuid[]) AND archived = true`, ids)
+}
+
+// The Inbox drops an update once it has been read (MUL-9215). Only what is
+// still a read update goes: an issue that needs the member, one they snoozed,
+// and one that became unread again all stay.
+func TestArchiveInboxUpdatesArchivesReadUpdates(t *testing.T) {
+	f := newInboxSectionsFixture(t, "Inbox archive read updates")
+	older := time.Now().Add(-time.Hour)
+
+	read := f.issue("Read update")
+	readRows := []string{
+		f.row(read, "new_comment", testutil.Cols{"section": "updates", "read": true, "created_at": older}),
+		f.row(read, "status_changed", testutil.Cols{"section": "updates", "read": true}),
+	}
+	// The Inbox shows an issue as read by its newest row, so an older unread
+	// sibling does not keep it.
+	readByNewest := f.issue("Read by its newest row")
+	readByNewestRows := []string{
+		f.row(readByNewest, "new_comment", testutil.Cols{"section": "updates", "created_at": older}),
+		f.row(readByNewest, "priority_changed", testutil.Cols{"section": "updates", "read": true}),
+	}
+	// A row from before sections were stored is an update once it is read.
+	legacyRead := f.row(f.issue("Legacy read"), "mentioned", testutil.Cols{"read": true})
+	issueless := f.row(nil, "quick_create_done", testutil.Cols{"section": "updates", "read": true})
+
+	unread := f.issue("Unread again")
+	unreadRows := []string{
+		f.row(unread, "new_comment", testutil.Cols{"section": "updates", "read": true, "created_at": older}),
+		f.row(unread, "new_comment", testutil.Cols{"section": "updates"}),
+	}
+	waiting := f.issue("Waiting on the member")
+	waitingRows := []string{
+		f.row(waiting, "mentioned", testutil.Cols{"section": "needs_you", "read": true, "created_at": older}),
+		f.row(waiting, "status_changed", testutil.Cols{"section": "updates", "read": true}),
+	}
+	legacyUnread := f.row(f.issue("Legacy unread mention"), "mentioned", nil)
+	snoozedIssue := f.issue("Snoozed update")
+	snoozed := f.row(snoozedIssue, "new_comment", testutil.Cols{
+		"section": "updates", "read": true, "snoozed_until": time.Now().Add(time.Hour),
+	})
+	notListed := f.row(f.issue("Not listed"), "new_comment", testutil.Cols{"section": "updates", "read": true})
+	// Someone else's row on a listed issue is not the caller's to archive.
+	otherID := dbfx.User(t, "Other reader", "inbox-archive-updates-"+uuid.NewString()+"@multica.ai")
+	dbfx.Member(t, f.workspaceID, otherID, "member")
+	othersRow := f.row(read, "new_comment", testutil.Cols{"section": "updates", "read": true, "recipient_id": otherID})
+
+	var published []map[string]any
+	testHandler.Bus.Subscribe(protocol.EventInboxBatchArchived, func(e events.Event) {
+		if e.WorkspaceID != f.workspaceID {
+			return
+		}
+		if payload, ok := e.Payload.(map[string]any); ok {
+			published = append(published, payload)
+		}
+	})
+
+	var resp struct {
+		Count int64 `json:"count"`
+	}
+	f.archiveUpdates(map[string]any{
+		"read_only": true,
+		"groups": []string{
+			read, readByNewest, inboxRowIssue(t, legacyRead), issueless,
+			unread, waiting, inboxRowIssue(t, legacyUnread), snoozedIssue,
+		},
+	}).Want(http.StatusOK).JSON(&resp)
+
+	if resp.Count != 6 {
+		t.Errorf("count = %d, want the six rows of the four read updates", resp.Count)
+	}
+	archived := append(append([]string{legacyRead, issueless}, readRows...), readByNewestRows...)
+	if got := f.archivedRows(archived...); got != len(archived) {
+		t.Errorf("archived read updates = %d, want %d", got, len(archived))
+	}
+	kept := append(append([]string{legacyUnread, snoozed, notListed, othersRow}, unreadRows...), waitingRows...)
+	if got := f.archivedRows(kept...); got != 0 {
+		t.Errorf("archived %d rows that are not the caller's read updates, want 0", got)
+	}
+	if len(published) != 1 || published[0]["recipient_id"] != testUserID || published[0]["count"] != int64(6) {
+		t.Errorf("published %+v, want one inbox:batch-archived for the caller's six rows", published)
+	}
+
+	// Nothing left to archive changes no row and announces nothing.
+	f.archiveUpdates(map[string]any{"read_only": true, "groups": []string{read, unread, waiting}}).
+		Want(http.StatusOK).JSON(&resp)
+	if resp.Count != 0 || len(published) != 1 {
+		t.Errorf("second call: count = %d with %d events, want 0 and no new event", resp.Count, len(published))
+	}
+}
+
+// inboxRowIssue is the issue a seeded row belongs to: the key the Inbox
+// names its group by.
+func inboxRowIssue(t *testing.T, itemID string) string {
+	t.Helper()
+	var issueID string
+	dbfx.QueryRow(t, `SELECT issue_id FROM inbox_item WHERE id = $1`, itemID).Scan(&issueID)
+	return issueID
+}
+
+// Clearing "Updates" archives the unread ones too, and still nothing that
+// needs the member.
+func TestArchiveInboxUpdatesClearsUnreadUpdates(t *testing.T) {
+	f := newInboxSectionsFixture(t, "Inbox clear updates")
+	unreadIssue := f.issue("Unread update")
+	unread := f.row(unreadIssue, "new_comment", testutil.Cols{"section": "updates"})
+	waitingIssue := f.issue("Waiting on the member")
+	waiting := f.row(waitingIssue, "new_comment", testutil.Cols{"section": "needs_you"})
+	groupMentionIssue := f.issue("Group mention filed as an update")
+	groupMention := f.row(groupMentionIssue, "mentioned", testutil.Cols{"section": "updates"})
+
+	var resp struct {
+		Count int64 `json:"count"`
+	}
+	f.archiveUpdates(map[string]any{"groups": []string{unreadIssue, waitingIssue, groupMentionIssue}}).
+		Want(http.StatusOK).JSON(&resp)
+	if resp.Count != 2 {
+		t.Errorf("count = %d, want the two updates", resp.Count)
+	}
+	if got := f.archivedRows(unread, groupMention); got != 2 {
+		t.Errorf("archived updates = %d, want 2", got)
+	}
+	if got := f.archivedRows(waiting); got != 0 {
+		t.Errorf("the issue that needs the member was archived")
+	}
+	if f.summary().NeedsYou != 1 {
+		t.Errorf("needs_you = %d, want the waiting issue still counted", f.summary().NeedsYou)
+	}
+}
+
+func TestArchiveInboxUpdatesRejectsBadInput(t *testing.T) {
+	f := newInboxSectionsFixture(t, "Inbox archive updates input")
+
+	var resp struct {
+		Count int64 `json:"count"`
+	}
+	f.archiveUpdates(map[string]any{"groups": []string{}}).Want(http.StatusOK).JSON(&resp)
+	if resp.Count != 0 {
+		t.Errorf("count = %d for no groups, want 0", resp.Count)
+	}
+	f.archiveUpdates(map[string]any{"groups": []string{"not-a-uuid"}}).Want(http.StatusBadRequest)
+	tooMany := make([]string, inboxArchiveUpdatesMaxGroups+1)
+	for i := range tooMany {
+		tooMany[i] = uuid.NewString()
+	}
+	f.archiveUpdates(map[string]any{"groups": tooMany}).Want(http.StatusBadRequest)
+}
+
+// A restored update comes back unread, or the Inbox would drop it again as a
+// read update. An issue that needs the member keeps the state it had.
+func TestUnarchiveInboxItemRestoresAnUpdateAsUnread(t *testing.T) {
+	f := newInboxSectionsFixture(t, "Inbox unarchive update")
+	older := time.Now().Add(-time.Hour)
+	unarchive := func(id string) InboxItemResponse {
+		t.Helper()
+		var item InboxItemResponse
+		testutil.Call(t, inboxWorkspaceHandler(testHandler.UnarchiveInboxItem),
+			withURLParam(inboxRequest(http.MethodPost, "/api/inbox/"+id+"/unarchive", f.workspaceID), "id", id)).
+			Want(http.StatusOK).
+			JSON(&item)
+		return item
+	}
+	isRead := func(id string) bool {
+		t.Helper()
+		var read bool
+		dbfx.QueryRow(t, `SELECT read FROM inbox_item WHERE id = $1`, id).Scan(&read)
+		return read
+	}
+
+	update := f.issue("Archived update")
+	updateOlder := f.row(update, "new_comment", testutil.Cols{"section": "updates", "read": true, "archived": true, "created_at": older})
+	updateNewest := f.row(update, "status_changed", testutil.Cols{"section": "updates", "read": true, "archived": true})
+	// Restored from the older row: the one the Inbox renders is still the newest.
+	if got := unarchive(updateOlder); got.Archived {
+		t.Fatalf("the restored row is still archived: %+v", got)
+	}
+	if isRead(updateNewest) {
+		t.Errorf("the restored update's newest row stayed read")
+	}
+	if !isRead(updateOlder) {
+		t.Errorf("an older row of the restored update became unread")
+	}
+	var resp struct {
+		Count int64 `json:"count"`
+	}
+	f.archiveUpdates(map[string]any{"read_only": true, "groups": []string{update}}).Want(http.StatusOK).JSON(&resp)
+	if resp.Count != 0 {
+		t.Errorf("the restored update was archived again as read")
+	}
+
+	waiting := f.issue("Archived while waiting")
+	waitingRow := f.row(waiting, "mentioned", testutil.Cols{"section": "needs_you", "read": true, "archived": true})
+	if got := unarchive(waitingRow); !got.Read {
+		t.Errorf("an issue that needs the member came back unread: %+v", got)
+	}
+}

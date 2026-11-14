@@ -4725,6 +4725,33 @@ func (q *Queries) HasActiveTaskForIssueAndAgentInThread(ctx context.Context, arg
 	return has_active, err
 }
 
+const hasOtherActiveRunStartedByMember = `-- name: HasOtherActiveRunStartedByMember :one
+SELECT EXISTS (
+    SELECT 1 FROM agent_task_queue
+    WHERE issue_id = $1
+      AND id <> $2
+      AND originator_user_id = $3
+      AND originator_source = 'direct_human'
+      AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+) AS has_other
+`
+
+type HasOtherActiveRunStartedByMemberParams struct {
+	IssueID          pgtype.UUID `json:"issue_id"`
+	TaskID           pgtype.UUID `json:"task_id"`
+	OriginatorUserID pgtype.UUID `json:"originator_user_id"`
+}
+
+// Whether the member has another run of their own still active on the issue,
+// besides the given task. The Inbox keeps the issue under "Working" while one
+// is (MUL-9215), so a cancelled sibling does not hand the issue back.
+func (q *Queries) HasOtherActiveRunStartedByMember(ctx context.Context, arg HasOtherActiveRunStartedByMemberParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasOtherActiveRunStartedByMember, arg.IssueID, arg.TaskID, arg.OriginatorUserID)
+	var has_other bool
+	err := row.Scan(&has_other)
+	return has_other, err
+}
+
 const hasPendingTaskForIssue = `-- name: HasPendingTaskForIssue :one
 SELECT count(*) > 0 AS has_pending FROM agent_task_queue
 WHERE context->>'wakeup_id' IS NULL AND issue_id = $1 AND status IN ('queued', 'dispatched')
