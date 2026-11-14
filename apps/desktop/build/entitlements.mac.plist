@@ -20,5 +20,9 @@
   <true/>
   <key>com.apple.security.network.server</key>
   <true/>
+  <!-- Voice input records from the microphone (getUserMedia); without it
+       the hardened runtime denies audio capture without asking. -->
+  <key>com.apple.security.device.audio-input</key>
+  <true/>
 </dict>
 </plist>

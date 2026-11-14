@@ -91,6 +91,7 @@ import {
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { BorderBeam } from "@multica/ui/components/common/border-beam";
 import { ClearablePillButton, PillButton } from "../common/pill-button";
+import { useComposerVoice, VoiceDialogFooter, VoiceMicButton } from "../voice";
 import { ActorAvatar } from "../common/actor-avatar";
 import { PropertyIcon } from "../common/property-icon";
 import {
@@ -277,6 +278,11 @@ export function ManualCreatePanel({
   const [formResetKey, setFormResetKey] = useState(0);
   const titleEditorRef = useRef<TitleEditorRef>(null);
   const descEditorRef = useRef<ContentEditorRef>(null);
+  // Dictation lands in the description. No send from the strip: creating
+  // needs a title, which voice does not fill.
+  const voice = useComposerVoice({
+    insert: (text) => descEditorRef.current?.insertText(text) ?? false,
+  });
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => descEditorRef.current?.uploadFile(f)),
   });
@@ -1025,7 +1031,7 @@ export function ManualCreatePanel({
             </div>
 
             {/* Title */}
-            <div className="px-5 pb-2 shrink-0">
+            <div className="px-5 pb-2 shrink-0" onFocusCapture={voice.onFocusCapture}>
               <TitleEditor
                 key={formResetKey}
                 ref={titleEditorRef}
@@ -1040,7 +1046,12 @@ export function ManualCreatePanel({
             </div>
 
             {/* Description — takes remaining space */}
-            <div {...descDropZoneProps} className="relative flex flex-1 min-h-0 overflow-y-auto px-5">
+            <div
+              {...descDropZoneProps}
+              ref={voice.rootRef}
+              onFocusCapture={voice.onFocusCapture}
+              className="relative flex flex-1 min-h-0 overflow-y-auto px-5"
+            >
               <ContentEditor
                 ref={descEditorRef}
                 defaultValue={draft.manual.description}
@@ -1497,48 +1508,51 @@ export function ManualCreatePanel({
                 for why (MUL-6236). Tooltip renders no DOM and
                 TooltipContent is portaled, so the Create button stays a direct
                 grid child in both branches below. */}
-            <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-2.5 border-t px-4 py-3 shrink-0 sm:flex sm:flex-wrap">
-              <div className="flex min-h-7 items-center gap-2 sm:mr-auto">
-                <FileUploadButton
-                  size="sm"
-                  multiple
-                  onSelect={(file) => descEditorRef.current?.uploadFile(file)}
-                />
+            <VoiceDialogFooter voice={voice}>
+              <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-2.5 border-t px-4 py-3 shrink-0 sm:flex sm:flex-wrap">
+                <div className="flex min-h-7 items-center gap-2 sm:mr-auto">
+                  <FileUploadButton
+                    size="sm"
+                    multiple
+                    onSelect={(file) => descEditorRef.current?.uploadFile(file)}
+                  />
+                  <VoiceMicButton voice={voice} />
+                </div>
+                <TooltipHint label={t(($) => $.create_issue.switch_to_agent_tooltip)}>
+                  <button
+                    type="button"
+                    onClick={switchToAgent}
+                    disabled={gate.uploading}
+                    aria-disabled={gate.uploading || undefined}
+                    aria-busy={gate.uploading || undefined}
+                    className="relative group flex shrink-0 items-center gap-1.5 justify-self-end text-caption px-2 py-1 rounded-sm text-muted-foreground bg-brand/5 hover:bg-brand/10 hover:text-foreground transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <ArrowLeftRight className="size-3.5 text-brand transition-transform duration-300 group-hover:rotate-180" />
+                    {t(($) => $.create_issue.switch_to_agent)}
+                    <BorderBeam />
+                  </button>
+                </TooltipHint>
+                <label className="flex shrink-0 items-center gap-1.5 text-caption text-muted-foreground cursor-pointer select-none">
+                  <Switch
+                    size="sm"
+                    checked={keepOpen}
+                    onCheckedChange={setKeepOpen}
+                  />
+                  {t(($) => $.create_issue.create_another)}
+                </label>
+                {submitState === "missing_title" ? (
+                  <Tooltip>
+                    {/* No `<span>` wrapper needed now: aria-disabled leaves the
+                        button focusable and hoverable, so it can anchor its own
+                        tooltip. */}
+                    <TooltipTrigger render={createButton} />
+                    <TooltipContent side="top">{t(($) => $.create_issue.title_required)}</TooltipContent>
+                  </Tooltip>
+                ) : (
+                  createButton
+                )}
               </div>
-              <TooltipHint label={t(($) => $.create_issue.switch_to_agent_tooltip)}>
-                <button
-                  type="button"
-                  onClick={switchToAgent}
-                  disabled={gate.uploading}
-                  aria-disabled={gate.uploading || undefined}
-                  aria-busy={gate.uploading || undefined}
-                  className="relative group flex shrink-0 items-center gap-1.5 justify-self-end text-caption px-2 py-1 rounded-sm text-muted-foreground bg-brand/5 hover:bg-brand/10 hover:text-foreground transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <ArrowLeftRight className="size-3.5 text-brand transition-transform duration-300 group-hover:rotate-180" />
-                  {t(($) => $.create_issue.switch_to_agent)}
-                  <BorderBeam />
-                </button>
-              </TooltipHint>
-              <label className="flex shrink-0 items-center gap-1.5 text-caption text-muted-foreground cursor-pointer select-none">
-                <Switch
-                  size="sm"
-                  checked={keepOpen}
-                  onCheckedChange={setKeepOpen}
-                />
-                {t(($) => $.create_issue.create_another)}
-              </label>
-              {submitState === "missing_title" ? (
-                <Tooltip>
-                  {/* No `<span>` wrapper needed now: aria-disabled leaves the
-                      button focusable and hoverable, so it can anchor its own
-                      tooltip. */}
-                  <TooltipTrigger render={createButton} />
-                  <TooltipContent side="top">{t(($) => $.create_issue.title_required)}</TooltipContent>
-                </Tooltip>
-              ) : (
-                createButton
-              )}
-            </div>
+            </VoiceDialogFooter>
     </>
   );
 }

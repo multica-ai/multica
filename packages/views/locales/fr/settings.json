@@ -490,6 +490,10 @@
       "goSettings": {
         "label": "Aller aux paramètres",
         "description": "Ouvrir les paramètres de l'espace de travail."
+      },
+      "voiceInput": {
+        "label": "Saisie vocale",
+        "description": "Dictez dans le dernier éditeur utilisé. Maintenez pour parler."
       }
     },
     "fixed": {
@@ -586,7 +590,8 @@
       "code": "Code",
       "channels": "Messagerie",
       "apps": "Applications connectées",
-      "workflows": "Workflows"
+      "workflows": "Workflows",
+      "voice_input": "Saisie vocale"
     },
     "groups": {
       "personal": "Personnel",
@@ -1852,6 +1857,101 @@
       "cancel": "Annuler",
       "admin_required": "Un administrateur peut rétablir l’accès.",
       "account_link": "Ce compte conserve des restrictions. Rétablissez l’accès dans les apps connectées."
+    }
+  },
+  "voice_input": {
+    "description": "Dictez dans le chat, les commentaires et les réponses. La voix est transcrite sur cet ordinateur et ne le quitte jamais.",
+    "model_title": "Modèle vocal",
+    "model_hint": "Les modèles s’exécutent sur cet ordinateur. Téléchargez-en un, ou passez de l’un à l’autre.",
+    "engine_unavailable": "La transcription sur l’appareil n’est pas disponible sur cet ordinateur.",
+    "input_title": "Saisie",
+    "shortcut": {
+      "title": "Raccourci",
+      "hint": "Fonctionne dès qu’un éditeur est à l’écran, même sans le focus.",
+      "change": "Modifier",
+      "unassigned": "Non défini"
+    },
+    "activation": {
+      "title": "Activation",
+      "auto": "Appui ou maintien",
+      "toggle": "Appui",
+      "hold": "Maintien",
+      "hints": {
+        "auto": "Appuyez pour commencer, appuyez à nouveau pour insérer. Maintenez pour parler, relâchez pour insérer.",
+        "toggle": "Appuyez pour commencer, appuyez à nouveau pour insérer.",
+        "hold": "Maintenez pour parler, relâchez pour insérer."
+      }
+    },
+    "recognition_title": "Reconnaissance",
+    "language": {
+      "title": "Langue parlée",
+      "hint": "La détection automatique convient dans la plupart des cas. Choisissez une langue si de courtes phrases sortent dans une autre.",
+      "auto": "Détection automatique"
+    },
+    "fillers": {
+      "title": "Supprimer les hésitations",
+      "hint": "Retire « euh », « hum » et les hésitations similaires."
+    },
+    "vocabulary": {
+      "title": "Vocabulaire",
+      "hint": "Noms et termes à écrire à votre façon, comme des produits ou des collègues. Jusqu’à {{max}}.",
+      "placeholder": "Ajouter un mot",
+      "remove": "Retirer {{word}}"
+    },
+    "microphone_title": "Micro",
+    "device": {
+      "title": "Périphérique d’entrée",
+      "default": "Par défaut du système",
+      "unnamed": "Micro {{index}}",
+      "permission_hint": "Testez le micro une fois pour voir le nom des périphériques."
+    },
+    "test": {
+      "title": "Tester le micro",
+      "hint": "Parlez pour vérifier le niveau. Rien n’est enregistré.",
+      "blocked": "L’accès au micro est bloqué. Autorisez-le dans le navigateur ou les réglages système.",
+      "start": "Tester",
+      "stop": "Arrêter"
+    },
+    "history": {
+      "title": "Historique",
+      "description": "Les enregistrements et leur texte restent sur cet ordinateur et ne sont jamais envoyés. Un enregistrement qui a échoué ou a été interrompu peut être retranscrit à partir de son audio.",
+      "keep": {
+        "title": "Conserver l'historique",
+        "hint": "Durée de conservation des enregistrements sur cet ordinateur.",
+        "options": {
+          "off": "Ne pas conserver",
+          "1d": "1 jour",
+          "7d": "7 jours",
+          "30d": "30 jours",
+          "forever": "Toujours"
+        }
+      },
+      "clear": "Tout effacer",
+      "clear_dialog": {
+        "title": "Effacer l'historique vocal ?",
+        "description": "Tous les enregistrements et transcriptions conservés sur cet ordinateur seront supprimés.",
+        "cancel": "Annuler"
+      },
+      "empty": "Vos dictées apparaîtront ici.",
+      "off": "L'historique est désactivé. Les nouveaux enregistrements ne sont pas conservés.",
+      "today": "Aujourd'hui",
+      "yesterday": "Hier",
+      "status": {
+        "transcribing": "Transcription…",
+        "failed": "Échec de la transcription",
+        "interrupted": "Interrompu avant la transcription"
+      },
+      "actions": {
+        "play": "Lire l'enregistrement",
+        "pause": "Pause",
+        "retranscribe": "Retranscrire",
+        "copy": "Copier le texte",
+        "delete": "Supprimer"
+      },
+      "copied": "Copié",
+      "copy_failed": "Impossible de copier",
+      "retry_failed": "Impossible de transcrire cet enregistrement",
+      "show_more": "Afficher plus"
     }
   }
 }

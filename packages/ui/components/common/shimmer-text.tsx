@@ -6,7 +6,10 @@ interface ShimmerTextProps extends Omit<ComponentProps<"span">, "children"> {
   active?: boolean;
 }
 
-/** A single-line activity label. Only the decorative highlight moves. */
+/**
+ * A single-line activity label. Only the decorative highlight moves. Space it
+ * with margin, never padding: the highlight copy is laid from the padding edge.
+ */
 export function ShimmerText({
   children,
   active = true,

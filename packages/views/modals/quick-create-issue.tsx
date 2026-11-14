@@ -62,6 +62,7 @@ import {
 } from "@multica/core/types";
 import { ActorAvatar } from "../common/actor-avatar";
 import { ClearablePillButton, PillButton } from "../common/pill-button";
+import { useComposerVoice, VoiceDialogFooter, VoiceMicButton } from "../voice";
 import { ProjectPicker } from "../projects/components/project-picker";
 import { DueDatePicker, PriorityIcon, PriorityPicker } from "../issues/components";
 import { canAssignAgent } from "../issues/components/pickers/assignee-picker";
@@ -594,6 +595,11 @@ export function AgentCreatePanel({
     void composer.submit();
   };
   const submitting = composer.submitting;
+  const canCreate = !!actor && !versionBlocked && !qoderAttachmentBlocked && !(anchorCommentId && !sourcePreview);
+  const voice = useComposerVoice({
+    insert: (text) => editorRef.current?.insertText(text) ?? false,
+    submit: canCreate ? submit : undefined,
+  });
 
   // Switch to the manual form WITHOUT destroying the agent draft. The agent
   // slot (prompt + actor) is left untouched so a later manual→agent flip
@@ -768,6 +774,8 @@ export function AgentCreatePanel({
             editor unbounded and pushed the modal past the viewport. */}
         <div
           {...dropZoneProps}
+          ref={voice.rootRef}
+          onFocusCapture={voice.onFocusCapture}
           className="relative px-5 pb-3 flex flex-1 min-h-[140px] overflow-y-auto"
         >
           <ContentEditor
@@ -938,54 +946,57 @@ export function AgentCreatePanel({
               attach group reproduces what `justify-between` did when the
               children were two wrapper divs, and `justify-self-end` goes
               inert on flex items. */}
-        <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-2.5 border-t px-4 py-3 shrink-0 sm:flex sm:flex-wrap">
-          <div className="flex min-h-7 items-center gap-2 sm:mr-auto">
-            {/* Deliberately NOT disabled while uploading: each file is its
-                own queue entry, so queueing a second one is safe and waiting
-                for the first to land just to attach the next is busywork. */}
-            <FileUploadButton
-              size="sm"
-              multiple
-              onSelect={(file) => editorRef.current?.uploadFile(file)}
-            />
-            {keepOpen && sentCount > 0 && (
-              <span className="text-caption text-emerald-600 dark:text-emerald-400">
-                {t(($) => $.create_issue.agent.sent_count, { count: sentCount })}
-              </span>
+        <VoiceDialogFooter voice={voice}>
+          <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-2.5 border-t px-4 py-3 shrink-0 sm:flex sm:flex-wrap">
+            <div className="flex min-h-7 items-center gap-2 sm:mr-auto">
+              {/* Deliberately NOT disabled while uploading: each file is its
+                  own queue entry, so queueing a second one is safe and waiting
+                  for the first to land just to attach the next is busywork. */}
+              <FileUploadButton
+                size="sm"
+                multiple
+                onSelect={(file) => editorRef.current?.uploadFile(file)}
+              />
+              <VoiceMicButton voice={voice} />
+              {keepOpen && sentCount > 0 && (
+                <span className="text-caption text-emerald-600 dark:text-emerald-400">
+                  {t(($) => $.create_issue.agent.sent_count, { count: sentCount })}
+                </span>
+              )}
+            </div>
+            <TooltipHint label={t(($) => $.create_issue.switch_to_manual_tooltip)}>
+              <button
+                type="button"
+                onClick={switchToManual}
+                disabled={gate.uploading}
+                aria-disabled={gate.uploading || undefined}
+                aria-busy={gate.uploading || undefined}
+                className="flex shrink-0 items-center gap-1.5 justify-self-end text-caption px-2 py-1 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <ArrowLeftRight className="size-3.5" />
+                {t(($) => $.create_issue.switch_to_manual)}
+              </button>
+            </TooltipHint>
+            <label className="flex shrink-0 items-center gap-1.5 text-caption text-muted-foreground cursor-pointer select-none">
+              <Switch
+                size="sm"
+                checked={keepOpen}
+                onCheckedChange={setKeepOpen}
+              />
+              {t(($) => $.create_issue.create_another)}
+            </label>
+            {versionBlocked ? (
+              <Tooltip>
+                <TooltipTrigger render={createButton} />
+                <TooltipContent side="top">
+                  {t(($) => $.create_issue.agent.version_blocked_tooltip, { min: versionCheck.min })}
+                </TooltipContent>
+              </Tooltip>
+            ) : (
+              createButton
             )}
           </div>
-          <TooltipHint label={t(($) => $.create_issue.switch_to_manual_tooltip)}>
-            <button
-              type="button"
-              onClick={switchToManual}
-              disabled={gate.uploading}
-              aria-disabled={gate.uploading || undefined}
-              aria-busy={gate.uploading || undefined}
-              className="flex shrink-0 items-center gap-1.5 justify-self-end text-caption px-2 py-1 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <ArrowLeftRight className="size-3.5" />
-              {t(($) => $.create_issue.switch_to_manual)}
-            </button>
-          </TooltipHint>
-          <label className="flex shrink-0 items-center gap-1.5 text-caption text-muted-foreground cursor-pointer select-none">
-            <Switch
-              size="sm"
-              checked={keepOpen}
-              onCheckedChange={setKeepOpen}
-            />
-            {t(($) => $.create_issue.create_another)}
-          </label>
-          {versionBlocked ? (
-            <Tooltip>
-              <TooltipTrigger render={createButton} />
-              <TooltipContent side="top">
-                {t(($) => $.create_issue.agent.version_blocked_tooltip, { min: versionCheck.min })}
-              </TooltipContent>
-            </Tooltip>
-          ) : (
-            createButton
-          )}
-        </div>
+        </VoiceDialogFooter>
     </>
   );
 }

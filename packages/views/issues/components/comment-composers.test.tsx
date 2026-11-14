@@ -433,6 +433,9 @@ describe("comment composers", () => {
     activateComposer("reply-composer-shell");
     expect(screen.getByPlaceholderText("Leave a reply...")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Attach file" })).toBeInTheDocument();
+    expect(container.querySelectorAll("button")).toHaveLength(1);
+    act(() => screen.getByTestId("editor").focus());
+    expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument();
     expect(container.querySelectorAll("button")).toHaveLength(2);
 
     const shell = screen.getByTestId("drop-zone");
@@ -455,7 +458,7 @@ describe("comment composers", () => {
 
     expect(screen.getByTestId("reply-composer-shell")).toBeInTheDocument();
     await screen.findByRole("button", { name: /Lambda trigger/ }, { timeout: 5000 });
-    expect(screen.getByTestId("drop-zone").className).toContain("pb-9");
+    expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument();
   });
 
   it("keeps main comment submission wired after removing expand", async () => {
@@ -1344,7 +1347,9 @@ describe.each(["reply", "description"])("annotations in %s drafts", (source) => 
     useCommentDraftStore.getState().addAnnotation(draftKey, { ...annotation, note: "" });
     const onSubmit = vi.fn().mockResolvedValue(false);
     renderAnnotatedComposer(onSubmit);
-    expect(isSendBlocked(screen.getByRole("button", { name: "Send" }) as HTMLButtonElement)).toBe(true);
+    // Nothing to send: the comment box keeps a blocked send, a reply rests as one line.
+    if (source === "description") expect(isSendBlocked(screen.getByRole("button", { name: "Send" }) as HTMLButtonElement)).toBe(true);
+    else expect(screen.queryByRole("button", { name: "Send" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /1 annotation/ })).not.toBeInTheDocument();
     act(() => { useCommentDraftStore.getState().addAnnotation(draftKey, { ...annotation, note: "New note" }); });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));

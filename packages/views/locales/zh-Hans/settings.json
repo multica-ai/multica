@@ -484,6 +484,10 @@
       "goSettings": {
         "label": "前往设置",
         "description": "打开工作区设置。"
+      },
+      "voiceInput": {
+        "label": "语音输入",
+        "description": "向最近使用的输入框口述。按住说话。"
       }
     },
     "fixed": {
@@ -580,7 +584,8 @@
       "code": "代码",
       "channels": "消息渠道",
       "apps": "已连接应用",
-      "workflows": "工作流"
+      "workflows": "工作流",
+      "voice_input": "语音输入"
     },
     "groups": {
       "personal": "个人",
@@ -1831,6 +1836,101 @@
       "cancel": "取消",
       "admin_required": "请工作区管理员解除限制。",
       "account_link": "此账号仍有旧操作限制。请在已连接应用中解除。"
+    }
+  },
+  "voice_input": {
+    "description": "在对话、评论和回复中口述输入。语音在这台电脑上转写，不会离开本机。",
+    "model_title": "语音模型",
+    "model_hint": "模型在这台电脑上运行。下载一个，或在已下载的模型之间切换。",
+    "engine_unavailable": "这台电脑暂不支持本地语音转写。",
+    "input_title": "输入",
+    "shortcut": {
+      "title": "快捷键",
+      "hint": "只要页面上有输入框就能使用，无需先聚焦。",
+      "change": "修改",
+      "unassigned": "未设置"
+    },
+    "activation": {
+      "title": "触发方式",
+      "auto": "点按或按住",
+      "toggle": "点按",
+      "hold": "按住",
+      "hints": {
+        "auto": "点按开始，再点一次插入。按住说话，松开插入。",
+        "toggle": "点按开始，再点一次插入。",
+        "hold": "按住说话，松开插入。"
+      }
+    },
+    "recognition_title": "识别",
+    "language": {
+      "title": "说话语言",
+      "hint": "自动检测适用于大多数情况。如果短句被识别成了别的语言，可以指定语言。",
+      "auto": "自动检测"
+    },
+    "fillers": {
+      "title": "去除语气词",
+      "hint": "去掉“嗯”“呃”等停顿词。"
+    },
+    "vocabulary": {
+      "title": "词汇表",
+      "hint": "希望按你的写法输出的名称和术语，例如产品名或同事名字。最多 {{max}} 个。",
+      "placeholder": "添加词语",
+      "remove": "移除 {{word}}"
+    },
+    "microphone_title": "麦克风",
+    "device": {
+      "title": "输入设备",
+      "default": "系统默认",
+      "unnamed": "麦克风 {{index}}",
+      "permission_hint": "测试一次麦克风后即可看到设备名称。"
+    },
+    "test": {
+      "title": "测试麦克风",
+      "hint": "说几句话查看音量。不会录音。",
+      "blocked": "麦克风权限被阻止。请在浏览器或系统设置中允许。",
+      "start": "测试",
+      "stop": "停止"
+    },
+    "history": {
+      "title": "历史记录",
+      "description": "录音和转写文字只保存在这台电脑上，不会上传。转写失败或被中断的录音可以用原始音频重新转写。",
+      "keep": {
+        "title": "保留历史记录",
+        "hint": "录音在这台电脑上保留多久。",
+        "options": {
+          "off": "不保留",
+          "1d": "1 天",
+          "7d": "7 天",
+          "30d": "30 天",
+          "forever": "永久"
+        }
+      },
+      "clear": "全部清除",
+      "clear_dialog": {
+        "title": "清除语音历史记录？",
+        "description": "这台电脑上保存的所有录音和转写文字都会被删除。",
+        "cancel": "取消"
+      },
+      "empty": "你的语音输入会显示在这里。",
+      "off": "历史记录已关闭，新的录音不会被保留。",
+      "today": "今天",
+      "yesterday": "昨天",
+      "status": {
+        "transcribing": "转写中…",
+        "failed": "转写失败",
+        "interrupted": "转写前被中断"
+      },
+      "actions": {
+        "play": "播放录音",
+        "pause": "暂停",
+        "retranscribe": "重新转写",
+        "copy": "复制文字",
+        "delete": "删除"
+      },
+      "copied": "已复制",
+      "copy_failed": "复制失败",
+      "retry_failed": "这段录音转写失败",
+      "show_more": "显示更多"
     }
   }
 }

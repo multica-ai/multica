@@ -35,7 +35,7 @@ function FileUploadButton({
 
   // `size-*`, not `h-* w-*`: the icon button's own `[&_svg:not([class*='size-'])]`
   // rule would otherwise override it (icon-xs forces 12px).
-  const iconSize = size === "sm" ? "size-3.5" : "size-4.5";
+  const iconSize = size === "sm" ? "size-3.5" : "size-4";
   const buttonSize = size === "sm" ? "icon-xs" : "icon-sm";
 
   return (
