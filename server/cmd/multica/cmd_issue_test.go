@@ -6265,3 +6265,154 @@ func TestIssueSearchCommandRegistration(t *testing.T) {
 		t.Errorf("project flag usage = %q, want %q", got, "Filter by project ID")
 	}
 }
+
+// issuePullRequestServer serves one issue's linked PRs and records the link and
+// unlink calls the CLI makes against it.
+type issuePullRequestServer struct {
+	linkBody   map[string]any
+	unlinkPath string
+}
+
+func (s *issuePullRequestServer) start(t *testing.T) {
+	t.Helper()
+	listed := map[string]any{
+		"pull_requests": []map[string]any{
+			{"id": "11111111-1111-1111-1111-111111111111", "number": float64(42), "state": "open", "title": "Fix the thing", "html_url": "https://github.com/acme/app/pull/42"},
+			{"id": "22222222-2222-2222-2222-222222222222", "number": float64(7), "state": "merged", "title": "API side", "html_url": "https://github.com/acme/api/pull/7"},
+			{"id": "33333333-3333-3333-3333-333333333333", "number": float64(7), "state": "open", "title": "Web side", "html_url": "https://github.com/acme/web/pull/7"},
+		},
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/issues/MUL-9" && r.Method == http.MethodGet:
+			json.NewEncoder(w).Encode(map[string]any{"id": "issue-uuid", "identifier": "MUL-9"})
+		case r.URL.Path == "/api/issues/issue-uuid/pull-requests" && r.Method == http.MethodGet:
+			json.NewEncoder(w).Encode(listed)
+		case r.URL.Path == "/api/issues/issue-uuid/pull-requests" && r.Method == http.MethodPost:
+			_ = json.NewDecoder(r.Body).Decode(&s.linkBody)
+			if strings.Contains(fmt.Sprint(s.linkBody["url"]), "/pull/999") {
+				w.WriteHeader(http.StatusNotFound)
+				json.NewEncoder(w).Encode(map[string]any{"error": "pull request not found; it appears here once its repository is connected and the PR has been synced"})
+				return
+			}
+			json.NewEncoder(w).Encode(listed)
+		case strings.HasPrefix(r.URL.Path, "/api/issues/issue-uuid/pull-requests/") && r.Method == http.MethodDelete:
+			s.unlinkPath = r.URL.Path
+			json.NewEncoder(w).Encode(listed)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+}
+
+func runQuiet(t *testing.T, run func() error) (string, error) {
+	t.Helper()
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	drainCh := make(chan []byte, 1)
+	go func() { b, _ := io.ReadAll(r); drainCh <- b }()
+	err := run()
+	_ = w.Close()
+	os.Stdout = old
+	return string(<-drainCh), err
+}
+
+func TestRunIssuePullRequestsLinkPostsURL(t *testing.T) {
+	s := &issuePullRequestServer{}
+	s.start(t)
+
+	out, err := runQuiet(t, func() error {
+		return runIssuePullRequestsLink(newIssuePullRequestsTestCmd(), []string{"MUL-9", "https://github.com/acme/app/pull/42/files"})
+	})
+	if err != nil {
+		t.Fatalf("link: %v", err)
+	}
+	// The server normalizes the URL; the CLI passes it through untouched.
+	if s.linkBody["url"] != "https://github.com/acme/app/pull/42/files" || s.linkBody["pull_request_id"] != nil {
+		t.Fatalf("link body = %#v", s.linkBody)
+	}
+	if !strings.Contains(out, "https://github.com/acme/app/pull/42") {
+		t.Fatalf("expected the updated PR list in the output:\n%s", out)
+	}
+}
+
+func TestRunIssuePullRequestsLinkByIDRestoresUnlinkedPR(t *testing.T) {
+	s := &issuePullRequestServer{}
+	s.start(t)
+
+	if _, err := runQuiet(t, func() error {
+		return runIssuePullRequestsLink(newIssuePullRequestsTestCmd(), []string{"MUL-9", "22222222-2222-2222-2222-222222222222"})
+	}); err != nil {
+		t.Fatalf("link: %v", err)
+	}
+	if s.linkBody["pull_request_id"] != "22222222-2222-2222-2222-222222222222" || s.linkBody["url"] != nil {
+		t.Fatalf("link body = %#v", s.linkBody)
+	}
+}
+
+func TestRunIssuePullRequestsUnlinkResolvesPR(t *testing.T) {
+	cases := []struct {
+		name, ref, wantID string
+	}{
+		{"by URL with a trailing page", "https://github.com/acme/app/pull/42/files?w=1", "11111111-1111-1111-1111-111111111111"},
+		{"by URL without a scheme, any case", "GitHub.com/acme/web/pull/7", "33333333-3333-3333-3333-333333333333"},
+		{"by unique number", "#42", "11111111-1111-1111-1111-111111111111"},
+		{"by id", "22222222-2222-2222-2222-222222222222", "22222222-2222-2222-2222-222222222222"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &issuePullRequestServer{}
+			s.start(t)
+			if _, err := runQuiet(t, func() error {
+				return runIssuePullRequestsUnlink(newIssuePullRequestsTestCmd(), []string{"MUL-9", tc.ref})
+			}); err != nil {
+				t.Fatalf("unlink: %v", err)
+			}
+			if want := "/api/issues/issue-uuid/pull-requests/" + tc.wantID; s.unlinkPath != want {
+				t.Fatalf("DELETE %s, want %s", s.unlinkPath, want)
+			}
+		})
+	}
+}
+
+func TestRunIssuePullRequestsUnlinkRefusesAmbiguousOrUnknownPR(t *testing.T) {
+	cases := []struct {
+		name, ref, wantErr string
+	}{
+		{"number shared by two repos", "7", "matches 2 linked PRs"},
+		{"number not linked", "99", "no linked pull request has number 99"},
+		{"URL not linked", "https://github.com/acme/app/pull/43", "is not linked to this issue"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &issuePullRequestServer{}
+			s.start(t)
+			_, err := runQuiet(t, func() error {
+				return runIssuePullRequestsUnlink(newIssuePullRequestsTestCmd(), []string{"MUL-9", tc.ref})
+			})
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("err = %v, want it to mention %q", err, tc.wantErr)
+			}
+			if s.unlinkPath != "" {
+				t.Fatalf("expected no DELETE, got %s", s.unlinkPath)
+			}
+		})
+	}
+}
+
+func TestRunIssuePullRequestsLinkExplainsUnsyncedPR(t *testing.T) {
+	s := &issuePullRequestServer{}
+	s.start(t)
+
+	_, err := runQuiet(t, func() error {
+		return runIssuePullRequestsLink(newIssuePullRequestsTestCmd(), []string{"MUL-9", "https://github.com/acme/app/pull/999"})
+	})
+	if err == nil || !strings.Contains(err.Error(), "not in this workspace yet") {
+		t.Fatalf("err = %v, want the not-synced explanation", err)
+	}
+}

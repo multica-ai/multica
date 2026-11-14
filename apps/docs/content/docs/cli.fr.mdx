@@ -402,6 +402,8 @@ Les tableaux ci-dessous couvrent toutes les commandes de premier niveau actuelle
 | | `search <query>` | Rechercher des tâches | `--limit`, `--include-closed`, `--project` |
 | | `children <id>` | Lister les sous-tâches regroupées par étape | |
 | | `pull-requests <id>` | Lister les PR associées | |
+| | `pull-requests link <id> <pr-url>` | Associer une PR synchronisée dont le titre et la branche ne contiennent pas la clé de la tâche | Rétablit aussi une PR retirée avec `unlink` |
+| | `pull-requests unlink <id> <pr>` | Retirer une PR associée sans qu'elle soit réassociée automatiquement | `<pr>` : URL, numéro ou id de la PR |
 | | `comment list/add/update/delete/resolve/unresolve` | Gérer les commentaires | `add` : `--content` / `--content-stdin` / `--content-file`, `--parent`, `--attachment` ; `update` : `--expected-revision` (obligatoire), `--content` / `--content-stdin` / `--content-file` ; `list` : `--since`, `--thread`, `--tail`, `--recent`, `--roots-only`, `--summary`, `--compact`, `--full` |
 | | `timeline <id>` | Lister l'activité et les commentaires dans l'ordre chronologique | `--action` (répétable), `--activity-only`, `--since`, `--tail` |
 | | `wakeup events/list/get/create/update/disable/trigger/delete/checkin/runs` | Gérer les réveils de tâche ; voir [Réveils de tâche](/issue-wakeups) | `create` / `update` : `--agent-id`, `--kind` (`event`, `at`, `every`, `cron`), `--event`, `--at` / `--after`, `--every`, `--cron`, `--timezone`, conditions `--until-*`, `--expires-in` / `--expires-at`, `--instruction` / `--instruction-file` ; `checkin` : `--note` |
