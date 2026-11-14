@@ -91,7 +91,6 @@
   "rail": {
     "label": "アプリナビゲーション",
     "sheet_description": "スペースとワークスペースを切り替えます。",
-    "inbox": "受信箱",
     "work": "作業",
     "team": "チーム",
     "chat": "チャット",
@@ -159,7 +158,20 @@
       "view_rename": "名前を変更",
       "view_duplicate": "複製",
       "view_delete": "ビューを削除",
-      "new_issue_here": "このプロジェクトに新規タスク"
+      "new_issue_here": "このプロジェクトに新規タスク",
+      "inbox_all": "すべての通知",
+      "inbox_empty": "通知はありません",
+      "inbox_settings": "インボックスの表示",
+      "inbox_show_count": "未読数",
+      "inbox_rail_badge": "「作業」に未読バッジを表示",
+      "inbox_types": "受け取る通知",
+      "inbox_types_hint": "オフにした種類の通知は届かなくなり、再びオンにしてもその間の通知は戻りません。",
+      "inbox_more_settings": "すべての通知設定",
+      "section_limit": "表示件数",
+      "pinned_settings": "ピン留めの表示",
+      "views_settings": "ビューの表示",
+      "views_builtin": "組み込みビュー",
+      "views_show_count": "件数"
     },
     "team": {
       "new_agent": "新規エージェント",

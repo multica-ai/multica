@@ -7,6 +7,7 @@ import { EMPTY_ISSUE_VIEW_PREFERENCE } from "@multica/core/api/schemas";
 import { useActiveIssueViewStore } from "@multica/core/issue-views/active-view-store";
 import { issueViewPreferenceOptions } from "@multica/core/issue-views/preferences";
 import { issueViewEverywhereOptions } from "@multica/core/issue-views/queries";
+import { inboxListOptions } from "@multica/core/inbox/queries";
 import { issueDetailOptions, issueKeys } from "@multica/core/issues/queries";
 import { issueUnreadOptions } from "@multica/core/issues/unread";
 import { SIDEBAR_PROJECTS_SCOPE } from "@multica/core/issues/sidebar-project-prefs";
@@ -15,7 +16,14 @@ import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-st
 import { spaceForPath } from "@multica/core/paths";
 import { pinListOptions } from "@multica/core/pins/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
-import type { Issue, IssueTableRowsRequest, IssueTableRowsResponse, PinnedItem, Project } from "@multica/core/types";
+import type {
+  InboxItem,
+  Issue,
+  IssueTableRowsRequest,
+  IssueTableRowsResponse,
+  PinnedItem,
+  Project,
+} from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 import { KeptRowsRelease, WorkPanel } from "./work-panel";
@@ -137,8 +145,10 @@ function renderPanel(
   pins: PinnedItem[] = [],
   projects: Project[] = [],
   unreadIssueIds: string[] = [],
+  inbox: InboxItem[] = [],
 ) {
   const qc = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
+  qc.setQueryData(inboxListOptions("ws-1").queryKey, inbox);
   qc.setQueryData(projectListOptions("ws-1").queryKey, { projects, total: projects.length });
   qc.setQueryData(pinListOptions("ws-1", "u1").queryKey, pins);
   qc.setQueryData(issueViewEverywhereOptions("ws-1").queryKey, []);
@@ -175,8 +185,8 @@ function renderPanel(
       <NavigationProvider value={adapter}>
         <KeptRowsRelease />
         {sheetOpen && spaceForPath(pathname) === "work" && <WorkPanel />}
-        <button type="button" onClick={() => setPathname("/acme/inbox")}>
-          Visit inbox
+        <button type="button" onClick={() => setPathname("/acme/agents")}>
+          Leave Work
         </button>
         <button type="button" onClick={() => setPathname(`/acme/issues/${ISSUE.id}`)}>
           Return to issue
@@ -223,6 +233,75 @@ beforeEach(() => {
   } as unknown as IssueTableRowsResponse);
   // The issue page never finishes loading, so the panel cannot lean on it.
   apiMock.getIssue.mockReturnValue(new Promise<Issue>(() => {}));
+});
+
+function inboxItem(issue: Issue): InboxItem {
+  return {
+    id: `inbox-${issue.id}`,
+    workspace_id: "ws-1",
+    recipient_type: "member",
+    recipient_id: "u1",
+    actor_type: "agent",
+    actor_id: "agent-1",
+    type: "new_comment",
+    severity: "info",
+    issue_id: issue.id,
+    title: issue.title,
+    body: null,
+    issue_status: issue.status,
+    issue_priority: "none",
+    read: false,
+    archived: false,
+    created_at: "2026-11-10T08:00:00Z",
+    details: null,
+  };
+}
+
+describe("WorkPanel sections", () => {
+  it("orders Inbox, Pinned, Views, Projects", () => {
+    renderPanel("/acme/my-issues", [PIN], [PROJECT]);
+    const labels = Array.from(document.querySelectorAll("[data-mc='panel-section'] h3"), (h) => h.textContent);
+    expect(labels).toEqual(["Inbox", "Pinned", "Views", "Projects"]);
+  });
+});
+
+describe("WorkPanel Inbox highlight", () => {
+  const inInbox = () => document.querySelector('[data-sidebar-list="inbox"]') as HTMLElement;
+  const inMyIssues = () => document.querySelector('[data-sidebar-list="builtin:my_issues"]') as HTMLElement;
+
+  it("lights an issue opened from the Inbox there only", async () => {
+    renderPanel("/acme/my-issues", [], [], [], [inboxItem(ISSUE)]);
+    await within(await waitFor(inMyIssues)).findByRole("link", { name: ISSUE.title });
+    fireEvent.click(within(inInbox()).getByRole("link", { name: ISSUE.title }));
+
+    expect(within(inInbox()).getByRole("link", { name: ISSUE.title })).toHaveAttribute("aria-current", "page");
+    expect(within(inMyIssues()).getByRole("link", { name: ISSUE.title })).not.toHaveAttribute("aria-current");
+    expect(allIssues()).not.toHaveAttribute("aria-current");
+  });
+
+  it("moves the light to the list the issue is clicked in next", async () => {
+    renderPanel("/acme/my-issues", [], [], [], [inboxItem(ISSUE)]);
+    await within(await waitFor(inMyIssues)).findByRole("link", { name: ISSUE.title });
+    fireEvent.click(within(inInbox()).getByRole("link", { name: ISSUE.title }));
+    fireEvent.click(within(inMyIssues()).getByRole("link", { name: ISSUE.title }));
+
+    expect(within(inMyIssues()).getByRole("link", { name: ISSUE.title })).toHaveAttribute("aria-current", "page");
+    expect(within(inInbox()).getByRole("link", { name: ISSUE.title })).not.toHaveAttribute("aria-current");
+  });
+
+  it("falls back to the other lists once the notification is archived", async () => {
+    const qc = renderPanel("/acme/my-issues", [], [], [], [inboxItem(ISSUE)]);
+    await within(await waitFor(inMyIssues)).findByRole("link", { name: ISSUE.title });
+    fireEvent.click(within(inInbox()).getByRole("link", { name: ISSUE.title }));
+    act(() => {
+      qc.setQueryData(inboxListOptions("ws-1").queryKey, [{ ...inboxItem(ISSUE), archived: true }]);
+    });
+
+    await waitFor(() =>
+      expect(within(inMyIssues()).getByRole("link", { name: ISSUE.title })).toHaveAttribute("aria-current", "page"),
+    );
+    expect(inInbox()).toBeNull();
+  });
 });
 
 describe("WorkPanel issue highlight", () => {
@@ -324,7 +403,7 @@ describe("WorkPanel issue highlight", () => {
     await act(() => qc.invalidateQueries({ queryKey: issueKeys.sidebarAll("ws-1") }));
     await screen.findByRole("link", { name: "Fixed the sidebar" });
 
-    fireEvent.click(screen.getByRole("button", { name: "Visit inbox" }));
+    fireEvent.click(screen.getByRole("button", { name: "Leave Work" }));
     fireEvent.click(screen.getByRole("button", { name: "Return to issue" }));
 
     expect(await screen.findByRole("link", { name: OTHER.title })).toBeInTheDocument();
@@ -539,7 +618,7 @@ describe("WorkPanel starred Unread view after its last issue is read", () => {
 
   it("keeps the row but drops the read issue once it is no longer the page", async () => {
     await openAndReadLastUnread();
-    fireEvent.click(screen.getByRole("button", { name: "Visit inbox" }));
+    fireEvent.click(screen.getByRole("button", { name: "Leave Work" }));
     fireEvent.click(screen.getByRole("button", { name: "Return to issue" }));
     await screen.findByRole("link", { name: "All issues" });
     expect(unreadRow()).not.toBeNull();

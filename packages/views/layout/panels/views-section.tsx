@@ -65,6 +65,7 @@ import { shouldOpenRowMenu, useRowMenu } from "../../common/point-menu";
 import { useT } from "../../i18n";
 import { PANEL_ROW_CLASS, PanelCount, PanelLink, PanelList, PanelSection, isPathWithin, panelRowAnchor, panelRowStateClass } from "../panel-nav";
 import { useDragClickGuard } from "../use-drag-click-guard";
+import { SECTION_SETTINGS_REVEAL_CLASS, ViewsSectionSettings } from "./sidebar-settings";
 import { SidebarIssueList, TREE_ROW_BUTTON_CLASS, TreeRow } from "./sidebar-tree";
 
 const DRAG_MODIFIERS = [restrictToVerticalAxis, restrictToFirstScrollableAncestor];
@@ -116,6 +117,7 @@ export function ViewsSection({
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   const collapsed = useSidebarTreeStore((s) => s.viewsCollapsed);
   const setCollapsed = useSidebarTreeStore((s) => s.setViewsCollapsed);
+  const showCount = useSidebarTreeStore((s) => s.viewsShowCount);
   const { arm: armClickGuard, release: releaseClickGuard } = useDragClickGuard();
 
   const onDragEnd = useCallback(
@@ -137,24 +139,27 @@ export function ViewsSection({
       collapsed={collapsed}
       onCollapsedChange={setCollapsed}
       action={
-        <IconButton
-          label={t(($) => $.panels.work.new_view)}
-          size="icon-xs"
-          className="text-muted-foreground"
-          onClick={() => {
-            // The new view lands in this list, so it has to be open. It is
-            // named in the page header, next to where its filters are set.
-            setCollapsed(false);
-            actions.create({
-              scope: WORKSPACE_SCOPE,
-              scopeVariant: null,
-              definition: issueViewSeedDefinition({ query: {}, display: {} }),
-              renameIn: "header",
-            });
-          }}
-        >
-          <Plus />
-        </IconButton>
+        <>
+          <ViewsSectionSettings sidebar={actions.sidebar} className={SECTION_SETTINGS_REVEAL_CLASS} />
+          <IconButton
+            label={t(($) => $.panels.work.new_view)}
+            size="icon-xs"
+            className="text-muted-foreground"
+            onClick={() => {
+              // The new view lands in this list, so it has to be open. It is
+              // named in the page header, next to where its filters are set.
+              setCollapsed(false);
+              actions.create({
+                scope: WORKSPACE_SCOPE,
+                scopeVariant: null,
+                definition: issueViewSeedDefinition({ query: {}, display: {} }),
+                renameIn: "header",
+              });
+            }}
+          >
+            <Plus />
+          </IconButton>
+        </>
       }
     >
       <DndContext
@@ -214,7 +219,7 @@ export function ViewsSection({
           icon={<span className="size-4" aria-hidden />}
           label={t(($) => $.panels.work.all_views)}
           active={pathname === p.views()}
-          trailing={<PanelCount value={allViews.length + BUILTIN_VIEW_KEYS.length} />}
+          trailing={showCount && <PanelCount value={allViews.length + BUILTIN_VIEW_KEYS.length} />}
           className="text-caption"
         />
       </PanelList>
@@ -449,7 +454,8 @@ function UnreadViewRow({
   const setExpanded = useSidebarTreeStore((s) => s.setExpanded);
   const unread = useIssueUnreadIds(wsId);
   const unreadDependency = filterDependencyState(true, [unread]);
-  const count = unread.data?.length ?? 0;
+  const showCount = useSidebarTreeStore((s) => s.viewsShowCount);
+  const count = showCount ? (unread.data?.length ?? 0) : 0;
   const request = unreadDependency.unresolved
     ? undefined
     : viewSidebarRequest(UNREAD_VIEW, todayDateOnly(), unread.data);

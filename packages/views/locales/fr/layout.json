@@ -92,7 +92,6 @@
   "rail": {
     "label": "Navigation de l'application",
     "sheet_description": "Changer d'espace et d'espace de travail.",
-    "inbox": "Boîte",
     "work": "Travail",
     "team": "Équipe",
     "chat": "Chat",
@@ -163,7 +162,20 @@
       "view_rename": "Renommer",
       "view_duplicate": "Dupliquer",
       "view_delete": "Supprimer la vue",
-      "new_issue_here": "Nouvelle tâche dans ce projet"
+      "new_issue_here": "Nouvelle tâche dans ce projet",
+      "inbox_all": "Toutes les notifications",
+      "inbox_empty": "Aucune notification",
+      "inbox_settings": "Affichage de la boîte de réception",
+      "inbox_show_count": "Nombre de non lus",
+      "inbox_rail_badge": "Badge de non lus sur Travail",
+      "inbox_types": "Me notifier pour",
+      "inbox_types_hint": "Désactivé, un type de notification n’est plus envoyé, et rien de cette période ne revient quand vous le réactivez.",
+      "inbox_more_settings": "Tous les réglages de notification",
+      "section_limit": "Lignes affichées",
+      "pinned_settings": "Affichage des épingles",
+      "views_settings": "Affichage des vues",
+      "views_builtin": "Vues intégrées",
+      "views_show_count": "Compteurs"
     },
     "team": {
       "new_agent": "Nouvel agent",

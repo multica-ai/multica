@@ -17,6 +17,7 @@ import { IssueContextMenuProvider } from "../../issues/actions";
 import { useIssueViewActions } from "../../issue-views/use-view-actions";
 import { useT } from "../../i18n";
 import { PanelBody, PanelHeader, isPathWithin } from "../panel-nav";
+import { INBOX_LIST, InboxSection, useInboxSectionRows } from "./inbox-section";
 import { PinnedSection, usePanelPins } from "./pinned-section";
 import { useKeptActiveItem } from "./sidebar-tree";
 import { ProjectsSection, useIssueInTree } from "./work-tree";
@@ -99,6 +100,11 @@ export function WorkPanel() {
       : undefined;
   const treeClaimsIssue = clickedList !== undefined && clickedList !== PINS_LIST;
   const pins = usePanelPins(wsId, userId, pathname, treeClaimsIssue ? null : currentIssueId);
+  const inboxRows = useInboxSectionRows(wsId);
+  // An issue opened from the Inbox lights there while the section still
+  // shows it; once archived, it falls back to the other lists.
+  const inboxClaimsIssue =
+    clickedList === INBOX_LIST && !!currentIssueId && inboxRows.shownIssueIds.has(currentIssueId);
   const requestLocate = useSidebarTreeStore((s) => s.requestLocate);
   const rememberClickedIssue = (event: React.MouseEvent) => {
     const link = (event.target as HTMLElement).closest("a[href]");
@@ -138,17 +144,18 @@ export function WorkPanel() {
     ...shownProjects.map((project) => projectSidebarSource(project.id)),
   ];
   const litSource =
-    !plainRowsLit || !currentIssueId
+    !plainRowsLit || !currentIssueId || inboxClaimsIssue
       ? null
       : clickedList && listing.includes(clickedList)
         ? clickedList
         : issueProjectExpanded
           ? issueProjectSource
           : (listOrder.find((source) => listing.includes(source)) ?? null);
-  const locatedProjectId = plainRowsLit && !litSource && issueProject ? issueProject.id : null;
+  const locatedProjectId = plainRowsLit && !inboxClaimsIssue && !litSource && issueProject ? issueProject.id : null;
   // An issue in a project the panel hides, or under the collapsed Projects
   // section, stays unmarked rather than lighting a list that may not show it.
-  const issueInAllIssues = plainRowsLit && !!currentIssue && !currentIssue.project_id && litSource === null;
+  const issueInAllIssues =
+    plainRowsLit && !inboxClaimsIssue && !!currentIssue && !currentIssue.project_id && litSource === null;
 
   const locate = useSidebarTreeStore((s) => s.locate);
   const setExpanded = useSidebarTreeStore((s) => s.setExpanded);
@@ -168,6 +175,21 @@ export function WorkPanel() {
       <IssueContextMenuProvider variant="sidebar">
         <PanelBody onClickCapture={rememberClickedIssue}>
           {wsId && (
+            <InboxSection
+              wsId={wsId}
+              rows={inboxRows}
+              pathname={pathname}
+              activeIssueId={inboxClaimsIssue ? currentIssueId : null}
+            />
+          )}
+
+          {wsId && (
+            <div data-pinned-section className="contents">
+              <PinnedSection pins={pins} wsId={wsId} />
+            </div>
+          )}
+
+          {wsId && (
             <ViewsSection
               wsId={wsId}
               pathname={pathname}
@@ -177,12 +199,6 @@ export function WorkPanel() {
               litSource={litSource}
               actions={viewActions}
             />
-          )}
-
-          {wsId && (
-            <div data-pinned-section className="contents">
-              <PinnedSection pins={pins} wsId={wsId} />
-            </div>
           )}
 
           {wsId && (

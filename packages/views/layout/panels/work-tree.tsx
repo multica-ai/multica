@@ -41,7 +41,7 @@ import { ProjectMenu } from "../../projects/components/project-row-actions";
 import { shouldOpenRowMenu, useRowMenu } from "../../common/point-menu";
 import { CollectionRowContext } from "../collection-list/row-context";
 import { useDragClickGuard } from "../use-drag-click-guard";
-import { ProjectsSectionSettings } from "./sidebar-settings";
+import { ProjectsSectionSettings, SECTION_SETTINGS_REVEAL_CLASS } from "./sidebar-settings";
 import { SidebarIssueList, TreeRow } from "./sidebar-tree";
 
 const DRAG_MODIFIERS = [restrictToVerticalAxis, restrictToFirstScrollableAncestor];
@@ -178,7 +178,7 @@ export function ProjectsSection({
       onCollapsedChange={setCollapsed}
       action={
         <>
-          <ProjectsSectionSettings wsId={wsId} className="opacity-0 group-hover/section:opacity-100 group-focus-within/section:opacity-100 [@media(pointer:coarse)]:opacity-100" />
+          <ProjectsSectionSettings wsId={wsId} className={SECTION_SETTINGS_REVEAL_CLASS} />
           <IconButton
             label={t(($) => $.panels.work.new_project)}
             size="icon-xs"

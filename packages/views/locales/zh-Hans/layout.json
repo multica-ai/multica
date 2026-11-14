@@ -91,7 +91,6 @@
   "rail": {
     "label": "应用导航",
     "sheet_description": "切换空间和工作区。",
-    "inbox": "收件箱",
     "work": "工作",
     "team": "团队",
     "chat": "聊天",
@@ -159,7 +158,20 @@
       "view_rename": "重命名",
       "view_duplicate": "创建副本",
       "view_delete": "删除视图",
-      "new_issue_here": "在此项目中新建任务"
+      "new_issue_here": "在此项目中新建任务",
+      "inbox_all": "全部通知",
+      "inbox_empty": "暂无通知",
+      "inbox_settings": "收件箱显示",
+      "inbox_show_count": "未读数量",
+      "inbox_rail_badge": "在「工作」上显示未读数",
+      "inbox_types": "接收以下通知",
+      "inbox_types_hint": "关闭后不再产生这类通知；重新打开也找不回关闭期间的通知。",
+      "inbox_more_settings": "全部通知设置",
+      "section_limit": "显示条数",
+      "pinned_settings": "固定显示",
+      "views_settings": "视图显示",
+      "views_builtin": "内置视图",
+      "views_show_count": "数量"
     },
     "team": {
       "new_agent": "新建智能体",

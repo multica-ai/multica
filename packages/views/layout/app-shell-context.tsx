@@ -6,9 +6,10 @@ import { useSidebarSafe } from "@multica/ui/components/ui/sidebar";
 import { useNavigation } from "../navigation";
 
 /**
- * Spaces whose navigation lives in the shell panel. Inbox, Chat and Settings
- * are list-and-detail pages that already render their own list column in the
- * same card, so the shell adds no panel for them.
+ * Spaces whose navigation lives in the shell panel. Chat and Settings are
+ * list-and-detail pages that already render their own list column in the
+ * same card, so the shell adds no panel for them. The Inbox page keeps its
+ * list column beside the Work panel.
  */
 export const PANEL_SPACES: ReadonlySet<AppSpaceId> = new Set(["work", "team", "autopilots"]);
 
