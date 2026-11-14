@@ -80,13 +80,15 @@ vi.mock("@multica/views/platform", () => ({
 // which of them the shell decided to mount.
 vi.mock("@multica/views/layout", () => ({
   AppBottomBar: () => <div data-testid="app-bottom-bar" />,
-  AppRail: () => <div data-testid="app-rail" />,
+  AppRail: ({ globalActions = true }: { globalActions?: boolean }) => (
+    <div data-testid="app-rail" data-global-actions={String(globalActions)} />
+  ),
   AppShellProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
-  CompactNavSheet: () => null,
+  CompactNavSheet: ({ globalActions = true }: { globalActions?: boolean }) => (
+    <div data-testid="compact-nav-sheet" data-global-actions={String(globalActions)} />
+  ),
   GlobalShortcuts: () => <div data-testid="global-shortcuts" />,
   NavigationProgress: () => <div data-testid="navigation-progress" />,
-  NewIssueButton: () => <div data-testid="title-bar-new-issue" />,
-  SearchButton: () => <div data-testid="title-bar-search" />,
   ShellRouteDataPrefetch: ({ children }: { children: ReactNode }) => <>{children}</>,
   SpacePanel: () => <div data-testid="space-panel" />,
   useAppShell: () => ({ hasPanel: true }),
@@ -168,8 +170,6 @@ describe("DesktopShell workspace gating", () => {
     expect(queryByTestId("app-bottom-bar")).not.toBeNull();
     expect(queryByTestId("space-panel")).not.toBeNull();
     expect(queryByTestId("search-command")).not.toBeNull();
-    expect(queryByTestId("title-bar-new-issue")).not.toBeNull();
-    expect(queryByTestId("title-bar-search")).not.toBeNull();
     expect(queryByTestId("global-shortcuts")).not.toBeNull();
     expect(queryByTestId("modal-registry")).not.toBeNull();
     expect(queryByTestId("floating-chat")).not.toBeNull();
@@ -206,7 +206,6 @@ describe("DesktopShell workspace gating", () => {
     expect(queryByTestId("app-bottom-bar")).toBeNull();
     expect(queryByTestId("space-panel")).toBeNull();
     expect(queryByTestId("search-command")).toBeNull();
-    expect(queryByTestId("title-bar-new-issue")).toBeNull();
     expect(queryByTestId("global-shortcuts")).toBeNull();
     expect(queryByTestId("modal-registry")).toBeNull();
     expect(queryByTestId("floating-chat")).toBeNull();
@@ -242,6 +241,15 @@ describe("DesktopShell workspace gating", () => {
 
     expect(queryByTestId("app-rail")).toBeNull();
     expect(queryByTestId("search-command")).toBeNull();
-    expect(queryByTestId("title-bar-new-issue")).toBeNull();
+  });
+
+  // Same placement as web's DashboardLayout: New issue and search sit in the
+  // rail (and the compact sheet's rail), not in the title bar.
+  it("puts New issue and search in the rail, as on web", () => {
+    const { container, getByTestId } = renderShell();
+
+    expect(getByTestId("app-rail")).toHaveAttribute("data-global-actions", "true");
+    expect(getByTestId("compact-nav-sheet")).toHaveAttribute("data-global-actions", "true");
+    expect(container.querySelector('[data-slot="title-bar-actions"]')).toBeNull();
   });
 });
