@@ -196,6 +196,7 @@
     "relation_subscribed": "Tôi theo dõi",
     "section_agent_status": "Trạng thái agent",
     "agent_status_running": "Đang chạy",
+    "agent_status_idle": "Nhàn rỗi",
     "section_read_state": "Trạng thái đọc",
     "read_state_unread": "Chưa đọc",
     "operator_label": "Khớp",
@@ -315,6 +316,7 @@
     "card_project": "Dự án",
     "card_labels": "Nhãn",
     "card_child_progress": "Tiến độ công việc con",
+    "card_pull_requests": "Pull request",
     "show_sub_issues": "Hiện công việc con",
     "layout_options": "Tùy chọn {{layout}}"
   },
@@ -386,6 +388,7 @@
       "created_at": "Ngày tạo",
       "updated_at": "Ngày cập nhật",
       "child_progress": "Tiến độ công việc con",
+      "pull_requests": "Pull request",
       "creator": "Người tạo"
     },
     "calculation": {
@@ -510,6 +513,7 @@
     "quick_action_blocked_body": "“{{name}}” chạy dưới danh nghĩa một agent mà bạn không được phép kích hoạt. Hãy nhờ quản trị viên không gian làm việc cho phép nhóm dùng agent đó, hoặc trỏ thao tác này tới một agent dùng chung.",
     "quick_action_blocked_ok": "Đã hiểu",
     "pull_requests_loading": "Đang tải…",
+    "pull_request_state_open": "Đang mở",
     "pull_request_state_draft": "Bản nháp",
     "pull_request_state_merged": "Đã hợp nhất",
     "pull_request_state_closed": "Đã đóng",
@@ -597,6 +601,7 @@
   },
   "activity": {
     "created": "đã tạo công việc này",
+    "created_on_behalf_of": "đã tạo công việc này thay mặt {{name}}",
     "self_assigned": "đã tự giao công việc này",
     "assigned_to": "đã giao cho {{name}}",
     "removed_assignee": "đã gỡ người được giao",
@@ -748,7 +753,10 @@
     "recipient_count_other": "{{count}} agent sẽ nhận được tin nhắn này",
     "steer_attachment_notice": "Chỉ văn bản mới có thể tham gia một lần chạy đang diễn ra, nên tin nhắn có tệp sẽ được xử lý sau lần chạy đó.",
     "restart_send": "Dừng và gửi",
-    "restart_failed": "Không thể dừng lần chạy hiện tại. Tin nhắn của bạn chưa được gửi."
+    "restart_failed": "Không thể dừng lần chạy hiện tại. Tin nhắn của bạn chưa được gửi.",
+    "reply_action": "Trả lời",
+    "actions_label": "Hành động bình luận",
+    "create_issue_from_selection": "Tạo công việc con từ đoạn đã chọn"
   },
   "reply": {
     "recipients_changed": "Đã đổi đối tượng trả lời. Hãy kiểm tra lại người nhận trước khi gửi lại.",
@@ -949,7 +957,10 @@
     "delete_failed": "Xóa công việc thất bại",
     "delete_dialog_title_other": "Xóa {{count}} công việc?",
     "delete_dialog_desc_other": "Hành động này không thể hoàn tác. Nó sẽ xóa vĩnh viễn các công việc đã chọn và mọi dữ liệu liên quan.",
-    "cancel": "Hủy"
+    "cancel": "Hủy",
+    "copy_links": "Sao chép liên kết",
+    "links_copied_other": "Đã sao chép {{count}} liên kết",
+    "delete_count_other": "Xóa {{count}} công việc"
   },
   "card": {
     "update_failed": "Cập nhật công việc thất bại",
@@ -986,12 +997,14 @@
     "stop_agent_run": "Dừng lần chạy của {{name}}",
     "relations": "Quan hệ",
     "create_sub_issue": "Tạo công việc con",
+    "quick_actions": "Thao tác nhanh",
     "set_parent_issue": "Đặt công việc cha...",
     "remove_parent_issue": "Xóa công việc cha",
     "remove_parent_issue_success": "Đã xóa công việc cha",
     "add_sub_issue": "Thêm công việc con...",
     "delete_issue": "Xóa công việc",
-    "mark_duplicate": "Đánh dấu trùng lặp..."
+    "mark_duplicate": "Đánh dấu trùng lặp...",
+    "open_in_new_window": "Mở trong cửa sổ mới"
   },
   "pickers": {
     "custom_property": {

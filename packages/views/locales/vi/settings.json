@@ -16,7 +16,6 @@
       "reorder": "Sắp xếp lại {{name}}"
     },
     "reorder_hint": "Kéo thả trong cùng một nhóm để sắp xếp lại bảng, danh sách và menu.",
-    "built_in_dialog": {},
     "editor": {
       "create_title": "Trạng thái mới",
       "edit_title": "Chỉnh sửa trạng thái",
@@ -336,8 +335,8 @@
     },
     "content_size": {
       "title": "Cỡ chữ",
-      "description": "Chỉ chữ nội dung; giao diện giữ nguyên cỡ.",
-      "follow": "Giống giao diện ({{size}} px)"
+      "description": "Chỉ chữ nội dung. Mặc định khớp với giao diện.",
+      "follow": "Khớp cỡ chữ giao diện"
     },
     "content_leading": {
       "title": "Chiều cao dòng",
@@ -848,6 +847,9 @@
       "agent_activity": {
         "label": "Hoạt động của agent",
         "description": "Khi một lượt chạy của agent thất bại"
+      },
+      "chat_replies": {
+        "label": "Bao gồm trả lời trò chuyện"
       }
     },
     "system": {
@@ -856,7 +858,7 @@
     },
     "browser": {
       "label": "Thông báo trình duyệt",
-      "hint": "Cho phép trình duyệt này hiển thị biểu ngữ thông báo cho mục hộp thư đến mới.",
+      "hint": "Cho phép trình duyệt này hiển thị biểu ngữ cho thông báo Hộp thư đến và trả lời trò chuyện.",
       "enable": "Bật",
       "granted": "Trình duyệt này có thể hiển thị biểu ngữ thông báo.",
       "denied": "Bị trình duyệt chặn. Bật thông báo cho trang này trong cài đặt trình duyệt.",
@@ -1365,7 +1367,8 @@
     "github_load_more": "Tải thêm",
     "github_selected_count": "{{count}} đã chọn",
     "github_cancel": "Hủy",
-    "github_import": "Thêm repo",
+    "github_import": "Thêm {{count}} repo",
+    "github_import_other": "Thêm {{count}} repo",
     "save": "Lưu",
     "saving": "Đang lưu...",
     "saved_hint": "Đã lưu mọi thay đổi",
@@ -1398,7 +1401,10 @@
       "close_others": "Đóng các tab khác",
       "open_window": "Mở thành cửa sổ mới",
       "new": "Tab mới",
-      "pinned_name": "{{title}} (đã ghim)"
+      "pinned_name": "{{title}} (đã ghim)",
+      "copy_link": "Sao chép liên kết",
+      "link_copied": "Đã sao chép liên kết",
+      "close_right": "Đóng các tab bên phải"
     },
     "updates": {
       "title": "Cập nhật",
@@ -1600,7 +1606,40 @@
     "github_actions": "Thao tác GitHub"
   },
   "channels": {
-    "breadcrumb": "Đường dẫn điều hướng"
+    "breadcrumb": "Đường dẫn điều hướng",
+    "add": "Thêm kênh nhắn tin",
+    "connect": "Kết nối",
+    "disconnect": "Ngắt kết nối",
+    "open": "Mở",
+    "normal": "Đã kết nối",
+    "waiting_message": "Đang chờ tin nhắn đầu tiên",
+    "disconnected": "Đã ngắt kết nối",
+    "find_me": "Tìm tôi trên {{platform}}",
+    "manage": "Quản lý {{platform}}",
+    "last_message": "Tin nhắn gần nhất {{time}}",
+    "ask_admin": "Hỏi quản trị viên",
+    "unavailable": "Kết nối không khả dụng",
+    "permissions_title": "Ai có thể kết nối",
+    "owner_or_admin": "Chủ sở hữu agent hoặc quản trị viên không gian làm việc",
+    "admin_only": "Chỉ quản trị viên không gian làm việc",
+    "connect_title": "Kết nối kênh nhắn tin",
+    "choose_description": "Chọn một agent và một nền tảng.",
+    "authorize_description": "Kết nối {{agent}} với {{platform}}.",
+    "agent_label": "Agent",
+    "choose_agent": "Chọn một agent",
+    "platform_label": "Nền tảng",
+    "region_label": "Khu vực",
+    "method_label": "Phương thức kết nối",
+    "feishu": "Feishu (Trung Quốc)",
+    "lark": "Lark (Quốc tế)",
+    "setup_guide": "Hướng dẫn thiết lập",
+    "connection_changed": "Kết nối này không còn khả dụng. Hãy đóng hộp thoại này và thử lại.",
+    "connect_failed": "Không kết nối được bot.",
+    "connect_success": "Đã kết nối kênh nhắn tin.",
+    "disconnect_failed": "Không ngắt kết nối được bot.",
+    "disconnect_title": "Ngắt kết nối kênh nhắn tin?",
+    "disconnect_description": "Agent này sẽ ngừng nhận tin nhắn từ {{platform}}.",
+    "agent_unavailable": "Agent không khả dụng"
   },
   "mcp_usage": {
     "agent_count_other": "Được {{count}} agent sử dụng",

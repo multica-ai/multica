@@ -103,7 +103,15 @@
     "open_in_new_window_click": "Nhấp",
     "open_in_other_window": "Đã mở trong cửa sổ khác",
     "in_other_window": "Cửa sổ khác",
-    "all_workspaces_open": "Mọi không gian làm việc đã được mở trong cửa sổ"
+    "all_workspaces_open": "Mọi không gian làm việc đã được mở trong cửa sổ",
+    "copy_link": "Sao chép liên kết",
+    "link_copied": "Đã sao chép liên kết",
+    "workspace_settings": "Cài đặt không gian làm việc",
+    "mark_all_read": "Đánh dấu tất cả là đã đọc",
+    "mark_all_read_failed": "Không đánh dấu tất cả là đã đọc được",
+    "reset_order": "Đặt lại thứ tự mặc định",
+    "copy_workspace_link": "Sao chép liên kết không gian làm việc",
+    "workspace_meta_other": "{{slug}} · {{count}} thành viên"
   },
   "bottom_bar": {
     "label": "Thanh trạng thái",
@@ -150,7 +158,8 @@
       "view_edit": "Sửa chế độ xem",
       "view_rename": "Đổi tên",
       "view_duplicate": "Nhân bản",
-      "view_delete": "Xóa chế độ xem"
+      "view_delete": "Xóa chế độ xem",
+      "new_issue_here": "Công việc mới trong dự án này"
     },
     "team": {
       "new_agent": "Agent mới",
@@ -166,7 +175,8 @@
       "members_other": "{{count}} thành viên",
       "resources": "Tài nguyên",
       "runtimes_online_other": "{{count}} đang trực tuyến",
-      "invite_member": "Mời thành viên"
+      "invite_member": "Mời thành viên",
+      "open_issue": "Mở {{identifier}}"
     },
     "autopilots": {
       "all": "Tất cả autopilot",
@@ -220,5 +230,19 @@
     "go_to_slide": "Tới slide {{index}}",
     "previous": "Trước",
     "next": "Sau"
+  },
+  "context_menu": {
+    "cut": "Cắt",
+    "copy": "Sao chép",
+    "paste": "Dán",
+    "select_all": "Chọn tất cả",
+    "add_to_dictionary": "Thêm vào từ điển",
+    "open_link": "Mở liên kết trong trình duyệt",
+    "copy_link_address": "Sao chép địa chỉ liên kết",
+    "copy_image": "Sao chép hình ảnh",
+    "copy_code": "Sao chép code",
+    "copy_table": "Sao chép bảng",
+    "copied": "Đã sao chép",
+    "copy_failed": "Không sao chép được"
   }
 }
