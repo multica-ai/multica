@@ -64,12 +64,11 @@ checksum:
   name_template: "checksums.txt"
 
 changelog:
+  use: github
+  # Only author logins should create contributor mentions, not product syntax
+  # such as @all in commit subjects. Keep every commit so all authors get credit.
+  format: '{{ .SHA }} {{ replace .Message "@" "@<!-- -->" }}{{ if .Logins }} ({{ .Logins | englishJoin }}){{ end }}'
   sort: asc
-  filters:
-    exclude:
-      - "^docs:"
-      - "^test:"
-      - "^chore:"
 
 brews:
   - name: multica
