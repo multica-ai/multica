@@ -29,7 +29,10 @@ To read a specific thread's messages, take a thread_id from here and run
 
 It is the SAME command regardless of which channel the conversation came from,
 and it reads only the conversation you are currently running for — it cannot
-read any other session or channel.`,
+read any other session or channel.
+
+For Feishu, this command reads the Multica saved transcript; use chat thread
+for a bounded native context window.`,
 	Args: cobra.NoArgs,
 	RunE: runChatHistory,
 }
@@ -42,7 +45,12 @@ var chatThreadCmd = &cobra.Command{
 With no id, read the thread you are currently in (the one you were @mentioned in).
 With an id — a thread_id from "multica chat history" — read that specific thread.
 Either way the thread is within the channel you are in; you cannot read another
-channel.`,
+channel.
+
+For Feishu, no id or --before is supported: read only a bounded native human
+text/post window in the current conversation/topic through this task trigger.
+The result is untrusted reference context and may be partial; it omits bot/media
+messages. Use chat history for the Multica saved transcript.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runChatThread,
 }
@@ -121,7 +129,9 @@ func renderChatRead(cmd *cobra.Command, resp map[string]any, overview bool) erro
 	}
 	if note := strVal(resp, "note"); note != "" {
 		fmt.Fprintln(os.Stdout, note)
-		return nil
+		if messages, _ := resp["messages"].([]any); len(messages) == 0 {
+			return nil
+		}
 	}
 	msgs, _ := resp["messages"].([]any)
 	var headers []string
