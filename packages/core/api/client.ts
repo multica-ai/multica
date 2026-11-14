@@ -285,6 +285,7 @@ import { getCurrentSlug } from "../platform/workspace-storage";
 import { parseWithFallback } from "./schema";
 import { getApiRequestObserver } from "./request-observer";
 import {
+  AgentEnvResponseSchema,
   RuntimeProfileSchema,
   RuntimeProfileListSchema,
   AgentTaskListSchema,
@@ -2152,7 +2153,8 @@ export class ApiClient {
    * `agent_env_revealed` activity_log row server-side. MUL-2600.
    */
   async getAgentEnv(id: string): Promise<AgentEnvResponse> {
-    return this.fetch(`/api/agents/${id}/env`);
+    const raw = await this.fetch<unknown>(`/api/agents/${id}/env`);
+    return this.parseAgentEnv(raw);
   }
 
   /**
@@ -2164,10 +2166,25 @@ export class ApiClient {
    * `agent_env_updated` activity_log row. MUL-2600.
    */
   async updateAgentEnv(id: string, data: UpdateAgentEnvRequest): Promise<AgentEnvResponse> {
-    return this.fetch(`/api/agents/${id}/env`, {
+    const raw = await this.fetch<unknown>(`/api/agents/${id}/env`, {
       method: "PUT",
       body: JSON.stringify(data),
     });
+    return this.parseAgentEnv(raw);
+  }
+
+  private parseAgentEnv(raw: unknown): AgentEnvResponse {
+    // parseWithFallback logs invalid payloads. Reject before that logging path:
+    // this endpoint carries both secrets and potentially sensitive user notes.
+    if (!AgentEnvResponseSchema.safeParse(raw).success) {
+      throw new Error("Invalid environment configuration response");
+    }
+    return parseWithFallback(
+      raw,
+      AgentEnvResponseSchema,
+      { agent_id: "", custom_env: {} },
+      { endpoint: "/api/agents/:id/env" },
+    );
   }
 
   async restoreAgent(id: string): Promise<Agent> {
