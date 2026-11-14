@@ -710,16 +710,11 @@ func (s *IssueWakeupService) publishSystemInbox(item db.InboxItem, issueStatus s
 	if s.Tasks == nil || s.Tasks.Bus == nil {
 		return
 	}
+	resp := inboxwriter.EventItem(item)
+	resp["issue_status"] = issueStatus
 	s.Tasks.Bus.Publish(events.Event{
 		Type: protocol.EventInboxNew, WorkspaceID: util.UUIDToString(item.WorkspaceID), ActorType: "system",
-		Payload: map[string]any{"item": map[string]any{
-			"id": util.UUIDToString(item.ID), "workspace_id": util.UUIDToString(item.WorkspaceID),
-			"recipient_type": item.RecipientType, "recipient_id": util.UUIDToString(item.RecipientID),
-			"type": item.Type, "severity": item.Severity, "issue_id": util.UUIDToPtr(item.IssueID),
-			"title": item.Title, "body": util.TextToPtr(item.Body), "read": item.Read, "archived": item.Archived,
-			"created_at": util.TimestampToString(item.CreatedAt), "actor_type": util.TextToPtr(item.ActorType),
-			"actor_id": util.UUIDToPtr(item.ActorID), "details": json.RawMessage(item.Details), "issue_status": issueStatus,
-		}},
+		Payload: map[string]any{"item": resp},
 	})
 }
 

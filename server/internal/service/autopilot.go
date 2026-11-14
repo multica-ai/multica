@@ -986,31 +986,14 @@ func (s *AutopilotService) notifyAutopilotSubscribersOnCreate(
 		if !inserted {
 			continue
 		}
+		resp := inbox.EventItem(item)
+		resp["issue_status"] = issue.Status
 		s.Bus.Publish(events.Event{
 			Type:        protocol.EventInboxNew,
 			WorkspaceID: util.UUIDToString(ap.WorkspaceID),
 			ActorType:   "agent",
 			ActorID:     util.UUIDToString(leaderID),
-			Payload: map[string]any{
-				"item": map[string]any{
-					"id":             util.UUIDToString(item.ID),
-					"workspace_id":   util.UUIDToString(item.WorkspaceID),
-					"recipient_type": item.RecipientType,
-					"recipient_id":   util.UUIDToString(item.RecipientID),
-					"type":           item.Type,
-					"severity":       item.Severity,
-					"issue_id":       util.UUIDToPtr(item.IssueID),
-					"issue_status":   issue.Status,
-					"title":          item.Title,
-					"body":           util.TextToPtr(item.Body),
-					"read":           item.Read,
-					"archived":       item.Archived,
-					"created_at":     util.TimestampToString(item.CreatedAt),
-					"actor_type":     util.TextToPtr(item.ActorType),
-					"actor_id":       util.UUIDToPtr(item.ActorID),
-					"details":        json.RawMessage(item.Details),
-				},
-			},
+			Payload:     map[string]any{"item": resp},
 		})
 	}
 }

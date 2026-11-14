@@ -183,19 +183,13 @@ func (s *AutopilotService) publishAutopilotQuotaInboxItems(items []db.InboxItem)
 		return
 	}
 	for _, item := range items {
+		resp := inbox.EventItem(item)
+		resp["issue_status"] = nil
+		resp["issue_priority"] = nil
 		s.Bus.Publish(events.Event{
 			Type: protocol.EventInboxNew, WorkspaceID: util.UUIDToString(item.WorkspaceID),
 			ActorType: "system",
-			Payload: map[string]any{"item": map[string]any{
-				"id": util.UUIDToString(item.ID), "workspace_id": util.UUIDToString(item.WorkspaceID),
-				"recipient_type": item.RecipientType, "recipient_id": util.UUIDToString(item.RecipientID),
-				"type": item.Type, "severity": item.Severity, "issue_id": nil,
-				"issue_status": nil, "issue_priority": nil,
-				"title": item.Title, "body": util.TextToPtr(item.Body), "read": item.Read,
-				"archived": item.Archived, "created_at": util.TimestampToString(item.CreatedAt),
-				"actor_type": util.TextToPtr(item.ActorType), "actor_id": nil,
-				"details": json.RawMessage(item.Details),
-			}},
+			Payload:   map[string]any{"item": resp},
 		})
 	}
 }

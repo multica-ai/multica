@@ -580,7 +580,7 @@ func notifyRunCancelled(ctx context.Context, queries *db.Queries, bus *events.Bu
 	if !inserted {
 		return
 	}
-	resp := inboxItemToResponse(item)
+	resp := inbox.EventItem(item)
 	resp["issue_status"] = issue.Status
 	bus.Publish(events.Event{
 		Type:        protocol.EventInboxNew,
@@ -799,7 +799,7 @@ func createMemberInboxItem(
 	if !inserted {
 		return false
 	}
-	resp := inboxItemToResponse(item)
+	resp := inbox.EventItem(item)
 	resp["issue_status"] = issueStatus
 	bus.Publish(events.Event{
 		Type:        protocol.EventInboxNew,
@@ -983,7 +983,7 @@ func notifyDirect(
 		return
 	}
 
-	resp := inboxItemToResponse(item)
+	resp := inbox.EventItem(item)
 	resp["issue_status"] = issueStatus
 	bus.Publish(events.Event{
 		Type:        protocol.EventInboxNew,
@@ -1106,7 +1106,7 @@ func notifyMentionedMembers(
 		if !inserted {
 			continue
 		}
-		resp := inboxItemToResponse(item)
+		resp := inbox.EventItem(item)
 		resp["issue_status"] = issueStatus
 		bus.Publish(events.Event{
 			Type:        protocol.EventInboxNew,
@@ -1575,28 +1575,4 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			issue.Title, "",
 			details)
 	})
-}
-
-// inboxItemToResponse converts a db.InboxItem into a map suitable for
-// JSON-serializable event payloads (mirrors handler.inboxToResponse fields).
-func inboxItemToResponse(item db.InboxItem) map[string]any {
-	return map[string]any{
-		"id":             util.UUIDToString(item.ID),
-		"workspace_id":   util.UUIDToString(item.WorkspaceID),
-		"recipient_type": item.RecipientType,
-		"recipient_id":   util.UUIDToString(item.RecipientID),
-		"type":           item.Type,
-		"severity":       item.Severity,
-		"issue_id":       util.UUIDToPtr(item.IssueID),
-		"title":          item.Title,
-		"body":           util.TextToPtr(item.Body),
-		"read":           item.Read,
-		"archived":       item.Archived,
-		"created_at":     util.TimestampToString(item.CreatedAt),
-		"actor_type":     util.TextToPtr(item.ActorType),
-		"actor_id":       util.UUIDToPtr(item.ActorID),
-		"details":        json.RawMessage(item.Details),
-		"section":        inbox.EffectiveSection(item.Section, item.Type, item.Read),
-		"snoozed_until":  util.TimestampToPtr(item.SnoozedUntil),
-	}
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/inbox"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -210,6 +211,9 @@ func TestNotification_ServiceMembership(t *testing.T) {
 						eventCount++
 						if item["type"] != source {
 							t.Errorf("event type = %v, want %s", item["type"], source)
+						}
+						if want := inbox.DefaultSection(source); item["section"] != want {
+							t.Errorf("event section = %v, want %s", item["section"], want)
 						}
 					}
 				})

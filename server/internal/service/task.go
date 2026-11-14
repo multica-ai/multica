@@ -6894,29 +6894,14 @@ func (s *TaskService) exhaustDelegatedFailureRecovery(ctx context.Context, targe
 		})
 	}
 	if inboxCreated && s.Bus != nil {
+		item := inbox.EventItem(exhaustedInbox)
+		item["issue_status"] = target.issue.Status
 		s.Bus.Publish(events.Event{
 			Type:        protocol.EventInboxNew,
 			WorkspaceID: util.UUIDToString(target.issue.WorkspaceID),
 			ActorType:   "system",
 			ActorID:     "",
-			Payload: map[string]any{"item": map[string]any{
-				"id":             util.UUIDToString(exhaustedInbox.ID),
-				"workspace_id":   util.UUIDToString(exhaustedInbox.WorkspaceID),
-				"recipient_type": exhaustedInbox.RecipientType,
-				"recipient_id":   util.UUIDToString(exhaustedInbox.RecipientID),
-				"type":           exhaustedInbox.Type,
-				"severity":       exhaustedInbox.Severity,
-				"issue_id":       util.UUIDToPtr(exhaustedInbox.IssueID),
-				"title":          exhaustedInbox.Title,
-				"body":           util.TextToPtr(exhaustedInbox.Body),
-				"read":           exhaustedInbox.Read,
-				"archived":       exhaustedInbox.Archived,
-				"created_at":     util.TimestampToString(exhaustedInbox.CreatedAt),
-				"actor_type":     util.TextToPtr(exhaustedInbox.ActorType),
-				"actor_id":       util.UUIDToPtr(exhaustedInbox.ActorID),
-				"details":        json.RawMessage(exhaustedInbox.Details),
-				"issue_status":   target.issue.Status,
-			}},
+			Payload:     map[string]any{"item": item},
 		})
 	}
 	return created, nil
@@ -8457,24 +8442,8 @@ func (s *TaskService) writeQuickCreateOutcomeInbox(ctx context.Context, task db.
 // updates immediately. Mirrors the payload shape used by the other inbox
 // listeners (notification_listeners.go).
 func (s *TaskService) publishQuickCreateInbox(item db.InboxItem, workspaceID, agentID, issueStatus string) {
-	resp := map[string]any{
-		"id":             util.UUIDToString(item.ID),
-		"workspace_id":   util.UUIDToString(item.WorkspaceID),
-		"recipient_type": item.RecipientType,
-		"recipient_id":   util.UUIDToString(item.RecipientID),
-		"type":           item.Type,
-		"severity":       item.Severity,
-		"issue_id":       util.UUIDToPtr(item.IssueID),
-		"title":          item.Title,
-		"body":           util.TextToPtr(item.Body),
-		"read":           item.Read,
-		"archived":       item.Archived,
-		"created_at":     util.TimestampToString(item.CreatedAt),
-		"actor_type":     util.TextToPtr(item.ActorType),
-		"actor_id":       util.UUIDToPtr(item.ActorID),
-		"details":        json.RawMessage(item.Details),
-		"issue_status":   issueStatus,
-	}
+	resp := inbox.EventItem(item)
+	resp["issue_status"] = issueStatus
 	s.Bus.Publish(events.Event{
 		Type:        protocol.EventInboxNew,
 		WorkspaceID: workspaceID,
