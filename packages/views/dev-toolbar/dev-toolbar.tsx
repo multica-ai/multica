@@ -66,6 +66,7 @@ const RESERVE_BAR_SPACE_CSS = (["svh", "dvh", "vh"] as const)
 const SYNC_DOT_CLASS: Record<WSStatus, string> = {
   connected: "bg-success",
   connecting: "bg-warning",
+  disconnected: "bg-destructive",
   reconnecting: "bg-destructive",
   offline: "bg-muted-foreground/50",
 };

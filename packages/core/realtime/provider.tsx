@@ -34,6 +34,7 @@ interface WSContextValue {
   onReconnect: (callback: () => void) => () => void;
   subscribeStatus: (listener: () => void) => () => void;
   getStatus: () => WSStatus;
+  reconnect: () => void;
 }
 
 const WSContext = createContext<WSContextValue | null>(null);
@@ -130,6 +131,19 @@ export function WSProvider({
     identityOS,
   ]);
 
+  // A tab returning from the background and a network coming back online are
+  // when a half-open socket is most likely to be discovered.
+  useEffect(() => {
+    if (!wsClient) return;
+    const probe = () => wsClient.checkHealth();
+    document.addEventListener("visibilitychange", probe);
+    window.addEventListener("online", probe);
+    return () => {
+      document.removeEventListener("visibilitychange", probe);
+      window.removeEventListener("online", probe);
+    };
+  }, [wsClient]);
+
   const stores: RealtimeSyncStores = { authStore };
 
   // Centralized WS -> store sync (uses state so it re-subscribes when WS changes)
@@ -167,9 +181,19 @@ export function WSProvider({
     [wsClient],
   );
 
+  const reconnect = useCallback(() => {
+    wsClient?.reconnect();
+  }, [wsClient]);
+
   return (
     <WSContext.Provider
-      value={{ subscribe, onReconnect: onReconnectCb, subscribeStatus, getStatus }}
+      value={{
+        subscribe,
+        onReconnect: onReconnectCb,
+        subscribeStatus,
+        getStatus,
+        reconnect,
+      }}
     >
       {children}
     </WSContext.Provider>
