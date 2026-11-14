@@ -69,7 +69,7 @@ settings:
       - message.groups
       - message.mpim
   interactivity:
-    is_enabled: false
+    is_enabled: true
   org_deploy_enabled: false
   socket_mode_enabled: true
   token_rotation_enabled: false
@@ -178,6 +178,10 @@ In a DM with the Bot, `/clear` keeps the current Multica Chat and resets only th
 
 In a channel or thread, send `@Multica /clear [message]` in the target thread so Multica can apply the boundary to the correct conversation.
 
+### Retry a failed run
+
+When a run started from Slack fails, the Bot posts the error in the same thread with **Retry** and **Open in Multica** buttons. **Retry** reruns the failed turn as the member who clicked it; that person must be a linked workspace member. After a retry, the card names who retried it and drops its buttons. A card stops accepting retries once the conversation has a newer turn.
+
 ## Manage connections
 
 Open **Settings → Messaging** to see connected agents grouped by platform. Select an agent to open its **Messaging** section. Workspace owners and admins can disconnect the Bot from its management menu there.
@@ -210,6 +214,7 @@ Account binding links use `MULTICA_APP_URL`, falling back to `FRONTEND_ORIGIN` w
 - **No reply in a channel**: confirm the Bot has been invited to the channel and the message @-mentions it.
 - **`/issue`, `/new`, or `/clear` doesn't exist**: confirm the manifest includes all three slash commands and the `commands` scope, then reinstall the app. If Slack reports that `/new` or `/clear` is already taken, use the `@Multica` message form or resolve the workspace-level command collision first.
 - **Files don't reach the agent**: confirm the manifest includes `files:read` and that the app was reinstalled after the scope was added, and check the file is 20 MiB or smaller.
+- **The Retry button does nothing**: confirm the manifest sets `settings.interactivity.is_enabled` to `true`. With Socket Mode, no Request URL is needed.
 - **The Bot doesn't run**: check whether the agent is archived and whether the [runtime](/daemon-runtimes) it uses is online.
 
 ## Next steps

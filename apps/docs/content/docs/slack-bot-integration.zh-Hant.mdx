@@ -69,7 +69,7 @@ settings:
       - message.groups
       - message.mpim
   interactivity:
-    is_enabled: false
+    is_enabled: true
   org_deploy_enabled: false
   socket_mode_enabled: true
   token_rotation_enabled: false
@@ -174,6 +174,10 @@ Bot 只會響應明確 @ 它的頻道訊息。執行時，它會在權限允許�
 
 在頻道或 thread 中，請在目標 thread 裡傳送 `@Multica /clear [訊息]`，讓 Multica 把邊界應用到正確的會話。
 
+### 重試失敗的執行
+
+從 Slack 發起的執行失敗時，Bot 會在同一個 thread 裡發出錯誤訊息，並附帶 **Retry** 和 **Open in Multica** 按鈕。**Retry** 以點擊者的身分重新執行失敗的這一輪，點擊者必須是已綁定帳號的 workspace 成員。重試後，卡片會顯示是誰重試的，並移除按鈕。對話出現更新的一輪後，舊卡片不再接受重試。
+
 ## 管理連線
 
 開啟 **設定 → 訊息渠道**，按平台檢視已連接的 AI 代理。點選 AI 代理，進入其詳細頁面的 **訊息渠道**。工作區 owner/admin 可以在這裡開啟 Bot 的管理選單，斷開連線。
@@ -206,6 +210,7 @@ openssl rand -base64 32
 - **頻道里沒有回覆**：確認 Bot 已被邀請進頻道，並在訊息中 @ 了它。
 - **`/issue`、`/new` 或 `/clear` 不存在**：確認 manifest 包含這三個 slash command 和 `commands` scope，隨後重新安裝 app。如果 Slack 提示 `/new` 或 `/clear` 已被佔用，請改用 `@Multica` 訊息形式，或先解決 workspace 級命令衝突。
 - **檔案沒有送達 AI 代理**：確認 manifest 裡包含 `files:read`，並且在新增該權限後重新安裝過應用，同時確認檔案不超過 20 MiB。
+- **點擊 Retry 沒有反應**：確認 manifest 中 `settings.interactivity.is_enabled` 為 `true`。使用 Socket Mode 時不需要 Request URL。
 - **Bot 不執行**：檢查 AI 代理是否已歸檔，以及它使用的[執行時](/daemon-runtimes)是否線上。
 
 ## 接下來

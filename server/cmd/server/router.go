@@ -843,7 +843,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				)
 			}
 			channelRouter.Register(slack.TypeSlack, slack.NewSlackResolverSet(queries, pool, slackReplier, slackTyping, slackMedia))
-			slack.NewOutbound(queries, box.Open, slog.Default()).Register(bus)
+			slack.NewOutbound(queries, box.Open, appURLFromEnv(), slog.Default()).Register(bus)
 
 			// On-demand history reader behind the unified `multica chat history`
 			// command (MUL-3871): pull the session's Slack conversation when the
@@ -858,6 +858,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				Queries: queries,
 				Tasks:   h.TaskService,
 				Control: slack.NewSlackDMControlStarter(queries, pool, h.TaskService, h),
+				Retry:   h.TaskService,
 				Binding: slackBindingSvc,
 				AppURL:  appURLFromEnv(),
 				Logger:  slog.Default(),

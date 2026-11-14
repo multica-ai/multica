@@ -69,7 +69,7 @@ settings:
       - message.groups
       - message.mpim
   interactivity:
-    is_enabled: false
+    is_enabled: true
   org_deploy_enabled: false
   socket_mode_enabled: true
   token_rotation_enabled: false
@@ -174,6 +174,10 @@ Bot 只会响应明确 @ 它的频道消息。执行时，它会在权限允许�
 
 在频道或 thread 中，请在目标 thread 里发送 `@Multica /clear [消息]`，让 Multica 把边界应用到正确的会话。
 
+### 重试失败的运行
+
+从 Slack 发起的运行失败时，Bot 会在同一个 thread 里发出错误信息，并附带 **Retry** 和 **Open in Multica** 按钮。**Retry** 以点击者的身份重新运行失败的这一轮，点击者必须是已绑定账号的 workspace 成员。重试后，卡片会显示是谁重试的，并移除按钮。对话出现更新的一轮后，旧卡片不再接受重试。
+
 ## 管理连接
 
 打开 **设置 → 消息渠道**，按平台查看已连接的智能体。点击智能体，进入其详情页的 **消息渠道**。工作区 owner/admin 可以在这里打开 Bot 的管理菜单，断开连接。
@@ -206,6 +210,7 @@ openssl rand -base64 32
 - **频道里没有回复**：确认 Bot 已被邀请进频道，并在消息中 @ 了它。
 - **`/issue`、`/new` 或 `/clear` 不存在**：确认 manifest 包含这三个 slash command 和 `commands` scope，随后重新安装 app。如果 Slack 提示 `/new` 或 `/clear` 已被占用，请改用 `@Multica` 消息形式，或先解决 workspace 级命令冲突。
 - **文件没有送达智能体**：确认 manifest 里包含 `files:read`，并且在添加该权限后重新安装过应用，同时确认文件不超过 20 MiB。
+- **点击 Retry 没有反应**：确认 manifest 中 `settings.interactivity.is_enabled` 为 `true`。使用 Socket Mode 时不需要 Request URL。
 - **Bot 不执行**：检查智能体是否已归档，以及它使用的[运行时](/daemon-runtimes)是否在线。
 
 ## 接下来
