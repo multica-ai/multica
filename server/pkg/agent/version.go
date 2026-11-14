@@ -153,6 +153,9 @@ func SupportsTaskSupplement(provider, version string) bool {
 		// into the running ACP turn (queued, then injected at the next
 		// tool/message boundary of the same session/prompt).
 		minimum = "2.33.0"
+	case "opencode":
+		// 2.2.7 is the oldest verified build advertising _session/steering.
+		minimum = "2.2.7"
 	case "cursor":
 		// 2026.10.14 is the oldest build verified to forward postToolUse
 		// additional_context into the model turn in --print mode.
