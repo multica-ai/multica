@@ -60,6 +60,7 @@ import { chatActivity } from "./chat-bar-sessions";
 import { ChatResizeHandles } from "./chat-resize-handles";
 import { useChatContextItems } from "./use-chat-context-items";
 import { useChatResize } from "./use-chat-resize";
+import { useChatExpandShortcut } from "./use-chat-expand-shortcut";
 import { useVisualViewportKeyboard } from "./use-visual-viewport-keyboard";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { CHAT_WINDOW_INSET, useChatWindowAnchor } from "./use-chat-window-anchor";
@@ -160,6 +161,8 @@ export function ChatWindow() {
   // "window" is all chrome and no content, so the panel goes full-screen
   // (Lark/IM-style) and the resize/expand affordances disappear with it.
   const isMobile = useIsMobile();
+  // Phones get a full-screen panel with no expand button, so no chord either.
+  useChatExpandShortcut(!isMobile, toggleExpand);
 
   // `@container`: the window is user-resizable from 360px to 90% of the
   // viewport, so the chat body's gutter (CHAT_GUTTER) has to key off the
@@ -298,7 +301,10 @@ export function ChatWindow() {
               >
                 {showRestore ? <Minimize2 /> : <Maximize2 />}
               </TooltipTrigger>
-              <TooltipContent side="top">{expandLabel}</TooltipContent>
+              <TooltipContent side="top">
+                {expandLabel}
+                <ActionShortcutKeycaps action="toggleChatExpand" />
+              </TooltipContent>
             </Tooltip>
           )}
           <Tooltip>

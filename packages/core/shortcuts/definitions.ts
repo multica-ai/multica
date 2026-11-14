@@ -12,6 +12,7 @@ export type ShortcutActionId =
   | "toggleRightSidebar"
   | "toggleChat"
   | "newChat"
+  | "toggleChatExpand"
   | "findInIssue"
   | "archiveInboxItem"
   | "send"
@@ -102,6 +103,10 @@ export const SHORTCUT_ACTIONS: readonly ShortcutActionDefinition[] = [
     defaultShortcut: createShortcutChord("J", { primary: true, shift: true }),
     allowInEditable: true,
   },
+  // The chat window's expand / restore button. No default: the natural
+  // Alt+Mod+J is Chrome's JavaScript console on macOS. Handled by the window
+  // itself, which alone knows whether it already fills its bounds.
+  { id: "toggleChatExpand", category: "general", defaultShortcut: null, allowInEditable: true },
   { id: "findInIssue", category: "general", defaultShortcut: primary("F"), allowInEditable: true },
   {
     id: "archiveInboxItem",
