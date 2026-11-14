@@ -11,10 +11,14 @@ export const projectKeys = {
     [...projectKeys.detail(wsId, id), "subscription"] as const,
 };
 
+// The cached list includes archived projects: it doubles as the id → project
+// lookup for every issue row, breadcrumb and filter chip, and an issue in an
+// archived project still needs its project's name. Surfaces that offer a
+// project as a choice filter archived ones out (see isProjectArchived).
 export function projectListOptions(wsId: string) {
   return queryOptions({
     queryKey: projectKeys.list(wsId),
-    queryFn: () => api.listProjects(),
+    queryFn: () => api.listProjects({ include_archived: true }),
     select: (data) => data.projects,
   });
 }
