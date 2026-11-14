@@ -95,6 +95,10 @@ function Get-LatestVersion {
     if ($env:MULTICA_RELEASE_DOWNLOAD_BASE_URL) {
         Write-Fail "MULTICA_CLI_VERSION is required with MULTICA_RELEASE_DOWNLOAD_BASE_URL."
     }
+    return Get-ServerLatestVersion
+}
+
+function Get-ServerLatestVersion {
     try {
         $release = Invoke-RestMethod -Uri "https://api.github.com/repos/multica-ai/multica/releases/latest" -ErrorAction Stop
         return $release.tag_name
@@ -108,7 +112,7 @@ function Get-SelfHostRef {
         return $env:MULTICA_SELFHOST_REF
     }
 
-    $latest = Get-LatestVersion
+    $latest = Get-ServerLatestVersion
     if ($latest) {
         return $latest
     }
@@ -227,6 +231,12 @@ function Get-WindowsCliArch {
 function Get-InstalledCliVersion {
     try {
         $firstLine = multica version 2>$null | Select-Object -First 1
+        if ($env:MULTICA_CLI_VERSION) {
+            if ("$firstLine" -match '^\s*multica\s+(\S+)') {
+                return $Matches[1]
+            }
+            return $null
+        }
         if ("$firstLine" -match '\b(v?\d+(?:\.\d+)+)\b') {
             $version = $Matches[1]
             if ($version -notlike 'v*') {
@@ -336,7 +346,21 @@ function Install-CliBinary {
     Remove-Item $tmpDir -Recurse -Force
 
     Add-ToUserPath $binDir
+    Assert-CliPin (Join-Path $binDir "multica.exe")
     Write-Ok "Multica CLI installed to $binDir\multica.exe"
+}
+
+function Assert-CliPin {
+    param([string]$InstalledPath)
+    if (-not $env:MULTICA_CLI_VERSION) { return }
+    $version = Get-InstalledCliVersion
+    if (($version -replace '^v', '') -ne ($env:MULTICA_CLI_VERSION.Trim() -replace '^v', '')) {
+        $active = Get-Command multica -ErrorAction SilentlyContinue | Select-Object -First 1
+        $activePath = if ($active -and $active.Source) { $active.Source }
+            elseif ($active) { "$($active.CommandType):multica" }
+            else { "multica (not found)" }
+        Write-Fail "Pinned CLI was installed to $InstalledPath, but $activePath still reports $version. Resolve any shadowing command with Get-Command multica -All, put $(Split-Path $InstalledPath -Parent) first in PATH, and re-run the installer."
+    }
 }
 
 function Add-ToUserPath {

@@ -512,6 +512,9 @@ docker compose -f docker-compose.selfhost.yml up -d
 ## Internal CLI release mirrors
 
 An internal file store can serve CLI releases without a GitHub-compatible API.
+Use installer scripts and CLI binaries with file-mirror support; changing server
+configuration does not upgrade an older daemon. Upgrade those daemons with the
+mirrored installer first.
 Mirror each required release under its tag, keeping the original filenames and
 `checksums.txt` from the release:
 
@@ -541,7 +544,11 @@ $env:MULTICA_RELEASE_DOWNLOAD_BASE_URL = "https://mirror.example/multica"
 .\install.ps1
 ```
 
-A pinned install bypasses Homebrew. With a release mirror, both installers verify
+A pinned install bypasses Homebrew and checks the full version reported by the
+active `multica` command. If another installation shadows the downloaded binary,
+it fails with the active and installed paths so you can correct `PATH`. A CLI pin
+does not select the server checkout; use `MULTICA_SELFHOST_REF` to pin that
+separately. With a release mirror, both installers verify
 SHA-256 against the mirrored manifest before replacing the CLI. Missing or
 mismatched checksums fail the install. With no overrides, installation keeps its
 existing release source and behavior.

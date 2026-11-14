@@ -321,7 +321,10 @@ $source = Get-Content -Raw $env:MULTICA_TEST_INSTALLER
 Invoke-Expression $source.Substring(0, $source.IndexOf("# Entry point"))
 function Get-WindowsCliArch { return "amd64" }
 function Add-ToUserPath { param([string]$Dir) }
-function Invoke-RestMethod { throw "GitHub release API must not be called" }
+function Invoke-RestMethod {
+    if ($env:MULTICA_TEST_SCENARIO -eq "server_ref") { return @{tag_name="v7.0.0"} }
+    throw "GitHub release API must not be called"
+}
 function Invoke-WebRequest {
     param([string]$Uri, [string]$OutFile, [switch]$UseBasicParsing, [string]$ErrorAction)
     Add-Content -Path $env:MULTICA_TEST_REQUESTS -Value $Uri
@@ -337,16 +340,32 @@ function Invoke-WebRequest {
         default { throw "Unexpected download URL: $Uri" }
     }
 }
-if ($env:MULTICA_TEST_SCENARIO -eq "existing_newer") {
-    function Test-CommandExists { param([string]$Name) return $Name -eq "multica" }
-    function Get-InstalledCliVersion { return "v9.9.9" }
+if ($env:MULTICA_TEST_SCENARIO -eq "server_ref") {
+    Write-Host "SERVER_REF=$(Get-SelfHostRef)"
+    $env:MULTICA_CLI_VERSION = ""
+    $env:MULTICA_RELEASE_DOWNLOAD_BASE_URL = ""
+    Write-Host "DEFAULT_CLI=$(Get-LatestVersion)"
+    exit 0
+}
+function multica {
+    if ($args[0] -ne "version") { throw "Only the fake version command is allowed" }
+    $installed = Join-Path $env:USERPROFILE ".multica/bin/multica.exe"
+    $version = if ($env:MULTICA_TEST_SCENARIO -eq "shadowed") { "v0.3.1" }
+        elseif (Test-Path $installed) { "v0.3.2" }
+        elseif ($env:MULTICA_TEST_SCENARIO -eq "source_dev") { "v0.3.2-19-gabcdef" }
+        else { "v9.9.9" }
+    return "multica $version (commit: fixture)"
+}
+if ($env:MULTICA_TEST_SCENARIO -in @("existing_newer", "source_dev", "shadowed")) {
     Install-Cli
 } else {
     Install-CliBinary
 }
+Write-Host "ACTIVE_CLI=$(((multica version) -split '\s+')[1])"
 '@ | Set-Content -Path $mirrorRunner -Encoding UTF8
 try {
-    foreach ($scenario in @("valid", "existing_newer", "wrong_checksum", "missing_checksum", "wrong_filename", "missing_manifest", "missing_pin")) {
+    foreach ($scenario in @("valid", "existing_newer", "source_dev", "shadowed", "server_ref", "wrong_checksum", "missing_checksum", "wrong_filename", "missing_manifest", "missing_pin")) {
+        if ($env:MULTICA_TEST_MIRROR_CASE -and $env:MULTICA_TEST_MIRROR_CASE -ne $scenario) { continue }
         $caseDir = Join-Path $mirrorRoot $scenario
         $profileDir = Join-Path $caseDir "profile"
         New-Item -ItemType Directory -Path $profileDir -Force | Out-Null
@@ -383,10 +402,17 @@ try {
         $stderr = $process.StandardError.ReadToEnd()
         $process.WaitForExit()
         $installed = Join-Path $profileDir ".multica/bin/multica.exe"
-        if ($scenario -in @("valid", "existing_newer")) {
+        if ($scenario -eq "server_ref") {
+            if ($process.ExitCode -ne 0 -or ($stdout -notmatch "SERVER_REF=v7.0.0" -or $stdout -notmatch "DEFAULT_CLI=v7.0.0")) { Fail-Test "CLI pin changed the server ref: $stdout $stderr" }
+            continue
+        }
+        if ($scenario -in @("valid", "existing_newer", "source_dev")) {
             if ($process.ExitCode -ne 0 -or -not (Test-Path $installed)) { Fail-Test "mirror install failed: $stdout $stderr" }
             if ((Get-FileHash $installed).Hash -ne (Get-FileHash $payload).Hash) { Fail-Test "mirror installed wrong payload" }
+            if ($stdout -notmatch '(?m)^ACTIVE_CLI=v0\.3\.2\r?$') { Fail-Test "active CLI did not reach pin: $stdout" }
             if (@(Get-Content $requests).Count -ne 2) { Fail-Test "expected exactly archive + checksum requests" }
+        } elseif ($scenario -eq "shadowed") {
+            if ($process.ExitCode -eq 0) { Fail-Test "shadowed CLI was reported as upgraded: $stdout $stderr" }
         } else {
             if ($process.ExitCode -eq 0 -or (Test-Path $installed)) { Fail-Test "unsafe mirror $scenario install succeeded: $stdout $stderr" }
             if ($scenario -eq "missing_pin" -and (Test-Path $requests)) { Fail-Test "missing pin attempted a download" }

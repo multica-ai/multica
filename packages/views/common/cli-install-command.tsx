@@ -61,6 +61,8 @@ export function CliInstallCommand({
 }) {
   const unix = useConfigStore((state) => state.cliInstallCommandUnix);
   const windows = useConfigStore((state) => state.cliInstallCommandWindows);
+  const configStatus = useConfigStore((state) => state.daemonConfigStatus);
+  if (configStatus !== "ready") return null;
   const commands = {
     macosLinux: unix || CLI_INSTALL_COMMANDS.macosLinux,
     windows: windows || CLI_INSTALL_COMMANDS.windows,

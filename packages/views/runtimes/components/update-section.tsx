@@ -137,8 +137,8 @@ export function UpdateSection({
     let active = true;
     setLatestVersion(null);
     if (configStatus !== "ready") return;
-    if (configuredVersion) {
-      setLatestVersion(parseReleaseVersion(configuredVersion) ? configuredVersion : null);
+    if (configuredVersion !== "") {
+      setLatestVersion(typeof configuredVersion === "string" && parseReleaseVersion(configuredVersion) ? configuredVersion : null);
       return;
     }
     fetchLatestVersion().then((version) => {

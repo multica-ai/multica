@@ -1039,7 +1039,7 @@ describe("ApiClient schema fallback", () => {
       expect(config.daemon_setup_target).toBe(target);
     });
 
-    it("drops malformed public CLI config fields without discarding other config", async () => {
+    it("preserves an invalid supplied CLI pin without discarding other config", async () => {
       stubFetchJson({
         cdn_domain: "cdn.example.com",
         cli_install_command_unix: {},
@@ -1050,7 +1050,7 @@ describe("ApiClient schema fallback", () => {
       expect(config.cdn_domain).toBe("cdn.example.com");
       expect(config.cli_install_command_unix).toBeUndefined();
       expect(config.cli_install_command_windows).toBeUndefined();
-      expect(config.cli_latest_version).toBeUndefined();
+      expect(config.cli_latest_version).toBeNull();
     });
 
     it("drops malformed daemon setup URLs instead of throwing", async () => {

@@ -211,7 +211,18 @@ install_cli_binary() {
   fi
 
   rm -rf "$tmp_dir"
+  verify_cli_pin "$bin_dir/multica"
   ok "Multica CLI installed to $bin_dir/multica"
+}
+
+verify_cli_pin() {
+  [ -n "${MULTICA_CLI_VERSION:-}" ] || return 0
+  local installed="$1" active version
+  active=$(command -v multica || true)
+  version=$(multica version 2>/dev/null | awk 'NR==1{print $2}' || true)
+  if [ "${version#v}" != "${MULTICA_CLI_VERSION#v}" ]; then
+    fail "Pinned CLI was installed to $installed, but ${active:-multica (not found)} still reports ${version:-unknown}. Put $(dirname "$installed") first in PATH and re-run the installer."
+  fi
 }
 
 add_to_path() {
@@ -235,6 +246,11 @@ get_latest_version() {
   if [ -n "${MULTICA_RELEASE_DOWNLOAD_BASE_URL:-}" ]; then
     fail "MULTICA_CLI_VERSION is required with MULTICA_RELEASE_DOWNLOAD_BASE_URL."
   fi
+  get_server_latest_version
+}
+
+get_server_latest_version() {
+  # Server provisioning selects its own ref, independently of the CLI pin.
   # grep exits 1 when no match; use `|| true` to avoid triggering pipefail
   curl -sI "$REPO_WEB_URL/releases/latest" 2>/dev/null | grep -i '^location:' | sed 's/.*tag\///' | tr -d '\r\n' || true
 }
@@ -246,7 +262,7 @@ get_selfhost_ref() {
   fi
 
   local latest
-  latest=$(get_latest_version)
+  latest=$(get_server_latest_version)
   if [ -n "$latest" ]; then
     printf '%s' "$latest"
     return

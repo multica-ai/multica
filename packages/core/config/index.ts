@@ -5,11 +5,11 @@ import type { DaemonConfigStatus, DaemonSetupTarget } from "../runtimes/commands
 interface ConfigState {
   cliInstallCommandUnix: string;
   cliInstallCommandWindows: string;
-  cliLatestVersion: string;
+  cliLatestVersion: string | null;
   setCliReleaseConfig: (config: {
     installCommandUnix?: string;
     installCommandWindows?: string;
-    latestVersion?: string;
+    latestVersion?: string | null;
   }) => void;
   cdnDomain: string;
   attachmentPublicUrl: string;

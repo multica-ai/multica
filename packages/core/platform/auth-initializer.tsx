@@ -58,6 +58,7 @@ export function AuthInitializer({
     if (configRequestRef.current) return configRequestRef.current;
 
     configStore.getState().setDaemonConfigStatus("loading");
+    configStore.getState().setCliReleaseConfig({});
     const request = getApi()
       .getConfig()
       .then((cfg) => {

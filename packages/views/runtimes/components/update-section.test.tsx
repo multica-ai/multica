@@ -1,3 +1,4 @@
+import { ApiClient } from "@multica/core/api/client";
 import { configStore } from "@multica/core/config";
 // @vitest-environment jsdom
 
@@ -219,4 +220,16 @@ it("keeps the deployment pin when a late GitHub response arrives", async () => {
   }));
   expect(screen.getByText("v9.8.7")).toBeInTheDocument();
   expect(screen.queryByText("v0.5.0")).not.toBeInTheDocument();
+});
+
+it("does not contact GitHub when the API supplies a malformed non-string pin", async () => {
+  vi.spyOn(Date, "now").mockReturnValue(Date.now() + 2_000_000_000_000);
+  const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({cli_latest_version: []})));
+  vi.stubGlobal("fetch",fetch);
+  const cfg = await new ApiClient("https://api.example.test").getConfig();
+  configStore.getState().setCliReleaseConfig({latestVersion:cfg.cli_latest_version});
+  fetch.mockReset().mockRejectedValue(new Error("Public GitHub lookup is forbidden"));
+  renderSection({runtimeId: "runtime-1"});
+  expect(fetch).not.toHaveBeenCalled();
+  expect(screen.queryByRole("button",{name:"Update"})).not.toBeInTheDocument();
 });

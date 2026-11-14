@@ -591,12 +591,18 @@ STUB
 
 test_file_mirror_install() {
   local scenario tmp code
-  for scenario in new existing wrong_checksum missing_checksum missing_pin; do
+  for scenario in new existing shadowed wrong_checksum missing_checksum missing_pin; do
+    if [ -n "${MULTICA_TEST_MIRROR_CASE:-}" ] && [ "$MULTICA_TEST_MIRROR_CASE" != "$scenario" ]; then continue; fi
     tmp="$(mktemp -d)"
     _setup_sandbox "$tmp"
     if [ "$scenario" = existing ]; then
       cp "$tmp/payload/multica" "$tmp/install-bin/multica"
       sed 's/0.3.2/0.3.1/' "$tmp/payload/multica" > "$tmp/install-bin/multica"
+    fi
+    if [ "$scenario" = shadowed ]; then
+      mkdir -p "$tmp/old-bin"
+      sed 's/0.3.2/0.3.1/' "$tmp/payload/multica" > "$tmp/old-bin/multica"
+      chmod +x "$tmp/old-bin/multica"
     fi
     cat > "$tmp/stub-bin/brew" <<'STUB'
 #!/usr/bin/env bash
@@ -634,7 +640,7 @@ esac
 STUB
     chmod +x "$tmp/stub-bin/curl"
     code=0
-    PATH="$tmp/stub-bin:$tmp/install-bin:/usr/bin:/bin" \
+    PATH="$tmp/stub-bin:$tmp/old-bin:$tmp/install-bin:/usr/bin:/bin" \
       MULTICA_BIN_DIR="$tmp/install-bin" \
       MULTICA_TEST_ARCHIVE="$tmp/multica.tar.gz" \
       MULTICA_TEST_REQUESTS="$tmp/requests" \
@@ -650,6 +656,12 @@ STUB
         fi
         if [ "$(wc -l < "$tmp/requests" | tr -d ' ')" -ne 2 ]; then echo "expected exactly manifest + archive requests" >&2; return 1; fi
         ;;
+      shadowed)
+        if [ "$code" -eq 0 ] || ! grep -Fq "$tmp/old-bin/multica" "$tmp/install.err" || ! grep -Fq "$tmp/install-bin/multica" "$tmp/install.err"; then
+          cat "$tmp/install.out" "$tmp/install.err" >&2
+          echo "shadowed pinned CLI was reported as active or lacked executable paths" >&2; return 1
+        fi
+        ;;
       *)
         if [ "$code" -eq 0 ] || [ -f "$tmp/install-bin/multica" ]; then echo "unsafe mirror $scenario install succeeded" >&2; return 1; fi
         if [ "$scenario" = missing_pin ] && [ -s "$tmp/requests" ]; then echo "missing pin attempted network access" >&2; return 1; fi
@@ -659,7 +671,20 @@ STUB
   done
 }
 
+test_cli_pin_does_not_choose_server_ref() {
+  if [ -n "${MULTICA_TEST_MIRROR_CASE:-}" ] && [ "$MULTICA_TEST_MIRROR_CASE" != server_ref ]; then return; fi
+  local tmp got
+  tmp="$(mktemp -d)"
+  _setup_sandbox "$tmp"
+  sed '/^# Entry point/,$d' "$ROOT_DIR/scripts/install.sh" > "$tmp/definitions.sh"
+  got=$(PATH="$tmp/stub-bin:/usr/bin:/bin" MULTICA_CLI_VERSION=v9.8.7 MULTICA_SELFHOST_REF="" \
+    bash -c 'source "$1"; get_selfhost_ref' _ "$tmp/definitions.sh")
+  rm -rf "$tmp"
+  if [ "$got" != v0.3.2 ]; then echo "CLI pin changed server ref to $got" >&2; return 1; fi
+}
+
 test_file_mirror_install
+test_cli_pin_does_not_choose_server_ref
 test_brew_install_failure_falls_back_to_release_binary
 test_brew_tap_failure_falls_back_to_release_binary
 test_remote_ssh_install_prints_token_login_hint
