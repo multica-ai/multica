@@ -151,6 +151,9 @@ LEARN MORE
 var subHelpTemplate = `{{.Short}}
 
 USAGE
+{{- if .Runnable}}
+  {{.UseLine}}
+{{- end}}
   {{.CommandPath}} <command> [flags]
 
 COMMANDS
