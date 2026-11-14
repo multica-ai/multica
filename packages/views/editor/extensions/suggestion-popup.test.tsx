@@ -4,7 +4,7 @@ import StarterKit from "@tiptap/starter-kit";
 import { Suggestion, type SuggestionProps } from "@tiptap/suggestion";
 import { PluginKey } from "@tiptap/pm/state";
 import { forwardRef, useImperativeHandle, useState } from "react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { ContextMenu, ContextMenuContent, ContextMenuItem } from "@multica/ui/components/ui/context-menu";
 import { contextMenuOriginRef } from "@multica/ui/lib/context-menu-origin";
@@ -45,27 +45,6 @@ const TestSuggestionList = forwardRef<TestListRef, TestListProps>(
 );
 
 let editor: Editor | null = null;
-
-beforeAll(() => {
-  const rect = () => new DOMRect(0, 0, 0, 0);
-  const rectList = () => ({ length: 0, item: () => null, [Symbol.iterator]: function* () {} }) as DOMRectList;
-  Object.defineProperty(Range.prototype, "getBoundingClientRect", {
-    configurable: true,
-    value: rect,
-  });
-  Object.defineProperty(Range.prototype, "getClientRects", {
-    configurable: true,
-    value: rectList,
-  });
-  Object.defineProperty(HTMLElement.prototype, "getClientRects", {
-    configurable: true,
-    value: rectList,
-  });
-  Object.defineProperty(Text.prototype, "getClientRects", {
-    configurable: true,
-    value: rectList,
-  });
-});
 
 afterEach(() => {
   act(() => {

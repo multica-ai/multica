@@ -1,7 +1,7 @@
 import type { Editor } from "@tiptap/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ListQuickActionsResponse, QuickAction } from "@multica/core/types";
 import { quickActionKeys } from "@multica/core/quick-actions";
 import { renderWithI18n } from "../test/i18n";
@@ -25,19 +25,6 @@ vi.mock("@multica/core/paths", async (importOriginal) => ({
   useWorkspaceSlug: () => "test",
   useWorkspacePaths: () => ({ issueDetail: (id: string) => `/test/issues/${id}` }),
 }));
-
-beforeAll(() => {
-  // jsdom has no layout; ProseMirror measures the caret while opening a picker.
-  const rects = () => ({
-    length: 0,
-    item: () => null,
-    [Symbol.iterator]: function* () {},
-  }) as DOMRectList;
-  Range.prototype.getBoundingClientRect = () => new DOMRect();
-  Range.prototype.getClientRects = rects;
-  HTMLElement.prototype.getClientRects = rects;
-  Object.defineProperty(Text.prototype, "getClientRects", { configurable: true, value: rects });
-});
 
 beforeEach(() => {
   listQuickActions.mockReset();
