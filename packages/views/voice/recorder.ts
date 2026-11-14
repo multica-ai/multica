@@ -15,7 +15,9 @@ const MAX_RECORDING_MS = 120_000;
 /** Shorter clips, or clips that never rise above the noise floor, are not sent. */
 const MIN_RECORDING_MS = 400;
 const SPEECH_LEVEL = 0.06;
-const LEVEL_HISTORY = 64;
+/** Enough history to fill a full-width strip at the waveform's 5 px pitch. */
+const LEVEL_HISTORY = 288;
+export const METER_INTERVAL_MS = 50;
 
 const MIME_TYPES = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
 
@@ -114,7 +116,7 @@ export class Recording implements VoiceRecorder {
         const elapsedMs = performance.now() - this.startedAt;
         this.onMeter({ levels: this.levels, elapsedMs });
         if (elapsedMs >= MAX_RECORDING_MS) this.onLimit();
-      }, 50);
+      }, METER_INTERVAL_MS);
     } catch {
       // Metering is cosmetic; record without it. Without a meter there is no
       // level to judge silence by, so treat the clip as speech.

@@ -1,6 +1,6 @@
 "use client";
 
-import type { PointerEvent, SyntheticEvent } from "react";
+import { useEffect, useRef, type PointerEvent, type SyntheticEvent } from "react";
 import { AlertCircle, Check, Mic, MicOff, RotateCcw, X } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
@@ -22,6 +22,7 @@ import {
 } from "@multica/core/voice";
 import { ActionShortcutKeycaps, ShortcutKeycaps } from "../common/shortcut-keycaps";
 import { useT } from "../i18n";
+import { METER_INTERVAL_MS } from "./recorder";
 import type { ComposerVoice } from "./use-composer-voice";
 
 const ESCAPE = createShortcutChord("Escape");
@@ -37,25 +38,92 @@ function formatElapsed(ms: number): string {
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
 }
 
-/** Scrolling level history, newest sample on the right. */
-function Waveform({ bars, className }: { bars: number; className?: string }) {
+const clamp01 = (value: number) => Math.min(1, Math.max(0, value));
+
+/** Recorder level (RMS × 5) to bar height: a noise gate, then a gentle curve so quiet speech still moves. */
+function perceptual(level: number): number {
+  return Math.pow(clamp01((level - 0.035) / 0.6), 0.8);
+}
+
+const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
+
+const WAVE_GEOMETRY = {
+  strip: { pitch: 5, bar: 3, fade: 24 },
+  hud: { pitch: 4.5, bar: 2.5, fade: 14 },
+} as const;
+
+/**
+ * Scrolling level history, newest sample on the right. Silence is a row of
+ * faint dots; speech stretches dots into capsules. Drawn on a canvas so it
+ * glides between the recorder's samples instead of stepping.
+ */
+function Waveform({ density, className }: { density: keyof typeof WAVE_GEOMETRY; className?: string }) {
   const { levels } = useVoiceMeter();
-  return (
-    <div
-      aria-hidden
-      className={cn("flex h-5 items-center justify-end gap-[2px]", className)}
-      style={{ maskImage: "linear-gradient(90deg, transparent 0, #000 24px)" }}
-    >
-      {levels.slice(-bars).map((level, index) => (
-        <span
-          // Bars are positional: the history scrolls left one slot per sample.
-          key={index}
-          className="w-[2px] shrink-0 rounded-full bg-current"
-          style={{ height: `${Math.max(10, Math.min(100, level * 110))}%` }}
-        />
-      ))}
-    </div>
-  );
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const latest = useRef({ levels, at: 0 });
+
+  useEffect(() => {
+    latest.current = { levels, at: performance.now() };
+  }, [levels]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx) return;
+    const { pitch, bar, fade } = WAVE_GEOMETRY[density];
+    const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    const color = getComputedStyle(canvas).color;
+    let width = 0;
+    let height = 0;
+    const resize = () => {
+      const rect = canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      width = rect.width;
+      height = rect.height;
+      canvas.width = Math.round(width * dpr);
+      canvas.height = Math.round(height * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    };
+    const capsule = (x: number, length: number) => {
+      const h = Math.max(bar, length);
+      ctx.beginPath();
+      ctx.roundRect(x, (height - h) / 2, bar, h, bar / 2);
+      ctx.fill();
+    };
+    const observer = new ResizeObserver(resize);
+    observer.observe(canvas);
+    resize();
+
+    let raf = 0;
+    const frame = () => {
+      const { levels, at } = latest.current;
+      const progress = still ? 1 : clamp01((performance.now() - at) / METER_INTERVAL_MS);
+      ctx.clearRect(0, 0, width, height);
+      ctx.fillStyle = color;
+      const slots = Math.ceil(width / pitch) + 2;
+      for (let k = 0; k < slots; k++) {
+        const x = width - bar - (k + progress) * pitch;
+        if (x < -bar) break;
+        const edge = clamp01(x / fade);
+        const p = perceptual(levels[levels.length - 1 - k] ?? 0);
+        if (p < 0.08) {
+          ctx.globalAlpha = 0.4 * edge;
+          capsule(x, bar);
+          continue;
+        }
+        ctx.globalAlpha = edge;
+        capsule(x, bar + (height - bar) * p * (k === 0 ? easeOut(progress) : 1));
+      }
+      raf = requestAnimationFrame(frame);
+    };
+    raf = requestAnimationFrame(frame);
+    return () => {
+      cancelAnimationFrame(raf);
+      observer.disconnect();
+    };
+  }, [density]);
+
+  return <canvas ref={canvasRef} aria-hidden className={cn("block h-5 w-full", className)} />;
 }
 
 /** Three bars that fit where the mic icon was. */
@@ -146,7 +214,7 @@ export function VoiceMicButton({ voice, className }: { voice: ComposerVoice; cla
  * The recording strip. Replaces the composer's toolbar row while a tapped
  * recording runs: cancel, timer, waveform, insert, send.
  */
-export function VoiceStrip({ voice, bars = 64 }: { voice: ComposerVoice; bars?: number }) {
+export function VoiceStrip({ voice }: { voice: ComposerVoice }) {
   const { t } = useT("editor");
   const phase = voice.session?.phase;
   if (!voice.showStrip) return null;
@@ -184,7 +252,7 @@ export function VoiceStrip({ voice, bars = 64 }: { voice: ComposerVoice; bars?: 
             <span className="sr-only">{t(($) => $.voice.recording)}</span>
             <Elapsed className="text-muted-foreground" />
           </span>
-          <Waveform bars={bars} className="min-w-0 flex-1 overflow-hidden text-foreground" />
+          <Waveform density="strip" className="min-w-0 flex-1 text-foreground" />
           <IconButton
             label={t(($) => $.voice.insert)}
             shortcut={<ActionShortcutKeycaps action="voiceInput" />}
@@ -231,7 +299,7 @@ export function VoiceHud({ voice }: { voice: ComposerVoice }) {
           <>
             <RecDot className="bg-[#ff5a52]" />
             <span className="sr-only">{t(($) => $.voice.recording)}</span>
-            <Waveform bars={28} className="w-[86px]" />
+            <Waveform density="hud" className="w-[86px]" />
             <Elapsed className="opacity-70" />
             <span className="text-caption opacity-70">{t(($) => $.voice.release_to_insert)}</span>
           </>

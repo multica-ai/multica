@@ -359,7 +359,7 @@ function ReplyInput({
         <VoiceErrorRow voice={voice} className="mt-1" />
         {voice.showStrip && (
           <div className="absolute inset-x-0 bottom-0 flex items-center">
-            <VoiceStrip voice={voice} bars={40} />
+            <VoiceStrip voice={voice} />
           </div>
         )}
         <div className={cn("absolute bottom-0 left-0 min-w-0", voice.available ? "right-32" : "right-24", voice.showStrip && "hidden")}>
