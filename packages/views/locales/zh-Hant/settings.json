@@ -508,8 +508,8 @@
     "floating_label": "懸浮聊天窗",
     "floating_hint": "在每個頁面顯示懸浮聊天按鈕。",
     "ask_agent_label": "「問 Multica」的 AI 代理",
-    "ask_agent_hint": "在此工作區從底部列發起新對話時使用的 AI 代理。",
-    "ask_agent_last_used": "上次使用的"
+    "ask_agent_hint": "用於 Ask Multica 建立聊天。自動選擇會先使用工作區預設 AI 代理，再使用第一個可用 AI 代理。",
+    "ask_agent_automatic": "自動選擇"
   },
   "issue": {
     "opening": {
@@ -917,6 +917,10 @@
     "usage_help": "使用方法"
   },
   "workspace": {
+    "default_chat_agent_clear": "清除預設值",
+    "default_chat_agent_label": "預設聊天 AI 代理",
+    "default_chat_agent_none": "不設定工作區預設 AI 代理",
+    "default_chat_agent_hint": "未選擇 AI 代理時用於新聊天，現有對話繼續使用原 AI 代理。",
     "section_general": "工作區資訊",
     "logo_label": "工作區圖示",
     "change_logo_aria": "更換工作區圖示",

@@ -76,7 +76,7 @@ const OPEN_KEY = "multica:chat:isOpen";
 const FLOATING_KEY = "multica:chat:floatingChatEnabled";
 /**
  * The agent Ask Multica starts a new chat with, per workspace. Missing key =
- * no preference: a new chat goes to the agent last chatted with.
+ * no preference: Ask uses the workspace default, then the first available agent.
  */
 const QUICK_CHAT_AGENT_KEY = "multica:chat:quickChatAgentId";
 /**
@@ -361,6 +361,8 @@ export interface ChatState {
   selectedProjectId: string | null;
   /** Settings preference: the agent Ask Multica starts a new chat with. */
   quickChatAgentId: string | null;
+  /** Transient new-chat intent, cleared on manual selection or workspace change. */
+  newChatSource: "ask" | null;
   /** Bumped by `startNewChat`; the window focuses its composer on each bump. */
   newChatRequest: number;
   /** Chats kept as chips in the bottom bar, newest first. */
@@ -462,6 +464,7 @@ export function createChatStore(options: ChatStoreOptions) {
     selectedAgentId: initialAgentId,
     selectedProjectId: storage.getItem(wsKey(PROJECT_STORAGE_KEY)),
     quickChatAgentId: storage.getItem(wsKey(QUICK_CHAT_AGENT_KEY)),
+    newChatSource: null,
     newChatRequest: 0,
     chatBarKept: initialChatBar.kept,
     chatBarDismissed: initialChatBar.dismissed,
@@ -498,12 +501,12 @@ export function createChatStore(options: ChatStoreOptions) {
       } else {
         storage.removeItem(wsKey(SESSION_STORAGE_KEY));
       }
-      set({ activeSessionId: id });
+      set({ activeSessionId: id, newChatSource: null });
     },
     setSelectedAgentId: (id) => {
       logger.info("setSelectedAgentId", { from: get().selectedAgentId, to: id });
       storage.setItem(wsKey(AGENT_STORAGE_KEY), id);
-      set({ selectedAgentId: id });
+      set({ selectedAgentId: id, newChatSource: null });
     },
     setSelectedProjectId: (id) => {
       logger.info("setSelectedProjectId", { from: get().selectedProjectId, to: id });
@@ -518,13 +521,16 @@ export function createChatStore(options: ChatStoreOptions) {
       set({ quickChatAgentId: id });
     },
     startNewChat: () => {
-      const { quickChatAgentId, setSelectedAgentId, setSelectedProjectId, setActiveSession, setOpen } =
-        get();
-      if (quickChatAgentId) setSelectedAgentId(quickChatAgentId);
-      setSelectedProjectId(null);
-      setActiveSession(null);
-      setOpen(true);
-      set((state) => ({ newChatRequest: state.newChatRequest + 1 }));
+      storage.removeItem(wsKey(SESSION_STORAGE_KEY));
+      storage.removeItem(wsKey(PROJECT_STORAGE_KEY));
+      storage.setItem(OPEN_KEY, "true");
+      set((state) => ({
+        activeSessionId: null,
+        selectedProjectId: null,
+        isOpen: true,
+        newChatSource: "ask",
+        newChatRequest: state.newChatRequest + 1,
+      }));
     },
     keepChatInBar: (sessionId) => {
       const { chatBarKept, chatBarDismissed } = get();
@@ -783,6 +789,7 @@ export function createChatStore(options: ChatStoreOptions) {
     });
     store.setState({
       activeSessionId: nextSession,
+      newChatSource: null,
       selectedAgentId: nextAgent,
       selectedProjectId: nextProject,
       quickChatAgentId: storage.getItem(wsKey(QUICK_CHAT_AGENT_KEY)),

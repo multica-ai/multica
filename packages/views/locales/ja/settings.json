@@ -508,8 +508,8 @@
     "floating_label": "フローティングチャット",
     "floating_hint": "すべてのページにフローティングチャットボタンを表示します。",
     "ask_agent_label": "「Multica に聞く」のエージェント",
-    "ask_agent_hint": "このワークスペースで、下部バーから始める新しいチャットの相手になるエージェント。",
-    "ask_agent_last_used": "最後に使用したエージェント"
+    "ask_agent_hint": "Ask Multica で新しいチャットを開始する際のエージェントです。自動ではワークスペースのデフォルト、次に最初の利用可能なエージェントを使用します。",
+    "ask_agent_automatic": "自動"
   },
   "issue": {
     "opening": {
@@ -917,6 +917,10 @@
     "usage_help": "使い方"
   },
   "workspace": {
+    "default_chat_agent_clear": "既定を解除",
+    "default_chat_agent_label": "チャットの既定エージェント",
+    "default_chat_agent_none": "既定のエージェントなし",
+    "default_chat_agent_hint": "エージェントが未選択の新規チャットに適用します。既存の会話は元のエージェントを使用します。",
     "section_general": "ワークスペース情報",
     "logo_label": "ワークスペースのアイコン",
     "name_label": "名前",

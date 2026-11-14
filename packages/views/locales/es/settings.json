@@ -514,8 +514,8 @@
     "floating_label": "Ventana de chat flotante",
     "floating_hint": "Muestra el botón de chat flotante en todas las páginas.",
     "ask_agent_label": "Agente de Preguntar a Multica",
-    "ask_agent_hint": "El agente con el que empieza un chat nuevo desde la barra inferior, en este espacio de trabajo.",
-    "ask_agent_last_used": "El último usado"
+    "ask_agent_hint": "Inicia nuevos chats de Preguntar a Multica. Automático usa el agente predeterminado del espacio de trabajo y después el primer agente disponible.",
+    "ask_agent_automatic": "Automático"
   },
   "issue": {
     "description": "Elige qué campos mantiene cada diálogo de creación en su barra de herramientas. Los campos ocultos siguen disponibles en el menú ⋯ y reaparecen mientras tengan un valor.",
@@ -926,6 +926,11 @@
     "usage_help": "Uso"
   },
   "workspace": {
+    "default_chat_agent_clear": "Borrar predeterminado",
+    "default_chat_agent_label": "Agente de chat predeterminado",
+    "default_chat_agent_none": "Sin agente predeterminado del espacio de trabajo",
+    "default_chat_agent_hint": "Se usa en chats nuevos sin una elección personal de agente. Las conversaciones existentes conservan su agente.",
+
     "section_general": "Detalles del espacio de trabajo",
     "logo_label": "Logo del espacio de trabajo",
     "change_logo_aria": "Cambiar logo del espacio de trabajo",

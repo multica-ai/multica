@@ -88,6 +88,8 @@ vi.mock("sonner", () => ({
   toast: { success: mockToastSuccess, error: vi.fn() },
 }));
 
+vi.mock("./workspace-default-chat-agent", () => ({ WorkspaceDefaultChatAgent: () => null }));
+
 import { WorkspaceTab } from "./workspace-tab";
 
 const TEST_RESOURCES = {

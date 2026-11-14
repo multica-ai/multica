@@ -70,8 +70,14 @@ export function ChatPage() {
   const isCurrentChatRoute = pathname === wsPaths.chat();
   const isCompact = useIsCompact();
 
+  const urlSession = searchParams.get("session") || null;
+  const urlAgent = searchParams.get("agent") || null;
+  const consumedAgentIntent = useRef<string | null>(null);
+
   const c = useChatController({
     isActive: isCurrentChatRoute && getCurrentSlug() === workspaceSlug,
+    intentSessionId: urlSession,
+    intentAgentId: consumedAgentIntent.current !== urlAgent ? urlAgent : null,
   });
   const { data: quickActionsPending = null } = useQuery(
     chatQuickActionsPendingOptions(c.activeSessionId ?? ""),
@@ -87,8 +93,6 @@ export function ChatPage() {
     agentName: c.activeAgent?.name,
     enabled: !c.isSessionArchived && !c.isAgentArchived && !c.isAgentAccessRevoked && c.isAgentRuntimeBound && !c.noAgent,
   });
-  const urlSession = searchParams.get("session") || null;
-  const urlAgent = searchParams.get("agent") || null;
 
   // "Composing a brand-new chat" — the user hit ⊕ but hasn't sent yet, so no
   // session exists. At compact widths this decides list-vs-conversation; on desktop the
@@ -144,7 +148,6 @@ export function ChatPage() {
   // supersede a still-pending intent: agent/member queries can resolve late,
   // and a deferred intent firing after the user picked a thread (or started
   // another chat) would clobber that choice.
-  const consumedAgentIntent = useRef<string | null>(null);
   const supersedeAgentIntent = () => {
     if (urlAgent) consumedAgentIntent.current = urlAgent;
   };
@@ -406,6 +409,7 @@ export function ChatPage() {
         isRunning={!!c.pendingTaskId}
         allowSubmitWhileRunning={c.pendingTask?.supports_queue === true}
         disabled={
+          !c.agentsSettled ||
           c.isSessionArchived ||
           c.isAgentArchived ||
           c.isAgentAccessRevoked ||
@@ -414,7 +418,7 @@ export function ChatPage() {
         noAgent={c.noAgent}
         agentArchived={c.isAgentArchived}
         agentAccessRevoked={c.isAgentAccessRevoked}
-        agentRuntimeRequired={!c.isAgentRuntimeBound}
+        agentRuntimeRequired={!!c.activeAgent && !c.isAgentRuntimeBound}
         agentName={c.activeAgent?.name}
         projects={c.projects}
         projectId={c.activeProjectId}

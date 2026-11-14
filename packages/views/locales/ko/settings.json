@@ -508,8 +508,8 @@
     "floating_label": "플로팅 채팅 창",
     "floating_hint": "모든 페이지에 플로팅 채팅 버튼을 표시합니다.",
     "ask_agent_label": "Multica에게 묻기 에이전트",
-    "ask_agent_hint": "이 워크스페이스에서 하단 바로 시작하는 새 채팅의 에이전트입니다.",
-    "ask_agent_last_used": "마지막으로 사용한 에이전트"
+    "ask_agent_hint": "Ask Multica에서 새 채팅을 시작할 에이전트입니다. 자동은 워크스페이스 기본 에이전트, 그다음 첫 번째 사용 가능한 에이전트를 사용합니다.",
+    "ask_agent_automatic": "자동"
   },
   "issue": {
     "opening": {
@@ -917,6 +917,10 @@
     "usage_help": "사용 방법"
   },
   "workspace": {
+    "default_chat_agent_clear": "기본값 지우기",
+    "default_chat_agent_label": "기본 채팅 에이전트",
+    "default_chat_agent_none": "워크스페이스 기본값 없음",
+    "default_chat_agent_hint": "에이전트를 선택하지 않은 새 채팅에 사용됩니다. 기존 대화의 에이전트는 유지됩니다.",
     "section_general": "워크스페이스 정보",
     "logo_label": "워크스페이스 아이콘",
     "change_logo_aria": "워크스페이스 로고 변경",

@@ -36,6 +36,40 @@ function makeAttachment(id: string): Attachment {
   };
 }
 
+describe("Ask chat intent", () => {
+  it("starts atomically while retaining personal choices, draft and attachments", () => {
+    const storage = memStorage();
+    const store = createChatStore({ storage });
+    const state = store.getState();
+    state.setSelectedAgentId("last");
+    state.setQuickChatAgentId("personal");
+    state.setActiveSession("previous");
+    state.setSelectedProjectId("project");
+    state.setInputDraft(DRAFT_NEW_SESSION, "draft");
+    state.addInputDraftAttachment(DRAFT_NEW_SESSION, makeAttachment("upload"));
+    const updates: unknown[] = [];
+    const unsubscribe = store.subscribe((next) => updates.push(next));
+    state.startNewChat();
+    unsubscribe();
+    expect(updates).toHaveLength(1);
+    expect(store.getState()).toMatchObject({
+      isOpen: true, newChatSource: "ask", activeSessionId: null,
+      selectedProjectId: null, selectedAgentId: "last", quickChatAgentId: "personal",
+      inputDrafts: { [DRAFT_NEW_SESSION]: "draft" },
+    });
+    expect(store.getState().inputDraftAttachments[DRAFT_NEW_SESSION]).toHaveLength(1);
+    state.setOpen(false);
+    state.toggle();
+    expect(store.getState().newChatSource).toBe("ask");
+    state.setSelectedAgentId("manual");
+    expect(store.getState().newChatSource).toBeNull();
+    state.startNewChat();
+    state.setActiveSession("session");
+    expect(store.getState().newChatSource).toBeNull();
+    expect(createChatStore({ storage }).getState().newChatSource).toBeNull();
+  });
+});
+
 // The pre-MUL-4864 scheme kept one new-chat draft per agent, in `__new__:<id>`
 // slots. Those slots have no timestamp, so on upgrade only one can survive:
 // the one for the agent the workspace has selected — the draft the user would
@@ -325,7 +359,7 @@ describe("chat store — Ask Multica agent", () => {
     expect(createChatStore({ storage }).getState().quickChatAgentId).toBeNull();
   });
 
-  it("starts a new chat with that agent and no project, and asks for composer focus", () => {
+  it("starts an Ask draft atomically and requests focus without replacing the stored agent", () => {
     const store = createChatStore({ storage: memStorage() });
     const s = () => store.getState();
     s().setSelectedAgentId("agent-1");
@@ -338,14 +372,15 @@ describe("chat store — Ask Multica agent", () => {
     expect(s().isOpen).toBe(true);
     expect(s().activeSessionId).toBeNull();
     expect(s().selectedProjectId).toBeNull();
-    expect(s().selectedAgentId).toBe("agent-9");
+    expect(s().selectedAgentId).toBe("agent-1");
+    expect(s().newChatSource).toBe("ask");
     expect(s().newChatRequest).toBe(1);
 
     s().startNewChat();
     expect(s().newChatRequest).toBe(2);
   });
 
-  it("starts the new chat with the current agent when none is set", () => {
+  it("retains the current selection when starting an automatic Ask draft", () => {
     const store = createChatStore({ storage: memStorage() });
     store.getState().setSelectedAgentId("agent-1");
 

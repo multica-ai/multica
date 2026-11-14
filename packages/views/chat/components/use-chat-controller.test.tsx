@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
-import type { Agent, ChatPendingTask, ChatSession, Project } from "@multica/core/types";
+import type { Agent, ChatPendingTask, ChatSession, Project, Workspace } from "@multica/core/types";
 
 interface QueuedRestore {
   id: string;
@@ -14,6 +14,8 @@ const h = vi.hoisted(() => {
   const store = {
     activeSessionId: null as string | null,
     selectedAgentId: null as string | null,
+    quickChatAgentId: null as string | null,
+    newChatSource: null as "ask" | null,
     selectedProjectId: null as string | null,
     setActiveSession: vi.fn((id: string | null) => {
       store.activeSessionId = id;
@@ -73,6 +75,7 @@ const h = vi.hoisted(() => {
     setProjectMutate: vi.fn(),
     removeFromCaches: vi.fn(),
     // useQuery reads these so each test can vary the loaded data.
+    workspaceQuery: { data: [] as Workspace[], isSuccess: true, isError: false },
     sessions: [] as ChatSession[],
     agents: [] as Agent[],
     projects: [] as Project[],
@@ -85,14 +88,17 @@ const h = vi.hoisted(() => {
 });
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
+const workspaceRef = vi.hoisted(() => ({ current: "ws-1" }));
+afterEach(() => { workspaceRef.current = "ws-1"; });
 vi.mock("@multica/core/platform", () => ({
-  getCurrentWsId: () => "ws-1",
+  getCurrentWsId: () => workspaceRef.current,
 }));
 vi.mock("@multica/core/auth", () => ({
   useAuthStore: (sel: (s: { user: { id: string } }) => unknown) =>
     sel({ user: { id: "user-1" } }),
 }));
 vi.mock("@multica/core/workspace/queries", () => ({
+  workspaceListOptions: () => ({ queryKey: ["workspaces", "list"] }),
   agentListOptions: () => ({ queryKey: ["agents"] }),
   memberListOptions: () => ({ queryKey: ["members"] }),
 }));
@@ -148,7 +154,8 @@ vi.mock("@multica/core/chat/mutations", () => ({
 vi.mock("../../common/use-app-foreground", () => ({
   useAppForeground: () => h.appForeground.value,
 }));
-vi.mock("@multica/core/chat", () => ({
+vi.mock("@multica/core/chat", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@multica/core/chat")>(),
   useChatStore: Object.assign(
     (sel: (s: typeof h.store) => unknown) => sel(h.store),
     { getState: () => h.store },
@@ -169,9 +176,10 @@ vi.mock("@tanstack/react-query", async (importOriginal) => {
     ...actual,
     useQuery: (options: { queryKey?: unknown[] }) => {
       const key = options.queryKey ?? [];
-      if (key.includes("agents")) return { data: h.agents };
+      if (key.includes("workspaces")) return h.workspaceQuery;
+      if (key.includes("agents")) return { data: h.agents, isSuccess: true };
       if (key.includes("members")) {
-        return { data: [{ user_id: "user-1", role: "admin" }] };
+        return { data: [{ user_id: "user-1", role: "admin" }], isSuccess: true };
       }
       if (key.includes("runtimes")) return { data: [] };
       if (key.includes("sessions")) return { data: h.sessions, isSuccess: true };
@@ -1280,6 +1288,26 @@ describe("useChatController.handleSend — compose target tracking", () => {
     expect(h.store.setActiveSession).not.toHaveBeenCalled();
   });
 
+  it("keeps a delayed session creation inside its source workspace", async () => {
+    const { commitInput, send } = sendFrom(null, () => { workspaceRef.current = "ws-2"; });
+    await send();
+    expect(api.sendChatMessage).not.toHaveBeenCalled();
+    expect(commitInput).not.toHaveBeenCalled();
+    expect(h.store.setActiveSession).not.toHaveBeenCalled();
+  });
+
+  it("leaves the destination draft and selection intact when a send acknowledgement arrives after switching workspace", async () => {
+    vi.mocked(api.sendChatMessage).mockImplementationOnce(async () => {
+      workspaceRef.current = "ws-2";
+      return { message_id: "msg-1", task_id: "task-1", created_at: new Date(0).toISOString() };
+    });
+    const { commitInput, send } = sendFrom(null);
+    await send();
+    expect(api.sendChatMessage).toHaveBeenCalledOnce();
+    expect(commitInput).not.toHaveBeenCalled();
+    expect(h.store.setActiveSession).not.toHaveBeenCalled();
+  });
+
   it("still clears the sent draft when sending from an existing session", async () => {
     const { commitInput, send } = sendFrom("sA");
     await send();
@@ -1338,5 +1366,71 @@ describe("useChatController revoked invoke permission", () => {
     expect(sent).toBe(false);
     expect(vi.mocked(api.sendChatMessage)).not.toHaveBeenCalled();
     expect(h.createSessionMutate).not.toHaveBeenCalled();
+  });
+});
+
+describe("useChatController workspace fallback query state", () => {
+  beforeEach(() => {
+    h.store.activeSessionId = null;
+    h.store.selectedAgentId = null;
+    h.store.quickChatAgentId = null;
+    h.store.newChatSource = "ask";
+    h.store.selectedProjectId = null;
+    h.sessions = [];
+    h.projects = [];
+    h.agents = [agentA, agentB];
+    h.pendingTask = null;
+    h.workspaceQuery = {
+      data: [{ id: "ws-1", settings: { default_chat_agent_id: agentB.id } }] as Workspace[],
+      isSuccess: true,
+      isError: false,
+    };
+    h.createSessionMutate.mockClear();
+    invokableAgentIds.current = null;
+  });
+
+  afterEach(() => {
+    h.workspaceQuery = { data: [], isSuccess: true, isError: false };
+    h.store.quickChatAgentId = null;
+    h.store.newChatSource = null;
+  });
+
+  it.each(["pending", "uncached error", "cached refetch error"])("holds automatic sends during %s and recovers from authoritative results", async (state) => {
+    h.workspaceQuery.isSuccess = false;
+    h.workspaceQuery.isError = state !== "pending";
+    if (state !== "cached refetch error") h.workspaceQuery.data = [];
+    const { result, rerender } = renderHook(() => useChatController());
+    expect(result.current.activeAgent).toBeNull();
+    await act(async () => {
+      expect(await result.current.handleSend("keep my draft")).toBe(false);
+    });
+    expect(h.createSessionMutate).not.toHaveBeenCalled();
+
+    h.workspaceQuery = {
+      data: [{ id: "ws-1", settings: { default_chat_agent_id: agentB.id } }] as Workspace[],
+      isSuccess: true,
+      isError: false,
+    };
+    rerender();
+    expect(result.current.activeAgent).toBe(agentB);
+    h.workspaceQuery.data = [{ id: "ws-1", settings: {} }] as Workspace[];
+    rerender();
+    expect(result.current.activeAgent).toBe(agentA);
+  });
+
+  it.each(["personal", "selected", "session"])("retains a valid %s target during workspace failure", (choice) => {
+    h.workspaceQuery.isSuccess = false;
+    h.workspaceQuery.isError = true;
+    if (choice === "personal") h.store.quickChatAgentId = agentB.id;
+    if (choice === "selected") {
+      h.store.newChatSource = null;
+      h.store.selectedAgentId = agentB.id;
+    }
+    if (choice === "session") {
+      h.store.activeSessionId = sB.id;
+      h.sessions = [sB];
+    }
+    const { result } = renderHook(() => useChatController());
+    expect(result.current.activeAgent).toBe(agentB);
   });
 });
