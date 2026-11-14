@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, Linking, Platform, Share } from "react-native";
 import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
 import { useQuery } from "@tanstack/react-query";
@@ -23,12 +23,14 @@ import {
 } from "@multica/core/issues/mutations";
 import { childIssuesOptions, issueDetailOptions, issueSubscribersOptions, issueTasksOptions, issueTimelineOptions } from "@multica/core/issues/queries";
 import { useIssueDeletion } from "@multica/core/issues/use-issue-deletion";
+import { useIssueTimelineSync } from "@multica/core/issues/use-issue-timeline-sync";
 import { paths } from "@multica/core/paths";
 import { useCreatePin, useDeletePin } from "@multica/core/pins/mutations";
 import { pinListOptions } from "@multica/core/pins/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
+import { useWSEvent, useWSReconnect } from "@multica/core/realtime";
 import { attachmentDownloadPath, contentReferencesAttachment } from "@multica/core/types";
-import type { AgentTask, Issue, IssuePriority, SearchIssueResult, TimelineEntry } from "@multica/core/types";
+import type { AgentTask, InboxNewPayload, Issue, IssuePriority, SearchIssueResult, TimelineEntry } from "@multica/core/types";
 import { endpoints } from "../../../platform/env";
 import { confirmDestructive, pick, promptText } from "../../components/action-sheet";
 import { formatDay, toDay } from "../../model/dates";
@@ -160,6 +162,24 @@ export function IssueDetail({ issueId }: { issueId: string }) {
   useEffect(() => {
     if (id) markRead(id);
   }, [id, markRead]);
+  // A notification on this issue while it is on screen is already read. One sent while the
+  // socket was down is never replayed, so a reconnect reads the issue again.
+  useWSEvent(
+    "inbox:new",
+    useCallback(
+      (payload: unknown) => {
+        const item = (payload as Partial<InboxNewPayload> | null)?.item;
+        if (id && item?.issue_id === id && !item.read) markRead(id);
+      },
+      [id, markRead],
+    ),
+  );
+  useWSReconnect(
+    useCallback(() => {
+      if (id) markRead(id);
+    }, [id, markRead]),
+  );
+  useIssueTimelineSync(id);
 
   const items = useMemo<TimelineModel[]>(() => {
     const liveSteps = liveTask ? runSteps(messages.data ?? [], true) : [];

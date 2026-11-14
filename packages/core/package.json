@@ -52,6 +52,7 @@
     "./issues/timeline-sort": "./issues/timeline-sort.ts",
     "./issues/comment-thread": "./issues/comment-thread.ts",
     "./issues/comment-deletion": "./issues/comment-deletion.ts",
+    "./issues/use-issue-timeline-sync": "./issues/use-issue-timeline-sync.ts",
     "./issues/comment-trigger-outcomes": "./issues/comment-trigger-outcomes.ts",
     "./issues/run-steering": "./issues/run-steering.ts",
     "./issues/unread": "./issues/unread.ts",
