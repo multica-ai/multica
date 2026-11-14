@@ -184,6 +184,36 @@ func TestIsACPResumeRejected(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "hermes gateway not_found in data",
+			// GH #10071: Hermes v0.22+ answers session/resume for a session its
+			// gateway does not know with a bare "Internal error" and the reason
+			// only as a structured token in `data`.
+			err:  &acpRPCError{Method: "session/resume", Code: -32603, Message: "Internal error", Data: `{"details":"not_found"}`},
+			want: true,
+		},
+		{
+			name: "hermes gateway not_found in data, python json.dumps spacing",
+			err:  &acpRPCError{Method: "session/resume", Code: -32603, Message: "Internal error", Data: `{"details": "not_found"}`},
+			want: true,
+		},
+		{
+			name: "hermes gateway not_ready in data",
+			// Same envelope, different cause (GH #9272): the gateway is still
+			// starting, and the recorded session is fine.
+			err:  &acpRPCError{Method: "session/resume", Code: -32603, Message: "Internal error", Data: `{"details":"not_ready"}`},
+			want: false,
+		},
+		{
+			name: "other hermes gateway details in data",
+			err:  &acpRPCError{Method: "session/resume", Code: -32603, Message: "Internal error", Data: `{"details":"acp_mcp_policy_unavailable"}`},
+			want: false,
+		},
+		{
+			name: "not_found outside the details field",
+			err:  &acpRPCError{Method: "session/resume", Code: -32603, Message: "Internal error", Data: `{"details":"mcp_server_not_found"}`},
+			want: false,
+		},
+		{
 			name: "plain error is never a rejection",
 			err:  fmt.Errorf("session/resume: Invalid session identifier (code=-32602)"),
 			want: false,
@@ -278,7 +308,7 @@ func TestClassifyACPResumeFailureCancelAndTimeoutAreNotRejections(t *testing.T) 
 // backslash-escaped quotes inconsistently, and a malformed error frame is
 // silently dropped by the ACP client, which shows up as a hung request rather
 // than a failed assertion.
-func fakeACPRejectedResumeScript(rpc string) string {
+func fakeACPRejectedResumeScript(rpc, errorFrame string) string {
 	return `#!/bin/sh
 while IFS= read -r line; do
   id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
@@ -290,7 +320,7 @@ while IFS= read -r line; do
       printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
       ;;
     *'"method":"` + rpc + `"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32602,"message":"Invalid session identifier ses_ghost.","data":{"sessionId":"ses_ghost"}}}\n' "$id"
+      printf '{"jsonrpc":"2.0","id":%s,"error":` + errorFrame + `}\n' "$id"
       ;;
   esac
 done
@@ -317,9 +347,14 @@ func TestACPBackendsReportRejectedResume(t *testing.T) {
 		binary    string
 		rpc       string
 		env       map[string]string
+		// frame overrides the JSON-RPC error object the fake runtime returns.
+		frame string
 	}{
 		{agentType: "qoder", binary: "qodercli", rpc: "session/resume"},
 		{agentType: "hermes", binary: "hermes", rpc: "session/resume"},
+		// Hermes' gateway adapter: the only evidence is the structured token in
+		// `data`, which must survive handleResponse's object-to-JSON rendering.
+		{agentType: "hermes", binary: "hermes", rpc: "session/resume", frame: `{"code":-32603,"message":"Internal error","data":{"details":"not_found"}}`},
 		{agentType: "kimi", binary: "kimi", rpc: "session/resume"},
 		{agentType: "kiro", binary: "kiro", rpc: "session/load"},
 		{agentType: "traecli", binary: "traecli", rpc: "session/load"},
@@ -329,11 +364,19 @@ func TestACPBackendsReportRejectedResume(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		t.Run(tc.agentType, func(t *testing.T) {
+		name := tc.agentType
+		if tc.frame != "" {
+			name += "/structured-data"
+		}
+		frame := tc.frame
+		if frame == "" {
+			frame = `{"code":-32602,"message":"Invalid session identifier ses_ghost.","data":{"sessionId":"ses_ghost"}}`
+		}
+		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
 			fakePath := filepath.Join(t.TempDir(), tc.binary)
-			writeTestExecutable(t, fakePath, []byte(fakeACPRejectedResumeScript(tc.rpc)))
+			writeTestExecutable(t, fakePath, []byte(fakeACPRejectedResumeScript(tc.rpc, frame)))
 
 			backend, err := New(tc.agentType, Config{ExecutablePath: fakePath, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Env: tc.env})
 			if err != nil {
