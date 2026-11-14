@@ -117,14 +117,22 @@ describe("VoiceHistoryStore", () => {
   });
 
   it("caps the number of entries even when keeping forever", async () => {
+    // Newest first, as the store writes it; only the oldest needs its audio on disk.
+    const full = Array.from({ length: MAX_HISTORY_ENTRIES }, (_, i) => ({
+      id: `e${i}`, createdAt: now - i, durationMs: 1, status: "done", text: String(i),
+      file: `e${i}.webm`, mimeType: "audio/webm",
+    }));
+    await writeFile(join(root, "history.json"), JSON.stringify(full));
+    await writeFile(join(root, `e${MAX_HISTORY_ENTRIES - 1}.webm`), audio);
+
     const store = await open();
-    for (let i = 0; i < MAX_HISTORY_ENTRIES; i++) {
-      const entry = await store.save(audio, "audio/webm", 1, null);
-      await store.update(entry.id, { status: "done", text: String(i) });
-    }
-    await store.save(audio, "audio/webm", 1, null);
-    expect(store.list()).toHaveLength(MAX_HISTORY_ENTRIES);
-    expect(store.list().at(-1)?.text).toBe("1");
+    const newest = await store.save(audio, "audio/webm", 1, null);
+    const list = store.list();
+    expect(list).toHaveLength(MAX_HISTORY_ENTRIES);
+    expect(list[0]?.id).toBe(newest.id);
+    expect(list.at(-1)?.id).toBe(`e${MAX_HISTORY_ENTRIES - 2}`);
+    expect(existsSync(join(root, `e${MAX_HISTORY_ENTRIES - 1}.webm`))).toBe(false);
+    expect((await open()).list()).toHaveLength(MAX_HISTORY_ENTRIES);
   });
 
   it("ignores a corrupt index and entries that point outside the folder", async () => {
