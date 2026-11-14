@@ -162,6 +162,21 @@ func (c *slackChannel) handleSocketEvent(ctx context.Context, sm *socketmode.Cli
 			c.dispatchSlashCommand(cmd, envelopeID)
 		}
 		return nil
+	case socketmode.EventTypeInteractive:
+		// ACK first for the same ~3s deadline; outcomes go to response_url.
+		if evt.Request != nil {
+			if err := sm.Ack(*evt.Request); err != nil {
+				c.logger.WarnContext(ctx, "slack: ack interaction failed", "error", err)
+			}
+		}
+		if cb, ok := evt.Data.(slack.InteractionCallback); ok && cb.Type == slack.InteractionTypeBlockActions && c.slash != nil {
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), slashCommandTimeout)
+				defer cancel()
+				c.slash.HandleBlockAction(ctx, cb)
+			}()
+		}
+		return nil
 	case socketmode.EventTypeConnecting, socketmode.EventTypeConnected, socketmode.EventTypeHello:
 		c.logger.DebugContext(ctx, "slack: socket mode", "event", evt.Type, "app_id", c.appID)
 	case socketmode.EventTypeIncomingError, socketmode.EventTypeErrorBadMessage:

@@ -26,6 +26,13 @@ type fakeSlashQueries struct {
 	bindErr   error
 	memberErr error
 	gotAppID  string
+
+	delivery    db.ChannelTaskDelivery
+	deliveryErr error
+}
+
+func (f *fakeSlashQueries) GetChannelTaskDelivery(context.Context, pgtype.UUID) (db.ChannelTaskDelivery, error) {
+	return f.delivery, f.deliveryErr
 }
 
 func (f *fakeSlashQueries) GetChannelInstallationByAppID(_ context.Context, arg db.GetChannelInstallationByAppIDParams) (db.ChannelInstallation, error) {

@@ -68,6 +68,7 @@ type slashQueries interface {
 	GetChannelInstallationByAppID(ctx context.Context, arg db.GetChannelInstallationByAppIDParams) (db.ChannelInstallation, error)
 	GetChannelUserBindingByUserID(ctx context.Context, arg db.GetChannelUserBindingByUserIDParams) (db.ChannelUserBinding, error)
 	GetMemberByUserAndWorkspace(ctx context.Context, arg db.GetMemberByUserAndWorkspaceParams) (db.Member, error)
+	GetChannelTaskDelivery(ctx context.Context, taskID pgtype.UUID) (db.ChannelTaskDelivery, error)
 }
 
 // quickCreateEnqueuer is the narrow slice of *service.TaskService the slash
@@ -87,6 +88,7 @@ type SlashCommandProcessor struct {
 	q           slashQueries
 	tasks       quickCreateEnqueuer
 	control     slashControlStarter
+	retry       chatRetrier
 	binding     bindingMinter
 	appURL      string
 	bindingPath string
@@ -94,6 +96,8 @@ type SlashCommandProcessor struct {
 	// respond posts an ephemeral reply to the command's response_url. Injected
 	// so tests can capture the reply without hitting Slack.
 	respond func(ctx context.Context, responseURL, text string) error
+	// replaceCard rewrites the interactive message a response_url belongs to.
+	replaceCard func(ctx context.Context, responseURL string, blocks []slack.Block, text string) error
 }
 
 // SlashCommandConfig configures the processor. Binding + AppURL are required for
@@ -104,6 +108,7 @@ type SlashCommandConfig struct {
 	Queries     *db.Queries
 	Tasks       quickCreateEnqueuer
 	Control     slashControlStarter
+	Retry       chatRetrier // nil refuses failure-card retries as stale
 	Binding     bindingMinter
 	AppURL      string
 	BindingPath string // default "/slack/bind"
@@ -129,6 +134,7 @@ func NewSlashCommandProcessor(cfg SlashCommandConfig) *SlashCommandProcessor {
 		q:           cfg.Queries,
 		tasks:       cfg.Tasks,
 		control:     cfg.Control,
+		retry:       cfg.Retry,
 		binding:     cfg.Binding,
 		appURL:      strings.TrimRight(cfg.AppURL, "/"),
 		bindingPath: bindingPath,
@@ -138,6 +144,13 @@ func NewSlashCommandProcessor(cfg SlashCommandConfig) *SlashCommandProcessor {
 		return slack.PostWebhookContext(ctx, responseURL, &slack.WebhookMessage{
 			ResponseType: slack.ResponseTypeEphemeral,
 			Text:         text,
+		})
+	}
+	p.replaceCard = func(ctx context.Context, responseURL string, blocks []slack.Block, text string) error {
+		return slack.PostWebhookContext(ctx, responseURL, &slack.WebhookMessage{
+			ReplaceOriginal: true,
+			Text:            text,
+			Blocks:          &slack.Blocks{BlockSet: blocks},
 		})
 	}
 	return p
