@@ -7,6 +7,7 @@ import {
   childIssuesOptions,
 } from "@multica/core/issues/queries";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
+import { useParentIssueRecents } from "@multica/core/issues/use-parent-issue-recents";
 import { IssuePickerModal } from "./issue-picker-modal";
 import { useT } from "../i18n";
 
@@ -21,6 +22,7 @@ export function SetParentIssueModal({
   const issueId = (data?.issueId as string) || "";
   const wsId = useWorkspaceId();
   const updateIssue = useUpdateIssue();
+  const recentIssues = useParentIssueRecents(wsId, true);
 
   const { data: children = [] } = useQuery({
     ...childIssuesOptions(wsId, issueId),
@@ -38,27 +40,31 @@ export function SetParentIssueModal({
       title={t(($) => $.set_parent.title)}
       description={t(($) => $.set_parent.description)}
       excludeIds={excludeIds}
-      onSelect={(selected) => {
-        updateIssue.mutate(
-          {
+      suggestions={[{
+        key: "recent",
+        heading: t(($) => $.issue_picker.suggested_recent),
+        issues: recentIssues,
+      }]}
+      onSelect={async (selected) => {
+        try {
+          // The picker closes immediately after selection. Await the mutation
+          // so its result still reaches the user after this modal unmounts.
+          await updateIssue.mutateAsync({
             id: issueId,
             parent_issue_id: selected.id,
-          },
-          {
-            onSuccess: () =>
-              toast.success(
-                t(($) => $.set_parent.toast_success, {
-                  identifier: selected.identifier,
-                }),
-              ),
-            onError: (err) =>
-              toast.error(
-                err instanceof Error && err.message
-                  ? err.message
-                  : t(($) => $.set_parent.toast_failed),
-              ),
-          },
-        );
+          });
+          toast.success(
+            t(($) => $.set_parent.toast_success, {
+              identifier: selected.identifier,
+            }),
+          );
+        } catch (err) {
+          toast.error(
+            err instanceof Error && err.message
+              ? err.message
+              : t(($) => $.set_parent.toast_failed),
+          );
+        }
       }}
     />
   );
