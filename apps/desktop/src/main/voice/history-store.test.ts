@@ -3,7 +3,7 @@ import { existsSync } from "fs";
 import { mkdtemp, readdir, rm, writeFile } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { MAX_HISTORY_ENTRIES, VoiceHistoryStore } from "./history-store";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -11,7 +11,7 @@ const audio = new Uint8Array([1, 2, 3]);
 
 let root: string;
 let now: number;
-let onChange: ReturnType<typeof vi.fn>;
+let onChange: Mock<() => void>;
 
 async function open() {
   const store = new VoiceHistoryStore({ root, onChange, now: () => now });
@@ -22,7 +22,7 @@ async function open() {
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "voice-history-"));
   now = 10 * DAY;
-  onChange = vi.fn();
+  onChange = vi.fn<() => void>();
 });
 
 afterEach(async () => {
@@ -58,7 +58,7 @@ describe("VoiceHistoryStore", () => {
     expect((await readdir(root)).filter((f) => f.endsWith(".ogg"))).toEqual([]);
   });
 
-  it("prunes by age when saving and on demand, never a recording in flight", async () => {
+  it("expires by the retention given when saving or chosen in Settings", async () => {
     const store = await open();
     const old = await store.save(audio, "audio/webm", 1, null);
     await store.update(old.id, { status: "done", text: "old" });
@@ -66,12 +66,54 @@ describe("VoiceHistoryStore", () => {
     const fresh = await store.save(audio, "audio/webm", 1, 7);
     expect(store.list().map((e) => e.id)).toEqual([fresh.id]);
 
-    await store.prune(0);
-    expect(store.list().map((e) => e.id)).toEqual([fresh.id]);
-    await store.update(fresh.id, { status: "failed" });
-    await store.prune(0);
+    await store.setRetention(0);
     expect(store.list()).toEqual([]);
-    expect((await readdir(root)).filter((f) => f !== "history.json")).toEqual([]);
+    expect((await readdir(root)).filter((f) => f.endsWith(".webm"))).toEqual([]);
+  });
+
+  it("keeps expiring by the chosen retention with no new recordings", async () => {
+    const store = await open();
+    await store.setRetention(1);
+    const entry = await store.save(audio, "audio/webm", 1, 1);
+    await store.update(entry.id, { status: "done", text: "yesterday" });
+
+    now += DAY / 2;
+    expect(await store.expire()).toBe(false);
+    expect(store.list()).toHaveLength(1);
+
+    now += 2 * DAY;
+    const reopened = await open();
+    expect(reopened.list()).toEqual([]);
+    expect((await readdir(root)).filter((f) => f.endsWith(".webm"))).toEqual([]);
+  });
+
+  it("expires on read once a recording passes the retention", async () => {
+    const store = await open();
+    await store.save(audio, "audio/webm", 1, 1);
+    now += 2 * DAY;
+    expect(store.list()).toHaveLength(1);
+    expect(await store.expire()).toBe(true);
+    expect(store.list()).toEqual([]);
+  });
+
+  it("clears a recording still being transcribed, and its late result stays gone", async () => {
+    const store = await open();
+    await store.setRetention(30);
+    const done = await store.save(audio, "audio/webm", 1, 30);
+    await store.update(done.id, { status: "done", text: "done" });
+    const inFlight = await store.save(audio, "audio/webm", 1, 30);
+
+    await store.clear();
+    expect(store.list()).toEqual([]);
+    expect((await readdir(root)).filter((f) => f.endsWith(".webm"))).toEqual([]);
+
+    await store.update(inFlight.id, { status: "done", text: "late" });
+    expect(store.list()).toEqual([]);
+    expect((await open()).list()).toEqual([]);
+
+    const next = await store.save(audio, "audio/webm", 1, 30);
+    now += 10 * DAY;
+    expect((await open()).list().map((e) => e.id)).toEqual([next.id]);
   });
 
   it("caps the number of entries even when keeping forever", async () => {

@@ -4,9 +4,10 @@ import {
   MAX_VOICE_SAMPLES,
   VOICE_HISTORY_AUDIO_CHANNEL,
   VOICE_HISTORY_CHANGED_CHANNEL,
+  VOICE_HISTORY_CLEAR_CHANNEL,
   VOICE_HISTORY_LIST_CHANNEL,
-  VOICE_HISTORY_PRUNE_CHANNEL,
   VOICE_HISTORY_REMOVE_CHANNEL,
+  VOICE_HISTORY_RETENTION_CHANNEL,
   VOICE_HISTORY_SAVE_CHANNEL,
   VOICE_HISTORY_UPDATE_CHANNEL,
   VOICE_MODEL_CANCEL_CHANNEL,
@@ -129,6 +130,7 @@ export function setupVoiceInput(): void {
 
   ipcMain.handle(VOICE_HISTORY_LIST_CHANNEL, async (): Promise<VoiceHistoryEntry[]> => {
     await historyReady;
+    await history.expire();
     return history.list();
   });
   ipcMain.handle(VOICE_HISTORY_SAVE_CHANNEL, async (_event, request: unknown): Promise<VoiceHistoryEntry | null> => {
@@ -152,9 +154,13 @@ export function setupVoiceInput(): void {
     await historyReady;
     if (typeof id === "string") await history.remove(id);
   });
-  ipcMain.handle(VOICE_HISTORY_PRUNE_CHANNEL, async (_event, keepDays: unknown) => {
+  ipcMain.handle(VOICE_HISTORY_RETENTION_CHANNEL, async (_event, keepDays: unknown) => {
     await historyReady;
-    await history.prune(keepDaysOf(keepDays));
+    if (keepDays === null || typeof keepDays === "number") await history.setRetention(keepDaysOf(keepDays));
+  });
+  ipcMain.handle(VOICE_HISTORY_CLEAR_CHANNEL, async () => {
+    await historyReady;
+    await history.clear();
   });
 
   app.on("will-quit", () => engine.stop());

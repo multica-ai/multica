@@ -164,8 +164,10 @@ interface DesktopAPI {
       update: (id: string, patch: VoiceHistoryUpdate) => Promise<void>;
       audio: (id: string) => Promise<VoiceHistoryAudio | null>;
       remove: (id: string) => Promise<void>;
-      /** Drop entries older than `keepDays` (0 drops all); null keeps them. */
-      prune: (keepDays: number | null) => Promise<void>;
+      /** Remember how many days to keep (0 keeps none, null forever) and drop older entries now. */
+      setRetention: (keepDays: number | null) => Promise<void>;
+      /** Delete every entry, including one still being transcribed. */
+      clear: () => Promise<void>;
     };
   };
   /** Listen for Cmd/Ctrl+W tab-close requests from the main process.

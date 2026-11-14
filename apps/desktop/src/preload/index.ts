@@ -48,7 +48,8 @@ import {
   VOICE_HISTORY_AUDIO_CHANNEL,
   VOICE_HISTORY_CHANGED_CHANNEL,
   VOICE_HISTORY_LIST_CHANNEL,
-  VOICE_HISTORY_PRUNE_CHANNEL,
+  VOICE_HISTORY_RETENTION_CHANNEL,
+  VOICE_HISTORY_CLEAR_CHANNEL,
   VOICE_HISTORY_REMOVE_CHANNEL,
   VOICE_HISTORY_SAVE_CHANNEL,
   VOICE_HISTORY_UPDATE_CHANNEL,
@@ -333,7 +334,9 @@ const desktopAPI = {
         ipcRenderer.invoke(VOICE_HISTORY_UPDATE_CHANNEL, id, patch),
       audio: (id: string): Promise<VoiceHistoryAudio | null> => ipcRenderer.invoke(VOICE_HISTORY_AUDIO_CHANNEL, id),
       remove: (id: string): Promise<void> => ipcRenderer.invoke(VOICE_HISTORY_REMOVE_CHANNEL, id),
-      prune: (keepDays: number | null): Promise<void> => ipcRenderer.invoke(VOICE_HISTORY_PRUNE_CHANNEL, keepDays),
+      setRetention: (keepDays: number | null): Promise<void> =>
+        ipcRenderer.invoke(VOICE_HISTORY_RETENTION_CHANNEL, keepDays),
+      clear: (): Promise<void> => ipcRenderer.invoke(VOICE_HISTORY_CLEAR_CHANNEL),
     },
   },
   /** Listen for Cmd/Ctrl+W tab-close requests from the main process.

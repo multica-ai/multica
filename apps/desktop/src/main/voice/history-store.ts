@@ -9,6 +9,7 @@ import type {
 } from "../../shared/voice";
 
 const INDEX = "history.json";
+const RETENTION = "retention.json";
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** Bounds the folder even when history is kept forever. */
 export const MAX_HISTORY_ENTRIES = 1000;
@@ -53,13 +54,26 @@ function isStoredEntry(value: unknown): value is StoredEntry {
   );
 }
 
+function isKeepDays(value: unknown): value is number | null {
+  return value === null || (typeof value === "number" && Number.isFinite(value) && value >= 0);
+}
+
+function publicEntry({ id, createdAt, durationMs, status, text }: StoredEntry): VoiceHistoryEntry {
+  return { id, createdAt, durationMs, status, text };
+}
+
 /**
  * Recordings and their transcripts, kept on this device. The index lives in
  * `<root>/history.json`, newest first; each recording is its own file next
  * to it. Writes are serialized so concurrent saves never lose an entry.
+ *
+ * The retention last chosen in Settings is kept in `<root>/retention.json`
+ * so old recordings expire on launch and on read, not only when recording.
  */
 export class VoiceHistoryStore {
   private entries: StoredEntry[] = [];
+  /** Undefined until a retention has been chosen; nothing expires by age. */
+  private keepDays: number | null | undefined;
   private writes: Promise<void> = Promise.resolve();
   private readonly now: () => number;
 
@@ -75,6 +89,13 @@ export class VoiceHistoryStore {
     } catch {
       this.entries = [];
     }
+    try {
+      const raw: unknown = JSON.parse(await readFile(join(this.options.root, RETENTION), "utf8"));
+      const keepDays = (raw as { keepDays?: unknown } | null)?.keepDays;
+      if (isKeepDays(keepDays)) this.keepDays = keepDays;
+    } catch {
+      this.keepDays = undefined;
+    }
     // The app quit while these were being transcribed.
     let interrupted = false;
     for (const entry of this.entries) {
@@ -82,11 +103,12 @@ export class VoiceHistoryStore {
       entry.status = "interrupted";
       interrupted = true;
     }
-    if (interrupted) await this.persist();
+    const expired = await this.expire(false);
+    if (interrupted || expired) await this.persist();
   }
 
   list(): VoiceHistoryEntry[] {
-    return this.entries.map(({ id, createdAt, durationMs, status, text }) => ({ id, createdAt, durationMs, status, text }));
+    return this.entries.map(publicEntry);
   }
 
   async save(audio: Uint8Array, mimeType: string, durationMs: number, keepDays: number | null): Promise<VoiceHistoryEntry> {
@@ -95,9 +117,31 @@ export class VoiceHistoryStore {
     await writeFile(join(this.options.root, file), audio);
     const entry: StoredEntry = { id, createdAt: this.now(), durationMs, status: "transcribing", text: "", file, mimeType };
     this.entries.unshift(entry);
-    await this.prune(keepDays, false);
+    await this.rememberRetention(keepDays);
+    await this.expire(false);
     await this.persist();
-    return this.list()[0]!;
+    return publicEntry(entry);
+  }
+
+  /** Remember the retention chosen in Settings and apply it now. */
+  async setRetention(keepDays: number | null): Promise<void> {
+    await this.rememberRetention(keepDays);
+    await this.expire();
+  }
+
+  /** Drop entries past the remembered retention. Resolves whether any were dropped. */
+  async expire(persist = true): Promise<boolean> {
+    const keepDays = this.keepDays;
+    const cutoff = keepDays === undefined || keepDays === null ? -Infinity : this.now() - keepDays * DAY_MS;
+    return this.drop((entry, index) => keepDays === 0 || entry.createdAt < cutoff || index >= MAX_HISTORY_ENTRIES, persist);
+  }
+
+  /**
+   * Delete every recording, including one still being transcribed; its
+   * late result finds no entry and is discarded.
+   */
+  async clear(): Promise<void> {
+    await this.drop(() => true);
   }
 
   async update(id: string, patch: VoiceHistoryUpdate): Promise<void> {
@@ -126,20 +170,22 @@ export class VoiceHistoryStore {
     await this.persist();
   }
 
-  /** Drop entries older than `keepDays` (0 drops all); null keeps them, up to the cap. */
-  async prune(keepDays: number | null, persist = true): Promise<void> {
-    const cutoff = keepDays === null ? -Infinity : this.now() - keepDays * DAY_MS;
-    const keep: StoredEntry[] = [];
-    const drop: StoredEntry[] = [];
-    for (const entry of this.entries) {
-      // A recording still being transcribed is never pruned from under it.
-      const expired = entry.status !== "transcribing" && (keepDays === 0 || entry.createdAt < cutoff);
-      (expired || keep.length >= MAX_HISTORY_ENTRIES ? drop : keep).push(entry);
-    }
-    if (drop.length === 0) return;
-    this.entries = keep;
-    await Promise.all(drop.map((entry) => rm(join(this.options.root, entry.file), { force: true })));
+  private async rememberRetention(keepDays: number | null): Promise<void> {
+    if (this.keepDays === keepDays) return;
+    this.keepDays = keepDays;
+    const path = join(this.options.root, RETENTION);
+    await writeFile(`${path}.tmp`, JSON.stringify({ keepDays }));
+    await rename(`${path}.tmp`, path);
+  }
+
+  private async drop(shouldDrop: (entry: StoredEntry, index: number) => boolean, persist = true): Promise<boolean> {
+    const dropped = this.entries.filter(shouldDrop);
+    if (dropped.length === 0) return false;
+    const gone = new Set(dropped);
+    this.entries = this.entries.filter((entry) => !gone.has(entry));
+    await Promise.all(dropped.map((entry) => rm(join(this.options.root, entry.file), { force: true })));
     if (persist) await this.persist();
+    return true;
   }
 
   private persist(): Promise<void> {

@@ -144,7 +144,7 @@ export function VoiceHistorySection() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t(($) => $.voice_input.history.clear_dialog.cancel)}</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" onClick={() => void api.prune(0)}>
+            <AlertDialogAction variant="destructive" onClick={() => void api.clear()}>
               {t(($) => $.voice_input.history.clear)}
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -177,7 +177,7 @@ function KeepHistoryRow({ api }: { api: LocalVoiceHistoryAPI }) {
           if (!next) return;
           const retention = next as VoiceHistoryRetention;
           update({ keepHistory: retention });
-          void api.prune(voiceHistoryDays(retention));
+          void api.setRetention(voiceHistoryDays(retention));
         }}
       >
         <SelectTrigger size="sm" className="w-full" aria-label={label}>

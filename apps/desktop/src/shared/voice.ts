@@ -17,7 +17,8 @@ export const VOICE_HISTORY_SAVE_CHANNEL = "voice:history:save";
 export const VOICE_HISTORY_UPDATE_CHANNEL = "voice:history:update";
 export const VOICE_HISTORY_AUDIO_CHANNEL = "voice:history:audio";
 export const VOICE_HISTORY_REMOVE_CHANNEL = "voice:history:remove";
-export const VOICE_HISTORY_PRUNE_CHANNEL = "voice:history:prune";
+export const VOICE_HISTORY_RETENTION_CHANNEL = "voice:history:retention";
+export const VOICE_HISTORY_CLEAR_CHANNEL = "voice:history:clear";
 
 /** The sample rate every model expects. */
 export const VOICE_SAMPLE_RATE = 16000;

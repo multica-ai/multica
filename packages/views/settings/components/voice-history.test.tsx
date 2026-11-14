@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_VOICE_SETTINGS, useVoiceModelsStore, useVoiceSettingsStore, type VoiceHistoryEntry } from "@multica/core/voice";
@@ -24,7 +24,8 @@ const api = {
   update: vi.fn(async () => {}),
   audio: vi.fn(async () => ({ audio: new Uint8Array([1]), mimeType: "audio/webm" })),
   remove: vi.fn(async () => {}),
-  prune: vi.fn(async () => {}),
+  setRetention: vi.fn(async () => {}),
+  clear: vi.fn(async () => {}),
 };
 
 beforeEach(() => {
@@ -70,13 +71,23 @@ describe("VoiceHistorySection", () => {
     await waitFor(() => expect(api.update).toHaveBeenLastCalledWith("b", { status: "done", text: "找回来了" }));
   });
 
-  it("prunes to the new retention when it changes", async () => {
+  it("applies the new retention when it changes", async () => {
     const user = userEvent.setup();
     renderWithI18n(<VoiceHistorySection />);
     await screen.findByText("今天的第一条");
     await user.click(screen.getByRole("combobox", { name: "Keep history" }));
     await user.click(await screen.findByRole("option", { name: "7 days" }));
     expect(useVoiceSettingsStore.getState().keepHistory).toBe("7d");
-    expect(api.prune).toHaveBeenCalledWith(7);
+    expect(api.setRetention).toHaveBeenCalledWith(7);
+  });
+
+  it("clears everything after confirming, without changing the retention", async () => {
+    renderWithI18n(<VoiceHistorySection />);
+    await screen.findByText("今天的第一条");
+    fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
+    fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Clear all" }));
+    expect(api.clear).toHaveBeenCalledOnce();
+    expect(api.setRetention).not.toHaveBeenCalled();
+    expect(useVoiceSettingsStore.getState().keepHistory).toBe("30d");
   });
 });

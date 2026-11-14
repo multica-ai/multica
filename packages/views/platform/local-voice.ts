@@ -21,8 +21,10 @@ export interface LocalVoiceHistoryAPI {
   update: (id: string, patch: { status: VoiceHistoryStatus; text?: string }) => Promise<void>;
   audio: (id: string) => Promise<{ audio: Uint8Array<ArrayBuffer>; mimeType: string } | null>;
   remove: (id: string) => Promise<void>;
-  /** Drop entries older than `keepDays` (0 drops all); null keeps them. */
-  prune: (keepDays: number | null) => Promise<void>;
+  /** Remember how many days to keep (0 keeps none, null forever) and drop older entries now. */
+  setRetention: (keepDays: number | null) => Promise<void>;
+  /** Delete every entry, including one still being transcribed. */
+  clear: () => Promise<void>;
 }
 
 export interface LocalVoiceAPI {
