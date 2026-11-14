@@ -93,7 +93,7 @@ export function ChatView({ title, state, items, pending, onBack, onRetry, onSend
           ) : state === "error" ? (
             <Failure title={strings.common.loadFailed} retryLabel={strings.common.retry} onRetry={onRetry} />
           ) : (
-            <FlatList
+            <FlatList contentInsetAdjustmentBehavior="automatic"
               ref={list}
               data={items}
               keyExtractor={(item) => item.id}

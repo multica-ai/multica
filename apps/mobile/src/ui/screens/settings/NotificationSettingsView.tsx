@@ -44,7 +44,7 @@ export function NotificationSettingsView({ state, muted, onBack, onRetry, onTogg
       ) : state === "error" ? (
         <Failure title={strings.common.loadFailed} retryLabel={strings.common.retry} onRetry={onRetry} />
       ) : (
-        <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24 }]}>
+        <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24 }]}>
           <GroupNote above>{strings.notifications.inbox}</GroupNote>
           <Group>{rows(INBOX_GROUPS)}</Group>
           <GroupNote>{strings.notifications.detail}</GroupNote>

@@ -37,7 +37,7 @@ export function SettingsView({ user, workspaceName, serverHost, version, onBack,
   return (
     <Screen>
       <PushHeader title={strings.more.settings} onBack={onBack} backLabel={strings.common.back} />
-      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24 }]}>
+      <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24 }]}>
         <View style={[styles.group, styles.account, { backgroundColor: palette.grouped }]}>
           <Avatar actor={{ kind: "member", name: user.name, avatarUrl: user.avatarUrl }} size={48} />
           <View style={styles.flex}>

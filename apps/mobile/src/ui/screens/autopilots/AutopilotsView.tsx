@@ -1,5 +1,4 @@
 import { Pressable, RefreshControl, SectionList, StyleSheet, View } from "react-native";
-import { Capsule } from "../../components/Floating";
 import { TitleHeader } from "../../components/Header";
 import { BOTTOM_CLEARANCE, Screen } from "../../components/Screen";
 import { Empty, Failure, Loading } from "../../components/States";
@@ -64,13 +63,13 @@ export function AutopilotsView({ state, sections, refreshing = false, onRefresh,
   const palette = useTheme();
   return (
     <Screen>
-      <TitleHeader title={strings.autopilot.title} right={<Capsule actions={[{ icon: "Plus", label: strings.autopilot.new, onPress: onCreate }]} />} />
+      <TitleHeader title={strings.autopilot.title} actions={[{ icon: "Plus", label: strings.autopilot.new, onPress: onCreate }]} />
       {state === "loading" ? (
         <Loading />
       ) : state === "error" ? (
         <Failure title={strings.common.loadFailed} retryLabel={strings.common.retry} onRetry={onRetry} />
       ) : (
-        <SectionList
+        <SectionList contentInsetAdjustmentBehavior="automatic"
           sections={sections.map((section) => ({ key: section.key, title: section.title, data: section.rows }))}
           keyExtractor={(item) => item.id}
           renderSectionHeader={({ section }) => (

@@ -1,52 +1,50 @@
 import { Pressable, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Icon, type IconName } from "../icons/Icon";
-import { floatShadow, useTheme } from "../theme";
-import { BottomFade } from "./BottomFade";
-import { FloatingButton } from "./Floating";
+import { BottomFade } from "../ui/components/BottomFade";
+import { FloatingButton } from "../ui/components/Floating";
+import { Icon, type IconName } from "../ui/icons/Icon";
+import { useStrings } from "../ui/strings";
+import { floatShadow, useTheme } from "../ui/theme";
 
-export interface TabItem {
-  key: string;
-  icon: IconName;
-  label: string;
-  dot?: boolean;
-}
+export type TabKey = "inbox" | "myIssues" | "agents" | "more";
 
-interface TabBarProps {
-  tabs: readonly TabItem[];
-  active: string;
-  onSelect: (key: string) => void;
-  onSearch: () => void;
-  searchLabel: string;
-}
+const TABS: readonly { key: TabKey; icon: IconName }[] = [
+  { key: "inbox", icon: "Inbox" },
+  { key: "myIssues", icon: "CircleUser" },
+  { key: "agents", icon: "Bot" },
+  { key: "more", icon: "ChevronsUpDown" },
+];
 
-/** Icon-only floating capsule plus a separate search button. */
-export function TabBar({ tabs, active, onSelect, onSearch, searchLabel }: TabBarProps) {
+/**
+ * Stands in for the system tab bar, which the app uses and the browser cannot draw: the three tabs,
+ * the menu tab, and search on its own.
+ */
+export function TabBar({ active }: { active: TabKey }) {
   const palette = useTheme();
+  const strings = useStrings();
   const insets = useSafeAreaInsets();
   return (
     <>
       <BottomFade height={insets.bottom + 110} />
       <View style={[styles.row, { bottom: Math.max(insets.bottom - 8, 12) }]} pointerEvents="box-none">
         <View style={[styles.bar, { backgroundColor: palette.float }, floatShadow(palette)]} accessibilityRole="tablist">
-          {tabs.map((tab) => {
+          {TABS.map((tab) => {
             const on = tab.key === active;
             return (
               <Pressable
                 key={tab.key}
                 accessibilityRole="tab"
-                accessibilityLabel={tab.label}
+                accessibilityLabel={strings.tabs[tab.key]}
                 accessibilityState={{ selected: on }}
-                onPress={() => onSelect(tab.key)}
                 style={[styles.tab, on && { backgroundColor: palette.fill }]}
               >
                 <Icon name={tab.icon} size={23} color={palette.label} />
-                {tab.dot ? <View style={[styles.dot, { backgroundColor: palette.accent, borderColor: palette.float }]} /> : null}
+                {tab.key === "inbox" ? <View style={[styles.dot, { backgroundColor: palette.accent, borderColor: palette.float }]} /> : null}
               </Pressable>
             );
           })}
         </View>
-        <FloatingButton icon="Search" label={searchLabel} size={56} onPress={onSearch} />
+        <FloatingButton icon="Search" label={strings.search.title} size={56} onPress={() => undefined} />
       </View>
     </>
   );

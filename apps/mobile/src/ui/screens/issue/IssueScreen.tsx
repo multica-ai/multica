@@ -21,6 +21,7 @@ import { runSteps } from "../../model/steps";
 import { isActiveTask, runPhase } from "../../model/tasks";
 import { useWorkspace } from "../../model/workspace-context";
 import type { RootStackParamList } from "../../navigation/types";
+import { useDetail } from "../../shell/detail";
 import { relativeTime, useStrings, type Strings } from "../../strings";
 import { IssueView, type AgentRunModel, type PullRequestModel, type TimelineModel } from "./IssueView";
 
@@ -62,8 +63,14 @@ function timelineModels(entries: readonly TimelineEntry[], resolveActor: ActorRe
 }
 
 export function IssueScreen() {
-  const navigation = useNavigation();
   const { issueId } = useRoute<RouteProp<RootStackParamList, "Issue">>().params;
+  return <IssueDetail issueId={issueId} />;
+}
+
+/** An issue by id: a pushed screen of its own, or the detail column beside a list. */
+export function IssueDetail({ issueId }: { issueId: string }) {
+  const navigation = useNavigation();
+  const detailNav = useDetail();
   const strings = useStrings();
   const { workspace } = useWorkspace();
   const resolveActor = useActorResolver();
@@ -173,7 +180,7 @@ export function IssueScreen() {
       }
       onStop={task && live ? () => cancelRun.mutate(task.id) : undefined}
       onOpenUrl={(url) => void Linking.openURL(url)}
-      onOpenIssue={(target) => navigation.navigate("Issue", { issueId: target })}
+      onOpenIssue={(target) => detailNav.open({ kind: "issue", issueId: target })}
       onComment={async (text) => {
         try {
           await createComment.mutateAsync({ content: text });

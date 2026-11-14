@@ -61,6 +61,8 @@ const en = {
     },
   },
   myIssues: { title: "My issues", assigned: "Assigned", created: "Created", subscribed: "Subscribed", empty: "Nothing here" },
+  /** The detail column beside a list, before anything is picked. */
+  detail: { inbox: "Pick a notification to read it", myIssues: "Pick an issue to open it", agents: "Pick a conversation to open it", foldHint: "Folding goes back to the list" },
   issue: {
     agent: "Agent",
     activity: "Activity",
@@ -195,6 +197,7 @@ const zhHans: Strings = {
     },
   },
   myIssues: { title: "我的任务", assigned: "指派给我", created: "我创建的", subscribed: "已订阅", empty: "这里还没有任务" },
+  detail: { inbox: "选一条通知查看", myIssues: "选一个任务查看", agents: "选一个对话查看", foldHint: "合上后回到列表" },
   issue: {
     agent: "智能体",
     activity: "动态",

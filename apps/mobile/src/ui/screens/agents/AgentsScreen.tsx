@@ -8,10 +8,12 @@ import { runPhase, useActiveTasks } from "../../model/tasks";
 import { useWorkspace } from "../../model/workspace-context";
 import { markdownPreview } from "../../markdown/parse";
 import { relativeTime, useStrings } from "../../strings";
+import { useDetail } from "../../shell/detail";
 import { AgentsView, type AgentListRow } from "./AgentsView";
 
 export function AgentsScreen() {
   const navigation = useNavigation();
+  const detail = useDetail();
   const strings = useStrings();
   const { workspace } = useWorkspace();
   const resolveActor = useActorResolver();
@@ -68,7 +70,8 @@ export function AgentsScreen() {
         void sessions.refetch();
         active.refetch();
       }}
-      onOpen={(row) => (row.target.kind === "issue" ? navigation.navigate("Issue", { issueId: row.target.issueId }) : navigation.navigate("Chat", { sessionId: row.target.sessionId }))}
+      selected={detail.selected}
+      onOpen={(row) => detail.open(row.target)}
       onNewChat={() => navigation.navigate("NewChat")}
     />
   );

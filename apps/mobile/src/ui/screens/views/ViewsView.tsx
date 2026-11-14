@@ -75,7 +75,7 @@ export function ViewsView({ state, starred, others, onBack, onRetry, onOpen, onT
       ) : state === "error" ? (
         <Failure title={strings.common.loadFailed} retryLabel={strings.common.retry} onRetry={onRetry} />
       ) : (
-        <ScrollView contentContainerStyle={styles.list}>
+        <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={styles.list}>
           {section(strings.views.starred, starred)}
           {section(strings.views.others, others)}
           <Txt variant="meta" tone="tertiary" style={styles.note}>

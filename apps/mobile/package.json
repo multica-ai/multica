@@ -32,7 +32,6 @@
     "@react-navigation/native-stack": "^7.21.0",
     "@tanstack/react-query": "catalog:",
     "expo": "~57.0.26",
-    "expo-blur": "~57.0.3",
     "expo-build-properties": "~57.0.22",
     "expo-constants": "~57.0.20",
     "expo-crypto": "~57.0.4",

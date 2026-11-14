@@ -3,7 +3,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Avatar, type AvatarActor } from "../../components/Avatar";
 import { BottomFade } from "../../components/BottomFade";
 import { Chip, ChipGroup } from "../../components/Chip";
-import { Capsule, FloatingSurface } from "../../components/Floating";
+import { FloatingSurface } from "../../components/Floating";
 import { Group, GroupRow } from "../../components/Group";
 import { PushHeader } from "../../components/Header";
 import { Screen } from "../../components/Screen";
@@ -54,7 +54,7 @@ export function AutopilotView(props: AutopilotViewProps) {
       <PushHeader
         onBack={onBack}
         backLabel={strings.common.back}
-        right={state === "ready" ? <Capsule actions={[{ icon: "MoreHorizontal", label: strings.common.more, onPress: props.onMore }]} /> : undefined}
+        actions={state === "ready" ? [{ icon: "MoreHorizontal", label: strings.common.more, onPress: props.onMore }] : []}
       />
       {state === "loading" ? (
         <Loading />
@@ -62,7 +62,7 @@ export function AutopilotView(props: AutopilotViewProps) {
         <Failure title={strings.common.loadFailed} retryLabel={strings.common.retry} onRetry={onRetry} />
       ) : (
         <>
-          <ScrollView
+          <ScrollView contentInsetAdjustmentBehavior="automatic"
             contentContainerStyle={[styles.content, canWrite && styles.withActions]}
             refreshControl={onRefresh ? <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.label3} /> : undefined}
           >

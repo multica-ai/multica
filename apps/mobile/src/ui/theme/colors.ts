@@ -22,7 +22,6 @@ export interface Palette {
   info: string;
   destructive: string;
   priorityHigh: string;
-  scrim: string;
   shadow: string;
   shadowOpacity: number;
   avatars: readonly string[];
@@ -50,7 +49,6 @@ export const light: Palette = {
   info: "#0072d5",
   destructive: "#e7000b",
   priorityHigh: "#ec6f00",
-  scrim: "rgba(255, 255, 255, 0.45)",
   shadow: "#000000",
   shadowOpacity: 0.08,
   avatars: ["#4a9fd1", "#c48a3a", "#7f6fd6", "#3f9e8f", "#d16a8a", "#6b8f3a"],
@@ -78,7 +76,6 @@ export const dark: Palette = {
   info: "#0f92f7",
   destructive: "#ff6467",
   priorityHigh: "#f67f2f",
-  scrim: "rgba(0, 0, 0, 0.45)",
   shadow: "#000000",
   shadowOpacity: 0.5,
   avatars: ["#3d86b3", "#a87532", "#6c5dbd", "#34877a", "#b65a77", "#5b7a31"],

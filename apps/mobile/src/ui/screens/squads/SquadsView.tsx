@@ -1,6 +1,5 @@
 import { FlatList, Pressable, RefreshControl, StyleSheet, View } from "react-native";
 import type { AvatarActor } from "../../components/Avatar";
-import { Capsule } from "../../components/Floating";
 import { TitleHeader } from "../../components/Header";
 import { BOTTOM_CLEARANCE, Screen } from "../../components/Screen";
 import { Empty, Failure, Loading } from "../../components/States";
@@ -59,13 +58,13 @@ export function SquadsView({ state, squads, refreshing = false, onRefresh, onRet
   const palette = useTheme();
   return (
     <Screen>
-      <TitleHeader title={strings.squad.title} right={onCreate ? <Capsule actions={[{ icon: "Plus", label: strings.squad.new, onPress: onCreate }]} /> : undefined} />
+      <TitleHeader title={strings.squad.title} actions={onCreate ? [{ icon: "Plus", label: strings.squad.new, onPress: onCreate }] : []} />
       {state === "loading" ? (
         <Loading />
       ) : state === "error" ? (
         <Failure title={strings.common.loadFailed} retryLabel={strings.common.retry} onRetry={onRetry} />
       ) : (
-        <FlatList
+        <FlatList contentInsetAdjustmentBehavior="automatic"
           data={squads}
           keyExtractor={(squad) => squad.id}
           renderItem={({ item }) => <SquadRow squad={item} onPress={() => onOpen(item.id)} />}

@@ -1,8 +1,5 @@
 import type { ReactNode } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
-import { BlurView } from "expo-blur";
-import { TabBar } from "../ui/components/TabBar";
-import { tabItems, type TabKey } from "../ui/navigation/tabs";
 import { StepsDisclosure } from "../ui/components/StepsDisclosure";
 import { AgentsView } from "../ui/screens/agents/AgentsView";
 import { GateView } from "../ui/screens/auth/GateView";
@@ -20,6 +17,7 @@ import { InboxView } from "../ui/screens/inbox/InboxView";
 import { StringsContext, stringsFor, useStrings } from "../ui/strings";
 import * as fx from "./fixtures";
 import { PhoneFrame } from "./PhoneFrame";
+import { TabBar, type TabKey } from "./TabBar";
 import { WORKSPACE_SCREENS } from "./workspace-screens";
 
 // Renders the app's real views with fixture data in iPhone-sized frames, so
@@ -30,8 +28,7 @@ import { WORKSPACE_SCREENS } from "./workspace-screens";
 const noop = () => {};
 
 function Tabs({ active }: { active: TabKey }) {
-  const strings = useStrings();
-  return <TabBar tabs={tabItems(strings, true)} active={active} onSelect={noop} onSearch={noop} searchLabel={strings.search.title} />;
+  return <TabBar active={active} />;
 }
 
 const SCREENS: Record<string, { caption: string; render: () => ReactNode }> = {
@@ -172,10 +169,10 @@ function MenuPreview({ mode }: { mode: "nav" | "workspaces" }) {
   return (
     <>
       <InboxView state="ready" rows={fx.inboxRows} onRetry={noop} onOpen={noop} onMarkAllRead={noop} />
-      <Tabs active="more" />
-      <BlurView intensity={28} tint={palette.scheme} style={StyleSheet.absoluteFill} />
-      <View style={[StyleSheet.absoluteFill, { backgroundColor: palette.scrim }]} />
-      <View style={styles.menu}>
+      <Tabs active="inbox" />
+      <View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(0,0,0,0.25)" }]} />
+      <View style={[styles.menu, { backgroundColor: palette.background }]}>
+        <View style={[styles.grabber, { backgroundColor: palette.fillStrong }]} />
         <WorkspaceMenuBody
           workspace={workspaces[0]!}
           workspaces={workspaces}
@@ -206,7 +203,6 @@ function MenuPreview({ mode }: { mode: "nav" | "workspaces" }) {
           onSettings={noop}
         />
       </View>
-      <Tabs active="more" />
     </>
   );
 }
@@ -282,7 +278,7 @@ export function Gallery() {
 const styles = StyleSheet.create({
   board: { padding: 32, gap: 40, alignItems: "flex-start" },
   caption: { fontSize: 13, textAlign: "center", marginTop: 14 },
-  menu: { position: "absolute", left: 16, bottom: 94 },
+  menu: { position: "absolute", left: 0, right: 0, bottom: 0, paddingHorizontal: 16, paddingTop: 24, paddingBottom: 34, borderTopLeftRadius: 28, borderTopRightRadius: 28 },
   sheet: { position: "absolute", left: 0, right: 0, bottom: 0, top: 340, borderTopLeftRadius: 28, borderTopRightRadius: 28, overflow: "hidden" },
   grabber: { position: "absolute", top: 6, alignSelf: "center", width: 36, height: 5, borderRadius: 3, zIndex: 1 },
 });

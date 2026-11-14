@@ -5,7 +5,6 @@ import { Avatar, type AvatarActor } from "../../components/Avatar";
 import { Chip, ChipGroup, Pill } from "../../components/Chip";
 import { BottomFade } from "../../components/BottomFade";
 import { Composer } from "../../components/Composer";
-import { Capsule } from "../../components/Floating";
 import { PushHeader } from "../../components/Header";
 import { RunSteps } from "../../components/RunSteps";
 import { Screen } from "../../components/Screen";
@@ -179,7 +178,7 @@ export function IssueView(props: IssueViewProps) {
   const palette = useTheme();
   const insets = useSafeAreaInsets();
   const header = (
-    <PushHeader onBack={onBack} backLabel={strings.common.back} right={onShare && issue ? <Capsule actions={[{ icon: "MoreHorizontal", label: strings.common.more, onPress: onShare }]} /> : undefined} />
+    <PushHeader onBack={onBack} backLabel={strings.common.back} actions={onShare && issue ? [{ icon: "MoreHorizontal", label: strings.common.more, onPress: onShare }] : []} />
   );
 
   if (state !== "ready" || !issue) {
@@ -196,7 +195,7 @@ export function IssueView(props: IssueViewProps) {
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         {header}
         <View style={styles.flex}>
-          <ScrollView contentContainerStyle={styles.content} keyboardDismissMode="interactive">
+          <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={styles.content} keyboardDismissMode="interactive">
             <Txt variant="meta" tone="secondary">
               {issue.identifier}
             </Txt>

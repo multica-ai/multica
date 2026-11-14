@@ -1,7 +1,6 @@
 import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import { Avatar, type AvatarActor } from "../../components/Avatar";
 import { Chip, ChipGroup } from "../../components/Chip";
-import { Capsule } from "../../components/Floating";
 import { PushHeader } from "../../components/Header";
 import { IssueRow, type IssueRowModel } from "../../components/IssueRow";
 import { Screen } from "../../components/Screen";
@@ -54,14 +53,14 @@ export function SquadView(props: SquadViewProps) {
       <PushHeader
         onBack={onBack}
         backLabel={strings.common.back}
-        right={state === "ready" ? <Capsule actions={[{ icon: "MoreHorizontal", label: strings.common.more, onPress: onMore }]} /> : undefined}
+        actions={state === "ready" ? [{ icon: "MoreHorizontal", label: strings.common.more, onPress: onMore }] : []}
       />
       {state === "loading" ? (
         <Loading />
       ) : state === "error" || !squad ? (
         <Failure title={strings.common.loadFailed} retryLabel={strings.common.retry} onRetry={onRetry} />
       ) : (
-        <ScrollView
+        <ScrollView contentInsetAdjustmentBehavior="automatic"
           contentContainerStyle={styles.content}
           refreshControl={onRefresh ? <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.label3} /> : undefined}
         >

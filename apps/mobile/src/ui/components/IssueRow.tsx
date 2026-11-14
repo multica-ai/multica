@@ -15,13 +15,14 @@ export interface IssueRowModel {
 }
 
 /** One issue in a list: status glyph, identifier, title, assignee. */
-export function IssueRow({ issue, onPress }: { issue: IssueRowModel; onPress: (issue: IssueRowModel) => void }) {
+export function IssueRow({ issue, selected = false, onPress }: { issue: IssueRowModel; selected?: boolean; onPress: (issue: IssueRowModel) => void }) {
   const palette = useTheme();
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityState={{ selected }}
       onPress={() => onPress(issue)}
-      style={({ pressed }) => [styles.row, pressed && { backgroundColor: palette.fill }]}
+      style={({ pressed }) => [styles.row, selected && styles.selected, (selected || pressed) && { backgroundColor: palette.fill }]}
     >
       <StatusIcon status={issue.status.key} color={issue.status.color} icon={issue.status.icon} size={16} />
       <View style={styles.body}>
@@ -45,6 +46,7 @@ export function IssueRow({ issue, onPress }: { issue: IssueRowModel; onPress: (i
 
 const styles = StyleSheet.create({
   row: { minHeight: 46, flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 20, paddingVertical: 10 },
+  selected: { marginHorizontal: 8, borderRadius: 14, paddingHorizontal: 12 },
   body: { flex: 1, minWidth: 0 },
   detail: { marginTop: 2 },
 });

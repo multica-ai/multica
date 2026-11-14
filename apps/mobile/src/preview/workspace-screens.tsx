@@ -1,8 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { StyleSheet, View } from "react-native";
 import type { ScheduleConfig } from "@multica/core/autopilots/schedule";
-import { TabBar } from "../ui/components/TabBar";
-import { tabItems } from "../ui/navigation/tabs";
 import { AutopilotEditorView, type AutopilotDraft, type AutopilotEditorPage } from "../ui/screens/autopilots/AutopilotEditorView";
 import { AutopilotsView } from "../ui/screens/autopilots/AutopilotsView";
 import { AutopilotView } from "../ui/screens/autopilots/AutopilotView";
@@ -15,18 +13,12 @@ import { SquadsView } from "../ui/screens/squads/SquadsView";
 import { SquadView } from "../ui/screens/squads/SquadView";
 import { SavedViewView } from "../ui/screens/views/SavedViewView";
 import { ViewsView } from "../ui/screens/views/ViewsView";
-import { useStrings } from "../ui/strings";
 import { useTheme } from "../ui/theme";
 import * as fx from "./fixtures-workspace";
 
 // Gallery entries for the screens reached from the workspace menu.
 
 const noop = () => {};
-
-function MoreTabs() {
-  const strings = useStrings();
-  return <TabBar tabs={tabItems(strings, true)} active="more" onSelect={noop} onSearch={noop} searchLabel={strings.search.title} />;
-}
 
 /** The app presents editors as page sheets over the screen that opened them. */
 function Sheet({ behind, children }: { behind: ReactNode; children: ReactNode }) {
@@ -108,7 +100,6 @@ export const WORKSPACE_SCREENS: Record<string, { caption: string; render: () => 
     render: () => (
       <>
         <ProjectsView state="ready" sections={fx.projectSections} onRetry={noop} onOpen={noop} onCreate={noop} />
-        <MoreTabs />
       </>
     ),
   },
@@ -117,7 +108,6 @@ export const WORKSPACE_SCREENS: Record<string, { caption: string; render: () => 
     render: () => (
       <>
         <ProjectsView state="ready" sections={[]} onRetry={noop} onOpen={noop} onCreate={noop} />
-        <MoreTabs />
       </>
     ),
   },
@@ -150,7 +140,6 @@ export const WORKSPACE_SCREENS: Record<string, { caption: string; render: () => 
     render: () => (
       <>
         <SquadsView state="ready" squads={fx.squads} onRetry={noop} onOpen={noop} onCreate={noop} />
-        <MoreTabs />
       </>
     ),
   },
@@ -200,7 +189,6 @@ export const WORKSPACE_SCREENS: Record<string, { caption: string; render: () => 
     render: () => (
       <>
         {autopilotsBehind}
-        <MoreTabs />
       </>
     ),
   },

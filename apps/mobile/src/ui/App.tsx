@@ -1,6 +1,6 @@
 import { useMemo, useRef } from "react";
 import { StatusBar } from "expo-status-bar";
-import { DarkTheme, DefaultTheme, NavigationContainer, createNavigationContainerRef } from "@react-navigation/native";
+import { DarkTheme, DefaultTheme, NavigationContainer, StackActions, createNavigationContainerRef } from "@react-navigation/native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { useAuthStore } from "@multica/core/auth";
 import { WorkspaceSlugProvider } from "@multica/core/paths";
@@ -26,7 +26,7 @@ type OpenLink = Extract<DeepLink, { kind: "open" }>;
 function openLink(link: OpenLink) {
   if (!navigationRef.isReady()) return false;
   if (link.subject.kind === "issue") navigationRef.navigate("Issue", { issueId: link.subject.id });
-  else if (link.subject.kind === "inbox") navigationRef.navigate("Tabs", { screen: "inbox" });
+  else if (link.subject.kind === "inbox") navigationRef.dispatch(StackActions.popTo("Tabs", { screen: "inbox" }));
   return true;
 }
 

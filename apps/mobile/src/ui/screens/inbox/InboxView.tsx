@@ -1,6 +1,5 @@
 import { FlatList, Pressable, RefreshControl, StyleSheet, View } from "react-native";
 import { Avatar, type AvatarActor } from "../../components/Avatar";
-import { Capsule } from "../../components/Floating";
 import { TitleHeader } from "../../components/Header";
 import { BOTTOM_CLEARANCE, Screen } from "../../components/Screen";
 import { Empty, Failure, Loading } from "../../components/States";
@@ -33,6 +32,8 @@ interface InboxViewProps {
   onOpen: (row: InboxRow) => void;
   onMarkAllRead?: () => void;
   onEndReached?: () => void;
+  /** The issue open beside the list. */
+  selectedIssueId?: string | null;
 }
 
 function Badge({ badge }: { badge: InboxBadge }) {
@@ -40,15 +41,16 @@ function Badge({ badge }: { badge: InboxBadge }) {
   return badge.kind === "status" ? <StatusIcon status={badge.status} size={12} /> : <Icon name={badge.icon} size={11} color={palette.label2} strokeWidth={2.4} />;
 }
 
-function Row({ row, onOpen }: { row: InboxRow; onOpen: (row: InboxRow) => void }) {
+function Row({ row, selected, onOpen }: { row: InboxRow; selected: boolean; onOpen: (row: InboxRow) => void }) {
   const palette = useTheme();
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityState={{ selected }}
       onPress={() => onOpen(row)}
-      style={({ pressed }) => [styles.row, pressed && { backgroundColor: palette.fill }]}
+      style={({ pressed }) => [styles.row, selected && styles.selected, (selected || pressed) && { backgroundColor: palette.fill }]}
     >
-      {row.unread ? <View style={[styles.dot, { backgroundColor: palette.accent }]} /> : null}
+      {row.unread ? <View style={[styles.dot, selected && styles.selectedDot, { backgroundColor: palette.accent }]} /> : null}
       <Avatar actor={row.actor} badge={row.badge ? <Badge badge={row.badge} /> : undefined} />
       <View style={styles.body}>
         <Txt variant="row" numberOfLines={1} tone={row.unread ? "primary" : "secondary"}>
@@ -67,24 +69,25 @@ function Row({ row, onOpen }: { row: InboxRow; onOpen: (row: InboxRow) => void }
   );
 }
 
-export function InboxView({ state, rows, refreshing = false, onRefresh, onRetry, onOpen, onMarkAllRead, onEndReached }: InboxViewProps) {
+export function InboxView({ state, rows, refreshing = false, onRefresh, onRetry, onOpen, onMarkAllRead, onEndReached, selectedIssueId = null }: InboxViewProps) {
   const strings = useStrings();
   const palette = useTheme();
   return (
     <Screen>
       <TitleHeader
         title={strings.inbox.title}
-        right={onMarkAllRead ? <Capsule actions={[{ icon: "CheckCircle2", label: strings.inbox.markAllRead, onPress: onMarkAllRead }]} /> : null}
+        actions={onMarkAllRead ? [{ icon: "CheckCircle2", label: strings.inbox.markAllRead, onPress: onMarkAllRead }] : []}
       />
       {state === "loading" ? (
         <Loading />
       ) : state === "error" ? (
         <Failure title={strings.common.loadFailed} retryLabel={strings.common.retry} onRetry={onRetry} />
       ) : (
-        <FlatList
+        <FlatList contentInsetAdjustmentBehavior="automatic"
           data={rows}
           keyExtractor={(row) => row.id}
-          renderItem={({ item }) => <Row row={item} onOpen={onOpen} />}
+          extraData={selectedIssueId}
+          renderItem={({ item }) => <Row row={item} selected={item.issueId !== null && item.issueId === selectedIssueId} onOpen={onOpen} />}
           contentContainerStyle={[styles.list, rows.length === 0 && styles.fill]}
           ListEmptyComponent={<Empty title={strings.inbox.empty} detail={strings.inbox.emptyDetail} />}
           onEndReached={onEndReached}
@@ -101,6 +104,8 @@ const styles = StyleSheet.create({
   fill: { flexGrow: 1 },
   row: { flexDirection: "row", gap: 14, paddingVertical: 11, paddingLeft: 24, paddingRight: 20 },
   dot: { position: "absolute", left: 9, top: 26, width: 7, height: 7, borderRadius: 4 },
+  selected: { marginHorizontal: 8, borderRadius: 14, paddingLeft: 16, paddingRight: 12 },
+  selectedDot: { left: 1 },
   body: { flex: 1, minWidth: 0 },
   summary: { marginTop: 2 },
 });

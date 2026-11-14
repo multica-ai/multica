@@ -11,6 +11,7 @@ import { StepsDisclosure } from "../../components/StepsDisclosure";
 import { runSteps } from "../../model/steps";
 import { useWorkspace } from "../../model/workspace-context";
 import type { RootStackParamList } from "../../navigation/types";
+import { useDetail } from "../../shell/detail";
 import { useStrings } from "../../strings";
 import { ChatView, type ChatItem } from "./ChatView";
 
@@ -26,8 +27,14 @@ function TaskSteps({ taskId }: { taskId: string }) {
 }
 
 export function ChatScreen() {
-  const navigation = useNavigation();
   const { sessionId } = useRoute<RouteProp<RootStackParamList, "Chat">>().params;
+  return <ChatDetail sessionId={sessionId} />;
+}
+
+/** A chat by id: a pushed screen of its own, or the detail column beside the agents list. */
+export function ChatDetail({ sessionId }: { sessionId: string }) {
+  const navigation = useNavigation();
+  const detail = useDetail();
   const strings = useStrings();
   const queryClient = useQueryClient();
   const { workspace } = useWorkspace();
@@ -82,7 +89,7 @@ export function ChatScreen() {
       onBack={() => navigation.goBack()}
       onRetry={() => void messages.refetch()}
       onSend={send}
-      onOpenIssue={(issueId) => navigation.navigate("Issue", { issueId })}
+      onOpenIssue={(issueId) => detail.open({ kind: "issue", issueId })}
       renderSteps={(id) => <TaskSteps taskId={id} />}
     />
   );

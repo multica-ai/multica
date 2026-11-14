@@ -18,37 +18,45 @@ interface MyIssuesViewProps {
   onRefresh?: () => void;
   onRetry: () => void;
   onOpen: (issue: IssueRowModel) => void;
+  /** The issue open beside the list. */
+  selectedId?: string | null;
 }
 
-export function MyIssuesView({ relation, onRelationChange, state, issues, refreshing = false, onRefresh, onRetry, onOpen }: MyIssuesViewProps) {
+export function MyIssuesView({ relation, onRelationChange, state, issues, refreshing = false, onRefresh, onRetry, onOpen, selectedId = null }: MyIssuesViewProps) {
   const strings = useStrings();
   const palette = useTheme();
   return (
     <Screen>
       <TitleHeader title={strings.myIssues.title} />
-      <Segments
-        value={relation}
-        onChange={onRelationChange}
-        items={[
-          { key: "assigned", label: strings.myIssues.assigned },
-          { key: "created", label: strings.myIssues.created },
-          { key: "subscribed", label: strings.myIssues.subscribed },
-        ]}
+      <FlatList
+        contentInsetAdjustmentBehavior="automatic"
+        data={state === "ready" ? issues : []}
+        keyExtractor={(issue) => issue.id}
+        extraData={selectedId}
+        renderItem={({ item }) => <IssueRow issue={item} selected={item.id === selectedId} onPress={onOpen} />}
+        contentContainerStyle={[styles.list, (state !== "ready" || issues.length === 0) && styles.fill]}
+        ListHeaderComponent={
+          <Segments
+            value={relation}
+            onChange={onRelationChange}
+            items={[
+              { key: "assigned", label: strings.myIssues.assigned },
+              { key: "created", label: strings.myIssues.created },
+              { key: "subscribed", label: strings.myIssues.subscribed },
+            ]}
+          />
+        }
+        ListEmptyComponent={
+          state === "loading" ? (
+            <Loading />
+          ) : state === "error" ? (
+            <Failure title={strings.common.loadFailed} retryLabel={strings.common.retry} onRetry={onRetry} />
+          ) : (
+            <Empty title={strings.myIssues.empty} />
+          )
+        }
+        refreshControl={onRefresh && state === "ready" ? <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.label3} /> : undefined}
       />
-      {state === "loading" ? (
-        <Loading />
-      ) : state === "error" ? (
-        <Failure title={strings.common.loadFailed} retryLabel={strings.common.retry} onRetry={onRetry} />
-      ) : (
-        <FlatList
-          data={issues}
-          keyExtractor={(issue) => issue.id}
-          renderItem={({ item }) => <IssueRow issue={item} onPress={onOpen} />}
-          contentContainerStyle={[styles.list, issues.length === 0 && styles.fill]}
-          ListEmptyComponent={<Empty title={strings.myIssues.empty} />}
-          refreshControl={onRefresh ? <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.label3} /> : undefined}
-        />
-      )}
     </Screen>
   );
 }

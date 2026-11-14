@@ -1,6 +1,5 @@
 import { RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import { Chip } from "../../components/Chip";
-import { Capsule } from "../../components/Floating";
 import { PushHeader } from "../../components/Header";
 import { IssueGroups, type IssueGroupModel } from "../../components/IssueGroups";
 import type { IssueRowModel } from "../../components/IssueRow";
@@ -39,11 +38,7 @@ export function SavedViewView({ state, title, subtitle, filters, groups, starred
       <PushHeader
         onBack={onBack}
         backLabel={strings.common.back}
-        right={
-          state === "missing" ? undefined : (
-            <Capsule actions={[{ icon: "Star", label: starred ? strings.views.unstar : strings.views.star, onPress: onToggleStar }]} />
-          )
-        }
+        actions={state === "missing" ? [] : [{ icon: "Star", label: starred ? strings.views.unstar : strings.views.star, onPress: onToggleStar, filled: starred }]}
       />
       {state === "loading" ? (
         <Loading />
@@ -52,7 +47,7 @@ export function SavedViewView({ state, title, subtitle, filters, groups, starred
       ) : state === "missing" ? (
         <Empty title={strings.views.missing} />
       ) : (
-        <ScrollView
+        <ScrollView contentInsetAdjustmentBehavior="automatic"
           contentContainerStyle={styles.content}
           refreshControl={onRefresh ? <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.label3} /> : undefined}
         >

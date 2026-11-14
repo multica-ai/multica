@@ -1,6 +1,5 @@
 import { Pressable, RefreshControl, SectionList, StyleSheet, View } from "react-native";
 import { Avatar } from "../../components/Avatar";
-import { Capsule } from "../../components/Floating";
 import { TitleHeader } from "../../components/Header";
 import { Ring } from "../../components/Progress";
 import { BOTTOM_CLEARANCE, Screen } from "../../components/Screen";
@@ -53,13 +52,13 @@ export function ProjectsView({ state, sections, refreshing = false, onRefresh, o
   const palette = useTheme();
   return (
     <Screen>
-      <TitleHeader title={strings.project.title} right={<Capsule actions={[{ icon: "Plus", label: strings.project.new, onPress: onCreate }]} />} />
+      <TitleHeader title={strings.project.title} actions={[{ icon: "Plus", label: strings.project.new, onPress: onCreate }]} />
       {state === "loading" ? (
         <Loading />
       ) : state === "error" ? (
         <Failure title={strings.common.loadFailed} retryLabel={strings.common.retry} onRetry={onRetry} />
       ) : (
-        <SectionList
+        <SectionList contentInsetAdjustmentBehavior="automatic"
           sections={sections.map((section) => ({ key: section.status, title: strings.project.status[section.status] ?? section.status, data: section.projects }))}
           keyExtractor={(project) => project.id}
           renderSectionHeader={({ section }) => (

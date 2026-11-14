@@ -2,7 +2,6 @@ import { RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import type { ProjectPriority, ProjectStatus } from "@multica/core/types";
 import { Avatar, type AvatarActor } from "../../components/Avatar";
 import { Chip, ChipGroup } from "../../components/Chip";
-import { Capsule } from "../../components/Floating";
 import { Group, GroupRow } from "../../components/Group";
 import { PushHeader } from "../../components/Header";
 import { IssueGroups, type IssueGroupModel } from "../../components/IssueGroups";
@@ -72,14 +71,14 @@ export function ProjectView(props: ProjectViewProps) {
       <PushHeader
         onBack={onBack}
         backLabel={strings.common.back}
-        right={state === "ready" ? <Capsule actions={[{ icon: "MoreHorizontal", label: strings.common.more, onPress: onMore }]} /> : undefined}
+        actions={state === "ready" ? [{ icon: "MoreHorizontal", label: strings.common.more, onPress: onMore }] : []}
       />
       {state === "loading" ? (
         <Loading />
       ) : state === "error" || state === "missing" || !project ? (
         <Failure title={strings.common.loadFailed} retryLabel={strings.common.retry} onRetry={onRetry} />
       ) : (
-        <ScrollView
+        <ScrollView contentInsetAdjustmentBehavior="automatic"
           contentContainerStyle={styles.content}
           refreshControl={onRefresh ? <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.label3} /> : undefined}
         >

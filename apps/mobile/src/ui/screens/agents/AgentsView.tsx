@@ -1,5 +1,4 @@
 import { Pressable, RefreshControl, SectionList, StyleSheet, View } from "react-native";
-import { Capsule } from "../../components/Floating";
 import { TitleHeader } from "../../components/Header";
 import { BOTTOM_CLEARANCE, Screen } from "../../components/Screen";
 import { Empty, Failure, Loading } from "../../components/States";
@@ -15,7 +14,14 @@ export interface AgentListRow {
   meta: string;
   time: string;
   unread: boolean;
-  target: { kind: "issue"; issueId: string } | { kind: "chat"; sessionId: string };
+  target: AgentTarget;
+}
+
+type AgentTarget = { kind: "issue"; issueId: string } | { kind: "chat"; sessionId: string };
+
+function isSelected(row: AgentListRow, selected: AgentTarget | null): boolean {
+  if (!selected) return false;
+  return row.target.kind === "issue" ? selected.kind === "issue" && selected.issueId === row.target.issueId : selected.kind === "chat" && selected.sessionId === row.target.sessionId;
 }
 
 interface AgentsViewProps {
@@ -27,13 +33,20 @@ interface AgentsViewProps {
   onRetry: () => void;
   onOpen: (row: AgentListRow) => void;
   onNewChat: () => void;
+  /** The conversation or issue open beside the list. */
+  selected?: AgentTarget | null;
 }
 
-function Row({ row, onOpen }: { row: AgentListRow; onOpen: (row: AgentListRow) => void }) {
+function Row({ row, selected, onOpen }: { row: AgentListRow; selected: boolean; onOpen: (row: AgentListRow) => void }) {
   const palette = useTheme();
   return (
-    <Pressable accessibilityRole="button" onPress={() => onOpen(row)} style={({ pressed }) => [styles.row, pressed && { backgroundColor: palette.fill }]}>
-      {row.unread ? <View style={[styles.dot, { backgroundColor: palette.accent }]} /> : null}
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ selected }}
+      onPress={() => onOpen(row)}
+      style={({ pressed }) => [styles.row, selected && styles.selected, (selected || pressed) && { backgroundColor: palette.fill }]}
+    >
+      {row.unread ? <View style={[styles.dot, selected && styles.selectedDot, { backgroundColor: palette.accent }]} /> : null}
       <View style={styles.body}>
         <View style={styles.line}>
           <Txt variant="row" numberOfLines={1} style={styles.flex}>
@@ -57,7 +70,7 @@ function Row({ row, onOpen }: { row: AgentListRow; onOpen: (row: AgentListRow) =
   );
 }
 
-export function AgentsView({ state, running, conversations, refreshing = false, onRefresh, onRetry, onOpen, onNewChat }: AgentsViewProps) {
+export function AgentsView({ state, running, conversations, refreshing = false, onRefresh, onRetry, onOpen, onNewChat, selected = null }: AgentsViewProps) {
   const strings = useStrings();
   const palette = useTheme();
   const sections = [
@@ -67,16 +80,17 @@ export function AgentsView({ state, running, conversations, refreshing = false, 
 
   return (
     <Screen>
-      <TitleHeader title={strings.agents.title} right={<Capsule actions={[{ icon: "SquarePen", label: strings.agents.newChat, onPress: onNewChat }]} />} />
+      <TitleHeader title={strings.agents.title} actions={[{ icon: "SquarePen", label: strings.agents.newChat, onPress: onNewChat }]} />
       {state === "loading" ? (
         <Loading />
       ) : state === "error" ? (
         <Failure title={strings.common.loadFailed} retryLabel={strings.common.retry} onRetry={onRetry} />
       ) : (
-        <SectionList
+        <SectionList contentInsetAdjustmentBehavior="automatic"
           sections={sections}
           keyExtractor={(row) => row.id}
-          renderItem={({ item }) => <Row row={item} onOpen={onOpen} />}
+          extraData={selected}
+          renderItem={({ item }) => <Row row={item} selected={isSelected(item, selected)} onOpen={onOpen} />}
           renderSectionHeader={({ section }) => (
             <Txt variant="metaStrong" tone="secondary" style={[styles.section, { backgroundColor: palette.background }]}>
               {section.title}
@@ -98,6 +112,8 @@ const styles = StyleSheet.create({
   section: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 4 },
   row: { paddingVertical: 10, paddingLeft: 20, paddingRight: 20 },
   dot: { position: "absolute", left: 8, top: 18, width: 7, height: 7, borderRadius: 4 },
+  selected: { marginHorizontal: 8, borderRadius: 14, paddingLeft: 12, paddingRight: 12 },
+  selectedDot: { left: 0 },
   body: { minWidth: 0 },
   line: { flexDirection: "row", alignItems: "center", gap: 12 },
   flex: { flex: 1 },

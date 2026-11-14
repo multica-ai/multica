@@ -1,17 +1,17 @@
 import { useMemo } from "react";
-import { useNavigation } from "@react-navigation/native";
 import { useQuery } from "@tanstack/react-query";
 import { useMarkAllInboxRead, useMarkInboxRead } from "@multica/core/inbox/mutations";
 import { deduplicateInboxItems, inboxListOptions } from "@multica/core/inbox/queries";
 import { useActorResolver } from "../../model/people";
 import { useStatusPresentation } from "../../model/status";
 import { useWorkspace } from "../../model/workspace-context";
+import { useDetail } from "../../shell/detail";
 import { useStrings } from "../../strings";
 import { inboxRows } from "./inbox-rows";
 import { InboxView } from "./InboxView";
 
 export function InboxScreen() {
-  const navigation = useNavigation();
+  const detail = useDetail();
   const strings = useStrings();
   const { workspace } = useWorkspace();
   const resolveActor = useActorResolver();
@@ -33,10 +33,11 @@ export function InboxScreen() {
       refreshing={list.isRefetching}
       onRefresh={() => void list.refetch()}
       onRetry={() => void list.refetch()}
+      selectedIssueId={detail.selected?.kind === "issue" ? detail.selected.issueId : null}
       onMarkAllRead={hasUnread ? () => markAllRead.mutate() : undefined}
       onOpen={(row) => {
         if (row.unread) markRead.mutate(row.id);
-        if (row.issueId) navigation.navigate("Issue", { issueId: row.issueId });
+        if (row.issueId) detail.open({ kind: "issue", issueId: row.issueId });
       }}
     />
   );

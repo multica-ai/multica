@@ -1,5 +1,4 @@
 import { useMemo, useState } from "react";
-import { useNavigation } from "@react-navigation/native";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
@@ -11,12 +10,13 @@ import { issueRowModel, sortByPhase } from "../../model/issues";
 import { useActorResolver } from "../../model/people";
 import { useStatusPresentation } from "../../model/status";
 import { useWorkspace } from "../../model/workspace-context";
+import { useDetail } from "../../shell/detail";
 import { MyIssuesView, type MyIssuesRelation } from "./MyIssuesView";
 
 const LIMIT = 100;
 
 export function MyIssuesScreen() {
-  const navigation = useNavigation();
+  const detail = useDetail();
   const { workspace } = useWorkspace();
   const userId = useAuthStore((state) => state.user?.id ?? "");
   const [relation, setRelation] = useState<MyIssuesRelation>("assigned");
@@ -62,7 +62,8 @@ export function MyIssuesScreen() {
         void subscribed.refetch();
         void list.refetch();
       }}
-      onOpen={(issue) => navigation.navigate("Issue", { issueId: issue.id })}
+      selectedId={detail.selected?.kind === "issue" ? detail.selected.issueId : null}
+      onOpen={(issue) => detail.open({ kind: "issue", issueId: issue.id })}
     />
   );
 }
