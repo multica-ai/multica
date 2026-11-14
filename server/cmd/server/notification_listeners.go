@@ -225,19 +225,72 @@ func archiveStaleTaskFailedInbox(
 	if len(rows) == 0 {
 		return
 	}
+	recipients := make([]inboxArchivedRecipient, len(rows))
+	for i, row := range rows {
+		recipients[i] = inboxArchivedRecipient{Type: row.RecipientType, ID: row.RecipientID}
+	}
+	count := publishInboxBatchArchived(bus, workspaceID, issueID, recipients)
 
-	// Dedupe recipients: the listener creates one row per failure event per
-	// subscriber, so a long-running issue can yield several rows for the
-	// same recipient.
+	slog.Info("auto-archive task_failed inbox: archived stale rows",
+		"workspace_id", workspaceID, "issue_id", issueID,
+		"row_count", len(rows), "recipient_count", count)
+}
+
+// archiveDoneIssueInbox archives every recipient's notifications for an issue
+// that reached a done status: finished work leaves the inbox whether or not
+// it was read. Cancelled issues keep theirs.
+func archiveDoneIssueInbox(
+	ctx context.Context,
+	queries *db.Queries,
+	bus *events.Bus,
+	workspaceID string,
+	issueID string,
+) {
+	rows, err := queries.ArchiveInboxByIssueForAllRecipients(ctx, db.ArchiveInboxByIssueForAllRecipientsParams{
+		WorkspaceID: parseUUID(workspaceID),
+		IssueID:     parseUUID(issueID),
+	})
+	if err != nil {
+		slog.Error("auto-archive done issue inbox: query failed",
+			"workspace_id", workspaceID, "issue_id", issueID, "error", err)
+		return
+	}
+	if len(rows) == 0 {
+		return
+	}
+	recipients := make([]inboxArchivedRecipient, len(rows))
+	for i, row := range rows {
+		recipients[i] = inboxArchivedRecipient{Type: row.RecipientType, ID: row.RecipientID}
+	}
+	count := publishInboxBatchArchived(bus, workspaceID, issueID, recipients)
+
+	slog.Info("auto-archive done issue inbox: archived rows",
+		"workspace_id", workspaceID, "issue_id", issueID,
+		"row_count", len(rows), "recipient_count", count)
+}
+
+type inboxArchivedRecipient struct {
+	Type string
+	ID   pgtype.UUID
+}
+
+// publishInboxBatchArchived sends one inbox:batch-archived per member
+// recipient, so connected clients drop the archived rows. Returns the number
+// of recipients notified.
+func publishInboxBatchArchived(
+	bus *events.Bus,
+	workspaceID string,
+	issueID string,
+	rows []inboxArchivedRecipient,
+) int {
+	// A recipient can hold several rows for one issue.
 	counts := map[string]int{}
 	for _, row := range rows {
-		// Inbox rows for task_failed only target member recipients today
-		// (notifySubscribers skips agent subscribers), but defend the WS
-		// layer against future widening — only members get a personal feed.
-		if row.RecipientType != "member" {
+		// Only members get a personal feed.
+		if row.Type != "member" {
 			continue
 		}
-		counts[util.UUIDToString(row.RecipientID)]++
+		counts[util.UUIDToString(row.ID)]++
 	}
 
 	for recipientID, count := range counts {
@@ -252,10 +305,7 @@ func archiveStaleTaskFailedInbox(
 			},
 		})
 	}
-
-	slog.Info("auto-archive task_failed inbox: archived stale rows",
-		"workspace_id", workspaceID, "issue_id", issueID,
-		"row_count", len(rows), "recipient_count", len(counts))
+	return len(counts)
 }
 
 // notifySubscribers queries the subscriber table for an issue, excludes the
@@ -913,6 +963,17 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 					"issue_id", issue.ID, "status", issue.Status, "error", handoffErr)
 			case handoff && issue.Status != issuestatus.Blocked:
 				archiveStaleTaskFailedInbox(ctx, queries, bus, e.WorkspaceID, issue.ID)
+			}
+
+			// After the status_changed rows above, so "moved to Done" leaves
+			// the inbox together with the rest of the issue's notifications.
+			category, categoryErr := issuestatus.CategoryWithError(ctx, queries, parseUUID(e.WorkspaceID), issue.Status)
+			switch {
+			case categoryErr != nil:
+				slog.Warn("resolve issue status category for done-issue inbox archive; keeping rows",
+					"issue_id", issue.ID, "status", issue.Status, "error", categoryErr)
+			case category == issuestatus.CategoryDone:
+				archiveDoneIssueInbox(ctx, queries, bus, e.WorkspaceID, issue.ID)
 			}
 		}
 
