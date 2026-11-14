@@ -336,6 +336,36 @@ func TestSnoozeInboxItemSnoozesTheWholeIssue(t *testing.T) {
 	}
 }
 
+// Nothing is written when a snooze runs out, so the summary says when the
+// next one does and the badge re-reads it then.
+func TestInboxSummaryReportsTheNextSnoozeToRunOut(t *testing.T) {
+	f := newInboxSectionsFixture(t, "Inbox next wake")
+	if got := f.summary().NextWakeAt; got != nil {
+		t.Fatalf("next_wake_at = %q with nothing snoozed, want none", *got)
+	}
+
+	soon := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+	later := soon.Add(24 * time.Hour)
+	f.row(f.issue("Back later"), "mentioned", testutil.Cols{"section": "needs_you", "snoozed_until": later})
+	// Only followed, but its row is still out of the counts until then.
+	f.row(f.issue("Back soon"), "new_comment", testutil.Cols{"section": "updates", "snoozed_until": soon})
+	// Not coming back: already back, or archived.
+	f.row(f.issue("Already back"), "mentioned", testutil.Cols{"section": "needs_you", "snoozed_until": time.Now().Add(-time.Hour)})
+	f.row(f.issue("Archived"), "mentioned", testutil.Cols{"section": "needs_you", "archived": true, "snoozed_until": soon.Add(-time.Minute)})
+
+	got := f.summary()
+	if got.NextWakeAt == nil {
+		t.Fatalf("next_wake_at missing, want %s", soon)
+	}
+	at, err := time.Parse(time.RFC3339, *got.NextWakeAt)
+	if err != nil || !at.Equal(soon) {
+		t.Errorf("next_wake_at = %q, want %s", *got.NextWakeAt, soon.Format(time.RFC3339))
+	}
+	if got.NeedsYou != 1 {
+		t.Errorf("needs_you = %d, want only the issue already back", got.NeedsYou)
+	}
+}
+
 func TestSnoozeInboxItemRejectsATimeItCannotUse(t *testing.T) {
 	f := newInboxSectionsFixture(t, "Inbox snooze validation")
 	id := f.row(f.issue("Issue"), "mentioned", testutil.Cols{"section": "needs_you"})

@@ -108,6 +108,21 @@ export function patchArchivedInboxCaches(qc: QueryClient, wsId: string, patch: (
   return snapshot;
 }
 
+// The longest delay a timer takes; a wake further out is re-checked then.
+const MAX_TIMER_MS = 2_147_000_000;
+// Read a little after the wake, so the server's clock has passed it too.
+const WAKE_SLACK_MS = 1_000;
+
+/** The earliest time a snoozed issue comes back in any workspace, in ms. */
+export function nextInboxSummaryWake(summary: readonly InboxWorkspaceUnread[] | undefined): number | null {
+  let next: number | null = null;
+  for (const entry of summary ?? []) {
+    const at = entry.next_wake_at ? Date.parse(entry.next_wake_at) : Number.NaN;
+    if (Number.isFinite(at) && (next == null || at < next)) next = at;
+  }
+  return next;
+}
+
 /**
  * Cross-workspace unread inbox summary. One cache entry shared across all
  * workspaces — the data is account-level, so switching workspaces does not
@@ -115,9 +130,14 @@ export function patchArchivedInboxCaches(qc: QueryClient, wsId: string, patch: (
  *
  * Visibility gating is the default, including for direct observers such as
  * the search palette. `refetchOnWindowFocus` re-reads an invalidated summary
- * once when the page is shown again; with `staleTime: Infinity` a page that
- * missed no event is not stale and makes no request. The dock badge overrides
- * `enabled` through `inboxUnreadSummaryEnabled` to stay live while hidden.
+ * once when the page is shown again; a page that missed no event is not stale
+ * and makes no request. The dock badge overrides `enabled` through
+ * `inboxUnreadSummaryEnabled` to stay live while hidden.
+ *
+ * The one change no event reports is a snooze running out (MUL-9215). The
+ * summary says when the next one does: the query is re-read then while on
+ * screen, and counts as stale from then on, so a page shown again after it
+ * re-reads on focus.
  */
 export function inboxUnreadSummaryOptions() {
   return queryOptions({
@@ -125,6 +145,14 @@ export function inboxUnreadSummaryOptions() {
     queryFn: () => api.getInboxUnreadSummary(),
     enabled: () => focusManager.isFocused(),
     refetchOnWindowFocus: true,
+    staleTime: (query) => {
+      const wake = nextInboxSummaryWake(query.state.data);
+      return wake == null ? Infinity : Math.min(Math.max(wake - query.state.dataUpdatedAt, 0), MAX_TIMER_MS);
+    },
+    refetchInterval: (query) => {
+      const wake = nextInboxSummaryWake(query.state.data);
+      return wake == null ? false : Math.min(Math.max(wake - Date.now(), 0) + WAKE_SLACK_MS, MAX_TIMER_MS);
+    },
   });
 }
 
@@ -216,6 +244,7 @@ export function useInboxUnreadCount(
   const { data } = useQuery({
     ...inboxUnreadSummaryOptions(),
     enabled: inboxUnreadSummaryEnabled(wsId, options),
+    refetchIntervalInBackground: options?.whileHidden ?? false,
     select: (summary: InboxWorkspaceUnread[]) =>
       unreadCountForWorkspace(summary, wsId),
   });

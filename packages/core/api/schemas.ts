@@ -3079,6 +3079,7 @@ export const InboxUnreadSummarySchema = z.array(
       // is not a number is dropped the same way, so the badge falls back to
       // `count` instead of the whole summary failing.
       needs_you: z.number().optional().catch(undefined),
+      next_wake_at: z.string().optional().catch(undefined),
     })
     .loose(),
 );

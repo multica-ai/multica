@@ -1125,6 +1125,46 @@ func (q *Queries) MarkRestoredInboxUpdateUnread(ctx context.Context, arg MarkRes
 	return result.RowsAffected(), nil
 }
 
+const nextInboxWakeByWorkspace = `-- name: NextInboxWakeByWorkspace :many
+SELECT i.workspace_id, min(i.snoozed_until)::timestamptz AS next_wake_at
+FROM inbox_item i
+JOIN member m ON m.workspace_id = i.workspace_id AND m.user_id = i.recipient_id
+WHERE i.recipient_type = 'member'
+  AND i.recipient_id = $1
+  AND i.archived = false
+  AND i.snoozed_until > now()
+GROUP BY i.workspace_id
+`
+
+type NextInboxWakeByWorkspaceRow struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	NextWakeAt  pgtype.Timestamptz `json:"next_wake_at"`
+}
+
+// Per-workspace time the next snoozed row of a recipient member comes back.
+// Both counts above leave snoozed rows out, and nothing is written when a
+// snooze runs out, so a client re-reads the summary at this time instead of
+// showing the old counts until some unrelated event (MUL-9215).
+func (q *Queries) NextInboxWakeByWorkspace(ctx context.Context, recipientID pgtype.UUID) ([]NextInboxWakeByWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, nextInboxWakeByWorkspace, recipientID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []NextInboxWakeByWorkspaceRow{}
+	for rows.Next() {
+		var i NextInboxWakeByWorkspaceRow
+		if err := rows.Scan(&i.WorkspaceID, &i.NextWakeAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const snoozeInboxGroup = `-- name: SnoozeInboxGroup :execrows
 WITH target AS (
     SELECT t.id, t.workspace_id, t.recipient_type, t.recipient_id, t.issue_id

@@ -385,6 +385,20 @@ WHERE i.recipient_type = 'member'
   ))
 GROUP BY i.workspace_id;
 
+-- name: NextInboxWakeByWorkspace :many
+-- Per-workspace time the next snoozed row of a recipient member comes back.
+-- Both counts above leave snoozed rows out, and nothing is written when a
+-- snooze runs out, so a client re-reads the summary at this time instead of
+-- showing the old counts until some unrelated event (MUL-9215).
+SELECT i.workspace_id, min(i.snoozed_until)::timestamptz AS next_wake_at
+FROM inbox_item i
+JOIN member m ON m.workspace_id = i.workspace_id AND m.user_id = i.recipient_id
+WHERE i.recipient_type = 'member'
+  AND i.recipient_id = sqlc.arg(recipient_id)
+  AND i.archived = false
+  AND i.snoozed_until > now()
+GROUP BY i.workspace_id;
+
 -- name: MarkAllInboxRead :execrows
 UPDATE inbox_item SET read = true
 WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2 AND archived = false AND read = false;

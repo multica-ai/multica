@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useQueries, useQuery, type UseQueryResult } from "@tanstack/react-query";
+import { useQueries, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { useAuthStore } from "@multica/core/auth";
 import {
@@ -10,6 +10,7 @@ import {
   inboxIssueProjection,
   type InboxFilters,
 } from "@multica/core/inbox/filter-store";
+import { inboxKeys } from "@multica/core/inbox/queries";
 import {
   buildInboxSections,
   nextInboxWake,
@@ -38,17 +39,22 @@ const MAX_TIMER_MS = 2_147_000_000;
 /**
  * The current time, moved forward when the next snooze in `items` runs out.
  * Nothing arrives from the server when a snooze simply elapses, so the list
- * has to notice by itself that an issue is back.
+ * has to notice by itself that an issue is back, and the badge is re-read
+ * with it so the two agree.
  */
 function useInboxClock(items: readonly InboxItem[]): number {
+  const qc = useQueryClient();
   const [now, setNow] = useState(() => Date.now());
   const nextWake = useMemo(() => nextInboxWake(items, now), [items, now]);
   useEffect(() => {
     if (nextWake == null) return;
     const delay = Math.min(Math.max(nextWake - Date.now(), 0) + 50, MAX_TIMER_MS);
-    const timer = setTimeout(() => setNow(Date.now()), delay);
+    const timer = setTimeout(() => {
+      setNow(Date.now());
+      if (Date.now() >= nextWake) void qc.invalidateQueries({ queryKey: inboxKeys.unreadSummary() });
+    }, delay);
     return () => clearTimeout(timer);
-  }, [nextWake]);
+  }, [nextWake, qc]);
   return now;
 }
 

@@ -66,6 +66,12 @@ export interface InboxWorkspaceUnread {
    * predates the sectioned Inbox, where the badge falls back to `count`.
    */
   needs_you?: number;
+  /**
+   * When the workspace's next snoozed issue comes back. The counts leave it
+   * out until then and nothing arrives when the time passes, so the summary
+   * is read again at this time. Absent when nothing is snoozed.
+   */
+  next_wake_at?: string;
 }
 
 export interface InboxItem {

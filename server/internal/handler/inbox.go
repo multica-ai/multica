@@ -497,13 +497,19 @@ type InboxWorkspaceUnreadResponse struct {
 	// rows of the Inbox's "Needs you" section, and the badge of a client that
 	// shows it (MUL-9215).
 	NeedsYou int64 `json:"needs_you"`
+	// NextWakeAt is when the workspace's next snoozed issue comes back, RFC
+	// 3339, or absent with none. The counts leave snoozed issues out and
+	// nothing is sent when a snooze runs out, so a client re-reads the
+	// summary then.
+	NextWakeAt *string `json:"next_wake_at,omitempty"`
 }
 
 // UnreadInboxSummary returns per-workspace inbox counts across every workspace
 // the user belongs to. The rail badge and the workspace switcher dot read it
 // without fetching each workspace's full inbox list. It is account-level by
 // nature: it ignores the active workspace and keys only on the authenticated
-// user. A workspace appears when either count is above zero.
+// user. A workspace appears when either count is above zero or it has a
+// snoozed issue still to come back.
 func (h *Handler) UnreadInboxSummary(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -523,6 +529,11 @@ func (h *Handler) UnreadInboxSummary(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to summarize inbox")
 		return
 	}
+	wakes, err := h.Queries.NextInboxWakeByWorkspace(r.Context(), parseUUID(userID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to summarize inbox")
+		return
+	}
 
 	byWorkspace := make(map[string]*InboxWorkspaceUnreadResponse, len(unread)+len(needsYou))
 	entry := func(workspaceID pgtype.UUID) *InboxWorkspaceUnreadResponse {
@@ -537,6 +548,9 @@ func (h *Handler) UnreadInboxSummary(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, row := range needsYou {
 		entry(row.WorkspaceID).NeedsYou = row.Count
+	}
+	for _, row := range wakes {
+		entry(row.WorkspaceID).NextWakeAt = timestampToPtr(row.NextWakeAt)
 	}
 
 	resp := make([]InboxWorkspaceUnreadResponse, 0, len(byWorkspace))
