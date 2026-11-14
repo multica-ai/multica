@@ -171,6 +171,23 @@ Hermes 在任务和聊天中的运行会将会话持久目录作为隔离的 `HE
 
 Multica 每次运行都会刷新其中的 skill 和派生配置。模型服务认证会保留，托管运行的消息平台适配器和 HTTP 入口会关闭。宿主的 Gateway 状态、日志、会话和定时任务各自隔离。运行结束时会停止本次运行的 Gateway，确保后续运行使用自己的执行环境。
 
+### 常驻 Hermes Gateway（可选）
+
+自托管运行时可以在每个容器内维护一个长期运行的 `hermes gateway run`，让 Hermes 的会话、记忆和自主学习的 skill 跨运行保留，每次运行启动的 `hermes acp` 只负责连接和查看。在守护进程的环境中设置 `MULTICA_HERMES_RESIDENT_GATEWAY=1`，在常驻 Gateway 进程的环境中设置 `MULTICA_RESIDENT_OWNER=1`。Gateway 需要自行启动和管理；此模式下守护进程不会为单次运行启动或停止 Gateway。
+
+隔离目录会通过符号链接保留常驻 Gateway 的状态记录、日志、会话和定时任务，不再隔离这些内容。会话持久目录不再作为 `HERMES_HOME`，空目录也不会阻止续接会话。如果常驻 Gateway 已经没有原会话，后端仍会重试并新建会话。
+
+启动 Hermes 运行前，守护进程会在本次运行的环境根目录中原子写入权限为 `0600` 的 `.multica_resident_task.json`，包含运行、智能体、工作区、可选的聊天会话标识，以及本次运行专用的 `mat_` 令牌；运行结束时删除。常驻 Gateway 调用的 Multica CLI 工具会从当前目录向上查找最近的上下文文件，仅在自身环境中没有显式运行身份时使用文件中的凭据和身份。显式传入的 `MULTICA_TASK_ID` 或 `mat_` 令牌优先。
+
+每次运行的工具环境需要 a Hermes build with turn_env support（支持 `turn_env` 的 Hermes 构建）。Multica 会在隔离配置的 `terminal.client_env_turn_passthrough` 中声明运行身份和允许的智能体 `custom_env` 变量名。每个 `hermes acp` 会随提示通过 `turn_env` 转发当前值，Hermes 只在内存中保留这些值；配置声明只包含名称，不包含环境变量值。用户仍不能通过 `custom_env` 覆盖 `MULTICA_*`、`PATH`、`HOME` 等守护进程保护的变量；`HERMES_HOME` 只用于控制 ACP 隔离目录，不作为工具环境覆盖项。未启用常驻模式时，生成配置与单次执行路径均不变。
+
+续接运行复用前一次的环境根目录时，上下文文件也会写入当前运行自己的稳定根目录，确保从工作目录发现上下文和按稳定根目录查找都能取得当前凭据。运行结束时两处文件都会删除。
+
+已知限制：
+
+- 常驻 Gateway 不会读取本次运行专用 Hermes 目录中准备的绑定 skill。
+- 同一个 Gateway 的工具共用一个操作系统用户。即使文件权限为 `0600`，同 UID 的进程仍可读取其他正在执行的运行的上下文文件。只有运行时内所有智能体彼此信任时，才应使用此模式。
+
 ### Codex 原生记忆与子智能体 [#codex-memory]
 
 守护进程管理的 Codex 运行默认关闭 Codex 原生记忆，避免本机或前一次运行留下的记忆带进别的工作区。设置只写入这次运行专用的 `CODEX_HOME/config.toml`（`features.memories` 和 `memories.generate_memories`、`memories.use_memories` 均为 `false`），不改你的 `~/.codex/config.toml`。需要保留原生记忆时，在守护进程的环境中设置 `MULTICA_CODEX_MEMORY=1`。
