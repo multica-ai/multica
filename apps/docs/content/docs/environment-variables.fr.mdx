@@ -47,6 +47,7 @@ Vous devez aussi choisir un service d'e-mail ; sinon, les codes de vérification
 | `LOG_LEVEL` | valeur par défaut de l'application | Niveau de journalisation |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | Délai d'attente, après un signal d'arrêt, avant le début de l'arrêt propre |
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | Durée pendant laquelle un runtime hors ligne peut se reconnecter avant que ses exécutions en cours n'échouent ; les valeurs inférieures à `150s` sont relevées à ce plancher |
+| `MULTICA_AUTOPILOT_DUPLICATE_GUARD` | `title` | Comment un autopilot reconnaît le doublon d'une issue créée dans la dernière minute : `title` (même titre rendu), `payload` (même titre et même charge utile de déclenchement, des livraisons webhook distinctes créent donc toujours une issue) ou `off` |
 
 Lorsque vous définissez un délai de maintien avant arrêt sur Kubernetes, `terminationGracePeriodSeconds` doit dépasser ce délai plus le temps nécessaire à l'arrêt proprement dit.
 

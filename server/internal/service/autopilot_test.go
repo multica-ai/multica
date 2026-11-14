@@ -296,3 +296,26 @@ func TestValidateIssueTitleTemplate(t *testing.T) {
 		})
 	}
 }
+
+func TestParseAutopilotDuplicateGuard(t *testing.T) {
+	cases := []struct {
+		raw     string
+		want    AutopilotDuplicateGuard
+		wantErr bool
+	}{
+		{raw: "", want: AutopilotDuplicateGuardTitle},
+		{raw: "title", want: AutopilotDuplicateGuardTitle},
+		{raw: " Payload ", want: AutopilotDuplicateGuardPayload},
+		{raw: "off", want: AutopilotDuplicateGuardOff},
+		{raw: "disabled", want: AutopilotDuplicateGuardTitle, wantErr: true},
+	}
+	for _, tc := range cases {
+		got, err := ParseAutopilotDuplicateGuard(tc.raw)
+		if (err != nil) != tc.wantErr {
+			t.Fatalf("ParseAutopilotDuplicateGuard(%q) err = %v, wantErr %v", tc.raw, err, tc.wantErr)
+		}
+		if got != tc.want {
+			t.Fatalf("ParseAutopilotDuplicateGuard(%q) = %q, want %q", tc.raw, got, tc.want)
+		}
+	}
+}

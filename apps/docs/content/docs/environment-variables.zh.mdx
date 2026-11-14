@@ -47,6 +47,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `LOG_LEVEL` | 应用默认 | 日志级别 |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | 收到终止信号后，开始优雅退出前等待多久 |
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | 运行时离线后可重新连接且不终止在途运行的宽限时间；低于 `150s` 时按 `150s` 处理 |
+| `MULTICA_AUTOPILOT_DUPLICATE_GUARD` | `title` | 自动化判定与最近 1 分钟内所建 issue 重复的方式：`title`（渲染后的标题相同）、`payload`（标题与触发负载均相同，因此不同的 webhook 投递总会创建 issue）或 `off` |
 
 在 Kubernetes 中设置 shutdown hold 时，`terminationGracePeriodSeconds` 要大于 hold 与实际退出所需时间之和。
 
