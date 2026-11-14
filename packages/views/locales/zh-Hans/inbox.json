@@ -18,6 +18,8 @@
     "notification_count_other": "{{count}} 条通知",
     "clear": "清除筛选",
     "empty": "没有符合筛选条件的通知",
+    "active_count_one": "{{count}} 个筛选条件",
+    "notification_count_one": "{{count}} 条通知",
     "section_notification": "通知",
     "section_issue": "任务",
     "type": "通知类型",

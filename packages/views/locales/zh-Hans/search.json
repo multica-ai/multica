@@ -14,7 +14,7 @@
     "issues": "任务",
     "autopilots": "自动化",
     "chats": "对话",
-    "skills": "Skills",
+    "skills": "技能",
     "cancelled": "已取消",
     "recent": "最近",
     "workspaces": "工作区",
@@ -29,7 +29,8 @@
     "current_agent": "当前智能体",
     "current_autopilot": "当前自动化",
     "inbox": "收件箱",
-    "current_chat": "当前对话"
+    "current_chat": "当前对话",
+    "selected_issues_one": "已选 {{count}} 个任务"
   },
   "commands": {
     "current_theme_aria": "当前主题",
@@ -61,7 +62,9 @@
     "subscribe": "订阅",
     "unsubscribe": "取消订阅",
     "delete": "删除任务",
-    "delete_selected_other": "删除 {{count}} 个任务"
+    "delete_selected_other": "删除 {{count}} 个任务",
+    "quick_actions_available_one": "{{count}} 条可用",
+    "delete_selected_one": "删除 {{count}} 个任务"
   },
   "project": {
     "change_status": "更改项目状态...",

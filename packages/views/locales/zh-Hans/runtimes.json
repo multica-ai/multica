@@ -113,7 +113,9 @@
       "workload_hint": "{{running}} 个运行中 · {{queued}} 个排队中",
       "cli": "CLI",
       "cloud_worker": "云端 worker",
-      "local_daemon": "本地守护进程"
+      "local_daemon": "本地守护进程",
+      "runtimes_hint_one": "{{count}} 个在线",
+      "health_issues_one": "{{count}} 个异常"
     },
     "rename": "重命名机器",
     "rename_dialog": {
@@ -127,7 +129,8 @@
       "toast_saved": "已重命名机器",
       "toast_cleared": "已清除机器名称",
       "toast_failed": "重命名机器失败"
-    }
+    },
+    "busy_count_one": "{{count}} 个忙碌"
   },
   "health": {
     "online": {
@@ -242,13 +245,19 @@
           "workload_queued": "排队中",
           "visibility_workspace": "工作区",
           "visibility_private": "私有"
-        }
+        },
+        "title_one": "解绑 {{count}} 个智能体并删除该运行时？",
+        "checkbox_one": "我已了解：这 {{count}} 个智能体会与该运行时解绑，在重新绑定前无法接受新工作；其排队中或进行中的运行会被取消。",
+        "confirm_one": "解绑 {{count}} 个智能体并删除运行时"
       }
     },
     "toast_deleted": "已删除运行时",
     "toast_delete_failed": "删除运行时失败",
     "running_chip_other": "· {{count}} 个进行中",
-    "queued_chip_other": "· {{count}} 个排队中"
+    "queued_chip_other": "· {{count}} 个排队中",
+    "visibility_members_count_one": "{{count}} 位成员",
+    "running_chip_one": "· {{count}} 个进行中",
+    "queued_chip_one": "· {{count}} 个排队中"
   },
   "detail_page": {
     "not_found_title": "未找到运行时",
@@ -351,7 +360,8 @@
     "heatmap_quietest_weekday": "最不活跃星期",
     "heatmap_average": "平均 {{value}}",
     "heatmap_window_total_other": "{{count}} 天总计",
-    "tooltip_total": "总计"
+    "tooltip_total": "总计",
+    "heatmap_window_total_one": "{{count}} 天总计"
   },
   "list": {
     "col_runtime": "运行时",
@@ -516,7 +526,10 @@
     "table_output": "输出",
     "table_cache_r": "缓存读",
     "table_cache_w": "缓存写",
-    "no_data": "还没有使用数据"
+    "no_data": "还没有使用数据",
+    "unmapped_notice_one": "有 {{count}} 个模型没有维护价格，相关 token 未计入费用统计。",
+    "cost_by_caption_agent_one": "{{count}} 个智能体使用此运行时",
+    "cost_by_caption_model_one": "{{count}} 个模型已使用"
   },
   "qoder": {
     "title": "Qoder Cloud Agents 运行时",
@@ -596,13 +609,15 @@
       "environment_waiting": "令牌验证后自动加载",
       "repo_count_other": "{{count}} 个仓库",
       "optional": "可选",
-      "execution_summary": "最多同时 {{concurrency}} 个 · 单次超时 {{timeout}} 分钟"
+      "execution_summary": "最多同时 {{concurrency}} 个 · 单次超时 {{timeout}} 分钟",
+      "repo_count_one": "{{count}} 个仓库"
     },
     "stop_confirm": {
       "title": "暂停 Qoder Cloud Agents？",
       "description": "恢复之前，新任务不会再发给 Qoder。",
       "cancel": "取消",
-      "description_agents_other": "下面 {{count}} 个智能体会保留指令和历史，但在恢复 Qoder 或更换运行时之前无法接新任务。"
+      "description_agents_other": "下面 {{count}} 个智能体会保留指令和历史，但在恢复 Qoder 或更换运行时之前无法接新任务。",
+      "description_agents_one": "下面 {{count}} 个智能体会保留指令和历史，但在恢复 Qoder 或更换运行时之前无法接新任务。"
     },
     "connect_title": "连接 Qoder Cloud Agents",
     "connect_description": "Multica 会在 Qoder 的沙箱里执行任务。",
@@ -638,7 +653,8 @@
       "edit_limits": "编辑执行设置",
       "run_timeout": "单次超时",
       "manage_title": "管理",
-      "minutes_other": "{{count}} 分钟"
+      "minutes_other": "{{count}} 分钟",
+      "minutes_one": "{{count}} 分钟"
     },
     "disconnect_confirm": {
       "title": "断开 Qoder Cloud Agents？",
@@ -648,8 +664,10 @@
       "confirm": "断开连接",
       "working": "正在断开…",
       "cancel": "取消",
-      "done": "已断开 Qoder"
-    }
+      "done": "已断开 Qoder",
+      "description_agents_one": "下面 {{count}} 个智能体会被解绑，保留指令和历史，之后可以换到其他运行时。"
+    },
+    "agent_count_one": "{{count}} 个智能体"
   },
   "intro": {
     "title": "给智能体一台干活的电脑",
@@ -674,5 +692,7 @@
       "run_there": "在那台机器上运行",
       "connected": "{{name}} 已连接到 Multica"
     }
-  }
+  },
+  "running_one": "{{count}} 个运行中",
+  "queued_one": "{{count}} 个排队中"
 }

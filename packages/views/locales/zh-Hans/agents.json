@@ -38,7 +38,8 @@
   },
   "presence_status_aria": "状态：{{status}}",
   "avatar_stack": {
-    "overflow_aria_other": "还有 {{count}} 个智能体"
+    "overflow_aria_other": "还有 {{count}} 个智能体",
+    "overflow_aria_one": "还有 {{count}} 个智能体"
   },
   "archived": {
     "active_link": "活跃智能体",
@@ -85,7 +86,8 @@
     "fallback_runtime_cloud": "云端",
     "fallback_runtime_local": "本地",
     "actions_aria": "行操作",
-    "task_count_other": "{{count}} 次运行"
+    "task_count_other": "{{count}} 次运行",
+    "task_count_one": "{{count}} 次运行"
   },
   "activity_tooltip": {
     "created_today": "今天创建",
@@ -93,7 +95,9 @@
     "last_7_days": "近 7 天",
     "no_activity": "无活动",
     "runs_other": "{{count}} 次运行",
-    "failed_suffix": " · {{count}} 次失败（{{percent}}%）"
+    "failed_suffix": " · {{count}} 次失败（{{percent}}%）",
+    "created_days_ago_one": "{{count}} 天前创建",
+    "runs_one": "{{count}} 次运行"
   },
   "row_actions": {
     "cancel_all_tasks": "取消全部运行",
@@ -125,7 +129,11 @@
     "archive_dialog_title": "归档\"{{name}}\"？",
     "archive_dialog_description": "归档后这个智能体将无法被分配或提及，进行中的运行会被取消。所有历史会被保留，可以稍后恢复。",
     "archive_dialog_cancel": "取消",
-    "archive_dialog_confirm": "归档"
+    "archive_dialog_confirm": "归档",
+    "cancelled_tasks_toast_one": "已取消 {{count}} 次运行",
+    "cancel_dialog_running_one": "{{count}} 个进行中",
+    "cancel_dialog_queued_one": "{{count}} 个排队中",
+    "cancel_dialog_impact_one": "将取消运行：{{summary}}。"
   },
   "detail": {
     "back_to_agents_full": "返回智能体列表",
@@ -195,7 +203,8 @@
   },
   "overview": {
     "attention_title": "需要处理的运行",
-    "attention_queued_other": "运行时不可用，当前有 {{count}} 次运行正在排队。"
+    "attention_queued_other": "运行时不可用，当前有 {{count}} 次运行正在排队。",
+    "attention_queued_one": "运行时不可用，当前有 {{count}} 次运行正在排队。"
   },
   "sections": {
     "runs_count_other": "{{count}} 次运行",
@@ -205,7 +214,9 @@
     "edit": "编辑",
     "add": "添加",
     "manage": "管理",
-    "instructions_empty": "还没有指令。"
+    "instructions_empty": "还没有指令。",
+    "runs_count_one": "{{count}} 次运行",
+    "recent_this_week_one": "本周 {{count}} 次"
   },
   "panel": {
     "status": "状态",
@@ -270,7 +281,7 @@
     "activity": "动态",
     "tasks": "运行",
     "instructions": "指令",
-    "skills": "Skills",
+    "skills": "技能",
     "environment": "环境变量",
     "custom_args": "自定义参数",
     "mcp_config": "MCP",
@@ -421,7 +432,10 @@
       "member_fix": "需要管理员处理",
       "footer_selected": "已选：",
       "cancel": "取消",
-      "next": "下一步"
+      "next": "下一步",
+      "harness_count_one": "{{count}} 个 harness",
+      "more_harnesses_one": "其余 {{count}} 个：{{names}}",
+      "hidden_remote_one": "另有 {{count}} 台机器仅所有者可用，不在这里显示"
     }
   },
   "create_dialog": {
@@ -457,7 +471,7 @@
       "editor_placeholder": "写下这个智能体该做什么、关注什么、要避开什么…"
     },
     "skills_section": {
-      "label": "Skills",
+      "label": "技能",
       "placeholder": "从工作区添加 skill",
       "selected_other": "已选 {{count}} 个——点击修改",
       "collapse": "收起",
@@ -465,7 +479,8 @@
       "list_loading": "加载中…",
       "list_empty_default": "暂无 skill。",
       "list_no_match": "没有匹配的 skill。",
-      "search_placeholder": "搜索 skill…"
+      "search_placeholder": "搜索 skill…",
+      "selected_one": "已选 {{count}} 个——点击修改"
     },
     "avatar": {
       "change_aria": "更换头像",
@@ -493,7 +508,8 @@
     "done": "完成",
     "untitled": "未命名建议",
     "customize": "自定义",
-    "defaults_summary_other": "正在使用 {{count}} 条内置建议"
+    "defaults_summary_other": "正在使用 {{count}} 条内置建议",
+    "defaults_summary_one": "正在使用 {{count}} 条内置建议"
   },
   "tab_body": {
     "common": {
@@ -517,7 +533,8 @@
       "mode_write": "编辑",
       "mode_preview": "预览",
       "preview_empty": "还没有可预览的内容。",
-      "char_count_other": "{{count}} 个字符"
+      "char_count_other": "{{count}} 个字符",
+      "char_count_one": "{{count}} 个字符"
     },
     "env": {
       "intro_readonly": "在智能体进程启动时注入。只有工作区所有者 / 管理员可以查看或编辑值；每次解锁和编辑都会写入工作区审计日志。",
@@ -548,7 +565,8 @@
       "reveal_action": "解锁并编辑",
       "revealing": "正在解锁…",
       "reveal_failed_toast": "加载环境变量值失败",
-      "empty_editable": "暂无环境变量。"
+      "empty_editable": "暂无环境变量。",
+      "not_revealed_title_one": "已配置 {{count}} 个变量"
     },
     "custom_args": {
       "intro": "添加智能体启动时传入的 CLI 参数。",
@@ -670,15 +688,15 @@
     },
     "runtime_config": {
       "mode_label": "路由模式",
-      "mode_local": "Local",
-      "mode_gateway": "Gateway",
+      "mode_local": "本机",
+      "mode_gateway": "网关",
       "model_override_label": "底层模型覆盖",
       "model_override_hint": "应用于此智能体此后领取的所有运行，直到修改或清空。清空后使用所选 OpenClaw 智能体绑定的模型，其身份保持不变。",
       "model_override_placeholder": "openrouter/@preset/agent-reasoning",
       "mode_local_hint": "在本机运行。",
       "mode_gateway_hint": "守护进程连接 OpenClaw Gateway。端点字段留空则继承守护进程宿主 `~/.openclaw/openclaw.json` 里的配置。",
       "gateway_legend": "Gateway 端点",
-      "host_label": "Host",
+      "host_label": "主机",
       "host_placeholder": "gw.internal",
       "port_label": "端口",
       "port_invalid": "端口必须是正整数。",
@@ -730,7 +748,8 @@
       "add_dialog_confirm_default": "添加",
       "add_dialog_confirm_other": "添加 {{count}} 个 skill",
       "add_dialog_cancel": "取消",
-      "add_failed_toast": "添加 skill 失败"
+      "add_failed_toast": "添加 skill 失败",
+      "add_dialog_confirm_one": "添加 {{count}} 个 skill"
     },
     "integrations": {
       "members_note": "在智能体主页查看和管理消息渠道。"
@@ -779,7 +798,8 @@
       "cancel_failed_toast": "取消运行失败",
       "started_prefix": "{{when}}启动",
       "dispatched_prefix": "{{when}}派发",
-      "queued_prefix": "{{when}}排队"
+      "queued_prefix": "{{when}}排队",
+      "runs_one": "次运行"
     },
     "connected_apps": {
       "loading": "正在加载应用…",
@@ -854,7 +874,7 @@
     "unavailable": "智能体不可用",
     "detail_link": "详情 →",
     "runtime_label": "运行时",
-    "skills_label": "Skills",
+    "skills_label": "技能",
     "owner_label": "所有者",
     "unknown_runtime": "未知运行时",
     "model_label": "模型",
@@ -953,6 +973,10 @@
     "tool_kind_read": "读取",
     "tool_kind_misc": "其他",
     "trigger_wakeup": "唤醒触发",
+    "outcome_files_one": "{{count}} 个文件",
+    "outcome_commands_one": "{{count}} 条命令",
+    "group_calls_one": "{{count}} 次调用",
+    "steps_count_one": "{{count}} 个步骤",
     "context_receipt_title": "上下文回执",
     "context_receipt_summary_other": "{{count}} 个来源 · {{size}}",
     "context_receipt_model": "模型",
@@ -985,6 +1009,7 @@
     "context_load_verified_other_version": "仅在 {{version}} 验证过",
     "context_load_unverified": "未验证",
     "context_load_not_delivered": "未送达"
+
   },
   "task_failure": {
     "cancelled_by_system": "已由系统取消",
@@ -1032,7 +1057,8 @@
   "last_active": {
     "today": "今天",
     "days_ago_other": "{{count}} 天前",
-    "none": "30 天内无活动"
+    "none": "30 天内无活动",
+    "days_ago_one": "{{count}} 天前"
   },
   "toolbar": {
     "section_availability": "可用性",

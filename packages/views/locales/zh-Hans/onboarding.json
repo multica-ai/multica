@@ -191,7 +191,8 @@
     "hint_selected": "已选择：{{name}}",
     "hint_pick": "在上方选择一个智能体运行时，就可以开始使用 Mika。",
     "hint_waiting": "等待第一个结果...",
-    "continue": "开始使用 Mika"
+    "continue": "开始使用 Mika",
+    "runtime_count_one": "{{count}} 个智能体运行时"
   },
   "step_platform": {
     "headline": "连接一台电脑来运行你的智能体。",
@@ -218,7 +219,8 @@
     "stage_slow_suffix": " 的终端是否有错误。",
     "stage_stalled_prefix": "目前还没有收到连接。如果你不太习惯终端，",
     "stage_stalled_term": "桌面端",
-    "stage_stalled_suffix": " 更顺手——一键搞定，这台电脑就连接好了。关闭这个对话框选择桌面端，或点跳过继续。"
+    "stage_stalled_suffix": " 更顺手——一键搞定，这台电脑就连接好了。关闭这个对话框选择桌面端，或点跳过继续。",
+    "runtimes_connected_one": "已连接 {{count}} 台电脑"
   },
   "errors": {
     "skip_failed": "完成上手引导失败",
