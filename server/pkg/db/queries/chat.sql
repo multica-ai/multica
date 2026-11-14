@@ -112,6 +112,75 @@ WHERE cs.workspace_id = $1 AND cs.creator_id = $2
   )
 ORDER BY (cs.pinned_at IS NOT NULL) DESC, cs.pinned_at DESC, COALESCE(lm.created_at, cs.updated_at) DESC;
 
+-- name: ListChatSessionsByCreatorPage :many
+-- Paginated workspace chat-session list for the caller (creator-scoped).
+-- status_filter is one of active, archived, or all.
+SELECT cs.*,
+       CASE WHEN cs.status = 'archived' THEN 0
+            ELSE (SELECT count(*) FROM chat_message m
+                    WHERE m.chat_session_id = cs.id
+                      AND m.role = 'assistant'
+                      AND m.created_at > cs.last_read_at)
+       END::int AS unread_count,
+       COALESCE(lm.content, '') AS last_message_content,
+       COALESCE(lm.role, '') AS last_message_role,
+       lm.created_at AS last_message_at,
+       lm.failure_reason AS last_message_failure_reason,
+       COALESCE(lm.message_kind, '') AS last_message_kind
+FROM chat_session cs
+LEFT JOIN LATERAL (
+  SELECT content, role, created_at, failure_reason, message_kind
+    FROM chat_message m
+   WHERE m.chat_session_id = cs.id
+     AND m.message_kind != 'channel_command'
+   ORDER BY m.created_at DESC
+   LIMIT 1
+) lm ON true
+WHERE cs.workspace_id = $1 AND cs.creator_id = $2
+  AND (
+    sqlc.arg('status_filter')::text = 'all'
+    OR (sqlc.arg('status_filter')::text = 'active' AND cs.status = 'active')
+    OR (sqlc.arg('status_filter')::text = 'archived' AND cs.status = 'archived')
+  )
+  AND (
+    cs.explicitly_created_at IS NOT NULL
+    OR
+    lm.created_at IS NOT NULL
+  )
+  AND (sqlc.narg('activity_after')::timestamptz IS NULL
+       OR COALESCE(lm.created_at, cs.updated_at) >= sqlc.narg('activity_after')::timestamptz)
+  AND (sqlc.narg('activity_before')::timestamptz IS NULL
+       OR COALESCE(lm.created_at, cs.updated_at) < sqlc.narg('activity_before')::timestamptz)
+ORDER BY (cs.pinned_at IS NOT NULL) DESC, cs.pinned_at DESC, COALESCE(lm.created_at, cs.updated_at) DESC
+LIMIT $3 OFFSET $4;
+
+-- name: CountChatSessionsByCreator :one
+SELECT count(*)::bigint
+FROM chat_session cs
+LEFT JOIN LATERAL (
+  SELECT created_at
+    FROM chat_message m
+   WHERE m.chat_session_id = cs.id
+     AND m.message_kind != 'channel_command'
+   ORDER BY m.created_at DESC
+   LIMIT 1
+) lm ON true
+WHERE cs.workspace_id = $1 AND cs.creator_id = $2
+  AND (
+    sqlc.arg('status_filter')::text = 'all'
+    OR (sqlc.arg('status_filter')::text = 'active' AND cs.status = 'active')
+    OR (sqlc.arg('status_filter')::text = 'archived' AND cs.status = 'archived')
+  )
+  AND (
+    cs.explicitly_created_at IS NOT NULL
+    OR
+    lm.created_at IS NOT NULL
+  )
+  AND (sqlc.narg('activity_after')::timestamptz IS NULL
+       OR COALESCE(lm.created_at, cs.updated_at) >= sqlc.narg('activity_after')::timestamptz)
+  AND (sqlc.narg('activity_before')::timestamptz IS NULL
+       OR COALESCE(lm.created_at, cs.updated_at) < sqlc.narg('activity_before')::timestamptz);
+
 -- name: ListAgentBuilderSessionsByCreator :many
 -- The caller's unfinished agent-creation conversations.
 --

@@ -2514,6 +2514,7 @@ export const ChatSessionSchema: z.ZodType<ChatSession> = z.object({
   is_current_channel_route: z.boolean().optional().catch(undefined),
   created_at: z.string().default(""),
   updated_at: z.string().default(""),
+  last_activity_at: z.string().optional(),
 }).loose();
 
 export const EMPTY_CHAT_SESSION: ChatSession = {
@@ -2532,6 +2533,21 @@ export const ChatSessionListSchema = z
   .transform((sessions) => sessions.filter((session) => session.id !== ""))
   .default([]);
 export const EMPTY_CHAT_SESSION_LIST: ChatSession[] = [];
+
+export const ChatSessionListPageResponseSchema = z
+  .object({
+    sessions: ChatSessionListSchema,
+    total: z.number().default(0),
+    has_more: z.boolean().default(false),
+    limit: z.number().optional(),
+    offset: z.number().optional(),
+  })
+  .loose();
+export const EMPTY_CHAT_SESSION_LIST_PAGE = {
+  sessions: [] as ChatSession[],
+  total: 0,
+  has_more: false,
+};
 
 // Deferred-cancellation draft restores
 // (`GET /api/chat/sessions/{id}/draft-restores`, #5219) feed the composer

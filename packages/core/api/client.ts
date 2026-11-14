@@ -298,6 +298,7 @@ import {
   ChatMessagesPageSchema,
   ChatPendingTaskSchema,
   ChatSessionListSchema,
+  ChatSessionListPageResponseSchema,
   ChatSessionSchema,
   PrioritizeQueuedChatTaskResponseSchema,
   SendChatMessageResponseSchema,
@@ -327,6 +328,7 @@ import {
   EMPTY_CHAT_PENDING_TASK,
   EMPTY_CHAT_SESSION,
   EMPTY_CHAT_SESSION_LIST,
+  EMPTY_CHAT_SESSION_LIST_PAGE,
   EMPTY_PRIORITIZE_QUEUED_CHAT_TASK_RESPONSE,
   EMPTY_CLOUD_RUNTIME_NODE,
   EMPTY_CLOUD_RUNTIME_NODE_LIST,
@@ -4045,6 +4047,32 @@ export class ApiClient {
     });
     return parseWithFallback(raw, ChatSessionListSchema, EMPTY_CHAT_SESSION_LIST, {
       endpoint: "GET /api/chat/sessions",
+    });
+  }
+
+  async listChatSessionsPage(
+    params: {
+      status?: string;
+      limit?: number;
+      offset?: number;
+      activity_since?: string;
+      activity_before?: string;
+    },
+    workspace?: WorkspaceScope,
+  ) {
+    const query = new URLSearchParams();
+    if (params.status) query.set("status", params.status);
+    if (params.limit != null) query.set("limit", String(params.limit));
+    if (params.offset != null) query.set("offset", String(params.offset));
+    if (params.activity_since) query.set("activity_since", params.activity_since);
+    if (params.activity_before) query.set("activity_before", params.activity_before);
+    const suffix = query.toString();
+    const raw: unknown = await this.fetch(
+      `/api/chat/sessions/page${suffix ? `?${suffix}` : ""}`,
+      { headers: workspaceHeader(workspace) },
+    );
+    return parseWithFallback(raw, ChatSessionListPageResponseSchema, EMPTY_CHAT_SESSION_LIST_PAGE, {
+      endpoint: "GET /api/chat/sessions/page",
     });
   }
 

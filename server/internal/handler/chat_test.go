@@ -1007,3 +1007,82 @@ func TestListChatSessions_ArchivedSessionReportsZeroUnread(t *testing.T) {
 		t.Fatalf("unarchived session unread: want count=1 has=true, got count=%d has=%v", n, has)
 	}
 }
+
+func TestListChatSessionsPage_PaginatesAndFiltersActivity(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "ChatSessionPageAgent", []byte("[]"))
+	recentID := createHandlerTestChatSession(t, agentID)
+	staleID := createHandlerTestChatSession(t, agentID)
+	ctx := context.Background()
+
+	markStale := func(id string) time.Time {
+		t.Helper()
+		staleAt := time.Now().UTC().Add(-30 * 24 * time.Hour)
+		if _, err := testPool.Exec(ctx, `UPDATE chat_session SET updated_at = $2 WHERE id = $1`, id, staleAt); err != nil {
+			t.Fatalf("stale updated_at: %v", err)
+		}
+		return staleAt
+	}
+	staleAt := markStale(staleID)
+
+	if _, err := testPool.Exec(ctx,
+		`INSERT INTO chat_message (chat_session_id, role, content) VALUES ($1, 'user', 'recent')`,
+		recentID); err != nil {
+		t.Fatalf("insert recent message: %v", err)
+	}
+
+	callPage := func(query string) ChatSessionsPageResponse {
+		t.Helper()
+		req := newRequest("GET", "/api/chat/sessions/page"+query, nil)
+		req = withChatTestWorkspaceCtx(t, req)
+		w := httptest.NewRecorder()
+		testHandler.ListChatSessionsPage(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("ListChatSessionsPage: expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp ChatSessionsPageResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode page: %v", err)
+		}
+		return resp
+	}
+
+	all := callPage("?status=all&limit=50")
+	if all.Total < 2 {
+		t.Fatalf("total = %d, want at least 2 seeded sessions", all.Total)
+	}
+	ids := make(map[string]struct{}, len(all.Sessions))
+	for _, s := range all.Sessions {
+		ids[s.ID] = struct{}{}
+	}
+	for _, want := range []string{recentID, staleID} {
+		if _, ok := ids[want]; !ok {
+			t.Fatalf("session %s missing from page list", want)
+		}
+	}
+
+	since := url.QueryEscape(staleAt.Add(time.Hour).Format(time.RFC3339Nano))
+	filtered := callPage("?status=all&limit=50&activity_since=" + since)
+	foundRecent, foundStale := false, false
+	for _, s := range filtered.Sessions {
+		switch s.ID {
+		case recentID:
+			foundRecent = true
+			if s.LastActivityAt == "" {
+				t.Fatal("recent session missing last_activity_at")
+			}
+		case staleID:
+			foundStale = true
+		}
+	}
+	if !foundRecent || foundStale {
+		t.Fatalf("activity_since filter: recent=%v stale=%v", foundRecent, foundStale)
+	}
+
+	badReq := newRequest("GET", "/api/chat/sessions/page?status=nope", nil)
+	badReq = withChatTestWorkspaceCtx(t, badReq)
+	w := httptest.NewRecorder()
+	testHandler.ListChatSessionsPage(w, badReq)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("invalid status: expected 400, got %d", w.Code)
+	}
+}
