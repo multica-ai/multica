@@ -259,6 +259,26 @@ var issuePullRequestsCmd = &cobra.Command{
 	RunE:    runIssuePullRequests,
 }
 
+var issuePullRequestsLinkCmd = &cobra.Command{
+	Use:   "link <issue> <pr-url>",
+	Short: "Link a pull request to an issue",
+	Long: `Link a pull request to an issue by its URL, for a PR whose title or branch
+does not mention the issue key. The PR must already be synced from a connected
+repository. Linking also undoes an earlier unlink of the same PR.`,
+	Args: exactArgs(2),
+	RunE: runIssuePullRequestsLink,
+}
+
+var issuePullRequestsUnlinkCmd = &cobra.Command{
+	Use:   "unlink <issue> <pr>",
+	Short: "Unlink a pull request from an issue",
+	Long: `Remove a pull request from an issue. <pr> is the PR's URL, its number (42 or #42),
+or its id from "multica issue pull-requests <issue> --output json". The choice is
+remembered, so later activity on the PR does not link it again; "link" restores it.`,
+	Args: exactArgs(2),
+	RunE: runIssuePullRequestsUnlink,
+}
+
 var issueChildrenCmd = &cobra.Command{
 	Use:     "children <id>",
 	Aliases: []string{"subissues"},
@@ -658,6 +678,10 @@ func init() {
 
 	// issue pull-requests
 	issuePullRequestsCmd.Flags().String("output", "table", "Output format: table or json")
+	issuePullRequestsCmd.AddCommand(issuePullRequestsLinkCmd)
+	issuePullRequestsCmd.AddCommand(issuePullRequestsUnlinkCmd)
+	issuePullRequestsLinkCmd.Flags().String("output", "table", "Output format: table or json")
+	issuePullRequestsUnlinkCmd.Flags().String("output", "table", "Output format: table or json")
 
 	issueChildrenCmd.Flags().String("output", "table", "Output format: table or json")
 	issueChildrenCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
@@ -1112,10 +1136,19 @@ func runIssuePullRequests(cmd *cobra.Command, args []string) error {
 	}
 
 	var result map[string]any
-	if err := client.GetJSON(ctx, "/api/issues/"+url.PathEscape(issueRef.ID)+"/pull-requests", &result); err != nil {
+	if err := client.GetJSON(ctx, issuePullRequestsPath(issueRef.ID), &result); err != nil {
 		return fmt.Errorf("list issue pull requests: %w", err)
 	}
+	return printIssuePullRequestsResult(cmd, result)
+}
 
+func issuePullRequestsPath(issueID string) string {
+	return "/api/issues/" + url.PathEscape(issueID) + "/pull-requests"
+}
+
+// printIssuePullRequestsResult prints the issue's pull request list, which is
+// also what link and unlink return, so every subcommand shows the result.
+func printIssuePullRequestsResult(cmd *cobra.Command, result map[string]any) error {
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
 		return cli.PrintJSON(os.Stdout, result)
@@ -1127,6 +1160,151 @@ func runIssuePullRequests(cmd *cobra.Command, args []string) error {
 		printIssuePRAutoComplete(autoComplete)
 	}
 	return nil
+}
+
+func runIssuePullRequestsLink(cmd *cobra.Command, args []string) error {
+	ref := strings.TrimSpace(args[1])
+	if ref == "" {
+		return fmt.Errorf("pull request URL is required")
+	}
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	issueRef, err := resolveIssueRef(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve issue: %w", err)
+	}
+
+	// The endpoint also accepts the id of a PR this workspace mirrors, which
+	// is how an unlinked PR (still listed by its id) is restored.
+	body := map[string]string{"url": ref}
+	if uuidRegexp.MatchString(ref) {
+		body = map[string]string{"pull_request_id": strings.ToLower(ref)}
+	}
+	var result map[string]any
+	if err := client.PostJSON(ctx, issuePullRequestsPath(issueRef.ID), body, &result); err != nil {
+		if isUnsyncedPullRequestError(err) {
+			// The generic not-found message would send the user hunting for a
+			// wrong ID; the PR is simply not mirrored here yet.
+			return fmt.Errorf("pull request %s is not in this workspace yet: it can be linked once its repository is connected to Multica and the PR has synced", ref)
+		}
+		return fmt.Errorf("link pull request: %w", err)
+	}
+	return printIssuePullRequestsResult(cmd, result)
+}
+
+func runIssuePullRequestsUnlink(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	issueRef, err := resolveIssueRef(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve issue: %w", err)
+	}
+
+	// The endpoint takes the PR's id; find it among the issue's linked PRs so
+	// a URL or number works too.
+	var listed map[string]any
+	if err := client.GetJSON(ctx, issuePullRequestsPath(issueRef.ID), &listed); err != nil {
+		return fmt.Errorf("list issue pull requests: %w", err)
+	}
+	prs, _ := listed["pull_requests"].([]any)
+	prID, err := matchLinkedPullRequest(normalizePullRequestList(prs), args[1])
+	if err != nil {
+		return fmt.Errorf("%w; see \"multica issue pull-requests %s\"", err, args[0])
+	}
+
+	var result map[string]any
+	if err := client.DeleteJSONResponse(ctx, issuePullRequestsPath(issueRef.ID)+"/"+url.PathEscape(prID), &result); err != nil {
+		return fmt.Errorf("unlink pull request: %w", err)
+	}
+	return printIssuePullRequestsResult(cmd, result)
+}
+
+func isUnsyncedPullRequestError(err error) bool {
+	var httpErr *cli.HTTPError
+	return errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound &&
+		strings.Contains(httpErr.Body, "pull request not found")
+}
+
+// matchLinkedPullRequest finds the id of the linked PR that ref names: its id,
+// its URL (any trailing /files, query or fragment ignored), or its number. A
+// number shared by PRs from different repositories is ambiguous.
+func matchLinkedPullRequest(prs []map[string]any, ref string) (string, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return "", fmt.Errorf("pull request is required")
+	}
+	if uuidRegexp.MatchString(ref) {
+		for _, pr := range prs {
+			if strings.EqualFold(strVal(pr, "id"), ref) {
+				return strVal(pr, "id"), nil
+			}
+		}
+		return "", fmt.Errorf("pull request %s is not linked to this issue", ref)
+	}
+	if number := strings.TrimPrefix(ref, "#"); isAllDigits(number) {
+		var matches []map[string]any
+		for _, pr := range prs {
+			if strVal(pr, "number") == number {
+				matches = append(matches, pr)
+			}
+		}
+		switch len(matches) {
+		case 1:
+			return strVal(matches[0], "id"), nil
+		case 0:
+			return "", fmt.Errorf("no linked pull request has number %s", number)
+		default:
+			urls := make([]string, 0, len(matches))
+			for _, pr := range matches {
+				urls = append(urls, pullRequestURL(pr))
+			}
+			return "", fmt.Errorf("pull request number %s matches %d linked PRs (%s); pass its URL instead", number, len(matches), strings.Join(urls, ", "))
+		}
+	}
+	want := canonicalPullRequestURL(ref)
+	for _, pr := range prs {
+		if want != "" && canonicalPullRequestURL(pullRequestURL(pr)) == want {
+			return strVal(pr, "id"), nil
+		}
+	}
+	return "", fmt.Errorf("pull request %s is not linked to this issue", ref)
+}
+
+var pullRequestURLPathPattern = regexp.MustCompile(`^(.+?/(?:pull|pulls|merge_requests)/\d+)(?:[/?#].*)?$`)
+
+// canonicalPullRequestURL reduces a PR URL to host and path up to the PR
+// number, lowercased, so a pasted ".../pull/42/files" matches the stored URL.
+func canonicalPullRequestURL(raw string) string {
+	raw = strings.ToLower(strings.TrimSpace(raw))
+	raw = strings.TrimPrefix(strings.TrimPrefix(raw, "https://"), "http://")
+	if m := pullRequestURLPathPattern.FindStringSubmatch(raw); m != nil {
+		return m[1]
+	}
+	return strings.TrimRight(raw, "/")
+}
+
+func isAllDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func normalizePullRequestList(raw []any) []map[string]any {

@@ -425,6 +425,8 @@ Migration from CSV parsing: replace `--attachment a,b` with `--attachment a --at
 | | `search <query>` | Search issues | `--limit`, `--include-closed`, `--project` |
 | | `children <id>` | List sub-issues grouped by stage | |
 | | `pull-requests <id>` | List linked PRs | |
+| | `pull-requests link <id> <pr-url>` | Link a synced PR whose title and branch lack the issue key | Also restores a PR removed with `unlink` |
+| | `pull-requests unlink <id> <pr>` | Remove a linked PR and keep it removed | `<pr>` is the PR URL, its number, or its id |
 | | `comment list/add/update/delete/resolve/unresolve` | Manage comments | `add`: `--content` / `--content-stdin` / `--content-file`, `--parent`, `--attachment`; `update`: `--expected-revision` (required), `--content` / `--content-stdin` / `--content-file`; `list`: `--since`, `--thread`, `--tail`, `--recent`, `--roots-only`, `--summary`, `--compact`, `--full` |
 | | `timeline <id>` | List activity records and comments in time order | `--action` (repeatable), `--activity-only`, `--since`, `--tail` |
 | | `wakeup events/list/get/create/update/disable/trigger/delete/checkin/runs` | Manage issue wakeups; see [Issue wakeups](/issue-wakeups) | `create` / `update`: `--agent-id`, `--kind` (`event`, `at`, `every`, `cron`), `--event`, `--at` / `--after`, `--every`, `--cron`, `--timezone`, `--until-*` conditions, `--expires-in` / `--expires-at`, `--instruction` / `--instruction-file`; `checkin`: `--note` |

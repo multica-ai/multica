@@ -394,6 +394,8 @@ CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 t
 | | `search <query>` | 태스크 검색 | `--limit`, `--include-closed`, `--project` |
 | | `children <id>` | 단계별로 묶은 하위 태스크 목록 | |
 | | `pull-requests <id>` | 연결된 PR 목록 | |
+| | `pull-requests link <id> <pr-url>` | 제목과 브랜치에 태스크 키가 없는 동기화된 PR 연결 | `unlink`로 제거한 PR 복원에도 사용 |
+| | `pull-requests unlink <id> <pr>` | 연결된 PR을 제거하고 이후 자동으로 다시 연결하지 않음 | `<pr>`은 PR URL, 번호 또는 id |
 | | `comment list/add/update/delete/resolve/unresolve` | 댓글 관리 | `add`: `--content` / `--content-stdin` / `--content-file`, `--parent`, `--attachment`. `update`: `--expected-revision`(필수), `--content` / `--content-stdin` / `--content-file`. `list`: `--since`, `--thread`, `--tail`, `--recent`, `--roots-only`, `--summary`, `--compact`, `--full` |
 | | `timeline <id>` | 활동 기록과 댓글을 시간순으로 표시 | `--action`(반복 가능), `--activity-only`, `--since`, `--tail` |
 | | `wakeup events/list/get/create/update/disable/trigger/delete/checkin/runs` | 태스크 깨우기 관리. 자세한 내용은 [태스크 깨우기](/issue-wakeups) | `create` / `update`: `--agent-id`, `--kind`(`event`, `at`, `every`, `cron`), `--event`, `--at` / `--after`, `--every`, `--cron`, `--timezone`, `--until-*` 조건, `--expires-in` / `--expires-at`, `--instruction` / `--instruction-file`. `checkin`: `--note` |

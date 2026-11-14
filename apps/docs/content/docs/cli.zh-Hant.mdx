@@ -399,6 +399,8 @@ CLI 配置檔案包含可代表你訪問 Multica 的令牌。不要提交到倉�
 | | `search <query>` | 搜尋任務 | `--limit`、`--include-closed`、`--project` |
 | | `children <id>` | 按階段分組列出子任務 | |
 | | `pull-requests <id>` | 列出關聯的 PR | |
+| | `pull-requests link <id> <pr-url>` | 關聯一個已同步、但標題和分支裡沒有任務編號的 PR | 也能恢復用 `unlink` 移除的 PR |
+| | `pull-requests unlink <id> <pr>` | 移除關聯的 PR，之後不會再自動關聯 | `<pr>` 可以是 PR 連結、編號或 id |
 | | `comment list/add/update/delete/resolve/unresolve` | 管理評論 | `add`：`--content` / `--content-stdin` / `--content-file`、`--parent`、`--attachment`；`update`：`--expected-revision`（必填）、`--content` / `--content-stdin` / `--content-file`；`list`：`--since`、`--thread`、`--tail`、`--recent`、`--roots-only`、`--summary`、`--compact`、`--full` |
 | | `timeline <id>` | 按時間列出活動記錄和評論 | `--action`（可重複）、`--activity-only`、`--since`、`--tail` |
 | | `wakeup events/list/get/create/update/disable/trigger/delete/checkin/runs` | 管理任務喚醒，詳見[任務喚醒](/issue-wakeups) | `create` / `update`：`--agent-id`、`--kind`（`event`、`at`、`every`、`cron`）、`--event`、`--at` / `--after`、`--every`、`--cron`、`--timezone`、`--until-*` 條件、`--expires-in` / `--expires-at`、`--instruction` / `--instruction-file`；`checkin`：`--note` |
