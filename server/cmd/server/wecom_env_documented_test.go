@@ -46,23 +46,25 @@ func TestEveryWecomEnvVarIsDocumentedAndPassedIntoTheContainer(t *testing.T) {
 	// the same as os.Getenv — what matters is that the process reads it, not
 	// which helper does the reading.
 	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, routerSourceFile, nil, 0)
-	if err != nil {
-		t.Fatalf("parse %s: %v", routerSourceFile, err)
-	}
 	seen := map[string]bool{}
-	ast.Inspect(file, func(n ast.Node) bool {
-		call, ok := n.(*ast.CallExpr)
-		if !ok {
-			return true
+	for _, source := range []string{routerSourceFile, "../../internal/integrations/wecom/inbox_webhook.go"} {
+		file, err := parser.ParseFile(fset, source, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", source, err)
 		}
-		for _, arg := range call.Args {
-			if name := stringLit(arg); wecomEnvName.MatchString(name) {
-				seen[name] = true
+		ast.Inspect(file, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
 			}
-		}
-		return true
-	})
+			for _, arg := range call.Args {
+				if name := stringLit(arg); wecomEnvName.MatchString(name) {
+					seen[name] = true
+				}
+			}
+			return true
+		})
+	}
 	var read []string
 	for name := range seen {
 		read = append(read, name)
