@@ -204,6 +204,7 @@
     }
   },
   "access": {
+    "agent_notice": "Les agents suivent les droits d’accès de leur propriétaire.",
     "label": "Accès",
     "title": "Accès à {{title}}",
     "description": "Définit qui peut voir ce projet, ses tâches, commentaires et pièces jointes.",

@@ -26,6 +26,7 @@ jobs:
       backend: ${{ steps.decide.outputs.backend }}
       sqlc: ${{ steps.decide.outputs.sqlc }}
       runtime: ${{ steps.decide.outputs.runtime }}
+      processtree: ${{ steps.decide.outputs.processtree }}
       quality_only: ${{ steps.decide.outputs.quality_only }}
       scripts: ${{ steps.decide.outputs.scripts }}
       installer: ${{ steps.decide.outputs.installer }}
@@ -509,7 +510,7 @@ jobs:
   # Preserve the existing required-check name while allowing tests, generated
   # SQL verification, and the vulnerability scan to run independently.
   backend:
-    needs: [changes, backend-tests, backend-agent-tests, sqlc-check, go-vulnerability-scan, macos-runtime, windows-execenv, script-checks, installer]
+    needs: [changes, backend-tests, backend-agent-tests, sqlc-check, go-vulnerability-scan, macos-runtime, macos-processtree, windows-execenv, script-checks, installer]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
@@ -517,7 +518,7 @@ jobs:
       - name: Check backend job results
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
-          JOB_SCOPES: '{"backend-tests":"backend","backend-agent-tests":"backend","sqlc-check":"sqlc","go-vulnerability-scan":"backend","macos-runtime":"full","windows-execenv":"runtime","script-checks":"scripts","installer":"installer"}'
+          JOB_SCOPES: '{"backend-tests":"backend","backend-agent-tests":"backend","sqlc-check":"sqlc","go-vulnerability-scan":"backend","macos-runtime":"full","macos-processtree":"processtree","windows-execenv":"runtime","script-checks":"scripts","installer":"installer"}'
         run: node scripts/ci-scope.mjs gate
 
   windows-execenv:
@@ -559,7 +560,7 @@ jobs:
         # These fixtures must redirect both the Windows user profile and the
         # platform-native Hermes home; otherwise discovery scans the runner's
         # real skills instead of the test directories.
-        run: go test ./internal/daemon -v -run '^(TestListRuntimeLocalSkills_HermesFollowsTaskHome|TestLocalSkills_DiscoversACPProviderRoots)$' -count=1 -timeout=5m
+        run: go test ./internal/daemon -v -run '^(TestListRuntimeLocalSkills_HermesFollowsTaskHome|TestLocalSkills_DiscoversACPProviderRoots|TestGC_LocalCodexHomePreservesJunctionTargets)$' -count=1 -timeout=5m
 
       - name: Test Windows Git Bash temp lifecycle
         working-directory: server
@@ -796,7 +797,7 @@ jobs:
         # backend job still covers the untagged and Unix arms.
         run: go test -race ./pkg/agent -v -run 'TestCursorBackground|TestCaptureCursorBackground' -count=1 -timeout=5m
 
-  # The only macOS runner here, and the only place cursor_background_process_darwin.go
+  # The daily macOS runtime runner, and the only place cursor_background_process_darwin.go
   # is ever built: it signals a process group through XNU's per-process unique
   # identity so a recycled PID cannot redirect a kill, and the two tests pinning
   # that are `//go:build darwin`. Windows keeps its arm as a step in
@@ -836,6 +837,31 @@ jobs:
         shell: bash
         working-directory: server
         run: CGO_ENABLED=0 go test ./pkg/agent -run '^TestCaptureCursorBackground(KernelRejectsStaleIdentity|DetachedSession|LateDescendant)$' -count=1
+
+  # MUL-9162: Darwin's kill(-pgid) skips group members that are exiting or
+  # zombies and returns EPERM instead of ESRCH while the group drains, so
+  # processtree treats that EPERM as "nothing left to signal". The branch is
+  # gated on runtime.GOOS, so the ubuntu backend job passes the same tests
+  # without ever reaching it; only a macOS host proves the handling is still
+  # there. Scoped to the package itself (stdlib-only, ~10s at -count=3) so a
+  # macOS runner is charged only to PRs that touch it, plus every full run.
+  # -count=3 because the test lands in the drain window only a few times per
+  # thousand iterations.
+  macos-processtree:
+    needs: changes
+    if: ${{ needs.changes.outputs.processtree == 'true' }}
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "~1.27.4"
+          check-latest: true
+          cache-dependency-path: server/go.sum
+      - name: Test macOS process-group drain handling
+        shell: bash
+        working-directory: server
+        run: go test ./internal/daemon/processtree/ -v -count=3 -timeout=5m
 
   image-budget:
     # Soft gate against the 21.7MB of raw PNG/JPG that MUL-6352 cleared out:

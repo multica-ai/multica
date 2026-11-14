@@ -6,25 +6,21 @@ import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { ChatBar } from "../chat/components/chat-bar";
 import { isFloatingChatRouteSuppressed } from "../chat/floating-chat-visibility";
-import { ActorAvatar } from "../common/actor-avatar";
 import { useT } from "../i18n";
 import { AppLink, useNavigation } from "../navigation";
 import { useAppShell } from "./app-shell-context";
-import { BOTTOM_BAR_ITEM_CLASS } from "./bottom-bar-styles";
 import { useTeamAgentStatus } from "./panels/team-status";
 
-const MAX_WORKING_AVATARS = 3;
-
 /**
- * What the team is doing, at a glance: how many agents are working, and work
- * that cannot start because its runtime is offline. Both lead to Team, which
- * names the agents. Renders nothing while the team is idle.
+ * Work that cannot start because its runtime is offline. Links to Team,
+ * which names the agents. Keeps the left slot occupied when there is no alert
+ * so quick chat stays on the right.
  */
 function TeamStatus({ wsId }: { wsId: string }) {
   const { t } = useT("layout");
   const p = useWorkspacePaths();
   const shell = useAppShell();
-  const { working, stuck, byAgent } = useTeamAgentStatus(wsId);
+  const { stuck, byAgent } = useTeamAgentStatus(wsId);
   const teamHref = shell?.spaceHref("team", p.agents()) ?? p.agents();
   const waitingTasks = stuck.reduce(
     (total, agent) => total + (byAgent.get(agent.id)?.queuedCount ?? 0),
@@ -33,25 +29,6 @@ function TeamStatus({ wsId }: { wsId: string }) {
 
   return (
     <div className="flex min-w-0 items-center gap-1">
-      {working.length > 0 && (
-        <AppLink href={teamHref} className={BOTTOM_BAR_ITEM_CLASS}>
-          <span aria-hidden className="flex shrink-0 -space-x-1">
-            {working.slice(0, MAX_WORKING_AVATARS).map((agent) => (
-              <ActorAvatar
-                key={agent.id}
-                actorType="agent"
-                actorId={agent.id}
-                size="xs"
-                profileLink={false}
-                className="ring-[1.5px] ring-app-shell"
-              />
-            ))}
-          </span>
-          <span className="truncate">
-            {t(($) => $.bottom_bar.working, { count: working.length })}
-          </span>
-        </AppLink>
-      )}
       {waitingTasks > 0 && (
         <AppLink
           href={teamHref}

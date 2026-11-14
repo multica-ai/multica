@@ -528,7 +528,12 @@ export function TabBar() {
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
-      activationConstraint: { distance: 5 },
+      // `tolerance` cancels a press whose first move already lands far away,
+      // so it stays a click. In macOS native full screen on a secondary
+      // display, Electron sends exactly such a move right after a press near
+      // the top of the window (electron/electron#55100); started as a drag,
+      // it would swallow the tab click.
+      activationConstraint: { distance: 5, tolerance: 100 },
     }),
   );
 

@@ -73,6 +73,8 @@ import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@multica/ui/components/ui/command";
 import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { MemberProfileCard } from "../../members/member-profile-card";
+import { HoverCard, HoverCardTrigger, HoverCardContent } from "@multica/ui/components/ui/hover-card";
 import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { PropRow } from "../../common/prop-row";
 import { TimelineHandoff } from "../../workflows/timeline-handoff";
@@ -96,7 +98,7 @@ import { AssigneePicker } from "./pickers/assignee-picker";
 import { LabelPicker } from "./pickers/label-picker";
 import { CustomPropertyValueEditor, CustomPropertyValueDisplay } from "./pickers/custom-property-picker";
 import { Switch } from "@multica/ui/components/ui/switch";
-import { IssueActionsDropdown, useIssueActions, useArchivedInboxItemId, IssueActionsContextMenu, IssueContextMenuProvider } from "../actions";
+import { IssueActionsDropdown, useIssuePageMenu, useIssueActions, useArchivedInboxItemId, IssueActionsContextMenu, IssueContextMenuProvider } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { SubIssuesAgentWorkingChip } from "./sub-issues-agent-working-chip";
@@ -365,10 +367,14 @@ function formatActivity(
   locale: string,
   resolveActorName?: (type: string, id: string) => string,
   resolveStatusLabel?: (statusKey: string) => string,
+  requesterName?: string,
 ): string {
   const details = (entry.details ?? {}) as Record<string, string>;
   switch (entry.action) {
     case "created":
+      if (requesterName && entry.actor_type === "agent") {
+        return t(($) => $.activity.created_on_behalf_of, { name: requesterName });
+      }
       return t(($) => $.activity.created);
     case "status_changed":
       // PR auto-complete (MUL-7429) says why the status moved.
@@ -735,6 +741,7 @@ function ActivityBlock({
   t,
   timeAgo,
   locale,
+  requesterName,
 }: {
   entries: TimelineEntry[];
   expanded: boolean;
@@ -754,6 +761,7 @@ function ActivityBlock({
   t: ActivityT;
   timeAgo: (dateStr: string) => string;
   locale: string;
+  requesterName?: string;
 }) {
   const wakeupText = useWakeupText();
   if (!expanded) {
@@ -869,7 +877,7 @@ function ActivityBlock({
                     entry={entry}
                     text={isWakeup
                       ? formatWakeupActivity(entry, t, wakeupText, getActorName)
-                      : formatActivity(entry, t, locale, getActorName, resolveStatusLabel)}
+                      : formatActivity(entry, t, locale, getActorName, resolveStatusLabel, requesterName)}
                   />
                 </span>
                 {chip && (
@@ -2792,6 +2800,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const showInSidebar = useShowInSidebar(issue);
   // The inbox passes `onDone` and owns archive and restore there.
   const archivedInboxItemId = useArchivedInboxItemId(id, !onDone);
+  const pageMenu = useIssuePageMenu();
 
   // Labels live in their own query (not on the issue body) — fetch the count
   // here so seeding can decide whether the "Labels" optional row should be
@@ -2981,6 +2990,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   if (!issue) {
     return <IssueNotFound showBackLink={!onDelete} leading={leadingAction} trailing={trailingActions} />;
   }
+
+  const requesterName =
+    issue.creator_type === "agent" && issue.requester_id
+      ? getActorName("member", issue.requester_id)
+      : undefined;
 
   const persistDescriptionSave = (
     draft: { markdown: string; baseMarkdown: string; attachmentIds: string[] },
@@ -3311,9 +3325,31 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       <div>
         <IssueSidebarSectionHeader title={t(($) => $.detail.section_details)} open={detailsOpen} onOpenChange={setDetailsOpen} />
         {detailsOpen && <IssueSidebarPropertyGrid>
-          <PropRow interactive={false} label={t(($) => $.detail.prop_created_by)}>
-            <ActorAvatar actorType={issue.creator_type} actorId={issue.creator_id} size="sm" enableHoverCard />
-            <span className="cursor-pointer truncate">{getActorName(issue.creator_type, issue.creator_id)}</span>
+          <PropRow
+            interactive={false}
+            label={t(($) => $.detail.prop_created_by)}
+            className={requesterName ? "items-start py-1.5" : undefined}
+          >
+            <div className="flex min-w-0 flex-1 items-start gap-1.5">
+              <ActorAvatar actorType={issue.creator_type} actorId={issue.creator_id} size="sm" enableHoverCard />
+              <div className="flex min-w-0 flex-1 flex-col">
+                <span className="cursor-pointer truncate">{getActorName(issue.creator_type, issue.creator_id)}</span>
+                {requesterName && issue.requester_id && (
+                  <HoverCard>
+                    <HoverCardTrigger
+                      render={<AppLink href={paths.memberDetail(issue.requester_id)} />}
+                      className="block truncate text-caption text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      title={t(($) => $.execution_log.attribution.on_behalf_of, { name: requesterName })}
+                    >
+                      {t(($) => $.execution_log.attribution.on_behalf_of, { name: requesterName })}
+                    </HoverCardTrigger>
+                    <HoverCardContent align="start" className="w-72">
+                      <MemberProfileCard userId={issue.requester_id} />
+                    </HoverCardContent>
+                  </HoverCard>
+                )}
+              </div>
+            </div>
           </PropRow>
           <PropRow interactive={false} label={t(($) => $.detail.prop_created)}>
             <span className="text-muted-foreground">{shortDate(issue.created_at, locale)}</span>
@@ -3429,6 +3465,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         t={t}
         timeAgo={timeAgo}
         locale={locale}
+        requesterName={requesterName}
       />
     );
   };
@@ -3533,6 +3570,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               onDeletedFallbackPath={onDelete ? undefined : paths.issues()}
               archivedInboxItemId={archivedInboxItemId}
               onShowInSidebar={isPeek ? undefined : (showInSidebar ?? undefined)}
+              rowMenu={pageMenu.rowMenu}
               trigger={
                 <IconButton
                   label={tCommon(($) => $.more_actions)}
@@ -3571,6 +3609,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           ref={attachScrollContainer}
           data-tab-scroll-root={isPeek ? undefined : scrollContainerKey}
           className="@container relative flex-1 overflow-y-auto [scrollbar-gutter:stable_both-edges]"
+          onContextMenu={pageMenu.onContextMenu}
         >
         {/* Gutters: 32px is a comfortable reading margin on a desktop column
             but eats 16% of a 393px phone, so below `md` they drop to 12px.

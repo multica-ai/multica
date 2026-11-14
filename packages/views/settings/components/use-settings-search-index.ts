@@ -183,6 +183,11 @@ export function useSettingsSearchIndex(
       })),
       {
         tab: "notifications",
+        anchor: "chat_replies",
+        title: t(($) => $.notifications.groups.chat_replies.label),
+      },
+      {
+        tab: "notifications",
         anchor: "system",
         title: t(($) => $.notifications.system.label),
       },

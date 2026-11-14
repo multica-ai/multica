@@ -2,6 +2,7 @@ export type NotificationGroupKey =
   | "assignments"
   | "status_changes"
   | "comments"
+  | "chat_replies"
   | "mentions"
   | "updates"
   | "new_issues"

@@ -204,6 +204,7 @@
     }
   },
   "access": {
+    "agent_notice": "智能体的权限跟随其所有者。",
     "label": "访问权限",
     "title": "{{title}}的访问权限",
     "description": "控制谁能查看项目及其中的任务、评论和附件。",

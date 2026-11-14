@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -113,8 +114,8 @@ type Catalog struct {
 	// walks Models, so keeping these out is what makes an unrunnable model fail
 	// closed everywhere without each lookup having to remember a flag.
 	Unavailable []UnavailableModel
-	// Fallback reports that discovery did not succeed and Models is a static
-	// stand-in rather than the runtime's real catalog.
+	// Fallback reports that discovery is incomplete. Models may be a static
+	// stand-in or a live catalog whose capability probes did not finish.
 	//
 	// Several providers (codebuddy, copilot, cursor, grok) answer a failed
 	// discovery with a baked-in list so the picker still has something to
@@ -141,10 +142,9 @@ type Catalog struct {
 // be used to reject, rewrite, or drop a saved model, thinking level, or
 // service tier.
 //
-// A fallback is a static stand-in for a discovery that failed, and an empty
-// catalog is what the providers without one return in the same situation.
-// Both mean "unknown", not "unsupported": the saved value goes to the CLI
-// as-is and the CLI is the judge (MUL-7691).
+// Static stand-ins, incomplete capability probes, and empty catalogs mean
+// "unknown", not "unsupported": the saved value goes to the CLI as-is and
+// the CLI is the judge (MUL-7691).
 func (c Catalog) Verified() bool {
 	return !c.Fallback && len(c.Models) > 0
 }
@@ -158,8 +158,15 @@ func (c Catalog) Verified() bool {
 // report leaves the cache alone; flagging it here would change that. The
 // capability checks read emptiness themselves (Catalog.Verified).
 func discovered(models []Model, err error) (Catalog, error) {
+	if errors.Is(err, errACPEffortDiscoveryIncomplete) {
+		// The model IDs are real, but missing effort metadata must not be used
+		// to reject saved settings or cached as a complete discovery.
+		return Catalog{Models: models, Fallback: true}, nil
+	}
 	return Catalog{Models: models}, err
 }
+
+var errACPEffortDiscoveryIncomplete = errors.New("ACP per-model effort discovery incomplete")
 
 // modelCache memoizes dynamic discovery calls so repeated UI loads
 // don't re-shell the agent CLI. Entries expire after cacheTTL.
@@ -291,8 +298,11 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
 			return discoverCodebuddyModels(ctx, runtimeCmd)
 		})
-	case "qwen":
-		// Qwen Code has no account-independent headless model catalog. An
+	case "amp":
+		// Amp selects its own models; manual IDs select native modes.
+		return Catalog{Models: []Model{}}, nil
+	case "qwen", "droid":
+		// Qwen Code and Droid use runtime defaults or manual model IDs. An
 		// empty list keeps the runtime default and manual model entry available
 		// without advertising a Token-Plan-specific model to other accounts.
 		return Catalog{Models: []Model{}}, nil
@@ -1641,17 +1651,13 @@ func discoverHermesModels(ctx context.Context, runtimeCmd Command) ([]Model, err
 		tmpdirPrefix: "multica-hermes-discovery-",
 		strictErrors: true,
 		timeout:      hermesDiscoveryTimeout,
-		// The same handshake carries an effort selector on jcode and carries
-		// none on Hermes Agent, so annotate is what tells the two apart —
-		// Hermes Agent models come back with a nil Thinking and show no
-		// picker. annotate covers the session's current model; the probe
-		// switches the discovery session onto each remaining model for its
-		// own catalog. See probeACPModelEffort.
+		// Session options describe only the current model; probe other models
+		// individually rather than sharing an effort catalog across providers.
 		annotate:         annotateACPThinkingForSessionModel,
 		probeModelEffort: true,
 	})
 	if err != nil {
-		return nil, annotateHermesDiscoveryUnconfigured(err)
+		return models, annotateHermesDiscoveryUnconfigured(err)
 	}
 	return models, nil
 }
@@ -2190,6 +2196,14 @@ func discoverACPModels(ctx context.Context, runtimeCmd Command, p acpDiscoveryPr
 
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 0, 1024*1024), 4*1024*1024)
+	writeACP := func(msg any) error {
+		data, err := json.Marshal(msg)
+		if err != nil {
+			return err
+		}
+		_, err = stdin.Write(append(data, '\n'))
+		return err
+	}
 	nextID := 1
 	requestACP := func(method string, params any) (json.RawMessage, error) {
 		id := nextID
@@ -2200,12 +2214,7 @@ func discoverACPModels(ctx context.Context, runtimeCmd Command, p acpDiscoveryPr
 			"method":  method,
 			"params":  params,
 		}
-		data, err := json.Marshal(msg)
-		if err != nil {
-			return nil, err
-		}
-		data = append(data, '\n')
-		if _, err = stdin.Write(data); err != nil {
+		if err := writeACP(msg); err != nil {
 			return nil, err
 		}
 
@@ -2216,10 +2225,23 @@ func discoverACPModels(ctx context.Context, runtimeCmd Command, p acpDiscoveryPr
 			}
 			var env struct {
 				ID     json.RawMessage `json:"id"`
+				Method string          `json:"method"`
+				Params json.RawMessage `json:"params"`
 				Result json.RawMessage `json:"result"`
 				Error  json.RawMessage `json:"error"`
 			}
-			if err := json.Unmarshal([]byte(line), &env); err != nil || string(env.ID) != fmt.Sprint(id) {
+			if err := json.Unmarshal([]byte(line), &env); err != nil {
+				continue
+			}
+			// Agent requests have their own ID namespace. Answer before matching
+			// responses, including when the agent's ID equals our pending ID.
+			if env.Method != "" && len(env.ID) > 0 && string(env.ID) != "null" {
+				if err := writeACP(rejectACPDiscoveryRequest(env.ID, env.Method, env.Params)); err != nil {
+					return nil, err
+				}
+				continue
+			}
+			if string(env.ID) != fmt.Sprint(id) {
 				continue
 			}
 			if len(env.Error) > 0 && string(env.Error) != "null" {
@@ -2332,14 +2354,49 @@ func discoverACPModels(ctx context.Context, runtimeCmd Command, p acpDiscoveryPr
 		}, models, sessionResult)
 	}
 	if p.probeModelEffort {
+		probeIncomplete := false
 		probeACPModelEffort(runCtx, func(_ context.Context, method string, params any) (json.RawMessage, error) {
-			return requestACP(method, params)
+			result, err := requestACP(method, params)
+			if err != nil {
+				probeIncomplete = true
+			}
+			return result, err
 		}, sessionResult, models)
-		if err := runCtx.Err(); err != nil {
+		if err := ctx.Err(); err != nil {
 			return fail("per-model effort discovery", err)
+		}
+		// Effort metadata is optional: a rejected or slow model switch must
+		// not discard the catalog or claim unknown capabilities are absent.
+		// Unprobed models keep nil Thinking; confirmed metadata survives.
+		if probeIncomplete || runCtx.Err() != nil {
+			return models, errACPEffortDiscoveryIncomplete
 		}
 	}
 	return models, nil
+}
+
+// Discovery has no human to approve actions. Select an offered single-use
+// rejection, or refuse the client method without granting any permission.
+func rejectACPDiscoveryRequest(id json.RawMessage, method string, params json.RawMessage) map[string]any {
+	if method == "session/request_permission" {
+		var p struct {
+			Options []acpPermissionOption `json:"options"`
+		}
+		if json.Unmarshal(params, &p) == nil {
+			for _, option := range p.Options {
+				if option.OptionID != "" && strings.EqualFold(strings.TrimSpace(option.Kind), acpKindRejectOnce) {
+					return map[string]any{
+						"jsonrpc": "2.0", "id": id,
+						"result": map[string]any{"outcome": map[string]any{"outcome": "selected", "optionId": option.OptionID}},
+					}
+				}
+			}
+		}
+	}
+	return map[string]any{
+		"jsonrpc": "2.0", "id": id,
+		"error": map[string]any{"code": -32601, "message": "Client actions are unavailable during model discovery"},
+	}
 }
 
 func replaceEnvValue(env []string, key, value string) []string {

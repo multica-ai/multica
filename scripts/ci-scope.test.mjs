@@ -23,6 +23,8 @@ for (const [name, files, selected] of [
   ["migration only", ["server/migrations/999_example.up.sql"], ["backend", "sqlc"]],
   ["agent process code", ["server/pkg/agent/cursor_background.go"], ["backend", "runtime"]],
   ["daemon dependency", ["server/internal/skill/service.go"], ["backend", "runtime"]],
+  ["process-group control", ["server/internal/daemon/processtree/controller_unix.go"], ["backend", "runtime", "processtree"]],
+  ["process-group caller", ["server/internal/daemon/gc.go"], ["backend", "runtime"]],
   ["native test compilation dependency", ["server/pkg/db/generated/issues.sql.go"], ["backend", "sqlc", "runtime"]],
   ["Go dependencies", ["server/go.mod", "server/go.sum"], ["backend", "runtime"]],
   ["Helm only", ["deploy/helm/multica/templates/deployment.yaml"], ["scripts"]],

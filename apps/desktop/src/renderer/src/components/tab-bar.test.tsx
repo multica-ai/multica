@@ -521,6 +521,28 @@ describe("TabBar overflow", () => {
   });
 });
 
+describe("TabBar click activation", () => {
+  // electron/electron#55100: in macOS native full screen on a secondary
+  // display, a press near the top of the window is followed by one pointermove
+  // offset by that display's position, without the pointer moving.
+  it("switches tabs when a press is followed by a far-off stray pointermove", () => {
+    const { getByRole } = render(<TabBar />);
+    const tab = getByRole("button", { name: "Projects" });
+
+    fireEvent.pointerDown(tab, {
+      button: 0,
+      isPrimary: true,
+      clientX: 300,
+      clientY: 16,
+    });
+    fireEvent.pointerMove(document, { clientX: 708, clientY: 998 });
+    fireEvent.pointerUp(document, { clientX: 300, clientY: 16 });
+    fireEvent.click(tab);
+
+    expect(state.setActiveTab).toHaveBeenCalledWith("tB");
+  });
+});
+
 describe("TabBar context menu", () => {
   it("opens an issue-detail tab as a dedicated window", async () => {
     state.byWorkspace.acme.tabs = [
