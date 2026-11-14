@@ -161,7 +161,7 @@ function CreateIssueDialogBody({
           // `max-w-[calc(100%-2rem)]` safety margin, leaving the card flush
           // against both screen edges on a 430px viewport (MUL-6236). Restore
           // the margin here and let the `sm:` widths take over above 640px.
-          "!w-full !max-w-[calc(100vw-1.5rem)]",
+          "!w-full !max-w-[calc(100%-1.5rem)]",
           // Source-context create needs numeric collapsed/expanded endpoints
           // so its preview transition can interpolate the height. Ordinary
           // quick create has no expanding preview and keeps its original

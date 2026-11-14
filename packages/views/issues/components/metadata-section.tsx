@@ -40,7 +40,7 @@ export function MetadataSection({ metadata }: { metadata: IssueMetadata }) {
             <MetadataEntries metadata={metadata} />
           </div>
         </div>}
-        <DialogContent showCloseButton={false} className={cn("flex flex-col overflow-hidden sm:max-w-3xl", expanded && "h-[calc(100dvh-2rem)] sm:max-w-[calc(100%-2rem)]")}>
+        <DialogContent showCloseButton={false} className={cn("flex flex-col overflow-hidden sm:max-w-3xl", expanded && "h-[calc(100%-2rem)] sm:max-w-[calc(100%-2rem)]")}>
           <DialogHeader className="shrink-0">
             <div className="flex min-w-0 items-center justify-between gap-2">
               <DialogTitle>{t(($) => $.detail.section_metadata)}</DialogTitle>

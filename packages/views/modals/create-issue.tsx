@@ -1556,7 +1556,7 @@ export function manualDialogContentClass(isExpanded: boolean) {
     // `max-w-[calc(100%-2rem)]`, leaving the card edge to edge on a phone
     // (MUL-6236). `!h-96` stays a hard height; it already fits the shortest
     // phone we support.
-    "!w-full !max-w-[calc(100vw-1.5rem)]",
+    "!w-full !max-w-[calc(100%-1.5rem)]",
     isExpanded
       ? "!h-5/6 !-translate-y-1/2 sm:!max-w-4xl"
       : "!h-96 !-translate-y-1/2 sm:!max-w-2xl",

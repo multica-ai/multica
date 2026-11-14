@@ -44,7 +44,7 @@ export function CompactNavSheet({ globalActions = true }: { globalActions?: bool
         data-slot="compact-nav-sheet"
         // Runs to the screen edge like the shell it stands in for, insetting
         // its content instead of stopping at the safe area as sheets do.
-        className="flex-row gap-0 overflow-hidden bg-app-shell p-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] data-[side=left]:left-0 data-[side=left]:w-auto data-[side=left]:max-w-[calc(100vw-3rem)]"
+        className="flex-row gap-0 overflow-hidden bg-app-shell p-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] data-[side=left]:inset-y-0 data-[side=left]:left-0 data-[side=left]:w-auto data-[side=left]:max-w-[calc(100vw-3rem)]"
       >
         <SheetHeader className="sr-only">
           <SheetTitle>{t(($) => $.rail.label)}</SheetTitle>
