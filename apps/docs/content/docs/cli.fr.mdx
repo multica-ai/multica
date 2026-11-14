@@ -145,6 +145,19 @@ Si une tâche ouverte portant le même titre (sans tenir compte de la casse ni d
 
 Pour livrer plusieurs PR successives, utilisez `issue create --title "..." --pr-auto-complete off` ou `issue update <id> --pr-auto-complete off` pour conserver le statut de cette tâche après fusion. `--pr-auto-complete on` rétablit la règle de l'espace de travail au prochain événement PR. `issue pull-requests <id>` affiche le réglage de la tâche, celui de l'espace de travail, le statut cible et la décision, même sans PR liée. Les serveurs compatibles enregistrent le réglage dans la transaction de création ; les anciens reçoivent un PUT supplémentaire. En cas d'échec, le CLI indique l'ID créé et la commande update à réessayer : ne répétez pas create.
 
+### Supprimer des tâches
+
+Supprimez une tâche, ou passez plusieurs identifiants de tâche ou UUID complets pour les supprimer en un seul lot :
+
+```bash
+multica issue delete MUL-123
+multica issue delete MUL-123 MUL-124 --yes --output json
+```
+
+La suppression est définitive : elle supprime les commentaires et pièces jointes, annule les exécutions en cours, marque les exécutions d’automatisation liées comme échouées et efface les marques de doublon pointant vers les tâches supprimées. Les sous-tâches sont détachées, sans être supprimées. Chaque identifiant est résolu avant la confirmation ; une tâche inexistante ou inaccessible interrompt la commande avant toute suppression.
+
+La commande demande confirmation. `--yes` permet de l’ignorer ; sans cette option, une exécution non interactive qui ne peut pas répondre échoue sans rien supprimer.
+
 ### Chronologie
 
 `issue get` montre la tâche telle qu'elle est maintenant. `issue timeline` liste dans l'ordre les changements de statut, de priorité, d'assigné, de titre et de dates ainsi que les résultats des exécutions, entremêlés avec les commentaires. C'est la commande pour savoir « quand est-elle passée en in_review » ou « depuis combien de temps est-elle bloquée dans ce statut » :
@@ -265,7 +278,7 @@ multica runtime profile create --display-name "Wrapper Claude interne" \
   --command-name ccms --runtime-type claude
 ```
 
-`daemon autostart` enregistre le profil courant pour qu'il démarre à l'ouverture de session ; les différences entre plateformes sont décrites dans [Démarrage à l'ouverture de session](/daemon-runtimes#autostart). `runtime usage` couvre 90 jours par défaut, et `--days` va jusqu'à 365. `runtime update` demande au daemon de cette machine de mettre sa CLI à jour vers la version indiquée ; `--wait` attend la fin de la mise à jour. `runtime profile create` indique l'outil compatible avec `--runtime-type` (l'ancien `--protocol-family` fonctionne encore) ; les arguments fixes ne se définissent pour l'instant que dans l'application web.
+`daemon autostart` enregistre le profil courant pour qu'il démarre à l'ouverture de session ; les différences entre plateformes sont décrites dans [Démarrage à l'ouverture de session](/daemon-runtimes#autostart). `runtime usage` couvre 90 jours par défaut, et `--days` va jusqu'à 365. `runtime update` demande au daemon de cette machine de mettre sa CLI à jour vers la version indiquée ; `--wait` attend la fin de la mise à jour et renvoie un code de sortie non nul si elle échoue ou expire, ou si l’attente elle-même expire. `runtime profile create` indique l'outil compatible avec `--runtime-type` (l'ancien `--protocol-family` fonctionne encore) ; les arguments fixes ne se définissent pour l'instant que dans l'application web.
 
 La suppression d'un runtime auquel des agents actifs sont encore liés est refusée par défaut. `multica runtime delete <id> --cascade` dissocie ces agents, préserve leur configuration et leur historique, et annule leurs exécutions actives.
 
@@ -382,6 +395,7 @@ Les tableaux ci-dessous couvrent toutes les commandes de premier niveau actuelle
 | | `get <id>` | Afficher une tâche | `--resolve-properties` (JSON uniquement ; lignes avec les noms de propriété, d'option et de membre à côté des ID enregistrés) |
 | | `create` | Créer une tâche | `--title` (obligatoire), `--description` / `--description-stdin` / `--description-file`, `--pr-auto-complete on/off`, `--status`, `--priority`, `--assignee`, `--parent`, `--stage`, `--project`, `--start-date`, `--due-date`, `--attachment` (répétable), `--property` (répétable), `--allow-duplicate` (crée même si une tâche ouverte porte le même titre) |
 | | `update <id>` | Mettre à jour les champs d'une tâche | Mêmes champs que `create`, plus `--position`, `--no-start`, `--duplicate-of` |
+| | `delete <id>...` | Supprimer définitivement une ou plusieurs tâches | `--yes` ignore la confirmation ; accepte les identifiants de tâche ou UUID complets |
 | | `assign <id>` | Assigner ou désassigner | `--to` (correspondance approximative sur le nom parmi les membres, les agents et les squads), `--to-id`, `--unassign`, `--no-start` |
 | | `status <id> <status>` | Changer le statut | `--no-start`, `--duplicate-of` |
 | | `reorder <id>` | Déplacer au sein d'une colonne | |
