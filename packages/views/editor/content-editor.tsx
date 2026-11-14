@@ -1047,7 +1047,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       <AttachmentDownloadProvider attachments={providerAttachments}>
         <div
           ref={wrapperRef}
-          className="relative flex flex-1 min-h-full flex-col"
+          className="relative flex min-w-0 flex-1 min-h-full flex-col"
           onMouseDown={handleContainerMouseDown}
         >
           <EditorContent className="flex flex-1 flex-col" editor={editor} />
