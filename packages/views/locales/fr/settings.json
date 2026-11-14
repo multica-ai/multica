@@ -277,7 +277,20 @@
     },
     "own": {
       "title": "Créer le vôtre",
-      "description": "Importez un thème au format .zip ou depuis un dossier, ou partez d’une copie du thème actuel."
+      "description": "Demandez à un agent d’en créer un, importez un thème au format .zip ou depuis un dossier, ou partez d’une copie du thème actuel."
+    },
+    "agent": {
+      "button": "Demander à un agent",
+      "title": "Demander à un agent de créer un thème",
+      "description_desktop": "Décrivez l’apparence souhaitée. L’agent reçoit le format des thèmes et doit passer les vérifications de thème. S’il tourne sur cet ordinateur, le thème apparaît dès qu’il est écrit et se met à jour à chaque modification demandée ; sinon, il joint un .zip à installer.",
+      "description_web": "Décrivez l’apparence souhaitée. L’agent reçoit le format des thèmes, doit passer les vérifications de thème et joint le thème sous forme de .zip à installer depuis le chat.",
+      "prompt_label": "À quoi doit-il ressembler ?",
+      "prompt_placeholder": "Un thème sombre et calme, avec un ciel nocturne qui dérive lentement derrière un verre dépoli",
+      "agent_label": "Agent",
+      "no_agents": "Aucun agent avec qui vous pouvez discuter n’est disponible.",
+      "submit": "Démarrer le chat",
+      "sending": "Démarrage…",
+      "chat_title": "Thème : {{id}}"
     },
     "tools": {
       "duplicate": "Dupliquer « {{name}} » en nouveau thème",

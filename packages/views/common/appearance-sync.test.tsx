@@ -175,7 +175,7 @@ describe("AppearanceSync", () => {
     };
     beforeEach(() => {
       useInstalledThemesStore.setState({ folders: {} });
-      useThemeFolderStatus.setState({ path: null, problems: [] });
+      useThemeFolderStatus.setState({ path: null, problems: [], awaiting: null });
       (window as unknown as { desktopAPI: unknown }).desktopAPI = desktop;
     });
     afterEach(() => {
@@ -198,6 +198,7 @@ describe("AppearanceSync", () => {
       expect(useThemeFolderStatus.getState()).toEqual({
         path: "/data/themes",
         problems: [{ folder: "huge", errors: ["A theme can be at most 1024 KB and 64 files"] }],
+        awaiting: null,
       });
 
       desktop.readThemeFolder.mockResolvedValue({
@@ -211,6 +212,31 @@ describe("AppearanceSync", () => {
       desktop.readThemeFolder.mockResolvedValue({ path: "/data/themes", entries: [] });
       await act(async () => onChange());
       await vi.waitFor(() => expect(html().hasAttribute("data-theme")).toBe(false));
+    });
+
+    it("switches to the theme an agent was asked for once it passes", async () => {
+      desktop.readThemeFolder.mockResolvedValue({ path: "/data/themes", entries: [] });
+      useAppearanceStore.setState({ theme: "default" });
+      useThemeFolderStatus.setState({ awaiting: "paper" });
+      render(<AppearanceSync />);
+      await vi.waitFor(() => expect(useThemeFolderStatus.getState().path).toBe("/data/themes"));
+      expect(useThemeFolderStatus.getState().awaiting).toBe("paper");
+
+      desktop.readThemeFolder.mockResolvedValue({
+        path: "/data/themes",
+        entries: [{ folder: "paper", error: "theme.css is missing" }],
+      });
+      await act(async () => onChange());
+      expect(useAppearanceStore.getState().theme).toBe("default");
+
+      desktop.readThemeFolder.mockResolvedValue({
+        path: "/data/themes",
+        entries: [{ folder: "paper", files: folder(".theme-light { --page-canvas: #fffdf8; }") }],
+      });
+      await act(async () => onChange());
+      await vi.waitFor(() => expect(html().getAttribute("data-theme")).toBe("paper"));
+      expect(useAppearanceStore.getState().theme).toBe("paper");
+      expect(useThemeFolderStatus.getState().awaiting).toBeNull();
     });
   });
 });

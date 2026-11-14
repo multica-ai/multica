@@ -124,9 +124,13 @@ function useThemeFolderSync() {
         );
         if (stopped) return;
         useInstalledThemesStore.getState().syncFolder(entries);
+        const { awaiting } = useThemeFolderStatus.getState();
+        const arrived = awaiting !== null && entries.some(({ result }) => result.ok && result.theme.id === awaiting);
+        if (arrived) useAppearanceStore.getState().set({ theme: awaiting });
         useThemeFolderStatus.setState({
           path: snapshot.path,
           problems: entries.flatMap(({ folder, result }) => (result.ok ? [] : [{ folder, errors: result.errors }])),
+          ...(arrived ? { awaiting: null } : {}),
         });
       } catch {
         // The folder could not be read; installed themes stay as they are.

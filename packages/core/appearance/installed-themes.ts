@@ -151,10 +151,15 @@ interface ThemeFolderStatus {
   path: string | null;
   /** Entries that fail the checks, with what is wrong. */
   problems: readonly { folder: string; errors: readonly string[] }[];
+  /**
+   * The id of a theme an agent was asked to write into the folder. It is
+   * applied the first time a read finds it passing, then cleared.
+   */
+  awaiting: string | null;
 }
 
 /** What the last read of the themes folder found, for the Appearance page. */
-export const useThemeFolderStatus = create<ThemeFolderStatus>()(() => ({ path: null, problems: [] }));
+export const useThemeFolderStatus = create<ThemeFolderStatus>()(() => ({ path: null, problems: [], awaiting: null }));
 
 /** A built-in or installed theme by id. */
 export function findTheme(id: string): Theme | undefined {

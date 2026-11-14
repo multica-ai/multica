@@ -277,7 +277,20 @@
     },
     "own": {
       "title": "Crea el tuyo",
-      "description": "Importa un tema como .zip o carpeta, o empieza con una copia del actual."
+      "description": "Pide a un agente que cree uno, importa un tema como .zip o carpeta, o empieza con una copia del actual."
+    },
+    "agent": {
+      "button": "Pedir a un agente",
+      "title": "Pide a un agente que cree un tema",
+      "description_desktop": "Describe el aspecto que quieres. El agente recibe el formato de temas y debe pasar las comprobaciones de temas. Si se ejecuta en este equipo, el tema aparece en cuanto lo escribe y se actualiza cuando pides cambios; si no, adjunta un .zip para instalar.",
+      "description_web": "Describe el aspecto que quieres. El agente recibe el formato de temas, debe pasar las comprobaciones de temas y adjunta el tema como un .zip que instalas desde el chat.",
+      "prompt_label": "¿Qué aspecto debería tener?",
+      "prompt_placeholder": "Un tema oscuro y tranquilo con un cielo nocturno que se mueve lentamente tras un cristal esmerilado",
+      "agent_label": "Agente",
+      "no_agents": "No hay ningún agente con el que puedas chatear.",
+      "submit": "Iniciar chat",
+      "sending": "Iniciando…",
+      "chat_title": "Tema: {{id}}"
     },
     "tools": {
       "duplicate": "Duplicar «{{name}}» como tema nuevo",

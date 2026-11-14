@@ -277,7 +277,20 @@
     },
     "own": {
       "title": "Make your own",
-      "description": "Import a theme as a .zip or folder, or start from a copy of the current one."
+      "description": "Ask an agent to build one, import a theme as a .zip or folder, or start from a copy of the current one."
+    },
+    "agent": {
+      "button": "Ask an agent",
+      "title": "Ask an agent to build a theme",
+      "description_desktop": "Describe the look you want. The agent gets the theme format and must pass the theme checks. If it runs on this computer, the theme appears as soon as it is written and updates as you ask for changes; otherwise it attaches a .zip to install.",
+      "description_web": "Describe the look you want. The agent gets the theme format, must pass the theme checks, and attaches the theme as a .zip you install from the chat.",
+      "prompt_label": "What should it look like?",
+      "prompt_placeholder": "A calm dark theme with a slowly drifting night sky behind frosted glass",
+      "agent_label": "Agent",
+      "no_agents": "No agent you can chat with is available.",
+      "submit": "Start chat",
+      "sending": "Starting…",
+      "chat_title": "Theme: {{id}}"
     },
     "tools": {
       "duplicate": "Duplicate “{{name}}” as a new theme",
