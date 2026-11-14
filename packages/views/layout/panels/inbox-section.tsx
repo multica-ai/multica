@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Archive, BookCheck, CheckCheck, ListChecks, MoreHorizontal } from "@multica/ui/icons";
+import { Archive, BookCheck, CheckCheck, History, ListChecks, MoreHorizontal } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import {
@@ -29,6 +29,7 @@ import { AppLink, useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 import { INBOX_TYPE_ICONS } from "../../inbox/components/inbox-filter-options";
 import { getInboxDisplayTitle, inboxRowHref, isAutopilotQuotaNotice } from "../../inbox/components/inbox-display";
+import { ARCHIVED_VIEW_PARAM } from "../../inbox/components/inbox-view";
 import { useTypeLabels } from "../../inbox/components/inbox-detail-label";
 import { useTimeAgo } from "../../inbox/components/inbox-list-item";
 import { PANEL_ROW_CLASS, PanelCount, PanelList, PanelSection, panelRowAnchor, panelRowStateClass } from "../panel-nav";
@@ -151,6 +152,8 @@ function InboxSectionActions({ className }: { className?: string }) {
   const archiveAll = useArchiveAllInbox();
   const archiveAllRead = useArchiveAllReadInbox();
   const archiveCompleted = useArchiveCompletedInbox();
+  const { push } = useNavigation();
+  const p = useWorkspacePaths();
   const label = t(($) => $.panels.work.inbox_actions);
   const onError = (fallback: string) => (err: unknown) =>
     toast.error(err instanceof Error && err.message ? err.message : fallback);
@@ -173,6 +176,11 @@ function InboxSectionActions({ className }: { className?: string }) {
         <MoreHorizontal className="size-3.5" />
       </DropdownMenuTrigger>
       <DropdownMenuContent side="right" align="start" className="w-auto min-w-48">
+        <DropdownMenuItem onClick={() => push(`${p.inbox()}?${new URLSearchParams({ view: ARCHIVED_VIEW_PARAM })}`)}>
+          <History className="size-4" />
+          {t(($) => $.panels.work.inbox_view_archived)}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
         <DropdownMenuItem
           onClick={() =>
             markAllRead.mutate(undefined, { onError: onError(tInbox(($) => $.errors.mark_all_read_failed)) })

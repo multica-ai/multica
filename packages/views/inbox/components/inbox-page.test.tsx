@@ -352,6 +352,20 @@ describe("InboxPage", () => {
     expect(screen.queryByTestId("issue-detail")).toBeNull();
   });
 
+  // The live Inbox lives in the Work panel; the archive has nowhere else to list.
+  it("lists the archive in its own column on desktop", () => {
+    reset();
+    layout.width = DESKTOP;
+    searchParams = new URLSearchParams("view=archived");
+    listData.archived = [item({ id: "archived-1", archived: true })];
+
+    const { container } = render(<InboxPage />);
+
+    expect(container.querySelector("[data-slot='list-column']")).not.toBeNull();
+    expect(screen.getByTestId("list").dataset.view).toBe("archived");
+    expect(screen.getByTestId("row").textContent).toBe("archived-1");
+  });
+
   it("keeps the title unread count static", () => {
     reset();
     const { container } = render(<InboxPage />);

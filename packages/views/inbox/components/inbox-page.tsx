@@ -97,6 +97,8 @@ import { useIsCompact } from "@multica/ui/hooks/use-mobile";
 import { cn } from "@multica/ui/lib/utils";
 import { CollapsedNavTrigger, PAGE_GUTTER, PageHeader } from "../../layout/page-header";
 import { PanelHeader } from "../../layout/panel-nav";
+import { useListColumnCollapsed } from "../../layout/app-shell-context";
+import { ListColumn } from "../../layout/list-column";
 import { InboxDeleteDialog } from "./inbox-delete-dialog";
 import { useTimeAgo } from "./inbox-list-item";
 import { InboxList } from "./inbox-list";
@@ -373,6 +375,10 @@ export function InboxPage() {
   ]);
 
   const isCompact = useIsCompact();
+  const listCollapsed = useListColumnCollapsed();
+  // Desktop shows the live Inbox in the Work panel; only the archive needs
+  // a list of its own on the page.
+  const archiveSplit = !isCompact && isArchivedView;
   const unreadCount = useInboxUnreadCount(wsId);
 
   const markReadMutation = useMarkInboxRead();
@@ -895,7 +901,10 @@ export function InboxPage() {
           // The inbox reads the row it selected itself (see the auto-read
           // effect above), and must keep a row marked unread while it is open.
           readsInbox={false}
-          leadingAction={compactBackAction}
+          // The archive's list header already has a nav trigger. Explicit
+          // false suppresses the detail header's fallback trigger, which is
+          // the way back once the list column is collapsed.
+          leadingAction={compactBackAction ?? (archiveSplit && !listCollapsed ? false : undefined)}
           onDelete={() => {
             // Issue deletion CASCADE-deletes the inbox item server-side, and the
             // issue:deleted WS event prunes it from the inbox cache. Just clear
@@ -1087,8 +1096,71 @@ export function InboxPage() {
     return <div className="flex flex-1 flex-col min-h-0">{listPanel}</div>;
   }
 
-  // -- Desktop layout: detail only --------------------------------------------
-  // The list is the Inbox section of the Work panel beside this page.
+  // -- Desktop layout ----------------------------------------------------------
+  // The live list is the Inbox section of the Work panel beside this page, so
+  // the page shows only the detail. The archive keeps its own list column.
+
+  const emptyDetail = (
+    <>
+      {(!archiveSplit || listCollapsed) && (
+        <PageHeader>
+          <h1 className="text-body font-semibold">
+            {isArchivedView ? t(($) => $.list.archived_title) : t(($) => $.page.title)}
+          </h1>
+        </PageHeader>
+      )}
+      <div className="relative flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden text-muted-foreground">
+        {inboxZeroCount === 0 ? (
+          <MulticaBleedMark
+            key={inboxZeroRises ? "rise" : "rest"}
+            enterDelay={inboxZeroRises ? 0.2 : undefined}
+            className="pointer-events-none absolute -right-[14%] -bottom-[26%] w-[min(560px,58%)] text-muted"
+          />
+        ) : (
+          <Inbox className="mb-3 h-10 w-10 text-faint-foreground" />
+        )}
+        <p className="relative text-body">
+          {visibleItems.length > 0
+            ? t(($) => $.detail.select_prompt)
+            : isArchivedView
+              ? t(($) => $.list.archived_empty)
+              : t(($) => $.detail.empty)}
+        </p>
+      </div>
+    </>
+  );
+
+  if (archiveSplit) {
+    return (
+      <div className="flex min-h-0 flex-1">
+        <ListColumn collapsed={listCollapsed} width="list">
+          {viewLoading ? (
+            <>
+              <div className="flex h-12 shrink-0 items-center pl-5 pr-2.5">
+                <Skeleton className="h-5 w-16" />
+              </div>
+              <div className="flex-1 min-h-0 overflow-y-auto space-y-1 p-2">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <div key={i} className="flex items-center gap-3 px-2 py-2.5">
+                    <Skeleton className="h-7 w-7 shrink-0 rounded-full" />
+                    <div className="flex-1 space-y-2">
+                      <Skeleton className="h-4 w-3/4" />
+                      <Skeleton className="h-3 w-1/2" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            listPanel
+          )}
+        </ListColumn>
+        <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
+          {viewLoading ? null : (detailContent ?? emptyDetail)}
+        </div>
+      </div>
+    );
+  }
 
   if (viewLoading) {
     return (
@@ -1101,31 +1173,7 @@ export function InboxPage() {
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-      {detailContent ?? (
-        <>
-          <PageHeader>
-            <h1 className="text-body font-semibold">{t(($) => $.page.title)}</h1>
-          </PageHeader>
-          <div className="relative flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden text-muted-foreground">
-            {inboxZeroCount === 0 ? (
-              <MulticaBleedMark
-                key={inboxZeroRises ? "rise" : "rest"}
-                enterDelay={inboxZeroRises ? 0.2 : undefined}
-                className="pointer-events-none absolute -right-[14%] -bottom-[26%] w-[min(560px,58%)] text-muted"
-              />
-            ) : (
-              <Inbox className="mb-3 h-10 w-10 text-faint-foreground" />
-            )}
-            <p className="relative text-body">
-              {visibleItems.length > 0
-                ? t(($) => $.detail.select_prompt)
-                : isArchivedView
-                  ? t(($) => $.list.archived_empty)
-                  : t(($) => $.detail.empty)}
-            </p>
-          </div>
-        </>
-      )}
+      {detailContent ?? emptyDetail}
     </div>
   );
 }

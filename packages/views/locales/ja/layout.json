@@ -160,6 +160,7 @@
       "view_delete": "ビューを削除",
       "new_issue_here": "このプロジェクトに新規タスク",
       "inbox_actions": "インボックスの操作",
+      "inbox_view_archived": "アーカイブ済みを表示",
       "inbox_empty": "通知はありません",
       "inbox_settings": "インボックスの表示",
       "inbox_show_count": "未読数",

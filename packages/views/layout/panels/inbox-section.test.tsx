@@ -83,13 +83,14 @@ function renderSection(items: InboxItem[], activeIssueId: string | null = null, 
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   client.setQueryData(["inbox", "ws-1", "list"], items);
   const nav = adapter(url);
-  return renderWithI18n(
+  const result = renderWithI18n(
     <QueryClientProvider client={client}>
       <NavigationProvider value={nav}>
         <Harness activeIssueId={activeIssueId} pathname={nav.pathname} />
       </NavigationProvider>
     </QueryClientProvider>,
   );
+  return { ...result, nav };
 }
 
 const rows = () => Array.from(document.querySelectorAll<HTMLElement>("[data-inbox-row]"));
@@ -222,5 +223,13 @@ describe("InboxSection", () => {
     expect(state.archiveCompleted).toHaveBeenCalledTimes(1);
     fireEvent.click(within(await open()).getByRole("menuitem", { name: "Archive all" }));
     expect(state.archiveAll).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens the archive from the section header", async () => {
+    const { nav } = renderSection([item({ id: "n1", issue_id: "issue-a" })]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Inbox actions" }));
+    fireEvent.click(within(await screen.findByRole("menu")).getByRole("menuitem", { name: "View archived" }));
+    expect(nav.push).toHaveBeenCalledWith("/acme/inbox?view=archived");
   });
 });
