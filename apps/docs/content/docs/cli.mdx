@@ -145,6 +145,19 @@ If an open issue with the same title (case-insensitive, extra spaces ignored) al
 
 For sequential PR delivery, use `issue create --title "..." --pr-auto-complete off` or `issue update <id> --pr-auto-complete off` to keep that issue's status when PRs merge. Use `--pr-auto-complete on` to restore the workspace rule; this takes effect at the next PR event. `issue pull-requests <id>` shows the issue override, workspace setting, target status, and decision state, even with no linked PRs. Supported servers save the creation override atomically; older servers receive a follow-up PUT. If that fails, the CLI reports the created issue ID and an update command to retry, so do not repeat the create.
 
+### Deleting issues
+
+Delete one issue or pass several issue keys or full UUIDs to delete them in one batch:
+
+```bash
+multica issue delete MUL-123
+multica issue delete MUL-123 MUL-124 --yes --output json
+```
+
+Deletion is permanent: it removes comments and attachments, cancels in-flight runs, fails linked autopilot runs, clears duplicate marks pointing to the deleted issues, and detaches child issues without deleting them. Every ID is resolved before confirmation; an unknown or inaccessible issue aborts the command before deletion.
+
+The command asks for confirmation. `--yes` skips the prompt; without it, a non-interactive run that cannot answer fails without deleting anything.
+
 ### Timeline
 
 `issue get` shows an issue as it is now. `issue timeline` lists, in order, the changes to status, priority, assignee, title, and dates and the run outcomes, interleaved with comments, which answers questions like "when did it move to in_review" or "how long has it been stuck in this status":
@@ -280,7 +293,7 @@ multica runtime profile create --display-name "Internal Claude wrapper" \
   --command-name ccms --runtime-type claude
 ```
 
-`daemon autostart` registers the current profile to start at login; see [Start at login](/daemon-runtimes#autostart) for platform details. `runtime usage` covers 90 days by default, and `--days` goes up to 365. `runtime update` asks the daemon on that computer to update its CLI to the given version; `--wait` keeps polling until the update finishes. `runtime profile create` takes the compatible tool through `--runtime-type` (the older `--protocol-family` still works); fixed arguments can currently be set only in the web app.
+`daemon autostart` registers the current profile to start at login; see [Start at login](/daemon-runtimes#autostart) for platform details. `runtime usage` covers 90 days by default, and `--days` goes up to 365. `runtime update` asks the daemon on that computer to update its CLI to the given version; `--wait` waits for completion and exits non-zero if the update fails or times out, or if the wait itself times out. `runtime profile create` takes the compatible tool through `--runtime-type` (the older `--protocol-family` still works); fixed arguments can currently be set only in the web app.
 
 Deleting a runtime that still has active agents bound to it is refused by default. `multica runtime delete <id> --cascade` unbinds those agents, preserves their configuration and history, and cancels their active runs.
 
@@ -405,6 +418,7 @@ Migration from CSV parsing: replace `--attachment a,b` with `--attachment a --at
 | | `get <id>` | Show a single issue | `--resolve-properties` (JSON only; rows with property, option and member names beside the stored ids) |
 | | `create` | Create an issue | `--title` (required), `--description` / `--description-stdin` / `--description-file`, `--pr-auto-complete on/off`, `--status`, `--priority`, `--assignee`, `--parent`, `--stage`, `--project`, `--start-date`, `--due-date`, `--attachment` (repeatable), `--property` (repeatable), `--allow-duplicate` (create even when an open issue with the same title exists) |
 | | `update <id>` | Update issue fields | Same fields as `create`, plus `--position`, `--no-start`, `--duplicate-of` |
+| | `delete <id>...` | Permanently delete one or more issues | `--yes` skips confirmation; accepts issue keys or full UUIDs |
 | | `assign <id>` | Assign or unassign | `--to` (fuzzy name match against members, agents, and squads), `--to-id`, `--unassign`, `--no-start` |
 | | `status <id> <status>` | Change status | `--no-start`, `--duplicate-of` |
 | | `reorder <id>` | Move within a column | |
