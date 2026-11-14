@@ -26,7 +26,6 @@ function AccessFields({ visibility, onVisibilityChange, hideFromAdmins = false, 
   visibility: ProjectVisibility;
   onVisibilityChange: (value: ProjectVisibility) => void;
   hideFromAdmins?: boolean;
-  // Omitted where the setting cannot be saved yet (the project is not private).
   onHideFromAdminsChange?: (value: boolean) => void;
   members: MemberWithUser[];
   selected: string[];
@@ -151,6 +150,9 @@ function ProjectAccessEditor({ project, onClose, changeAccess }: { project: Proj
   const projectMembers = useQuery(projectMembersOptions(wsId, project.id));
   const [visibility, setVisibility] = useState<ProjectVisibility>(project.visibility ?? "workspace");
   const [draftIds, setDraftIds] = useState<string[] | null>(null);
+  // A switch to private starts with the switch on, the server's default.
+  const [draftHideFromAdmins, setDraftHideFromAdmins] = useState(true);
+  const savedPrivate = project.visibility === "private";
   const [error, setError] = useState("");
   const [confirmPublic, setConfirmPublic] = useState(false);
   const members = workspaceMembers.data ?? [];
@@ -169,7 +171,8 @@ function ProjectAccessEditor({ project, onClose, changeAccess }: { project: Proj
     catch (err) { setError(err instanceof Error ? err.message : t(($) => $.access.failed)); return false; }
   };
   const saveScope = async () => {
-    if (await run({ type: "visibility", visibility, memberIds: selected })) { setConfirmPublic(false); onClose(); }
+    const hideFromAdmins = visibility === "private" ? draftHideFromAdmins : undefined;
+    if (await run({ type: "visibility", visibility, memberIds: selected, hideFromAdmins })) { setConfirmPublic(false); onClose(); }
   };
   return (
     <>
@@ -178,8 +181,8 @@ function ProjectAccessEditor({ project, onClose, changeAccess }: { project: Proj
           <div role="alert" className="space-y-2 text-body"><p>{t(($) => $.access.load_failed)}</p><Button variant="outline" size="sm" onClick={() => { void workspaceMembers.refetch(); void projectMembers.refetch(); }}>{t(($) => $.access.retry)}</Button></div>
         ) : (
           <AccessFields visibility={visibility} onVisibilityChange={setVisibility} members={members} selected={selected} userId={userId} leadId={leadId}
-            hideFromAdmins={project.visibility === "private" && visibility === "private" && !!project.hide_from_admins}
-            onHideFromAdminsChange={project.visibility === "private" ? (value) => { void run({ type: "hide_from_admins", hideFromAdmins: value }); } : undefined}
+            hideFromAdmins={visibility === "private" && (savedPrivate ? !!project.hide_from_admins : draftHideFromAdmins)}
+            onHideFromAdminsChange={savedPrivate ? (value) => { void run({ type: "hide_from_admins", hideFromAdmins: value }); } : setDraftHideFromAdmins}
             disabled={pending} canChangeScope={canManage} canUsePrivate
             canAdd={canManage}
             canRemove={(id) => canManage && id !== leadId}
@@ -209,12 +212,14 @@ function ProjectAccessEditor({ project, onClose, changeAccess }: { project: Proj
   );
 }
 
-export function ProjectAccessDraftPicker({ visibility, memberIds, leadId, members, onChange }: {
+export function ProjectAccessDraftPicker({ visibility, memberIds, leadId, members, onChange, hideFromAdmins, onHideFromAdminsChange }: {
   visibility: ProjectVisibility;
   memberIds: string[];
   leadId?: string;
   members: MemberWithUser[];
   onChange: (visibility: ProjectVisibility, ids: string[]) => void;
+  hideFromAdmins: boolean;
+  onHideFromAdminsChange: (value: boolean) => void;
 }) {
   const { t } = useT("projects");
   const userId = useAuthStore((s) => s.user?.id);
@@ -231,6 +236,7 @@ export function ProjectAccessDraftPicker({ visibility, memberIds, leadId, member
       } />
       <PopoverContent side="top" align="end" className="max-h-[70dvh] w-96 max-w-[calc(100vw-2rem)] overflow-y-auto">
         <AccessFields visibility={visibility} onVisibilityChange={(value) => onChange(value, selected)} members={members} selected={selected} leadId={leadId} userId={userId}
+          hideFromAdmins={visibility === "private" && hideFromAdmins} onHideFromAdminsChange={onHideFromAdminsChange}
           disabled={false} canChangeScope canUsePrivate canAdd
           canRemove={(id) => !fixed.includes(id)}
           onAdd={(id) => onChange(visibility, [...selected, id])}

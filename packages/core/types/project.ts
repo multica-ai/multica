@@ -58,6 +58,8 @@ export interface CreateProjectRequest {
   title: string;
   visibility?: ProjectVisibility;
   member_ids?: string[];
+  /** Private projects only; omitted turns it on. */
+  hide_from_admins?: boolean;
   description?: string;
   icon?: string;
   status?: ProjectStatus;
@@ -77,7 +79,10 @@ export interface UpdateProjectRequest {
   title?: string;
   visibility?: ProjectVisibility;
   member_ids?: string[];
-  /** Turning it on needs the project to be private after the update. */
+  /**
+   * Turning it on needs the project to be private after the update. A switch
+   * to private that omits it turns it on.
+   */
   hide_from_admins?: boolean;
   description?: string | null;
   icon?: string | null;

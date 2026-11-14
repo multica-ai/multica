@@ -14,6 +14,8 @@ interface ProjectDraft {
   dueDate?: string;
   visibility?: ProjectVisibility;
   memberIds?: string[];
+  // Undefined means the private default, on.
+  hideFromAdmins?: boolean;
 }
 
 const EMPTY_DRAFT: ProjectDraft = {

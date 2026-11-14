@@ -53,11 +53,13 @@ it("shows both access notices only when project-members visibility is selected",
   renderControl({ ...project, visibility: "workspace" });
   await user.click(screen.getByRole("button", { name: "Access" }));
   expect(await screen.findByRole("radio", { name: "Entire workspace" })).toBeChecked();
-  expect(screen.queryByText(/owners and admins always have access/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/Workspace owners always have access/)).not.toBeInTheDocument();
   expect(screen.queryByText(/Agents follow their owner/)).not.toBeInTheDocument();
   await user.click(screen.getByRole("radio", { name: "Project members only" }));
-  expect(screen.getByText(/owners and admins always have access/)).toBeVisible();
+  expect(screen.getByText(/Workspace owners always have access/)).toBeVisible();
   expect(screen.getByText(/Agents follow their owner/)).toBeVisible();
+  await user.click(screen.getByRole("switch", { name: /Hide from workspace admins/ }));
+  expect(screen.getByText(/owners and admins always have access/)).toBeVisible();
   await user.click(screen.getByRole("radio", { name: "Entire workspace" }));
   expect(screen.queryByText(/owners and admins always have access/)).not.toBeInTheDocument();
   expect(screen.queryByText(/Agents follow their owner/)).not.toBeInTheDocument();
@@ -161,12 +163,17 @@ it("hides a private project from admins in one switch and lets admin members be 
   }
 });
 
-it("offers hiding from admins only once the project is private", async () => {
+it.each([[true, false], [false, true]])("switches a project to private with hiding from admins on by default (turned off: %s)", async (turnOff, expected) => {
   const user = userEvent.setup();
   renderControl({ ...project, visibility: "workspace" });
   await user.click(screen.getByRole("button", { name: "Access" }));
   await user.click(await screen.findByRole("radio", { name: "Project members only" }));
-  expect(screen.queryByRole("switch")).not.toBeInTheDocument();
+  const toggle = screen.getByRole("switch", { name: /Hide from workspace admins/ });
+  expect(toggle).toBeChecked();
+  if (turnOff) await user.click(toggle);
+  expect(api.updateProject).not.toHaveBeenCalled();
+  await user.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(api.updateProject).toHaveBeenCalledWith("p1", { visibility: "private", member_ids: ["owner", "lead", "member"], hide_from_admins: expected }));
 });
 
 it("keeps the admin switch read-only for a regular member", async () => {
@@ -180,10 +187,17 @@ it("keeps the admin switch read-only for a regular member", async () => {
 it("keeps new-project access in the draft until the project is created", async () => {
   const changed = vi.fn();
   const user = userEvent.setup();
-  renderWithI18n(<ProjectAccessDraftPicker visibility="workspace" memberIds={[]} leadId="lead" members={members} onChange={changed} />);
+  const hideChanged = vi.fn();
+  const view = renderWithI18n(<ProjectAccessDraftPicker visibility="workspace" memberIds={[]} leadId="lead" members={members} onChange={changed} hideFromAdmins onHideFromAdminsChange={hideChanged} />);
   await user.click(screen.getByRole("button", { name: "Access" }));
+  expect(screen.queryByRole("switch")).not.toBeInTheDocument();
   await user.click(screen.getByRole("radio", { name: "Project members only" }));
   expect(changed).toHaveBeenCalledWith("private", ["owner", "lead"]);
+  view.rerender(<ProjectAccessDraftPicker visibility="private" memberIds={["owner", "lead"]} leadId="lead" members={members} onChange={changed} hideFromAdmins onHideFromAdminsChange={hideChanged} />);
+  const toggle = screen.getByRole("switch", { name: /Hide from workspace admins/ });
+  expect(toggle).toBeChecked();
+  await user.click(toggle);
+  expect(hideChanged).toHaveBeenCalledWith(false);
   expect(api.updateProject).not.toHaveBeenCalled();
   expect(api.addProjectMembers).not.toHaveBeenCalled();
 });

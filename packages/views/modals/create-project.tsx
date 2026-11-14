@@ -173,6 +173,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const [dueDate, setDueDate] = useState<string>(draft.dueDate ?? "");
   const [visibility, setVisibility] = useState<ProjectVisibility>(draft.visibility ?? "workspace");
   const [memberIds, setMemberIds] = useState<string[]>(draft.memberIds ?? []);
+  const [hideFromAdmins, setHideFromAdmins] = useState(draft.hideFromAdmins ?? true);
   // Optional properties stay in the ⋯ menu until selected or opened.
   const [startDatePickerOpen, setStartDatePickerOpen] = useState(false);
   const [dueDatePickerOpen, setDueDatePickerOpen] = useState(false);
@@ -407,7 +408,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
         ...(workflowId ? { workflow_id: workflowId } : {}),
         // Server attaches these in the same transaction as the project.
         resources,
-        ...(visibility === "private" ? { visibility, member_ids: memberIds } : {}),
+        ...(visibility === "private" ? { visibility, member_ids: memberIds, hide_from_admins: hideFromAdmins } : {}),
       });
       clearDraft();
       onClose();
@@ -629,7 +630,9 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
           <WorkflowPill value={workflowId} onChange={setWorkflowId} />
           {<ProjectAccessDraftPicker visibility={visibility} memberIds={memberIds} members={members}
             leadId={leadType === "member" ? leadId : undefined}
-            onChange={(value, ids) => { setVisibility(value); setMemberIds(ids); setDraft({ visibility: value, memberIds: ids }); }} />}
+            onChange={(value, ids) => { setVisibility(value); setMemberIds(ids); setDraft({ visibility: value, memberIds: ids }); }}
+            hideFromAdmins={hideFromAdmins}
+            onHideFromAdminsChange={(value) => { setHideFromAdmins(value); setDraft({ hideFromAdmins: value }); }} />}
 
           <Popover
             open={leadOpen}

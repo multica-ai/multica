@@ -139,6 +139,9 @@ type CreateProjectRequest struct {
 	// always added.
 	Visibility *string  `json:"visibility,omitempty"`
 	MemberIDs  []string `json:"member_ids,omitempty"`
+	// HideFromAdmins on a private project; omitted turns it on. Rejected as
+	// true on a workspace-visible project. (MUL-9284)
+	HideFromAdmins *bool `json:"hide_from_admins,omitempty"`
 	// WorkflowID picks the project's workflow at creation; omitted or null
 	// uses the workspace Default workflow. A new project has no issues, so no
 	// status mapping is involved. (MUL-7420)
@@ -466,6 +469,14 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		private = true
 		privateMemberIDs = ids
 	}
+	hideFromAdmins := private && defaultHideFromAdmins
+	if req.HideFromAdmins != nil {
+		if *req.HideFromAdmins && !private {
+			writeError(w, http.StatusBadRequest, "hide_from_admins requires a private project")
+			return
+		}
+		hideFromAdmins = *req.HideFromAdmins
+	}
 
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	creatorID, ok := parseUUIDOrBadRequest(w, actorID, "creator_id")
@@ -537,6 +548,17 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to set project visibility")
 			return
+		}
+		if hideFromAdmins {
+			project, err = qtx.UpdateProjectHideFromAdmins(r.Context(), db.UpdateProjectHideFromAdminsParams{
+				ID:             project.ID,
+				WorkspaceID:    project.WorkspaceID,
+				HideFromAdmins: true,
+			})
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to set project visibility")
+				return
+			}
 		}
 	}
 

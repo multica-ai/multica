@@ -46,6 +46,11 @@ type projectAccessUpdate struct {
 	hideFromAdmins *bool // nil leaves it unchanged
 }
 
+// defaultHideFromAdmins is hide_from_admins for a project that becomes private
+// without the request naming it, on create and on a visibility switch.
+// (MUL-9284)
+const defaultHideFromAdmins = true
+
 func (u projectAccessUpdate) empty() bool {
 	return u.visibility == "" && len(u.addIDs) == 0 && u.hideFromAdmins == nil
 }
@@ -97,11 +102,16 @@ func parseProjectMemberIDs(w http.ResponseWriter, raw []string, field string) ([
 //     Agents never grant access, here or anywhere else.
 //   - a hide_from_admins switch (requestedHide = nil leaves it alone), which
 //     takes the same humans as a visibility switch. Turning it on needs the
-//     project to be private after the update.
+//     project to be private after the update. A switch to private that does
+//     not name it turns it on: hiding from admins is the private default.
 //
 // newLeadType / newLeadID are the lead the project will have after the update.
 func (h *Handler) prepareProjectAccessUpdate(w http.ResponseWriter, r *http.Request, project db.Project, requested *string, rawMemberIDs []string, requestedHide *bool, newLeadType pgtype.Text, newLeadID pgtype.UUID, leadChanged bool) (projectAccessUpdate, bool) {
 	update, ok := h.prepareProjectScopeUpdate(w, r, project, requested, rawMemberIDs, newLeadType, newLeadID, leadChanged)
+	if ok && requestedHide == nil && update.visibility == projectaccess.VisibilityPrivate {
+		hide := defaultHideFromAdmins
+		requestedHide = &hide
+	}
 	if !ok || requestedHide == nil || *requestedHide == project.HideFromAdmins {
 		return update, ok
 	}

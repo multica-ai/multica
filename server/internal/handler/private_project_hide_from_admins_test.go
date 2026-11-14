@@ -122,6 +122,49 @@ func TestHideFromAdminsNeedsPrivateProject(t *testing.T) {
 	}
 }
 
+func TestBecomingPrivateHidesFromAdminsByDefault(t *testing.T) {
+	f := newPrivateProjectFixture(t)
+	create := func(body map[string]any) ProjectResponse {
+		body["title"] = f.marker + " new"
+		var p ProjectResponse
+		testutil.Call(t, testHandler.CreateProject, asUser(newRequest(http.MethodPost, "/api/projects", body), testUserID)).Want(http.StatusCreated).JSON(&p)
+		t.Cleanup(func() {
+			testPool.Exec(context.Background(), `DELETE FROM project_member WHERE project_id = $1`, p.ID)
+			testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, p.ID)
+		})
+		return p
+	}
+	if p := create(map[string]any{"visibility": "private"}); !p.HideFromAdmins {
+		t.Error("a project created private must hide from admins unless asked not to")
+	}
+	if p := create(map[string]any{"visibility": "private", "hide_from_admins": false}); p.HideFromAdmins {
+		t.Error("hide_from_admins=false on create was ignored")
+	}
+	if p := create(map[string]any{}); p.HideFromAdmins {
+		t.Error("a workspace-visible project must not hide from admins")
+	}
+	testutil.Call(t, testHandler.CreateProject, asUser(newRequest(http.MethodPost, "/api/projects", map[string]any{"title": f.marker + " bad", "hide_from_admins": true}), testUserID)).Want(http.StatusBadRequest)
+
+	update := func(id string, body map[string]any) ProjectResponse {
+		var p ProjectResponse
+		req := withURLParam(asUser(newRequest(http.MethodPut, "/api/projects/"+id, body), testUserID), "id", id)
+		testutil.Call(t, testHandler.UpdateProject, req).Want(http.StatusOK).JSON(&p)
+		return p
+	}
+	open := create(map[string]any{})
+	if p := update(open.ID, map[string]any{"visibility": "private"}); !p.HideFromAdmins {
+		t.Error("switching to private must hide from admins unless asked not to")
+	}
+	update(open.ID, map[string]any{"visibility": "workspace"})
+	if p := update(open.ID, map[string]any{"visibility": "private", "hide_from_admins": false}); p.HideFromAdmins {
+		t.Error("hide_from_admins=false with a switch to private was ignored")
+	}
+	// An edit that leaves visibility alone never changes the flag.
+	if p := update(open.ID, map[string]any{"title": f.marker + " renamed"}); p.HideFromAdmins {
+		t.Error("an unrelated edit turned hide_from_admins on")
+	}
+}
+
 func TestAdminHidingProjectFromAdminsKeepsAccess(t *testing.T) {
 	f := newPrivateProjectFixture(t)
 	admin := createWorkspaceAdmin(t, f.marker+"-admin@multica.test")

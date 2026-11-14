@@ -21,7 +21,7 @@ export function canChangeProjectLead(project: Pick<Project, "lead_type" | "lead_
 }
 
 type AccessChange =
-  | { type: "visibility"; visibility: ProjectVisibility; memberIds: string[] }
+  | { type: "visibility"; visibility: ProjectVisibility; memberIds: string[]; hideFromAdmins?: boolean }
   | { type: "hide_from_admins"; hideFromAdmins: boolean }
   | { type: "add"; userId: string }
   | { type: "remove"; userId: string };
@@ -34,7 +34,11 @@ export function useProjectAccessMutation(wsId: string, projectId: string) {
     mutationFn: async (change: AccessChange) => {
       if (!onlineManager.isOnline()) throw new Error("You're offline. Reconnect and try again.");
       if (change.type === "visibility") {
-        await api.updateProject(projectId, { visibility: change.visibility, member_ids: change.memberIds });
+        await api.updateProject(projectId, {
+          visibility: change.visibility,
+          member_ids: change.memberIds,
+          ...(change.hideFromAdmins === undefined ? {} : { hide_from_admins: change.hideFromAdmins }),
+        });
       } else if (change.type === "hide_from_admins") {
         await api.updateProject(projectId, { hide_from_admins: change.hideFromAdmins });
       } else if (change.type === "add") {
