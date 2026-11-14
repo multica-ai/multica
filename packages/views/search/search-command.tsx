@@ -9,6 +9,7 @@ import {
   useSearchStore,
 } from "@multica/core/command-bar";
 import { createShortcutChord } from "@multica/core/shortcuts";
+import { useWorkspaceSlug } from "@multica/core/paths";
 import {
   Dialog,
   DialogContent,
@@ -36,6 +37,7 @@ const ESCAPE = createShortcutChord("Escape");
  */
 export function SearchCommand() {
   const { t } = useT("search");
+  const workspaceSlug = useWorkspaceSlug();
   const open = useSearchStore((s) => s.open);
   const setOpen = useSearchStore((s) => s.setOpen);
   const [hostDialog, setHostDialog] = useState<PaletteHostDialog | null>(null);
@@ -60,7 +62,9 @@ export function SearchCommand() {
             <DialogTitle>{t(($) => $.title)}</DialogTitle>
             <DialogDescription>{t(($) => $.description)}</DialogDescription>
           </DialogHeader>
-          {open && <PaletteBody close={close} openHostDialog={openHostDialog} />}
+          {/* The desktop shell survives workspace navigation. Reset its query,
+              selection and pending searches together with their workspace. */}
+          {open && <PaletteBody key={workspaceSlug} close={close} openHostDialog={openHostDialog} />}
         </DialogContent>
       </Dialog>
       <PaletteHostDialogs dialog={hostDialog} onClose={() => setHostDialog(null)} />
