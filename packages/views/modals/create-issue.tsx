@@ -1512,7 +1512,6 @@ export function ManualCreatePanel({
               <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-2.5 border-t px-4 py-3 shrink-0 sm:flex sm:flex-wrap">
                 <div className="flex min-h-7 items-center gap-2 sm:mr-auto">
                   <FileUploadButton
-                    size="sm"
                     multiple
                     onSelect={(file) => descEditorRef.current?.uploadFile(file)}
                   />

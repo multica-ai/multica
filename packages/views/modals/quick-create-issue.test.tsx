@@ -1353,7 +1353,7 @@ describe("AgentCreatePanel", () => {
       expect(create.parentElement).toBe(footer);
       expect(keepOpen.parentElement?.parentElement).toBe(footer);
       expect(attach.parentElement?.parentElement).toBe(footer);
-      expect(attach).toHaveAttribute("data-size", "sm");
+      expect(attach).not.toHaveAttribute("data-size");
     });
   });
 });

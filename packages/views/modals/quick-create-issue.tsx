@@ -953,7 +953,6 @@ export function AgentCreatePanel({
                   own queue entry, so queueing a second one is safe and waiting
                   for the first to land just to attach the next is busywork. */}
               <FileUploadButton
-                size="sm"
                 multiple
                 onSelect={(file) => editorRef.current?.uploadFile(file)}
               />
