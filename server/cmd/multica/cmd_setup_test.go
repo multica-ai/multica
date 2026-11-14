@@ -76,7 +76,7 @@ func TestSelfHostSetupHealthResponses(t *testing.T) {
 			}))
 			defer server.Close()
 
-			result, err := persistSelfHostConfigIfReachable(server.URL, "https://new.example", profile, probeServer)
+			result, err := persistSelfHostConfigIfReachable(server.URL, "https://new.example", profile, existing, probeServer)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -203,7 +203,7 @@ func TestPersistSelfHostConfigIfReachable(t *testing.T) {
 		}
 
 		proceed, err := persistSelfHostConfigIfReachable(
-			"https://api.new.example", "https://new.example", "",
+			"https://api.new.example", "https://new.example", "", existing,
 			func(string) serverProbeResult { return serverProbeResult{} },
 		)
 		if err != nil {
@@ -229,7 +229,7 @@ func TestPersistSelfHostConfigIfReachable(t *testing.T) {
 		redirectTestHome(t, t.TempDir())
 
 		proceed, err := persistSelfHostConfigIfReachable(
-			"https://api.new.example", "https://new.example", "",
+			"https://api.new.example", "https://new.example", "", cli.CLIConfig{},
 			func(string) serverProbeResult { return serverProbeResult{statusCode: http.StatusOK, healthy: true} },
 		)
 		if err != nil {
@@ -606,5 +606,162 @@ func TestSetupCommandsFailClosedInTaskContext(t *testing.T) {
 	}
 	if string(after) != string(ownerBytes) {
 		t.Fatalf("owner config content changed: got %q", after)
+	}
+}
+
+func TestSetupKeepsProfileOnlyForTheSameBackend(t *testing.T) {
+	for _, tc := range []struct {
+		target string
+		keep   bool
+	}{
+		{"https://example.invalid/team/", true},
+		{"https://example.invalid/another", false},
+		{"https://example.invalid:8443/team", false},
+		{"http://example.invalid/team", false},
+		{"https://other.invalid/team", false},
+		{"https://EXAMPLE.invalid/team", false},
+		{"https://user@example.invalid/team", false},
+		{"https://example.invalid:443/team", false},
+	} {
+		t.Run(tc.target, func(t *testing.T) {
+			redirectTestHome(t, t.TempDir())
+			old := cli.CLIConfig{ServerURL: "https://example.invalid/team", Token: "test-only", WorkspaceID: "w", DeviceName: "workstation", PollInterval: "1m"}
+			if err := cli.SaveCLIConfigForProfile(old, "dev"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := persistSelfHostConfigIfReachable(tc.target, "https://app.invalid", "dev", old, func(string) serverProbeResult { return serverProbeResult{statusCode: http.StatusOK, healthy: true} }); err != nil {
+				t.Fatal(err)
+			}
+			got, err := cli.LoadCLIConfigForProfile("dev")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.keep && (got.DeviceName != old.DeviceName || got.PollInterval != old.PollInterval) {
+				t.Fatal("same backend lost profile settings")
+			}
+			if got.Token != "" || got.WorkspaceID != "" {
+				t.Fatal("setup retained login credentials")
+			}
+			if !tc.keep && got.DeviceName != "" {
+				t.Fatal("different backend inherited profile")
+			}
+		})
+	}
+}
+
+func TestSetupRejectsProfileChangedDuringConfirmationOrProbe(t *testing.T) {
+	redirectTestHome(t, t.TempDir())
+	const profile = "setup-change"
+	old := cli.CLIConfig{ServerURL: "https://a.invalid", AppURL: "https://a.invalid", Token: "old-fixture"}
+	newLogin := cli.CLIConfig{ServerURL: "https://b.invalid", AppURL: "https://b.invalid", Token: "new-fixture", DeviceName: "new-device"}
+	for _, stage := range []string{"while confirming", "during health check"} {
+		t.Run(stage, func(t *testing.T) {
+			if err := cli.SaveCLIConfigForProfile(old, profile); err != nil {
+				t.Fatal(err)
+			}
+			if stage == "while confirming" {
+				if err := cli.SaveCLIConfigForProfile(newLogin, profile); err != nil {
+					t.Fatal(err)
+				}
+			}
+			ok, err := persistSelfHostConfigIfReachable(old.ServerURL, old.AppURL, profile, old, func(string) serverProbeResult {
+				if stage == "during health check" {
+					if err := cli.SaveCLIConfigForProfile(newLogin, profile); err != nil {
+						t.Fatal(err)
+					}
+				}
+				return serverProbeResult{statusCode: http.StatusOK, healthy: true}
+			})
+			if err == nil || !strings.Contains(err.Error(), "profile changed") {
+				t.Fatalf("setup accepted stale confirmation: %v, %v", ok, err)
+			}
+			got, err := cli.LoadCLIConfigForProfile(profile)
+			if err != nil || got.ServerURL != newLogin.ServerURL || got.Token != newLogin.Token || got.DeviceName != newLogin.DeviceName {
+				t.Fatal("setup replaced a concurrently changed login")
+			}
+		})
+	}
+}
+
+func TestSetupDoesNotRewriteAnUnchangedTarget(t *testing.T) {
+	redirectTestHome(t, t.TempDir())
+	cfg := cli.CLIConfig{ServerURL: "https://example.test", AppURL: "https://app.example.test"}
+	if err := cli.SaveCLIConfigForProfile(cfg, "dev"); err != nil {
+		t.Fatal(err)
+	}
+	path, err := cli.CLIConfigPathForProfile("dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok, err := persistSelfHostConfigIfReachable(cfg.ServerURL+"/", cfg.AppURL+"/", "dev", cfg, func(string) serverProbeResult { return serverProbeResult{statusCode: http.StatusOK, healthy: true} })
+	if err != nil || !ok.healthy {
+		t.Fatalf("setup = %v, %v", ok, err)
+	}
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(before, after) {
+		t.Fatal("unchanged profile was rewritten")
+	}
+}
+
+func TestSetupUnreadableProfileIsNotOverwritten(t *testing.T) {
+	for _, setup := range []struct {
+		name string
+		run  func(*cobra.Command, []string) error
+	}{
+		{"cloud", runSetupCloud},
+		{"self-host", runSetupSelfHost},
+	} {
+		for _, invalid := range []string{"invalid JSON", "permission denied"} {
+			t.Run(setup.name+"/"+invalid, func(t *testing.T) {
+				redirectTestHome(t, t.TempDir())
+				const profile = "unreadable-setup"
+				path, err := cli.CLIConfigPathForProfile(profile)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				before := []byte(`{"device_name":"preserve me",`)
+				if invalid == "permission denied" {
+					before = []byte(`{"device_name":"preserve me"}`)
+				}
+				if err := os.WriteFile(path, before, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if invalid == "permission denied" {
+					if err := os.Chmod(path, 0); err != nil {
+						t.Skipf("cannot make profile unreadable: %v", err)
+					}
+					defer os.Chmod(path, 0o600)
+					if _, err := os.ReadFile(path); err == nil {
+						t.Skip("platform allows reading a mode-000 profile")
+					}
+				}
+				cmd := testCmd()
+				cmd.Flags().String("profile", profile, "")
+				err = setup.run(cmd, nil)
+				if err == nil || !strings.Contains(err.Error(), "read existing profile") {
+					t.Fatalf("setup error = %v, want read existing profile", err)
+				}
+				if err := os.Chmod(path, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				after, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !bytes.Equal(before, after) {
+					t.Fatal("setup replaced an unreadable profile")
+				}
+			})
+		}
 	}
 }
