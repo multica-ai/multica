@@ -32,6 +32,11 @@ type fakeDirectUploadServer struct {
 	// presignStatus/presignResponse override the presign reply.
 	presignStatus   int
 	presignResponse string
+	// refuseZeroSize models the real server's capability refusal for a
+	// zero-length declaration, which is what routes an empty file to the
+	// multipart path. It is a separate switch from presignStatus so a test can
+	// keep the non-empty path healthy while refusing only size 0.
+	refuseZeroSize bool
 
 	// putRequests records what the client sent to the storage host.
 	putRequests []recordedPut
@@ -104,7 +109,22 @@ func (f *fakeDirectUploadServer) handlePresign(w http.ResponseWriter, r *http.Re
 	f.presignBody = body
 	status := f.presignStatus
 	response := f.presignResponse
+	refuseZero := f.refuseZeroSize
 	f.mu.Unlock()
+
+	// The real endpoint answers a zero-length declaration with the capability
+	// code, after its own permission and input checks. Modelling it here is what
+	// makes the fallback assertion about behaviour rather than about the client
+	// special-casing its own size.
+	if refuseZero && body["size_bytes"] == float64(0) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotImplemented)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"error": "zero-byte uploads are not available through presigned upload",
+			"code":  directUploadCapabilityUnsupportedCode,
+		})
+		return
+	}
 
 	if response != "" {
 		w.WriteHeader(status)
@@ -157,11 +177,18 @@ func (f *fakeDirectUploadServer) handleFallback(w http.ResponseWriter, r *http.R
 	f.fallbackCalls++
 	f.fallbackBody = body
 	f.mu.Unlock()
+	// The shape the multipart endpoint returns for an empty file: the same
+	// attachment contract as the direct path, including the sniffed type and the
+	// zero size.
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"id":           "legacy-1",
 		"url":          "https://cdn.example.com/legacy",
+		"download_url": "/api/attachments/legacy-1/download",
 		"markdown_url": "/api/attachments/legacy-1/download",
+		"filename":     "empty.bin",
+		"content_type": "text/plain; charset=utf-8",
+		"size_bytes":   0,
 	})
 }
 
@@ -610,32 +637,90 @@ func TestSanitizeUploadTransportError_StripsSignedURL(t *testing.T) {
 	}
 }
 
-// TestUploadAttachmentFile_EmptyFileIsNotChunked guards the framing of a
-// zero-byte PUT. Handing net/http a reader with ContentLength 0 makes it send
-// the body chunked, and a real S3-compatible server rejects that for a
-// presigned PUT with "UnexpectedContent: This request does not support
-// content" — so an empty file could never be uploaded directly. A fake storage
-// server cannot catch this, which is why the assertion is on the wire framing.
-func TestUploadAttachmentFile_EmptyFileIsNotChunked(t *testing.T) {
+// TestUploadAttachmentFile_EmptyFileFallsBackToMultipart pins the whole
+// observable behaviour for a real zero-byte file. A presigned PUT for length 0
+// binds no size — SigV4 signs content-length only when it is non-zero — so the
+// server refuses that one size with its existing capability code, and the client
+// must reach the legacy endpoint without ever sending bytes to the bucket.
+//
+// The assertions are on the requests, not on the outcome alone: an empty file
+// that quietly PUT to storage and completed would still look successful here,
+// which is the failure this test exists to catch.
+func TestUploadAttachmentFile_EmptyFileFallsBackToMultipart(t *testing.T) {
 	fake, server := newFakeDirectUploadServer(t)
+	// Model the real server: a zero-size declaration is declined as a
+	// capability refusal, with the code the client keys its fallback on.
+	fake.refuseZeroSize = true
 	client := NewAPIClient(server.URL, "ws-1", "test-token")
 
 	path := writeTestFile(t, "empty.bin", 0)
-	if _, err := client.UploadAttachmentFile(context.Background(), path, "issue-1"); err != nil {
+	att, err := client.UploadAttachmentFile(context.Background(), path, "issue-1")
+	if err != nil {
 		t.Fatalf("UploadAttachmentFile on an empty file: %v", err)
 	}
-	if len(fake.putRequests) != 1 {
-		t.Fatalf("PUT count = %d, want 1", len(fake.putRequests))
+
+	// Exactly one metadata request and one multipart request. No storage PUT and
+	// no completion: nothing was ever staged, so completing would be a request
+	// for an object that does not exist.
+	if fake.presignCalls != 1 {
+		t.Fatalf("presign calls = %d, want 1", fake.presignCalls)
 	}
-	put := fake.putRequests[0]
-	if len(put.transferEncoding) != 0 {
-		t.Fatalf("empty upload was sent with Transfer-Encoding %v; a presigned PUT must carry an explicit Content-Length",
-			put.transferEncoding)
+	if fake.presignBody["size_bytes"] != float64(0) {
+		t.Fatalf("presign declared size_bytes = %v, want 0 (the real size must reach the server)", fake.presignBody["size_bytes"])
 	}
-	if put.contentLength != 0 {
-		t.Fatalf("Content-Length = %d, want 0", put.contentLength)
+	if len(fake.putRequests) != 0 {
+		t.Fatalf("the client sent %d storage PUT(s) for an empty file; the direct path must not be used", len(fake.putRequests))
 	}
-	if len(put.body) != 0 {
-		t.Fatalf("body carried %d bytes for an empty file", len(put.body))
+	if fake.completeCalls != 0 {
+		t.Fatalf("the client called complete-upload %d time(s) without staging an object", fake.completeCalls)
+	}
+	if fake.fallbackCalls != 1 {
+		t.Fatalf("fallback calls = %d, want 1", fake.fallbackCalls)
+	}
+
+	// The fallback keeps the attachment contract: same id, size, MIME and binding
+	// a caller would have got from the direct path.
+	if att.ID != "legacy-1" {
+		t.Fatalf("attachment id = %q, want the multipart upload's id", att.ID)
+	}
+	if att.SizeBytes != 0 {
+		t.Fatalf("size_bytes = %d, want 0", att.SizeBytes)
+	}
+	if !strings.HasPrefix(att.ContentType, "text/plain") {
+		t.Fatalf("content_type = %q, want text/plain", att.ContentType)
+	}
+	if att.MarkdownURL == "" || att.DownloadURL == "" {
+		t.Fatalf("the fallback response is missing markdown_url/download_url: %+v", att)
+	}
+	// The multipart body carries the file part and the binding, exactly as the
+	// direct request carried them as metadata.
+	if !strings.Contains(string(fake.fallbackBody), `name="file"; filename="empty.bin"`) {
+		t.Fatalf("the multipart body is missing the file part: %q", string(fake.fallbackBody))
+	}
+	if !strings.Contains(string(fake.fallbackBody), "issue-1") {
+		t.Fatalf("the multipart body lost the issue binding: %q", string(fake.fallbackBody))
+	}
+}
+
+// TestUploadAttachmentFile_NonEmptyFileStaysOnTheDirectPath is the counterweight:
+// the fallback is reached for empty files only. One byte still PUTs to storage
+// and completes, because its credential is length-bound.
+func TestUploadAttachmentFile_NonEmptyFileStaysOnTheDirectPath(t *testing.T) {
+	fake, server := newFakeDirectUploadServer(t)
+	fake.refuseZeroSize = true
+	client := NewAPIClient(server.URL, "ws-1", "test-token")
+
+	path := writeTestFile(t, "one.bin", 1)
+	if _, err := client.UploadAttachmentFile(context.Background(), path, "issue-1"); err != nil {
+		t.Fatalf("UploadAttachmentFile: %v", err)
+	}
+	if fake.fallbackCalls != 0 {
+		t.Fatalf("a one-byte upload fell back to multipart (%d calls)", fake.fallbackCalls)
+	}
+	if len(fake.putRequests) != 1 || fake.putRequests[0].contentLength != 1 {
+		t.Fatalf("PUT requests = %+v, want one with Content-Length 1", fake.putRequests)
+	}
+	if fake.completeCalls != 1 {
+		t.Fatalf("complete calls = %d, want 1", fake.completeCalls)
 	}
 }

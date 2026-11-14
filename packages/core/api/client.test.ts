@@ -3843,6 +3843,64 @@ describe("ApiClient presigned direct upload", () => {
     expect(fetchMock.mock.calls.at(-1)?.[0]).toBe("https://api.example.test/api/upload-file");
   });
 
+  it("routes a real empty file to multipart without touching object storage", async () => {
+    // The server refuses a zero-length presign with the capability code, because
+    // a SigV4 credential for length 0 binds no size. What matters here is what
+    // the client does with that answer: one metadata request carrying the real
+    // size, then the multipart body — never a PUT (there is no credential) and
+    // never a completion (nothing was staged).
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (String(url).endsWith("/api/attachments/presign-upload")) {
+        return Promise.resolve(
+          jsonResponse(
+            { error: "zero-byte uploads are not available through presigned upload", code: "attachment_presign_unsupported" },
+            501,
+          ),
+        );
+      }
+      if (String(url).startsWith("https://bucket.example.test/")) {
+        throw new Error(`an empty file must not be PUT to storage, but ${url} was requested`);
+      }
+      if (String(url).includes("/complete-upload")) {
+        throw new Error(`an empty file must not be completed, but ${url} was requested`);
+      }
+      return Promise.resolve(jsonResponse({ ...ATTACHMENT_BODY, size_bytes: 0, filename: "empty.txt" }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const att = await client().uploadFile(new File([], "empty.txt", { type: "text/plain" }));
+    expect(att.id).toBe("att-1");
+    expect(att.size_bytes).toBe(0);
+
+    const presignCall = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/presign-upload"));
+    expect(JSON.parse(String(presignCall?.[1]?.body))).toMatchObject({ filename: "empty.txt", size_bytes: 0 });
+    // Exactly two requests: the declined presign and the multipart upload.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.at(-1)?.[0]).toBe("https://api.example.test/api/upload-file");
+    // The multipart body still carries the file and its binding.
+    const form = fetchMock.mock.calls.at(-1)?.[1]?.body;
+    expect(form).toBeInstanceOf(FormData);
+    expect((form as FormData).get("file")).toBeInstanceOf(File);
+  });
+
+  it("keeps a one-byte file on the direct path", async () => {
+    // The counterweight: the refusal is about a length that cannot be signed,
+    // not about small files.
+    const { calls } = stubUploadRoutes({
+      presign: () => jsonResponse({ ...presignResponse, headers: { "Content-Type": "text/plain", "Content-Length": "1" } }),
+      put: () => new Response(null, { status: 200 }),
+      complete: () => jsonResponse({ ...ATTACHMENT_BODY, size_bytes: 1 }),
+    });
+
+    await client().uploadFile(new File(["x"], "tiny.txt", { type: "text/plain" }));
+
+    expect(calls.map((c) => `${c.init?.method ?? "GET"} ${c.url}`)).toEqual([
+      "POST https://api.example.test/api/attachments/presign-upload",
+      `PUT ${PRESIGN_URL}`,
+      "POST https://api.example.test/api/attachments/session-1/complete-upload",
+    ]);
+  });
+
   it.each([
     ["a 501 without the capability code", 501, { error: "boom" }],
     ["a 401", 401, { error: "unauthorized" }],

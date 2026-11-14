@@ -30,8 +30,9 @@ import (
 // copy buffer rather than 100 MiB of heap — and three of them cost the same.
 //
 // Compatibility is the other half of the contract. A server that predates the
-// endpoint answers 404/405, and one whose storage backend cannot presign
-// answers 501 with a stable code; both fall back to the multipart path. Every
+// endpoint answers 404/405, and one whose storage backend cannot presign — or
+// that declines an upload it cannot express, such as an empty file — answers
+// 501 with a stable code; all of those fall back to the multipart path. Every
 // other failure (401, 403, a rejected PUT, a 5xx) is reported instead of being
 // retried through the old path, because the upload may already have consumed
 // the user's bytes and a blind retry would either duplicate the object or
@@ -253,8 +254,13 @@ func (c *APIClient) putAttachmentObject(ctx context.Context, uploadURL string, h
 	// Handing net/http a non-nil reader with ContentLength 0 makes it fall back
 	// to chunked transfer encoding, and S3-compatible servers reject that for a
 	// presigned PUT ("UnexpectedContent: This request does not support
-	// content"), so an empty file could never be uploaded directly. NoBody is
-	// what makes the request carry no body at all, which is a valid empty PUT.
+	// content"). NoBody is what makes the request carry no body at all, which is
+	// the only well-formed empty PUT.
+	//
+	// Current servers never ask for one: a zero-length credential binds no size,
+	// so presign-upload declines it and this client falls back to multipart
+	// before reaching here. A server that predates that rule still issues the
+	// URL, and a client must not turn its empty upload into a chunked request.
 	var payload io.Reader = reader
 	if source.Size == 0 {
 		payload = http.NoBody

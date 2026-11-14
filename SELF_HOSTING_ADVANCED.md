@@ -178,7 +178,8 @@ is why an old server and a new client interoperate without configuration:
 |---|---|---|---|
 | Any release before direct upload | any | multipart `/api/upload-file` | `presign-upload` answers `404`, which the client treats as "the route is absent here" |
 | Storage that cannot presign (local disk, or a backend missing inspect/copy) | current | multipart `/api/upload-file` | the endpoint answers `501` with code `attachment_presign_unsupported` |
-| S3-compatible bucket | current | presign → PUT → complete | the only case where the file skips the API |
+| Any deployment, an empty (`0`-byte) file | current | multipart `/api/upload-file` | the same `501`/`attachment_presign_unsupported`: a SigV4 credential for length `0` binds no size, so the endpoint declines rather than issue one — see below |
+| S3-compatible bucket, a non-empty file | current | presign → PUT → complete | the only case where the file skips the API |
 | S3-compatible bucket, but the bucket is unreachable from the client | current | **no fallback** — the upload fails with the storage error | the bytes were already sent; retrying through the API would transfer them twice |
 | S3-compatible bucket, credential rejected (`401`/`403`) or server error (`5xx`) | current | **no fallback** — the error is reported | a capability refusal is the only fallback signal, so a real failure is never hidden behind a second attempt |
 
@@ -187,6 +188,24 @@ for transport failures and `5xx`. The call is idempotent — a repeat returns th
 attachment the first attempt published — so a retry can never create a second
 attachment. A `4xx` completion (expired session, missing object, changed object)
 is final and is reported.
+
+##### Why empty files do not use the direct path
+
+SigV4 folds `content-length` into the canonical request only when the value is
+non-zero, so a presigned PUT for a `0`-byte object is signed over `host` alone.
+That credential carries no size binding: a bucket accepts any number of bytes
+through it, and the size check in `complete-upload` runs after those bytes are
+already stored. `presign-upload` therefore answers a `size_bytes` of `0` with
+the same `501`/`attachment_presign_unsupported` it uses for a backend that
+cannot presign, after its usual identity, workspace, input and target-permission
+checks — and the client uploads the empty file through `/api/upload-file`, where
+it has always worked. The published attachment keeps the same shape and MIME
+semantics either way.
+
+Sessions created for empty files by an earlier release remain completable, and
+`complete-upload` still verifies the object exists, matches the declared size
+and is reachable by the caller, so a credential issued before this rule cannot
+publish more than the empty object it was issued for.
 
 ##### Browser clients
 

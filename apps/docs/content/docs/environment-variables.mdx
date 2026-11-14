@@ -160,6 +160,8 @@ The bucket must be reachable from wherever the client runs. If it is not, the up
 
 The one automatic fallback is a capability one, decided before any bytes move: with `LOCAL_UPLOAD_DIR` (or any backend that cannot presign) the endpoint answers `501` with code `attachment_presign_unsupported`, and the client uses the older multipart path instead. A server that predates the endpoint answers `404`/`405` and falls back the same way. Nothing else does: a `401`/`403` is a credential problem and a `5xx` is a server fault, so both are reported instead of being retried through the API, where the file may be transferred twice.
 
+An **empty file** takes that same fallback. SigV4 signs `content-length` only when it is non-zero, so a credential for a `0`-byte object covers `host` alone and accepts any number of bytes; rather than issue one, `presign-upload` answers `501` with the same code after its usual identity, workspace, input and target-permission checks. The client uploads the empty file through the multipart path, which has always published empty files, and the attachment keeps the same shape and MIME semantics. Sessions an earlier release created for empty files remain completable, with the object-existence, size and access checks unchanged.
+
 The capability is determined from the configured backend's Go interface set — a storage type that cannot presign, inspect and conditionally copy — not from probing the bucket at runtime, so a bucket that accepts the credential but rejects the conditional copy surfaces as a failed upload rather than a fallback.
 
 Nothing needs configuring beyond the bucket above. The bucket needs these permissions on top of what uploads already require:

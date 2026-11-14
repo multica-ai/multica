@@ -912,9 +912,11 @@ class DirectUploadUnavailableError extends Error {
  *
  * The route is absent (404 from a build without it, 405 from a router that
  * rejects the method) or the capability is declined (501 carrying the stable
- * code). A 401/403 is a credential problem and a 5xx is a server fault: neither
- * is fixed by routing the bytes through the API, and a fallback there would
- * double the transfer or hide a real outage.
+ * code — a backend that cannot presign, or an upload it cannot express such as
+ * a zero-byte file, whose credential would bind no size). A 401/403 is a
+ * credential problem and a 5xx is a server fault: neither is fixed by routing
+ * the bytes through the API, and a fallback there would double the transfer or
+ * hide a real outage.
  */
 function directUploadFallsBack(status: number, body: unknown): boolean {
   if (status === 404 || status === 405) return true;

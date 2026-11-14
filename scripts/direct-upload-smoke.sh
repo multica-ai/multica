@@ -13,6 +13,9 @@
 #      upload streams instead of buffering.
 #   6. Object storage holds the file under a final key while the staging object
 #      is reclaimed by the cleanup worker.
+#   7. A zero-byte file is DECLINED by the presign endpoint (501 with the
+#      capability code, no credential) and still publishes through the multipart
+#      fallback: an empty presigned credential would bind no size at all.
 #
 # OWNERSHIP RULES — this script must never destroy anything it did not create:
 #
@@ -413,6 +416,12 @@ cat > "$SMOKE_DIR/proxy.py" <<'PY'
 Written as a small asyncio server rather than an nginx dependency so the smoke
 test runs anywhere Go and Docker do. It also COUNTs the body bytes it forwards,
 which is what proves the file never passed through.
+
+It relays a chunked request body as well as a `Content-Length` one, because a
+real reverse proxy does: the CLI streams the multipart fallback through an
+io.Pipe, so that request is chunked. Relaying only `Content-Length` bodies left
+the upstream waiting forever on the chunked ones — which is a bug in this proxy,
+not a property of the deployment it models.
 """
 import asyncio
 import sys
@@ -420,6 +429,47 @@ import sys
 LIMIT = int(sys.argv[2])
 UPSTREAM_PORT = int(sys.argv[3])
 METRICS_PATH = sys.argv[4]
+
+
+def record(kind, size):
+    with open(METRICS_PATH, "a") as metrics:
+        metrics.write("%s\t%d\n" % (kind, size))
+
+
+def is_chunked(headers):
+    encoding = headers.get("transfer-encoding", "").lower()
+    return "chunked" in encoding
+
+
+async def relay_chunked_body(reader, upstream_writer):
+    """Relay a chunked body verbatim, returning the decoded payload length.
+
+    Returns None when the running total passes the limit: the caller then drops
+    the upstream request and answers 413, which is what a buffering proxy does
+    when a body outgrows its ceiling.
+    """
+    forwarded = 0
+    while True:
+        size_line = await reader.readline()
+        if not size_line:
+            return forwarded
+        upstream_writer.write(size_line)
+        size = int(size_line.strip().split(b";")[0] or b"0", 16)
+        if size == 0:
+            # Trailer section, terminated by an empty line.
+            while True:
+                trailer = await reader.readline()
+                upstream_writer.write(trailer)
+                if trailer in (b"\r\n", b"\n", b""):
+                    break
+            await upstream_writer.drain()
+            return forwarded
+        forwarded += size
+        if forwarded > LIMIT:
+            return None
+        data = await reader.readexactly(size + 2)  # payload plus CRLF
+        upstream_writer.write(data)
+        await upstream_writer.drain()
 
 
 async def handle(reader, writer):
@@ -436,9 +486,9 @@ async def handle(reader, writer):
             headers[name.strip().lower()] = value.strip()
 
         length = int(headers.get("content-length", "0") or 0)
-        if length > LIMIT:
-            with open(METRICS_PATH, "a") as metrics:
-                metrics.write("rejected\t%d\n" % length)
+        chunked_request = is_chunked(headers)
+        if not chunked_request and length > LIMIT:
+            record("rejected", length)
             body = b"413 Request Entity Too Large"
             writer.write(
                 b"HTTP/1.1 413 Request Entity Too Large\r\n"
@@ -460,17 +510,33 @@ async def handle(reader, writer):
         upstream_writer.write(b"\r\n")
 
         forwarded = 0
-        remaining = length
-        while remaining > 0:
-            chunk = await reader.read(min(remaining, 65536))
-            if not chunk:
-                break
-            remaining -= len(chunk)
-            forwarded += len(chunk)
-            upstream_writer.write(chunk)
-            await upstream_writer.drain()
-        with open(METRICS_PATH, "a") as metrics:
-            metrics.write("forwarded\t%d\n" % forwarded)
+        if chunked_request:
+            forwarded = await relay_chunked_body(reader, upstream_writer)
+            if forwarded is None:
+                # Over the limit mid-stream: the upstream request is abandoned
+                # and the client is told, exactly as a buffering proxy would.
+                record("rejected", LIMIT + 1)
+                upstream_writer.close()
+                body = b"413 Request Entity Too Large"
+                writer.write(
+                    b"HTTP/1.1 413 Request Entity Too Large\r\n"
+                    b"Content-Type: text/plain\r\n"
+                    b"Content-Length: " + str(len(body)).encode() + b"\r\n"
+                    b"Connection: close\r\n\r\n" + body
+                )
+                await writer.drain()
+                return
+        else:
+            remaining = length
+            while remaining > 0:
+                chunk = await reader.read(min(remaining, 65536))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                forwarded += len(chunk)
+                upstream_writer.write(chunk)
+                await upstream_writer.drain()
+        record("forwarded", forwarded)
 
         # Response: copy every header line, then the body. Streaming responses
         # are not needed here — the API answers these routes with JSON.
@@ -696,23 +762,88 @@ fi
 
 # ------------------------------------------------------------- empty file ----
 
-step "Zero-byte upload against real S3-compatible storage"
-# This exists because an in-memory double cannot reproduce the behaviour that
-# broke it: a real S3-compatible server answers a byte-RANGE request against a
-# zero-length object with 416 InvalidRange, so an unconditional ranged probe
-# fails completion even though the object is valid.
+step "Zero-byte upload: the capability is declined and the file still publishes"
+
+# Two separate facts, because they fail differently:
+#
+#   1. The empty file uploads and downloads as empty content with the same
+#      metadata as any other attachment. That is the product promise and it must
+#      hold end to end through the real CLI.
+#   2. It does NOT travel through the presigned path. A SigV4 credential for
+#      length 0 binds no size — the store accepts any body through it — so the
+#      endpoint declines size 0 and the client falls back to multipart. Asserting
+#      only (1) would pass on the vulnerable build too, so (2) is checked
+#      directly against the API before the CLI runs.
 EMPTY_FILE="$WORK/empty.bin"
 : > "$EMPTY_FILE"
+
+# The refusal itself: 501 with the capability code, and no credential in the
+# response. A 400 or a 5xx here would strand every empty upload, because no
+# client falls back on either.
+empty_presign_status="$(curl -s -o "$SMOKE_DIR/empty-presign.json" -w '%{http_code}' \
+  -X POST "$PROXY_URL/api/attachments/presign-upload" \
+  -H "Authorization: Bearer $pat" -H "X-Workspace-ID: $WS_ID" \
+  -H 'Content-Type: application/json' \
+  -d '{"filename":"empty.bin","content_type":"text/plain","size_bytes":0}')"
+if [ "$empty_presign_status" = "501" ]; then
+  ok "a zero-byte presign request is declined with 501"
+else
+  bad "zero-byte presign expected 501, got $empty_presign_status: $(cat "$SMOKE_DIR/empty-presign.json")"
+fi
+if grep -q '"code"[[:space:]]*:[[:space:]]*"attachment_presign_unsupported"' "$SMOKE_DIR/empty-presign.json" 2>/dev/null; then
+  ok "the zero-byte refusal carries attachment_presign_unsupported"
+else
+  bad "the zero-byte refusal is missing the capability code: $(cat "$SMOKE_DIR/empty-presign.json")"
+fi
+if grep -q "X-Amz-Signature" "$SMOKE_DIR/empty-presign.json" 2>/dev/null; then
+  bad "the zero-byte refusal contained a signed URL"
+else
+  ok "the zero-byte refusal returned no upload credential"
+fi
+# The size-1 case is the counterweight, and it is the same request shape: the
+# rule is about a length that cannot be signed, not about small files.
+one_byte_status="$(curl -s -o "$SMOKE_DIR/one-byte-presign.json" -w '%{http_code}' \
+  -X POST "$PROXY_URL/api/attachments/presign-upload" \
+  -H "Authorization: Bearer $pat" -H "X-Workspace-ID: $WS_ID" \
+  -H 'Content-Type: application/json' \
+  -d '{"filename":"one.bin","content_type":"application/octet-stream","size_bytes":1}')"
+if [ "$one_byte_status" = "200" ]; then
+  ok "a one-byte presign request still issues a credential (200)"
+else
+  bad "one-byte presign expected 200, got $one_byte_status: $(cat "$SMOKE_DIR/one-byte-presign.json")"
+fi
+if grep -q '"Content-Length"[[:space:]]*:[[:space:]]*"1"' "$SMOKE_DIR/one-byte-presign.json" 2>/dev/null; then
+  ok "the one-byte credential binds its length"
+else
+  bad "the one-byte credential does not report a Content-Length header: $(cat "$SMOKE_DIR/one-byte-presign.json")"
+fi
+
+# End to end through the CLI: the fallback must actually run and publish.
 EMPTY_JSON="$( cd "$WORK" && MULTICA_SERVER_URL="$PROXY_URL" \
   "$SMOKE_DIR/multica" issue create --title "smoke empty" \
     --attachment "$(basename "$EMPTY_FILE")" --output json 2>"$LOG_DIR/cli-empty.log")"
 EMPTY_STATUS=$?
 if [ $EMPTY_STATUS -eq 0 ]; then
-  ok "zero-byte file uploaded through the presigned path"
+  ok "zero-byte file uploaded (multipart fallback after the 501)"
 else
   bad "zero-byte upload failed: $(tail -3 "$LOG_DIR/cli-empty.log" | tr '\n' ' ')"
 fi
+# The fallback is what makes the upload work, so prove the direct path was not
+# used at all: a presign that had succeeded would have written an upload session
+# row for this issue, and there must be none. Counting rows is deterministic,
+# unlike grepping a client log whose verbosity is not part of the contract.
 EMPTY_ISSUE_ID="$(printf '%s' "$EMPTY_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("id",""))' 2>/dev/null)"
+if [ -n "$EMPTY_ISSUE_ID" ]; then
+  EMPTY_SESSIONS="$(docker exec "$PG_CONTAINER" psql -U "$POSTGRES_USER" -d "$DB_NAME" -Atqc \
+    "SELECT count(*) FROM attachment_upload_session WHERE issue_id = '$EMPTY_ISSUE_ID'" 2>/dev/null)"
+  if [ "$EMPTY_SESSIONS" = "0" ]; then
+    ok "the zero-byte upload created no upload session (it never used the presigned path)"
+  else
+    bad "the zero-byte upload created $EMPTY_SESSIONS upload session row(s): it went through the presigned path"
+  fi
+else
+  bad "issue create returned no id for the zero-byte upload: $EMPTY_JSON"
+fi
 EMPTY_ATTACHMENT_ID=""
 if [ -n "$EMPTY_ISSUE_ID" ]; then
   EMPTY_ATTACHMENT_ID="$(curl -s "$API_URL/api/issues/$EMPTY_ISSUE_ID/attachments" \
