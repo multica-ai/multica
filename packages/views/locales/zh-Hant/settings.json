@@ -387,6 +387,7 @@
     "reserved_error": "該快捷鍵已被瀏覽器或桌面視窗占用。",
     "send_error": "傳送只能使用 Enter 或 Mod + Enter。",
     "unsafe_error": "這個按鍵會干擾文字輸入或基礎鍵盤導航。",
+    "unrecognized_error": "無法錄製這個組合鍵，請換一個試試。",
     "send_enter_hint": "Shift+Enter 可插入段落、繼續列表，或在程式碼塊中換行。",
     "categories": {
       "general": "常規",

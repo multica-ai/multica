@@ -387,6 +387,7 @@
     "reserved_error": "브라우저 또는 데스크톱 창에서 예약된 단축키입니다.",
     "send_error": "보내기는 Enter 또는 Mod+Enter만 사용할 수 있습니다.",
     "unsafe_error": "이 키는 텍스트 입력이나 기본 키보드 탐색을 방해합니다.",
+    "unrecognized_error": "이 키 조합은 기록할 수 없습니다. 다른 조합을 사용해 보세요.",
     "send_enter_hint": "Shift+Enter로 단락을 삽입하거나 목록을 이어가고 코드 블록에서 줄을 바꿀 수 있습니다.",
     "categories": {
       "general": "일반",
