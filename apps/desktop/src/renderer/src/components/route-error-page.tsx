@@ -94,7 +94,7 @@ function DesktopNotFoundPage() {
         ) : null}
         <Button
           type="button"
-          onClick={() => useTabStore.getState().closeActiveTab()}
+          onClick={() => useTabStore.getState().closeActiveTab({ reason: "recovery" })}
         >
           <X className="mr-2 h-4 w-4" aria-hidden="true" />
           Close tab
@@ -158,7 +158,7 @@ function DesktopUnexpectedErrorPage({ error }: { error: unknown }) {
         <Button
           type="button"
           variant="outline"
-          onClick={() => useTabStore.getState().closeActiveTab()}
+          onClick={() => useTabStore.getState().closeActiveTab({ reason: "recovery" })}
         >
           <X className="mr-2 h-4 w-4" aria-hidden="true" />
           Close tab
