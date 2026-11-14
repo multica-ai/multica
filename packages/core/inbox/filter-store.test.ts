@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { InboxItem, Label } from "../types";
 import {
   EMPTY_INBOX_FILTERS,
+  activeInboxFilterSupport,
   archivedInboxQuery,
   effectiveInboxFilters,
   filterInboxItems,
@@ -297,6 +298,14 @@ describe("backend capability", () => {
     );
     expect(inboxIssueFieldsSupport([item("system", null, null)])).toBe("supported");
     expect(inboxIssueFieldsSupport([item("legacy", "todo", "high", { issue_label_ids: undefined })])).toBe("unsupported");
+  });
+
+  it("holds the main list's selection with no notification, for the Working rows left", () => {
+    expect(activeInboxFilterSupport([])).toEqual({ priority: "supported", issueFields: "supported" });
+    expect(activeInboxFilterSupport([item("legacy", "todo", undefined, { issue_label_ids: undefined })])).toEqual({
+      priority: "unsupported",
+      issueFields: "unsupported",
+    });
   });
 
   it("keeps unproven dimensions dormant, and on the archive everything an old server would ignore", () => {

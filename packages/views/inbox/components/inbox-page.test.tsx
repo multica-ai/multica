@@ -1192,6 +1192,21 @@ describe("InboxPage", () => {
       expect(screen.getAllByTestId("working-row").map((row) => row.textContent)).toEqual(["issue-high"]);
     });
 
+    it("keeps narrowing Working once no notification is left", () => {
+      reset();
+      layout.width = DESKTOP;
+      listData.tasks = [ownRun("issue-a"), ownRun("issue-b")];
+      listData.issues = {
+        "issue-a": { id: "issue-a", status: "in_progress", project_id: "project-a", labels: [] },
+        "issue-b": { id: "issue-b", status: "in_progress", project_id: "project-b", labels: [] },
+      };
+      useInboxFilterStore.getState().toggleFilterValue("workspace-1", "project", "project-a");
+
+      render(<InboxPage />);
+
+      expect(screen.getAllByTestId("working-row").map((row) => row.textContent)).toEqual(["issue-a"]);
+    });
+
     it("does not call a link to a Working issue broken while its issue loads under a filter", () => {
       reset();
       layout.width = DESKTOP;

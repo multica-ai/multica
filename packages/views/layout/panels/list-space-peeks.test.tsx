@@ -197,4 +197,24 @@ describe("InboxPeek", () => {
     await waitFor(() => expect(rows()).toEqual(["needsYou:high", "working:issue-w"]));
     expect(screen.getByTestId("list")).toHaveAttribute("data-filtered", "true");
   });
+
+  it("keeps narrowing Working once no notification is left", async () => {
+    setApiInstance({
+      getIssue: async (id: string) => ({ id, status: "todo", project_id: id === "issue-a" ? "project-a" : "project-b", labels: [] }),
+    } as unknown as ApiClient);
+    useInboxFilterStore.getState().toggleFilterValue("ws-1", "project", "project-a");
+    const run = (issueId: string) =>
+      ({
+        id: `task-${issueId}`,
+        agent_id: "agent-1",
+        issue_id: issueId,
+        status: "running",
+        created_at: "2026-06-15T08:00:00Z",
+        attribution: { source: "direct_human", precise: true, originator: { id: "member-1" } },
+      }) as AgentTask;
+    renderPeek([], [run("issue-a"), run("issue-b")]);
+
+    await waitFor(() => expect(rows()).toEqual(["working:issue-a"]));
+    expect(screen.getByTestId("list")).toHaveAttribute("data-filtered", "true");
+  });
 });

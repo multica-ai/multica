@@ -42,11 +42,11 @@ import {
   useRetrySourceContextQuickCreate,
 } from "@multica/core/inbox/mutations";
 import {
+  activeInboxFilterSupport,
   effectiveInboxFilters,
   filterInboxItems,
   inboxFilterCount,
   inboxIssueFieldsSupport,
-  inboxPriorityFilterSupport,
   useInboxFilters,
   useInboxFilterStore,
   type InboxFilterSupport,
@@ -181,8 +181,9 @@ export function InboxPage() {
   const viewItems = isArchivedView ? archivedItems : items;
   // The paginated endpoint guarantees the priority projection, including on
   // empty pages.
-  const priorityFilterSupport = isArchivedView ? "supported" : inboxPriorityFilterSupport(rawItems);
-  const issueFieldsSupport = isArchivedView ? archiveIssueFields : inboxIssueFieldsSupport(rawItems);
+  const activeSupport = activeInboxFilterSupport(rawItems);
+  const priorityFilterSupport = isArchivedView ? "supported" : activeSupport.priority;
+  const issueFieldsSupport = isArchivedView ? archiveIssueFields : activeSupport.issueFields;
   const activeFilters = useMemo(
     () => effectiveInboxFilters(filters, { priority: priorityFilterSupport, issueFields: issueFieldsSupport }),
     [filters, priorityFilterSupport, issueFieldsSupport],

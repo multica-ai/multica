@@ -315,6 +315,20 @@ export function inboxIssueFieldsSupport(
     : "unsupported";
 }
 
+/**
+ * Capability of the main Inbox list, for the page, its preview and the filter
+ * menu alike. With no notification there is nothing to probe, but nothing for
+ * the server to answer either: every row left is a run in "Working", matched
+ * against its issue on the client. The selection holds for those rows, and an
+ * older server is still caught by the first notification that arrives.
+ */
+export function activeInboxFilterSupport(
+  items: readonly InboxItem[],
+): { priority: InboxPriorityFilterSupport; issueFields: InboxFilterSupport } {
+  if (items.length === 0) return { priority: "supported", issueFields: "supported" };
+  return { priority: inboxPriorityFilterSupport(items), issueFields: inboxIssueFieldsSupport(items) };
+}
+
 /** Ignore a stale priority selection until the backend capability is proven. */
 export function inboxFiltersForPrioritySupport(
   filters: InboxFilters,

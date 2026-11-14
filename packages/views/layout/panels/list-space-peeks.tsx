@@ -7,11 +7,10 @@ import { useSetChatSessionArchived } from "@multica/core/chat/mutations";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
+  activeInboxFilterSupport,
   effectiveInboxFilters,
   filterInboxItems,
   inboxFilterCount,
-  inboxIssueFieldsSupport,
-  inboxPriorityFilterSupport,
   useInboxFilters,
 } from "@multica/core/inbox/filter-store";
 import { useArchiveInbox } from "@multica/core/inbox/mutations";
@@ -50,11 +49,7 @@ export function InboxPeek() {
 
   const activeRows = useMemo(() => rawItems.filter((item) => !item.archived), [rawItems]);
   const effective = useMemo(
-    () =>
-      effectiveInboxFilters(filters, {
-        priority: inboxPriorityFilterSupport(rawItems),
-        issueFields: inboxIssueFieldsSupport(rawItems),
-      }),
+    () => effectiveInboxFilters(filters, activeInboxFilterSupport(rawItems)),
     [rawItems, filters],
   );
   const rows = useMemo(() => filterInboxItems(activeRows, effective), [activeRows, effective]);
