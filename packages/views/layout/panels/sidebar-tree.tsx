@@ -170,7 +170,8 @@ export const TreeRow = forwardRef<HTMLAnchorElement, TreeRowProps>(function Tree
   );
 });
 
-/** Marks a project only its members can see. It sits above the row link's
+/** Marks a private project, which only its members and workspace owners and
+ *  admins can see. It sits above the row link's
  *  stretched hit area so its tooltip opens; a click still reaches the link. */
 export function PrivateProjectLock() {
   const { t } = useT("layout");

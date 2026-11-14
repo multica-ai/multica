@@ -133,9 +133,9 @@ describe("ProjectsSection", () => {
 
   it("marks a private project with a lock inside its link", () => {
     renderSection([{ ...project("p1", "Desktop"), visibility: "private" }, { ...project("p2", "Mobile"), visibility: "workspace" }]);
-    const lock = screen.getByRole("img", { name: "Only project members can see this" });
+    const lock = screen.getByRole("img", { name: "Visible to project members and workspace owners and admins" });
     expect(lock.closest("a")).toHaveTextContent("Desktop");
-    expect(screen.getAllByRole("img", { name: "Only project members can see this" })).toHaveLength(1);
+    expect(screen.getAllByRole("img", { name: "Visible to project members and workspace owners and admins" })).toHaveLength(1);
   });
 
   it("expands a project in place, keeping its count", () => {
