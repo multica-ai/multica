@@ -69,7 +69,7 @@ settings:
       - message.groups
       - message.mpim
   interactivity:
-    is_enabled: false
+    is_enabled: true
   org_deploy_enabled: false
   socket_mode_enabled: true
   token_rotation_enabled: false
@@ -174,6 +174,10 @@ Dans un message direct avec le bot, `/clear` conserve la discussion Multica en c
 
 Dans un canal ou un fil, envoyez `@Multica /clear [message]` dans le fil cible afin que Multica puisse appliquer la limite à la bonne conversation.
 
+### Relancer une exécution en échec
+
+Quand une exécution lancée depuis Slack échoue, le bot publie l'erreur dans le même fil avec les boutons **Retry** et **Open in Multica**. **Retry** relance le tour en échec au nom du membre qui clique ; cette personne doit être un membre de l'espace de travail dont le compte est lié. Après une relance, la carte indique qui l'a relancée et retire ses boutons. Une carte n'accepte plus de relance dès que la conversation a un tour plus récent.
+
 ## Gérer les connexions
 
 Ouvrez **Paramètres → Messagerie** pour voir les agents connectés, regroupés par plateforme. Sélectionnez un agent pour ouvrir sa section **Messagerie**. Les propriétaires et administrateurs de l'espace de travail peuvent y déconnecter le bot depuis son menu de gestion.
@@ -206,6 +210,7 @@ Les liens d'association de compte utilisent `MULTICA_APP_URL`, ou `FRONTEND_ORIG
 - **Aucune réponse dans un canal** : vérifiez que le bot a été invité dans le canal et que le message le @mentionne.
 - **`/issue`, `/new` ou `/clear` n'existe pas** : vérifiez que le manifeste inclut les trois commandes slash et la portée `commands`, puis réinstallez l'application. Si Slack indique que `/new` ou `/clear` est déjà pris, utilisez la forme message `@Multica` ou résolvez d'abord le conflit de commandes au niveau de l'espace de travail.
 - **Les fichiers ne parviennent pas à l'agent** : vérifiez que le manifeste inclut `files:read` et que l'application a été réinstallée après l'ajout de cette portée, et que le fichier fait 20 Mio au maximum.
+- **Le bouton Retry ne fait rien** : vérifiez que le manifeste définit `settings.interactivity.is_enabled` à `true`. Avec Socket Mode, aucune Request URL n'est nécessaire.
 - **Le bot ne s'exécute pas** : vérifiez si l'agent est archivé et si le [runtime](/daemon-runtimes) qu'il utilise est en ligne.
 
 ## Étapes suivantes

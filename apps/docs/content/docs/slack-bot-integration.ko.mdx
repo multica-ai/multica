@@ -69,7 +69,7 @@ settings:
       - message.groups
       - message.mpim
   interactivity:
-    is_enabled: false
+    is_enabled: true
   org_deploy_enabled: false
   socket_mode_enabled: true
   token_rotation_enabled: false
@@ -174,6 +174,10 @@ Bot과의 DM에서 `/clear`를 보내면 현재 Multica Chat은 유지되고 에
 
 채널이나 thread에서는 대상 thread에서 `@Multica /clear [메시지]`를 보내세요.
 
+### 실패한 실행 다시 시도
+
+Slack에서 시작한 실행이 실패하면 Bot이 같은 thread에 오류를 게시하고 **Retry**와 **Open in Multica** 버튼을 함께 보냅니다. **Retry**는 클릭한 멤버로서 실패한 턴을 다시 실행하며, 클릭한 사람은 계정을 연결한 workspace 멤버여야 합니다. 다시 시도하면 카드에 누가 다시 시도했는지 표시되고 버튼이 사라집니다. 대화에 더 새로운 턴이 생기면 해당 카드로는 다시 시도할 수 없습니다.
+
 ## 연결 관리
 
 **설정 → 메신저**에서 플랫폼별로 연결된 에이전트를 확인할 수 있습니다. 에이전트를 선택하면 상세 페이지의 **메신저** 섹션이 열립니다. 워크스페이스 owner/admin은 그곳의 Bot 관리 메뉴에서 연결을 해제할 수 있습니다.
@@ -206,6 +210,7 @@ API 서비스를 다시 시작한 뒤 Slack app을 연결하세요. 이 키는 �
 - **채널에서 답변이 없음**: Bot이 채널에 초대되었고 메시지에서 @멘션했는지 확인합니다.
 - **`/issue`, `/new` 또는 `/clear`가 없음**: manifest에 세 slash command와 `commands` scope가 포함되어 있는지 확인하고 app을 다시 설치합니다. Slack에서 `/new` 또는 `/clear`가 이미 사용 중이라고 표시되면 `@Multica` 메시지 형식을 사용하거나 workspace 수준의 명령 충돌을 먼저 해결하세요.
 - **파일이 에이전트에 도착하지 않음**: manifest에 `files:read`가 포함되어 있는지, scope를 추가한 뒤 app을 다시 설치했는지 확인하고, 파일이 20 MiB 이하인지도 확인합니다.
+- **Retry 버튼을 눌러도 반응이 없음**: manifest의 `settings.interactivity.is_enabled`가 `true`인지 확인하세요. Socket Mode에서는 Request URL이 필요하지 않습니다.
 - **Bot이 실행되지 않음**: 에이전트가 보관 처리되었는지, 사용하는 [런타임](/daemon-runtimes)이 온라인인지 확인합니다.
 
 ## 다음 단계
