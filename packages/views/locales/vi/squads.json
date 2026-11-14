@@ -124,7 +124,6 @@
     "mine": "Squad của tôi",
     "all": "Tất cả squad"
   },
-  "toolbar": {},
   "intro": {
     "title": "Cho agent vào squad, chúng làm việc như một đội",
     "description": "Giao công việc cho squad. Agent trưởng đọc nó, giao từng bước cho thành viên có vai phù hợp, và theo dõi tới khi đạt mục tiêu. Bạn chỉ làm việc với một người được giao.",
