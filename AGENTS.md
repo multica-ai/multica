@@ -129,6 +129,7 @@ Workspace-scoped queries filter by `workspace_id`; membership gates access and `
 
 ## Change and Delivery Rules
 
+- Before fixing a bug, check that nobody has reported or fixed it already. Search open issues and PRs by two or three keywords (`gh search issues -R multica-ai/multica --state open "<keywords>"`, same for `prs`). Titles often word the bug differently, so also find PRs that mention a matching issue number (`gh pr list --state all --search "<number>"`) and open PRs that touch the files you plan to change (`gh pr list --state open --limit 300 --json number,title,files`). When working from a Multica issue, also run `multica issue search "<keywords>"`; GitHub reports are mirrored there as `GitHub triage: …` issues. If a PR exists, review, verify, or push that one forward instead of opening another. If you can't tell whether it covers the bug, say so on the issue before writing code.
 - Keep changes scoped; reuse existing patterns.
 - Before adding complexity for a speculative or vanishingly unlikely race or security edge case, explain the concrete failure mode, likelihood, and complexity cost to the user and get their buy-in. Do not silently expand scope for theoretical robustness.
 - Do not add internal compatibility shims, dual writes, fallback paths, or legacy adapters unless requested. This does not relax API response compatibility above.
