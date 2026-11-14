@@ -217,7 +217,7 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 	for _, name := range codexSymlinkedFiles {
 		src := filepath.Join(sharedHome, name)
 		dst := filepath.Join(codexHome, name)
-		if err := ensureSymlink(src, dst); err != nil {
+		if err := ensureSymlink(src, dst, logger); err != nil {
 			logger.Warn("execenv: codex-home symlink failed", "file", name, "error", err)
 		}
 	}
@@ -1266,15 +1266,16 @@ func exposeSharedCodexPluginCache(codexHome, sharedHome string) error {
 // ensureSymlink ensures dst tracks src. If src doesn't exist, it's a no-op.
 // If dst is already a symlink pointing at src, it's a no-op. Otherwise — a
 // wrong-target symlink, a broken symlink, or a regular file left over from a
-// prior createFileLink copy fallback — dst is removed and recreated via
+// prior createFileLink fallback — dst is removed and recreated via
 // createFileLink so the per-task home doesn't drift from the shared source.
 //
 // The "regular file" branch matters on Windows: when os.Symlink fails (no
-// Developer Mode / not elevated), createFileLink falls back to copying the
-// file. Without this re-creation step, a once-stale auth.json would never
-// pick up token refreshes from the shared ~/.codex/auth.json, leaving Codex
-// stuck on a revoked refresh token across env reuses (issue #2081).
-func ensureSymlink(src, dst string) error {
+// Developer Mode / not elevated), createFileLink falls back to a hard link or,
+// across volumes, a copy. Without this re-creation step, a once-stale
+// auth.json would never pick up token refreshes from the shared
+// ~/.codex/auth.json, leaving Codex stuck on a revoked refresh token across
+// env reuses (issue #2081).
+func ensureSymlink(src, dst string, logger *slog.Logger) error {
 	if _, err := os.Stat(src); os.IsNotExist(err) {
 		return nil // source doesn't exist — skip
 	}
@@ -1292,7 +1293,7 @@ func ensureSymlink(src, dst string) error {
 		}
 	}
 
-	return createFileLink(src, dst)
+	return createFileLink(src, dst, logger)
 }
 
 // logCodexAuthState records the kind of auth.json the per-task CODEX_HOME
