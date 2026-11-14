@@ -82,6 +82,7 @@
     "./locales/fr": "./locales/fr.ts",
     "./locales/es": "./locales/es.ts",
     "./locales/ru": "./locales/ru.ts",
+    "./locales/vi": "./locales/vi.ts",
     "./locales/*": "./locales/*"
   },
   "dependencies": {

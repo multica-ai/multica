@@ -1,0 +1,35 @@
+{
+  "header": {
+    "back": "Quay lại",
+    "log_out": "Đăng xuất"
+  },
+  "list": {
+    "title": "Bạn đã được mời",
+    "subtitle": "Tham gia sẽ mở không gian làm việc đó. Các lời mời khác vẫn đang chờ.",
+    "workspace_fallback": "Không gian làm việc",
+    "inviter_fallback": "Ai đó",
+    "invited_admin": "{{inviter}} đã mời bạn làm quản trị viên",
+    "invited_member": "{{inviter}} đã mời bạn làm thành viên",
+    "accept": "Tham gia",
+    "joining": "Đang tham gia...",
+    "decline": "Từ chối",
+    "declining": "Đang từ chối...",
+    "skip": "Bỏ qua và thiết lập không gian làm việc của riêng tôi"
+  },
+  "empty": {
+    "title": "Không có lời mời đang chờ",
+    "hint": "Tiếp tục để thiết lập không gian làm việc của riêng bạn.",
+    "continue": "Tiếp tục thiết lập",
+    "go_to_dashboard": "Đi tới bảng điều khiển"
+  },
+  "linked": {
+    "not_found": "Lời mời này có thể đã hết hạn, bị thu hồi, hoặc không thuộc về tài khoản của bạn.",
+    "accepted": "Lời mời này đã được chấp nhận.",
+    "declined": "Lời mời này đã bị từ chối.",
+    "expired": "Lời mời này đã hết hạn."
+  },
+  "errors": {
+    "accept_failed": "Không chấp nhận được lời mời",
+    "decline_failed": "Không từ chối được lời mời"
+  }
+}

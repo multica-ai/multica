@@ -1,0 +1,11 @@
+{
+  "attach_file": "Đính kèm tệp",
+  "toggle_sidebar": "Ẩn/hiện thanh bên trái",
+  "copy_code": "Sao chép mã",
+  "plain_text": "văn bản thuần",
+  "error_boundary": {
+    "title": "Đã xảy ra lỗi khi hiển thị phần này.",
+    "description": "Đã xảy ra lỗi không mong muốn.",
+    "try_again": "Thử lại"
+  }
+}
