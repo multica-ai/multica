@@ -865,6 +865,27 @@
       "title": "Notifications système",
       "label": "Afficher les notifications système lorsque Multica est en arrière-plan"
     },
+    "delivery": {
+      "title": "Diffusion hors de l'application",
+      "google_chat": {
+        "label": "Google Chat",
+        "description": "Envoyez les nouveaux éléments de la boîte de réception dans un espace Google Chat.",
+        "input_label": "URL du webhook Google Chat",
+        "placeholder": "https://chat.googleapis.com/v1/spaces/…",
+        "how_to": "Espace Google Chat → Applications et intégrations → Webhooks → Ajouter un webhook → copier l'URL. L'enregistrement envoie un message de test dans l'espace.",
+        "connecting": "Connexion…",
+        "connected": "Connecté à l'espace {{space}}",
+        "invalid_url": "Saisissez une URL de webhook Google Chat commençant par https://chat.googleapis.com/v1/spaces/.",
+        "missing_credentials": "L'URL du webhook doit inclure key et token. Copiez l'URL complète depuis Google Chat.",
+        "connection_failed": "Impossible de se connecter à Google Chat. Vérifiez l'URL du webhook et réessayez.",
+        "remove_title": "Supprimer le webhook Google Chat ?",
+        "remove_description": "Les notifications s'arrêteront. Pour vous reconnecter, copiez à nouveau l'URL du webhook depuis Google Chat.",
+        "save": "Enregistrer",
+        "replace": "Remplacer",
+        "remove": "Supprimer",
+        "cancel": "Annuler"
+      }
+    },
     "browser": {
       "label": "Notifications du navigateur",
       "hint": "Autorisez ce navigateur à afficher des bannières pour les notifications de la boîte de réception et les réponses du chat.",

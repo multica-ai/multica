@@ -842,6 +842,27 @@
     "toast_profile_failed": "Не удалось обновить профиль"
   },
   "notifications": {
+    "delivery": {
+      "title": "Каналы доставки",
+      "google_chat": {
+        "label": "Google Chat",
+        "description": "Отправлять новые уведомления из входящих в пространство Google Chat.",
+        "input_label": "URL вебхука Google Chat",
+        "placeholder": "https://chat.googleapis.com/v1/spaces/…",
+        "how_to": "Пространство Google Chat → Приложения и интеграции → Вебхуки → Добавить вебхук → скопировать URL. При сохранении в пространство отправляется тестовое сообщение.",
+        "connecting": "Подключение…",
+        "connected": "Подключено к пространству {{space}}",
+        "invalid_url": "Введите URL вебхука Google Chat, начинающийся с https://chat.googleapis.com/v1/spaces/.",
+        "missing_credentials": "URL вебхука должен содержать key и token. Скопируйте полный URL из Google Chat.",
+        "connection_failed": "Не удалось подключиться к Google Chat. Проверьте URL вебхука и повторите попытку.",
+        "remove_title": "Удалить вебхук Google Chat?",
+        "remove_description": "Уведомления прекратятся. Для повторного подключения снова скопируйте URL вебхука из Google Chat.",
+        "save": "Сохранить",
+        "replace": "Заменить",
+        "remove": "Удалить",
+        "cancel": "Отмена"
+      }
+    },
     "title": "Уведомления во входящих",
     "description": "Отключённые события остаются видимыми в задаче.",
     "toast_failed": "Не удалось обновить настройки уведомлений",

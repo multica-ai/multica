@@ -856,6 +856,27 @@
       "title": "시스템 알림",
       "label": "Multica가 백그라운드에 있을 때 시스템 알림 표시"
     },
+    "delivery": {
+      "title": "앱 외부 전송",
+      "google_chat": {
+        "label": "Google Chat",
+        "description": "새 인박스 항목을 Google Chat 스페이스로 보냅니다.",
+        "input_label": "Google Chat 웹훅 URL",
+        "placeholder": "https://chat.googleapis.com/v1/spaces/…",
+        "how_to": "Google Chat 스페이스 → 앱 및 통합 → 웹훅 → 웹훅 추가 → URL 복사. 저장하면 스페이스에 테스트 메시지가 전송됩니다.",
+        "connecting": "연결 중…",
+        "connected": "스페이스 {{space}}에 연결됨",
+        "invalid_url": "https://chat.googleapis.com/v1/spaces/로 시작하는 Google Chat 웹훅 URL을 입력하세요.",
+        "missing_credentials": "웹훅 URL에는 key와 token이 모두 필요합니다. Google Chat에서 전체 URL을 복사하세요.",
+        "connection_failed": "Google Chat에 연결하지 못했습니다. 웹훅 URL을 확인하고 다시 시도하세요.",
+        "remove_title": "Google Chat 웹훅을 삭제할까요?",
+        "remove_description": "알림이 중단됩니다. 다시 연결하려면 Google Chat에서 웹훅 URL을 다시 복사하세요.",
+        "save": "저장",
+        "replace": "교체",
+        "remove": "삭제",
+        "cancel": "취소"
+      }
+    },
     "browser": {
       "label": "브라우저 알림",
       "hint": "이 브라우저에서 받은편지함 알림과 채팅 답변의 배너를 표시하도록 허용합니다.",

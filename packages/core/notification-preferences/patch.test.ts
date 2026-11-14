@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import {
   applyNotificationPreferencePatch,
@@ -80,6 +81,69 @@ describe("notification preference patches", () => {
         {},
         { comments: "muted" },
         {},
+      ),
+    ).toEqual({});
+  });
+
+  it("derives Google Chat webhook changes independently of mute groups", () => {
+    expect(
+      deriveNotificationPreferencePatch(
+        { comments: "muted" },
+        {
+          comments: "muted",
+          google_chat_webhook:
+            "https://chat.googleapis.com/v1/spaces/AAAA/messages?key=k&token=t",
+        },
+      ),
+    ).toEqual({
+      google_chat_webhook:
+        "https://chat.googleapis.com/v1/spaces/AAAA/messages?key=k&token=t",
+    });
+
+    expect(
+      deriveNotificationPreferencePatch(
+        { google_chat_webhook: "https://chat.googleapis.com/••••" },
+        {},
+      ),
+    ).toEqual({ google_chat_webhook: "" });
+  });
+
+  it("never places a raw Google Chat webhook in the optimistic cache", () => {
+    const raw =
+      "https://chat.googleapis.com/v1/spaces/AAAA/messages?key=k&token=t";
+    const applied = applyNotificationPreferencePatch({}, {
+      google_chat_webhook: raw,
+    });
+
+    expect(applied.google_chat_webhook).toBeUndefined();
+    expect(JSON.stringify(applied)).not.toContain("token=t");
+    expect(
+      rollbackNotificationPreferencePatch(
+        applied,
+        { google_chat_webhook: raw },
+        {},
+      ),
+    ).toEqual({});
+  });
+
+  it("keeps the confirmed webhook while replacing or removing it", () => {
+    const current = { google_chat_webhook: "masked", comments: "muted" } as const;
+    for (const webhook of ["replacement", ""]) {
+      expect(applyNotificationPreferencePatch(current, {
+        google_chat_webhook: webhook,
+      })).toEqual(current);
+    }
+  });
+
+  it("keeps a later Google Chat credential change when an earlier write fails", () => {
+    expect(
+      rollbackNotificationPreferencePatch(
+        {},
+        {
+          google_chat_webhook:
+            "https://chat.googleapis.com/v1/spaces/AAAA/messages?key=k&token=t",
+        },
+        { google_chat_webhook: "https://chat.googleapis.com/old-mask" },
       ),
     ).toEqual({});
   });

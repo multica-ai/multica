@@ -856,6 +856,27 @@
       "title": "システム通知",
       "label": "Multica がバックグラウンドにあるときにシステム通知を表示"
     },
+    "delivery": {
+      "title": "アプリ外への通知",
+      "google_chat": {
+        "label": "Google Chat",
+        "description": "新しいインボックス項目を Google Chat スペースに送信します。",
+        "input_label": "Google Chat Webhook URL",
+        "placeholder": "https://chat.googleapis.com/v1/spaces/…",
+        "how_to": "Google Chat スペース → アプリと統合 → Webhook → Webhook を追加 → URL をコピー。保存するとスペースにテストメッセージが送信されます。",
+        "connecting": "接続中…",
+        "connected": "スペース {{space}} に接続済み",
+        "invalid_url": "https://chat.googleapis.com/v1/spaces/ で始まる Google Chat Webhook URL を入力してください。",
+        "missing_credentials": "Webhook URL には key と token が必要です。Google Chat から URL 全体をコピーしてください。",
+        "connection_failed": "Google Chat に接続できませんでした。Webhook URL を確認して再試行してください。",
+        "remove_title": "Google Chat Webhook を削除しますか？",
+        "remove_description": "通知が停止します。再接続するには Google Chat から Webhook URL をもう一度コピーしてください。",
+        "save": "保存",
+        "replace": "置き換え",
+        "remove": "削除",
+        "cancel": "キャンセル"
+      }
+    },
     "browser": {
       "label": "ブラウザ通知",
       "hint": "受信トレイの通知とチャットの返信のバナー表示を、このブラウザに許可します。",

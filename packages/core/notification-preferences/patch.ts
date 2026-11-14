@@ -41,6 +41,12 @@ export function deriveNotificationPreferencePatch(
     }
   }
 
+  const previousWebhook = previous.google_chat_webhook ?? "";
+  const nextWebhook = next.google_chat_webhook ?? "";
+  if (previousWebhook !== nextWebhook) {
+    patch.google_chat_webhook = nextWebhook;
+  }
+
   return patch;
 }
 
@@ -59,6 +65,8 @@ export function applyNotificationPreferencePatch(
       delete next[key];
     }
   }
+
+  // Webhook writes require server confirmation; keep the last confirmed value.
 
   return next;
 }

@@ -856,6 +856,27 @@
       "title": "系统通知",
       "label": "Multica 在后台时显示系统通知"
     },
+    "delivery": {
+      "title": "应用外通知",
+      "google_chat": {
+        "label": "Google Chat",
+        "description": "将新的收件箱条目发送到 Google Chat 空间。",
+        "input_label": "Google Chat Webhook URL",
+        "placeholder": "https://chat.googleapis.com/v1/spaces/…",
+        "how_to": "Google Chat 空间 → 应用和集成 → Webhook → 添加 Webhook → 复制 URL。保存时会向空间发送测试消息。",
+        "connecting": "连接中…",
+        "connected": "已连接到空间 {{space}}",
+        "invalid_url": "请输入以 https://chat.googleapis.com/v1/spaces/ 开头的 Google Chat Webhook URL。",
+        "missing_credentials": "Webhook URL 必须同时包含 key 和 token。请从 Google Chat 复制完整 URL。",
+        "connection_failed": "无法连接到 Google Chat。请检查 Webhook URL 后重试。",
+        "remove_title": "移除 Google Chat Webhook？",
+        "remove_description": "通知将停止。重新连接时，需要再次从 Google Chat 复制 Webhook URL。",
+        "save": "保存",
+        "replace": "替换",
+        "remove": "移除",
+        "cancel": "取消"
+      }
+    },
     "browser": {
       "label": "浏览器通知",
       "hint": "允许此浏览器为收件箱通知和聊天回复显示横幅。",
