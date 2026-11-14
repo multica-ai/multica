@@ -7,7 +7,8 @@ export type NotificationGroupKey =
   | "updates"
   | "new_issues"
   | "agent_activity"
-  | "system_notifications";
+  | "system_notifications"
+  | "email_notifications";
 
 export type NotificationGroupValue = "all" | "muted";
 

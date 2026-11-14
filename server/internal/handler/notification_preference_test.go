@@ -11,6 +11,12 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
+func TestValidNotifGroups_IncludesEmailNotifications(t *testing.T) {
+	if !validNotifGroups["email_notifications"] {
+		t.Error("email_notifications must be a valid notification group")
+	}
+}
+
 func notificationPreferenceRequest(
 	t *testing.T,
 	method string,
