@@ -53,6 +53,8 @@
     "zoom_actual": "Taille réelle"
   },
   "attachment": {
+    "install_theme": "Installer le thème",
+    "install_theme_failed": "Impossible de lire la pièce jointe. Réessayez dans un instant.",
     "download_failed": "Impossible d'obtenir un lien de téléchargement. Réessayez dans un instant.",
     "preview": "Aperçu",
     "preview_loading": "Chargement de l'aperçu…",

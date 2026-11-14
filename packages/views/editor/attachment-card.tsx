@@ -27,6 +27,7 @@ interface AttachmentCardChromeProps {
   canPreview: boolean;
   canDownload: boolean;
   canDelete?: boolean;
+  action?: ReactNode;
   onPreview: () => void;
   onDownload: () => void | Promise<unknown>;
   onDelete?: () => void;
@@ -38,6 +39,7 @@ function AttachmentCardChrome({
   canPreview,
   canDownload,
   canDelete,
+  action,
   onPreview,
   onDownload,
   onDelete,
@@ -61,6 +63,7 @@ function AttachmentCardChrome({
             : filename}
         </p>
       </div>
+      {!uploading && action}
       {!uploading && canPreview && (
         <DeferredTooltip
           content={t(($) => $.attachment.preview)}
@@ -149,6 +152,8 @@ export interface AttachmentCardProps {
   onDownload: () => void | Promise<unknown>;
   /** Optional remove button, used by editable comment/file-card surfaces. */
   onDelete?: () => void;
+  /** A labelled button shown before the icons, such as Install theme. */
+  action?: ReactNode;
   /** Registers the card with the right-click menu. */
   scopeRef?: (element: HTMLElement | null) => void;
 }
@@ -162,6 +167,7 @@ export function AttachmentCard({
   onPreview,
   onDownload,
   onDelete,
+  action,
   scopeRef,
 }: AttachmentCardProps) {
   const kind = filename ? getPreviewKind(contentType, filename) : null;
@@ -177,6 +183,7 @@ export function AttachmentCard({
         canPreview={canPreview}
         canDownload={!!href}
         canDelete={!!onDelete}
+        action={action}
         onPreview={onPreview}
         onDownload={onDownload}
         onDelete={onDelete}
@@ -198,6 +205,8 @@ export interface AttachmentFileCardProps {
   onPreview: () => void;
   onDownload: () => void | Promise<unknown>;
   onDelete?: () => void;
+  /** A labelled button that stays visible, such as Install theme. */
+  action?: ReactNode;
   /** Registers the card with the right-click menu. */
   scopeRef?: (element: HTMLElement | null) => void;
 }
@@ -218,6 +227,7 @@ export function AttachmentFileCard({
   onPreview,
   onDownload,
   onDelete,
+  action,
   scopeRef,
 }: AttachmentFileCardProps) {
   const { t } = useT("editor");
@@ -263,6 +273,7 @@ export function AttachmentFileCard({
           </span>
         )}
       </span>
+      {!uploading && action}
       {!uploading && (canDownload || onDelete) && (
         <span className={cn(
           "relative flex shrink-0 items-center gap-0.5 transition-opacity group-hover/file-card:opacity-100 group-focus-within/file-card:opacity-100 [@media(hover:none)]:opacity-100",
