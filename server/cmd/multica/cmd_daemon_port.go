@@ -39,6 +39,10 @@ func readDaemonPortRecord(profile string) (daemonPortRecord, bool) {
 // A crash or systemd handoff can leave it behind. Old daemons without this file
 // remain discoverable at the profile-derived port.
 func resolveHealthPort(profile string) int {
+	return resolveHealthPortOr(profile, healthPortForProfile(profile))
+}
+
+func resolveHealthPortOr(profile string, preferred int) int {
 	if record, ok := readDaemonPortRecord(profile); ok {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		health := checkDaemonHealthOnPort(ctx, record.Port)
@@ -47,7 +51,7 @@ func resolveHealthPort(profile string) int {
 			return record.Port
 		}
 	}
-	return healthPortForProfile(profile)
+	return preferred
 }
 
 func publishDaemonPort(profile string, record daemonPortRecord) error {

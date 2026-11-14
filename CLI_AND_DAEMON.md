@@ -201,6 +201,20 @@ multica daemon autostart status --output json
 multica daemon autostart disable        # remove the registration
 ```
 
+On a shared Linux host, two OS users can each run a default-profile daemon.
+To give one account its own preferred health port at every login, run
+`systemctl --user edit multica-daemon.service` as that user and add:
+
+```ini
+[Service]
+Environment=MULTICA_DAEMON_HEALTH_PORT=19515
+```
+
+Choose a different port for each account. The setting takes effect the next
+time systemd starts that service. For a manual start, use
+`multica daemon start --health-port 19515`. Once the daemon is running,
+`multica daemon status` uses the active port recorded under that user's profile.
+
 Refresh: while an entry exists and carries Multica's ownership marker,
 `daemon start` silently rewrites it so a moved executable (a Homebrew
 upgrade, a self-update) heals. An entry at the same path that Multica did

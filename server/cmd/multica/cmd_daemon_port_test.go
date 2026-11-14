@@ -58,6 +58,9 @@ func TestResolveHealthPortValidatesRecordAndFallsBack(t *testing.T) {
 	if err := publishDaemonPort(profile, daemonPortRecord{Port: port, PID: 12345}); err != nil {
 		t.Fatal(err)
 	}
+	if got := resolveHealthPortOr(profile, 20077); got != port {
+		t.Fatalf("explicit startup preference masked active daemon record: got %d, want %d", got, port)
+	}
 	if got := resolveHealthPort(profile); got != port {
 		t.Fatalf("resolved port=%d, want live record %d", got, port)
 	}
