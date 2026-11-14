@@ -83,7 +83,7 @@ export function ChatComposer({
       attachmentIds: string[];
     }) => {
       // `onSend` may be sync or async; await is safe in both cases. If it
-      // throws, MessageComposer's catch restores text + chips.
+      // throws, MessageComposer keeps the draft for retry.
       await onSend(content, attachmentIds);
     },
     [onSend],
