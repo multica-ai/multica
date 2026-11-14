@@ -19,10 +19,11 @@ import {
   useCoordinatedUploads,
   type UploadDraftBinding,
 } from "../../editor/use-coordinated-uploads";
+import { Button } from "@multica/ui/components/ui/button";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { ChatAddMenu } from "./chat-add-menu";
 import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
-import { useChatStore, DRAFT_NEW_SESSION } from "@multica/core/chat";
+import { useChatStore, DRAFT_NEW_SESSION, useChatRunDraftStore, forgetChatRunDraft } from "@multica/core/chat";
 import { attachmentToDraftUpload, type DraftUpload } from "@multica/core/drafts";
 import { createLogger } from "@multica/core/logger";
 import { useShortcut, type ShortcutChord } from "@multica/core/shortcuts";
@@ -63,6 +64,7 @@ function isAttachmentReferenced(content: string, attachment: Attachment): boolea
 }
 
 interface ChatInputProps {
+  onAddToRun?: (content: string) => Promise<void>;
   onSend: (
     content: string,
     attachmentIds: string[] | undefined,
@@ -166,6 +168,7 @@ const PAGE_CONTEXT_SHORTCUT = {
 
 export function ChatInput({
   onSend,
+  onAddToRun,
   restoreDraftRequest,
   conversationStarterRequest,
   onConversationStarterApplied,
@@ -200,6 +203,7 @@ export function ChatInput({
   const editorAreaRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
+  const addToRunRef = useRef(false);
   // Two keys with deliberately different concerns:
   //
   // `draftKey` — zustand storage key. Scopes the in-progress draft per session
@@ -266,6 +270,13 @@ export function ChatInput({
     setAttachedPageKey(null);
   }
   const attachedPage = pageContext && attachedPageKey === pageContextKey ? pageContext : null;
+  const withPageContext = (content: string) => attachedPage
+    ? `[${escapeMarkdownLabel(attachedPage.label)}](mention://${attachedPage.type}/${attachedPage.id})\n\n${content}`
+    : content;
+  const retryContent = withPageContext(composeAnnotatedReply(inputDraft, annotations));
+  const retryDraft = useChatRunDraftStore((s) => s.draft.attempts.find(
+    (a) => a.session === draftKey && a.content === retryContent,
+  ));
   const togglePageContext = () =>
     setAttachedPageKey((current) => (current === pageContextKey ? null : pageContextKey));
 
@@ -601,9 +612,18 @@ export function ChatInput({
       });
       // The page goes ahead of the message as a mention, which is how chat
       // already hands the agent an issue or project to read.
-      const sent = attachedPage
-        ? `[${escapeMarkdownLabel(attachedPage.label)}](mention://${attachedPage.type}/${attachedPage.id})\n\n${content}`
-        : content;
+      const sent = withPageContext(content);
+      if (addToRunRef.current) {
+        if (!onAddToRun || draftAttachments.length > 0) return false;
+        try {
+          await onAddToRun(sent);
+          commitInput({ clearEditor: editorDraftKeyRef.current === keyAtSend });
+          return true;
+        } catch {
+          toast.error(t(($) => $.input.add_to_run_error));
+          return false;
+        }
+      }
       const accepted = await onSend(
         sent,
         uniqueActiveIds.length > 0 ? uniqueActiveIds : undefined,
@@ -869,6 +889,12 @@ export function ChatInput({
             {leftAdornment}
           </div>
         )}
+        {retryDraft && (
+          <Button type="button" size="xs" variant="ghost" disabled={submitting}
+            onClick={() => forgetChatRunDraft(retryDraft.id)}>
+            {t(($) => $.input.new_run_instruction)}
+          </Button>
+        )}
         <div className="absolute bottom-1 right-1.5 flex items-center gap-1">
           {pageContext && (
             <IconButton
@@ -881,6 +907,21 @@ export function ChatInput({
             >
               <Scan />
             </IconButton>
+          )}
+          {onAddToRun && (
+            <Button
+              type="button"
+              size="xs"
+              variant="ghost"
+              disabled={hasNothingToSend || submitting || !!disabled || !!noAgent || gate.uploading || draftAttachments.length > 0}
+              onClick={async () => {
+                if (submitting || addToRunRef.current) return;
+                addToRunRef.current = true;
+                try { await submit(); } finally { addToRunRef.current = false; }
+              }}
+            >
+              {retryDraft ? t(($) => $.input.retry_run) : t(($) => $.input.add_to_run)}
+            </Button>
           )}
           <SubmitButton
             onClick={submit}

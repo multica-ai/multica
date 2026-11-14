@@ -467,7 +467,12 @@ type ackTaskSupplementRequest struct {
 
 func (h *Handler) ClaimTaskSupplement(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "taskId")
-	if _, ok := h.requireDaemonTaskAccess(w, r, taskID); !ok {
+	task, ok := h.requireDaemonTaskAccess(w, r, taskID)
+	if !ok {
+		return
+	}
+	if task.ChatSessionID.Valid && !task.IssueID.Valid {
+		h.claimChatSupplement(w, r, task)
 		return
 	}
 	var req struct {
@@ -497,7 +502,8 @@ func (h *Handler) ClaimTaskSupplement(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) AckTaskSupplement(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "taskId")
-	if _, ok := h.requireDaemonTaskAccess(w, r, taskID); !ok {
+	task, ok := h.requireDaemonTaskAccess(w, r, taskID)
+	if !ok {
 		return
 	}
 	commentID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "commentId"), "comment id")
@@ -507,6 +513,10 @@ func (h *Handler) AckTaskSupplement(w http.ResponseWriter, r *http.Request) {
 	var req ackTaskSupplementRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if task.ChatSessionID.Valid && !task.IssueID.Valid {
+		h.ackChatSupplement(w, r, task, commentID, req)
 		return
 	}
 	var row db.TaskSupplement
