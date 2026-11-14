@@ -4,8 +4,7 @@ import { toast } from "sonner";
 import { ApiError } from "@multica/core/api";
 import { cronPreviewOptions } from "@multica/core/autopilots/queries";
 import { useT } from "../../../i18n";
-import type { ScheduleConfig } from "./model";
-import { toCron } from "./cron-mapping";
+import { type ScheduleConfig, toCron } from "@multica/core/autopilots/schedule";
 
 /** The server's rejection, split the way the editor is: which input is at fault
  *  (the cron box or the timezone picker), and the parser's own words. */

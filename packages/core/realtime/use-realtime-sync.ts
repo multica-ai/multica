@@ -863,11 +863,14 @@ export interface RealtimeSyncStores {
  * @param client - WebSocket client instance (null when not yet connected)
  * @param stores - Platform-created Zustand store instances for auth and workspace
  * @param onToast - Optional callback for showing toast messages (platform-specific)
+ * @param onWorkspaceLost - Opens the destination path after the current
+ *   workspace is lost. Defaults to a full-page navigation.
  */
 export function useRealtimeSync(
   client: WSClient | null,
   stores: RealtimeSyncStores,
   onToast?: (message: string, type?: "info" | "error") => void,
+  onWorkspaceLost?: (destination: string) => void,
 ) {
   const { authStore } = stores;
   const qc = useQueryClient();
@@ -878,6 +881,8 @@ export function useRealtimeSync(
   const hasOnboarded = useHasOnboarded();
   const hasOnboardedRef = useRef(hasOnboarded);
   hasOnboardedRef.current = hasOnboarded;
+  const onWorkspaceLostRef = useRef(onWorkspaceLost);
+  onWorkspaceLostRef.current = onWorkspaceLost;
 
   // Main sync: onAny -> refreshMap with debounce
   useEffect(() => {
@@ -1519,7 +1524,9 @@ export function useRealtimeSync(
         remaining,
         hasOnboardedRef.current,
       );
-      if (typeof window !== "undefined") {
+      if (onWorkspaceLostRef.current) {
+        onWorkspaceLostRef.current(target);
+      } else if (typeof window !== "undefined" && window.location) {
         // eslint-disable-next-line no-restricted-syntax -- in-app path, not an external URL; core has no router to hand it to
         window.location.assign(target);
       }

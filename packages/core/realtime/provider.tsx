@@ -52,6 +52,10 @@ export interface WSProviderProps {
   identity?: ClientIdentity;
   /** Optional callback for showing toast messages (platform-specific, e.g. sonner) */
   onToast?: (message: string, type?: "info" | "error") => void;
+  /** Opens the destination path after the current workspace is lost. Defaults to a full-page navigation. */
+  onWorkspaceLost?: (destination: string) => void;
+  /** Signals the user returning to the app, so a dropped connection retries without waiting out its backoff. */
+  subscribeAppActivity?: (onActivity: () => void) => () => void;
 }
 
 export function WSProvider({
@@ -62,6 +66,8 @@ export function WSProvider({
   cookieAuth,
   identity,
   onToast,
+  onWorkspaceLost,
+  subscribeAppActivity,
 }: WSProviderProps) {
   const user = authStore((s) => s.user);
   // Reactive read of the current workspace slug (URL-driven singleton in
@@ -130,10 +136,15 @@ export function WSProvider({
     identityOS,
   ]);
 
+  useEffect(() => {
+    if (!wsClient || !subscribeAppActivity) return;
+    return subscribeAppActivity(() => wsClient.reconnectNow());
+  }, [wsClient, subscribeAppActivity]);
+
   const stores: RealtimeSyncStores = { authStore };
 
   // Centralized WS -> store sync (uses state so it re-subscribes when WS changes)
-  useRealtimeSync(wsClient, stores, onToast);
+  useRealtimeSync(wsClient, stores, onToast, onWorkspaceLost);
 
   // Keeps this workspace's local search index attached and caught up.
   useLocalSearchIndexSync(wsClient, user?.id ?? null, wsId, wsSlug);

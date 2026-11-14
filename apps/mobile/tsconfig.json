@@ -1,17 +1,10 @@
 {
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
-    "resolveJsonModule": true,
     "strict": true,
-    "paths": {
-      "@/*": [
-        "./*"
-      ]
-    }
+    "noUncheckedIndexedAccess": true,
+    "types": ["node"]
   },
-  "include": [
-    "**/*.ts",
-    "**/*.tsx",
-    "nativewind-env.d.ts"
-  ]
+  "include": ["**/*.ts", "**/*.tsx", "expo-env.d.ts"],
+  "exclude": ["node_modules", "dist", "ios", "android"]
 }

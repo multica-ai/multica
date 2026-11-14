@@ -36,6 +36,13 @@ const PROCESS_ENV = {
     "packages/core must not read process.env. Have the app layer pass the value in (CoreProvider props or a function argument).",
 };
 
+// The iOS app runs core on Hermes, which lacks these; the call throws there
+// while every browser and Node test passes.
+const MISSING_ON_HERMES = ["toSorted", "toReversed", "toSpliced"].map((property) => ({
+  property,
+  message: `Hermes (apps/mobile) has no Array.prototype.${property}. Copy the array and use the mutating method instead.`,
+}));
+
 const WEB_STORAGE = [
   {
     name: "localStorage",
@@ -58,6 +65,7 @@ const boundaryRules = (allowedStorage = []) => {
     "no-restricted-properties": [
       "error",
       PROCESS_ENV,
+      ...MISSING_ON_HERMES,
       ...storage.flatMap(({ name, message }) =>
         ["window", "globalThis", "self"].map((object) => ({
           object,

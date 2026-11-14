@@ -14,8 +14,7 @@
  * order identical to what the reader sees without depending on what is
  * currently painted.
  *
- * Pure — no React, no DOM, no platform APIs. Mobile shares it (see
- * apps/mobile/CLAUDE.md: pure functions from @multica/core are importable).
+ * Pure — no React, no DOM, no platform APIs.
  */
 
 import { decodeHTMLAttribute } from "entities/decode";

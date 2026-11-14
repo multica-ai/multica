@@ -155,8 +155,7 @@ func TestSessionRenewCheckInterval_WireValueFitsInsideTheRenewalWindow(t *testin
 // value. That floor must never be the thing that decides the cadence, so the
 // server's own smallest possible value has to sit above it.
 func TestSessionRenewCheckInterval_StaysAboveTheClientFloors(t *testing.T) {
-	// packages/core/platform/session-renewal.ts and
-	// apps/mobile/data/session-renewal.ts both floor at 5 seconds.
+	// packages/core/platform/session-renewal.ts floors at 5 seconds.
 	const clientFloor = 5 * time.Second
 
 	for _, ttl := range []string{"1s", "30s", "1m", "10m", "720h"} {

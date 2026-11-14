@@ -1,21 +1,20 @@
 name: Mobile Verify
 
-# Runs lint + typecheck for apps/mobile only, parallel to the main CI
-# workflow. Path-filtered so PRs that don't touch mobile (or anything
-# mobile transitively depends on) pay zero cost.
+# Verifies apps/mobile only, parallel to the main CI workflow. Path-filtered
+# so PRs that don't touch mobile (or anything mobile transitively depends on)
+# pay zero cost.
 #
 # Path scope rationale — mobile transitively depends on:
 # - apps/mobile/**                — the app itself
-# - packages/core/**              — mobile imports types AND pure functions
-#                                   (agents, markdown, permissions, api/schemas, …),
-#                                   not only @multica/core/types
+# - packages/core/**              — mobile runs core whole: API client, auth,
+#                                   realtime, React Query and persisted stores
 # - package.json / pnpm-lock.yaml — install graph
 # - pnpm-workspace.yaml           — catalog versions
 # - turbo.json                    — turbo task pipeline
 #
-# Mobile's vitest suite is intentionally narrow (Node env, pure-function
-# tests under apps/mobile/lib/*.test.ts — see apps/mobile/vitest.config.ts).
-# RN component-level rendering is not exercised here.
+# The iOS bundle export catches what tsc cannot: a core change that Metro
+# cannot resolve or Hermes cannot compile. Native builds need Xcode and are
+# not run here.
 # Repository-wide radius checks run once in CI: frontend-build owns them when
 # selected, otherwise frontend-quality handles docs/mobile-only changes.
 
@@ -66,3 +65,6 @@ jobs:
 
       - name: Type check, lint, and test
         run: pnpm exec turbo typecheck lint test --filter=@multica/mobile
+
+      - name: Bundle for iOS
+        run: pnpm --filter @multica/mobile bundle:ios

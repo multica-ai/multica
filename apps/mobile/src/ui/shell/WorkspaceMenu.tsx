@@ -1,0 +1,163 @@
+import { useState, type ReactNode } from "react";
+import { Pressable, StyleSheet, View } from "react-native";
+import { FloatingButton, FloatingSurface } from "../components/Floating";
+import { Txt } from "../components/Text";
+import { Icon, type IconName } from "../icons/Icon";
+import { useStrings } from "../strings";
+import { useTheme } from "../theme";
+
+export interface MenuWorkspace {
+  slug: string;
+  name: string;
+}
+
+export interface MenuDestination {
+  key: string;
+  icon: IconName;
+  label: string;
+  meta?: string;
+}
+
+export interface MenuViews {
+  items: readonly MenuDestination[];
+  onAll: () => void;
+}
+
+interface WorkspaceMenuBodyProps {
+  workspace: MenuWorkspace;
+  workspaces: readonly MenuWorkspace[];
+  /** Groups of destinations, split by a hairline. */
+  sections: readonly (readonly MenuDestination[])[];
+  /** Starred views, in a card of their own under the destinations. */
+  views?: MenuViews;
+  active: string;
+  onNavigate: (key: string) => void;
+  onSwitch: (slug: string) => void;
+  onSettings: () => void;
+  initialMode?: "nav" | "workspaces";
+}
+
+function WorkspaceMark({ name }: { name: string }) {
+  const palette = useTheme();
+  return (
+    <View style={[styles.mark, { backgroundColor: palette.label }]}>
+      <Txt variant="caption" style={{ color: palette.background }}>
+        {name.trim().slice(0, 1).toUpperCase() || "?"}
+      </Txt>
+    </View>
+  );
+}
+
+interface MenuRowProps {
+  icon?: IconName;
+  label: string;
+  meta?: string;
+  checked?: boolean;
+  selected: boolean;
+  onPress: () => void;
+  leading?: ReactNode;
+}
+
+function MenuRow({ icon, label, meta, checked = false, selected, onPress, leading }: MenuRowProps) {
+  const palette = useTheme();
+  return (
+    <Pressable
+      // "menuitem" has no iOS trait; VoiceOver would not announce the row as tappable.
+      accessibilityRole="button"
+      accessibilityState={{ selected: selected || checked }}
+      onPress={onPress}
+      style={({ pressed }) => [styles.item, (selected || pressed) && { backgroundColor: palette.fill }]}
+    >
+      {leading ?? (icon ? <Icon name={icon} size={19} color={palette.label} /> : null)}
+      <Txt variant="row" numberOfLines={1} style={styles.flex}>
+        {label}
+      </Txt>
+      {meta ? (
+        <Txt variant="meta" tone="tertiary">
+          {meta}
+        </Txt>
+      ) : null}
+      {checked ? <Icon name="Check" size={17} color={palette.label} /> : null}
+    </Pressable>
+  );
+}
+
+/** Opened by the menu tab: every destination and the workspace switcher. The app shows it in a sheet. */
+export function WorkspaceMenuBody({ workspace, workspaces, sections, views, active, onNavigate, onSwitch, onSettings, initialMode = "nav" }: WorkspaceMenuBodyProps) {
+  const strings = useStrings();
+  const palette = useTheme();
+  const [mode, setMode] = useState(initialMode);
+  return (
+    <View style={styles.stack}>
+      <View style={styles.top}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={strings.more.switchWorkspace}
+          onPress={() => setMode(mode === "nav" ? "workspaces" : "nav")}
+          style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}
+        >
+          <FloatingSurface style={styles.pill}>
+            <WorkspaceMark name={workspace.name} />
+            <Txt variant="calloutStrong" numberOfLines={1} style={styles.pillName}>
+              {workspace.name}
+            </Txt>
+            <Icon name="ChevronsUpDown" size={15} color={palette.label2} />
+          </FloatingSurface>
+        </Pressable>
+        <View style={styles.flex} />
+        <FloatingButton icon="Settings" label={strings.more.settings} onPress={onSettings} />
+      </View>
+      <FloatingSurface style={styles.card}>
+        {mode === "nav"
+          ? sections.map((section, index) => (
+              <View key={index}>
+                {index > 0 ? <View style={[styles.rule, { backgroundColor: palette.separator }]} /> : null}
+                {section.map((item) => (
+                  <MenuRow key={item.key} icon={item.icon} label={item.label} meta={item.meta} selected={item.key === active} onPress={() => onNavigate(item.key)} />
+                ))}
+              </View>
+            ))
+          : workspaces.map((item) => (
+              <MenuRow
+                key={item.slug}
+                label={item.name}
+                selected={false}
+                checked={item.slug === workspace.slug}
+                leading={<WorkspaceMark name={item.name} />}
+                onPress={() => onSwitch(item.slug)}
+              />
+            ))}
+      </FloatingSurface>
+      {mode === "nav" && views ? (
+        <FloatingSurface style={styles.card}>
+          <View style={styles.cardHead}>
+            <Txt variant="caption" tone="tertiary" style={styles.flex}>
+              {strings.nav.views}
+            </Txt>
+            <Pressable accessibilityRole="button" hitSlop={10} onPress={views.onAll}>
+              <Txt variant="caption" tone="tertiary">
+                {strings.nav.all}
+              </Txt>
+            </Pressable>
+          </View>
+          {views.items.map((item) => (
+            <MenuRow key={item.key} icon={item.icon} label={item.label} meta={item.meta} selected={item.key === active} onPress={() => onNavigate(item.key)} />
+          ))}
+        </FloatingSurface>
+      ) : null}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  stack: { gap: 10 },
+  top: { flexDirection: "row", alignItems: "center", gap: 10 },
+  pill: { height: 44, borderRadius: 22, flexDirection: "row", alignItems: "center", gap: 8, paddingLeft: 8, paddingRight: 12, flexShrink: 1 },
+  pillName: { flexShrink: 1 },
+  mark: { width: 26, height: 26, borderRadius: 7, alignItems: "center", justifyContent: "center" },
+  card: { borderRadius: 22, padding: 6 },
+  cardHead: { flexDirection: "row", paddingHorizontal: 12, paddingTop: 6, paddingBottom: 2 },
+  rule: { height: StyleSheet.hairlineWidth, marginHorizontal: 12, marginVertical: 4 },
+  item: { height: 44, borderRadius: 14, flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 12 },
+  flex: { flex: 1 },
+});

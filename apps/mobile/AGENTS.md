@@ -1,94 +1,50 @@
-# Mobile App Instructions
+# Mobile Instructions
 
-These rules apply only to `apps/mobile/`, in addition to the [root instructions](../../AGENTS.md). Paths below are relative to `apps/mobile/` unless prefixed with `packages/` or `.github/`.
+The root [AGENTS.md](../../AGENTS.md) applies here too. This file covers what is specific to `apps/mobile/`.
 
-## Sharing and Dependencies
+## Shape
 
-- Mobile owns its UI, state, hooks, providers, API client, QueryClient, i18n, and build/release workflow. Import core types with `import type`; runtime imports are limited to pure utilities and platform-independent schemas. Do not import web/desktop stores, hooks, Query factories, or WS updaters. Import runtime values through the pure module's own subpath (e.g. `@multica/core/agents/derive-presence`); `eslint.config.js` rejects value imports from core barrels other than `types` and `markdown`, because the rest also load hooks, queries, stores, or React context. Add the narrow subpath to `packages/core/package.json` exports when it is missing.
-- Use `package.json` and the lockfile for current versions. Mobile pins Expo/React Native dependencies rather than taking the root React catalog.
-- Add SDK-aligned native packages with `pnpm exec expo install <package>` from this directory. Check compatibility before adding other dependencies; do not pick versions from memory.
-- Follow [README.md](README.md) for setup, simulator/device builds, and environment variants. Keep iOS scripts routed through `scripts/ios-run.sh`, which prebuilds before running iOS so config plugins are reapplied. Preserve the caller's `APP_ENV`; avoid clean prebuilds in the normal edit loop.
-- Generated `ios/` and `android/` directories are not source. Check new source paths with `git check-ignore -v <path>` when they could match the root ignore rules, particularly `data/`, `build/`, and `bin/`.
+An Expo/React Native app for iPhone and iPad. Product logic is `@multica/core`, the same code Web and Desktop run; the app supplies what core needs from a host and draws native UI on top.
 
-## Behavioral Parity
-
-- Before implementing a feature, inspect its web/desktop implementation in `packages/views/` and `packages/core/`: endpoints, permissions, state transitions, display transforms, and cross-cache side effects.
-- Match product semantics: counts/visibility, permissions, enums, and canonical IDs/fields. Adapt UI and navigation to the phone; document meaningful divergences with the source behavior they preserve.
-- Mirror the relevant behavior using mobile-owned caches and helpers; do not copy cache shapes or UI preprocessing blindly. List transforms must preserve pagination, grouping, and visibility semantics.
-- Reuse `lib/inbox-display.ts` for inbox list display. Badge counts come from the server unread summary via `lib/unread-counts.ts` and `data/queries/inbox.ts`; do not derive them from the downloaded list. Inbox writes/events refresh both the list and unread summary through `data/realtime/inbox-ws-updaters.ts`.
-- An explicit implementation request authorizes work. Explain significant interaction choices and parity points briefly; ask when an unresolved product decision affects the implementation, not for a second approval using special wording.
-
-## UI Components
-
-- Inspect existing rows, pickers, forms, and domain visuals before adding components. Extend a suitable existing pattern; do not rewrite a domain component merely because a new feature uses it.
-- For a new interaction, prefer a native iOS/RN API, then an RNR component. If neither fits, compose existing primitives inline for a local need. A new generic primitive requires at least three callers and no suitable native/RNR alternative; clarify unresolved interaction requirements before inventing one.
-- Native examples: `Alert.prompt` for text prompts, `Alert.alert` for confirmation, `ActionSheetIOS` for action menus, existing native date/media/document pickers, `Share.share`, and `expo-haptics`.
-- Add RNR components with `npx @react-native-reusables/cli@latest add <name>`. Review generated changes and preserve local customizations. Keep default variants/spacing unless a concrete product need requires changes.
-- Generic primitives live in `components/ui/`; domain compositions live in `components/<domain>/`. Use the existing `cn()` in `lib/utils.ts` and semantic tokens.
-- Screens have titles, tab bars have icons, secondary labels use type-aware helpers, and multiple trailing row elements stack vertically. Check long text, keyboard, safe areas, scrolling, and both themes.
-
-### Theming model
-
-- `global.css` defines mobile color variables; `tailwind.config.js` maps classes and `lib/theme.ts` supplies native style/navigation values. Update the corresponding mappings together when changing tokens.
-- Preserve class-based light/dark/system switching through `lib/use-color-scheme.ts` and its secure-store persistence. React Navigation uses `NAV_THEME` from `lib/theme.ts`.
-- Keep mobile tokens local; do not import web/desktop CSS. Read [docs/markdown-rendering-adr.md](docs/markdown-rendering-adr.md) before changing the Markdown renderer or its native styling.
-
-### Sheets and navigation
-
-- Import navigation hooks, theme providers, and theme values from `expo-router`. Its bundled navigation context is separate from `@react-navigation/*`; direct imports from those packages are lint errors.
-
-| Content | Container |
+| Location | Responsibility |
 | --- | --- |
-| Confirmation or text prompt | Native alert/prompt |
-| Short action menu | Native action sheet; reuse existing local popover patterns when appropriate |
-| Long list, search, form, or keyboard interaction | Expo Router `presentation: "formSheet"` route |
-| Multi-screen modal flow | Expo Router `presentation: "modal"` |
+| `index.ts`, `src/boot.ts` | Boot order. `src/platform/install-storage` is the first import of `boot.ts`, because core's persisted stores read storage when their modules load. In a browser Metro resolves `src/boot.web.ts` instead, which mounts the screen preview. |
+| `src/platform/` | Host layer for core, no UI: storage backend, endpoints, client identity, app lifecycle, workspace selection, deep links, locale, sign-out, and `MobileCoreProvider`. |
+| `src/ui/theme/`, `src/ui/components/`, `src/ui/icons/` | Design language: light and dark palettes, type ramp, floating controls, chips, avatars, status and priority glyphs. |
+| `src/ui/model/` | Hooks and pure helpers the containers share to turn core data into view models: the current workspace, actor names, the workspace roster, status presentation, issue grouping, dates, run phases and steps, and the project, view, squad and autopilot row models. Schedules are edited through core's `autopilots/schedule`; `model/schedule.ts` only picks which of its patterns the phone offers. The root `.gitignore` ignores every `data/` directory, so do not name a folder `data`. |
+| `src/ui/markdown/` | Markdown parsing and rendering for descriptions, comments and chat, tables and images included. Images and links resolve through `MarkdownHostContext`; the app's host (`src/ui/shell/markdown-host.ts`) loads attachment images with the session token and opens files through a signed download URL. |
+| `src/ui/screens/<screen>/` | One folder per screen: a `*View.tsx` that renders view-model props only, and a `*Screen.tsx` container that maps core queries and mutations to those props. |
+| `src/ui/shell/`, `src/ui/navigation/` | Native stack inside system tabs (`createNativeBottomTabNavigator`). More opens the workspace menu as a sheet route; projects, squads and autopilots are pages pushed from it; editors and single-property pickers (`IssueField`) are modal routes. On wide windows `ListDetail.tsx` splits each tab into a list and a detail column, at the fold when the display has one; `useDetail()` opens an issue or conversation in that column, or pushes it when narrow. |
+| `modules/fold-layout/` | Local Expo module reporting the display's folds (iOS 27.1 reserved regions) and the native safe area. Changing it needs `pod install` or a fresh prebuild. |
+| `src/ui/strings.ts` | UI copy in English and Simplified Chinese (Traditional Chinese uses the Simplified strings until it has its own). |
+| `src/preview/` | Browser gallery of the real views with fixture data, for reviewing screens without Xcode. |
+| `app.config.ts` | Native configuration per variant (development, staging, production). `ios/` is generated by `expo prebuild` and not tracked. |
 
-- All pickers in one attribute row use the same formSheet interaction, including short option lists.
-- Place picker routes under their owning context and register them in `app/(app)/[workspace]/_layout.tsx` using `SHEET_OPTIONS`. Reuse that configuration rather than copying its current values; document necessary overrides at the route.
-- Sheet bodies own their data lookup and mutation, then return with `router.back()`. Draft flows use the appropriate local draft store when there is no persisted record. Follow the existing body-header pattern unless the route explicitly requires native header chrome.
-- Check the return destination when opening a sheet from another modal, and handle deep links without assuming the record is already cached.
-- Destructive swipes reveal an action that requires a tap; never auto-execute on full swipe. Reuse `components/inbox/swipeable-inbox-row.tsx`, including its one-shot haptic feedback.
+## Rules
 
-## Data Layer
-
-Use the existing helpers rather than rebuilding request or subscription plumbing.
-
-| Concern | Implementation |
-| --- | --- |
-| Requests | `data/api.ts`: `fetchValidated` for GET, `fetchValidatedWith` for writes with consumed response bodies |
-| Response schemas/fallbacks | `data/schemas.ts`, `lib/parse-response.ts`; reuse compatible pure schemas from core |
-| Query keys and options | `data/queries/`; mutations import the corresponding key factory |
-| Query lifecycle | `data/query-client.ts`: AppState focus and NetInfo connectivity |
-| Realtime lifecycle | `data/realtime/ws-client.ts`, `data/realtime/realtime-provider.tsx`, `lib/use-ws-subscriptions.ts` |
-
-- UI-consumed responses follow the root API compatibility rules. Raw `fetch` is reserved for writes whose response body is unused. Fallback values must satisfy the expected success type.
-- Forward each query's `signal` through the API method to fetch. Preserve the request timeout and caller-abort forwarding in `data/api.ts`; do not replace its cancellation implementation without checking the supported mobile runtime.
-- Preserve the API client's request IDs/logging and the idempotent 401 cleanup in `app/_layout.tsx` (auth, workspace, Query cache, navigation). Mobile uses bearer auth; do not copy browser cookie/CSRF plumbing.
-- Use feature key factories, with `wsId` for workspace data and separate account-level keys for cross-workspace summaries. Do not hardcode keys or require every key to have the same number of segments.
-- **Optimistic-update exception:** inbox mark-read may patch synchronously before navigation to avoid an unread row in the iOS transition snapshot. Keep this inside the mutation, capture rollback state before patching, and refresh on settle. It is not permission to optimistically create/delete/leave or to generalize navigation-time optimism.
-- Other mutations follow the root optimistic-update policy; message sends retain visible pending/retry states.
-
-## Realtime
-
-- Keep listing subscriptions mounted for the workspace session in `RealtimeSubscriptions` in `app/(app)/[workspace]/_layout.tsx`. Record subscriptions belong to the owning screen, filter by record ID, and clean up on unmount/ID changes.
-- Use `useWSSubscriptions` and typed `ws.on`. When adding protocol events, update both `WSEventType` and `WSEventPayloadMap` in `packages/core/types/events.ts`; narrow unknown payloads rather than adding unchecked casts.
-- Updaters belong to the feature whose cache they change. That feature subscribes to relevant foreign events; for example, inbox owns its reactions to issue status/deletion events.
-- Patch when the payload and cache shape make the result determinate. Invalidate when information is incomplete, list membership is uncertain, or an infrequent event makes refetching simpler. Use existing refresh helpers that handle in-flight request races.
-- Each feature refreshes its affected caches on reconnect, including any account-level projections it owns. Avoid a global refetch sweep or subscriptions with no mobile consumer.
-- Accept authoritative WS updates over local optimistic state. Do not add timestamp gates to protect optimistic patches without a demonstrated ordering problem.
+- Server data, client state and realtime come from core's queries, mutations and stores. Do not add request helpers, query keys or WebSocket handlers here. When core lacks something mobile needs, add it to core and keep it safe on React Native (root rules, "Sharing Rules and Package Boundaries").
+- UI uses React Native and native modules only. `packages/views/` and `packages/ui/` render DOM and cannot be imported.
+- Persist through core's `defaultStorage`, which the installed backend routes to the app's SQLite key-value store. Credentials go to the Keychain: add any new credential key to `SECURE_KEYS` in `src/platform/storage.ts`.
+- Keep platform logic in plain functions apart from the native modules that feed it, so it runs under Vitest in Node with native modules mocked.
+- Expo and React Native packages are pinned to the SDK's versions in this manifest (exempt from the dependency catalog); change them with `pnpm exec expo install`. Libraries core also uses, such as React Query and Zustand, stay on `catalog:` so the app and core share one instance.
+- Views take plain props and never read core, so the preview can render them. Put query and mutation code in the screen's container.
+- Headers are system navigation bars. Screens describe them with `TitleHeader` / `PushHeader` from `src/ui/components/Header.tsx` and pass buttons as `actions`, which become native bar items (icons map through `src/ui/icons/sf-symbols.ts`). `HeaderPlacementContext` draws the same header inline for the list column and the preview, and gives the detail column only its actions.
+- Action sheets, prompts and destructive confirmations go through `src/ui/components/action-sheet.ts`; editors build on the sheet header, fields and choice lists in `src/ui/components/Form.tsx`.
+- Colors, type and radii come from `src/ui/theme`; do not hard-code them in screens. Color is for status, avatars, unread dots and diffs; everything else is the monochrome palette.
+- Icons are copied from `packages/ui/icons/glyphs.ts`. Add a name to `scripts/sync-icons.mjs` and run `pnpm --filter @multica/mobile sync:icons`.
+- `patches/expo-modules-core@*.patch` makes Expo present UI from the foreground scene's key window, which scene-based apps need. Root `package.json` applies it; drop it once Expo ships the fix.
 
 ## Verification
 
-From the repository root:
+Run from the repository root:
 
 ```bash
 pnpm --filter @multica/mobile typecheck
 pnpm --filter @multica/mobile lint
 pnpm --filter @multica/mobile test
+pnpm --filter @multica/mobile bundle:ios   # Metro resolution and Hermes compile
 ```
 
-- Root frontend checks exclude mobile. `.github/workflows/mobile-verify.yml` defines the current mobile CI scope; these checks do not build an IPA or verify native rendering.
-- For UI changes, verify the affected flow in the simulator/device, including themes, keyboard/scrolling, and navigation. For shared semantics or realtime changes, change the same data from web and confirm mobile catches up without manual refresh, including after reconnect.
-- Test parsing/transforms in the existing Vitest setup. Preserve `scripts/ios-run.test.sh` coverage when changing the native build wrapper.
-- Report which checks ran and which native/cross-client checks were unavailable. Do not claim visual or release verification from typecheck/unit tests alone.
+For UI changes, also look at the screens: `pnpm --filter @multica/mobile preview:web` serves the gallery (`?screens=inbox,issue&scheme=dark&locale=en`), and `preview:export` writes a static build to `dist-web/` for headless screenshots. Add a gallery entry with fixtures for each new view. The gallery draws headers inline and the tab bar with a stand-in (`src/preview/TabBar.tsx`); system bars, the split layout and folds only show in a native build.
+
+A native build (`pnpm ios:mobile`) needs Xcode; say so when you could not run it.

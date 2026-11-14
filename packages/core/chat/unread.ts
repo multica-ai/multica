@@ -6,8 +6,7 @@ import type { ChatSession } from "../types/chat";
  *
  * Single source of truth for every surface that renders an aggregate chat
  * unread count (web/desktop sidebar, mobile tab bar) — the platforms must
- * show the same N for the same account state (see "Behavioral parity" in
- * apps/mobile/CLAUDE.md). Pure function so mobile can import it directly.
+ * show the same N for the same account state.
  *
  * `excludeSessionId` drops one session from the sum: the session the user is
  * currently reading. The chat thread list renders that session's own badge

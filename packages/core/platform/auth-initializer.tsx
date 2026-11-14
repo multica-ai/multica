@@ -17,6 +17,7 @@ import { createLogger } from "../logger";
 import { clearClientSessionData } from "./session-cleanup";
 import { defaultStorage } from "./storage";
 import type { ClientIdentity } from "./types";
+import { addWindowListener, removeWindowListener } from "./window-events";
 import type { StorageAdapter } from "../types/storage";
 import type { User } from "../types";
 
@@ -170,7 +171,7 @@ export function AuthInitializer({
       inFlight = false;
       if (cancelled) return;
       if (loaded) {
-        window.removeEventListener("online", retryNow);
+        removeWindowListener("online", retryNow);
         return;
       }
       if (retryAfterFlight) {
@@ -205,13 +206,13 @@ export function AuthInitializer({
     };
 
     retryConfigRef.current = retryNow;
-    window.addEventListener("online", retryNow);
+    addWindowListener("online", retryNow);
     void attempt();
 
     return () => {
       cancelled = true;
       retryConfigRef.current = () => {};
-      window.removeEventListener("online", retryNow);
+      removeWindowListener("online", retryNow);
       if (retryTimer !== undefined) clearTimeout(retryTimer);
     };
   }, [loadConfig]);
@@ -245,7 +246,7 @@ export function AuthInitializer({
 
     const rejectSession = () => {
       settled = true;
-      window.removeEventListener("online", retryNow);
+      removeWindowListener("online", retryNow);
       if (retryTimer !== undefined) clearTimeout(retryTimer);
       // One teardown for every dead session, whether it died at boot or
       // under a running shell. The api client's 401 hook has normally run
@@ -295,7 +296,7 @@ export function AuthInitializer({
         // on both platforms. Publish the verified user immediately; route and
         // shell consumers own the shared workspace query and its recovery.
         settled = true;
-        window.removeEventListener("online", retryNow);
+        removeWindowListener("online", retryNow);
         onAuthSuccess(user);
         warmWorkspaces();
       } catch (err) {
@@ -350,17 +351,17 @@ export function AuthInitializer({
         useAuthStore.getState().sessionExpired();
       } else {
         api.setToken(token);
-        window.addEventListener("online", retryNow);
+        addWindowListener("online", retryNow);
         void attempt();
       }
     } else {
-      window.addEventListener("online", retryNow);
+      addWindowListener("online", retryNow);
       void attempt();
     }
 
     return () => {
       cancelled = true;
-      window.removeEventListener("online", retryNow);
+      removeWindowListener("online", retryNow);
       if (retryTimer !== undefined) clearTimeout(retryTimer);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps

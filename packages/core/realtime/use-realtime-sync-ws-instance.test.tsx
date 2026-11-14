@@ -959,6 +959,20 @@ describe("useRealtimeSync — member:removed", () => {
     // Let the relocate lookup settle before the test tears down.
     await waitFor(() => expect(qc.getQueryData(workspaceKeys.list())).toEqual([]));
   });
+
+  it("hands the destination to the host when it provides a navigator", async () => {
+    setApiInstance({ listWorkspaces: vi.fn().mockResolvedValue([]) } as unknown as ApiClient);
+    const onWorkspaceLost = vi.fn();
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const ws = createMockWs();
+    renderHook(() => useRealtimeSync(ws, createStores(), undefined, onWorkspaceLost), {
+      wrapper: createWrapper(qc),
+    });
+
+    dispatchMemberRemoved(ws, { member_id: "m1", user_id: "u1", workspace_id: "ws-1" });
+
+    await waitFor(() => expect(onWorkspaceLost).toHaveBeenCalledWith("/"));
+  });
 });
 
 describe("deliverable inventory freshness", () => {

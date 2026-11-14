@@ -57,9 +57,8 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { ScheduleEditor } from "./schedule-editor/schedule-editor";
 import { WebhookUrlField } from "./webhook-url-field";
-import { getDefaultScheduleConfig, type ScheduleConfig } from "./schedule-editor/model";
+import { getDefaultScheduleConfig, type ScheduleConfig, cronFields, parseCron, toCron } from "@multica/core/autopilots/schedule";
 import { browserTimezone } from "../../common/timezone-select";
-import { cronFields, parseCron, toCron } from "./schedule-editor/cron-mapping";
 import { useDescribeSchedule } from "./schedule-editor/describe";
 import { formatInTimeZone } from "../../common/format-in-time-zone";
 import { SegmentedToggle } from "../../common/segmented-toggle";
