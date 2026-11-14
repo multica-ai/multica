@@ -14,6 +14,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { createChatStore, registerChatStore, useChatStore } from "@multica/core/chat";
 import type { ReactElement } from "react";
 
 const { resolveIssueIdentifierMock, mermaidRenderMock } = vi.hoisted(() => ({
@@ -186,6 +187,9 @@ function seedTimeline(client: QueryClient, text: string) {
 }
 
 beforeEach(() => {
+  registerChatStore(createChatStore({
+    storage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+  }));
   vi.clearAllMocks();
   mermaidRenderMock.mockResolvedValue({
     svg: '<svg viewBox="0 0 123 45"><g><text>diagram</text></g></svg>',
@@ -358,7 +362,8 @@ describe("live → persisted row identity", () => {
   // Howard's contract #1: the handoff must be an in-place data swap, not a
   // remount, or every completed task rebuilds its diagrams and the scroll
   // position jumps.
-  it("keeps one row key across the handoff and does not re-run Mermaid", async () => {
+  it.each([false, true])("keeps one row key across the handoff and does not re-run Mermaid (collapsed preference %s)", async (keepExecutionDetailsCollapsed) => {
+    useChatStore.setState({ keepExecutionDetailsCollapsed });
     const client = makeClient();
     seedTimeline(client, MERMAID_FIXTURE);
 

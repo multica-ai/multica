@@ -506,6 +506,7 @@
   },
   "chat": {
     "floating_label": "フローティングチャット",
+    "collapsed_execution_details_label": "チャットの実行詳細を既定で折りたたむ",
     "floating_hint": "すべてのページにフローティングチャットボタンを表示します。",
     "ask_agent_label": "「Multica に聞く」のエージェント",
     "ask_agent_hint": "このワークスペースで、下部バーから始める新しいチャットの相手になるエージェント。",

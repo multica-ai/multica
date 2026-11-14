@@ -156,6 +156,11 @@ export function useSettingsSearchIndex(
       },
       {
         tab: "preferences",
+        anchor: "chat-execution-details",
+        title: t(($) => $.chat.collapsed_execution_details_label),
+      },
+      {
+        tab: "preferences",
         anchor: "issue-opening",
         title: t(($) => $.issue.opening.click),
         description: t(($) => $.issue.opening.hint),

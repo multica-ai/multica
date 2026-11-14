@@ -512,6 +512,7 @@
   },
   "chat": {
     "floating_label": "Ventana de chat flotante",
+    "collapsed_execution_details_label": "Contraer los detalles de ejecución del chat por defecto",
     "floating_hint": "Muestra el botón de chat flotante en todas las páginas.",
     "ask_agent_label": "Agente de Preguntar a Multica",
     "ask_agent_hint": "El agente con el que empieza un chat nuevo desde la barra inferior, en este espacio de trabajo.",

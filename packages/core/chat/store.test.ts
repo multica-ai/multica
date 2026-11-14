@@ -217,6 +217,27 @@ describe("chat store — draft attachments", () => {
   });
 });
 
+describe("chat store — collapsed execution details preference", () => {
+  it("defaults off and ignores malformed stored values", () => {
+    const storage = memStorage();
+    expect(createChatStore({ storage }).getState().keepExecutionDetailsCollapsed).toBe(false);
+    storage.setItem("multica:chat:keepExecutionDetailsCollapsed", "invalid");
+    expect(createChatStore({ storage }).getState().keepExecutionDetailsCollapsed).toBe(false);
+  });
+
+  it("persists both choices across store recreation without changing floating chat", () => {
+    const storage = memStorage();
+    const store = createChatStore({ storage });
+    store.getState().setKeepExecutionDetailsCollapsed(true);
+    expect(storage.getItem("multica:chat:keepExecutionDetailsCollapsed")).toBe("true");
+    const reopened = createChatStore({ storage });
+    expect(reopened.getState().keepExecutionDetailsCollapsed).toBe(true);
+    expect(reopened.getState().floatingChatEnabled).toBe(true);
+    reopened.getState().setKeepExecutionDetailsCollapsed(false);
+    expect(createChatStore({ storage }).getState().keepExecutionDetailsCollapsed).toBe(false);
+  });
+});
+
 describe("chat store — floating window preference", () => {
   it("defaults ON when no preference is stored", () => {
     const store = createChatStore({ storage: memStorage() });

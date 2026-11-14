@@ -506,6 +506,7 @@
   },
   "chat": {
     "floating_label": "懸浮聊天窗",
+    "collapsed_execution_details_label": "預設收合聊天執行詳情",
     "floating_hint": "在每個頁面顯示懸浮聊天按鈕。",
     "ask_agent_label": "「問 Multica」的 AI 代理",
     "ask_agent_hint": "在此工作區從底部列發起新對話時使用的 AI 代理。",
