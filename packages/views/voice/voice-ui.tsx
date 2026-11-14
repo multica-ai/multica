@@ -224,7 +224,7 @@ export function VoiceStrip({ voice }: { voice: ComposerVoice }) {
         <span className="flex size-[var(--button-height-sm)] shrink-0 items-center justify-center">
           <Mic className="size-4 text-muted-foreground" />
         </span>
-        <ShimmerText className="truncate pl-1 text-caption font-medium text-muted-foreground">
+        <ShimmerText className="ml-1 truncate text-caption font-medium text-muted-foreground">
           {t(($) => $.voice.transcribing)}
         </ShimmerText>
       </div>
@@ -242,7 +242,7 @@ export function VoiceStrip({ voice }: { voice: ComposerVoice }) {
         <X />
       </IconButton>
       {phase === "requesting" ? (
-        <ShimmerText className="min-w-0 flex-1 truncate pl-1 text-caption font-medium text-muted-foreground">
+        <ShimmerText className="ml-1 min-w-0 flex-1 truncate text-caption font-medium text-muted-foreground">
           {t(($) => $.voice.requesting)}
         </ShimmerText>
       ) : (
