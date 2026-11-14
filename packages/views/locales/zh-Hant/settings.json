@@ -349,7 +349,7 @@
     },
     "density": {
       "title": "資訊密度",
-      "description": "任務清單和搜尋結果的列高。",
+      "description": "任務清單、搜尋結果和側邊欄的列高，以及看板的間距。",
       "compact": "緊湊",
       "default": "標準",
       "comfortable": "寬鬆"

@@ -131,10 +131,15 @@ class Bridge {
   };
 
   private applyTheme(theme: ThemeTokens) {
+    const previous = this.theme;
     this.theme = theme;
     if (typeof document !== "undefined") {
+      const root = document.documentElement.style;
+      for (const name of Object.keys(previous)) {
+        if (!(name in theme)) root.removeProperty(name);
+      }
       for (const [name, value] of Object.entries(theme)) {
-        document.documentElement.style.setProperty(name, value);
+        root.setProperty(name, value);
       }
     }
     for (const listener of this.themeListeners) listener(theme);

@@ -349,7 +349,7 @@
     },
     "density": {
       "title": "밀도",
-      "description": "이슈 목록과 검색 결과의 행 높이.",
+      "description": "이슈 목록, 검색 결과, 사이드바의 행 높이와 보드의 간격.",
       "compact": "좁게",
       "default": "기본",
       "comfortable": "넓게"

@@ -51,6 +51,8 @@ function ActorAvatar({
   return (
     <div
       data-slot="avatar"
+      data-mc="avatar"
+      data-type={isSystem ? "system" : isAgent ? "agent" : isSquad ? "squad" : "member"}
       className={cn(
         "inline-flex shrink-0 items-center justify-center font-medium overflow-hidden",
         (!avatarUrl || emoji || imgError) && "bg-muted text-muted-foreground",

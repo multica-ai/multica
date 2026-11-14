@@ -355,7 +355,7 @@
     },
     "density": {
       "title": "Density",
-      "description": "Row height in issue lists and search.",
+      "description": "Row height in issue lists, search and the sidebar, and spacing on the board.",
       "compact": "Compact",
       "default": "Default",
       "comfortable": "Comfortable"

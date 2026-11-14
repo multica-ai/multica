@@ -179,6 +179,7 @@ function PaletteFrame({
   return (
     <>
       <CommandPrimitive
+        data-mc="command-palette"
         key={stack.length}
         label={t(($) => $.title)}
         shouldFilter={false}

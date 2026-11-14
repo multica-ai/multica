@@ -34,9 +34,14 @@ import {
 import { BreadcrumbHeader, type BreadcrumbSegment } from "./breadcrumb-header";
 
 /** The reading column of an object page; the header above it stays full width. */
-export const OBJECT_PAGE_BODY = "mx-auto w-full max-w-[760px] px-6 py-8";
+export const OBJECT_PAGE_BODY =
+  "mx-auto w-full max-w-[var(--object-page-max-width,760px)] px-[var(--space-lg,1.5rem)] py-[var(--space-xl,2rem)]";
+
+/** What an object page shows, as themes see it on `data-type`. */
+export type ObjectPageType = "project" | "agent" | "squad" | "runtime" | "member" | "autopilot" | "skill";
 
 interface ObjectPageProps {
+  type: ObjectPageType;
   /** The lists this object was opened from, each one a link back. */
   segments: BreadcrumbSegment[];
   /** The object's own crumb. */
@@ -65,7 +70,7 @@ interface ObjectPageProps {
  * right panel the header toggles — the layout the issue page already uses.
  * There are no tabs: what a tab would hold is a section of the body.
  */
-export function ObjectPage({ segments, leaf, actions, panel, layoutId, children, scrollRef }: ObjectPageProps) {
+export function ObjectPage({ type, segments, leaf, actions, panel, layoutId, children, scrollRef }: ObjectPageProps) {
   const { t } = useT("layout");
   const isMobile = useIsMobile();
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({ id: layoutId });
@@ -134,7 +139,7 @@ export function ObjectPage({ segments, leaf, actions, panel, layoutId, children,
 
   if (!panel) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col">
+      <div data-mc="object-page" data-type={type} className="flex min-h-0 flex-1 flex-col">
         {header}
         {body}
       </div>
@@ -142,7 +147,7 @@ export function ObjectPage({ segments, leaf, actions, panel, layoutId, children,
   }
 
   return (
-    <div ref={shortcutTargetRef} className="flex min-h-0 flex-1 flex-col">
+    <div ref={shortcutTargetRef} data-mc="object-page" data-type={type} className="flex min-h-0 flex-1 flex-col">
       {header}
       <ResizablePanelGroup
         orientation="horizontal"
@@ -311,6 +316,8 @@ export function ObjectSectionEmpty({
 }) {
   return (
     <div
+      data-mc="empty-state"
+      data-variant="section"
       className={cn(
         "flex min-h-13 items-center gap-3 rounded-lg border border-dashed border-input py-2.5 pr-2.5 pl-3.5 text-muted-foreground",
         className,

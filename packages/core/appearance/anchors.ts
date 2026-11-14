@@ -23,10 +23,11 @@ export const THEME_ANCHORS = {
   "board-column": "One column on a board.",
   "board-card":
     "One issue card on a board; `data-status`, `data-priority` and `data-assignee-type` as on `issue-row`.",
-  "status-icon": "The status glyph (an svg).",
+  "status-icon":
+    "The status glyph (an svg). A custom status adds `data-color`, its hex colour, and `data-palette`, its colour slot.",
   "priority-icon": "The priority glyph (an svg).",
   "label-chip":
-    "A label; `data-color` is its hex colour, also set as `--label-color` (and the text colour as `--label-foreground`).",
+    "A label; `data-color` is its hex colour and `data-palette` its colour slot. The chip paints with `--label-color` (the slot's colour when the theme declares one) and `--label-foreground`.",
   content:
     "Rich text: issue descriptions, comments, chat messages and documents, in both reading and editing; `data-density` is document or compact when reading.",
   comment: "A top-level comment card in an issue timeline; `data-author-type` is member, agent or system.",
@@ -42,6 +43,21 @@ export const THEME_ANCHORS = {
   toaster:
     "The toast region. Each toast is an `li`; `data-type` is success, error, info, warning, loading or default, and a plain toast may have no `data-type` at all.",
   "settings-page": "The settings page.",
+  "issue-detail":
+    "An open issue, on its page or in the peek; `data-status`, `data-priority`, and `data-view` (page or peek).",
+  "issue-title": "The issue's title above its description, reading and editing.",
+  "issue-properties": "The properties sidebar next to an issue.",
+  "issue-activity": "The activity and comments under an issue.",
+  "object-page":
+    "The page of one project, agent, squad, runtime, member, autopilot or skill; `data-type` names which.",
+  "command-palette": "The search and command palette.",
+  "palette-item":
+    "A row in the palette; `data-type` is command, page, workspace, issue, project, member, agent, squad, object or option (a choice inside a palette page). The highlighted row has `data-selected`.",
+  avatar: "An avatar; `data-type` is member, agent, squad or system.",
+  "empty-state": "A placeholder for something with nothing in it yet; `data-variant` is page or section.",
+  "editor-toolbar": "The formatting toolbar over selected text; `data-mode` is format or link.",
+  "editor-menu": "A menu floating over the editor while typing; `data-kind` is slash or mention.",
+  tab: "Desktop only: one tab in `tab-bar`; `data-active` and `data-pinned` are true or false.",
 } as const;
 
 export type ThemeAnchor = keyof typeof THEME_ANCHORS;

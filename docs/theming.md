@@ -94,9 +94,11 @@ Set variables on `.theme-light` and `.theme-dark` (both on `<html>`). The
 CSS loads after the app's own styles while the theme is active, so at equal
 specificity the theme wins; keep selectors that simple and avoid
 `!important`. What the person picks on the Appearance page still wins over a
-theme: high contrast replaces the muted and border colours, and font choices
-other than the defaults replace the font variables. Colour is the theme's
-alone; to let people pick one, declare an option.
+theme: high contrast replaces the muted and border colours, font choices
+other than the defaults replace the font variables, and Compact or
+Comfortable density replaces the issue row and group header heights, board
+card padding and gap, and the space panel's row height and padding. Colour
+is the theme's alone; to let people pick one, declare an option.
 
 ## Variables
 
@@ -109,6 +111,11 @@ at the end, with its default. They come in layers:
 - **Components and product** (menus, buttons, nav rows, issue rows, the
   board, status colours) default to a foundation. Set one to change just
   that component: `--menu-radius: 0` squares menus and nothing else.
+- **Layout and spacing** (a spacing scale `--space-xs` to `--space-xl`, the
+  page's side padding, the navigation panel's starting width, the widest the
+  reading column and object pages get) sets the room around everything.
+  Board card and page paddings read the scale, so changing `--space-sm`
+  moves each of them that has no variable of its own set.
 - **Editor content** (headings, lists, tables, quotes, links, code and
   syntax colours) styles issue descriptions, comments, chat and documents.
 
@@ -124,6 +131,33 @@ their default as a fallback. So it can be set on any ancestor, not only on
 
 Values that could load a resource are rejected anywhere in `theme.css`, see
 [What CSS may not do](#what-css-may-not-do).
+
+### Colour slots
+
+Labels, custom statuses and select options carry the colour someone picked,
+a `#rrggbb`. A theme recolours them through ten slots named after the
+colour picker's presets: `--palette-gray`, `-red`, `-orange`, `-yellow`,
+`-green`, `-teal`, `-blue`, `-indigo`, `-purple` and `-pink`. A preset lands
+on its own slot. Any other colour is placed in OKLab: one with little chroma
+on gray, the rest on the slot whose hue is nearest, so pale and dark shades
+stay with their hue. A slot the theme leaves unset keeps every colour in it
+as picked, so declare only the ones you want to change:
+
+```css
+.theme-dark {
+  --palette-red: oklch(0.7 0.14 25);
+  --palette-yellow: oklch(0.82 0.12 90);
+  --label-chip-color: oklch(0.2 0.02 260);
+}
+```
+
+Label text is dark or light by the colour as picked, so a slot shows both:
+a pale pick and a deep pick of red both land in `--palette-red`. Once slots
+change, set `--label-chip-color` too, per slot if needed:
+`[data-mc="label-chip"][data-palette="yellow"] { --label-chip-color: … }`.
+The label chip and a custom status's icon carry `data-color` (the hex) and
+`data-palette` (the slot). The built-in statuses keep their own variables,
+`--status-*`.
 
 ## Options
 
@@ -181,9 +215,9 @@ those change without notice. Anchors, slots and hooks stay until the next
 | `[data-mc="issue-row"]` | One issue in a list; `data-status`, `data-priority` (`urgent`, `high`, `medium`, `low`, `none`), `data-assignee-type` (`member`, `agent`, `squad` or `none`), `data-parity` (`even` or `odd`, the row's index within its status group, so stripes survive virtual scrolling where `:nth-child` does not) and `data-selected` (`true` or `false`, ticked for bulk actions). |
 | `[data-mc="board-column"]` | One column on a board. |
 | `[data-mc="board-card"]` | One issue card on a board; `data-status`, `data-priority` and `data-assignee-type` as on `issue-row`. Cards have no `data-parity` or `data-selected`. |
-| `[data-mc="status-icon"]` | The status glyph (an `svg`). |
+| `[data-mc="status-icon"]` | The status glyph (an `svg`). A custom status adds `data-color`, its hex colour, and `data-palette`, its [colour slot](#colour-slots). |
 | `[data-mc="priority-icon"]` | The priority glyph (an `svg`). |
-| `[data-mc="label-chip"]` | A label; `data-color` is its hex colour. The chip paints with `var(--label-color)` and `var(--label-foreground)`, so a rule can restyle it without `!important`. |
+| `[data-mc="label-chip"]` | A label; `data-color` is its hex colour and `data-palette` its [colour slot](#colour-slots). The chip paints with `var(--label-color)` and `var(--label-foreground)`, so a rule can restyle it without `!important`. `--label-color` is the slot's colour when the theme declares one, else the colour as picked; `--label-foreground` is `--label-chip-color` when set, else dark or light text by the picked colour. |
 | `[data-mc="content"]` | Rich text: issue descriptions, comments, chat messages and documents, reading and editing. `data-density` is `document` or `compact` when reading. |
 | `[data-mc="comment"]` | A top-level comment card; `data-author-type` is `member`, `agent` or `system`. |
 | `[data-mc="comment-reply"]` | A reply inside a comment card; `data-author-type` as on `comment`. |
@@ -196,6 +230,18 @@ those change without notice. Anchors, slots and hooks stay until the next
 | `[data-mc="unread-dot"]` | The unread marker on an inbox item. |
 | `[data-mc="toaster"]` | The toast region. Each toast inside is an `li` with `data-type` `success`, `error`, `info`, `warning`, `loading` or `default`. A plain toast usually has no `data-type`, so match it with both `li:not([data-type])` and `li[data-type="default"]`. |
 | `[data-mc="settings-page"]` | The settings page. |
+| `[data-mc="issue-detail"]` | An open issue, on its page or in the peek; `data-status`, `data-priority`, and `data-view` (`page` or `peek`). |
+| `[data-mc="issue-title"]` | The issue's title above its description, reading and editing. |
+| `[data-mc="issue-properties"]` | The properties sidebar next to an issue. |
+| `[data-mc="issue-activity"]` | The activity and comments under an issue. |
+| `[data-mc="object-page"]` | The page of one project, agent, squad, runtime, member, autopilot or skill; `data-type` is `project`, `agent`, `squad`, `runtime`, `member`, `autopilot` or `skill`. |
+| `[data-mc="command-palette"]` | The search and command palette. |
+| `[data-mc="palette-item"]` | A row in the palette; `data-type` is `command`, `page`, `workspace`, `issue`, `project`, `member`, `agent`, `squad`, `object` or `option` (a choice inside a palette page). The highlighted row has `data-selected`. |
+| `[data-mc="avatar"]` | An avatar; `data-type` is `member`, `agent`, `squad` or `system`. |
+| `[data-mc="empty-state"]` | A placeholder for something with nothing in it yet; `data-variant` is `page` (a centred state) or `section` (a quiet row in a page section). |
+| `[data-mc="editor-toolbar"]` | The formatting toolbar over selected text; `data-mode` is `format` or `link`. |
+| `[data-mc="editor-menu"]` | A menu floating over the editor while typing; `data-kind` is `slash` or `mention`. |
+| `[data-mc="tab"]` | Desktop only: one tab in `tab-bar`; `data-active` and `data-pinned` are `true` or `false`. |
 
 Each label chip sets `--label-color` (its hex colour) and `--label-foreground`
 (a text colour readable on it). Read them to draw a label another way, such
@@ -278,6 +324,36 @@ that breaks them:
   somewhere else, such as inside `@media` or on `body`, it says so instead
   of passing it.
 
+## Embedded content
+
+Plugin surfaces and HTML blocks (`` ```html `` fences in issues and chat)
+run in sandboxed frames, so a theme's CSS does not reach them. Instead both receive the same
+set of [embed tokens](#embed-token-reference) as custom properties on their
+`:root`: surfaces and text, accents, status, priority and label colours,
+chart series, code highlighting, the interface, content and code fonts, two
+text sizes, radii and `--color-scheme`. Each one is resolved where the embed
+sits, so the theme's values and its rules on an ancestor anchor apply, and
+it crosses as a plain value: a colour, a length in pixels, a font stack or a
+keyword. Nothing that could load a resource or read another variable gets
+through.
+
+They follow the theme and mode as they change: a plugin surface receives a
+new set (`multica.ui.onThemeChange` in the
+[SDK](../packages/plugin-sdk/README.md#theme)), and an HTML block that
+uses any of them rebuilds with the new values, reruns its scripts and takes
+the app's `color-scheme`. In an HTML block, `--background` is the
+block's own surface, so a document that paints it sits flush in its frame.
+
+```html
+<div style="background: var(--surface); color: var(--foreground);
+            border-radius: var(--radius-card); font: var(--text-body) var(--font-ui)">
+  <span style="color: var(--status-done)">Done</span>
+</div>
+```
+
+Fonts arrive as names: an embed shows the app's font only if the system has
+it, and otherwise the next family in the stack.
+
 ## Safe mode
 
 A theme can hide or break parts of the interface. To get back, open the app
@@ -347,8 +423,12 @@ When a mode has frame rules, the rail takes the frame's colours and a failure
 reads `Contrast, dark mode (frame): …`; without them it takes the page's
 colours and reads `Contrast, light mode: …`, like the other page pairs.
 
-Contrast covers the page, the frame, and two places a theme reaches only
-indirectly:
+Contrast covers the page, the frame, labels and two places a theme reaches
+only indirectly. Labels are measured in each colour slot the theme
+declares: `--label-chip-color` on the slot, or, when it is not set, whichever
+of the dark and light text reads worse on it, since either can land there.
+A failure reads `Contrast, light mode (label): …`. The tooltip and display
+chips:
 
 - **Tooltips** are always drawn with dark-mode text: the tooltip is a
   `.dark` scope, so its `--foreground` is the app's dark value in both
@@ -495,6 +575,22 @@ and dark differ, both defaults are given.
 | `--pr-merged` | `oklch(54.1% 0.281 293.009)` / `oklch(70.2% 0.183 293.541)` | Merged pull request icon and pill. The pill's text defaults one shade darker in light mode. |
 | `--pr-closed` | `oklch(58.6% 0.253 17.585)` / `oklch(71.2% 0.194 13.428)` | Closed pull request icon. |
 
+### Label and custom status colours
+
+| Variable | Default (light / dark) | Use |
+| --- | --- | --- |
+| `--palette-gray` | the colour as picked | Labels, custom statuses and select options whose colour is the gray preset (`#6b7280`) or nearest to it. |
+| `--palette-red` | the colour as picked | Labels, custom statuses and select options whose colour is the red preset (`#ef4444`) or nearest to it. |
+| `--palette-orange` | the colour as picked | Labels, custom statuses and select options whose colour is the orange preset (`#f97316`) or nearest to it. |
+| `--palette-yellow` | the colour as picked | Labels, custom statuses and select options whose colour is the yellow preset (`#eab308`) or nearest to it. |
+| `--palette-green` | the colour as picked | Labels, custom statuses and select options whose colour is the green preset (`#22c55e`) or nearest to it. |
+| `--palette-teal` | the colour as picked | Labels, custom statuses and select options whose colour is the teal preset (`#14b8a6`) or nearest to it. |
+| `--palette-blue` | the colour as picked | Labels, custom statuses and select options whose colour is the blue preset (`#3b82f6`) or nearest to it. |
+| `--palette-indigo` | the colour as picked | Labels, custom statuses and select options whose colour is the indigo preset (`#6366f1`) or nearest to it. |
+| `--palette-purple` | the colour as picked | Labels, custom statuses and select options whose colour is the purple preset (`#a855f7`) or nearest to it. |
+| `--palette-pink` | the colour as picked | Labels, custom statuses and select options whose colour is the pink preset (`#ec4899`) or nearest to it. |
+| `--label-chip-color` | dark or light, whichever reads on the picked colour | Text on a label. Set it with the slots it has to read on; `[data-palette]` on the chip names its slot. |
+
 ### Shape and depth
 
 | Variable | Default (light / dark) | Use |
@@ -591,12 +687,27 @@ and dark differ, both defaults are given.
 | `--rail-item-active-background` | `var(--sidebar-accent)` | The current space. |
 | `--rail-item-active-color` | `var(--sidebar-accent-foreground)` | Icon and label of the current space. |
 | `--nav-item-height` | `2rem` | Minimum height of a row in the space panel. |
+| `--nav-item-padding-y` | `0.375rem` | Top and bottom padding of a row in the space panel; with the text, it sets the row's height when that is above the minimum. |
 | `--nav-item-radius` | `var(--radius)` | Rows in the space panel. |
 | `--nav-item-color` | `var(--muted-foreground)` | Row text. |
 | `--nav-item-hover-background` | `var(--surface-hover)` | Row hover. |
 | `--nav-item-hover-color` | `var(--foreground)` | Row text on hover. |
 | `--nav-item-active-background` | `var(--surface-selected)` | The current row. |
 | `--nav-item-active-color` | `var(--surface-selected-foreground)` | Text of the current row. |
+
+### Layout and spacing
+
+| Variable | Default (light / dark) | Use |
+| --- | --- | --- |
+| `--space-xs` | `0.5rem` | Spacing step: the gap between board cards. |
+| `--space-sm` | `0.75rem` | Spacing step: board card padding, the issue page's side padding on phones. |
+| `--space-md` | `1rem` | Spacing step: the page's side padding. |
+| `--space-lg` | `1.5rem` | Spacing step: an object page's side padding, the issue page's top padding on phones. |
+| `--space-xl` | `2rem` | Spacing step: an object page's top padding, the issue page's padding. |
+| `--page-padding-x` | `var(--space-md, 1rem)` | Side padding of page headers, the toolbars under them and full-width lists. |
+| `--sidebar-panel-width` | `240px` | Starting width of the navigation panel, kept between 200px and 320px. Once the person drags its edge, their width wins. |
+| `--content-max-width` | `clamp(56rem, 70cqi, 70rem)` | Widest the reading column gets on an issue page and in chat. |
+| `--object-page-max-width` | `760px` | Widest the body of a project, agent, squad, runtime or other object page gets. |
 
 ### Issues
 
@@ -618,6 +729,9 @@ and dark differ, both defaults are given.
 | `--board-card-hover-background` | `var(--surface-hover)` | Board card hover. |
 | `--board-card-border-color` | `var(--surface-border)` | Board card border. |
 | `--board-card-shadow` | `var(--surface-shadow)` | Board card shadow. |
+| `--board-card-padding-y` | `var(--space-sm, 0.75rem)` | Top and bottom padding of a board card. |
+| `--board-card-padding-x` | `0.625rem` | Side padding of a board card. |
+| `--board-card-gap` | `var(--space-xs, 0.5rem)` | Space between cards in a board column. |
 
 ### Editor content
 
@@ -739,3 +853,133 @@ and dark differ, both defaults are given.
 | `--code-punctuation` | `var(--muted-foreground)` | HTML and XML brackets. |
 
 <!-- theme-variables:end -->
+
+## Embed token reference
+
+Generated from `packages/core/appearance/embed-tokens.ts`. Every token is
+set when the host defines it; `--background`, colours and fonts follow the
+[variables](#variable-reference) of the same name.
+
+<!-- embed-tokens:start (generated by packages/views/common/embed-tokens.test.ts) -->
+
+### Surfaces and text
+
+| Token | Kind | Use |
+| --- | --- | --- |
+| `--background` | colour | What the embed sits on. In an HTML block, the block's own surface. |
+| `--foreground` | colour | Body text. |
+| `--muted-foreground` | colour | Secondary text. |
+| `--faint-foreground` | colour | Hints and placeholders; not for text that must be read. |
+| `--surface` | colour | A panel or card on the page. |
+| `--surface-raised` | colour | A surface above another: menus, popovers. |
+| `--surface-hover` | colour | A row or control under the pointer. |
+| `--surface-selected` | colour | A selected row or control. |
+| `--surface-border` | colour | The border of a surface. |
+| `--page-canvas` | colour | The page behind the content column. |
+| `--card` | colour | Card fill. |
+| `--card-foreground` | colour | Text on a card. |
+| `--popover` | colour | Popover fill. |
+| `--popover-foreground` | colour | Text in a popover. |
+| `--muted` | colour | A quiet fill: code, tags, tracks. |
+| `--border` | colour | Dividers and outlines. |
+| `--input` | colour | Input borders. |
+| `--ring` | colour | Focus rings. |
+| `--color-scheme` | keyword | `light` or `dark`, for `color-scheme: var(--color-scheme)`. |
+
+### Accent and intent
+
+| Token | Kind | Use |
+| --- | --- | --- |
+| `--primary` | colour | Primary buttons and strong accents. |
+| `--primary-foreground` | colour | Text on `--primary`. |
+| `--secondary` | colour | Secondary buttons. |
+| `--secondary-foreground` | colour | Text on `--secondary`. |
+| `--accent` | colour | Hover and highlight fill. |
+| `--accent-foreground` | colour | Text on `--accent`. |
+| `--brand` | colour | Links and the brand accent. |
+| `--destructive` | colour | Errors and destructive actions. |
+| `--success` | colour | Success. |
+| `--warning` | colour | Warnings. |
+| `--info` | colour | Information. |
+
+### Status and priority
+
+| Token | Kind | Use |
+| --- | --- | --- |
+| `--status-backlog` | colour | Backlog. |
+| `--status-todo` | colour | Todo. |
+| `--status-in-progress` | colour | In progress. |
+| `--status-in-review` | colour | In review. |
+| `--status-done` | colour | Done. |
+| `--status-blocked` | colour | Blocked. |
+| `--status-cancelled` | colour | Cancelled. |
+| `--priority-urgent` | colour | Urgent priority. |
+| `--priority-high` | colour | High priority. |
+| `--priority-medium` | colour | Medium priority. |
+| `--priority-low` | colour | Low priority. |
+| `--priority-none` | colour | No priority. |
+
+### Label colours
+
+| Token | Kind | Use |
+| --- | --- | --- |
+| `--palette-gray` | colour | Labels and custom statuses in the gray slot, as the theme paints them. |
+| `--palette-red` | colour | Labels and custom statuses in the red slot, as the theme paints them. |
+| `--palette-orange` | colour | Labels and custom statuses in the orange slot, as the theme paints them. |
+| `--palette-yellow` | colour | Labels and custom statuses in the yellow slot, as the theme paints them. |
+| `--palette-green` | colour | Labels and custom statuses in the green slot, as the theme paints them. |
+| `--palette-teal` | colour | Labels and custom statuses in the teal slot, as the theme paints them. |
+| `--palette-blue` | colour | Labels and custom statuses in the blue slot, as the theme paints them. |
+| `--palette-indigo` | colour | Labels and custom statuses in the indigo slot, as the theme paints them. |
+| `--palette-purple` | colour | Labels and custom statuses in the purple slot, as the theme paints them. |
+| `--palette-pink` | colour | Labels and custom statuses in the pink slot, as the theme paints them. |
+
+### Charts
+
+| Token | Kind | Use |
+| --- | --- | --- |
+| `--chart-1` | colour | Chart series 1. |
+| `--chart-2` | colour | Chart series 2. |
+| `--chart-3` | colour | Chart series 3. |
+| `--chart-4` | colour | Chart series 4. |
+| `--chart-5` | colour | Chart series 5. |
+
+### Code highlighting
+
+| Token | Kind | Use |
+| --- | --- | --- |
+| `--code-block-background` | colour | Code block fill. |
+| `--code-block-color` | colour | Code block text. |
+| `--code-keyword` | colour | Keywords and built-ins. |
+| `--code-string` | colour | Strings and added lines. |
+| `--code-number` | colour | Numbers and literals. |
+| `--code-comment` | colour | Comments. |
+| `--code-function` | colour | Function names. |
+| `--code-type` | colour | Types and class names. |
+| `--code-tag` | colour | Tag names. |
+| `--code-property` | colour | Properties and attributes. |
+| `--code-variable` | colour | Variables. |
+| `--code-punctuation` | colour | Punctuation and tag brackets. |
+| `--code-deletion` | colour | Deleted lines. |
+
+### Type
+
+| Token | Kind | Use |
+| --- | --- | --- |
+| `--font-ui` | font stack | Interface font stack. |
+| `--font-sans` | font stack | The same as `--font-ui`. |
+| `--font-content` | font stack | Font stack for rich text: descriptions, comments, documents. |
+| `--font-mono` | font stack | Code font stack. |
+| `--text-caption` | length (px) | Caption size, after the person's font size. |
+| `--text-body` | length (px) | Body size, after the person's font size. |
+
+### Shape
+
+| Token | Kind | Use |
+| --- | --- | --- |
+| `--radius` | length (px) | Base corner radius. |
+| `--radius-card` | length (px) | Cards and panels. |
+| `--radius-button` | length (px) | Buttons. |
+| `--radius-input` | length (px) | Inputs. |
+
+<!-- embed-tokens:end -->

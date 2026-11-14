@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
-import { HTML_BLOCK_THEME_TOKENS } from "../utils/html-block-document";
+import { EMBED_TOKEN_INPUTS } from "@multica/core/appearance";
 
 /**
- * Everything that decides what a sandboxed block copies out of the theme: the
+ * Everything that decides what a sandboxed embed copies out of the theme: the
  * attributes that pick a theme, and what it resolves to on the root. Tokens
- * are read resolved so a theme written straight into `style` still counts.
+ * are read resolved so a theme written straight into `style` still counts,
+ * and with the variables they are resolved from, which may be all a theme
+ * option changes.
  */
 function readThemeSignature(): string {
   const root = document.documentElement;
@@ -16,7 +18,7 @@ function readThemeSignature(): string {
     document.body?.getAttribute("data-theme"),
     styles.colorScheme,
     styles.fontFamily,
-    ...HTML_BLOCK_THEME_TOKENS.map((name) => styles.getPropertyValue(name)),
+    ...EMBED_TOKEN_INPUTS.map((name) => styles.getPropertyValue(name)),
   ].join("|");
 }
 

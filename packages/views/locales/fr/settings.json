@@ -355,7 +355,7 @@
     },
     "density": {
       "title": "Densité",
-      "description": "Hauteur des lignes dans les listes de tickets et la recherche.",
+      "description": "Hauteur des lignes dans les listes de tickets, la recherche et la barre latérale, et espacement du tableau.",
       "compact": "Compacte",
       "default": "Par défaut",
       "comfortable": "Aérée"

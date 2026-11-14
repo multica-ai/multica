@@ -39,13 +39,15 @@ import {
   type DynamicBlockError,
 } from "./dynamic-block";
 import { useThemeVersion } from "./hooks/use-theme-version";
+import { readEmbedTheme } from "../common/embed-theme";
 import {
+  HTML_BLOCK_EMBED_OPTIONS,
   HTML_BLOCK_MESSAGE_KEY,
   INITIAL_HTML_BLOCK_HEIGHT,
   buildHtmlBlockDocument,
+  htmlBlockTheme,
   nextHtmlBlockHeight,
   readHtmlBlockMessage,
-  readHtmlBlockTheme,
 } from "./utils/html-block-document";
 import { hashSource } from "./utils/source-hash";
 
@@ -135,7 +137,7 @@ export function HtmlBlockPreview({ html, title }: HtmlBlockPreviewProps) {
     const host = hostRef.current;
     if (!host) return;
     setError(null);
-    setSrcDoc(buildHtmlBlockDocument(html, readHtmlBlockTheme(getComputedStyle(host))));
+    setSrcDoc(buildHtmlBlockDocument(html, htmlBlockTheme(readEmbedTheme(host, HTML_BLOCK_EMBED_OPTIONS))));
   }, [html, themeVersion]);
 
   return (

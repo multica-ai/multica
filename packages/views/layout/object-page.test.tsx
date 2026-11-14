@@ -28,6 +28,7 @@ function renderPage(panel?: React.ReactNode) {
   return renderWithI18n(
     <NavigationProvider value={makeAdapter()}>
       <ObjectPage
+        type="agent"
         layoutId="test_object_page"
         segments={[{ href: "/acme/agents", label: "Agents" }]}
         leaf={<span>Lambda</span>}

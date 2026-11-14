@@ -12,18 +12,26 @@ describe("LabelChip", () => {
   it("paints from --label-color, not an inline background, so themes can restyle it", () => {
     const el = chip(renderWithI18n(<LabelChip label={label("#8b5cf6")} />).container);
 
-    expect(el.style.getPropertyValue("--label-color")).toBe("#8b5cf6");
+    expect(el.style.getPropertyValue("--label-color")).toBe("var(--palette-purple, #8b5cf6)");
     expect(el.style.backgroundColor).toBe("");
     expect(el.className).toContain("bg-(--label-color)");
     expect(el).toHaveAttribute("data-color", "#8b5cf6");
   });
 
-  it("sets a readable text colour as --label-foreground", () => {
+  it("paints through its colour slot, falling back to the colour as picked", () => {
+    const el = chip(renderWithI18n(<LabelChip label={label("#ef4444")} />).container);
+
+    expect(el).toHaveAttribute("data-palette", "red");
+    expect(el.style.getPropertyValue("--label-color")).toBe("var(--palette-red, #ef4444)");
+  });
+
+  it("sets a readable text colour as --label-foreground, which --label-chip-color overrides", () => {
     const dark = chip(renderWithI18n(<LabelChip label={label("#1e3a8a")} />).container);
     const light = chip(renderWithI18n(<LabelChip label={label("#fde68a")} />).container);
 
-    expect(dark.style.getPropertyValue("--label-foreground")).toBe("#f9fafb");
-    expect(light.style.getPropertyValue("--label-foreground")).toBe("#111827");
+    expect(dark.style.getPropertyValue("--label-foreground")).toBe("var(--label-chip-color, #f9fafb)");
+    expect(light.style.getPropertyValue("--label-foreground")).toBe("var(--label-chip-color, #111827)");
+    expect(light).toHaveAttribute("data-palette", "yellow");
     expect(dark.style.color).toBe("");
     expect(dark.className).toContain("text-(--label-foreground)");
   });
