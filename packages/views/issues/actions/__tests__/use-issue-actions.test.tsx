@@ -298,6 +298,18 @@ describe("useIssueActions", () => {
     );
   });
 
+  it("copyTitleAsLink copies the identifier and title as a Markdown link", async () => {
+    const { result } = renderHook(() => useIssueActions(mockIssue), { wrapper });
+
+    await act(async () => {
+      await result.current.copyTitleAsLink();
+    });
+
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+      "[TES-1 Example](https://app.multica.com/test/issues/TES-1)",
+    );
+  });
+
   it("copyCommentLink writes the issue's shareable URL anchored at the comment", async () => {
     const { result } = renderHook(() => useIssueActions(mockIssue), { wrapper });
 
