@@ -27,6 +27,7 @@ import endpoint. It accepts either a hosted URL or an uploaded local archive
 ```bash
 multica skill import --url <url> --output json              # hosted source
 multica skill import --file <path-to.skill> --output json   # local archive
+multica skill import --dir <skill-folder> --output json      # local directory
 ```
 
 The CLI defaults to `--on-conflict fail`. A URL import sends:
@@ -38,8 +39,9 @@ body: { "url": "<url>", "on_conflict": "fail" }
 ```
 
 A `--file` import hits the same route as `multipart/form-data` with a `file`
-part (the `.skill` / `.zip` bytes) and an `on_conflict` field. `--url` and
-`--file` are mutually exclusive; exactly one is required.
+part (the `.skill` / `.zip` bytes) and an `on_conflict` field. A `--dir` import
+packs the folder into a zip and uploads it the same way. Exactly one of `--url`,
+`--file` and `--dir` is required.
 
 Do not finish with `npx skills add`. That installs into an external/local skill
 environment, not the Multica workspace DB, so Multica cannot manage or bind it.
@@ -89,7 +91,24 @@ skill folder works too. The server:
   `--on-conflict` strategies as URL imports.
 
 The upload itself is capped at 16 MiB (compressed). Any source that is not a
-local archive still goes through `--url`.
+local archive or directory still goes through `--url`.
+
+## Local directory import
+
+`multica skill import --dir <path> --output json` imports a folder that has
+`SKILL.md` at its root, without packaging it first. The CLI zips the folder in
+memory and uploads it as a local archive, so the server rules above apply. It
+applies the same file selection as the server: dotfiles and dot-directories
+(such as `.git`), `__MACOSX`, license files, nested `SKILL.md` files and binary
+assets are left out. Supporting files over 1 MiB are skipped with a note on
+stderr. These cases fail before anything is uploaded:
+
+- `SKILL.md` is missing from the folder root;
+- more than 512 supporting files, or more than 8 MiB of them in total;
+- a symbolic link that points outside the folder, at a directory, or at a
+  special file (device, socket, pipe).
+
+A symbolic link to a regular file inside the folder is followed.
 
 ## Direct URL flow
 

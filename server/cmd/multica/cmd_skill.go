@@ -60,7 +60,7 @@ var skillDeleteCmd = &cobra.Command{
 
 var skillImportCmd = &cobra.Command{
 	Use:   "import",
-	Short: "Import a skill from a URL (clawhub.ai, skills.sh, github.com) or a local .skill/.zip archive",
+	Short: "Import a skill from a URL (clawhub.ai, skills.sh, github.com), a local .skill/.zip archive, or a local skill directory",
 	RunE:  runSkillImport,
 }
 
@@ -150,8 +150,9 @@ func init() {
 	skillDeleteCmd.Flags().Bool("yes", false, "Skip confirmation prompt")
 
 	// skill import
-	skillImportCmd.Flags().String("url", "", "URL to import from (clawhub.ai, skills.sh, or github.com). Mutually exclusive with --file.")
-	skillImportCmd.Flags().String("file", "", "Path to a local skill archive (.skill or .zip) to import. Mutually exclusive with --url.")
+	skillImportCmd.Flags().String("url", "", "URL to import from (clawhub.ai, skills.sh, or github.com). Mutually exclusive with --file and --dir.")
+	skillImportCmd.Flags().String("file", "", "Path to a local skill archive (.skill or .zip) to import. Mutually exclusive with --url and --dir.")
+	skillImportCmd.Flags().String("dir", "", "Path to a local skill directory with SKILL.md at its root; it is packed and uploaded like --file. Mutually exclusive with --url and --file.")
 	skillImportCmd.Flags().String("on-conflict", "fail", "Conflict strategy when a skill with the same name exists: fail, overwrite, rename, or skip")
 	skillImportCmd.Flags().String("output", "json", "Output format: table or json")
 
@@ -501,27 +502,47 @@ func runSkillImport(cmd *cobra.Command, _ []string) error {
 
 	importURL, _ := cmd.Flags().GetString("url")
 	importFile, _ := cmd.Flags().GetString("file")
-	switch {
-	case importURL == "" && importFile == "":
-		return fmt.Errorf("either --url or --file is required")
-	case importURL != "" && importFile != "":
-		return fmt.Errorf("--url and --file are mutually exclusive")
+	importDir, _ := cmd.Flags().GetString("dir")
+	sources := 0
+	for _, v := range []string{importURL, importFile, importDir} {
+		if v != "" {
+			sources++
+		}
+	}
+	if sources != 1 {
+		return errSkillImportSourceFlags
 	}
 	onConflict, _ := cmd.Flags().GetString("on-conflict")
 	if !validSkillImportConflictStrategy(onConflict) {
 		return fmt.Errorf("--on-conflict must be one of: fail, overwrite, rename, skip")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), cli.AtLeastAPITimeout(60*time.Second))
-	defer cancel()
-
-	var result map[string]any
-	if importFile != "" {
+	var archiveData []byte
+	var archiveName string
+	switch {
+	case importFile != "":
 		fileData, readErr := os.ReadFile(importFile)
 		if readErr != nil {
 			return fmt.Errorf("read skill archive: %w", readErr)
 		}
-		if err := client.ImportSkillFile(ctx, fileData, filepath.Base(importFile), onConflict, &result); err != nil {
+		archiveData, archiveName = fileData, filepath.Base(importFile)
+	case importDir != "":
+		packed, packErr := packSkillDirectory(importDir)
+		if packErr != nil {
+			return packErr
+		}
+		for _, rel := range packed.skipped {
+			fmt.Fprintf(os.Stderr, "Skipping %s: larger than %d bytes\n", rel, skillDirMaxFileBytes)
+		}
+		archiveData, archiveName = packed.data, packed.filename
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), cli.AtLeastAPITimeout(60*time.Second))
+	defer cancel()
+
+	var result map[string]any
+	if archiveData != nil {
+		if err := client.ImportSkillFile(ctx, archiveData, archiveName, onConflict, &result); err != nil {
 			if handledErr := handleSkillImportError(cmd, err); handledErr != nil {
 				return handledErr
 			}
