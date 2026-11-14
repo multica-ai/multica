@@ -105,15 +105,15 @@ func newFlagTestCmd(name string) *cobra.Command {
 }
 
 func TestResolveTextFlag(t *testing.T) {
-	t.Run("inline value is unescaped", func(t *testing.T) {
+	t.Run("inline value is preserved literally", func(t *testing.T) {
 		c := newFlagTestCmd("description")
 		_ = c.Flags().Set("description", `para1\n\npara2`)
 		got, ok, err := resolveTextFlag(c, "description")
 		if err != nil || !ok {
 			t.Fatalf("unexpected: ok=%v err=%v", ok, err)
 		}
-		if got != "para1\n\npara2" {
-			t.Errorf("got %q, want decoded paragraphs", got)
+		if got != `para1\n\npara2` {
+			t.Errorf("got %q, want literal backslashes", got)
 		}
 	})
 
@@ -751,7 +751,7 @@ func TestRunIssueCommentUpdateSendsExpectedRequest(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("decode request body: %v", err)
 		}
-		if len(body) != 2 || body["content"] != "updated\ncomment" || body["expected_revision"] != float64(7) {
+		if len(body) != 2 || body["content"] != `updated\ncomment` || body["expected_revision"] != float64(7) {
 			t.Fatalf("body = %#v, want content plus expected revision", body)
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -784,7 +784,7 @@ func TestRunIssueCommentUpdateSendsExpectedRequest(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatalf("decode stdout JSON %q: %v", out, err)
 	}
-	if got["id"] != commentID || got["content"] != "updated\ncomment" {
+	if got["id"] != commentID || got["content"] != `updated\ncomment` {
 		t.Fatalf("stdout = %#v", got)
 	}
 }
