@@ -452,8 +452,9 @@ inside the existing skill rather than a skill of its own, so it adds a line
 to the skill's routing table instead of an entry to every agent's skill list.
 
 - **Desktop on the agent's computer.** The agent writes the theme into the
-  themes folder. Multica switches to a theme the first time it appears there
-  and passes the checks, and applies every later save within a second, so
+  themes folder. Once it passes the checks it is listed under **Theme**,
+  where you pick it once: a new theme never replaces the one in use by
+  itself. Every later save to the theme in use applies within a second, so
   ask for changes and watch them land.
 - **On the web, or with an agent on another machine.** The agent attaches
   the theme as a `.zip`. **Install theme** on the attachment reads it with

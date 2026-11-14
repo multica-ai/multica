@@ -213,31 +213,24 @@ describe("AppearanceSync", () => {
       await vi.waitFor(() => expect(html().hasAttribute("data-theme")).toBe(false));
     });
 
-    it("switches to a theme that first passes after the opening read, once", async () => {
-      const paper = { folder: "paper", files: folder(".theme-light { --page-canvas: #fffdf8; }") };
-      desktop.readThemeFolder.mockResolvedValue({ path: "/data/themes", entries: [paper] });
-      useAppearanceStore.setState({ theme: "default" });
+    it("lists a new folder theme without switching to it, and applies saves to the theme in use", async () => {
+      const paper = (canvas: string) => ({ folder: "paper", files: folder(`.theme-light { --page-canvas: ${canvas}; }`) });
+      const dusk = { folder: "dusk", files: folder(".theme-light { --page-canvas: #2a2438; }", "dusk") };
+      desktop.readThemeFolder.mockResolvedValue({ path: "/data/themes", entries: [paper("#fffdf8")] });
+      useAppearanceStore.setState({ theme: "paper" });
       render(<AppearanceSync />);
-      await vi.waitFor(() => expect(useThemeFolderStatus.getState().path).toBe("/data/themes"));
-      expect(useAppearanceStore.getState().theme).toBe("default");
+      await vi.waitFor(() => expect(themeCss()?.textContent).toContain("#fffdf8"));
 
-      desktop.readThemeFolder.mockResolvedValue({
-        path: "/data/themes",
-        entries: [paper, { folder: "dusk", error: "theme.css is missing" }],
-      });
-      await act(async () => onChange());
-      expect(useAppearanceStore.getState().theme).toBe("default");
-
-      const dusk = (canvas: string) => ({ folder: "dusk", files: folder(`.theme-light { --page-canvas: ${canvas}; }`, "dusk") });
-      desktop.readThemeFolder.mockResolvedValue({ path: "/data/themes", entries: [paper, dusk("#2a2438")] });
-      await act(async () => onChange());
-      await vi.waitFor(() => expect(html().getAttribute("data-theme")).toBe("dusk"));
-
-      act(() => useAppearanceStore.getState().set({ theme: "default" }));
-      desktop.readThemeFolder.mockResolvedValue({ path: "/data/themes", entries: [paper, dusk("#2f2940")] });
+      desktop.readThemeFolder.mockResolvedValue({ path: "/data/themes", entries: [paper("#fffdf8"), dusk] });
       await act(async () => onChange());
       await vi.waitFor(() => expect(useInstalledThemesStore.getState().folders).toHaveProperty("dusk"));
-      expect(useAppearanceStore.getState().theme).toBe("default");
+      expect(useAppearanceStore.getState().theme).toBe("paper");
+      expect(html().getAttribute("data-theme")).toBe("paper");
+
+      desktop.readThemeFolder.mockResolvedValue({ path: "/data/themes", entries: [paper("#f0f0ff"), dusk] });
+      await act(async () => onChange());
+      await vi.waitFor(() => expect(themeCss()?.textContent).toContain("#f0f0ff"));
+      expect(html().getAttribute("data-theme")).toBe("paper");
     });
   });
 });

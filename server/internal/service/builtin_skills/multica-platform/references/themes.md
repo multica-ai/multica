@@ -65,10 +65,10 @@ Desktop watches a themes folder in its user data:
 
 - **Desktop on this computer** (the `Multica` folder above exists): write the
   theme into `<themes folder>/<id>/`, creating `themes` if needed. Desktop
-  switches to a new theme the first time it passes the checks, and applies
-  every later save within about a second, so make follow-up changes in those
-  files. If Desktop was not running, the user picks the theme under
-  Settings → Appearance.
+  lists it once it passes the checks but does not switch to it: tell the user
+  to pick it once under Settings → Appearance → Theme. From then on every
+  save to the theme in use applies within about a second, so make follow-up
+  changes in those files.
 - **Anywhere else**, or when the user is on the web or another computer: zip
   the theme with `manifest.json` at the top of the zip as `<id>.zip`, and
   attach it to your reply (`multica attachment upload <path>` in a chat,
@@ -77,5 +77,6 @@ Desktop watches a themes folder in its user data:
   For a follow-up, raise `version` and attach a new zip; installing it
   replaces the previous one.
 
-In the reply, say where the theme went (the folder, or the attachment), what
-the checker reported, and include the previews when you have them.
+In the reply, say where the theme went (the folder, or the attachment) and,
+for the folder, that it needs picking once; what the checker reported; and
+include the previews when you have them.
