@@ -8,6 +8,19 @@ SELECT * FROM agent
 WHERE workspace_id = $1 AND kind = 'user'
 ORDER BY created_at ASC;
 
+-- name: ListAgentAccessRows :many
+-- Visibility checks need no instructions, runtime config, or credentials.
+-- Include archived user agents for historical aggregation and inventory.
+SELECT id, owner_id, permission_mode, kind FROM agent
+WHERE workspace_id = $1 AND kind = 'user'
+ORDER BY created_at ASC;
+
+-- name: ListAgentAccessRowsAnyKind :many
+-- Include hidden execution carriers so rollups can fold them for every actor.
+SELECT id, owner_id, permission_mode, kind FROM agent
+WHERE workspace_id = $1
+ORDER BY created_at ASC;
+
 -- name: ListAllAgentsAnyKind :many
 -- Every agent row in the workspace, INCLUDING `kind = 'system'` execution
 -- carriers (agent builder sessions) that ListAllAgents deliberately hides.

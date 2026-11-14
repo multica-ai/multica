@@ -1268,7 +1268,7 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 	for _, a := range agents {
 		targets := targetsByAgent[uuidToString(a.ID)]
 		if actorType == "member" {
-			if !memberAllowedToViewAgent(a, targets, actorID, member.Role) {
+			if !memberAllowedToViewAgent(a.OwnerID, a.PermissionMode, targets, actorID, member.Role) {
 				continue
 			}
 		}

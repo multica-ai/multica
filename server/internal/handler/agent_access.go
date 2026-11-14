@@ -189,14 +189,14 @@ func memberHitsInvocationTargets(targets []db.AgentInvocationTarget, userID stri
 // list endpoint avoids an N+1. Workspace owner/admin and the agent owner see
 // everything; a regular member sees a public_to agent only when on its
 // allow-list, and never sees other members' private agents.
-func memberAllowedToViewAgent(agent db.Agent, targets []db.AgentInvocationTarget, userID, role string) bool {
+func memberAllowedToViewAgent(ownerID pgtype.UUID, permissionMode string, targets []db.AgentInvocationTarget, userID, role string) bool {
 	if roleAllowed(role, "owner", "admin") {
 		return true
 	}
-	if uuidToString(agent.OwnerID) == userID {
+	if uuidToString(ownerID) == userID {
 		return true
 	}
-	if agent.PermissionMode != "public_to" {
+	if permissionMode != "public_to" {
 		return false
 	}
 	return memberHitsInvocationTargets(targets, userID)
@@ -299,18 +299,25 @@ func (h *Handler) accessibleAgentIDs(ctx context.Context, workspaceID, actorType
 	if err != nil {
 		return nil, false
 	}
-	agents, err := h.Queries.ListAllAgents(ctx, wsUUID)
+	agents, err := h.Queries.ListAgentAccessRows(ctx, wsUUID)
 	if err != nil {
 		return nil, false
 	}
-	targetsByAgent, ok := h.loadInvocationTargetsByAgent(ctx, agents)
-	if !ok {
-		return nil, false
+	var targetsByAgent map[string][]db.AgentInvocationTarget
+	if actorType == "member" && !roleAllowed(role, "owner", "admin") {
+		ids := make([]pgtype.UUID, 0, len(agents))
+		for _, a := range agents {
+			ids = append(ids, a.ID)
+		}
+		var ok bool
+		if targetsByAgent, ok = h.loadInvocationTargetsByAgentIDs(ctx, ids); !ok {
+			return nil, false
+		}
 	}
 	allowed := make(map[string]struct{}, len(agents))
 	for _, a := range agents {
 		if actorType == "member" {
-			if !memberAllowedToViewAgent(a, targetsByAgent[uuidToString(a.ID)], actorID, role) {
+			if !memberAllowedToViewAgent(a.OwnerID, a.PermissionMode, targetsByAgent[uuidToString(a.ID)], actorID, role) {
 				continue
 			}
 		}
@@ -350,7 +357,7 @@ func (h *Handler) restrictedAgentIDs(ctx context.Context, workspaceID, actorType
 	if err != nil {
 		return nil, false
 	}
-	agents, err := h.Queries.ListAllAgentsAnyKind(ctx, wsUUID)
+	agents, err := h.Queries.ListAgentAccessRowsAnyKind(ctx, wsUUID)
 	if err != nil {
 		return nil, false
 	}
@@ -359,8 +366,12 @@ func (h *Handler) restrictedAgentIDs(ctx context.Context, workspaceID, actorType
 	judgeUserAgents := actorType == "member" && !roleAllowed(role, "owner", "admin")
 	var targetsByAgent map[string][]db.AgentInvocationTarget
 	if judgeUserAgents {
+		ids := make([]pgtype.UUID, 0, len(agents))
+		for _, a := range agents {
+			ids = append(ids, a.ID)
+		}
 		var ok bool
-		if targetsByAgent, ok = h.loadInvocationTargetsByAgent(ctx, agents); !ok {
+		if targetsByAgent, ok = h.loadInvocationTargetsByAgentIDs(ctx, ids); !ok {
 			return nil, false
 		}
 	}
@@ -369,7 +380,7 @@ func (h *Handler) restrictedAgentIDs(ctx context.Context, workspaceID, actorType
 	for _, a := range agents {
 		if a.Kind == "user" {
 			if !judgeUserAgents ||
-				memberAllowedToViewAgent(a, targetsByAgent[uuidToString(a.ID)], actorID, role) {
+				memberAllowedToViewAgent(a.OwnerID, a.PermissionMode, targetsByAgent[uuidToString(a.ID)], actorID, role) {
 				continue
 			}
 		}
@@ -386,7 +397,11 @@ func (h *Handler) loadInvocationTargetsByAgent(ctx context.Context, agents []db.
 	for _, a := range agents {
 		ids = append(ids, a.ID)
 	}
-	out := make(map[string][]db.AgentInvocationTarget, len(agents))
+	return h.loadInvocationTargetsByAgentIDs(ctx, ids)
+}
+
+func (h *Handler) loadInvocationTargetsByAgentIDs(ctx context.Context, ids []pgtype.UUID) (map[string][]db.AgentInvocationTarget, bool) {
+	out := make(map[string][]db.AgentInvocationTarget, len(ids))
 	if len(ids) == 0 {
 		return out, true
 	}
