@@ -184,6 +184,11 @@ function ProjectsGroup({
         onChange={(onlyMine) => update({ onlyMine })}
       />
       <SwitchField
+        label={t(($) => $.panels.work.projects_show_no_project)}
+        checked={settings.showNoProject}
+        onChange={(showNoProject) => update({ showNoProject })}
+      />
+      <SwitchField
         label={t(($) => $.panels.work.projects_show_count)}
         checked={settings.showCount}
         onChange={(showCount) => update({ showCount })}

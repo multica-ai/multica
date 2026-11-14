@@ -6,11 +6,18 @@ import type { DragEndEvent } from "@dnd-kit/core";
 import type { IssueViewPreference } from "@multica/core/api/schemas";
 import { issueViewPreferenceOptions } from "@multica/core/issue-views/preferences";
 import { buildIssueStatusCatalog } from "@multica/core/issue-statuses/queries";
+import { issueTableFacetsOptions } from "@multica/core/issues/queries";
+import {
+  NO_PROJECT_FACET_KEY,
+  NO_PROJECT_SIDEBAR_SOURCE,
+  noProjectCountRequest,
+} from "@multica/core/issues/sidebar-list";
 import { SIDEBAR_PROJECTS_SCOPE } from "@multica/core/issues/sidebar-project-prefs";
 import {
   DEFAULT_SIDEBAR_ISSUE_SETTINGS,
   DEFAULT_SIDEBAR_PROJECT_SETTINGS,
   useSidebarTreeStore,
+  type SidebarProjectSettings,
 } from "@multica/core/issues/stores/sidebar-tree-store";
 import type { Project } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
@@ -93,12 +100,17 @@ const savedPrefs = (prefs: Record<string, unknown>): IssueViewPreference => ({
   prefs: { hidden: [], order: [], ...prefs },
 });
 
-function renderSection(projects = PROJECTS) {
-  const qc = new QueryClient({ defaultOptions: { queries: { enabled: false } } });
+function renderSection(projects = PROJECTS, projectSettings: Partial<SidebarProjectSettings> = {}) {
+  const qc = new QueryClient({ defaultOptions: { queries: { enabled: false, retry: false } } });
+  qc.setQueryData(issueTableFacetsOptions("ws-1", noProjectCountRequest([])).queryKey, {
+    query_fingerprint: "",
+    total: 0,
+    facets: [{ kind: "project", values: [{ key: "p1", count: 3 }, { key: NO_PROJECT_FACET_KEY, count: 7 }] }],
+  });
   qc.setQueryData(
     issueViewPreferenceOptions("ws-1", SIDEBAR_PROJECTS_SCOPE).queryKey,
     savedPrefs({
-      projects: { ...DEFAULT_SIDEBAR_PROJECT_SETTINGS, ordering: "name" },
+      projects: { ...DEFAULT_SIDEBAR_PROJECT_SETTINGS, ordering: "name", ...projectSettings },
       issues: DEFAULT_SIDEBAR_ISSUE_SETTINGS,
       order: ["p9"],
     }),
@@ -114,7 +126,7 @@ function renderSection(projects = PROJECTS) {
         plainRowsLit
         activeIssueId={null}
         litSource={null}
-        locatedProjectId={null}
+        locatedSource={null}
       />
     </QueryClientProvider>,
   );
@@ -189,6 +201,33 @@ describe("ProjectsSection", () => {
 
     fireEvent.click(screen.getByRole("menuitem", { name: "New issue in this project" }));
     expect(openCreateIssue).toHaveBeenCalledWith({ project_id: "p2" });
+  });
+
+  it("lists issues outside every project under No project, which only expands", () => {
+    renderSection();
+    expect(screen.queryByRole("link", { name: "No project" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "No project" }));
+    expect(useSidebarTreeStore.getState().expanded).toEqual([NO_PROJECT_SIDEBAR_SOURCE]);
+    expect(screen.getByRole("button", { name: "No project" })).toHaveAttribute("aria-expanded", "true");
+    expect(document.querySelector(`[data-sidebar-list="${NO_PROJECT_SIDEBAR_SOURCE}"]`)).not.toBeNull();
+  });
+
+  it("counts the open issues outside every project", () => {
+    renderSection();
+    expect(screen.getByRole("button", { name: "No project" }).parentElement).toHaveTextContent("7");
+  });
+
+  it("creates an issue without a project from the No project row", () => {
+    renderSection();
+    openCreateIssue.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "New issue without a project" }));
+    expect(openCreateIssue).toHaveBeenCalledWith();
+  });
+
+  it("leaves out No project when its setting is off", () => {
+    renderSection(PROJECTS, { showNoProject: false });
+    expect(screen.queryByRole("button", { name: "No project" })).toBeNull();
   });
 
   it("collapses from the section label", () => {

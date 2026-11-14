@@ -3,6 +3,7 @@ import { baselineFromQuery } from "../issue-views/baseline";
 import type { BuiltinViewKey } from "../issue-views/sidebar-views";
 import type {
   IssueStatusCategory,
+  IssueTableFacetsRequest,
   IssueTableQuerySpec,
   IssueTableRelation,
   IssueTableScope,
@@ -50,9 +51,9 @@ const ASSIGNEE_RELATIONS: Record<SidebarIssueAssignee, IssueTableRelation[]> = {
   me_and_my_agents: ["assigned", "my_agents"],
 };
 
-/** The request for an expanded project, or `null` when the settings leave nothing to list. */
-export function projectSidebarRequest(
-  projectId: string,
+function projectRowRequest(
+  scope: IssueTableScope,
+  filters: IssueTableQuerySpec["filters"],
   settings: SidebarIssueSettings,
   statuses: readonly StatusRef[],
   userId: string | undefined,
@@ -63,14 +64,60 @@ export function projectSidebarRequest(
   const relations = ASSIGNEE_RELATIONS[settings.assignee] ?? [];
   return {
     table: {
-      scope: { kind: "project", project_id: projectId },
+      scope,
       filters: {
+        ...filters,
         ...(shown.length < statuses.length ? { statuses: shown } : {}),
         ...(relations.length > 0 ? { relations } : {}),
         include_sub_issues: settings.showSubIssues,
       },
       sort: { field: settings.sortBy, direction: settings.sortDirection },
     },
+  };
+}
+
+/** The request for an expanded project, or `null` when the settings leave nothing to list. */
+export function projectSidebarRequest(
+  projectId: string,
+  settings: SidebarIssueSettings,
+  statuses: readonly StatusRef[],
+  userId: string | undefined,
+): SidebarIssuesRequest | null {
+  return projectRowRequest({ kind: "project", project_id: projectId }, {}, settings, statuses, userId);
+}
+
+/** The Projects section's row for issues outside every project. */
+export const NO_PROJECT_SIDEBAR_SOURCE = "project:none";
+
+/** The request for the expanded "No project" row, listed like an expanded project. */
+export function noProjectSidebarRequest(
+  settings: SidebarIssueSettings,
+  statuses: readonly StatusRef[],
+  userId: string | undefined,
+): SidebarIssuesRequest | null {
+  return projectRowRequest({ kind: "workspace" }, { include_no_project: true }, settings, statuses, userId);
+}
+
+/** The facet key the table query gives issues outside every project. */
+export const NO_PROJECT_FACET_KEY = "__none__";
+
+/**
+ * Counts open issues per project, the "No project" row's under
+ * `NO_PROJECT_FACET_KEY`. Open is what a project's count means: any status
+ * outside the done and closed categories, sub-issues included.
+ */
+export function noProjectCountRequest(statuses: readonly StatusRef[]): IssueTableFacetsRequest {
+  return {
+    query: {
+      scope: { kind: "workspace" },
+      filters: {
+        statuses: statuses.filter((s) => !FINISHED.has(s.category)).map((s) => s.key),
+        include_sub_issues: true,
+      },
+      sort: { field: "position", direction: "asc" },
+    },
+    facets: [{ kind: "project" }],
+    include_total: false,
   };
 }
 

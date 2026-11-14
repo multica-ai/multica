@@ -11,9 +11,13 @@ import { inboxListOptions } from "@multica/core/inbox/queries";
 import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
 import { issueDetailOptions, issueKeys } from "@multica/core/issues/queries";
 import { issueUnreadOptions } from "@multica/core/issues/unread";
+import { NO_PROJECT_SIDEBAR_SOURCE } from "@multica/core/issues/sidebar-list";
 import { SIDEBAR_PROJECTS_SCOPE } from "@multica/core/issues/sidebar-project-prefs";
 import { useSidebarKeptStore } from "@multica/core/issues/stores/sidebar-kept-store";
-import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
+import {
+  DEFAULT_SIDEBAR_PROJECT_SETTINGS,
+  useSidebarTreeStore,
+} from "@multica/core/issues/stores/sidebar-tree-store";
 import { spaceForPath } from "@multica/core/paths";
 import { pinListOptions } from "@multica/core/pins/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
@@ -217,6 +221,7 @@ function renderPanel(
 
 const issueRow = () => screen.getByRole("link", { name: ISSUE.title });
 const allIssues = () => screen.getByRole("link", { name: "All issues" });
+const noProjectLocated = () => !!screen.getByRole("button", { name: "No project" }).closest("[data-located]");
 
 beforeEach(() => {
   useSidebarTreeStore.setState({
@@ -224,6 +229,7 @@ beforeEach(() => {
     viewsCollapsed: false,
     pinnedCollapsed: false,
     projectsCollapsed: false,
+    projectSettings: DEFAULT_SIDEBAR_PROJECT_SETTINGS,
   });
   useActiveIssueViewStore.setState({ active: {} });
   useSidebarKeptStore.setState({ held: {} });
@@ -339,7 +345,7 @@ describe("WorkPanel issue highlight", () => {
     expect(issueRow()).toHaveAttribute("aria-current", "page");
   });
 
-  it("leaves All issues lit for an issue no expanded row lists", async () => {
+  it("marks No project for an issue without a project no expanded row lists", async () => {
     const qc = renderPanel("/acme/issues/9c8d7e6f-5a4b-4c3d-8e2f-1a0b9c8d7e6f");
     act(() => {
       qc.setQueryData(issueDetailOptions("ws-1", "9c8d7e6f-5a4b-4c3d-8e2f-1a0b9c8d7e6f").queryKey, {
@@ -349,7 +355,8 @@ describe("WorkPanel issue highlight", () => {
     });
 
     await screen.findByRole("link", { name: ISSUE.title });
-    expect(allIssues()).toHaveAttribute("aria-current", "page");
+    await waitFor(() => expect(noProjectLocated()).toBe(true));
+    expect(allIssues()).not.toHaveAttribute("aria-current");
   });
 
   it("keeps an issue its list drops lit in place until another issue opens", async () => {
@@ -420,7 +427,7 @@ describe("WorkPanel issue highlight", () => {
 
     expect(await screen.findByRole("link", { name: OTHER.title })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Fixed the sidebar" })).toBeNull();
-    expect(allIssues()).toHaveAttribute("aria-current", "page");
+    expect(noProjectLocated()).toBe(true);
   });
 
   it("keeps the open project in the tree after it leaves the projects filter", async () => {
@@ -488,14 +495,45 @@ describe("WorkPanel and the open issue's project", () => {
     expect(useSidebarTreeStore.getState().expanded).toEqual([]);
   });
 
-  it("lights All issues for an issue without a project that no list shows", async () => {
+  it("marks No project for an issue without a project that no list shows", async () => {
     useSidebarTreeStore.setState({ expanded: [] });
     const qc = renderPanel(`/acme/issues/${ISSUE.id}`, [], [PROJECT]);
     act(() => {
       qc.setQueryData(issueDetailOptions("ws-1", ISSUE.id).queryKey, ISSUE);
     });
 
+    await waitFor(() => expect(noProjectLocated()).toBe(true));
+    expect(allIssues()).not.toHaveAttribute("aria-current");
+  });
+
+  it("lights the issue in the expanded No project row", async () => {
+    useSidebarTreeStore.setState({ expanded: [NO_PROJECT_SIDEBAR_SOURCE] });
+    const qc = renderPanel(`/acme/issues/${ISSUE.id}`, [], [PROJECT]);
+    act(() => {
+      qc.setQueryData(issueDetailOptions("ws-1", ISSUE.id).queryKey, ISSUE);
+    });
+
+    const list = await waitFor(
+      () => document.querySelector(`[data-sidebar-list="${NO_PROJECT_SIDEBAR_SOURCE}"]`) as HTMLElement,
+    );
+    await waitFor(() =>
+      expect(within(list).getByRole("link", { name: ISSUE.title })).toHaveAttribute("aria-current", "page"),
+    );
+    expect(allIssues()).not.toHaveAttribute("aria-current");
+  });
+
+  it("lights All issues for an issue without a project once No project is hidden", async () => {
+    useSidebarTreeStore.setState({
+      expanded: [],
+      projectSettings: { ...DEFAULT_SIDEBAR_PROJECT_SETTINGS, showNoProject: false },
+    });
+    const qc = renderPanel(`/acme/issues/${ISSUE.id}`, [], [PROJECT]);
+    act(() => {
+      qc.setQueryData(issueDetailOptions("ws-1", ISSUE.id).queryKey, ISSUE);
+    });
+
     await waitFor(() => expect(allIssues()).toHaveAttribute("aria-current", "page"));
+    expect(screen.queryByRole("button", { name: "No project" })).toBeNull();
   });
 
   it("does not light All issues for an issue under the collapsed Projects section", async () => {

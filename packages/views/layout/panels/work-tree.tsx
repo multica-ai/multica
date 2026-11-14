@@ -1,20 +1,24 @@
 "use client";
 
 import { useCallback, useId, useMemo, useRef, useSyncExternalStore, type MouseEvent } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { CSS } from "@dnd-kit/utilities";
-import { Folder, Plus } from "@multica/ui/icons";
+import { Folder, FolderMinus, Plus } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { DropdownMenuItem } from "@multica/ui/components/ui/dropdown-menu";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
-import { issueKeys, sidebarIssuesOptions } from "@multica/core/issues/queries";
+import { issueKeys, issueTableFacetsOptions, sidebarIssuesOptions } from "@multica/core/issues/queries";
 import { filterDependencyState, statusCatalogSource } from "@multica/core/issues/surface/filter-dependency";
 import {
+  NO_PROJECT_FACET_KEY,
+  NO_PROJECT_SIDEBAR_SOURCE,
   SIDEBAR_FIRST_PAGE,
+  noProjectCountRequest,
+  noProjectSidebarRequest,
   projectSidebarRequest,
   projectSidebarSource,
   type SidebarIssuesRequest,
@@ -42,7 +46,7 @@ import { shouldOpenRowMenu, useRowMenu } from "../../common/point-menu";
 import { CollectionRowContext } from "../collection-list/row-context";
 import { useDragClickGuard } from "../use-drag-click-guard";
 import { ProjectsSectionSettings, SECTION_SETTINGS_REVEAL_CLASS } from "./sidebar-settings";
-import { SidebarIssueList, TreeRow } from "./sidebar-tree";
+import { SidebarIssueList, TreeRow, TreeToggleRow } from "./sidebar-tree";
 
 const DRAG_MODIFIERS = [restrictToVerticalAxis, restrictToFirstScrollableAncestor];
 
@@ -129,8 +133,8 @@ interface ProjectsSectionProps {
   activeIssueId: string | null;
   /** The one list that lights the open issue. */
   litSource: string | null;
-  /** The project whose row marks the open issue no list shows. */
-  locatedProjectId: string | null;
+  /** The row, a project's or "No project", that marks the open issue no list shows. */
+  locatedSource: string | null;
 }
 
 export function ProjectsSection({
@@ -142,7 +146,7 @@ export function ProjectsSection({
   plainRowsLit,
   activeIssueId,
   litSource,
-  locatedProjectId,
+  locatedSource,
 }: ProjectsSectionProps) {
   const { t } = useT("layout");
   const p = useWorkspacePaths();
@@ -211,13 +215,24 @@ export function ProjectsSection({
                 issueSettings={issueSettings}
                 activeIssueId={litSource === projectSidebarSource(project.id) ? activeIssueId : null}
                 openIssueId={activeIssueId}
-                located={locatedProjectId === project.id}
+                located={locatedSource === projectSidebarSource(project.id)}
               />
             ))}
           </PanelList>
         </SortableContext>
       </DndContext>
       <PanelList className="mt-px">
+        {projectSettings.showNoProject && (
+          <NoProjectTreeItem
+            wsId={wsId}
+            userId={userId}
+            showCount={projectSettings.showCount}
+            issueSettings={issueSettings}
+            activeIssueId={litSource === NO_PROJECT_SIDEBAR_SOURCE ? activeIssueId : null}
+            openIssueId={activeIssueId}
+            located={locatedSource === NO_PROJECT_SIDEBAR_SOURCE}
+          />
+        )}
         {totalProjects === 0 ? (
           <li>
             <button
@@ -246,6 +261,97 @@ export function ProjectsSection({
         )}
       </PanelList>
     </PanelSection>
+  );
+}
+
+/**
+ * Issues outside every project, listed like a project's. No page shows them,
+ * so the row only expands.
+ */
+function NoProjectTreeItem({
+  wsId,
+  userId,
+  showCount,
+  issueSettings,
+  activeIssueId,
+  openIssueId,
+  located,
+}: {
+  wsId: string;
+  userId: string | undefined;
+  showCount: boolean;
+  issueSettings: SidebarIssueSettings;
+  activeIssueId: string | null;
+  openIssueId: string | null;
+  located: boolean;
+}) {
+  const { t } = useT("layout");
+  const listId = useId();
+  const rowRef = useRef<HTMLButtonElement>(null);
+  const [expanded, setExpanded] = useExpanded(NO_PROJECT_SIDEBAR_SOURCE);
+  const statusCatalog = useIssueStatuses(wsId);
+  const catalogDependency = filterDependencyState(true, [statusCatalogSource(statusCatalog)]);
+  const params = catalogDependency.unresolved
+    ? undefined
+    : noProjectSidebarRequest(issueSettings, statusCatalog.statuses, userId);
+  const prefetch = usePrefetch(wsId, NO_PROJECT_SIDEBAR_SOURCE, params);
+  const { data: count = 0 } = useQuery({
+    ...issueTableFacetsOptions(wsId, noProjectCountRequest(statusCatalog.statuses)),
+    enabled: showCount && !catalogDependency.unresolved,
+    select: (data) =>
+      data.facets[0]?.values.find((value) => value.key === NO_PROJECT_FACET_KEY)?.count ?? 0,
+  });
+  const label = t(($) => $.panels.work.no_project);
+
+  return (
+    <li>
+      <TreeToggleRow
+        ref={rowRef}
+        label={label}
+        icon={<FolderMinus className="size-4 shrink-0" />}
+        located={located}
+        expanded={expanded}
+        onExpandedChange={setExpanded}
+        listId={listId}
+        onPrefetch={prefetch}
+        trailing={
+          <span className="relative flex h-5 min-w-5 items-center justify-end">
+            {showCount && (
+              <PanelCount
+                value={count}
+                className="transition-opacity group-focus-within/row:opacity-0 group-hover/row:opacity-0 [@media(pointer:coarse)]:opacity-0"
+              />
+            )}
+            <IconButton
+              label={t(($) => $.panels.work.new_issue_no_project)}
+              size="icon-xs"
+              className="absolute -right-2 z-10 text-muted-foreground opacity-0 transition-opacity group-focus-within/row:opacity-100 group-hover/row:opacity-100 focus-visible:opacity-100 [@media(pointer:coarse)]:opacity-100"
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={() => openCreateIssueWithPreference()}
+            >
+              <Plus />
+            </IconButton>
+          </span>
+        }
+      />
+      {expanded && (
+        <SidebarIssueList
+          id={listId}
+          wsId={wsId}
+          source={NO_PROJECT_SIDEBAR_SOURCE}
+          params={params}
+          paramsError={catalogDependency.error}
+          onRetry={catalogDependency.retry}
+          activeIssueId={activeIssueId}
+          openIssueId={openIssueId}
+          ownsOpen={(issue) => !issue.project_id}
+          onCollapse={() => {
+            setExpanded(false);
+            rowRef.current?.focus();
+          }}
+        />
+      )}
+    </li>
   );
 }
 

@@ -7,7 +7,7 @@ import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { isIssueUuid } from "@multica/core/issues/canonical-id";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
-import { projectSidebarSource, sidebarProjects } from "@multica/core/issues/sidebar-list";
+import { NO_PROJECT_SIDEBAR_SOURCE, projectSidebarSource, sidebarProjects } from "@multica/core/issues/sidebar-list";
 import { useSidebarProjectPrefs } from "@multica/core/issues/sidebar-project-prefs";
 import { useSidebarKeptStore } from "@multica/core/issues/stores/sidebar-kept-store";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
@@ -137,31 +137,43 @@ export function WorkPanel() {
   // user toggles a row or asks to show the issue there.
   const projectsCollapsed = useSidebarTreeStore((s) => s.projectsCollapsed);
   const issueProjectId = currentIssue?.project_id ?? null;
-  const issueProject =
-    !projectsCollapsed && issueProjectId ? shownProjects.find((project) => project.id === issueProjectId) : undefined;
-  const issueProjectSource = issueProject ? projectSidebarSource(issueProject.id) : null;
-  // An expanded project always lists its open issue (`ownsOpen`).
-  const issueProjectExpanded = useSidebarTreeStore(
-    (s) => !!issueProjectSource && s.expanded.includes(issueProjectSource),
-  );
-  const listing = issueProjectExpanded ? [...inTree.sources, issueProjectSource!] : inTree.sources;
+  const showNoProject = !projectsCollapsed && projectSettings.showNoProject;
+  // The Projects row the open issue belongs under: its project's, or "No project".
+  const issueHomeSource = projectsCollapsed
+    ? null
+    : issueProjectId
+      ? shownProjects.some((project) => project.id === issueProjectId)
+        ? projectSidebarSource(issueProjectId)
+        : null
+      : currentIssue && showNoProject
+        ? NO_PROJECT_SIDEBAR_SOURCE
+        : null;
+  // An expanded row always lists its open issue (`ownsOpen`).
+  const issueHomeExpanded = useSidebarTreeStore((s) => !!issueHomeSource && s.expanded.includes(issueHomeSource));
+  const listing = issueHomeExpanded ? [...inTree.sources, issueHomeSource!] : inTree.sources;
   const listOrder = [
     ...viewActions.sidebar.items.map(sidebarViewItemSource),
     ...shownProjects.map((project) => projectSidebarSource(project.id)),
+    ...(showNoProject ? [NO_PROJECT_SIDEBAR_SOURCE] : []),
   ];
   const litSource =
     !plainRowsLit || !currentIssueId || inboxClaimsIssue
       ? null
       : clickedList && listing.includes(clickedList)
         ? clickedList
-        : issueProjectExpanded
-          ? issueProjectSource
+        : issueHomeExpanded
+          ? issueHomeSource
           : (listOrder.find((source) => listing.includes(source)) ?? null);
-  const locatedProjectId = plainRowsLit && !inboxClaimsIssue && !litSource && issueProject ? issueProject.id : null;
+  const locatedSource = plainRowsLit && !inboxClaimsIssue && !litSource ? issueHomeSource : null;
   // An issue in a project the panel hides, or under the collapsed Projects
   // section, stays unmarked rather than lighting a list that may not show it.
   const issueInAllIssues =
-    plainRowsLit && !inboxClaimsIssue && !!currentIssue && !currentIssue.project_id && litSource === null;
+    plainRowsLit &&
+    !inboxClaimsIssue &&
+    !!currentIssue &&
+    !currentIssue.project_id &&
+    litSource === null &&
+    locatedSource === null;
 
   const locate = useSidebarTreeStore((s) => s.locate);
   const setExpanded = useSidebarTreeStore((s) => s.setExpanded);
@@ -217,7 +229,7 @@ export function WorkPanel() {
               plainRowsLit={plainRowsLit}
               activeIssueId={currentIssueId}
               litSource={litSource}
-              locatedProjectId={locatedProjectId}
+              locatedSource={locatedSource}
             />
           )}
         </PanelBody>

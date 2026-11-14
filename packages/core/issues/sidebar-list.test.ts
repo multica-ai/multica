@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { Project } from "../types";
 import {
+  noProjectCountRequest,
+  noProjectSidebarRequest,
   projectSidebarRequest,
   shownSidebarStatuses,
   builtinSidebarRequest,
@@ -55,6 +57,36 @@ describe("projectSidebarRequest", () => {
     const settings = { ...DEFAULT_SIDEBAR_ISSUE_SETTINGS, hiddenStatuses: STATUSES.map((s) => s.key) };
     expect(shownSidebarStatuses(settings, STATUSES)).toEqual([]);
     expect(projectSidebarRequest("p1", settings, STATUSES, "u1")).toBeNull();
+  });
+});
+
+describe("No project", () => {
+  it("lists issues outside every project with the project rows' settings", () => {
+    const settings: SidebarIssueSettings = { ...DEFAULT_SIDEBAR_ISSUE_SETTINGS, assignee: "me" };
+    expect(noProjectSidebarRequest(settings, STATUSES, "u1")).toEqual({
+      table: {
+        scope: { kind: "workspace" },
+        filters: {
+          include_no_project: true,
+          statuses: ["backlog", "todo", "in_progress", "merged"],
+          relations: ["assigned"],
+          include_sub_issues: true,
+        },
+        sort: { field: "updated_at", direction: "desc" },
+      },
+    });
+  });
+
+  it("counts open issues, sub-issues included, as a project's count does", () => {
+    expect(noProjectCountRequest(STATUSES)).toEqual({
+      query: {
+        scope: { kind: "workspace" },
+        filters: { statuses: ["backlog", "todo", "in_progress", "merged"], include_sub_issues: true },
+        sort: { field: "position", direction: "asc" },
+      },
+      facets: [{ kind: "project" }],
+      include_total: false,
+    });
   });
 });
 

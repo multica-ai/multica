@@ -35,6 +35,8 @@ export interface SidebarProjectSettings {
   statuses: ProjectStatus[];
   onlyMine: boolean;
   showCount: boolean;
+  /** The row after the projects that lists issues outside every project. */
+  showNoProject: boolean;
 }
 
 export const DEFAULT_SIDEBAR_PROJECT_SETTINGS: SidebarProjectSettings = {
@@ -42,6 +44,7 @@ export const DEFAULT_SIDEBAR_PROJECT_SETTINGS: SidebarProjectSettings = {
   statuses: ["planned", "in_progress", "paused"],
   onlyMine: false,
   showCount: true,
+  showNoProject: true,
 };
 
 /** How many rows a capped sidebar section shows before "Show more". */
