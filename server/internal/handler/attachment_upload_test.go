@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -59,6 +58,11 @@ type directUploadStorage struct {
 	// beforeReadPrefix runs at the start of ReadPrefix: the window between the
 	// HEAD that measured the object and the probe read that describes it.
 	beforeReadPrefix func()
+	// presignErr, when set, is what PresignPut returns instead of a URL. It lets
+	// a test drive the backend's own capability refusal (storage.ErrUnsupported)
+	// through the handler, which is a different path from the handler's size
+	// gate and must produce the same 501.
+	presignErr error
 }
 
 type directUploadObject struct {
@@ -117,6 +121,11 @@ func (s *directUploadStorage) GetReader(ctx context.Context, key string) (io.Rea
 
 // PresignPut issues a URL that the test's own PUT helper consumes.
 func (s *directUploadStorage) PresignPut(ctx context.Context, key string, ttl time.Duration, contentType string, contentLength int64) (string, map[string]string, error) {
+	if s.presignErr != nil {
+		// Not recorded as a presigned key: a refused request issued no
+		// credential, and tests assert on exactly that.
+		return "", nil, s.presignErr
+	}
 	s.mu.Lock()
 	s.presignedKeys = append(s.presignedKeys, key)
 	s.mu.Unlock()
@@ -499,7 +508,12 @@ func TestPresignAttachmentUpload_LocalBackendReturns501(t *testing.T) {
 	}
 }
 
-func TestPresignAttachmentUpload_RejectsOversizeAndEmpty(t *testing.T) {
+// TestPresignAttachmentUpload_RejectsOversizeAndMalformed covers the requests
+// that are wrong rather than merely empty. An explicit size_bytes of 0 is NOT
+// one of them: it is a valid upload that this endpoint declines as a capability
+// (see attachment_upload_empty_test.go), and refusing it here as a 400 would
+// stop empty files from uploading at all.
+func TestPresignAttachmentUpload_RejectsOversizeAndMalformed(t *testing.T) {
 	installDirectUploadStorage(t)
 	issueID := seedIssueForUpload(t)
 
@@ -513,8 +527,8 @@ func TestPresignAttachmentUpload_RejectsOversizeAndEmpty(t *testing.T) {
 		wantStatus int
 	}{
 		{
-			// Absent is a validation error; an explicit 0 is NOT (see the
-			// empty-file compatibility test below).
+			// Absent is a validation error; an explicit 0 is a valid
+			// declaration that the endpoint declines as a capability.
 			name:       "missing size field",
 			rawBody:    `{"filename":"a.txt","content_type":"text/plain"}`,
 			wantStatus: http.StatusBadRequest,
@@ -919,64 +933,11 @@ func TestClaimAttachmentUploadSession_RespectsExpiryAndLease(t *testing.T) {
 	}
 }
 
-// TestEmptyFileParityWithMultipartPath pins the compatibility the rework had to
-// restore: the multiplexed endpoint has always published an empty file, and the
-// direct path must not be stricter. A 400 here would be a silent regression
-// because the CLI does not treat 400 as a fallback signal.
-func TestEmptyFileParityWithMultipartPath(t *testing.T) {
-	store := installDirectUploadStorage(t)
-	issueID := seedIssueForUpload(t)
-
-	// The legacy path first: this is the behaviour being matched.
-	legacyStore := &mockStorage{}
-	origStorage := testHandler.Storage
-	testHandler.Storage = legacyStore
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
-	if _, err := writer.CreateFormFile("file", "empty.txt"); err != nil {
-		t.Fatalf("create form file: %v", err)
-	}
-	writer.Close()
-	req := httptest.NewRequest(http.MethodPost, "/api/upload-file", &body)
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	req.Header.Set("X-User-ID", testUserID)
-	req.Header.Set("X-Workspace-ID", testWorkspaceID)
-	legacyRecorder := httptest.NewRecorder()
-	testHandler.UploadFile(legacyRecorder, req)
-	testHandler.Storage = origStorage
-	if legacyRecorder.Code != http.StatusOK {
-		t.Fatalf("legacy empty-file upload = %d: %s", legacyRecorder.Code, legacyRecorder.Body.String())
-	}
-	var legacyAttachment AttachmentResponse
-	if err := json.Unmarshal(legacyRecorder.Body.Bytes(), &legacyAttachment); err != nil {
-		t.Fatalf("decode legacy response: %v", err)
-	}
-	if legacyAttachment.SizeBytes != 0 {
-		t.Fatalf("legacy size_bytes = %d, want 0", legacyAttachment.SizeBytes)
-	}
-
-	// The direct path must agree: an explicit 0 is accepted and published.
-	presign := presignUpload(t, presignUploadRequest{
-		Filename: "empty.txt", ContentType: "text/plain", SizeBytes: 0, IssueID: issueID,
-	}, testUserID, testWorkspaceID)
-	store.putStagingObject(store.presignedKeys[0], nil, "text/plain")
-	w := completeUpload(t, presign.AttachmentID, testUserID, testWorkspaceID)
-	if w.Code != http.StatusOK {
-		t.Fatalf("direct empty-file upload = %d, want 200: %s", w.Code, w.Body.String())
-	}
-	var directAttachment AttachmentResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &directAttachment); err != nil {
-		t.Fatalf("decode direct response: %v", err)
-	}
-	if directAttachment.SizeBytes != 0 {
-		t.Fatalf("direct size_bytes = %d, want 0", directAttachment.SizeBytes)
-	}
-	// Both paths report the same shape, which is what makes them interchangeable
-	// for a client.
-	if directAttachment.ID == "" || directAttachment.MarkdownURL == "" {
-		t.Fatalf("direct empty-file response is missing the attachment contract: %+v", directAttachment)
-	}
-}
+// The empty-file contract moved with the capability: a zero-byte presign is now
+// refused (see TestPresignAttachmentUpload_ZeroByteRefusedWithoutSideEffects in
+// attachment_upload_empty_test.go), so the parity assertion lives there against
+// the multipart endpoint and a directly inserted legacy session. Keeping the
+// pairing in one file is what stops these two from drifting apart.
 
 // TestSessionExpiryPolicyIsDerivedAndFinite nails the completion deadline:
 // it follows expires_at, it is finite, and it does not depend on the cleanup
@@ -1193,40 +1154,5 @@ func TestProbeAndCopyBindTheSameObjectVersion(t *testing.T) {
 	if result.ContentType != want {
 		t.Fatalf("published content_type = %q, but the copied bytes sniff as %q — metadata and bytes describe different objects",
 			result.ContentType, want)
-	}
-}
-
-// TestCompleteSucceedsForVerifiedEmptyObject covers item 3 end to end at the
-// handler: a zero-byte staging object must publish, not 502.
-func TestCompleteSucceedsForVerifiedEmptyObject(t *testing.T) {
-	store := installDirectUploadStorage(t)
-	issueID := seedIssueForUpload(t)
-
-	presign := presignUpload(t, presignUploadRequest{
-		Filename: "empty.txt", ContentType: "text/plain", SizeBytes: 0, IssueID: issueID,
-	}, testUserID, testWorkspaceID)
-	store.putStagingObject(store.presignedKeys[0], nil, "text/plain")
-
-	w := completeUpload(t, presign.AttachmentID, testUserID, testWorkspaceID)
-	if w.Code != http.StatusOK {
-		t.Fatalf("empty upload completion = %d, want 200: %s", w.Code, w.Body.String())
-	}
-	var att AttachmentResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &att); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if att.SizeBytes != 0 {
-		t.Fatalf("size_bytes = %d, want 0", att.SizeBytes)
-	}
-	// The MIME semantics must survive: text/plain for empty content, matching
-	// the multipart path, never an empty string.
-	if !strings.HasPrefix(att.ContentType, "text/plain") {
-		t.Fatalf("content_type = %q, want text/plain", att.ContentType)
-	}
-	// The object must be published at the final key with the same (zero) length.
-	finalKey := attachmentObjectKey(testWorkspaceID, testUserID, presign.AttachmentID, "empty.txt")
-	published, ok := store.object(finalKey)
-	if !ok || len(published.body) != 0 {
-		t.Fatalf("final object missing or non-empty: exists=%v len=%d", ok, len(published.body))
 	}
 }

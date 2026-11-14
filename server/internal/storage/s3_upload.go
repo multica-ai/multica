@@ -19,9 +19,10 @@ import (
 // Presigned direct-upload support for the S3 backend.
 //
 // The upload primitive is a presigned PUT against a staging key. A SigV4
-// presigned PUT DOES bind Content-Type and Content-Length, because both are in
-// the canonical request — so the store itself rejects a body of the wrong size
-// or declared type (see PresignPut below).
+// presigned PUT DOES bind Content-Type and a NON-ZERO Content-Length, because
+// both are in the canonical request — so the store itself rejects a body of the
+// wrong size or declared type (see PresignPut below). A zero length is not
+// signed at all, so it is refused rather than issued.
 //
 // What it cannot bind is everything else: the presigned URL stays usable until
 // it expires, so the client can re-PUT different bytes of the same length to
@@ -50,12 +51,33 @@ const presignPutMaxTTL = 7 * 24 * time.Hour
 // that header is for chunked framing — so the length is bound by SigV4's
 // content-length-in-signature rule, which the SDK applies to the canonical
 // request.
+//
+// The corollary is that length 0 has no binding to offer: SigV4 signs
+// content-length only when the value is non-zero, so an empty-file credential
+// covers `host` alone and authorizes an unbounded body. Zero is therefore
+// refused with ErrUnsupported and the caller routes empty files to the
+// multipart path — an empty file is a valid upload, just not one this
+// primitive can safely express.
 func (s *S3Storage) PresignPut(ctx context.Context, key string, ttl time.Duration, contentType string, contentLength int64) (string, map[string]string, error) {
 	if key == "" {
 		return "", nil, fmt.Errorf("s3 PresignPut: empty key")
 	}
 	if contentLength < 0 {
 		return "", nil, fmt.Errorf("s3 PresignPut: content length is required")
+	}
+	if contentLength == 0 {
+		// A zero length binds nothing. SigV4 folds content-length into the
+		// canonical request only when there is a length to fold — a size-0 PUT
+		// is signed over `host` alone, and a real bucket accepted a 120 MiB
+		// object through such a URL. The credential would therefore authorize
+		// "whatever the client feels like sending", which is precisely the
+		// property this function exists to provide.
+		//
+		// Reported as a capability refusal rather than a bad request: an empty
+		// file is a legitimate upload, just not one this path can express, and
+		// callers translate ErrUnsupported into the machine-readable 501 that
+		// sends the client down the multipart path.
+		return "", nil, fmt.Errorf("s3 PresignPut: refusing a zero-length credential that binds no size: %w", ErrUnsupported)
 	}
 	if ttl <= 0 {
 		ttl = presignPutTTL

@@ -45,6 +45,12 @@ type ObjectInfo struct {
 // UploadPresigner issues a single-object PUT credential and reports the
 // headers that credential requires. headers must be sent verbatim or the
 // signature will not validate.
+//
+// contentLength must be positive. A zero length has no SigV4 binding to fold
+// into the signature, so an implementation MUST refuse it with ErrUnsupported
+// rather than return a credential that authorizes an unbounded body. A negative
+// length is an input error, not a capability one. Callers treat ErrUnsupported
+// as "this object cannot be uploaded this way" and use the multipart path.
 type UploadPresigner interface {
 	PresignPut(ctx context.Context, key string, ttl time.Duration, contentType string, contentLength int64) (url string, headers map[string]string, err error)
 }

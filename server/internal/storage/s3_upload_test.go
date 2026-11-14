@@ -261,6 +261,56 @@ func TestS3PresignPut_ClampsTTLAndRejectsBadInput(t *testing.T) {
 	}
 }
 
+// TestS3PresignPut_RefusesZeroLengthCredential covers the defect a real bucket
+// exposed: SigV4 cannot express a zero Content-Length in the canonical request,
+// so a size-0 PUT is signed with `host` alone. That URL is a credential for
+// "any number of bytes" — a 120 MiB object was stored with a credential issued
+// for an empty file. The refusal is a capability error, not a validation error,
+// so callers route it to the empty-file fallback instead of reporting a bad
+// request.
+func TestS3PresignPut_RefusesZeroLengthCredential(t *testing.T) {
+	remote, store := newFakeObjectStore(t)
+
+	rawURL, headers, err := store.PresignPut(context.Background(), "upload-staging/ws/session", time.Minute, "text/plain", 0)
+	if !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("PresignPut(size=0) error = %v, want ErrUnsupported", err)
+	}
+	if rawURL != "" {
+		t.Fatalf("PresignPut(size=0) returned a URL: %s", rawURL)
+	}
+	if headers != nil {
+		t.Fatalf("PresignPut(size=0) returned headers: %v", headers)
+	}
+	// No request may be made: the point is that no credential exists, not that
+	// one exists and is discarded.
+	remote.mu.Lock()
+	requests := len(remote.requests)
+	remote.mu.Unlock()
+	if requests != 0 {
+		t.Fatalf("PresignPut(size=0) still contacted the store (%d requests)", requests)
+	}
+
+	// The very next size is a legitimate, length-bound credential — the rule is
+	// "no empty PUT", not "no small PUT".
+	rawURL, headers, err = store.PresignPut(context.Background(), "upload-staging/ws/session", time.Minute, "application/octet-stream", 1)
+	if err != nil {
+		t.Fatalf("PresignPut(size=1): %v", err)
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		t.Fatalf("parse presigned URL: %v", err)
+	}
+	signed := parsed.Query().Get("X-Amz-SignedHeaders")
+	for _, want := range []string{"host", "content-length", "content-type"} {
+		if !strings.Contains(signed, want) {
+			t.Fatalf("size=1 signed headers %q do not include %q", signed, want)
+		}
+	}
+	if headers["Content-Length"] != "1" {
+		t.Fatalf("size=1 Content-Length header = %q, want 1", headers["Content-Length"])
+	}
+}
+
 func TestS3FinalizeObject_CopiesUnderIfMatchAndReplacesMetadata(t *testing.T) {
 	remote, store := newFakeObjectStore(t)
 

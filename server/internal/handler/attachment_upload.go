@@ -126,6 +126,18 @@ func StorageSupportsDirectUpload(s storage.Storage) bool {
 	return ok
 }
 
+// isUnsupportedUploadError reports whether err is the storage layer declining
+// the request as impossible for this path (rather than failing).
+//
+// The distinction is the whole fallback contract: a capability refusal becomes
+// attachment_presign_unsupported, which a client turns into one multipart
+// attempt, while any other error is reported so a real fault is never retried
+// through a second transfer. errors.Is rather than a direct comparison because
+// the S3 backend wraps the sentinel with the reason.
+func isUnsupportedUploadError(err error) bool {
+	return errors.Is(err, storage.ErrUnsupported)
+}
+
 type presignUploadRequest struct {
 	Filename    string `json:"filename"`
 	ContentType string `json:"content_type"`
@@ -226,6 +238,26 @@ func (h *Handler) PresignAttachmentUpload(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	if sizeBytes == 0 {
+		// An empty file is a valid upload, but not one this path can authorize.
+		// SigV4 folds content-length into the canonical request only when it is
+		// non-zero, so a size-0 credential is signed over `host` alone and
+		// accepts any number of bytes: against a real bucket such a URL stored a
+		// 120 MiB object. Complete-upload's size check cannot repair that — by
+		// then the bytes are already in the bucket, under a key the client can
+		// keep rewriting until the URL expires.
+		//
+		// 501 with the capability code, after the permission and input checks
+		// above: this deployment does accept the upload, just not this way, and
+		// the client answers it by retrying through the multipart endpoint. A 400
+		// would be worse than useless — no client falls back on one, so empty
+		// files would simply stop uploading — and refusing earlier in the chain
+		// would turn the endpoint into an oracle for which targets exist.
+		writeErrorCode(w, http.StatusNotImplemented, codeUploadPresignUnsupported,
+			"zero-byte uploads are not available through presigned upload; use the multipart endpoint")
+		return
+	}
+
 	uploaderType, uploaderID := h.resolveActor(r, userID, workspaceID)
 
 	sessionID, err := uuid.NewV7()
@@ -243,6 +275,17 @@ func (h *Handler) PresignAttachmentUpload(w http.ResponseWriter, r *http.Request
 	expiresAt := time.Now().Add(uploadPresignTTL)
 	uploadURL, headers, err := capable.PresignPut(r.Context(), stagingKey, uploadPresignTTL, contentType, sizeBytes)
 	if err != nil {
+		// A backend that declines the upload is not a fault: it says this object
+		// cannot go through the direct path, which is the same answer as a
+		// backend without the capability at all. Reporting it as a 502 would
+		// read as a transient server error, and the client would retry instead
+		// of falling back.
+		if isUnsupportedUploadError(err) {
+			slog.Warn("storage backend declined presigned upload", "error", err)
+			writeErrorCode(w, http.StatusNotImplemented, codeUploadPresignUnsupported,
+				"this deployment's storage backend cannot issue a credential for this upload")
+			return
+		}
 		slog.Error("failed to presign upload", "error", err)
 		writeError(w, http.StatusBadGateway, "failed to create upload URL")
 		return
@@ -1049,9 +1092,11 @@ func validatePresignUploadRequest(w http.ResponseWriter, req presignUploadReques
 		writeError(w, http.StatusBadRequest, "size_bytes must not be negative")
 		return "", "", 0, false
 	}
-	// 0 is accepted: the multipart path has always published empty files, and a
-	// client that cannot upload one here would also not fall back (a 400 is not
-	// a fallback signal), so rejecting it would be a silent regression.
+	// 0 is structurally valid (the multipart path has always published empty
+	// files) but this endpoint refuses it later, once permission and input have
+	// been checked: see the zero-byte capability refusal in
+	// PresignAttachmentUpload. Rejecting it here as a bad request would be a
+	// silent regression, because no client falls back on a 400.
 	if sizeBytes > maxUploadSize {
 		writeError(w, http.StatusRequestEntityTooLarge, "file exceeds the 100 MiB upload limit")
 		return "", "", 0, false
