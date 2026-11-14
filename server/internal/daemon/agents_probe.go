@@ -551,9 +551,13 @@ func probeDshMulticaProfile(ctx context.Context, executablePath string) dshProbe
 // coding tool that daemon discovery recognizes.
 func HasDiscoveredTool(id string) bool {
 	tools := probeAgentCLIs()
-	if id == "" {
-		return len(tools) > 0
+	if id != "" {
+		return tools[id].Path != ""
 	}
-	_, ok := tools[id]
-	return ok
+	for _, tool := range tools {
+		if tool.Path != "" {
+			return true
+		}
+	}
+	return false
 }

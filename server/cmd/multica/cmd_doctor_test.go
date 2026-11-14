@@ -14,7 +14,8 @@ import (
 )
 
 func TestDoctorChecksAreIndependent(t *testing.T) {
-	redirectTestHome(t, t.TempDir())
+	home := t.TempDir()
+	redirectTestHome(t, home)
 	t.Setenv("MULTICA_HERMES_PATH", "/does-not-exist/hermes")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/health" || r.Header.Get("Authorization") != "" || r.URL.RawQuery != "" {
@@ -29,7 +30,7 @@ func TestDoctorChecksAreIndependent(t *testing.T) {
 	cmd.Flags().String("profile", "unknown-fixture-profile", "")
 	cmd.Flags().String("tool", "hermes", "")
 	cmd.Flags().String("server-url", "", "")
-	if err := cmd.Flags().Set("server-url", srv.URL); err != nil {
+	if err := cmd.Flags().Set("server-url", "http://fixture-user:fixture-password@"+srv.Listener.Addr().String()+"?token=fixture-query#fragment"); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("MULTICA_TOKEN", "fixture-credential")
@@ -48,9 +49,43 @@ func TestDoctorChecksAreIndependent(t *testing.T) {
 	if bytes.Contains(out.Bytes(), []byte("fixture-credential")) {
 		t.Fatal("output contains credentials")
 	}
+	out.Reset()
+	if err := cmd.Flags().Set("output", "table"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runDoctor(cmd, nil); err != errSilent {
+		t.Fatalf("table error = %v", err)
+	}
+	for _, secret := range []string{"fixture-credential", "fixture-user", "fixture-password", "fixture-query"} {
+		if bytes.Contains(out.Bytes(), []byte(secret)) {
+			t.Fatalf("table contains %s", secret)
+		}
+	}
+	if !bytes.Contains(out.Bytes(), []byte("server\tOK")) || !bytes.Contains(out.Bytes(), []byte("tool\tFAIL")) {
+		t.Fatalf("missing independent table checks: %s", out.String())
+	}
+	entries, err := os.ReadDir(home)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("doctor changed initially empty configuration home: entries=%v error=%v", entries, err)
+	}
 	srv.Close()
 	if row := checkDoctorServer(context.Background(), srv.URL); row.OK || row.Message == "" {
 		t.Fatalf("unreachable server: %+v", row)
+	}
+}
+
+func TestDoctorDoesNotFollowHealthRedirect(t *testing.T) {
+	destination := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("doctor followed health redirect")
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	}))
+	defer destination.Close()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, destination.URL, http.StatusFound)
+	}))
+	defer srv.Close()
+	if row := checkDoctorServer(context.Background(), srv.URL); row.OK {
+		t.Fatal("redirect was reported as a healthy server")
 	}
 }
 
