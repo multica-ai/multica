@@ -104,7 +104,12 @@ func StopHermesTaskGateway(cfg Config, home string) error {
 			return err
 		}
 		if !fi.Mode().IsRegular() {
-			return fmt.Errorf("refusing to stop Hermes through non-local %s", name)
+			// A linked record attaches this home to a gateway owned by another
+			// home (the shared s6 container gateway). This task must not stop it.
+			if cfg.Logger != nil {
+				cfg.Logger.Debug("hermes task home shares another home's gateway; leaving it running", "home", home, "entry", name)
+			}
+			return nil
 		}
 		found = true
 	}
