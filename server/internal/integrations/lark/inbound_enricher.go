@@ -137,8 +137,8 @@ func NewInboundEnricher(client APIClient, cfg InboundEnricherConfig) Enricher {
 // names are resolved (Phase 2). A sender the Contact lookup misses is still
 // named when an @-mention in the fetched messages carries its id; the rest
 // fall back to positional "User N". Resolution is best-effort and never
-// blocks. p2p chats skip the Contact call (identity is unambiguous in a
-// 1:1) but still use @-mention names.
+// blocks. In p2p chats only quoted and forwarded speakers are resolved; the
+// trigger sender stays unlabeled (identity is unambiguous in a 1:1).
 //
 // Persistence note: like the quoted/forwarded blocks, the rewritten Body
 // is persisted into the addressed turn's chat_message.content downstream
@@ -230,20 +230,19 @@ func (e *inboundEnricher) Enrich(ctx context.Context, msg InboundMessage, creds 
 	fetches.Wait()
 
 	// Phase 2 — resolve display names for every speaker we're about to
-	// render (recent + quoted + forwarded) plus the sender who @-mentioned
-	// the Bot, in one batch. Group chats only; p2p keeps positional labels
-	// (identity is unambiguous in a 1:1). Unresolved ids fall back to
-	// "User N" per speakerLabeler.
-	var names map[string]string
-	if msg.ChatType == ChatTypeGroup {
-		ids := senderOpenIDs(recentItems)
-		ids = append(ids, senderOpenIDs(quotedItems)...)
-		ids = append(ids, senderOpenIDs(forwardItems)...)
-		if msg.SenderOpenID != "" {
-			ids = append(ids, string(msg.SenderOpenID))
-		}
-		names = e.resolveNames(ctx, creds, ids)
+	// render (recent + quoted + forwarded), plus in groups the sender who
+	// @-mentioned the Bot, in one batch. A p2p trigger sender needs no label
+	// (identity is unambiguous in a 1:1), but a quoted or forwarded message
+	// there can come from anyone. Unresolved ids fall back to "User N" per
+	// speakerLabeler.
+	isGroup := msg.ChatType == ChatTypeGroup
+	ids := senderOpenIDs(recentItems)
+	ids = append(ids, senderOpenIDs(quotedItems)...)
+	ids = append(ids, senderOpenIDs(forwardItems)...)
+	if isGroup && msg.SenderOpenID != "" {
+		ids = append(ids, string(msg.SenderOpenID))
 	}
+	names := e.resolveNames(ctx, creds, ids)
 	// The Contact lookup only covers users inside the app's contact scope,
 	// which is often just a few people. Every @-mention in the fetched
 	// messages carries the mentioned user's (or app's) id and display name,
@@ -283,7 +282,7 @@ func (e *inboundEnricher) Enrich(ctx context.Context, msg InboundMessage, creds 
 			// Label the user's own message with their real name so the agent
 			// knows WHO @-mentioned it — not just what they said. Only when the
 			// name resolved (group path); otherwise the body passes through.
-			if name := names[string(msg.SenderOpenID)]; name != "" {
+			if name := names[string(msg.SenderOpenID)]; isGroup && name != "" {
 				core = fmt.Sprintf("[%s]: %s", name, msg.Body)
 			}
 		}

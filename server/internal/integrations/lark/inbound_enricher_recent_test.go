@@ -581,6 +581,44 @@ func TestEnrichForwardedNamesFromMentions(t *testing.T) {
 	}
 }
 
+// TestEnrichP2PResolvesQuotedAndForwardedNames covers forwarding into a
+// 1:1 chat, the usual way a user hands the Bot a conversation: the
+// forwarded and quoted speakers get real names, while the trigger sender
+// stays unlabeled as before.
+func TestEnrichP2PResolvesQuotedAndForwardedNames(t *testing.T) {
+	t.Parallel()
+	fake := newEnricherFake()
+	fake.userNames = map[string]string{"ou_alice": "Alice", "ou_bob": "Bob", "ou_me": "Me"}
+	fake.byID["om_forward"] = []LarkMessage{
+		{MessageID: "om_forward", MessageType: "merge_forward", SenderID: "ou_me", SenderType: "user", Content: `{"content":"Merged and Forwarded Message"}`},
+		textMsg("c1", "ou_alice", "login is broken", "1000"),
+		textMsg("c2", "ou_me", "looking", "2000"),
+	}
+	fake.byID["om_parent"] = []LarkMessage{textMsg("om_parent", "ou_bob", "see logs", "1000")}
+
+	forward := enrich(t, fake, InboundMessage{MessageType: "merge_forward", MessageID: "om_forward", ChatID: "oc_p", ChatType: ChatTypeP2P, SenderOpenID: "ou_me"}, groupCfg())
+	quote := enrich(t, fake, InboundMessage{MessageType: "text", MessageID: "om_q", ChatID: "oc_p", ChatType: ChatTypeP2P, SenderOpenID: "ou_me", Body: "why?", ParentID: "om_parent"}, groupCfg())
+
+	wantForward := `<forwarded_messages count="2">
+[Alice]: login is broken
+[Me]: looking
+</forwarded_messages>`
+	wantQuote := `<quoted_message message_id="om_parent" sender="Bob" type="text">
+see logs
+</quoted_message>
+
+why?`
+	if forward.Body != wantForward {
+		t.Errorf("forward body\n got = %q\nwant = %q", forward.Body, wantForward)
+	}
+	if quote.Body != wantQuote {
+		t.Errorf("quote body\n got = %q\nwant = %q", quote.Body, wantQuote)
+	}
+	if len(fake.listCalls) != 0 {
+		t.Errorf("p2p must not prefetch recent context, got %v", fake.listCalls)
+	}
+}
+
 // TestEnrichContactNameWinsOverMentionName pins precedence: a mention's
 // name only fills an id the Contact lookup did not resolve.
 func TestEnrichContactNameWinsOverMentionName(t *testing.T) {
