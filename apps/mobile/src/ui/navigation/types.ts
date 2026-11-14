@@ -3,6 +3,8 @@ import type { NavigatorScreenParams } from "@react-navigation/native";
 export type RootStackParamList = {
   Tabs: NavigatorScreenParams<TabParamList> | undefined;
   Issue: { issueId: string };
+  /** One property of an issue, edited in a sheet. */
+  IssueField: { issueId: string; field: IssueFieldKey };
   Chat: { sessionId: string };
   NewChat: undefined;
   Search: undefined;
@@ -24,6 +26,8 @@ export type RootStackParamList = {
   AutopilotEditor: { autopilotId?: string };
   TriggerEditor: { autopilotId: string; triggerId?: string };
 };
+
+export type IssueFieldKey = "assignee" | "project" | "labels" | "parent" | "start" | "due";
 
 /** The system tab bar. `more` and `search` never become selected: they open the menu and search. */
 export type TabParamList = {

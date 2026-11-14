@@ -1,6 +1,7 @@
 import { useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
+import { canAssignAgentToIssue } from "@multica/core/permissions";
 import type { Agent, MemberRole, MemberWithUser } from "@multica/core/types";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { agentListOptions, memberListOptions, squadListOptions } from "@multica/core/workspace/queries";
@@ -78,4 +79,52 @@ export function useRoster(wsId: string) {
     activeAgents: entries.bots,
     ready: membersQuery.isSuccess && agentsQuery.isSuccess,
   };
+}
+
+export interface AssigneeEntry {
+  /** `member:<id>`, `agent:<id>` or `squad:<id>`. */
+  value: string;
+  type: "member" | "agent" | "squad";
+  id: string;
+  actor: AvatarActor;
+  detail?: string;
+}
+
+export function parseAssigneeValue(value: string): { type: "member" | "agent" | "squad"; id: string } | null {
+  const [type, id] = value.split(":");
+  return (type === "member" || type === "agent" || type === "squad") && id ? { type, id } : null;
+}
+
+/**
+ * Who the viewer may hand an issue to: every member, the agents they may invoke that
+ * have a runtime, and the squads whose leader is one of those agents.
+ */
+export function useAssignees(wsId: string) {
+  const roster = useRoster(wsId);
+  const squadsQuery = useQuery(squadListOptions(wsId));
+  const { userId, role, agents, members, activeAgents } = roster;
+  const squads = squadsQuery.data;
+  return useMemo(() => {
+    const runnable = new Set(
+      agents
+        .filter((agent) => !agent.archived_at && (agent.runtime_id ?? "").trim() && canAssignAgentToIssue(agent, { userId, role }).allowed)
+        .map((agent) => agent.id),
+    );
+    const teams: AssigneeEntry[] = (squads ?? [])
+      .filter((squad) => !squad.archived_at && runnable.has(squad.leader_id))
+      .map((squad) => ({
+        value: rosterValue("squad", squad.id),
+        type: "squad",
+        id: squad.id,
+        actor: { kind: "agent", name: squad.name, avatarUrl: resolvePublicFileUrl(squad.avatar_url) },
+        detail: squad.description || undefined,
+      }));
+    return {
+      userId,
+      ready: roster.ready,
+      members: members as AssigneeEntry[],
+      agents: activeAgents.filter((entry) => runnable.has(entry.id)) as AssigneeEntry[],
+      squads: teams,
+    };
+  }, [agents, squads, userId, role, members, activeAgents, roster.ready]);
 }

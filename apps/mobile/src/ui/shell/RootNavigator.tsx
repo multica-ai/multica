@@ -11,6 +11,7 @@ import { TriggerEditorScreen } from "../screens/autopilots/TriggerEditorScreen";
 import { ChatScreen } from "../screens/chat/ChatScreen";
 import { NewChatScreen } from "../screens/chat/NewChatScreen";
 import { InboxScreen } from "../screens/inbox/InboxScreen";
+import { IssueFieldScreen } from "../screens/issue/IssueFieldScreen";
 import { IssueScreen } from "../screens/issue/IssueScreen";
 import { MyIssuesScreen } from "../screens/my-issues/MyIssuesScreen";
 import { ProjectEditorScreen } from "../screens/projects/ProjectEditorScreen";
@@ -94,6 +95,7 @@ export function RootNavigator() {
     <Stack.Navigator screenOptions={{ ...NATIVE_HEADER, headerTintColor: palette.label }}>
       <Stack.Screen name="Tabs" component={Tabs} options={NO_HEADER} />
       <Stack.Screen name="Issue" component={IssueScreen} />
+      <Stack.Screen name="IssueField" component={IssueFieldScreen} options={EDITOR} />
       <Stack.Screen name="Chat" component={ChatScreen} />
       <Stack.Screen name="Settings" component={SettingsScreen} />
       <Stack.Screen name="NotificationSettings" component={NotificationSettingsScreen} />

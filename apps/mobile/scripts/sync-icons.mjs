@@ -12,6 +12,7 @@ const NAMES = [
   "FolderKanban", "GitMerge", "GitPullRequest", "GitPullRequestClosed", "GitPullRequestDraft", "Hash",
   "Inbox", "Layers", "ListTodo", "Loader2", "LogOut", "Mail", "MessageSquare", "MoreHorizontal",
   "Paperclip", "Plus", "Quote", "Search", "Settings", "Square", "SquarePen", "Star", "Users", "X", "Zap",
+  "BellOff", "CornerDownRight", "File", "ListTree", "Pin", "PinOff", "SmilePlus", "Tag",
 ];
 
 const here = dirname(fileURLToPath(import.meta.url));

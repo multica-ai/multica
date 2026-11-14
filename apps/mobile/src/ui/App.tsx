@@ -10,7 +10,9 @@ import { MobileCoreProvider } from "../platform/mobile-core-provider";
 import { useSignOut } from "../platform/session";
 import { useDeepLinks } from "../platform/use-deep-links";
 import { selectWorkspace, useWorkspaceSelection } from "../platform/workspace";
+import { MarkdownHostContext } from "./markdown/host";
 import { WorkspaceContext } from "./model/workspace-context";
+import { appMarkdownHost } from "./shell/markdown-host";
 import type { RootStackParamList } from "./navigation/types";
 import { GateView } from "./screens/auth/GateView";
 import { SignInScreen } from "./screens/auth/SignInScreen";
@@ -76,14 +78,16 @@ function Root() {
   return (
     <WorkspaceSlugProvider slug={selection.workspace.slug}>
       <WorkspaceContext.Provider value={{ workspace: selection.workspace, workspaces: selection.workspaces }}>
-        <NavigationContainer
-          key={selection.workspace.id}
-          ref={navigationRef}
-          theme={navigationTheme}
-          onReady={flushLink}
-        >
-          <RootNavigator />
-        </NavigationContainer>
+        <MarkdownHostContext.Provider value={appMarkdownHost}>
+          <NavigationContainer
+            key={selection.workspace.id}
+            ref={navigationRef}
+            theme={navigationTheme}
+            onReady={flushLink}
+          >
+            <RootNavigator />
+          </NavigationContainer>
+        </MarkdownHostContext.Provider>
       </WorkspaceContext.Provider>
     </WorkspaceSlugProvider>
   );

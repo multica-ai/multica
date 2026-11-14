@@ -1,23 +1,33 @@
+import { useState } from "react";
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { IssuePriority } from "@multica/core/types";
 import { Avatar, type AvatarActor } from "../../components/Avatar";
-import { Chip, ChipGroup, Pill } from "../../components/Chip";
+import { Chip, ChipGroup } from "../../components/Chip";
 import { BottomFade } from "../../components/BottomFade";
 import { Composer } from "../../components/Composer";
 import { PushHeader } from "../../components/Header";
-import { RunSteps } from "../../components/RunSteps";
 import { Screen } from "../../components/Screen";
 import { Failure, Loading } from "../../components/States";
 import { PriorityIcon, StatusIcon } from "../../components/StatusIcon";
 import { Txt } from "../../components/Text";
+import { editableMentions, type MentionCandidate, type MentionTarget } from "../../model/mentions";
 import type { StatusPresentation } from "../../model/status";
-import type { RunStep } from "../../model/steps";
-import type { RunPhase } from "../../model/tasks";
 import { Icon } from "../../icons/Icon";
 import { Markdown } from "../../markdown/Markdown";
 import { useStrings } from "../../strings";
 import { radius, useTheme } from "../../theme";
+import { RunBlock, Thread, type CommentHandlers, type CommentModel, type TimelineModel } from "./IssueThread";
+
+export type { AgentRunModel, CommentModel, TimelineModel } from "./IssueThread";
+
+export interface IssueLinkModel {
+  id: string;
+  identifier: string;
+  title: string;
+  status: StatusPresentation;
+  done: boolean;
+}
 
 export interface IssueModel {
   identifier: string;
@@ -27,15 +37,13 @@ export interface IssueModel {
   priority: IssuePriority;
   assignee: AvatarActor | null;
   project: string | null;
-}
-
-export interface AgentRunModel {
-  id: string;
-  agent: AvatarActor;
-  phase: RunPhase;
-  time: string;
-  steps: readonly RunStep[];
-  hiddenSteps: number;
+  labels: readonly { id: string; name: string; color: string }[];
+  /** Formatted for display. */
+  start: string | null;
+  due: string | null;
+  overdue: boolean;
+  parent: IssueLinkModel | null;
+  children: readonly IssueLinkModel[];
 }
 
 export interface PullRequestModel {
@@ -48,59 +56,45 @@ export interface PullRequestModel {
   url: string;
 }
 
-export type TimelineModel =
-  | { kind: "activity"; id: string; actor: AvatarActor; text: string; time: string }
-  | { kind: "comment"; id: string; actor: AvatarActor; body: string; time: string; deleted: boolean };
+export interface PropertyHandlers {
+  onStatus: () => void;
+  onPriority: () => void;
+  onAssignee: () => void;
+  onProject: () => void;
+  onLabels: () => void;
+  onStart: () => void;
+  onDue: () => void;
+  /** Offers the properties that have no value yet. */
+  onAdd?: () => void;
+}
 
 interface IssueViewProps {
   state: "loading" | "error" | "missing" | "ready";
   issue: IssueModel | null;
-  run: AgentRunModel | null;
   pullRequests: readonly PullRequestModel[];
   timeline: readonly TimelineModel[];
   onBack: () => void;
   onRetry: () => void;
-  onShare?: () => void;
-  onStatusPress?: () => void;
-  onPriorityPress?: () => void;
-  onStop?: () => void;
+  onMore?: () => void;
+  properties?: PropertyHandlers;
   onOpenUrl: (url: string) => void;
   onOpenIssue: (issueId: string) => void;
-  onComment: (text: string) => Promise<unknown>;
+  comments: Omit<CommentHandlers, "onReply" | "onEdit" | "onOpenIssue">;
+  onComment: (text: string, parentId: string | null) => Promise<unknown>;
+  onEditComment: (commentId: string, text: string) => Promise<unknown>;
+  mentions?: { candidates: readonly MentionCandidate[]; onQuery?: (query: string | null) => void };
 }
 
-function SectionTitle({ children }: { children: string }) {
+function SectionTitle({ children, trailing }: { children: string; trailing?: string }) {
   return (
-    <Txt variant="metaStrong" tone="secondary" style={styles.sectionTitle}>
-      {children}
-    </Txt>
-  );
-}
-
-function RunBlock({ run, onStop }: { run: AgentRunModel; onStop?: () => void }) {
-  const strings = useStrings();
-  const palette = useTheme();
-  const active = run.phase === "running" || run.phase === "queued";
-  const phaseText = { running: strings.issue.running, queued: strings.issue.queued, failed: strings.issue.failed, done: strings.issue.finished }[run.phase];
-  return (
-    <View style={styles.section}>
-      <SectionTitle>{strings.issue.agent}</SectionTitle>
-      <View style={styles.runHead}>
-        <Avatar actor={run.agent} size={24} running={run.phase === "running"} />
-        <Txt variant="calloutStrong">{run.agent.name}</Txt>
-        <Txt variant="meta" tone={run.phase === "failed" ? "destructive" : "secondary"} style={styles.flex} numberOfLines={1}>
-          {phaseText} · {run.time}
+    <View style={styles.sectionHead}>
+      <Txt variant="metaStrong" tone="secondary" style={styles.flex}>
+        {children}
+      </Txt>
+      {trailing ? (
+        <Txt variant="meta" tone="tertiary">
+          {trailing}
         </Txt>
-        {active && onStop ? (
-          <Pill icon={<Icon name="Square" size={11} color={palette.label} strokeWidth={3} />} onPress={onStop}>
-            {strings.issue.stop}
-          </Pill>
-        ) : null}
-      </View>
-      {run.steps.length ? (
-        <View style={styles.steps}>
-          <RunSteps steps={run.steps} more={run.hiddenSteps > 0 ? strings.chat.steps(run.hiddenSteps) : undefined} />
-        </View>
       ) : null}
     </View>
   );
@@ -139,47 +133,82 @@ function PullRequestCard({ pr, onOpen }: { pr: PullRequestModel; onOpen: () => v
   );
 }
 
-function TimelineItem({ item, onOpenIssue }: { item: TimelineModel; onOpenIssue: (id: string) => void }) {
+function IssueLink({ link, onOpen, last }: { link: IssueLinkModel; onOpen: () => void; last: boolean }) {
   const palette = useTheme();
-  const strings = useStrings();
-  if (item.kind === "activity") {
-    return (
-      <View style={styles.activity}>
-        <View style={[styles.activityDot, { borderColor: palette.label3 }]} />
-        <Txt variant="meta" tone="secondary" numberOfLines={2} style={styles.flex}>
-          <Txt variant="metaStrong">{item.actor.name}</Txt> {item.text} · {item.time}
-        </Txt>
-      </View>
-    );
-  }
   return (
-    <View style={[styles.comment, { backgroundColor: palette.grouped }]}>
-      <View style={styles.commentHead}>
-        <Avatar actor={item.actor} size={20} />
-        <Txt variant="metaStrong">{item.actor.name}</Txt>
-        <Txt variant="meta" tone="tertiary">
-          {item.time}
-        </Txt>
-      </View>
-      {item.deleted ? (
-        <Txt variant="callout" tone="tertiary">
-          {strings.issue.deleted}
-        </Txt>
-      ) : (
-        <Markdown source={item.body} size="callout" onOpenIssue={onOpenIssue} />
-      )}
-    </View>
+    <Pressable
+      accessibilityRole="link"
+      onPress={onOpen}
+      style={({ pressed }) => [styles.child, !last && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: palette.separator }, pressed && { opacity: 0.6 }]}
+    >
+      <StatusIcon status={link.status.key} color={link.status.color} icon={link.status.icon} size={15} />
+      <Txt variant="meta" tone="secondary">
+        {link.identifier}
+      </Txt>
+      <Txt variant="callout" numberOfLines={1} style={styles.flex}>
+        {link.title}
+      </Txt>
+    </Pressable>
   );
 }
 
+function Properties({ issue, handlers }: { issue: IssueModel; handlers?: PropertyHandlers }) {
+  const strings = useStrings();
+  const palette = useTheme();
+  return (
+    <ChipGroup>
+      <Chip
+        icon={<StatusIcon status={issue.status.key} color={issue.status.color} icon={issue.status.icon} size={14} />}
+        label={issue.status.label}
+        onPress={handlers?.onStatus}
+        accessibilityLabel={`${strings.issue.statusTitle}: ${issue.status.label}`}
+      />
+      <Chip
+        icon={<PriorityIcon priority={issue.priority} size={14} />}
+        label={strings.priority[issue.priority]}
+        onPress={handlers?.onPriority}
+        accessibilityLabel={`${strings.issue.priorityTitle}: ${strings.priority[issue.priority]}`}
+      />
+      <Chip
+        icon={issue.assignee ? <Avatar actor={issue.assignee} size={18} /> : <Icon name="CircleUser" size={16} color={palette.label2} />}
+        label={issue.assignee?.name ?? strings.issue.unassigned}
+        muted={!issue.assignee}
+        onPress={handlers?.onAssignee}
+        accessibilityLabel={`${strings.issue.assignee}: ${issue.assignee?.name ?? strings.issue.unassigned}`}
+      />
+      <Chip
+        icon={<Icon name="FolderKanban" size={15} color={palette.label2} />}
+        label={issue.project ?? strings.issue.noProject}
+        muted={!issue.project}
+        onPress={handlers?.onProject}
+        accessibilityLabel={`${strings.issue.project}: ${issue.project ?? strings.issue.noProject}`}
+      />
+      {issue.labels.map((label) => (
+        <Chip key={label.id} icon={<View style={[styles.labelDot, { backgroundColor: label.color }]} />} label={label.name} onPress={handlers?.onLabels} />
+      ))}
+      {issue.start ? <Chip icon={<Icon name="Calendar" size={15} color={palette.label2} />} label={issue.start} onPress={handlers?.onStart} accessibilityLabel={`${strings.issue.start}: ${issue.start}`} /> : null}
+      {issue.due ? (
+        <Chip
+          icon={<Icon name="CalendarClock" size={15} color={issue.overdue ? palette.destructive : palette.label2} />}
+          label={issue.due}
+          onPress={handlers?.onDue}
+          accessibilityLabel={`${strings.issue.due}: ${issue.due}`}
+        />
+      ) : null}
+      {handlers?.onAdd ? <Chip icon={<Icon name="Plus" size={15} color={palette.label2} />} onPress={handlers.onAdd} accessibilityLabel={strings.issue.addProperty} /> : null}
+    </ChipGroup>
+  );
+}
+
+type ComposerTarget = { kind: "reply"; comment: CommentModel } | { kind: "edit"; comment: CommentModel; text: string; targets: MentionTarget[] };
+
 export function IssueView(props: IssueViewProps) {
-  const { state, issue, run, pullRequests, timeline, onBack, onRetry, onShare, onStatusPress, onPriorityPress, onStop, onOpenUrl, onOpenIssue, onComment } = props;
+  const { state, issue, pullRequests, timeline, onBack, onRetry, onMore, properties, onOpenUrl, onOpenIssue, comments, onComment, onEditComment, mentions } = props;
   const strings = useStrings();
   const palette = useTheme();
   const insets = useSafeAreaInsets();
-  const header = (
-    <PushHeader onBack={onBack} backLabel={strings.common.back} actions={onShare && issue ? [{ icon: "MoreHorizontal", label: strings.common.more, onPress: onShare }] : []} />
-  );
+  const [target, setTarget] = useState<ComposerTarget | null>(null);
+  const header = <PushHeader onBack={onBack} backLabel={strings.common.back} actions={onMore && issue ? [{ icon: "MoreHorizontal", label: strings.common.more, onPress: onMore }] : []} />;
 
   if (state !== "ready" || !issue) {
     return (
@@ -190,24 +219,36 @@ export function IssueView(props: IssueViewProps) {
     );
   }
 
+  const handlers: CommentHandlers = {
+    ...comments,
+    onOpenIssue,
+    onReply: (comment) => setTarget({ kind: "reply", comment }),
+    onEdit: (comment) => setTarget({ kind: "edit", comment, ...editableMentions(comment.body) }),
+  };
+  const done = issue.children.filter((child) => child.done).length;
+
   return (
     <Screen>
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         {header}
         <View style={styles.flex}>
-          <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={styles.content} keyboardDismissMode="interactive">
+          <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={styles.content} keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled">
+            {issue.parent ? (
+              <Pressable accessibilityRole="link" onPress={() => onOpenIssue(issue.parent!.id)} style={({ pressed }) => [styles.parent, pressed && { opacity: 0.6 }]}>
+                <Icon name="ListTree" size={14} color={palette.label2} />
+                <Txt variant="meta" tone="secondary" numberOfLines={1} style={styles.flexShrink}>
+                  {issue.parent.identifier} {issue.parent.title}
+                </Txt>
+                <Icon name="ChevronRight" size={14} color={palette.label3} />
+              </Pressable>
+            ) : null}
             <Txt variant="meta" tone="secondary">
               {issue.identifier}
             </Txt>
             <Txt variant="heading" style={styles.title} selectable>
               {issue.title}
             </Txt>
-            <ChipGroup>
-              <Chip icon={<StatusIcon status={issue.status.key} color={issue.status.color} icon={issue.status.icon} size={14} />} label={issue.status.label} onPress={onStatusPress} />
-              <Chip icon={<PriorityIcon priority={issue.priority} size={14} />} label={strings.priority[issue.priority]} onPress={onPriorityPress} />
-              <Chip icon={issue.assignee ? <Avatar actor={issue.assignee} size={18} /> : <Icon name="CircleUser" size={16} color={palette.label2} />} label={issue.assignee?.name ?? strings.issue.unassigned} />
-              {issue.project ? <Chip icon={<Icon name="FolderKanban" size={15} color={palette.label2} />} label={issue.project} /> : null}
-            </ChipGroup>
+            <Properties issue={issue} handlers={properties} />
             <View style={styles.description}>
               {issue.description.trim() ? (
                 <Markdown source={issue.description} onOpenIssue={onOpenIssue} />
@@ -217,7 +258,16 @@ export function IssueView(props: IssueViewProps) {
                 </Txt>
               )}
             </View>
-            {run ? <RunBlock run={run} onStop={onStop} /> : null}
+            {issue.children.length ? (
+              <View style={styles.section}>
+                <SectionTitle trailing={`${done}/${issue.children.length}`}>{strings.issue.subIssues}</SectionTitle>
+                <View style={[styles.children, { backgroundColor: palette.grouped }]}>
+                  {issue.children.map((child, index) => (
+                    <IssueLink key={child.id} link={child} onOpen={() => onOpenIssue(child.id)} last={index === issue.children.length - 1} />
+                  ))}
+                </View>
+              </View>
+            ) : null}
             {pullRequests.length ? (
               <View style={[styles.section, styles.prs]}>
                 {pullRequests.map((pr) => (
@@ -229,16 +279,47 @@ export function IssueView(props: IssueViewProps) {
               <View style={styles.section}>
                 <SectionTitle>{strings.issue.activity}</SectionTitle>
                 <View style={styles.timeline}>
-                  {timeline.map((item) => (
-                    <TimelineItem key={item.id} item={item} onOpenIssue={onOpenIssue} />
-                  ))}
+                  {timeline.map((item) =>
+                    item.kind === "thread" ? (
+                      <Thread key={item.id} thread={item} handlers={handlers} />
+                    ) : item.kind === "run" ? (
+                      <RunBlock key={item.id} run={item.run} onStop={comments.onStop} />
+                    ) : (
+                      <View key={item.id} style={styles.activity}>
+                        <View style={[styles.activityDot, { borderColor: palette.label3 }]} />
+                        <Txt variant="meta" tone="secondary" numberOfLines={2} style={styles.flex}>
+                          <Txt variant="metaStrong">{item.actor.name}</Txt> {item.text} · {item.time}
+                        </Txt>
+                      </View>
+                    ),
+                  )}
                 </View>
               </View>
             ) : null}
           </ScrollView>
           <BottomFade height={insets.bottom + 80} />
           <View style={[styles.composer, { paddingBottom: Math.max(insets.bottom - 8, 12) }]}>
-            <Composer placeholder={strings.issue.comment} sendLabel={strings.common.send} onSend={onComment} />
+            <Composer
+              placeholder={target?.kind === "reply" ? strings.issue.replyPlaceholder : strings.issue.comment}
+              sendLabel={strings.common.send}
+              mentions={mentions}
+              focusKey={target?.kind === "reply" ? target.comment.id : null}
+              draft={target?.kind === "edit" ? { key: target.comment.id, text: target.text, targets: target.targets } : null}
+              context={
+                target
+                  ? {
+                      label: target.kind === "reply" ? strings.issue.replyingTo(target.comment.actor.name) : strings.issue.editing,
+                      cancelLabel: strings.common.cancel,
+                      onCancel: () => setTarget(null),
+                    }
+                  : undefined
+              }
+              onSend={async (text) => {
+                if (target?.kind === "edit") await onEditComment(target.comment.id, text);
+                else await onComment(text, target?.kind === "reply" ? target.comment.id : null);
+                setTarget(null);
+              }}
+            />
           </View>
         </View>
       </KeyboardAvoidingView>
@@ -248,13 +329,16 @@ export function IssueView(props: IssueViewProps) {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  content: { paddingHorizontal: 20, paddingTop: 4, paddingBottom: 120 },
+  flexShrink: { flexShrink: 1 },
+  content: { paddingHorizontal: 20, paddingTop: 4, paddingBottom: 140 },
+  parent: { flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", marginBottom: 8, maxWidth: "100%" },
   title: { marginTop: 4, marginBottom: 14 },
   description: { marginTop: 18 },
   section: { marginTop: 28 },
-  sectionTitle: { marginBottom: 10 },
-  runHead: { flexDirection: "row", alignItems: "center", gap: 8 },
-  steps: { marginTop: 10, marginLeft: 4 },
+  sectionHead: { flexDirection: "row", alignItems: "center", marginBottom: 10 },
+  labelDot: { width: 9, height: 9, borderRadius: 5, marginHorizontal: 2 },
+  children: { borderRadius: radius.card, paddingHorizontal: 14 },
+  child: { minHeight: 44, flexDirection: "row", alignItems: "center", gap: 8 },
   prs: { gap: 8, marginTop: 16 },
   pr: { borderRadius: radius.card, paddingHorizontal: 14 },
   prRow: { minHeight: 46, flexDirection: "row", alignItems: "center", gap: 10 },
@@ -262,7 +346,5 @@ const styles = StyleSheet.create({
   timeline: { gap: 12 },
   activity: { flexDirection: "row", alignItems: "center", gap: 10, paddingLeft: 2 },
   activityDot: { width: 9, height: 9, borderRadius: 5, borderWidth: 1.5 },
-  comment: { borderRadius: radius.card, padding: 14, gap: 8 },
-  commentHead: { flexDirection: "row", alignItems: "center", gap: 8 },
   composer: { position: "absolute", left: 16, right: 16, bottom: 0, flexDirection: "row" },
 });

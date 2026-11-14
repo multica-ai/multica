@@ -3,7 +3,9 @@ import type { AgentListRow } from "../ui/screens/agents/AgentsView";
 import type { ChatItem, PendingRun } from "../ui/screens/chat/ChatView";
 import type { AgentChoice } from "../ui/screens/chat/NewChatView";
 import type { InboxRow } from "../ui/screens/inbox/InboxView";
-import type { AgentRunModel, IssueModel, PullRequestModel, TimelineModel } from "../ui/screens/issue/IssueView";
+import type { FieldChoice } from "../ui/screens/issue/IssueFieldView";
+import type { MentionCandidate } from "../ui/model/mentions";
+import type { AgentRunModel, CommentModel, IssueModel, PullRequestModel, TimelineModel } from "../ui/screens/issue/IssueView";
 
 const lambda = { kind: "agent", name: "Lambda" } as const;
 const claude = { kind: "agent", name: "Claude" } as const;
@@ -43,6 +45,18 @@ export const issue: IssueModel = {
   priority: "high",
   assignee: lambda,
   project: "移动端",
+  labels: [
+    { id: "l1", name: "iOS", color: "#3b82f6" },
+    { id: "l2", name: "设计", color: "#a855f7" },
+  ],
+  start: null,
+  due: "11月30日",
+  overdue: false,
+  parent: { id: "p", identifier: "MUL-9001", title: "移动端 2.0", status: { key: "in_progress", label: "进行中", color: null, icon: null }, done: false },
+  children: [
+    { id: "c1", identifier: "MUL-9203", title: "评论支持 thread 和回复", status: { key: "done", label: "已完成", color: null, icon: null }, done: true },
+    { id: "c2", identifier: "MUL-9204", title: "Issue 属性编辑", status: { key: "in_progress", label: "进行中", color: null, icon: null }, done: false },
+  ],
 };
 
 export const run: AgentRunModel = {
@@ -62,10 +76,40 @@ export const pullRequests: PullRequestModel[] = [
   { id: "p1", title: "rebuild the iOS app on @multica/core", state: "draft", additions: 1726, deletions: 43665, files: 434, url: "https://github.com" },
 ];
 
+const comment = (id: string, actor: CommentModel["actor"], body: string, time: string, extra: Partial<CommentModel> = {}): CommentModel => ({
+  id,
+  actor,
+  body,
+  time,
+  edited: false,
+  deleted: false,
+  mine: actor === jiayuan,
+  reactions: [],
+  files: [],
+  ...extra,
+});
+
 export const timeline: TimelineModel[] = [
   { kind: "activity", id: "e1", actor: jiayuan, text: "创建了任务", time: "8 小时" },
-  { kind: "activity", id: "e2", actor: lambda, text: "把状态改为 审核中", time: "1 小时" },
-  { kind: "comment", id: "e3", actor: jiayuan, body: "UI 有点太丑，参考 Mobbin 上 **Linear** 和 **Cursor** 重新 mockup，先确定风格。", time: "5 分钟", deleted: false },
+  {
+    kind: "thread",
+    id: "e2",
+    root: comment("e2", jiayuan, "先补齐 issue 详情页，对照一下 Web：\n\n| 功能 | Web | iOS |\n| --- | :---: | :---: |\n| 评论 thread | ✅ | ✅ |\n| @ 提及 | ✅ | ✅ |\n| 属性编辑 | ✅ | ✅ |", "40 分钟", {
+      reactions: [{ emoji: "👍", count: 2, mine: true }],
+    }),
+    replies: [comment("e3", lambda, "收到，按这张表逐项补，[@Jiayuan Zhang](mention://member/u1) 做完给你截图。", "35 分钟", { edited: true })],
+    run,
+    resolved: false,
+  },
+  {
+    kind: "thread",
+    id: "e4",
+    root: comment("e4", codex, "旧版评论是平铺的，这里先记一下。", "2 小时"),
+    replies: [comment("e5", jiayuan, "已经改成 thread 了。", "1 小时")],
+    run: null,
+    resolved: true,
+  },
+  { kind: "activity", id: "e6", actor: lambda, text: "把状态改为 审核中", time: "10 分钟" },
 ];
 
 export const agentsRunning: AgentListRow[] = [
@@ -115,3 +159,19 @@ export const searchResults: IssueRowModel[] = [
 ];
 
 export { savedViewName } from "./fixtures-workspace";
+
+export const mentionCandidates: MentionCandidate[] = [
+  { type: "member", id: "u1", label: "Jiayuan Zhang", actor: jiayuan },
+  { type: "agent", id: "lambda", label: "Lambda", actor: lambda, detail: "Agent" },
+  { type: "agent", id: "codex", label: "Codex", actor: codex, detail: "Agent" },
+];
+
+export const assigneeChoices: FieldChoice[] = [
+  { value: "none", label: "未分配" },
+  { value: "member:u1", label: "Jiayuan Zhang", actor: jiayuan, detail: "jiayuan@multica.ai" },
+  { value: "member:u2", label: "李想", actor: { kind: "member", name: "李想" }, detail: "lixiang@multica.ai" },
+  { value: "agent:lambda", label: "Lambda", actor: lambda, detail: "Multica 全栈工程师" },
+  { value: "agent:claude", label: "Claude", actor: claude, detail: "后端与 daemon" },
+  { value: "agent:codex", label: "Codex", actor: codex, detail: "前端修复" },
+  { value: "squad:release", label: "发布小队", actor: { kind: "agent", name: "发布小队" }, detail: "小队" },
+];

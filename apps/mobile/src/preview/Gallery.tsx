@@ -5,6 +5,7 @@ import { AgentsView } from "../ui/screens/agents/AgentsView";
 import { GateView } from "../ui/screens/auth/GateView";
 import { ChatView } from "../ui/screens/chat/ChatView";
 import { NewChatView } from "../ui/screens/chat/NewChatView";
+import { IssueFieldView } from "../ui/screens/issue/IssueFieldView";
 import { IssueView } from "../ui/screens/issue/IssueView";
 import { MyIssuesView } from "../ui/screens/my-issues/MyIssuesView";
 import { SearchView } from "../ui/screens/search/SearchView";
@@ -26,6 +27,17 @@ import { WORKSPACE_SCREENS } from "./workspace-screens";
 // `?screens=inbox,issue&scheme=dark&locale=en`.
 
 const noop = () => {};
+
+function IssueFieldPreview() {
+  const strings = useStrings();
+  return (
+    <IssueFieldView
+      title={strings.issue.assignee}
+      close={{ label: strings.common.cancel, onPress: noop }}
+      list={{ choices: fx.assigneeChoices, selected: ["agent:lambda"], onToggle: noop, searchPlaceholder: strings.form.searchPlaceholder }}
+    />
+  );
+}
 
 function Tabs({ active }: { active: TabKey }) {
   return <TabBar active={active} />;
@@ -65,20 +77,24 @@ const SCREENS: Record<string, { caption: string; render: () => ReactNode }> = {
       <IssueView
         state="ready"
         issue={fx.issue}
-        run={fx.run}
         pullRequests={fx.pullRequests}
         timeline={fx.timeline}
         onBack={noop}
         onRetry={noop}
-        onShare={noop}
-        onStatusPress={noop}
-        onPriorityPress={noop}
-        onStop={noop}
+        onMore={noop}
+        properties={{ onStatus: noop, onPriority: noop, onAssignee: noop, onProject: noop, onLabels: noop, onStart: noop, onDue: noop, onAdd: noop }}
         onOpenUrl={noop}
         onOpenIssue={noop}
+        comments={{ onReact: noop, onCopy: noop, onCopyLink: noop, onResolve: noop, onDelete: noop, onStop: noop }}
         onComment={async () => {}}
+        onEditComment={async () => {}}
+        mentions={{ candidates: fx.mentionCandidates }}
       />
     ),
+  },
+  issueField: {
+    caption: "Issue property",
+    render: () => <IssueFieldPreview />,
   },
   agents: {
     caption: "Agents",

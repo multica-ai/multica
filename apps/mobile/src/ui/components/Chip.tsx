@@ -4,11 +4,12 @@ import { floatShadow, radius, useTheme } from "../theme";
 import { Txt } from "./Text";
 
 /** Grey pill for one issue property, inside a ChipGroup. */
-export function Chip({ icon, label, onPress }: { icon?: ReactNode; label?: string; onPress?: () => void }) {
+export function Chip({ icon, label, onPress, muted = false, accessibilityLabel }: { icon?: ReactNode; label?: string; onPress?: () => void; muted?: boolean; accessibilityLabel?: string }) {
   const palette = useTheme();
   return (
     <Pressable
       accessibilityRole={onPress ? "button" : undefined}
+      accessibilityLabel={accessibilityLabel}
       onPress={onPress}
       disabled={!onPress}
       style={({ pressed }) => [
@@ -19,7 +20,7 @@ export function Chip({ icon, label, onPress }: { icon?: ReactNode; label?: strin
     >
       {icon}
       {label ? (
-        <Txt variant="chip" numberOfLines={1}>
+        <Txt variant="chip" tone={muted ? "secondary" : "primary"} numberOfLines={1}>
           {label}
         </Txt>
       ) : null}

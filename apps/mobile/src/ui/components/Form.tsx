@@ -93,19 +93,24 @@ interface ChoiceListProps<T extends string> {
   onToggle: (value: T) => void;
   searchPlaceholder?: string;
   emptyLabel?: string;
+  /** Searching elsewhere, e.g. on the server: the field always shows and the choices arrive filtered. */
+  search?: { query: string; onQueryChange: (query: string) => void };
 }
 
 /** Options with a check on the chosen ones; a search field once the list is long. */
-export function ChoiceList<T extends string>({ choices, selected, onToggle, searchPlaceholder, emptyLabel }: ChoiceListProps<T>) {
+export function ChoiceList<T extends string>({ choices, selected, onToggle, searchPlaceholder, emptyLabel, search }: ChoiceListProps<T>) {
   const palette = useTheme();
-  const [query, setQuery] = useState("");
+  const [localQuery, setLocalQuery] = useState("");
+  const query = search?.query ?? localQuery;
+  const setQuery = search?.onQueryChange ?? setLocalQuery;
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return q ? choices.filter((choice) => choice.label.toLowerCase().includes(q)) : choices;
-  }, [choices, query]);
+    if (search || !q) return choices;
+    return choices.filter((choice) => choice.label.toLowerCase().includes(q) || choice.detail?.toLowerCase().includes(q));
+  }, [choices, query, search]);
   return (
-    <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
-      {searchPlaceholder && choices.length > 8 ? (
+    <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
+      {searchPlaceholder && (search || choices.length > 8) ? (
         <View style={[styles.search, { backgroundColor: palette.fill }]}>
           <Icon name="Search" size={16} color={palette.label2} />
           <TextInput
@@ -114,6 +119,7 @@ export function ChoiceList<T extends string>({ choices, selected, onToggle, sear
             placeholder={searchPlaceholder}
             placeholderTextColor={palette.label3}
             autoCorrect={false}
+            autoCapitalize="none"
             style={[typeRamp.callout, styles.searchInput, { color: palette.label }]}
           />
         </View>
