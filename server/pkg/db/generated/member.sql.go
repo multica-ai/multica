@@ -89,6 +89,31 @@ func (q *Queries) GetMemberByUserAndWorkspace(ctx context.Context, arg GetMember
 	return i, err
 }
 
+const getMemberByUserAndWorkspaceForUpdate = `-- name: GetMemberByUserAndWorkspaceForUpdate :one
+SELECT id, workspace_id, user_id, role, created_at, pinned_at FROM member
+WHERE user_id = $1 AND workspace_id = $2
+FOR UPDATE
+`
+
+type GetMemberByUserAndWorkspaceForUpdateParams struct {
+	UserID      pgtype.UUID `json:"user_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) GetMemberByUserAndWorkspaceForUpdate(ctx context.Context, arg GetMemberByUserAndWorkspaceForUpdateParams) (Member, error) {
+	row := q.db.QueryRow(ctx, getMemberByUserAndWorkspaceForUpdate, arg.UserID, arg.WorkspaceID)
+	var i Member
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.UserID,
+		&i.Role,
+		&i.CreatedAt,
+		&i.PinnedAt,
+	)
+	return i, err
+}
+
 const getRealtimeMemberships = `-- name: GetRealtimeMemberships :many
 SELECT m.user_id, m.workspace_id
 FROM member m

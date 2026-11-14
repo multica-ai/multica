@@ -7,6 +7,11 @@ RETURNING *;
 SELECT * FROM workspace_invitation
 WHERE id = $1;
 
+-- name: GetInvitationForUpdate :one
+SELECT * FROM workspace_invitation
+WHERE id = $1
+FOR UPDATE;
+
 -- name: ListPendingInvitationsByWorkspace :many
 SELECT wi.*,
        u.name  AS inviter_name,

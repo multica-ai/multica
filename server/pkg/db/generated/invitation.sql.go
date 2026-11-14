@@ -176,6 +176,30 @@ func (q *Queries) GetInvitation(ctx context.Context, id pgtype.UUID) (WorkspaceI
 	return i, err
 }
 
+const getInvitationForUpdate = `-- name: GetInvitationForUpdate :one
+SELECT id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, status, created_at, updated_at, expires_at FROM workspace_invitation
+WHERE id = $1
+FOR UPDATE
+`
+
+func (q *Queries) GetInvitationForUpdate(ctx context.Context, id pgtype.UUID) (WorkspaceInvitation, error) {
+	row := q.db.QueryRow(ctx, getInvitationForUpdate, id)
+	var i WorkspaceInvitation
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.InviterID,
+		&i.InviteeEmail,
+		&i.InviteeUserID,
+		&i.Role,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ExpiresAt,
+	)
+	return i, err
+}
+
 const getPendingInvitationByEmail = `-- name: GetPendingInvitationByEmail :one
 SELECT id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, status, created_at, updated_at, expires_at FROM workspace_invitation
 WHERE workspace_id = $1 AND invitee_email = $2 AND status = 'pending' AND expires_at > now()
