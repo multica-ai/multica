@@ -80,13 +80,15 @@ function shortcutTokens(
   return tokens;
 }
 
+const ON_PRIMARY_BUTTON =
+  "in-[[data-slot=button][data-variant=default]]:border-current/30 in-[[data-slot=button][data-variant=default]]:bg-current/15 in-[[data-slot=button][data-variant=default]]:text-current in-[[data-slot=button][data-variant=default]]:shadow-none";
+
 export function ShortcutKeycaps({
   shortcut,
   platform = getShortcutPlatform(),
   size = "sm",
   decorative = false,
   className,
-  keyClassName,
 }: {
   shortcut: ShortcutChord;
   platform?: ShortcutPlatform;
@@ -94,7 +96,6 @@ export function ShortcutKeycaps({
   /** Hide a redundant hint when its parent already names the action. */
   decorative?: boolean;
   className?: string;
-  keyClassName?: string;
 }) {
   const accessibleLabel = formatShortcut(shortcut, platform);
 
@@ -114,10 +115,13 @@ export function ShortcutKeycaps({
           data-shortcut-key={id}
           className={cn(
             "border border-border/70 bg-muted/80 shadow-[0_1px_0_0_color-mix(in_oklab,var(--border)_70%,transparent)]",
+            // On a primary button the keycap is tinted from the button's own
+            // ink. Themes recolor that ink through --button-primary-foreground,
+            // which --primary-foreground and --background do not follow.
+            ON_PRIMARY_BUTTON,
             size === "md"
               ? "h-7 min-w-7 rounded-md px-1.5 text-caption [&_svg]:size-3.5"
               : "h-5 min-w-5 px-1 text-micro [&_svg]:size-3",
-            keyClassName,
           )}
         >
           {Icon ? <Icon aria-hidden="true" strokeWidth={1.8} /> : (text ?? label)}

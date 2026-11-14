@@ -53,4 +53,18 @@ describe("ShortcutKeycaps", () => {
     expect(screen.getByRole("img", { name: "Esc" })).toBeInTheDocument();
     expect(container.querySelector("[title='Esc']")).toHaveTextContent("Esc");
   });
+
+  it("tints keycaps from a primary button's own ink", () => {
+    // Themes recolor primary button text through --button-primary-foreground,
+    // so keycaps on it must inherit that ink, not read --primary-foreground.
+    const { container } = render(
+      <ShortcutKeycaps shortcut={createShortcutChord("Enter", { primary: true })} platform="macos" />,
+    );
+
+    for (const key of container.querySelectorAll("kbd")) {
+      expect(key).toHaveClass("in-[[data-slot=button][data-variant=default]]:text-current");
+      expect(key).toHaveClass("in-[[data-slot=button][data-variant=default]]:bg-current/15");
+      expect(key.className).not.toMatch(/primary-foreground|bg-background/);
+    }
+  });
 });

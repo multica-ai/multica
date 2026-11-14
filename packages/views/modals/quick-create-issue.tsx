@@ -667,7 +667,6 @@ export function AgentCreatePanel({
               shortcut={sendShortcut}
               decorative
               className="ml-1 max-sm:hidden"
-              keyClassName="border-background/30 bg-background/15 text-primary-foreground shadow-none"
             />
           ) : null}
         </>
