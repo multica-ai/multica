@@ -1,4 +1,25 @@
 {
+  "quota": {
+    "title": "{{provider}} の利用枠",
+    "exhausted": "利用枠を使い切りました",
+    "claude_observed": "タスクからプランの使用量が報告されると更新します。",
+    "dsh_observed": "タスクが最後に報告した利用枠の上限到達を表示します。",
+    "column": "利用枠の消費率",
+    "refresh": "更新",
+    "refreshing": "更新中…",
+    "stale": "最新ではありません",
+    "primary": "プライマリ期間",
+    "secondary": "セカンダリ期間",
+    "used": "{{percent}} 使用済み",
+    "resets": "リセット日時 {{time}}",
+    "observed": "確認日時 {{time}}",
+    "upgrade_daemon": "利用枠を更新するには、このマシンの Multica をアップデートしてください。",
+    "offline": "ランタイムに接続すると利用枠を更新できます。",
+    "timeout": "利用枠の更新がタイムアウトしました。",
+    "failed": "利用枠を更新できませんでした。",
+    "unavailable": "現在のログインでは ChatGPT のプラン利用枠を取得できません。",
+    "empty": "利用枠の記録はまだありません。"
+  },
   "page": {
     "title": "ランタイム",
     "connect_remote": "マシンを追加",

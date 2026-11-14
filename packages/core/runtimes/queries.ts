@@ -5,6 +5,7 @@ export const runtimeKeys = {
   all: (wsId: string) => ["runtimes", wsId] as const,
   list: (wsId: string) => [...runtimeKeys.all(wsId), "list"] as const,
   listMine: (wsId: string) => [...runtimeKeys.all(wsId), "list", "mine"] as const,
+  subscriptionQuota: (wsId: string, rid: string) => [...runtimeKeys.all(wsId), rid, "subscription-quota"] as const,
   usage: (rid: string, days: number, tz: string) =>
     ["runtimes", "usage", rid, days, tz] as const,
   usageByAgent: (rid: string, days: number, tz: string) =>
@@ -13,6 +14,22 @@ export const runtimeKeys = {
   usageByHour: (rid: string, days: number, tz: string) =>
     ["runtimes", "usage", "by-hour", rid, days, tz] as const,
 };
+
+export function runtimeSubscriptionQuotaOptions(wsId: string, runtimeId: string) {
+  return queryOptions({
+    queryKey: runtimeKeys.subscriptionQuota(wsId, runtimeId),
+    queryFn: () => api.runtimeSubscriptionQuota(runtimeId),
+    refetchInterval: ({ state }) => {
+      const status = state.data?.status;
+      return state.status !== "error" && status === "pending" ? 1500 : false;
+    },
+    retry: false,
+  });
+}
+
+export function requestRuntimeSubscriptionQuota(runtimeId: string, ifStale: boolean) {
+  return api.runtimeSubscriptionQuota(runtimeId, "POST", ifStale);
+}
 
 // `tz` is the viewer's IANA name — all reports follow the viewer's tz.
 export function runtimeUsageOptions(

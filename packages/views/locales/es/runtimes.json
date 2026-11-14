@@ -1,4 +1,25 @@
 {
+  "quota": {
+    "title": "Cuota de {{provider}}",
+    "exhausted": "Cuota agotada",
+    "claude_observed": "Se actualiza cuando una tarea informa del uso de la suscripción.",
+    "dsh_observed": "Muestra el último agotamiento de cuota que informó una tarea.",
+    "column": "Cuota usada",
+    "refresh": "Actualizar",
+    "refreshing": "Actualizando…",
+    "stale": "Sin actualizar",
+    "primary": "Ventana principal",
+    "secondary": "Ventana secundaria",
+    "used": "{{percent}} usado",
+    "resets": "Se restablece el {{time}}",
+    "observed": "Consultado el {{time}}",
+    "upgrade_daemon": "Actualiza Multica en esta máquina para consultar la cuota.",
+    "offline": "Conecta este runtime para actualizar la cuota.",
+    "timeout": "Se agotó el tiempo de espera al actualizar la cuota.",
+    "failed": "No se pudo actualizar la cuota.",
+    "unavailable": "Este inicio de sesión no tiene una cuota de suscripción de ChatGPT disponible.",
+    "empty": "Aún no hay datos de cuota."
+  },
   "page": {
     "title": "Runtimes",
     "connect_remote": "Añadir una máquina",

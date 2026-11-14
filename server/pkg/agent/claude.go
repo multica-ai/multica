@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
@@ -218,6 +219,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		terminalReasonError := ""
 		var sessionID string
 		var lastUsageResult *claudeSDKMessage
+		var subscriptionQuota *protocol.SubscriptionQuotaSnapshot
 		sawAsyncLaunch := false
 		usage := make(map[string]TokenUsage)
 		seenUsage := make(map[string]struct{})
@@ -307,6 +309,10 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			eventCount++
 
 			switch msg.Type {
+			case "rate_limit_event":
+				if snapshot := msg.RateLimitInfo.subscriptionQuota(time.Now()); snapshot != nil {
+					subscriptionQuota = snapshot
+				}
 			case "assistant":
 				assistantEventCount++
 				turn := b.handleAssistant(msg, msgCh, usage, seenUsage)
@@ -518,13 +524,14 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		}
 
 		resCh <- Result{
-			Status:         finalStatus,
-			Output:         finalOutput,
-			Error:          finalError,
-			DurationMs:     duration.Milliseconds(),
-			SessionID:      reportedSessionID,
-			Usage:          usage,
-			ResumeRejected: resumeRejected,
+			SubscriptionQuota: subscriptionQuota,
+			Status:            finalStatus,
+			Output:            finalOutput,
+			Error:             finalError,
+			DurationMs:        duration.Milliseconds(),
+			SessionID:         reportedSessionID,
+			Usage:             usage,
+			ResumeRejected:    resumeRejected,
 		}
 	}()
 
@@ -721,12 +728,13 @@ func claudeMapHasAsyncLaunchStatus(value map[string]any) bool {
 // ── Claude SDK JSON types ──
 
 type claudeSDKMessage struct {
-	Type            string          `json:"type"`
-	Message         json.RawMessage `json:"message,omitempty"`
-	Subtype         string          `json:"subtype,omitempty"`
-	SessionID       string          `json:"session_id,omitempty"`
-	Model           string          `json:"model,omitempty"`
-	ParentToolUseID string          `json:"parent_tool_use_id,omitempty"`
+	RateLimitInfo   *claudeQuotaEvent `json:"rate_limit_info,omitempty"`
+	Type            string            `json:"type"`
+	Message         json.RawMessage   `json:"message,omitempty"`
+	Subtype         string            `json:"subtype,omitempty"`
+	SessionID       string            `json:"session_id,omitempty"`
+	Model           string            `json:"model,omitempty"`
+	ParentToolUseID string            `json:"parent_tool_use_id,omitempty"`
 
 	// result fields
 	ResultText string `json:"result,omitempty"`

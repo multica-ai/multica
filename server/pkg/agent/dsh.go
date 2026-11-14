@@ -13,6 +13,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 const (
@@ -426,6 +428,13 @@ func handleDshFrame(frame dshFrame, requestID string, ch chan<- Message, state *
 		state.result = &Result{
 			Status: frame.Status, Output: frame.Output, Error: errorText,
 			SessionID: frame.SessionID, Usage: state.usage, ResumeRejected: frame.ResumeRejected,
+		}
+		// DSH reserves ACCOUNT_QUOTA for its account route. QUOTA can
+		// also indicate an API key's exhausted balance.
+		if frame.Status == "failed" && frame.Error != nil && frame.Error.Code == "ACCOUNT_QUOTA" {
+			state.result.SubscriptionQuota = &protocol.SubscriptionQuotaSnapshot{
+				ObservedAt: time.Now().Unix(), Exhausted: true,
+			}
 		}
 		if state.result.SessionID == "" {
 			state.result.SessionID = state.sessionID

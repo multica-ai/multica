@@ -92,6 +92,7 @@ export interface RuntimeDevice {
    * own limit still applies. Older backends omit the field.
    */
   max_concurrent_tasks?: number | null;
+  subscription_quota?: import("../runtimes/subscription-quota-schema").SubscriptionQuotaSnapshot;
   last_seen_at: string | null;
   created_at: string;
   updated_at: string;

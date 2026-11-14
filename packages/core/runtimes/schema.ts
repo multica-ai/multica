@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { subscriptionQuotaSnapshotSchema } from "./subscription-quota-schema";
 import type { AgentRuntime } from "../types";
 
 export const AgentRuntimeSchema = z.object({
@@ -17,6 +18,7 @@ export const AgentRuntimeSchema = z.object({
   visibility: z.enum(["private", "public"]).catch("private"),
   shared_with: z.array(z.string().uuid()).catch([]),
   profile_id: z.string().nullable().catch(null),
+  subscription_quota: subscriptionQuotaSnapshotSchema.optional().catch(undefined),
   max_concurrent_tasks: z.number().int().nullable().catch(null),
   last_seen_at: z.string().nullable().catch(null),
   created_at: z.string().catch(""),

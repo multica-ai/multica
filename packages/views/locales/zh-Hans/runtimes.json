@@ -1,4 +1,25 @@
 {
+  "quota": {
+    "title": "{{provider}} 额度",
+    "exhausted": "额度已耗尽",
+    "claude_observed": "任务返回套餐用量时更新。",
+    "dsh_observed": "显示任务最近一次报告的额度耗尽。",
+    "column": "额度已用",
+    "refresh": "刷新",
+    "refreshing": "正在刷新…",
+    "stale": "已过时",
+    "primary": "主要窗口",
+    "secondary": "次要窗口",
+    "used": "已用 {{percent}}",
+    "resets": "重置时间 {{time}}",
+    "observed": "查询时间 {{time}}",
+    "upgrade_daemon": "更新这台机器上的 Multica 后即可刷新额度。",
+    "offline": "运行时上线后即可刷新额度。",
+    "timeout": "额度刷新超时。",
+    "failed": "无法刷新额度。",
+    "unavailable": "当前登录没有可查询的 ChatGPT 套餐额度。",
+    "empty": "暂无额度记录。"
+  },
   "page": {
     "title": "运行时",
     "connect_remote": "添加机器",

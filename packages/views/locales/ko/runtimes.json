@@ -1,4 +1,25 @@
 {
+  "quota": {
+    "title": "{{provider}} 한도",
+    "exhausted": "한도 소진",
+    "claude_observed": "작업이 구독 사용량을 보고하면 업데이트됩니다.",
+    "dsh_observed": "작업에서 마지막으로 보고한 한도 소진을 표시합니다.",
+    "column": "한도 사용률",
+    "refresh": "새로고침",
+    "refreshing": "새로고침 중…",
+    "stale": "오래된 정보",
+    "primary": "기본 기간",
+    "secondary": "보조 기간",
+    "used": "{{percent}} 사용",
+    "resets": "초기화 {{time}}",
+    "observed": "확인 {{time}}",
+    "upgrade_daemon": "한도를 새로고침하려면 이 머신의 Multica를 업데이트하세요.",
+    "offline": "런타임이 연결되면 한도를 새로고침할 수 있습니다.",
+    "timeout": "한도 새로고침 시간이 초과되었습니다.",
+    "failed": "한도를 새로고침하지 못했습니다.",
+    "unavailable": "현재 로그인에서 확인할 수 있는 ChatGPT 구독 한도가 없습니다.",
+    "empty": "아직 한도 기록이 없습니다."
+  },
   "page": {
     "title": "런타임",
     "connect_remote": "머신 추가",

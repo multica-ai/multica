@@ -33,3 +33,22 @@ describe("runtime concurrency cap response contract", () => {
     expect(parsed.name).toBe("Claude");
   });
 });
+
+describe("runtime quota response contract", () => {
+  it("preserves zero usage and does not invent a second window", () => {
+    const snapshot = { observedAt: 1_800_000_000, primary: { usedPercent: 0, windowDurationMins: 180 } };
+    const runtime = AgentRuntimeSchema.parse({ id: "r", workspace_id: "w", subscription_quota: snapshot });
+    expect(runtime.subscription_quota).toEqual(snapshot);
+  });
+
+  it.each([
+    null,
+    { observedAt: 1_800_000_000 },
+    { observedAt: 1_800_000_000, primary: { usedPercent: 120 } },
+    { observedAt: Number.MAX_SAFE_INTEGER, primary: { usedPercent: 0 } },
+  ])("drops invalid quota without dropping the runtime: %j", (subscription_quota) => {
+    const runtime = AgentRuntimeSchema.parse({ id: "r", workspace_id: "w", subscription_quota });
+    expect(runtime.id).toBe("r");
+    expect(runtime.subscription_quota).toBeUndefined();
+  });
+});

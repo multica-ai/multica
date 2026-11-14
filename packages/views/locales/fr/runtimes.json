@@ -1,4 +1,25 @@
 {
+  "quota": {
+    "title": "Quota de {{provider}}",
+    "exhausted": "Quota épuisé",
+    "claude_observed": "Se met à jour lorsqu’une tâche signale l’utilisation de l’abonnement.",
+    "dsh_observed": "Affiche le dernier épuisement de quota signalé par une tâche.",
+    "column": "Quota utilisé",
+    "refresh": "Actualiser",
+    "refreshing": "Actualisation…",
+    "stale": "Obsolète",
+    "primary": "Fenêtre principale",
+    "secondary": "Fenêtre secondaire",
+    "used": "{{percent}} utilisé",
+    "resets": "Réinitialisation le {{time}}",
+    "observed": "Vérifié le {{time}}",
+    "upgrade_daemon": "Mettez Multica à jour sur cette machine pour actualiser le quota.",
+    "offline": "Connectez cet environnement d’exécution pour actualiser son quota.",
+    "timeout": "Le délai d’actualisation du quota a expiré.",
+    "failed": "Impossible d’actualiser le quota.",
+    "unavailable": "Aucun quota d’abonnement ChatGPT pour ce compte.",
+    "empty": "Aucune donnée de quota pour le moment."
+  },
   "page": {
     "title": "Runtimes",
     "connect_remote": "Ajouter une machine",

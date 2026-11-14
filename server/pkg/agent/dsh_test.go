@@ -149,3 +149,24 @@ func writeDshFixture(t *testing.T, body string) string {
 	}
 	return path
 }
+
+func TestDshSubscriptionQuotaObservesExplicitExhaustion(t *testing.T) {
+	for _, tc := range []struct {
+		code string
+		want bool
+	}{
+		{"ACCOUNT_QUOTA", true}, {"QUOTA", false}, {"RATE_LIMIT", false}, {"AUTH", false},
+	} {
+		t.Run(tc.code, func(t *testing.T) {
+			state := &dshRunState{}
+			handleDshFrame(dshFrame{
+				Version: DshProtocolVersion, Type: "result", RequestID: "request",
+				Status: "failed", Error: &dshWireError{Code: tc.code},
+			}, "request", nil, state)
+			quota := state.result.SubscriptionQuota
+			if (quota != nil) != tc.want || (quota != nil && (!quota.Exhausted || quota.Primary != nil || quota.Secondary != nil)) {
+				t.Fatalf("unexpected quota for %s: %+v", tc.code, quota)
+			}
+		})
+	}
+}
