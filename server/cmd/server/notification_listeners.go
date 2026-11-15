@@ -512,7 +512,7 @@ func createMemberInboxItem(
 	resp := inboxItemToResponse(item)
 	resp["issue_status"] = issueStatus
 	bus.Publish(events.Event{
-		Type:        protocol.EventInboxNew,
+		Type:        inbox.NewItemEventType(item),
 		WorkspaceID: workspaceID,
 		ActorType:   e.ActorType,
 		ActorID:     e.ActorID,
@@ -676,7 +676,7 @@ func notifyDirect(
 	resp := inboxItemToResponse(item)
 	resp["issue_status"] = issueStatus
 	bus.Publish(events.Event{
-		Type:        protocol.EventInboxNew,
+		Type:        inbox.NewItemEventType(item),
 		WorkspaceID: workspaceID,
 		ActorType:   e.ActorType,
 		ActorID:     e.ActorID,
@@ -751,8 +751,18 @@ func notifyMentionedMembers(
 	skip map[string]bool,
 	details []byte,
 ) {
-	// Collect the set of member IDs to notify.
+	// Collect the set of member IDs to notify, each with how the mention
+	// reached them. Naming someone outranks reaching them through a squad,
+	// which outranks @all.
 	recipientIDs := map[string]bool{}
+	via := map[string]string{}
+	reach := func(id, how string) {
+		recipientIDs[id] = true
+		if via[id] == inbox.MentionViaMember || (via[id] == inbox.MentionViaSquad && how == inbox.MentionViaAll) {
+			return
+		}
+		via[id] = how
+	}
 
 	hasAll := false
 	var squadIDs []string
@@ -765,7 +775,7 @@ func notifyMentionedMembers(
 			if _, err := util.ParseUUID(m.ID); err != nil {
 				continue
 			}
-			recipientIDs[m.ID] = true
+			reach(m.ID, inbox.MentionViaMember)
 		}
 		if m.Type == "squad" {
 			squadIDs = append(squadIDs, m.ID)
@@ -787,7 +797,7 @@ func notifyMentionedMembers(
 		}
 		for _, sm := range members {
 			if sm.MemberType == "member" {
-				recipientIDs[util.UUIDToString(sm.MemberID)] = true
+				reach(util.UUIDToString(sm.MemberID), inbox.MentionViaSquad)
 			}
 		}
 	}
@@ -799,7 +809,7 @@ func notifyMentionedMembers(
 			slog.Error("failed to list members for @all mention", "workspace_id", e.WorkspaceID, "error", err)
 		} else {
 			for _, m := range members {
-				recipientIDs[util.UUIDToString(m.UserID)] = true
+				reach(util.UUIDToString(m.UserID), inbox.MentionViaAll)
 			}
 		}
 	}
@@ -834,7 +844,7 @@ func notifyMentionedMembers(
 			Title:         title,
 			ActorType:     util.StrToText(e.ActorType),
 			ActorID:       optionalUUID(e.ActorID),
-			Details:       details,
+			Details:       withDetail(details, "mention_via", via[id]),
 		})
 		if err != nil {
 			slog.Error("mention inbox creation failed", "mentioned_id", id, "error", err)
@@ -846,7 +856,7 @@ func notifyMentionedMembers(
 		resp := inboxItemToResponse(item)
 		resp["issue_status"] = issueStatus
 		bus.Publish(events.Event{
-			Type:        protocol.EventInboxNew,
+			Type:        inbox.NewItemEventType(item),
 			WorkspaceID: e.WorkspaceID,
 			ActorType:   e.ActorType,
 			ActorID:     e.ActorID,
@@ -1306,4 +1316,21 @@ func inboxItemToResponse(item db.InboxItem) map[string]any {
 		"actor_id":       util.UUIDToPtr(item.ActorID),
 		"details":        json.RawMessage(item.Details),
 	}
+}
+
+// withDetail returns details with one more string field. Details that are not
+// a JSON object are returned as they are.
+func withDetail(details []byte, key, value string) []byte {
+	fields := map[string]any{}
+	if len(details) > 0 {
+		if err := json.Unmarshal(details, &fields); err != nil || fields == nil {
+			return details
+		}
+	}
+	fields[key] = value
+	out, err := json.Marshal(fields)
+	if err != nil {
+		return details
+	}
+	return out
 }
