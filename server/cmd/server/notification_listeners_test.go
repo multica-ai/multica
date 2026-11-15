@@ -1321,30 +1321,41 @@ func TestNotification_StatusChange_DoneArchivesIssueInbox(t *testing.T) {
 	}
 }
 
-// TestNotification_StatusChange_CancelledKeepsIssueInbox verifies that only a
-// done status clears the inbox; a cancelled issue keeps its notifications.
-func TestNotification_StatusChange_CancelledKeepsIssueInbox(t *testing.T) {
-	queries := db.New(testPool)
-	bus := newNotificationBus(t, queries)
+// TestNotification_StatusChange_TerminalArchivesIssueInbox verifies that a
+// closed status (cancelled) clears the inbox like done does, while a status
+// that is not done or closed keeps the issue's notifications.
+func TestNotification_StatusChange_TerminalArchivesIssueInbox(t *testing.T) {
+	for _, tc := range []struct {
+		status     string
+		wantActive int
+	}{
+		{"cancelled", 0},
+		{"in_review", 1},
+	} {
+		t.Run(tc.status, func(t *testing.T) {
+			queries := db.New(testPool)
+			bus := newNotificationBus(t, queries)
 
-	issueID := createTestIssue(t, testWorkspaceID, testUserID)
-	t.Cleanup(func() {
-		cleanupInboxForIssue(t, issueID)
-		cleanupTestIssue(t, issueID)
-	})
-	addTestSubscriber(t, issueID, "member", testUserID, "creator")
+			issueID := createTestIssue(t, testWorkspaceID, testUserID)
+			t.Cleanup(func() {
+				cleanupInboxForIssue(t, issueID)
+				cleanupTestIssue(t, issueID)
+			})
+			addTestSubscriber(t, issueID, "member", testUserID, "creator")
 
-	if _, err := testPool.Exec(context.Background(), `
-		INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, details)
-		VALUES ($1, 'member', $2, 'new_comment', 'info', $3, 'cancelled keep test', '{}')
-	`, testWorkspaceID, testUserID, issueID); err != nil {
-		t.Fatalf("seed notification: %v", err)
-	}
+			if _, err := testPool.Exec(context.Background(), `
+				INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, details)
+				VALUES ($1, 'member', $2, 'new_comment', 'info', $3, 'terminal archive test', '{}')
+			`, testWorkspaceID, testUserID, issueID); err != nil {
+				t.Fatalf("seed notification: %v", err)
+			}
 
-	publishStatusChange(bus, issueID, "cancelled", "in_progress")
+			publishStatusChange(bus, issueID, tc.status, "in_progress")
 
-	if active := countActiveInboxForIssue(t, testUserID, issueID); active != 1 {
-		t.Fatalf("expected the notification to stay on a cancelled issue, got %d active", active)
+			if active := countActiveInboxForIssue(t, testUserID, issueID); active != tc.wantActive {
+				t.Fatalf("status %s: expected %d active inbox rows, got %d", tc.status, tc.wantActive, active)
+			}
+		})
 	}
 }
 

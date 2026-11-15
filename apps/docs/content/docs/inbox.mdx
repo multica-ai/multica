@@ -52,6 +52,8 @@ Selecting a notification marks it as read. Archive it when you're done; archivin
 
 Once an issue reaches a status that hands it back to a person, its **Run failed** notifications archive automatically. Those statuses are `in_review`, custom statuses in the `started` category, and any status in the `done` or `closed` category. `blocked` is the exception: it hands the issue over too, but the work is still stuck, so the earlier failures are still worth reading.
 
+When an issue reaches any status in the `done` or `closed` category, all of its notifications archive automatically for everyone, read or not. A later notification on the issue lands in the inbox again.
+
 Right-click a notification for **Mark as read** / **Mark as unread** and **Archive** (**Unarchive** in the Archived view). Mark as unread is the "I looked, but I'm not done with this" action: the notification goes back to unread and raises the unread count again, and it stays unread even while you keep it open; opening it again later marks it read as usual. Archived notifications keep their read state, so restoring one brings it back exactly as you left it.
 
 From the inbox menu you can also:
