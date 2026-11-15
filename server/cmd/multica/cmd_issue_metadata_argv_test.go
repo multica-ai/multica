@@ -45,9 +45,10 @@ func TestIssueMetadataMutationKeyArgv(t *testing.T) {
 		t.Fatal(err)
 	}
 	cases := []struct {
-		name      string
-		key       string
-		wantError string
+		name           string
+		key            string
+		wantError      string
+		wantLocalError bool
 	}{
 		{name: "prefix", key: "pipeline_status"},
 		{name: "punctuation", key: "_a.B-c9"},
@@ -57,7 +58,9 @@ func TestIssueMetadataMutationKeyArgv(t *testing.T) {
 		{name: "slash", key: "pipeline_status/draft", wantError: "key must match"},
 		{name: "percent", key: "pipeline_status%draft", wantError: "key must match"},
 		{name: "encoded fragment", key: "pipeline_status%23draft", wantError: "key must match"},
-		{name: "empty", key: "", wantError: "--key is required"},
+		{name: "empty", key: "", wantError: "--key is required", wantLocalError: true},
+		{name: "dot segment", key: ".", wantError: "key must match", wantLocalError: true},
+		{name: "parent segment", key: "..", wantError: "key must match", wantLocalError: true},
 		{name: "too long", key: strings.Repeat("a", 65), wantError: "key must match"},
 		{name: "leading digit", key: "9start", wantError: "key must match"},
 		{name: "leading dot", key: ".start", wantError: "key must match"},
@@ -140,7 +143,7 @@ func TestIssueMetadataMutationKeyArgv(t *testing.T) {
 						if runErr == nil || !strings.Contains(string(output), tc.wantError) {
 							t.Errorf("argv %q: error=%v output=%s, want %q", argv, runErr, output, tc.wantError)
 						}
-						if tc.key == "" {
+						if tc.wantLocalError {
 							wantRequests = nil
 						} else if rejectionStatus != http.StatusBadRequest {
 							t.Errorf("invalid key response status = %d, want 400", rejectionStatus)
