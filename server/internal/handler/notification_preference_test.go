@@ -196,3 +196,45 @@ func TestPatchNotificationPreferencesRejectsUnknownGroups(t *testing.T) {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }
+
+func TestPatchNotificationPreferencesValidatesOthersIssuesValues(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `
+			DELETE FROM notification_preference
+			WHERE workspace_id = $1 AND user_id = $2
+		`, testWorkspaceID, testUserID)
+	})
+
+	for value, want := range map[string]int{
+		"all":         http.StatusOK,
+		"key_updates": http.StatusOK,
+		"muted":       http.StatusBadRequest,
+	} {
+		recorder := httptest.NewRecorder()
+		testHandler.PatchNotificationPreferences(
+			recorder,
+			notificationPreferenceRequest(t, http.MethodPatch, map[string]string{
+				"others_issues": value,
+			}),
+		)
+		if recorder.Code != want {
+			t.Errorf("others_issues=%q: status=%d want %d body=%s",
+				value, recorder.Code, want, recorder.Body.String())
+		}
+	}
+
+	// key_updates stays exclusive to others_issues.
+	recorder := httptest.NewRecorder()
+	testHandler.PatchNotificationPreferences(
+		recorder,
+		notificationPreferenceRequest(t, http.MethodPatch, map[string]string{
+			"comments": "key_updates",
+		}),
+	)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("comments=key_updates: status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}

@@ -1221,12 +1221,18 @@ export function useToggleIssueSubscriber(issueId: string) {
         qc.setQueryData<IssueSubscriber[]>(
           issueKeys.subscribers(issueId),
           (old) => {
+            // An explicit subscribe rewrites an existing row's reason to
+            // manual, which lifts it out of the delegated and bystander tiers.
             if (
               old?.some(
                 (s) => s.user_id === userId && s.user_type === userType,
               )
             )
-              return old;
+              return old.map((s) =>
+                s.user_id === userId && s.user_type === userType
+                  ? { ...s, reason: "manual" as const }
+                  : s,
+              );
             return [...(old ?? []), temp];
           },
         );

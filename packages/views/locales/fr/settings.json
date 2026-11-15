@@ -848,6 +848,12 @@
       "projects": "Projets que vous suivez",
       "agents": "Agents"
     },
+    "others_issues": {
+      "label": "Tâches des autres",
+      "description": "Tâches assignées à quelqu'un d'autre ou à son agent, que vous suivez seulement parce que vous les avez créées, commentées ou y avez été mentionné. Les mises à jour clés sont les @mentions, les réponses dans les fils auxquels vous avez participé et les statuts qui demandent une personne, comme en relecture, bloquée ou terminée.",
+      "key_updates": "Mises à jour clés",
+      "all": "Toute l'activité"
+    },
     "leaving": {
       "title": "Sortir de la boîte de réception",
       "description": "Lire une notification ne la retire pas de la boîte de réception.",

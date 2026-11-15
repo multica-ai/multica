@@ -30,12 +30,29 @@ var validNotifGroups = map[string]bool{
 	"new_issues":             true,
 	"system_notifications":   true,
 	"auto_archive_completed": true,
+	"others_issues":          true,
 }
 
-// validNotifValues is the set of allowed preference values per group.
+// validNotifValues is the set of allowed preference values for a group not
+// listed in notifValuesByGroup.
 var validNotifValues = map[string]bool{
 	"all":   true,
 	"muted": true,
+}
+
+// notifValuesByGroup lists the groups whose values are not on/off.
+// `others_issues` is how much of someone else's issue a passive subscriber
+// receives: absent or "key_updates" for mentions, thread replies and handoffs,
+// "all" for every event. Muting it would only hide what still needs you.
+var notifValuesByGroup = map[string]map[string]bool{
+	"others_issues": {"all": true, "key_updates": true},
+}
+
+func validNotifValue(group, value string) bool {
+	if values, ok := notifValuesByGroup[group]; ok {
+		return values[value]
+	}
+	return validNotifValues[value]
 }
 
 func (h *Handler) GetNotificationPreferences(w http.ResponseWriter, r *http.Request) {
@@ -94,7 +111,7 @@ func decodeNotificationPreferenceRequest(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusBadRequest, "invalid preference group: "+k)
 			return nil, false
 		}
-		if !validNotifValues[v] {
+		if !validNotifValue(k, v) {
 			writeError(w, http.StatusBadRequest, "invalid preference value: "+v)
 			return nil, false
 		}

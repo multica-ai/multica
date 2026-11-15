@@ -21,7 +21,7 @@ Sur téléphone, le panneau Travail se trouve dans le tiroir. Sa section Boîte 
 Les notifications courantes incluent :
 
 - une tâche vous est assignée, ou vous est retirée ;
-- une tâche à laquelle vous êtes abonné reçoit un nouveau commentaire, ou son assigné, son statut, sa priorité ou ses dates changent ;
+- une tâche à laquelle vous êtes abonné reçoit un nouveau commentaire, ou son assigné, son statut, sa priorité ou ses dates changent (sur les tâches des autres, seulement les mises à jour clés par défaut ; voir plus bas) ;
 - quelqu'un vous @mentionne dans la description ou un commentaire d'une tâche ;
 - une tâche ou un commentaire que vous avez créé reçoit une réaction ;
 - une exécution d'agent échoue sur une tâche à laquelle vous êtes abonné ;
@@ -46,6 +46,12 @@ Changer l'assigné ne supprime pas les abonnements existants. Abonnez-vous ou d�
 <Callout type="info">
 Lorsque le statut d'une sous-tâche change, les abonnés de la tâche parente sont également notifiés. Les commentaires, la priorité et les changements de dates d'une sous-tâche ne remontent pas à la tâche parente.
 </Callout>
+
+## Tâches des autres
+
+Sur une tâche assignée à quelqu'un d'autre ou à son agent, un abonnement obtenu parce que vous l'avez créée, commentée ou y avez été mentionné n'apporte par défaut que les mises à jour clés : les @mentions, les réponses dans les fils auxquels vous avez participé et les statuts qui demandent une personne, comme `in_review`, `blocked` ou `done`. Les commentaires courants et les autres changements restent sur la tâche. Les tâches auxquelles vous vous êtes abonné vous-même, celles que vous suivez par leur projet et celles assignées à vous ou à vos agents apportent toujours toute l'activité.
+
+La page de la tâche signale un tel abonnement par **Mises à jour clés**. Son menu propose **Recevoir toute l'activité**, qui en fait un abonnement explicite à cette tâche ; il n'est ensuite plus possible de revenir aux mises à jour clés pour cette tâche, seulement de se désabonner. **Modifier la valeur par défaut** ouvre **Paramètres → Notifications**, où **Tâches des autres**, en tête de **Tâches que vous suivez**, fait passer toutes ces tâches à **Toute l'activité**.
 
 ## Les agents n'utilisent pas la boîte de réception
 
