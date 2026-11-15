@@ -28,7 +28,6 @@ import { projectListOptions } from "@multica/core/projects/queries";
 import { propertyListOptions } from "@multica/core/properties";
 import { paletteColor } from "@multica/core/appearance";
 import type {
-  BatchIssueLabelOps,
   BatchIssuePropertyOps,
   Issue,
   IssueProperty,
@@ -42,7 +41,7 @@ import { useNavigation } from "../../navigation";
 import { SubmenuPanel } from "../actions/issue-actions-menu-items";
 import { useIssueStatusOptions } from "../utils/status-options";
 import { AssigneePickerPanel } from "./pickers";
-import { BatchLabelPanel } from "./pickers/batch-label-picker";
+import { BatchLabelPanel, type BatchLabelApply } from "./pickers/batch-label-picker";
 import { stageOptions } from "./pickers/stage-picker";
 import { StatusIcon } from "./status-icon";
 import { PriorityIcon } from "./priority-icon";
@@ -82,7 +81,7 @@ interface BatchMenuItemsProps {
   onStatus: (status: string) => void;
   onAssignee: (updates: Partial<UpdateIssueRequest>) => void;
   onUpdate: (updates: Partial<UpdateIssueRequest>) => void;
-  onLabels: (ops: BatchIssueLabelOps) => void;
+  onLabels: BatchLabelApply;
   onProperties: (ops: BatchIssuePropertyOps) => void;
   onEditor: (editor: BatchEditor) => void;
   onSetParent: () => void;
@@ -428,10 +427,31 @@ function PropertyEntry({
       <span className="max-w-48 truncate">{property.name}</span>
     </>
   );
-  if (!INLINE_PROPERTY_TYPES.has(property.type)) {
-    return <P.Item onClick={() => onEditor({ kind: "property", property })}>{label}</P.Item>;
-  }
+  // Clearing is its own action: a selection with differing values has no
+  // shared value for the editor to clear from.
   const setCount = issues.filter((issue) => issue.properties?.[property.id] !== undefined).length;
+  const clearItem = setCount > 0 && (
+    <>
+      <P.Separator />
+      <P.Item onClick={() => onProperties({ unset: [property.id] })}>
+        <X className="h-3.5 w-3.5" />
+        {t(($) => $.batch.property_clear, { count: setCount })}
+      </P.Item>
+    </>
+  );
+  if (!INLINE_PROPERTY_TYPES.has(property.type)) {
+    const edit = () => onEditor({ kind: "property", property });
+    if (!clearItem) return <P.Item onClick={edit}>{label}</P.Item>;
+    return (
+      <P.Sub>
+        <P.SubTrigger>{label}</P.SubTrigger>
+        <P.SubContent className="min-w-48">
+          <P.Item onClick={edit}>{t(($) => $.batch.property_edit)}</P.Item>
+          {clearItem}
+        </P.SubContent>
+      </P.Sub>
+    );
+  }
   const countOf = (value: IssuePropertyValue) =>
     issues.filter((issue) => issue.properties?.[property.id] === value).length;
   const set = (value: IssuePropertyValue) => onProperties({ set: { [property.id]: value } });
@@ -467,15 +487,7 @@ function PropertyEntry({
               valueRow("true", true, t(($) => $.pickers.custom_property.true_label)),
               valueRow("false", false, t(($) => $.pickers.custom_property.false_label)),
             ]}
-        {setCount > 0 && (
-          <>
-            <P.Separator />
-            <P.Item onClick={() => onProperties({ unset: [property.id] })}>
-              <X className="h-3.5 w-3.5" />
-              {t(($) => $.batch.property_clear, { count: setCount })}
-            </P.Item>
-          </>
-        )}
+        {clearItem}
       </P.SubContent>
     </P.Sub>
   );

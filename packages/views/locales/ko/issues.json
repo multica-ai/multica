@@ -968,6 +968,8 @@
     "stage": "단계",
     "custom_properties": "사용자 지정 속성",
     "pick_date": "날짜 선택…",
+    "property_edit": "값 설정…",
+    "result_unknown": "어떤 이슈가 변경되었는지 확인할 수 없습니다. 다시 시도하기 전에 목록을 확인하세요.",
     "property_clear": "지우기 ({{count}}개 설정됨)",
     "labels_search": "라벨 추가 또는 제거…",
     "clear_labels_other": "태스크 {{count}}개의 라벨 모두 제거",

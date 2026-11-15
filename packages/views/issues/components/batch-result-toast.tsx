@@ -78,6 +78,10 @@ export function useBatchResultToast() {
 
   const report = useCallback(
     (response: BatchUpdateIssuesResponse, count: number, options: BatchResultToastOptions = {}): boolean => {
+      if (response.unconfirmed) {
+        toast.warning(t(($) => $.batch.result_unknown));
+        return false;
+      }
       const results = response.results;
       if (!results) {
         // Older servers report only a count.

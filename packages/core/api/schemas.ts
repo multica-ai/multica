@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { normalizeIssueStatusCategory } from "../issues/config/status";
 import type {
+  BatchIssueOutcome,
+  BatchIssueResult,
+  BatchUpdateIssuesResponse,
   AppCatalogResponse,
   AppsOverview,
   TeamAppImpact,
@@ -3531,6 +3534,55 @@ export const WorkspaceSubscriptionSummarySchema = z
       },
     }),
   );
+
+const BATCH_ISSUE_OUTCOMES: readonly string[] = [
+  "updated",
+  "unchanged",
+  "skipped",
+  "would_update",
+  "deleted",
+  "would_delete",
+] satisfies BatchIssueOutcome[];
+
+// An outcome this client does not know is not a confirmed write: it reads as
+// skipped, never as success.
+const BatchIssueResultSchema = z
+  .object({
+    issue_id: z.string().min(1),
+    identifier: z.string().optional().catch(undefined),
+    outcome: z.string(),
+    code: z.string().optional().catch(undefined),
+    message: z.string().optional().catch(undefined),
+  })
+  .loose()
+  .transform(
+    (value): BatchIssueResult => ({
+      issue_id: value.issue_id,
+      identifier: value.identifier,
+      outcome: BATCH_ISSUE_OUTCOMES.includes(value.outcome) ? (value.outcome as BatchIssueOutcome) : "skipped",
+      code: value.code,
+      message: value.message,
+    }),
+  );
+
+/** `results` is absent on servers that predate per-issue batch results. */
+export const BatchUpdateIssuesResponseSchema = z
+  .object({
+    updated: z.number().int().nonnegative(),
+    results: z.array(BatchIssueResultSchema).optional(),
+    dry_run: z.boolean().optional().catch(undefined),
+  })
+  .loose()
+  .transform(
+    (value): BatchUpdateIssuesResponse => ({
+      updated: value.updated,
+      ...(value.results ? { results: value.results } : {}),
+      ...(value.dry_run !== undefined ? { dry_run: value.dry_run } : {}),
+    }),
+  );
+
+/** A batch response that failed validation: whatever was written is unknown. */
+export const UNCONFIRMED_BATCH_UPDATE: BatchUpdateIssuesResponse = { updated: 0, unconfirmed: true };
 
 export const IssueLimitUsageSchema = z
   .object({

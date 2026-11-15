@@ -1017,6 +1017,8 @@
     "stage": "Stage",
     "custom_properties": "Custom properties",
     "pick_date": "Pick a date…",
+    "property_edit": "Set value…",
+    "result_unknown": "Couldn't confirm which issues changed. Check the list before retrying.",
     "property_clear": "Clear ({{count}} set)",
     "labels_search": "Add or remove labels…",
     "clear_labels_one": "Remove all labels from {{count}} issue",

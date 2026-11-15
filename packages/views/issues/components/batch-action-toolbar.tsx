@@ -191,7 +191,7 @@ export function BatchActionToolbar({
     updates: Partial<UpdateIssueRequest>,
     ops: { labels?: BatchIssueLabelOps; properties?: BatchIssuePropertyOps } = {},
     { quiet = false }: { quiet?: boolean } = {},
-  ) => {
+  ): Promise<boolean> => {
     try {
       const response = surfaceActions
         ? await surfaceActions.batchUpdate(ids, updates, ops)
@@ -201,8 +201,10 @@ export function BatchActionToolbar({
         successMessage: quiet ? null : undefined,
       });
       if (applied && clearSelectionOnApply && !quiet) clear();
+      return applied;
     } catch (err) {
       reportError(err);
+      return false;
     }
   };
 
@@ -292,7 +294,7 @@ export function BatchActionToolbar({
     onStatus: (status: string) => handleBatchStatus({ status }),
     onAssignee: handleBatchAssignee,
     onUpdate: (updates: Partial<UpdateIssueRequest>) => void handleBatchUpdate(updates),
-    onLabels: (labels: BatchIssueLabelOps) => void handleLabels(labels),
+    onLabels: handleLabels,
     onProperties: (properties: BatchIssuePropertyOps) => void handleProperties(properties),
     onEditor: openEditor,
     onSetParent: openSetParent,
@@ -367,7 +369,7 @@ export function BatchActionToolbar({
         {/* Labels */}
         <BatchLabelPicker
           issues={selectedIssues}
-          onApply={(labels) => void handleLabels(labels)}
+          onApply={handleLabels}
           open={labelsOpen}
           onOpenChange={setLabelsOpen}
           triggerRender={barButton}
@@ -447,7 +449,7 @@ export function BatchActionToolbar({
               property={editor.property}
               value={sharedPropertyValue(selectedIssues, editor.property.id)}
               onChange={(value) =>
-                handleProperties(
+                void handleProperties(
                   value === undefined
                     ? { unset: [editor.property.id] }
                     : { set: { [editor.property.id]: value } },

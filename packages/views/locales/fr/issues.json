@@ -1017,6 +1017,8 @@
     "stage": "Étape",
     "custom_properties": "Propriétés personnalisées",
     "pick_date": "Choisir une date…",
+    "property_edit": "Définir la valeur…",
+    "result_unknown": "Impossible de confirmer les tâches modifiées. Vérifiez la liste avant de réessayer.",
     "property_clear": "Effacer ({{count}} renseignées)",
     "labels_search": "Ajouter ou retirer des étiquettes…",
     "clear_labels_one": "Retirer toutes les étiquettes de {{count}} tâche",

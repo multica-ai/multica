@@ -103,6 +103,12 @@ describe("useBatchResultToast", () => {
     expect(toast.warning).toHaveBeenCalledTimes(1);
   });
 
+  it("warns that the result is unknown when the response could not be read", () => {
+    expect(report({ updated: 0, unconfirmed: true }, 2)).toBe(false);
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(toast.warning).toHaveBeenCalledWith(expect.stringMatching(/Couldn't confirm/));
+  });
+
   it("explains an outdated server instead of showing a generic failure", () => {
     withReporter().reportError(new BatchOpsUnsupportedError());
     expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/server/i));

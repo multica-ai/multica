@@ -968,6 +968,8 @@
     "stage": "ステージ",
     "custom_properties": "カスタムプロパティ",
     "pick_date": "日付を選択…",
+    "property_edit": "値を設定…",
+    "result_unknown": "どの課題が変更されたか確認できませんでした。再試行する前に一覧を確認してください。",
     "property_clear": "クリア（{{count}} 件設定済み）",
     "labels_search": "ラベルを追加または削除…",
     "clear_labels_other": "タスク {{count}} 件のラベルをすべて削除",

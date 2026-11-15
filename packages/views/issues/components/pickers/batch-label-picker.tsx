@@ -13,16 +13,20 @@ import { PickerEmpty, PickerItem, PickerPanel, PropertyPicker } from "./property
 import { useT } from "../../../i18n";
 
 type LabelState = "all" | "some" | "none";
+type Pick = { state: "all" | "none"; pending: boolean };
+
+/** Resolves true only when the write applied to every selected issue. */
+export type BatchLabelApply = (ops: BatchIssueLabelOps) => Promise<boolean>;
 
 const EMPTY_LABELS: Label[] = [];
-const NO_PICKS: ReadonlyMap<string, "all" | "none"> = new Map();
+const NO_PICKS: ReadonlyMap<string, Pick> = new Map();
 
 /**
  * Label rows for a selection, each with a tri-state box: checked when every
  * issue has the label, a dash when only some do. Picking a row adds the label
  * to every issue, or removes it from all when every issue already has it.
  */
-function useBatchLabelRows(issues: readonly Issue[], query: string, onApply: (ops: BatchIssueLabelOps) => void) {
+function useBatchLabelRows(issues: readonly Issue[], query: string, onApply: BatchLabelApply) {
   const wsId = useWorkspaceId();
   const { data: labels = EMPTY_LABELS } = useQuery(labelListOptions(wsId, "issue"));
   const counts = useMemo(() => {
@@ -33,29 +37,44 @@ function useBatchLabelRows(issues: readonly Issue[], query: string, onApply: (op
     return map;
   }, [issues]);
   // The write lands through realtime a moment later; hold the picked state
-  // until the issues themselves change so the box does not flicker back.
-  const [held, setHeld] = useState<{ issues: readonly Issue[]; picks: ReadonlyMap<string, "all" | "none"> }>({
+  // until the issues themselves change so the box does not flicker back. A
+  // write that did not fully apply drops its hold, so the real counts show and
+  // a retry repeats the same operation instead of inverting it.
+  const [held, setHeld] = useState<{ issues: readonly Issue[]; picks: ReadonlyMap<string, Pick> }>({
     issues,
     picks: new Map(),
   });
-  const pending = held.issues === issues ? held.picks : NO_PICKS;
+  const picks = held.issues === issues ? held.picks : NO_PICKS;
 
   const total = issues.length;
   const stateOf = (labelId: string): LabelState => {
-    const held = pending.get(labelId);
-    if (held) return held;
+    const pick = picks.get(labelId);
+    if (pick) return pick.state;
     const n = counts.get(labelId) ?? 0;
     return n === 0 ? "none" : n === total ? "all" : "some";
   };
   const countOf = (labelId: string) => {
-    const held = pending.get(labelId);
-    if (held) return held === "all" ? total : 0;
+    const pick = picks.get(labelId);
+    if (pick) return pick.state === "all" ? total : 0;
     return counts.get(labelId) ?? 0;
   };
   const toggle = (labelId: string) => {
+    if (picks.get(labelId)?.pending) return;
     const removing = stateOf(labelId) === "all";
-    setHeld({ issues, picks: new Map(pending).set(labelId, removing ? "none" : "all") });
-    onApply(removing ? { remove: [labelId] } : { add: [labelId] });
+    const pick: Pick = { state: removing ? "none" : "all", pending: true };
+    setHeld({ issues, picks: new Map(picks).set(labelId, pick) });
+    const settle = (applied: boolean) =>
+      setHeld((prev) => {
+        if (prev.picks.get(labelId) !== pick) return prev;
+        const next = new Map(prev.picks);
+        if (applied) next.set(labelId, { ...pick, pending: false });
+        else next.delete(labelId);
+        return { issues: prev.issues, picks: next };
+      });
+    onApply(removing ? { remove: [labelId] } : { add: [labelId] }).then(
+      (applied) => settle(applied === true),
+      () => settle(false),
+    );
   };
 
   const q = query.trim().toLowerCase();
@@ -127,7 +146,7 @@ export function BatchLabelPicker({
   align = "center",
 }: {
   issues: readonly Issue[];
-  onApply: (ops: BatchIssueLabelOps) => void;
+  onApply: BatchLabelApply;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   trigger: React.ReactNode;
@@ -154,7 +173,7 @@ export function BatchLabelPicker({
           <ClearLabelsButton
             count={rows.total}
             onClick={() => {
-              onApply({ clear: true });
+              void onApply({ clear: true });
               onOpenChange(false);
             }}
           />
@@ -173,7 +192,7 @@ export function BatchLabelPanel({
   onClose,
 }: {
   issues: readonly Issue[];
-  onApply: (ops: BatchIssueLabelOps) => void;
+  onApply: BatchLabelApply;
   onClose: () => void;
 }) {
   const { t } = useT("issues");
@@ -190,7 +209,7 @@ export function BatchLabelPanel({
           <ClearLabelsButton
             count={rows.total}
             onClick={() => {
-              onApply({ clear: true });
+              void onApply({ clear: true });
               onClose();
             }}
           />

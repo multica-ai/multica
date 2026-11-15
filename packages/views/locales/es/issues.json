@@ -931,6 +931,8 @@
     "stage": "Etapa",
     "custom_properties": "Propiedades personalizadas",
     "pick_date": "Elegir fecha…",
+    "property_edit": "Establecer valor…",
+    "result_unknown": "No se pudo confirmar qué tareas cambiaron. Revisa la lista antes de reintentar.",
     "property_clear": "Borrar ({{count}} con valor)",
     "labels_search": "Añadir o quitar etiquetas…",
     "clear_labels_one": "Quitar todas las etiquetas de {{count}} tarea",

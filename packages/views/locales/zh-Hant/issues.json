@@ -968,6 +968,8 @@
     "stage": "階段",
     "custom_properties": "自訂屬性",
     "pick_date": "選擇日期…",
+    "property_edit": "設定值…",
+    "result_unknown": "無法確認哪些任務已修改，重試前請先檢查列表。",
     "property_clear": "清空（{{count}} 個已設定）",
     "labels_search": "新增或移除標籤…",
     "clear_labels_other": "清除這 {{count}} 個任務的全部標籤",

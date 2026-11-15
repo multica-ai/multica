@@ -132,6 +132,8 @@ export interface BatchUpdateIssuesResponse {
   /** Absent on servers that predate per-issue results. */
   results?: BatchIssueResult[];
   dry_run?: boolean;
+  /** The response could not be read, so which issues changed is unknown. */
+  unconfirmed?: boolean;
 }
 
 /** Both sides of an issue's duplicate relation (MUL-7349). */

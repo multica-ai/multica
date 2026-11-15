@@ -409,6 +409,8 @@ import {
   CreateBillingPortalSessionResponseSchema,
   WorkspaceSubscriptionSummarySchema,
   IssueLimitUsageSchema,
+  BatchUpdateIssuesResponseSchema,
+  UNCONFIRMED_BATCH_UPDATE,
   WorkspaceSubscriptionPricesSchema,
   CreateWorkspaceSubscriptionCheckoutResponseSchema,
   WorkspaceSubscriptionSeatReconcileResultSchema,
@@ -1813,10 +1815,14 @@ export class ApiClient {
     updates: UpdateIssueRequest,
     ops: { labels?: BatchIssueLabelOps; properties?: BatchIssuePropertyOps } = {},
   ): Promise<BatchUpdateIssuesResponse> {
-    const response = await this.fetch<BatchUpdateIssuesResponse>("/api/issues/batch-update", {
+    const raw = await this.fetch<unknown>("/api/issues/batch-update", {
       method: "POST",
       body: JSON.stringify({ issue_ids: issueIds, updates, ...ops }),
     });
+    const response = parseWithFallback(raw, BatchUpdateIssuesResponseSchema, UNCONFIRMED_BATCH_UPDATE, {
+      endpoint: "POST /api/issues/batch-update",
+    });
+    if (response.unconfirmed) return response;
     // Older servers ignore label and property operations and answer with a
     // bare count, which would read as success.
     if ((ops.labels || ops.properties) && !response.results) {
