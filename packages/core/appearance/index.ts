@@ -21,6 +21,8 @@ export * from "./theme-package";
 export * from "./installed-themes";
 export * from "./anchors";
 export * from "./theme-variables";
+export * from "./palette";
+export * from "./embed-tokens";
 export * from "./local-fonts";
 export * from "./theme-archive";
 export * from "./theme-export";
@@ -56,7 +58,7 @@ export const FONT_SIZES = [12, 13, 14, 15, 16] as const;
 export type FontSize = (typeof FONT_SIZES)[number];
 export const DEFAULT_FONT_SIZE: FontSize = 14;
 
-export const CONTENT_SIZES = [13, 14, 15, 16, 17, 18] as const;
+export const CONTENT_SIZES = [12, 13, 14, 15, 16, 17, 18] as const;
 export type ContentSize = typeof FOLLOW_UI | (typeof CONTENT_SIZES)[number];
 
 export const CONTENT_LEADINGS = ["compact", "default", "relaxed"] as const;
@@ -209,11 +211,24 @@ const CODE_FONT_FAMILIES: Record<CodeFont, string | null> = {
   jetbrains: "var(--font-code-jetbrains), var(--font-ui-mono), ui-monospace, monospace",
   system: 'ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace',
 };
-const ROW_HEIGHTS: Record<Density, string | null> = {
-  compact: "32px",
-  default: null,
-  comfortable: "42px",
-};
+/** What each density sets; Default leaves the theme's or the stylesheet's values. */
+const DENSITY_VARIABLES = {
+  "--issue-row-height": ["32px", "42px"],
+  "--issue-group-header-height": ["2.25rem", "2.75rem"],
+  "--board-card-padding-y": ["0.5rem", "1rem"],
+  "--board-card-gap": ["0.375rem", "0.75rem"],
+  "--nav-item-height": ["1.75rem", "2.25rem"],
+  "--nav-item-padding-y": ["0.25rem", "0.5rem"],
+} as const satisfies Record<string, readonly [compact: string, comfortable: string]>;
+
+function densityVariables(density: Density): Record<string, string | null> {
+  return Object.fromEntries(
+    Object.entries(DENSITY_VARIABLES).map(([name, [compact, comfortable]]) => [
+      name,
+      density === "compact" ? compact : density === "comfortable" ? comfortable : null,
+    ]),
+  );
+}
 const LEADINGS: Record<ContentLeading, [string, string] | null> = {
   compact: ["1.5", "1.65"],
   default: null,
@@ -242,7 +257,7 @@ export function appearanceRootVariables(
     "--content-scale": prefs.contentSize === FOLLOW_UI ? null : String(prefs.contentSize / 14),
     "--content-leading": leading?.[0] ?? null,
     "--content-leading-cjk": leading?.[1] ?? null,
-    "--issue-row-height": ROW_HEIGHTS[prefs.density],
+    ...densityVariables(prefs.density),
   };
 }
 

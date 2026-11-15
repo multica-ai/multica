@@ -79,6 +79,7 @@ import {
 } from "../../common/property-icon";
 import { useLocale, useT } from "../../i18n";
 import { SettingsReadOnlyNotice, SettingsTab } from "./settings-layout";
+import { paletteColor } from "@multica/core/appearance";
 
 const MAX_ACTIVE_PROPERTIES = 20;
 
@@ -240,7 +241,7 @@ export function PropertiesTab() {
                       >
                         <span
                           className="size-2 rounded-full"
-                          style={{ backgroundColor: option.color }}
+                          style={{ backgroundColor: paletteColor(option.color) }}
                         />
                         {option.name}
                       </span>
@@ -461,7 +462,7 @@ function PropertyEditorDialog({
       {/* Options are unbounded, so the form is the part that has to give:
           header and footer stay put and the fields scroll, keeping "Save
           property" clickable no matter how many options are on the draft. */}
-      <DialogContent className="flex max-h-[85dvh] flex-col sm:max-w-lg">
+      <DialogContent className="flex max-h-[85%] flex-col sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>
             {property

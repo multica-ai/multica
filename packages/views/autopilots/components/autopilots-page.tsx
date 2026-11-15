@@ -73,7 +73,9 @@ function NameCell({ autopilot }: { autopilot: Autopilot }) {
             title={
               autopilot.pause_reason === "agent_runtime_required"
                 ? t(($) => $.status.paused_runtime_required)
-                : t(($) => $.status.paused)
+                : autopilot.pause_reason === "project_archived"
+                  ? t(($) => $.status.paused_project_archived)
+                  : t(($) => $.status.paused)
             }
             className="flex shrink-0 items-center text-amber-500"
           >

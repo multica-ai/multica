@@ -21,7 +21,8 @@
     "active": "활성",
     "paused": "일시 중지",
     "paused_runtime_required": "일시 중지됨 — 담당 에이전트에 런타임이 필요합니다",
-    "archived": "보관됨"
+    "archived": "보관됨",
+    "paused_project_archived": "일시 중지됨 — 프로젝트가 보관되었습니다"
   },
   "execution_mode": {
     "create_issue": "태스크 생성",
@@ -115,7 +116,8 @@
       "cancel": "취소",
       "confirm": "삭제",
       "deleting": "삭제하는 중..."
-    }
+    },
+    "paused_project_archived": "프로젝트가 보관되어 자동화가 일시 중지되었습니다. 프로젝트를 복원한 후 다시 활성화하세요."
   },
   "access": {
     "title": "접근 권한 관리",

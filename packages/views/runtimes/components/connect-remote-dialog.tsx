@@ -144,7 +144,7 @@ function WorkspaceConnectDialog({ wsId, currentUserId, onClose }: {
 
   return (
     <Dialog open onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="flex max-h-[85vh] flex-col gap-0 p-0 sm:max-w-lg">
+      <DialogContent className="flex max-h-[85%] flex-col gap-0 p-0 sm:max-w-lg">
         <AnimatePresence mode="wait" initial={false}>
           <motion.div
             key={step}

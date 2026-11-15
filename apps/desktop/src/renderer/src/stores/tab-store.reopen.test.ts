@@ -49,6 +49,35 @@ describe("renderer-local closed destinations", () => {
     expect(active().url).toBe("/acme/issues?view=one&sort=old#anchor");
   });
 
+  it("keeps a live pinned alias session's back and forward history during recovery", () => {
+    const store = useTabStore.getState();
+    const uuid = "00000000-0000-4000-8000-000000000042";
+    const original = store.openTab(`/acme/issues/${uuid}?filter=old#saved`, "Saved", { activate: true });
+    store.rememberIssueIdentity(original, uuid, "ACME-42");
+    store.closeTab(original);
+
+    const current = store.openTab("/acme/issues/ACME-42?filter=current#live", "Current", { activate: true });
+    store.navigateActiveSession("/acme/issues/ACME-43?filter=next#next");
+    store.goBack();
+    store.togglePin(current);
+    store.commitViewState(current, "/acme/issues/ACME-42", "draft", "Current draft");
+    const authoritative = active();
+    const history = authoritative.history;
+    store.setActiveTab(useTabStore.getState().byWorkspace.acme.tabs.find((tab) => tab.id !== current)!.id);
+
+    store.reopenClosedTab();
+
+    expect(active()).toBe(authoritative);
+    expect(active().history).toBe(history);
+    expect(active().pinned).toBe(true);
+    expect(active().url).toBe("/acme/issues/ACME-42?filter=current#live");
+    store.goForward();
+    expect(active().url).toBe("/acme/issues/ACME-43?filter=next#next");
+    store.goBack();
+    expect(active().memento.view["/acme/issues/ACME-42::draft"]).toBe("Current draft");
+    expect(useTabStore.getState().closedTabsByWorkspace.acme).toEqual([]);
+  });
+
   it.each([
     ["00000000-0000-4000-8000-000000000042", "ACME-42", false],
     ["ACME-42", "00000000-0000-4000-8000-000000000042", false],

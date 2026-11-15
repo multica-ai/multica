@@ -43,7 +43,6 @@
     "unsubscribed": "Suscripción cancelada",
     "label_added": "Etiqueta {{name}} añadida",
     "label_removed": "Etiqueta {{name}} quitada",
-    "label_failed": "No se ha podido añadir la etiqueta {{name}} a todas las tareas",
     "update_failed": "La actualización falló",
     "assigned": "{{identifier}} asignada a {{name}}"
   },

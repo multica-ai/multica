@@ -170,7 +170,7 @@ function IssueRunsDialogContent({
       {/* DialogContent's base is `sm:max-w-sm`, which a same-specificity
           `max-w-5xl` does not beat — `!` wins it, matching the transcript
           dialog. Fixed height so the chart stays put while the list scrolls. */}
-      <DialogContent className="flex !h-[min(56rem,calc(100dvh-4rem))] !w-[calc(100vw-4rem)] !max-w-5xl flex-col !gap-0 overflow-hidden !p-0">
+      <DialogContent className="flex !h-[min(56rem,calc(100%-4rem))] !w-[calc(100%-4rem)] !max-w-5xl flex-col !gap-0 overflow-hidden !p-0">
         <DialogHeader className="px-6 pt-5 pb-4">
           <DialogTitle>{t(($) => $.runs_timeline.title)}</DialogTitle>
           <div className="flex min-w-0 items-start justify-between gap-3">

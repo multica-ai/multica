@@ -7,6 +7,7 @@ import type {
   IssueStatusIcon,
 } from "@multica/core/types";
 import { STATUS_CONFIG } from "@multica/core/issues/config";
+import { paletteColor, paletteSlot } from "@multica/core/appearance";
 
 // Geometry constants (viewBox 0 0 14 14, center 7,7)
 
@@ -212,13 +213,16 @@ export function StatusIcon({
   // A custom color wins over the category's token, but only when the caller
   // isn't already forcing the glyph to inherit (selected rows, dark chips).
   const useCustomColor = !builtIn && !inheritColor && Boolean(color);
+  const customColor = !builtIn && color ? color : undefined;
 
   return (
     <svg
       data-mc="status-icon"
+      data-color={customColor}
+      data-palette={customColor ? (paletteSlot(customColor) ?? undefined) : undefined}
       viewBox="0 0 14 14"
       fill="none"
-      style={useCustomColor ? { color: color ?? undefined } : undefined}
+      style={useCustomColor ? { color: paletteColor(color) } : undefined}
       className={`${className} ${
         inheritColor || useCustomColor
           ? ""

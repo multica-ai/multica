@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useSyncExternalStore, type ReactNode } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useIsFetching, useQuery, useQueryClient } from "@tanstack/react-query";
 import { agentTaskSnapshotOptions } from "@multica/core/agents/queries";
 import { useAuthStore } from "@multica/core/auth";
 import { paths } from "@multica/core/paths";
@@ -143,7 +143,8 @@ export function DevToolbar({ build, apiUrl, route, onNavigate }: DevToolbarProps
   const failed = recording.requests.filter(requestFailed).length;
   const errors = recording.errors.length;
   const queries = queryClient.getQueryCache().getAll();
-  const fetching = queries.filter((q) => q.state.fetchStatus === "fetching").length;
+  // Subscribes to the cache, so the counter does not wait for the next clock tick.
+  const fetching = useIsFetching();
   const online = runtimes?.filter((r) => r.status === "online").length ?? 0;
   const running = activeTasks(tasks ?? []).filter((t) => t.status === "running").length;
   const openIssue = slug ? (issueId: string) => onNavigate(paths.workspace(slug).issueDetail(issueId)) : null;

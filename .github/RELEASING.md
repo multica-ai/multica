@@ -10,6 +10,12 @@ formulae, and container images.
 The verification job runs the Go tests and `govulncheck` before any publishing
 job starts. The vulnerability scan is fail-closed by default.
 
+Release notes use GoReleaser's GitHub changelog to credit commit authors and
+recognized co-authors between the previous and current tags. Keep all commits,
+including documentation, tests, and chores, so their authors are credited too.
+Commit-subject `@` characters are separated from the following text with an HTML
+comment; only the generated author mentions populate GitHub's Contributors list.
+
 CI and release jobs require Go `~1.27.4`: at least 1.27.4, while accepting
 newer 1.27 patches. This security floor is independent of the development
 minimum in `server/go.mod`. A plain `1.27.x` can resolve to an older patch

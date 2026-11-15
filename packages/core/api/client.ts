@@ -13,6 +13,9 @@ import type {
   CreateIssueRequest,
   MoveIssueRequest,
   UpdateIssueRequest,
+  BatchIssueLabelOps,
+  BatchIssuePropertyOps,
+  BatchUpdateIssuesResponse,
   IssueDuplicates,
   GroupedIssuesResponse,
   ListIssuesResponse,
@@ -112,6 +115,7 @@ import type {
   StartMikaOnboardingResponse,
   CancelTaskResponse,
   Project,
+  ArchiveProjectResponse,
   CreateProjectRequest,
   UpdateProjectRequest,
   ListProjectsResponse,
@@ -378,6 +382,7 @@ import {
   RuntimeUsageListSchema,
   SearchIssuesResponseSchema,
   ProjectSchema,
+  ArchiveProjectResponseSchema,
   ListProjectMembersResponseSchema,
   ProjectSubscriptionSchema,
   ListProjectsResponseSchema,
@@ -406,6 +411,8 @@ import {
   CreateBillingPortalSessionResponseSchema,
   WorkspaceSubscriptionSummarySchema,
   IssueLimitUsageSchema,
+  BatchUpdateIssuesResponseSchema,
+  UNCONFIRMED_BATCH_UPDATE,
   WorkspaceSubscriptionPricesSchema,
   CreateWorkspaceSubscriptionCheckoutResponseSchema,
   WorkspaceSubscriptionSeatReconcileResultSchema,
@@ -689,6 +696,14 @@ function assertIssueCreatePropertiesSnapshot(
 // or a server that did not send one — the caller then falls back to
 // err.message, which is what every endpoint that has not adopted this yet
 // produces.
+/** The server predates batch label / property operations and ignored them. */
+export class BatchOpsUnsupportedError extends Error {
+  constructor() {
+    super("batch label and property changes are not supported by this server");
+    this.name = "BatchOpsUnsupportedError";
+  }
+}
+
 export function errorCode(err: unknown): string | undefined {
   if (err instanceof ApiError && err.body && typeof err.body === "object") {
     const code = (err.body as { code?: unknown }).code;
@@ -1414,11 +1429,12 @@ export class ApiClient {
     });
   }
 
-  async searchProjects(params: { q: string; limit?: number; offset?: number; include_closed?: boolean; signal?: AbortSignal }): Promise<SearchProjectsResponse> {
+  async searchProjects(params: { q: string; limit?: number; offset?: number; include_closed?: boolean; include_archived?: boolean; signal?: AbortSignal }): Promise<SearchProjectsResponse> {
     const search = new URLSearchParams({ q: params.q });
     if (params.limit !== undefined) search.set("limit", String(params.limit));
     if (params.offset !== undefined) search.set("offset", String(params.offset));
     if (params.include_closed) search.set("include_closed", "true");
+    if (params.include_archived) search.set("include_archived", "true");
     const raw = await this.fetch<unknown>(
       `/api/projects/search?${search}`,
       params.signal ? { signal: params.signal } : undefined,
@@ -1797,11 +1813,25 @@ export class ApiClient {
     await this.fetch(`/api/issues/${id}`, { method: "DELETE" });
   }
 
-  async batchUpdateIssues(issueIds: string[], updates: UpdateIssueRequest): Promise<{ updated: number }> {
-    return this.fetch("/api/issues/batch-update", {
+  async batchUpdateIssues(
+    issueIds: string[],
+    updates: UpdateIssueRequest,
+    ops: { labels?: BatchIssueLabelOps; properties?: BatchIssuePropertyOps } = {},
+  ): Promise<BatchUpdateIssuesResponse> {
+    const raw = await this.fetch<unknown>("/api/issues/batch-update", {
       method: "POST",
-      body: JSON.stringify({ issue_ids: issueIds, updates }),
+      body: JSON.stringify({ issue_ids: issueIds, updates, ...ops }),
     });
+    const response = parseWithFallback(raw, BatchUpdateIssuesResponseSchema, UNCONFIRMED_BATCH_UPDATE, {
+      endpoint: "POST /api/issues/batch-update",
+    });
+    if (response.unconfirmed) return response;
+    // Older servers ignore label and property operations and answer with a
+    // bare count, which would read as success.
+    if ((ops.labels || ops.properties) && !response.results) {
+      throw new BatchOpsUnsupportedError();
+    }
+    return response;
   }
 
   async batchDeleteIssues(issueIds: string[]): Promise<{ deleted: number }> {
@@ -4406,9 +4436,10 @@ export class ApiClient {
   }
 
   // Projects
-  async listProjects(params?: { status?: string }): Promise<ListProjectsResponse> {
+  async listProjects(params?: { status?: string; include_archived?: boolean }): Promise<ListProjectsResponse> {
     const search = new URLSearchParams();
     if (params?.status) search.set("status", params.status);
+    if (params?.include_archived) search.set("include_archived", "true");
     const raw = await this.fetch<unknown>(`/api/projects?${search}`);
     return parseWithFallback(raw, ListProjectsResponseSchema, EMPTY_LIST_PROJECTS_RESPONSE, {
       endpoint: "GET /api/projects",
@@ -4438,6 +4469,18 @@ export class ApiClient {
 
   async deleteProject(id: string): Promise<void> {
     await this.fetch(`/api/projects/${id}`, { method: "DELETE" });
+  }
+
+  async archiveProject(id: string): Promise<ArchiveProjectResponse> {
+    const raw = await this.fetch<unknown>(`/api/projects/${id}/archive`, { method: "POST" });
+    return parseWithFallback(raw, ArchiveProjectResponseSchema, { ...EMPTY_PROJECT, paused_autopilot_ids: [] }, {
+      endpoint: "POST /api/projects/:id/archive",
+    });
+  }
+
+  async restoreProject(id: string): Promise<Project> {
+    const raw = await this.fetch<unknown>(`/api/projects/${id}/restore`, { method: "POST" });
+    return parseWithFallback(raw, ProjectSchema, EMPTY_PROJECT, { endpoint: "POST /api/projects/:id/restore" });
   }
 
   async getProjectMembers(id: string): Promise<ListProjectMembersResponse> {
