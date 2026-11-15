@@ -117,7 +117,7 @@ interface SettingsScopeGroup {
 const SETTINGS_HEADER_RAIL = cn(
   "flex min-w-0 flex-1 items-center gap-2",
   "md:pl-[max(1rem,calc(50%-var(--settings-column)/2+2rem))]",
-  "md:group-has-[[data-slot=sidebar-trigger]]/settings-header:pl-[max(0px,calc(50%-var(--settings-column)/2-0.25rem))]",
+  "md:group-has-[[data-sidebar=trigger]]/settings-header:pl-[max(0px,calc(50%-var(--settings-column)/2-0.25rem))]",
   "md:pr-[max(1.5rem,calc(50%-var(--settings-column)/2+2.5rem))]",
 );
 

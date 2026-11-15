@@ -356,6 +356,8 @@ type ListArchivedInboxPageRow struct {
 // MATCHING notification, which is the row the list renders; issue filters and
 // "unread" then test that group. Issue filters never match a notification
 // without an issue, "is not" included. Type groups mirror INBOX_TYPE_GROUPS.
+// review_requested, task_completed, agent_blocked and agent_completed are no
+// longer written, but archived rows from older servers still carry them.
 // Select narrow group representatives before loading bodies or comment anchors.
 func (q *Queries) ListArchivedInboxPage(ctx context.Context, arg ListArchivedInboxPageParams) ([]ListArchivedInboxPageRow, error) {
 	rows, err := q.db.Query(ctx, listArchivedInboxPage,

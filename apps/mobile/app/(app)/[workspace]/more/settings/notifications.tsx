@@ -45,6 +45,11 @@ const INBOX_GROUPS: {
     descriptionKey: "groups.mentions_description",
   },
   {
+    key: "reactions",
+    labelKey: "groups.reactions",
+    descriptionKey: "groups.reactions_description",
+  },
+  {
     key: "updates",
     labelKey: "groups.updates",
     descriptionKey: "groups.updates_description",

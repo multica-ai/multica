@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useId, useRef, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-kit/modifiers";
@@ -17,13 +17,15 @@ import {
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import type { IssueView } from "@multica/core/api/schemas";
+import type { IssueTableFacetsRequest } from "@multica/core/types";
 import { useWorkspacePaths } from "@multica/core/paths";
-import { sidebarIssuesOptions } from "@multica/core/issues/queries";
+import { issueTableFacetsOptions, sidebarIssuesOptions } from "@multica/core/issues/queries";
 import { workspaceWorkingAgentsOptions } from "@multica/core/agents";
 import {
   SIDEBAR_FIRST_PAGE,
   builtinSidebarRequest,
   builtinSidebarSource,
+  sidebarCountRequest,
   viewSidebarNeedsUnread,
   viewSidebarRequest,
   viewSidebarSource,
@@ -67,6 +69,13 @@ const ROW_MENU_CLASS = cn(
   TREE_ROW_BUTTON_CLASS,
   "text-muted-foreground opacity-0 group-hover/row:opacity-100 data-[popup-open]:opacity-100 [@media(pointer:coarse)]:opacity-100",
 );
+const EMPTY_COUNT_REQUEST: IssueTableFacetsRequest = {
+  query: { scope: { kind: "workspace" }, filters: {}, sort: { field: "position", direction: "asc" } },
+  facets: [{ kind: "priority" }],
+  include_total: true,
+};
+const ROW_COUNT_CLASS =
+  "transition-opacity group-focus-within/row:opacity-0 group-hover/row:opacity-0 group-has-[[data-popup-open]]/row:opacity-0 [@media(pointer:coarse)]:opacity-0";
 
 interface ViewsSectionProps {
   wsId: string;
@@ -212,6 +221,20 @@ export function ViewsSection({
   );
 }
 
+/**
+ * How many issues the row lists when expanded. Kept off the sidebar list
+ * cache: a list query with an observer reads as a list showing the open issue.
+ */
+function useListedCount(wsId: string, request: SidebarIssuesRequest | null | undefined, enabled: boolean): number {
+  const { data = 0 } = useQuery({
+    ...issueTableFacetsOptions(wsId, request ? sidebarCountRequest(request) : EMPTY_COUNT_REQUEST),
+    enabled: enabled && !!request,
+    placeholderData: keepPreviousData,
+    select: (response) => response.total,
+  });
+  return enabled && request ? data : 0;
+}
+
 function usePrefetch(wsId: string, source: string, request: SidebarIssuesRequest | null | undefined) {
   const qc = useQueryClient();
   return () => {
@@ -339,7 +362,8 @@ function BuiltinViewRow({
     ? undefined
     : builtinSidebarRequest(builtin, issueSettings, statusCatalog.statuses, working.data);
   const prefetch = usePrefetch(wsId, source, request);
-  const count = builtin === "working" && showCount ? (working.data?.length ?? 0) : 0;
+  const listedCount = useListedCount(wsId, request, showCount && builtin !== "working");
+  const count = !showCount ? 0 : builtin === "working" ? (working.data?.length ?? 0) : listedCount;
 
   return (
     <>
@@ -363,10 +387,7 @@ function BuiltinViewRow({
         trailing={
           // The menu button takes the count's place, so the row never reflows.
           <span className="relative flex h-5 min-w-5 items-center justify-end">
-            <PanelCount
-              value={count}
-              className="transition-opacity group-focus-within/row:opacity-0 group-hover/row:opacity-0 group-has-[[data-popup-open]]/row:opacity-0 [@media(pointer:coarse)]:opacity-0"
-            />
+            <PanelCount value={count} className={ROW_COUNT_CLASS} />
             <RowMenu
               label={t(($) => $.panels.work.view_actions, { name: label })}
               state={rowMenu}
@@ -453,6 +474,8 @@ function SavedViewRow({
     ? undefined
     : viewSidebarRequest(view, todayDateOnly(), unread.data);
   const prefetch = usePrefetch(wsId, source, request);
+  const showCount = useSidebarTreeStore((s) => s.viewsShowCount);
+  const count = useListedCount(wsId, request, showCount);
   const canManage = actions.canManage(view);
 
   if (renaming) {
@@ -489,42 +512,49 @@ function SavedViewRow({
         }}
         onNavigateInPlace={() => setActive(target.containerKey, view.id)}
         trailing={
-          <RowMenu label={t(($) => $.panels.work.view_actions, { name: view.name })} state={rowMenu}>
-            {canManage && (
-              <>
-                <DropdownMenuItem onClick={() => actions.edit(view)}>
-                  <Filter className="size-3.5" />
-                  {t(($) => $.panels.work.view_edit)}
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => startRename(view.id, "sidebar")}>
-                  <Pencil className="size-3.5" />
-                  {t(($) => $.panels.work.view_rename)}
-                </DropdownMenuItem>
-              </>
-            )}
-            <DropdownMenuItem onClick={() => actions.duplicate(view, "sidebar")}>
-              <Copy className="size-3.5" />
-              {t(($) => $.panels.work.view_duplicate)}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => actions.copyLink(target.href)}>
-              <Link2 className="size-3.5" />
-              {t(($) => $.panels.work.view_copy_link)}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => actions.sidebar.unstar(item.id)}>
-              <EyeOff className="size-3.5" />
-              {t(($) => $.panels.work.view_remove)}
-            </DropdownMenuItem>
-            {canManage && (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem variant="destructive" onClick={() => onDelete(view)}>
-                  <Trash2 className="size-3.5" />
-                  {t(($) => $.panels.work.view_delete)}
-                </DropdownMenuItem>
-              </>
-            )}
-          </RowMenu>
+          <span className="relative flex h-5 min-w-5 items-center justify-end">
+            <PanelCount value={count} className={ROW_COUNT_CLASS} />
+            <RowMenu
+              label={t(($) => $.panels.work.view_actions, { name: view.name })}
+              state={rowMenu}
+              className="absolute right-0"
+            >
+              {canManage && (
+                <>
+                  <DropdownMenuItem onClick={() => actions.edit(view)}>
+                    <Filter className="size-3.5" />
+                    {t(($) => $.panels.work.view_edit)}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => startRename(view.id, "sidebar")}>
+                    <Pencil className="size-3.5" />
+                    {t(($) => $.panels.work.view_rename)}
+                  </DropdownMenuItem>
+                </>
+              )}
+              <DropdownMenuItem onClick={() => actions.duplicate(view, "sidebar")}>
+                <Copy className="size-3.5" />
+                {t(($) => $.panels.work.view_duplicate)}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => actions.copyLink(target.href)}>
+                <Link2 className="size-3.5" />
+                {t(($) => $.panels.work.view_copy_link)}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => actions.sidebar.unstar(item.id)}>
+                <EyeOff className="size-3.5" />
+                {t(($) => $.panels.work.view_remove)}
+              </DropdownMenuItem>
+              {canManage && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem variant="destructive" onClick={() => onDelete(view)}>
+                    <Trash2 className="size-3.5" />
+                    {t(($) => $.panels.work.view_delete)}
+                  </DropdownMenuItem>
+                </>
+              )}
+            </RowMenu>
+          </span>
         }
       />
       {expanded && (

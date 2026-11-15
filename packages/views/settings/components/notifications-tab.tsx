@@ -25,7 +25,7 @@ import {
 // Inbox event groups, by how the event reaches you. `system_notifications`
 // is a sibling preference key but lives in its own section below.
 const INBOX_CATEGORIES = [
-  { key: "direct", groups: ["assignments", "mentions"] },
+  { key: "direct", groups: ["assignments", "mentions", "reactions"] },
   { key: "issues", groups: ["status_changes", "comments", "updates"] },
   { key: "projects", groups: ["new_issues"] },
   { key: "agents", groups: ["agent_activity"] },
@@ -113,12 +113,15 @@ export function NotificationsTab() {
             </span>
           </SettingsRow>
           <SettingsRow
+            anchor="auto_archive_completed"
             label={t(($) => $.notifications.leaving.done_label)}
             description={t(($) => $.notifications.leaving.done_description)}
           >
-            <span className="text-caption text-muted-foreground">
-              {t(($) => $.notifications.leaving.done_value)}
-            </span>
+            <Switch
+              checked={preferences.auto_archive_completed !== "muted"}
+              aria-label={t(($) => $.notifications.leaving.done_label)}
+              onCheckedChange={(checked) => handleToggle("auto_archive_completed", checked)}
+            />
           </SettingsRow>
           <SettingsRow
             anchor="archived"

@@ -504,24 +504,10 @@ func resolveWorkspaceID(cmd *cobra.Command) string {
 	return cfg.WorkspaceID
 }
 
-// resolveTargetWorkspaceID resolves the workspace a command should act on.
-//
-// The --workspace flag (accepting a full UUID, slug, or short UUID prefix)
-// takes highest precedence so scripts can pin a workspace by exact identifier,
-// independent of the mutable current-workspace pointer persisted in
-// config.json. That pointer is global process-shared state — any concurrent
-// `multica workspace switch` (or another script) can shift it mid-run and
-// silently retarget an unrelated command at the wrong workspace (GitHub
-// #7654). A UUID is forwarded as-is; a slug or prefix is resolved against the
-// caller's accessible workspace list, which also serves as the access /
-// existence check and yields a clear "not found" error for an unknown value.
-//
-// When --workspace is absent the existing resolution chain applies unchanged
-// (--workspace-id flag, MULTICA_WORKSPACE_ID env, profile default), preserving
-// today's behavior. Inside a daemon-managed agent task the workspace is bound
-// by the task token and the server ignores any client-supplied workspace, so
-// the flag is deliberately not honored there — resolution stays with the
-// daemon-provided env, exactly as resolveWorkspaceID already enforces.
+// resolveTargetWorkspaceID applies a human command's explicit selector without
+// changing the saved profile default. Pin a resolved slug/prefix in memory so
+// workspace URL paths and client headers cannot resolve it differently.
+// Daemon tasks retain their existing task-scoped workspace resolution.
 func resolveTargetWorkspaceID(cmd *cobra.Command) (string, error) {
 	if !inDaemonManagedExecutionContext() && cmd.Flags().Changed("workspace") {
 		target := strings.TrimSpace(cmd.Flag("workspace").Value.String())

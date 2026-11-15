@@ -363,11 +363,6 @@ export function effectiveInboxFilters(
   return next;
 }
 
-/** @deprecated Use `effectiveInboxFilters` with `archived: true`. */
-export function inboxFiltersForArchive(filters: InboxFilters): InboxFilters {
-  return filters.agent ? withoutInboxFilter(filters, "agent") : filters;
-}
-
 /** Start of the received window, at a local midnight so it holds all day. */
 export function inboxReceivedAfter(received: InboxReceivedFilter, now: Date = new Date()): Date {
   const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());

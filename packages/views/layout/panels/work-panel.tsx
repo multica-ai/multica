@@ -30,6 +30,18 @@ const PROJECTS_LIST = "projects";
 /** Pinned rows' place in the clicked-issue record, apart from every sidebar source. */
 const PINS_LIST = "pins";
 
+interface ClickedIssue {
+  segment: string;
+  list: string | null;
+}
+
+/** The highlight records the open issue had before a click or the issue header moved on. */
+interface SettledIssue {
+  issueId: string | null;
+  clickedIssue: ClickedIssue | null;
+  inboxIssueId: string | null;
+}
+
 /**
  * The `{id}` of a `{base}/{id}` route — for `/issues/{id}`, a UUID or an
  * identifier like `MUL-123`.
@@ -92,17 +104,37 @@ export function WorkPanel() {
   // An issue can sit in Pinned and in several lists at once, but lights in
   // one place: the list it was clicked in. Arriving any other way (search, a
   // link, a shortcut) lights the pin, else the first list that shows it.
-  const [clickedIssue, setClickedIssue] = useState<{ segment: string; list: string | null } | null>(null);
-  const clickedList =
-    clickedIssue &&
-    currentIssueId &&
-    (clickedIssue.segment === currentIssueId || clickedIssue.segment === currentIssue?.identifier)
-      ? clickedIssue.list
-      : undefined;
+  const [liveClickedIssue, setClickedIssue] = useState<ClickedIssue | null>(null);
+  const isOpenIssue = (segment: string) =>
+    !!currentIssueId && (segment === currentIssueId || segment === currentIssue?.identifier);
   // An issue opened from the Inbox, by a row or by the issue header moving on
   // to the next notification, lights there while the section still shows it;
   // once archived, it falls back to the other lists.
-  const inboxIssueId = useInboxSelectionStore((s) => (wsId ? s.sidebarIssueByWorkspace[wsId] : null));
+  const liveInboxIssueId = useInboxSelectionStore((s) => (wsId ? (s.sidebarIssueByWorkspace[wsId] ?? null) : null));
+  // A click, or the issue header moving on, names the next issue before the
+  // route reaches it, which on web waits for the next page to load. Until
+  // then the open issue keeps the record it had, or its highlight would fall
+  // through to another list, or All issues, for the length of the load.
+  const [settled, setSettled] = useState<SettledIssue>({
+    issueId: currentIssueId,
+    clickedIssue: liveClickedIssue,
+    inboxIssueId: liveInboxIssueId,
+  });
+  const movingOn =
+    settled.issueId === currentIssueId &&
+    ((liveClickedIssue !== settled.clickedIssue && !!liveClickedIssue && !isOpenIssue(liveClickedIssue.segment)) ||
+      (liveInboxIssueId !== settled.inboxIssueId && !!liveInboxIssueId && liveInboxIssueId !== currentIssueId));
+  if (
+    !movingOn &&
+    (settled.issueId !== currentIssueId ||
+      settled.clickedIssue !== liveClickedIssue ||
+      settled.inboxIssueId !== liveInboxIssueId)
+  ) {
+    setSettled({ issueId: currentIssueId, clickedIssue: liveClickedIssue, inboxIssueId: liveInboxIssueId });
+  }
+  const clickedIssue = movingOn ? settled.clickedIssue : liveClickedIssue;
+  const inboxIssueId = movingOn ? settled.inboxIssueId : liveInboxIssueId;
+  const clickedList = clickedIssue && isOpenIssue(clickedIssue.segment) ? clickedIssue.list : undefined;
   // The notification open beside the section: an issue opened from it, or an
   // issue-less one on the Inbox page.
   const inboxOpenKey =
@@ -113,8 +145,11 @@ export function WorkPanel() {
         : null;
   const inboxRows = useInboxSectionRows(wsId, inboxOpenKey);
   const rememberSidebarIssue = useInboxSelectionStore((s) => s.rememberSidebarIssue);
+  // Moving on from an archived row keeps the issue lit nowhere rather than elsewhere.
   const inboxClaimsIssue =
-    !!currentIssueId && inboxIssueId === currentIssueId && inboxRows.shownIssueIds.has(currentIssueId);
+    !!currentIssueId &&
+    inboxIssueId === currentIssueId &&
+    (movingOn || inboxRows.shownIssueIds.has(currentIssueId));
   const treeClaimsIssue = inboxClaimsIssue || (clickedList !== undefined && clickedList !== PINS_LIST);
   const pins = usePanelPins(wsId, userId, pathname, treeClaimsIssue ? null : currentIssueId);
   const requestLocate = useSidebarTreeStore((s) => s.requestLocate);

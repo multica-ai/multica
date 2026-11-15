@@ -72,8 +72,6 @@ vi.mock("@multica/views/layout", () => ({
   CompactNavSheet: () => null,
   GlobalShortcuts: () => null,
   NavigationProgress: () => null,
-  NewIssueButton: () => null,
-  SearchButton: () => null,
   ShellRouteDataPrefetch: ({ children }: { children: ReactNode }) => <>{children}</>,
   SpacePanel: () => null,
   // In a panel space the shell's toggleNav is the sidebar toggle.
@@ -157,7 +155,7 @@ describe("DesktopShell sidebar trigger", () => {
   it("keeps exactly one trigger and tells page headers not to add another", () => {
     const { container, getByTestId, queryByRole } = renderShell();
 
-    expect(container.querySelectorAll("[data-slot='sidebar-trigger']")).toHaveLength(1);
+    expect(container.querySelectorAll("[data-sidebar='trigger']")).toHaveLength(1);
     expect(getByTestId("page-content")).toHaveAttribute(
       "data-external-trigger",
       "true",
@@ -168,7 +166,7 @@ describe("DesktopShell sidebar trigger", () => {
     expect(mainTopBar).toHaveStyle({ paddingLeft: "144px" });
 
     fireEvent.click(
-      container.querySelector('[data-slot="sidebar-trigger"]')!,
+      container.querySelector('[data-sidebar="trigger"]')!,
     );
     expect(getByTestId("page-content")).toHaveAttribute(
       "data-sidebar-state",

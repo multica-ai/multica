@@ -88,7 +88,13 @@ multica workspace list
 multica workspace switch <slug>
 ```
 
-之后的命令会使用这个工作区。单次命令可以通过 `--workspace-id` 临时覆盖，也可以设置 `MULTICA_WORKSPACE_ID`。
+之后的命令会使用这个工作区。在脚本中，可以为单次命令固定目标，而不修改已保存的默认工作区：
+
+```bash
+multica issue list --workspace my-team
+```
+
+`--workspace` 接受完整 UUID、slug，或至少 4 个十六进制字符且没有歧义的 UUID 前缀。优先级依次为 `--workspace`、`--workspace-id`、`MULTICA_WORKSPACE_ID`、profile 默认值。守护进程管理的智能体运行仍使用其绑定的工作区，这个 flag 不会覆盖它。
 
 邀请成员：
 
@@ -379,7 +385,7 @@ CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓�
 
 ## 命令参考
 
-下表覆盖当前全部顶层命令，按 CLI 自身的分组排列。所有命令都接受全局 flag `--server-url`、`--workspace-id`、`--profile` 和 `--debug`。`--output` 是逐命令注册的 flag，默认格式因命令而异：`list` 类默认表格，`get`、`create` 类多默认 JSON。完整参数以 `multica <command> --help` 为准。
+下表覆盖当前全部顶层命令，按 CLI 自身的分组排列。所有命令都接受全局 flag `--server-url`、`--workspace`、`--workspace-id`、`--profile` 和 `--debug`。`--output` 是逐命令注册的 flag，默认格式因命令而异：`list` 类默认表格，`get`、`create` 类多默认 JSON。完整参数以 `multica <command> --help` 为准。
 
 ### 任务附件
 

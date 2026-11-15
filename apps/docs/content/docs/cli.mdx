@@ -88,7 +88,13 @@ multica workspace list
 multica workspace switch <slug>
 ```
 
-Subsequent commands use this workspace. A single command can override it with `--workspace-id`, or you can set `MULTICA_WORKSPACE_ID`.
+Subsequent commands use this workspace. For scripts, pin the target for one command without changing the saved default:
+
+```bash
+multica issue list --workspace my-team
+```
+
+`--workspace` accepts a full UUID, a slug, or an unambiguous UUID prefix of at least four hexadecimal characters. Resolution priority is `--workspace`, `--workspace-id`, `MULTICA_WORKSPACE_ID`, then the profile default. Daemon-managed agent runs keep their task-bound workspace; this flag does not override it.
 
 Invite members:
 
@@ -402,7 +408,7 @@ CLI configuration files contain tokens that can access Multica as you. Don't com
 
 ## Command reference
 
-The tables below cover every current top-level command, grouped the way the CLI itself groups them. All commands accept the global flags `--server-url`, `--workspace-id`, `--profile`, and `--debug`. `--output` is registered per command, and the default format varies: `list` commands default to a table, while `get` and `create` commands mostly default to JSON. Full flags are defined by `multica <command> --help`.
+The tables below cover every current top-level command, grouped the way the CLI itself groups them. All commands accept the global flags `--server-url`, `--workspace`, `--workspace-id`, `--profile`, and `--debug`. `--output` is registered per command, and the default format varies: `list` commands default to a table, while `get` and `create` commands mostly default to JSON. Full flags are defined by `multica <command> --help`.
 
 ### Issue attachments
 

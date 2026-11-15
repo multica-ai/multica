@@ -6,6 +6,7 @@ import {
   projectSidebarRequest,
   shownSidebarStatuses,
   builtinSidebarRequest,
+  sidebarCountRequest,
   sidebarProjects,
   noProjectRowIndex,
   NO_PROJECT_ORDER_ID,
@@ -89,6 +90,25 @@ describe("No project", () => {
       facets: [{ kind: "project" }],
       include_total: false,
     });
+  });
+});
+
+describe("sidebarCountRequest", () => {
+  it("totals what the row lists, whatever its ordering", () => {
+    const request = builtinSidebarRequest("subscribed", DEFAULT_SIDEBAR_ISSUE_SETTINGS, STATUSES)!;
+    expect(sidebarCountRequest(request)).toEqual({
+      query: { ...request.table, sort: { field: "position", direction: "asc" } },
+      facets: [{ kind: "priority" }],
+      include_total: true,
+    });
+  });
+
+  it("facets on a dimension the request leaves unfiltered", () => {
+    const request = viewSidebarRequest(
+      { query: { priorityFilters: ["high"] }, display: {}, scope_type: "workspace", scope_variant: null },
+      "2026-03-11",
+    )!;
+    expect(sidebarCountRequest(request).facets).toEqual([{ kind: "creator" }]);
   });
 });
 

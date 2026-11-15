@@ -158,43 +158,6 @@ func (q *Queries) ArchiveInboxByIssueAndType(ctx context.Context, arg ArchiveInb
 	return items, nil
 }
 
-const archiveInboxByIssueForAllRecipients = `-- name: ArchiveInboxByIssueForAllRecipients :many
-UPDATE inbox_item SET archived = true
-WHERE workspace_id = $1 AND issue_id = $2 AND archived = false
-RETURNING recipient_type, recipient_id
-`
-
-type ArchiveInboxByIssueForAllRecipientsParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	IssueID     pgtype.UUID `json:"issue_id"`
-}
-
-type ArchiveInboxByIssueForAllRecipientsRow struct {
-	RecipientType string      `json:"recipient_type"`
-	RecipientID   pgtype.UUID `json:"recipient_id"`
-}
-
-// A done issue leaves every recipient's inbox, read or not.
-func (q *Queries) ArchiveInboxByIssueForAllRecipients(ctx context.Context, arg ArchiveInboxByIssueForAllRecipientsParams) ([]ArchiveInboxByIssueForAllRecipientsRow, error) {
-	rows, err := q.db.Query(ctx, archiveInboxByIssueForAllRecipients, arg.WorkspaceID, arg.IssueID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ArchiveInboxByIssueForAllRecipientsRow{}
-	for rows.Next() {
-		var i ArchiveInboxByIssueForAllRecipientsRow
-		if err := rows.Scan(&i.RecipientType, &i.RecipientID); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const archiveInboxItem = `-- name: ArchiveInboxItem :one
 UPDATE inbox_item SET archived = true
 WHERE id = $1
@@ -435,36 +398,6 @@ func (q *Queries) DeleteInboxGroup(ctx context.Context, arg DeleteInboxGroupPara
 		return 0, err
 	}
 	return result.RowsAffected(), nil
-}
-
-const getInboxItem = `-- name: GetInboxItem :one
-SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, section, snoozed_until FROM inbox_item
-WHERE id = $1
-`
-
-func (q *Queries) GetInboxItem(ctx context.Context, id pgtype.UUID) (InboxItem, error) {
-	row := q.db.QueryRow(ctx, getInboxItem, id)
-	var i InboxItem
-	err := row.Scan(
-		&i.ID,
-		&i.WorkspaceID,
-		&i.RecipientType,
-		&i.RecipientID,
-		&i.Type,
-		&i.Severity,
-		&i.IssueID,
-		&i.Title,
-		&i.Body,
-		&i.Read,
-		&i.Archived,
-		&i.CreatedAt,
-		&i.ActorType,
-		&i.ActorID,
-		&i.Details,
-		&i.Section,
-		&i.SnoozedUntil,
-	)
-	return i, err
 }
 
 const getInboxItemInWorkspace = `-- name: GetInboxItemInWorkspace :one

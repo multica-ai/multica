@@ -139,16 +139,10 @@ const railOrder = () =>
   Array.from(document.querySelectorAll<HTMLElement>("[data-rail-item]"), (item) => item.dataset.railItem);
 
 describe("AppRail global actions", () => {
-  it("carries New issue and search by default", () => {
+  it("carries New issue and search", () => {
     renderRail();
     expect(screen.getByRole("button", { name: /^new issue$/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Search..." })).toBeTruthy();
-  });
-
-  it("leaves them to the desktop title bar when turned off", () => {
-    renderRail(undefined, <AppRail globalActions={false} />);
-    expect(screen.queryByRole("button", { name: /^new issue$/i })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Search..." })).toBeNull();
   });
 });
 

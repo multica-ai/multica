@@ -105,10 +105,6 @@ JOIN selected_ids selected ON selected.id = i.id
 LEFT JOIN issue iss ON iss.id = i.issue_id
 ORDER BY i.created_at DESC, i.id DESC;
 
--- name: GetInboxItem :one
-SELECT * FROM inbox_item
-WHERE id = $1;
-
 -- name: GetInboxItemInWorkspace :one
 SELECT * FROM inbox_item
 WHERE id = $1 AND workspace_id = $2;
@@ -219,12 +215,6 @@ RETURNING *;
 -- whole group back. Leaves `read` untouched for the same reason as above.
 UPDATE inbox_item SET archived = false
 WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND issue_id = $4 AND archived = true;
-
--- name: ArchiveInboxByIssueForAllRecipients :many
--- A done issue leaves every recipient's inbox, read or not.
-UPDATE inbox_item SET archived = true
-WHERE workspace_id = $1 AND issue_id = $2 AND archived = false
-RETURNING recipient_type, recipient_id;
 
 -- name: ArchiveInboxByIssueAndType :many
 UPDATE inbox_item SET archived = true

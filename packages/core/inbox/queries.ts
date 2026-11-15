@@ -26,18 +26,6 @@ export function inboxListOptions(wsId: string) {
   });
 }
 
-/**
- * @deprecated Legacy array endpoint, capped at 200 groups. New archive
- * consumers must use archivedInboxPagesOptions for the complete archive.
- * Retained for compatibility with legacy cache consumers.
- */
-export function archivedInboxListOptions(wsId: string) {
-  return queryOptions({
-    queryKey: inboxKeys.archived(wsId),
-    queryFn: () => api.listArchivedInbox(),
-  });
-}
-
 // Keyed by the request parameters themselves: an `agent` selection carried in
 // from the active inbox never changes the key, and the relative windows
 // (received, due date) re-key when the day turns.
@@ -192,10 +180,9 @@ export function unreadCountForWorkspace(
  * its own; deriving it from `listInbox()` instead downloaded the entire
  * unbounded inbox on every app start just to render a number (MUL-6967).
  *
- * `GET /api/inbox/unread-count` is deliberately not the source: it counts raw
- * notification rows, while the inbox renders one row per issue. The summary
- * endpoint applies the same newest-per-issue rule `deduplicateInboxItems`
- * applies client-side, so this number matches the list the user sees.
+ * The summary endpoint applies the same newest-per-issue rule
+ * `deduplicateInboxItems` applies client-side, so this number matches the
+ * list the user sees.
  */
 export function useInboxUnreadCount(
   wsId: string | null | undefined,

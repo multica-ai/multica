@@ -88,7 +88,13 @@ multica workspace list
 multica workspace switch <slug>
 ```
 
-Les commandes suivantes utilisent cet espace de travail. Une commande isolée peut le remplacer avec `--workspace-id`, ou vous pouvez définir `MULTICA_WORKSPACE_ID`.
+Les commandes suivantes utilisent cet espace de travail. Dans les scripts, fixez la cible d’une commande sans modifier l’espace par défaut enregistré :
+
+```bash
+multica issue list --workspace my-team
+```
+
+`--workspace` accepte un UUID complet, un slug ou un préfixe UUID non ambigu d’au moins quatre caractères hexadécimaux. L’ordre de priorité est `--workspace`, `--workspace-id`, `MULTICA_WORKSPACE_ID`, puis l’espace par défaut du profil. Les exécutions d’agents gérées par le daemon conservent l’espace lié à leur tâche ; cette option ne le remplace pas.
 
 Inviter des membres :
 
@@ -385,7 +391,7 @@ Les fichiers de configuration du CLI contiennent des jetons qui permettent d'acc
 
 ## Référence des commandes
 
-Les tableaux ci-dessous couvrent toutes les commandes de premier niveau actuelles, regroupées comme le CLI lui-même les regroupe. Toutes les commandes acceptent les options globales `--server-url`, `--workspace-id`, `--profile` et `--debug`. `--output` est déclarée commande par commande, et le format par défaut varie : les commandes `list` affichent par défaut un tableau, tandis que les commandes `get` et `create` renvoient le plus souvent du JSON. Les options complètes sont définies par `multica <command> --help`.
+Les tableaux ci-dessous couvrent toutes les commandes de premier niveau actuelles, regroupées comme le CLI lui-même les regroupe. Toutes les commandes acceptent les options globales `--server-url`, `--workspace`, `--workspace-id`, `--profile` et `--debug`. `--output` est déclarée commande par commande, et le format par défaut varie : les commandes `list` affichent par défaut un tableau, tandis que les commandes `get` et `create` renvoient le plus souvent du JSON. Les options complètes sont définies par `multica <command> --help`.
 
 ### Core
 

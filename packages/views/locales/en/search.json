@@ -6,6 +6,7 @@
   "breadcrumb_aria": "Current menu",
   "groups": {
     "pages": "Pages",
+    "views": "Views",
     "commands": "Commands",
     "members": "Members",
     "agents": "Agents",
