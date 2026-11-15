@@ -224,7 +224,7 @@
     "search": "名前またはメールで検索...",
     "no_members": "該当するメンバーはいません",
     "no_selected": "メンバーはいません",
-    "admin_notice": "ワークスペースの owner と admin は常にアクセスできます。",
+    "members_only_notice": "アクセスできるのはこのリストのメンバーだけです。ワークスペースの owner と admin も追加が必要です。",
     "you": "あなた",
     "remove": "{{name}}を削除",
     "failed": "アクセス権を保存できませんでした。",

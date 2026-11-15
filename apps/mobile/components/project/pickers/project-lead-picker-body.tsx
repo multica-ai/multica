@@ -37,6 +37,11 @@ interface Props {
   value: LeadValue | null;
   query: string;
   onChange: (next: LeadValue | null) => void;
+  /**
+   * A private project is always led by a person, who manages who can see it:
+   * no Unassigned row and no agents. Mirrors the web lead picker.
+   */
+  peopleOnly?: boolean;
 }
 
 type Row =
@@ -52,7 +57,12 @@ function isRowSelected(value: LeadValue | null, row: Row): boolean {
   return value.type === "agent" && value.id === row.agent.id;
 }
 
-export function ProjectLeadPickerBody({ value, query, onChange }: Props) {
+export function ProjectLeadPickerBody({
+  value,
+  query,
+  onChange,
+  peopleOnly = false,
+}: Props) {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const { t } = useT("issues");
   const { data: members = [] } = useQuery(memberListOptions(wsId));
@@ -70,7 +80,7 @@ export function ProjectLeadPickerBody({ value, query, onChange }: Props) {
       .filter((m) => matchName(m.name))
       .sort((a, b) => a.name.localeCompare(b.name))
       .map((m) => ({ kind: "member" as const, member: m }));
-    const agentRows: Row[] = [...agents]
+    const agentRows: Row[] = (peopleOnly ? [] : [...agents])
       .filter((a) => matchName(a.name))
       .sort((a, b) => a.name.localeCompare(b.name))
       .map((a) => ({ kind: "agent" as const, agent: a }));
@@ -80,12 +90,12 @@ export function ProjectLeadPickerBody({ value, query, onChange }: Props) {
     const all = [...memberRows, ...agentRows];
     const selectedRow = all.find((r) => isRowSelected(value, r));
     return [
-      { kind: "unassigned" },
+      ...(peopleOnly ? [] : [{ kind: "unassigned" as const }]),
       ...(selectedRow ? [selectedRow] : []),
       ...memberRows.filter((r) => !isRowSelected(value, r)),
       ...agentRows.filter((r) => !isRowSelected(value, r)),
     ];
-  }, [members, agents, query, value]);
+  }, [members, agents, query, value, peopleOnly]);
 
   const select = (row: Row) => {
     if (row.kind === "unassigned") onChange(null);

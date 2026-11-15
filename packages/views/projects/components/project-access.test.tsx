@@ -53,13 +53,13 @@ it("shows both access notices only when project-members visibility is selected",
   renderControl({ ...project, visibility: "workspace" });
   await user.click(screen.getByRole("button", { name: "Access" }));
   expect(await screen.findByRole("radio", { name: "Entire workspace" })).toBeChecked();
-  expect(screen.queryByText(/owners and admins always have access/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/Only the people listed here have access/)).not.toBeInTheDocument();
   expect(screen.queryByText(/Agents follow their owner/)).not.toBeInTheDocument();
   await user.click(screen.getByRole("radio", { name: "Project members only" }));
-  expect(screen.getByText(/owners and admins always have access/)).toBeVisible();
+  expect(screen.getByText(/Only the people listed here have access/)).toBeVisible();
   expect(screen.getByText(/Agents follow their owner/)).toBeVisible();
   await user.click(screen.getByRole("radio", { name: "Entire workspace" }));
-  expect(screen.queryByText(/owners and admins always have access/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/Only the people listed here have access/)).not.toBeInTheDocument();
   expect(screen.queryByText(/Agents follow their owner/)).not.toBeInTheDocument();
   expect(api.listAgents).not.toHaveBeenCalled();
 });
@@ -69,7 +69,7 @@ it("loads the member list, finds people by email, and adds and removes only afte
   renderControl();
   await user.click(screen.getByRole("button", { name: "Access" }));
   await screen.findByText("member@test");
-  expect(screen.getByText(/owners and admins always have access/)).toBeVisible();
+  expect(screen.getByText(/Only the people listed here have access/)).toBeVisible();
   expect(screen.getByText("Agents follow their owner's access.")).toBeVisible();
   expect(api.listAgents).not.toHaveBeenCalled();
   await user.click(screen.getByRole("button", { name: "Add workspace member" }));
@@ -82,6 +82,17 @@ it("loads the member list, finds people by email, and adds and removes only afte
   expect(await screen.findByRole("alert")).toHaveTextContent("Remove denied");
   expect(screen.getByText("outside@test")).toBeVisible();
   expect(screen.getByRole("dialog")).toBeVisible();
+});
+
+it("treats workspace owners and admins as ordinary project members", async () => {
+  state.viewer = "lead";
+  const user = userEvent.setup();
+  renderControl();
+  await user.click(screen.getByRole("button", { name: "Access" }));
+  await screen.findByText("owner@test");
+  await user.click(screen.getByRole("button", { name: "Remove Owner" }));
+  await waitFor(() => expect(api.removeProjectMember).toHaveBeenCalledWith("p1", "owner"));
+  await waitFor(() => expect(screen.queryByText("owner@test")).not.toBeInTheDocument());
 });
 
 it("keeps project membership read-only for a regular member, including their own membership", async () => {
@@ -126,6 +137,25 @@ it.each(["owner", "lead", "member"])("guards the lead picker for %s", async (vie
   }
 });
 
+it("offers only people as the lead of a private project", async () => {
+  api.listAgents.mockResolvedValue([{ id: "a1", name: "Build Agent", archived_at: null }]);
+  const update = vi.fn();
+  const trigger = () => <button type="button">Change lead</button>;
+  const { unmount } = renderWithI18n(<QueryClientProvider client={qc}><ProjectLeadPicker project={project} handleUpdate={update} renderTrigger={trigger} /></QueryClientProvider>);
+  await waitFor(() => expect(screen.getByRole("button", { name: "Change lead" })).toBeEnabled());
+  await userEvent.click(screen.getByRole("button", { name: "Change lead" }));
+  expect(await screen.findByRole("button", { name: "Member" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "No lead" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Build Agent" })).not.toBeInTheDocument();
+  unmount();
+
+  renderWithI18n(<QueryClientProvider client={qc}><ProjectLeadPicker project={{ ...project, visibility: "workspace" }} handleUpdate={update} renderTrigger={trigger} /></QueryClientProvider>);
+  await waitFor(() => expect(screen.getByRole("button", { name: "Change lead" })).toBeEnabled());
+  await userEvent.click(screen.getByRole("button", { name: "Change lead" }));
+  expect(await screen.findByRole("button", { name: "Build Agent" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "No lead" })).toBeVisible();
+});
+
 it("requires confirmation before making private content visible to the workspace", async () => {
   const user = userEvent.setup();
   renderControl();
@@ -137,6 +167,16 @@ it("requires confirmation before making private content visible to the workspace
   expect(api.updateProject).not.toHaveBeenCalled();
   await user.click(within(confirmation).getByRole("button", { name: "Confirm" }));
   await waitFor(() => expect(api.updateProject).toHaveBeenCalledWith("p1", { visibility: "workspace", member_ids: ["owner", "lead", "member"] }));
+});
+
+it("shows whoever makes a project private as its lead when it has none", async () => {
+  const user = userEvent.setup();
+  renderControl({ ...project, visibility: "workspace", lead_type: null, lead_id: null });
+  await user.click(screen.getByRole("button", { name: "Access" }));
+  await user.click(await screen.findByRole("radio", { name: "Project members only" }));
+  const row = (await screen.findByText("owner@test")).parentElement!.parentElement!;
+  expect(within(row).getByText("Lead")).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Remove Owner" })).not.toBeInTheDocument();
 });
 
 it("keeps new-project access in the draft until the project is created", async () => {

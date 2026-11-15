@@ -5,8 +5,10 @@ import { issueKeys } from "../issues/queries";
 import type { Project, ProjectVisibility } from "../types";
 
 // Mirrors the server: owners/admins, or the member lead of a private project.
-// Anyone may set the lead of a workspace-visible project, so leading one
-// grants nothing; making it private takes an owner/admin.
+// The caller already sees the project, which on a private one means being a
+// member: a role opens nothing by itself. Anyone may set the lead of a
+// workspace-visible project, so leading one grants nothing; making it private
+// takes an owner/admin.
 export function canManageProjectAccess(project: Pick<Project, "lead_type" | "lead_id" | "visibility">, userId: string | null | undefined, role: string | null | undefined): boolean {
   if (!userId) return false;
   if (role === "owner" || role === "admin") return true;

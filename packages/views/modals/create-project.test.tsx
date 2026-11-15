@@ -273,6 +273,38 @@ describe("CreateProjectModal", () => {
     ]);
   });
 
+  it("makes the creator the lead of a private project that names none", async () => {
+    createProjectMock.mockClear();
+    const user = userEvent.setup();
+    renderWithI18n(<CreateProjectModal onClose={vi.fn()} />);
+
+    await user.type(screen.getByPlaceholderText(/project title/i), "Secret plan");
+    expect(screen.getByRole("button", { name: "No lead" })).toBeInTheDocument();
+    await user.click(screen.getByRole("radio", { name: "Project members only" }));
+    // A private project always has a person leading it.
+    expect(screen.queryByRole("button", { name: "No lead" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: /^create project$/i }));
+
+    expect(createProjectMock.mock.calls[0]?.[0]).toMatchObject({
+      visibility: "private",
+      lead_type: "member",
+      lead_id: "user-1",
+    });
+  });
+
+  it("leaves a workspace-visible project without a lead when none is picked", async () => {
+    createProjectMock.mockClear();
+    const user = userEvent.setup();
+    renderWithI18n(<CreateProjectModal onClose={vi.fn()} />);
+
+    await user.type(screen.getByPlaceholderText(/project title/i), "Open plan");
+    await user.click(screen.getByRole("button", { name: /^create project$/i }));
+
+    const payload = createProjectMock.mock.calls[0]?.[0] as { lead_type?: string; lead_id?: string };
+    expect(payload.lead_type).toBeUndefined();
+    expect(payload.lead_id).toBeUndefined();
+  });
+
   it("reveals the start/due date pickers from the ⋯ overflow menu", async () => {
     const user = userEvent.setup();
     renderWithI18n(<CreateProjectModal onClose={vi.fn()} />);

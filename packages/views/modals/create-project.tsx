@@ -31,6 +31,7 @@ import {
 } from "@multica/core/projects/config";
 import { splitGithubUrlRef } from "@multica/core/github";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -335,13 +336,20 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
 
   const leadQuery = leadFilter.toLowerCase();
   const filteredMembers = members.filter((m) => m.name.toLowerCase().includes(leadQuery) || matchesPinyin(m.name, leadQuery));
-  const filteredAgents = agents.filter(
+  // A private project is led by a person, who manages who can see it: the
+  // member picked here, or whoever creates it. The picked lead is kept as it
+  // was, so switching back to the whole workspace restores it.
+  const userId = useAuthStore((s) => s.user?.id);
+  const isPrivate = visibility === "private";
+  const shownLeadType = isPrivate ? ("member" as const) : leadType;
+  const shownLeadId = isPrivate ? (leadType === "member" && leadId ? leadId : userId) : leadId;
+  const filteredAgents = isPrivate ? [] : agents.filter(
     (a) => !a.archived_at && (a.name.toLowerCase().includes(leadQuery) || matchesPinyin(a.name, leadQuery)),
   );
 
   const leadLabel =
-    leadType && leadId ? getActorName(leadType, leadId) : t(($) => $.create_project.lead);
-  const hasLead = !!(leadType && leadId);
+    shownLeadType && shownLeadId ? getActorName(shownLeadType, shownLeadId) : t(($) => $.create_project.lead);
+  const hasLead = !!(shownLeadType && shownLeadId);
   const hasSource = sourceMode === "local" ? !!selectedLocalPath : selectedRepos.length > 0;
 
   const createProject = useCreateProject();
@@ -400,8 +408,8 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
         icon,
         status,
         priority,
-        lead_type: leadType,
-        lead_id: leadId,
+        lead_type: hasLead ? shownLeadType : undefined,
+        lead_id: hasLead ? shownLeadId : undefined,
         start_date: startDate || undefined,
         due_date: dueDate || undefined,
         ...(workflowId ? { workflow_id: workflowId } : {}),
@@ -642,9 +650,9 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
               <PopoverTrigger
                 render={
                   <PillButton>
-                    {leadType && leadId ? (
+                    {shownLeadType && shownLeadId ? (
                       <>
-                        <ActorAvatar actorType={leadType} actorId={leadId} size="sm" showStatusDot />
+                        <ActorAvatar actorType={shownLeadType} actorId={shownLeadId} size="sm" showStatusDot />
                         <span className="truncate">{leadLabel}</span>
                       </>
                     ) : (
@@ -668,17 +676,19 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                 />
               </div>
               <div className="p-1 max-h-60 overflow-y-auto">
-                <button
-                  type="button"
-                  onClick={() => {
-                    updateLead(undefined, undefined);
-                    setLeadOpen(false);
-                  }}
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-body hover:bg-accent transition-colors"
-                >
-                  <UserMinus className="h-3.5 w-3.5 text-muted-foreground" />
-                  <span className="text-muted-foreground">{t(($) => $.create_project.no_lead)}</span>
-                </button>
+                {isPrivate ? null : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      updateLead(undefined, undefined);
+                      setLeadOpen(false);
+                    }}
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-body hover:bg-accent transition-colors"
+                  >
+                    <UserMinus className="h-3.5 w-3.5 text-muted-foreground" />
+                    <span className="text-muted-foreground">{t(($) => $.create_project.no_lead)}</span>
+                  </button>
+                )}
                 {filteredMembers.length > 0 && (
                   <>
                     <div className="px-2 pt-2 pb-1 text-caption font-medium text-muted-foreground uppercase tracking-wider">
