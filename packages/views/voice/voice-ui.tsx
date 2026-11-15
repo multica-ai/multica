@@ -161,20 +161,19 @@ function RecDot({ className }: { className?: string }) {
 }
 
 /**
- * The sentence a stream is still hearing, faded until it is typed. Long
- * sentences keep their newest words in view.
+ * The sentence a stream is still hearing, faded until it is typed, across
+ * the full width of the composer and above it, so it never sits on the text
+ * being written. Long sentences keep their newest words in view.
  */
-function Interim({ text, className }: { text: string; className?: string }) {
+function Interim({ text }: { text: string }) {
   return (
-    <span
+    <div
       aria-live="off"
-      className={cn(
-        "flex min-w-0 justify-end overflow-hidden text-caption [mask-image:linear-gradient(to_right,transparent,black_24px)]",
-        className,
-      )}
+      data-voice-interim=""
+      className="flex max-h-24 w-full flex-col justify-end overflow-hidden rounded-md border bg-background px-3 py-2 text-body text-faint-foreground shadow-[var(--floating-shadow)] animate-in fade-in"
     >
-      <span className="shrink-0 whitespace-nowrap">{text}</span>
-    </span>
+      <p className="whitespace-pre-wrap break-words">{text}</p>
+    </div>
   );
 }
 
@@ -245,7 +244,6 @@ export function VoiceMicButton({
  */
 export function VoiceStrip({ voice }: { voice: ComposerVoice }) {
   const { t } = useT("editor");
-  const interim = useVoiceInterim();
   const phase = voice.session?.phase;
   if (!voice.showStrip) return null;
   if (phase === "transcribing") {
@@ -254,13 +252,9 @@ export function VoiceStrip({ voice }: { voice: ComposerVoice }) {
         <span className="flex size-[var(--button-height-sm)] shrink-0 items-center justify-center">
           <Mic className="size-4 text-muted-foreground" />
         </span>
-        {interim ? (
-          <Interim text={interim} className="ml-1 flex-1 text-faint-foreground" />
-        ) : (
-          <ShimmerText className="ml-1 truncate text-caption font-medium text-muted-foreground">
-            {t(($) => $.voice.transcribing)}
-          </ShimmerText>
-        )}
+        <ShimmerText className="ml-1 truncate text-caption font-medium text-muted-foreground">
+          {t(($) => $.voice.transcribing)}
+        </ShimmerText>
       </div>
     );
   }
@@ -286,11 +280,7 @@ export function VoiceStrip({ voice }: { voice: ComposerVoice }) {
             <span className="sr-only">{t(($) => $.voice.recording)}</span>
             <Elapsed className="text-muted-foreground" />
           </span>
-          {interim ? (
-            <Interim text={interim} className="flex-1 text-faint-foreground" />
-          ) : (
-            <Waveform density="strip" className="min-w-0 flex-1 text-foreground" />
-          )}
+          <Waveform density="strip" className="min-w-0 flex-1 text-foreground" />
           <IconButton
             label={t(($) => $.voice.insert)}
             shortcut={<ActionShortcutKeycaps action="voiceInput" />}
@@ -319,17 +309,28 @@ export function VoiceStrip({ voice }: { voice: ComposerVoice }) {
 }
 
 /**
- * The push-to-talk pill, anchored above the composer that receives the text.
- * Always dark ink, like a system indicator, so it reads over any page. The
+ * What floats above the composer that receives the text: the push-to-talk
+ * pill while a hold records, and a stream's sentence in progress. The pill is
+ * always dark ink, like a system indicator, so it reads over any page. The
  * composer root must be `relative`.
  */
 export function VoiceHud({ voice }: { voice: ComposerVoice }) {
-  const { t } = useT("editor");
   const interim = useVoiceInterim();
-  const phase = voice.session?.phase;
-  if (!voice.showHud) return null;
+  const showInterim = interim !== "" && (voice.showStrip || voice.showHud);
+  if (!voice.showHud && !showInterim) return null;
   return (
-    <div className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-3 -translate-x-1/2">
+    <div className="pointer-events-none absolute inset-x-0 bottom-full z-30 mb-2 flex flex-col items-center gap-2">
+      {voice.showHud && <HudPill voice={voice} />}
+      {showInterim && <Interim text={interim} />}
+    </div>
+  );
+}
+
+function HudPill({ voice }: { voice: ComposerVoice }) {
+  const { t } = useT("editor");
+  const phase = voice.session?.phase;
+  return (
+    <div>
       <div
         role="status"
         className="flex h-10 items-center gap-2.5 whitespace-nowrap rounded-full bg-multica-ink pl-3.5 pr-4 text-multica-paper shadow-[var(--floating-shadow)] animate-in fade-in zoom-in-95 slide-in-from-bottom-2"
@@ -340,11 +341,7 @@ export function VoiceHud({ voice }: { voice: ComposerVoice }) {
             <span className="sr-only">{t(($) => $.voice.recording)}</span>
             <Waveform density="hud" className="w-[86px]" />
             <Elapsed className="opacity-70" />
-            {interim ? (
-              <Interim text={interim} className="max-w-[240px] opacity-50" />
-            ) : (
-              <span className="text-caption opacity-70">{t(($) => $.voice.release_to_insert)}</span>
-            )}
+            <span className="text-caption opacity-70">{t(($) => $.voice.release_to_insert)}</span>
           </>
         ) : (
           <>

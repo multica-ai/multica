@@ -3975,6 +3975,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
             }}
           >
             {descriptionAnnotations.popup}
+            {/* Above the whole description, so a sentence in progress never covers the text it joins. */}
+            <VoiceHud voice={descVoice} />
             <div data-comment-content={descriptionSourceId}>
               <ContentEditor
                 ref={descEditorRef}
@@ -4022,7 +4024,6 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
 
             <VoiceErrorRow voice={descVoice} className="mt-3" />
             <div ref={descVoice.rootRef} className="relative flex min-h-6 items-center gap-1 mt-3">
-              <VoiceHud voice={descVoice} />
               {descVoice.showStrip ? (
                 <VoiceStrip voice={descVoice} />
               ) : (

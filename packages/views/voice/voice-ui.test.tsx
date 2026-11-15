@@ -14,7 +14,7 @@ import {
 } from "@multica/core/voice";
 import { renderWithI18n } from "../test/i18n";
 import type { ComposerVoice } from "./use-composer-voice";
-import { VoiceStrip } from "./voice-ui";
+import { VoiceHud, VoiceStrip } from "./voice-ui";
 
 let handlers: VoiceStreamHandlers | null = null;
 let endStream: () => void = () => {};
@@ -88,28 +88,40 @@ async function recording() {
   expect(getVoiceState().phase).toBe("recording");
 }
 
-describe("VoiceStrip", () => {
-  it("shows a stream's sentence in progress, faded, in place of the waveform", async () => {
+function Composer({ session }: { session: VoiceState }) {
+  const v = voice(session);
+  return (
+    <div className="relative">
+      <VoiceHud voice={v} />
+      <VoiceStrip voice={v} />
+    </div>
+  );
+}
+
+describe("a stream's sentence in progress", () => {
+  it("floats faded above the composer while the strip keeps its waveform", async () => {
     await recording();
-    const { container, rerender } = renderWithI18n(<VoiceStrip voice={voice(getVoiceState())} />);
-    expect(container.querySelector("canvas")).not.toBeNull();
+    const { container, rerender } = renderWithI18n(<Composer session={getVoiceState()} />);
+    expect(container.querySelector("[data-voice-interim]")).toBeNull();
 
     act(() => handlers!.onInterim("Assign the issue"));
-    rerender(<VoiceStrip voice={voice(getVoiceState())} />);
-    expect(screen.getByText("Assign the issue").parentElement).toHaveClass("text-faint-foreground");
-    expect(container.querySelector("canvas")).toBeNull();
+    rerender(<Composer session={getVoiceState()} />);
+    const panel = container.querySelector("[data-voice-interim]");
+    expect(panel).toHaveTextContent("Assign the issue");
+    expect(panel).toHaveClass("w-full", "text-faint-foreground");
+    expect(panel?.parentElement).toHaveClass("absolute", "inset-x-0", "bottom-full");
+    expect(container.querySelector("canvas")).not.toBeNull();
 
     act(() => handlers!.onTurn("Assign the issue to Alice."));
-    expect(screen.queryByText("Assign the issue")).not.toBeInTheDocument();
-    expect(container.querySelector("canvas")).not.toBeNull();
+    expect(container.querySelector("[data-voice-interim]")).toBeNull();
   });
 
-  it("keeps showing the last sentence while the stream finishes", async () => {
+  it("stays in view while the stream finishes", async () => {
     await recording();
     act(() => handlers!.onInterim("Ship it"));
     act(() => toggleVoice("box"));
     expect(getVoiceState().phase).toBe("transcribing");
-    renderWithI18n(<VoiceStrip voice={voice(getVoiceState())} />);
+    renderWithI18n(<Composer session={getVoiceState()} />);
     expect(screen.getByText("Ship it")).toBeInTheDocument();
     await act(async () => endStream());
   });
