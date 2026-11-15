@@ -287,6 +287,68 @@ function inboxCommands() {
 }
 
 describe("InboxPage", () => {
+  it("chooses a fresh anchor after returning to the list and reopening the same issue", () => {
+    reset();
+    layout.width = PHONE;
+    searchParams = new URLSearchParams("issue=issue-1");
+    listData.active = [
+      item({ id: "n1", read: false, created_at: "2026-11-15T08:00:00Z", details: { comment_id: "c1" } }),
+      item({ id: "n2", read: false, created_at: "2026-11-15T08:02:00Z", details: { comment_id: "c2" } }),
+    ];
+    markReadMutate.mockImplementation(() => {
+      listData.active = listData.active.map((current) => ({ ...current, read: true }));
+    });
+    const { rerender } = render(<InboxPage />);
+    expect(issueDetailProps.at(-1)?.highlightCommentId).toBe("c1");
+    rerender(<InboxPage />);
+    const back = issueDetailProps.at(-1)?.leadingAction as { props: { onClick: () => void } };
+    act(() => back.props.onClick());
+    expect(screen.queryByTestId("issue-detail")).toBeNull();
+    fireEvent.click(screen.getByTestId("row"));
+    expect(issueDetailProps.at(-1)?.highlightCommentId).toBe("c2");
+  });
+
+  it("keeps the selected landing when opening the phone inbox auto-marks the issue read", () => {
+    reset();
+    layout.width = PHONE;
+    searchParams = new URLSearchParams("issue=issue-1");
+    listData.active = [
+      item({ id: "n1", read: false, created_at: "2026-11-15T08:00:00Z", details: { comment_id: "c1" } }),
+      item({ id: "n2", read: false, created_at: "2026-11-15T08:01:00Z", details: { comment_id: "c2" } }),
+      item({ id: "n3", read: false, created_at: "2026-11-15T08:02:00Z", details: { comment_id: "c3" } }),
+    ];
+    markReadMutate.mockImplementation(() => {
+      listData.active = listData.active.map((current) => ({ ...current, read: true }));
+    });
+    const { rerender } = render(<InboxPage />);
+    expect(markReadMutate).toHaveBeenCalledWith("n3", expect.anything());
+    expect(issueDetailProps.at(-1)?.highlightCommentId).toBe("c1");
+    rerender(<InboxPage />);
+    expect(issueDetailProps.at(-1)?.highlightCommentId).toBe("c1");
+  });
+
+  it("picks the landing again when the open row is clicked again", () => {
+    reset();
+    layout.width = DESKTOP;
+    searchParams = new URLSearchParams("view=archived");
+    listData.archived = [
+      item({ id: "n1", archived: true, read: false, created_at: "2026-11-15T08:00:00Z", details: { comment_id: "c1" } }),
+      item({ id: "n2", archived: true, read: false, created_at: "2026-11-15T08:02:00Z", details: { comment_id: "c2" } }),
+    ];
+    markReadMutate.mockImplementation(() => {
+      listData.archived = listData.archived.map((current) => ({ ...current, read: true }));
+    });
+    const { rerender } = render(<InboxPage />);
+    fireEvent.click(screen.getByTestId("row"));
+    expect(issueDetailProps.at(-1)?.highlightCommentId).toBe("c1");
+    rerender(<InboxPage />);
+    expect(issueDetailProps.at(-1)?.highlightCommentId).toBe("c1");
+
+    // Everything is read by now, so a fresh click opens at the newest comment.
+    fireEvent.click(screen.getByTestId("row"));
+    expect(issueDetailProps.at(-1)?.highlightCommentId).toBe("c2");
+  });
+
   it("opens a notification the Work panel offered despite a type filter", () => {
     reset();
     layout.width = DESKTOP;

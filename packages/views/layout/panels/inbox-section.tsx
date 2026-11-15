@@ -7,6 +7,7 @@ import { Archive, BookCheck, CheckCheck, History, ListChecks, MoreHorizontal } f
 import { cn } from "@multica/ui/lib/utils";
 import { useIsCompact } from "@multica/ui/hooks/use-mobile";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
+import { ShimmerText } from "@multica/ui/components/common/shimmer-text";
 import { Button, buttonVariants } from "@multica/ui/components/ui/button";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@multica/ui/components/ui/hover-card";
 import {
@@ -58,7 +59,13 @@ import {
   panelRowStateClass,
 } from "../panel-nav";
 import { InboxSectionSettings, SECTION_SETTINGS_REVEAL_CLASS } from "./sidebar-settings";
-import { ISSUE_ROW_LINK_CLASS, TREE_ROW_BUTTON_CLASS } from "./sidebar-tree";
+import {
+  ISSUE_ROW_LINK_CLASS,
+  IssueAgentBadge,
+  SIDEBAR_SHIMMER_CLASS,
+  TREE_ROW_BUTTON_CLASS,
+  useIssueAgentState,
+} from "./sidebar-tree";
 
 /**
  * The unread count sits in the panel's number column (the rows' trailing
@@ -327,6 +334,8 @@ function InboxRow({
     writeViewState(issueHighlightMementoKey(item.issue_id), undefined);
     requestLanding(item.issue_id);
   };
+  const agents = useIssueAgentState(item.workspace_id, item.issue_id ?? "");
+  const running = !!agents?.running;
   const unread = item.read !== true;
   const archiveLabel = t(($) => $.list.archive_tooltip);
   // Hidden while the archive button stands in its place.
@@ -336,9 +345,25 @@ function InboxRow({
       {timeAgo(item.created_at)}
     </span>
   );
+  // Takes the time's place while an agent runs or waits on the issue.
+  const agentBadge = agents && (
+    <span className={cn("flex shrink-0 items-center", yields)}>
+      <IssueAgentBadge agents={agents} />
+    </span>
+  );
   const dot = <span data-mc="unread-dot" aria-hidden className="size-1.5 shrink-0 rounded-full bg-brand" />;
   const titleText = (
-    <span className={cn("min-w-0 flex-1 truncate", unread && "font-medium text-foreground")}>{title}</span>
+    <ShimmerText
+      active={running}
+      className={cn(
+        "min-w-0 flex-1 truncate",
+        SIDEBAR_SHIMMER_CLASS,
+        unread && "font-medium",
+        unread && !running && "text-foreground",
+      )}
+    >
+      {title}
+    </ShimmerText>
   );
 
   return (
@@ -371,13 +396,14 @@ function InboxRow({
             {compact ? (
               <>
                 {titleText}
-                {unread ? <span className={cn("flex shrink-0 items-center", yields)}>{dot}</span> : time}
+                {agentBadge ||
+                  (unread ? <span className={cn("flex shrink-0 items-center", yields)}>{dot}</span> : time)}
               </>
             ) : (
               <>
                 <span className="flex min-w-0 items-center gap-2 leading-5">
                   {titleText}
-                  {time}
+                  {agentBadge || time}
                 </span>
                 <span className="flex min-w-0 items-center gap-2 text-caption leading-4 text-muted-foreground">
                   <span className="min-w-0 flex-1 truncate">

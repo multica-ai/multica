@@ -98,6 +98,10 @@ export function IssueDetailRoute({ routeId, onDelete, deliverable }: IssueDetail
   const navigation = useNavigation();
 
   useCanonicalIssueUrl(routeId, issue?.identifier, highlight.hash, deliverable);
+  // A UUID or differently-cased address is about to be rewritten, which mounts
+  // a new page (a new route segment on web). Landing here would scroll a page
+  // that is about to go, and record the landing as done for the next one.
+  const landsHere = routeId === issue?.identifier;
 
   // Once the link has opened its file and the viewer has closed (or the file
   // is missing), the address becomes the plain issue page. A replace: Back
@@ -131,8 +135,8 @@ export function IssueDetailRoute({ routeId, onDelete, deliverable }: IssueDetail
         issueId={canonicalId}
         skipInitialRefetch={hasLoaded}
         onDelete={onDelete}
-        highlightCommentId={highlight.commentId}
-        highlightAppRequestId={highlight.appRequestId}
+        highlightCommentId={landsHere ? highlight.commentId : undefined}
+        highlightAppRequestId={landsHere ? highlight.appRequestId : undefined}
         highlightRequestToken={landingToken}
         openDeliverable={deliverable}
         onDeliverableLinkDone={deliverable ? onDeliverableLinkDone : undefined}

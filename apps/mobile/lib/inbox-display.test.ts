@@ -57,6 +57,20 @@ describe("deduplicateInboxItems", () => {
       },
     });
   });
+
+  it("anchors at the oldest unread comment, or the newest once all are read", () => {
+    const unread = deduplicateInboxItems([
+      item({ id: "older", created_at: "2026-06-15T08:00:00Z", details: { comment_id: "comment-1" } }),
+      item({ id: "newer", created_at: "2026-06-15T08:02:00Z", details: { comment_id: "comment-2" } }),
+    ]);
+    expect(unread[0]?.details?.comment_id).toBe("comment-1");
+
+    const read = deduplicateInboxItems([
+      item({ id: "older", read: true, created_at: "2026-06-15T08:00:00Z", details: { comment_id: "comment-1" } }),
+      item({ id: "newer", read: true, created_at: "2026-06-15T08:02:00Z", details: { comment_id: "comment-2" } }),
+    ]);
+    expect(read[0]?.details?.comment_id).toBe("comment-2");
+  });
 });
 
 describe("getInboxDisplayTitle", () => {

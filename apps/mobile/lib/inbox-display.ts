@@ -149,8 +149,8 @@ export function getInboxNavigationTarget(
  *   2. Group by `issue_id` (fall back to `id` for items with no issue
  *      attached — e.g. quick_create_failed).
  *   3. In each group, keep the newest by `created_at`.
- *   4. Preserve the newest grouped `comment_id` anchor when the newest row
- *      is a later status/metadata event for the same issue.
+ *   4. Anchor the row where the reader left off: the oldest unread
+ *      `comment_id` in the group, or the newest one once all are read.
  *   5. Sort the result newest-first.
  */
 export function deduplicateInboxItems(items: InboxItem[]): InboxItem[] {
@@ -171,9 +171,11 @@ export function deduplicateInboxItems(items: InboxItem[]): InboxItem[] {
     const newest = group[0];
     if (!newest) continue;
 
-    const commentId =
-      newest.details?.comment_id ??
-      group.find((item) => item.details?.comment_id)?.details?.comment_id;
+    const hasComment = (item: InboxItem) => !!item.details?.comment_id;
+    const commentId = (
+      group.findLast((item) => item.read !== true && hasComment(item)) ??
+      group.find(hasComment)
+    )?.details?.comment_id;
 
     if (commentId && newest.details?.comment_id !== commentId) {
       merged.push({

@@ -499,6 +499,22 @@ export function InboxPage() {
     setSelectedKey(nextKey);
   };
 
+  // The comment a notification opens at is chosen once per opening or
+  // re-click. Opening reads the issue, which moves the row's anchor from the
+  // oldest unread comment to the newest; following it would land a second
+  // time, past the comments the reader came for. Taken from the selected row,
+  // not the deferred detail, which renders only after the read has landed.
+  const [landing, setLanding] = useState<{ key: string; token: number; commentId: string | undefined } | null>(null);
+  if (selected && (landing?.key !== selectedKey || landing.token !== highlightRequestToken)) {
+    setLanding({ key: selectedKey, token: highlightRequestToken, commentId: selected.details?.comment_id ?? undefined });
+  } else if (landing && !selectedKey && !detailKey) {
+    // Back on the list: opening the row again chooses afresh.
+    setLanding(null);
+  }
+  const detailItemKey = detailItem ? (detailItem.issue_id ?? detailItem.id) : null;
+  const landingCommentId =
+    landing?.key === detailItemKey ? landing.commentId : (detailItem?.details?.comment_id ?? undefined);
+
   const handleMarkRead = (id: string) => {
     // Reading it back explicitly cancels an earlier park on the same row.
     if (manualUnreadIdRef.current === id) manualUnreadIdRef.current = null;
@@ -912,7 +928,7 @@ export function InboxPage() {
           issueId={detailItem.issue_id}
           defaultSidebarOpen={false}
           layoutId="multica_inbox_issue_detail_layout"
-          highlightCommentId={detailItem.details?.comment_id ?? undefined}
+          highlightCommentId={landingCommentId}
           highlightRequestToken={highlightRequestToken}
           highlightAppRequestId={
             detailItem.type.startsWith("app_") ? (detailItem.details?.request_id ?? undefined) : undefined
