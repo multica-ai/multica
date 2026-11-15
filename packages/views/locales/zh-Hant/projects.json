@@ -9,7 +9,7 @@
     "view_comfortable": "舒適檢視",
     "no_search_results": "未找到匹配的專案",
     "view_table": "表格",
-    "view_cards": "卡片",
+    "view_board": "看板",
     "row_menu": "專案操作",
     "rename": "重新命名",
     "pin": "固定到側邊欄",
@@ -19,7 +19,10 @@
     "scope_archived": "已歸檔的專案",
     "archive": "歸檔",
     "restore": "還原",
-    "no_archived": "沒有已歸檔的專案"
+    "no_archived": "沒有已歸檔的專案",
+    "search": "搜尋專案",
+    "group_none": "不分組",
+    "board_column_empty": "暫無專案"
   },
   "table": {
     "name": "名稱",
@@ -27,6 +30,9 @@
     "status": "狀態",
     "progress": "進度",
     "lead": "負責人",
+    "start_date": "開始日期",
+    "due_date": "截止日期",
+    "last_activity": "最近活動",
     "created": "建立時間",
     "issues": "任務數",
     "archived": "歸檔於"
