@@ -220,7 +220,11 @@ func TestTomcatExecutionAndResume(t *testing.T) {
 				t.Fatal(err)
 			}
 			text := string(data)
-			for _, want := range []string{"host-only", root, "session/set_config_option", "custom-model", "http://example.test/mcp", "only user prompt"} {
+			encodedRoot, err := json.Marshal(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range []string{"host-only", string(encodedRoot), "session/set_config_option", "custom-model", "http://example.test/mcp", "only user prompt"} {
 				if !strings.Contains(text, want) {
 					t.Errorf("trace missing %q: %s", want, text)
 				}
@@ -507,7 +511,7 @@ func TestTomcatRegistrationAndInputValidation(t *testing.T) {
 	for _, tc := range []struct {
 		version string
 		valid   bool
-	}{{"0.1.79", false}, {"0.1.80", true}, {"0.2.0", true}, {"not-a-version", false}} {
+	}{{"0.1.80", false}, {"0.1.96", false}, {"0.1.97", true}, {"0.2.0", true}, {"not-a-version", false}} {
 		if err := CheckMinVersion("tomcat", tc.version); (err == nil) != tc.valid {
 			t.Errorf("version %s: %v", tc.version, err)
 		}

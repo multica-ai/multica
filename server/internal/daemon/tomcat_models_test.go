@@ -101,7 +101,7 @@ func tomcatDaemonModelCommand(t *testing.T) (profileLaunchSpec, string) {
 		t.Fatal(err)
 	}
 	root := t.TempDir()
-	return profileLaunchSpec{path: self, version: "0.1.86", fixedArgs: []string{"-test.run=^TestTomcatDaemonModelsHelperProcess$", "--", root, "profile with spaces"}}, root
+	return profileLaunchSpec{path: self, version: "0.1.97", fixedArgs: []string{"-test.run=^TestTomcatDaemonModelsHelperProcess$", "--", root, "profile with spaces"}}, root
 }
 
 func TestTomcatTaskModelPrecedence(t *testing.T) {

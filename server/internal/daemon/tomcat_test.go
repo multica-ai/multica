@@ -21,7 +21,7 @@ func TestTomcatDiscoveryHonorsOverrideAndModel(t *testing.T) {
 	home := t.TempDir()
 	redirectTestHome(t, home)
 	bin := filepath.Join(t.TempDir(), "tomcat")
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\nprintf 'tomcat 0.1.80\\n'\n"), 0755); err != nil {
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nprintf 'tomcat 0.1.97\\n'\n"), 0755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", "/usr/bin:/bin")

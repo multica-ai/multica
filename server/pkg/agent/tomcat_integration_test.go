@@ -204,6 +204,17 @@ func TestTomcatSharedServeWithHermesClient(t *testing.T) {
 			if !strings.Contains(text, "fixture-project-instruction") {
 				t.Error("project AGENTS.md did not reach the model")
 			}
+			var system strings.Builder
+			messages, _ := body["messages"].([]any)
+			for _, item := range messages {
+				message, _ := item.(map[string]any)
+				if message["role"] == "system" {
+					fmt.Fprint(&system, message["content"])
+				}
+			}
+			if !strings.Contains(system.String(), "fixture-injected-skill-description") {
+				t.Error("the injected .agents/skills description did not reach the model's system context")
+			}
 			if hasResult("m1-write") {
 				send(map[string]any{"content": "hermes-stream"}, "stop")
 			} else {
@@ -215,9 +226,14 @@ func TestTomcatSharedServeWithHermesClient(t *testing.T) {
 	t.Cleanup(server.Close)
 	run("init")
 	write(filepath.Join(home, ".tomcat", "mcp.json"), `{"mcpServers":{}}`)
-	write(filepath.Join(home, ".tomcat", "tomcat.config.toml"), fmt.Sprintf("[llm.thinking]\nlevel = \"medium\"\n[llm]\ndefault_model = \"mock\"\ntitle_model = \"mock\"\n[context]\ncompaction_model = \"mock\"\n[skills]\nenabled = false\n[workspace]\nworkspace_roots = [%s]\n", strconv.Quote(workspace)))
+	write(filepath.Join(home, ".tomcat", "tomcat.config.toml"), fmt.Sprintf("[llm.thinking]\nlevel = \"medium\"\n[llm]\ndefault_model = \"mock\"\ntitle_model = \"mock\"\n[context]\ncompaction_model = \"mock\"\n[skills]\nenabled = true\n[workspace]\nworkspace_roots = [%s]\n", strconv.Quote(workspace)))
 	write(filepath.Join(home, ".tomcat", "models.toml"), fmt.Sprintf("[[models]]\nid = \"mock\"\napi = \"openai\"\nprovider = \"openai\"\nbase_url = %s\ncapabilities = { tools = true, vision = false, files = false, reasoning = false, web_search = false }\n\n[[models]]\nid = \"catalog-alias\"\nmodel_name = \"alias-wire\"\napi = \"openai\"\nprovider = \"openai\"\nbase_url = %s\nsupported_reasoning_levels = [\"low\", \"medium\", \"high\"]\ncapabilities = { tools = true, vision = false, files = false, reasoning = true, web_search = false }\n", strconv.Quote(server.URL), strconv.Quote(server.URL)))
 	write(filepath.Join(workspace, "AGENTS.md"), "fixture-project-instruction\n")
+	skillDir := filepath.Join(workspace, ".agents", "skills", "fixture-skill")
+	if err := os.MkdirAll(skillDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	write(filepath.Join(skillDir, "SKILL.md"), "---\nname: fixture-skill\ndescription: fixture-injected-skill-description\n---\nDisposable skill body.\n")
 	run("model", "key", "set", "openai", "local-fixture-key")
 	t.Cleanup(func() {
 		stopCtx, stop := context.WithTimeout(context.Background(), 20*time.Second)
