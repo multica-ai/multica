@@ -19,6 +19,7 @@ import { useT } from "../../i18n";
 export function ProjectPicker({
   projectId,
   onUpdate,
+  trigger: customTrigger,
   triggerRender,
   tooltip,
   align = "start",
@@ -27,8 +28,11 @@ export function ProjectPicker({
   onOpenChange,
   disabled = false,
 }: {
-  projectId: string | null;
+  /** `undefined` for a selection whose issues sit in different projects: no row is checked. */
+  projectId: string | null | undefined;
   onUpdate: (updates: Partial<UpdateIssueRequest>) => void;
+  /** Trigger content in place of the current project. */
+  trigger?: React.ReactNode;
   triggerRender?: React.ReactElement;
   /** Hover tooltip naming the property; hidden while the picker is open. */
   tooltip?: React.ReactNode;
@@ -86,7 +90,7 @@ export function ProjectPicker({
         triggerRender={resolvedTriggerRender}
         tooltip={tooltip}
         trigger={
-          current ? (
+          customTrigger ?? (current ? (
             <>
               <ProjectIcon project={current} size="sm" />
               <span className="truncate">{current.title}</span>
@@ -96,7 +100,7 @@ export function ProjectPicker({
               <FolderKanban className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               <span className="truncate">{t(($) => $.picker.no_project)}</span>
             </>
-          )
+          ))
         }
       >
         {/* "No project" — always the first row, search active or not, and the
@@ -104,7 +108,7 @@ export function ProjectPicker({
             the unassigned row in the assignee picker. */}
         <PickerItem
           emptyValue
-          selected={!projectId}
+          selected={projectId === null}
           onClick={() => {
             onUpdate({ project_id: null });
             setOpen(false);
