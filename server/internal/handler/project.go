@@ -188,7 +188,8 @@ type UpdateProjectRequest struct {
 	StartDate   *string `json:"start_date"`
 	DueDate     *string `json:"due_date"`
 	// Visibility switches between "workspace" and "private" (MUL-8472).
-	// MemberIDs is only read together with a switch to "private".
+	// MemberIDs adds project members to a project that is or becomes
+	// "private"; see prepareProjectAccessUpdate.
 	Visibility *string  `json:"visibility"`
 	MemberIDs  []string `json:"member_ids,omitempty"`
 }

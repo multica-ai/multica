@@ -638,8 +638,9 @@ func runProjectUpdate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no fields to update; use flags like --title, --status, --description, --icon, --lead, --start-date, --due-date, --visibility")
 	}
 
-	// The server reads member_ids only when the visibility changes, so members
-	// named for a project that is already private go through the member API.
+	// Servers before MUL-9325 read member_ids only when the visibility
+	// changes, so members named for a project that is already private go
+	// through the member API.
 	if ids, ok := body["member_ids"].([]string); ok {
 		var project map[string]any
 		if err := client.GetJSON(ctx, "/api/projects/"+projectRef.ID, &project); err != nil {
