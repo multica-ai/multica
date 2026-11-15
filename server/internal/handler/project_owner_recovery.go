@@ -14,7 +14,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/projectaccess"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
-	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // Owner recovery for private projects (MUL-9284).
@@ -214,12 +213,11 @@ func (h *Handler) notifyProjectOwnerJoined(ctx context.Context, project db.Proje
 		"joined_by":     name,
 	})
 	body := name + " is a workspace owner and added themselves to this private project. They can now see its issues."
-	workspaceID := uuidToString(project.WorkspaceID)
 	for _, recipient := range recipients {
 		if recipient == ownerID {
 			continue
 		}
-		item, created, err := inbox.CreateIfEligible(ctx, h.Queries, db.CreateInboxItemParams{
+		_, _, err := inbox.Deliver(ctx, h.Queries, h.Bus, inbox.Notification{Params: db.CreateInboxItemParams{
 			ID:            dbid.NewV7(),
 			WorkspaceID:   project.WorkspaceID,
 			RecipientType: "member",
@@ -232,42 +230,13 @@ func (h *Handler) notifyProjectOwnerJoined(ctx context.Context, project db.Proje
 			ActorType:     pgtype.Text{String: "member", Valid: true},
 			ActorID:       ownerID,
 			Details:       details,
-		})
+		}})
 		if err != nil {
 			slog.Warn("project owner-joined notice failed",
 				"project_id", uuidToString(project.ID),
 				"recipient_id", uuidToString(recipient),
 				"error", err,
 			)
-			continue
 		}
-		if !created {
-			continue
-		}
-		h.publish(protocol.EventInboxNew, workspaceID, "member", uuidToString(ownerID), map[string]any{
-			"item": inboxEventPayload(item),
-		})
-	}
-}
-
-// inboxEventPayload is the inbox item as the inbox:new listener reads it: a
-// plain map, because it routes on the nested recipient_id.
-func inboxEventPayload(item db.InboxItem) map[string]any {
-	return map[string]any{
-		"id":             uuidToString(item.ID),
-		"workspace_id":   uuidToString(item.WorkspaceID),
-		"recipient_type": item.RecipientType,
-		"recipient_id":   uuidToString(item.RecipientID),
-		"type":           item.Type,
-		"severity":       item.Severity,
-		"issue_id":       uuidToPtr(item.IssueID),
-		"title":          item.Title,
-		"body":           textToPtr(item.Body),
-		"read":           item.Read,
-		"archived":       item.Archived,
-		"created_at":     timestampToString(item.CreatedAt),
-		"actor_type":     textToPtr(item.ActorType),
-		"actor_id":       uuidToPtr(item.ActorID),
-		"details":        json.RawMessage(item.Details),
 	}
 }

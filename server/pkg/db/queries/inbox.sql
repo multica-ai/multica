@@ -119,7 +119,7 @@ WHERE id = $1 AND workspace_id = $2;
 --
 -- MUL-9333: a row written on an issue the recipient has snoozed joins the
 -- snooze, so it stays out of the inbox with the rest of the issue.
--- inbox.CreateIfEligible ends the snooze instead when the row is one that
+-- inbox.Deliver ends the snooze instead when the row is one that
 -- wakes it.
 INSERT INTO inbox_item (
     workspace_id, recipient_type, recipient_id,
