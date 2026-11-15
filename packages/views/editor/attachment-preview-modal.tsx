@@ -1022,14 +1022,19 @@ function PreviewPanel({
               <MessageSquareText className="size-4" />
             </ChromeButton>
           )}
-          {canCopyText && (
-            <ChromeButton
-              label={t(($) => $.attachment.copy_contents)}
-              disabled={!copyContent.data || copyContent.isError}
-              onClick={() => void handleCopyText()}
-            >
-              <Copy className="size-4" />
-            </ChromeButton>
+          {/* Reserve the HTML copy slot so switching source never moves its toggle. */}
+          {(canCopyText || kind === "html") && (
+            <div className="size-8 shrink-0">
+              {canCopyText && (
+                <ChromeButton
+                  label={t(($) => $.attachment.copy_contents)}
+                  disabled={!copyContent.data || copyContent.isError}
+                  onClick={() => void handleCopyText()}
+                >
+                  <Copy className="size-4" />
+                </ChromeButton>
+              )}
+            </div>
           )}
           {copyLink && (
             <ChromeButton label={copyLink.label} onClick={copyLink.onSelect}>
