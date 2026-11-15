@@ -388,7 +388,10 @@ function PropertyOptionChips({ property }: { property: IssueProperty }) {
           <span className="hidden text-caption @3xl/catalog:inline">+{wideRest}</span>
         )}
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-auto max-w-72 p-2">
+      <PopoverContent
+        align="start"
+        className="max-h-[min(24rem,var(--available-height))] w-auto max-w-72 overflow-y-auto p-2"
+      >
         <div className="flex flex-wrap gap-1">
           {options.map((option) => (
             <OptionChip key={option.id} option={option} />
