@@ -6,6 +6,9 @@ import {
   DEFAULT_SIDEBAR_INBOX_SETTINGS,
   useSidebarTreeStore,
 } from "@multica/core/issues/stores/sidebar-tree-store";
+import { useInboxFilterStore } from "@multica/core/inbox/filter-store";
+import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
+import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import type { InboxItem } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
@@ -40,8 +43,12 @@ vi.mock("@multica/core/inbox/mutations", () => ({
   useMarkInboxRead: () => ({ mutate: state.markRead }),
   useMarkInboxUnread: () => ({ mutate: state.markUnread }),
 }));
+vi.mock("@multica/core/hooks", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/hooks")>()),
+  useWorkspaceId: () => "ws-1",
+}));
 vi.mock("@multica/core/workspace/hooks", () => ({
-  useActorName: () => ({ getActorName: () => "Leo Park" }),
+  useActorName: () => ({ getActorName: () => "Leo Park", getActorInitials: () => "LP", getActorAvatarUrl: () => null }),
 }));
 vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => null }));
 vi.mock("@multica/ui/hooks/use-mobile", async (importOriginal) => ({
@@ -87,19 +94,22 @@ function adapter(url: string): NavigationAdapter {
   };
 }
 
-function Harness({ activeIssueId, pathname }: { activeIssueId: string | null; pathname: string }) {
-  const rows = useInboxSectionRows("ws-1");
+function Harness({ activeIssueId, pathname, openKey }: { activeIssueId: string | null; pathname: string; openKey: string | null }) {
+  const rows = useInboxSectionRows("ws-1", openKey);
   return <InboxSection wsId="ws-1" rows={rows} pathname={pathname} activeIssueId={activeIssueId} />;
 }
 
 function renderSection(items: InboxItem[], activeIssueId: string | null = null, url = "/acme/issues") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   client.setQueryData(["inbox", "ws-1", "list"], items);
+  client.setQueryData(agentTaskSnapshotOptions("ws-1").queryKey, []);
   const nav = adapter(url);
+  // As the Work panel keys it: the issue opened from the section, or the Inbox page's notification.
+  const openKey = nav.pathname === "/acme/inbox" ? nav.searchParams.get("issue") : activeIssueId;
   const result = renderWithI18n(
     <QueryClientProvider client={client}>
       <NavigationProvider value={nav}>
-        <Harness activeIssueId={activeIssueId} pathname={nav.pathname} />
+        <Harness activeIssueId={activeIssueId} pathname={nav.pathname} openKey={openKey} />
       </NavigationProvider>
     </QueryClientProvider>,
   );
@@ -123,6 +133,8 @@ beforeEach(() => {
     spy.mockReset();
   }
   useSidebarTreeStore.setState({ inboxCollapsed: false, inboxSettings: DEFAULT_SIDEBAR_INBOX_SETTINGS });
+  useInboxFilterStore.getState().clearFilters("ws-1");
+  useInboxSelectionStore.setState({ landing: null });
 });
 
 describe("InboxSection", () => {
@@ -153,6 +165,54 @@ describe("InboxSection", () => {
     expect(screen.getByRole("link", { name: /^Commented/ })).toHaveAttribute("href", "/acme/issues/issue-a#comment-c-1");
     expect(screen.getByRole("link", { name: /^Assigned/ })).toHaveAttribute("href", "/acme/issues/issue-b");
     expect(screen.getByRole("link", { name: /^Autopilot paused/ })).toHaveAttribute("href", "/acme/inbox?issue=n3");
+  });
+
+  it("opens an app's request on its issue at that request", () => {
+    renderSection([
+      item({ id: "n1", issue_id: "issue-a", title: "Confirm deploy", type: "app_action_requested", details: { request_id: "r-1" } }),
+    ]);
+
+    expect(screen.getByRole("link", { name: /^Confirm deploy/ })).toHaveAttribute("href", "/acme/issues/issue-a#app-request-r-1");
+  });
+
+  it("asks the issue page to land again on every click, even on the issue already open", () => {
+    renderSection([item({ id: "n1", issue_id: "issue-a", title: "Commented", details: { comment_id: "c-1" } })], "issue-a");
+
+    fireEvent.click(screen.getByRole("link", { name: /^Commented/ }));
+    const first = useInboxSelectionStore.getState().landing;
+    fireEvent.click(screen.getByRole("link", { name: /^Commented/ }));
+
+    expect(first?.issueId).toBe("issue-a");
+    expect(useInboxSelectionStore.getState().landing).toEqual({ issueId: "issue-a", token: first!.token + 1 });
+  });
+
+  it("lists under the Inbox filters, keeping the open row once reading it", () => {
+    useInboxFilterStore.getState().toggleUnreadOnly("ws-1");
+    renderSection(
+      [
+        item({ id: "n1", issue_id: "issue-a", title: "Open one", read: true }),
+        item({ id: "n2", issue_id: "issue-b", title: "Read one", read: true, created_at: "2026-11-09T08:00:00Z" }),
+        item({ id: "n3", issue_id: "issue-c", title: "Unread one", created_at: "2026-11-08T08:00:00Z" }),
+      ],
+      "issue-a",
+    );
+
+    expect(rows().map((row) => row.textContent)).toEqual([
+      expect.stringContaining("Open one"),
+      expect.stringContaining("Unread one"),
+    ]);
+    expect(screen.getByRole("button", { name: "1 active filter" })).toBeInTheDocument();
+  });
+
+  it("says when the filters hide everything, and clears them from there", () => {
+    useInboxFilterStore.getState().toggleFilterValue("ws-1", "type", "mentions");
+    renderSection([item({ id: "n1", issue_id: "issue-a", title: "Commented" })]);
+
+    expect(rows()).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+
+    expect(rows()).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Filter inbox" })).toBeInTheDocument();
   });
 
   it("puts who did what under the title, or keeps one line when compact", () => {

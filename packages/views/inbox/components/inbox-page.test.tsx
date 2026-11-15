@@ -287,9 +287,33 @@ function inboxCommands() {
 }
 
 describe("InboxPage", () => {
-  it.each([false, true])("enabling idle closes an already busy notification with unread pin=%s", (unreadOnly) => {
+  it("opens a notification the Work panel offered despite a type filter", () => {
     reset();
     layout.width = DESKTOP;
+    searchParams = new URLSearchParams("issue=quick-failed");
+    listData.active = [item({ id: "quick-failed", issue_id: null, type: "quick_create_failed", title: "Review quick-create failure" })];
+    useInboxFilterStore.getState().toggleFilterValue("workspace-1", "type", "mentions");
+    render(<InboxPage />);
+    expect(replace).not.toHaveBeenCalledWith("/acme/inbox");
+    expect(screen.getByText("Review quick-create failure")).toBeInTheDocument();
+  });
+
+  it("replays the comment landing when re-clicking an open archived row", () => {
+    reset();
+    layout.width = DESKTOP;
+    searchParams = new URLSearchParams("view=archived");
+    listData.archived = [item({ archived: true, details: { comment_id: "comment-1" } })];
+    render(<InboxPage />);
+    fireEvent.click(screen.getByTestId("row"));
+    const firstToken = issueDetailProps.at(-1)?.highlightRequestToken;
+    fireEvent.click(screen.getByTestId("row"));
+    expect(issueDetailProps.at(-1)?.highlightRequestToken).not.toBe(firstToken);
+  });
+
+  // Only the phone's page lists notifications; on desktop the Work panel does.
+  it.each([false, true])("enabling idle closes an already busy notification with unread pin=%s", (unreadOnly) => {
+    reset();
+    layout.width = PHONE;
     searchParams = new URLSearchParams("issue=busy-issue");
     listData.active = [item({ id: "busy-row", issue_id: "busy-issue", read: !unreadOnly })];
     listData.tasks = [{ id: "task-a", agent_id: "agent-1", issue_id: "busy-issue", status: "running" }] as AgentTask[];
@@ -309,7 +333,7 @@ describe("InboxPage", () => {
 
   it("enabling unread closes a read notification pinned by idle", () => {
     reset();
-    layout.width = DESKTOP;
+    layout.width = PHONE;
     searchParams = new URLSearchParams("issue=idle-issue");
     listData.active = [item({ id: "read-row", issue_id: "idle-issue", read: true })];
     useInboxFilterStore.getState().setAgent("workspace-1", "idle");
@@ -323,7 +347,7 @@ describe("InboxPage", () => {
 
   it("re-enabling idle evaluates current activity after disabling it", () => {
     reset();
-    layout.width = DESKTOP;
+    layout.width = PHONE;
     searchParams = new URLSearchParams("issue=issue-a");
     listData.active = [item({ id: "was-idle", issue_id: "issue-a", read: true })];
     useInboxFilterStore.getState().setAgent("workspace-1", "idle");

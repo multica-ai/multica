@@ -250,13 +250,20 @@ export function InboxPage() {
   });
   const lookupItems = useMemo(() => deduplicateArchivedInboxItems(lookup.data?.items ?? []), [lookup.data]);
   const presenceItems = lookupMissed ? presence.data?.items ?? [] : [];
+  const isCompact = useIsCompact();
+  // On desktop the live list is the Work panel's Inbox section, which applies
+  // the filters itself. The page only opens the notification the URL names,
+  // as the issue page does for an issue notification, so a filter can never
+  // refuse to open a row the section offered.
+  const opensAnyLiveRow = !isCompact && !isArchivedView;
   const selectionItems = useMemo(() => {
+    if (opensAnyLiveRow) return items;
     if (!isArchivedView || selectedOnPage) return filteredItems;
     return deduplicateArchivedInboxItems([
       ...filteredItems,
       ...filterInboxItems(lookupItems, effectiveFilters, filterContext),
     ]);
-  }, [isArchivedView, selectedOnPage, filteredItems, lookupItems, effectiveFilters, filterContext]);
+  }, [opensAnyLiveRow, items, isArchivedView, selectedOnPage, filteredItems, lookupItems, effectiveFilters, filterContext]);
   const visibleItems = isArchivedView && pinnedKey ? selectionItems : filteredItems;
 
   // Inbox zero: the bleeding m rises once, at the moment the last notification
@@ -374,7 +381,6 @@ export function InboxPage() {
     setSelectedKey,
   ]);
 
-  const isCompact = useIsCompact();
   const listCollapsed = useListColumnCollapsed();
   // Desktop shows the live Inbox in the Work panel; only the archive needs
   // a list of its own on the page.
@@ -473,15 +479,24 @@ export function InboxPage() {
   }, [unreadOnlyActive]);
 
   const writeViewState = useViewStateWriter();
+  // Bumped when the already-open notification row is re-clicked; threaded to
+  // IssueDetail so it replays the comment-highlight landing without a
+  // remount. Selection changes don't need it — they remount the detail (key
+  // by issue) and a fresh mount with a cleared memento entry lands by itself.
+  const [highlightRequestToken, setHighlightRequestToken] = useState(0);
   const handleSelect = (item: InboxItem) => {
+    const nextKey = item.issue_id ?? item.id;
     // Every click on a notification row is a fresh deep-link intent: clear
     // the "highlight already landed" memento entry so the comment jump runs
     // again even if this issue's detail was opened (and its landing
     // consumed) before. Selection restored from the URL on a remount goes
     // through the effects above, not through here, so a tab switch back
     // keeps the entry and does NOT re-jump.
-    if (item.issue_id) writeViewState(issueHighlightMementoKey(item.issue_id), undefined);
-    setSelectedKey(item.issue_id ?? item.id);
+    if (item.issue_id) {
+      writeViewState(issueHighlightMementoKey(item.issue_id), undefined);
+      if (nextKey === selectedKey) setHighlightRequestToken((t) => t + 1);
+    }
+    setSelectedKey(nextKey);
   };
 
   const handleMarkRead = (id: string) => {
@@ -516,6 +531,9 @@ export function InboxPage() {
   // from, so both have to move the selection off it first. `list` is whichever
   // list the row came from — the main one for archive, the archived one for
   // unarchive.
+  // The rows in the order the user sees them: on desktop the Work panel
+  // section's, which applies the same filters.
+  const listedItems = opensAnyLiveRow ? filteredItems : selectionItems;
   const advanceSelectionPast = (id: string, list: InboxItem[]) => {
     const idx = list.findIndex((i) => i.id === id);
     const target = idx >= 0 ? list[idx] : null;
@@ -530,7 +548,7 @@ export function InboxPage() {
 
   // Toasts live in these shared handlers so every archive surface confirms alike.
   const handleArchive = (id: string) => {
-    advanceSelectionPast(id, selectionItems);
+    advanceSelectionPast(id, listedItems);
     archiveMutation.mutate(id, {
       onSuccess: () => toast.success(t(($) => $.toasts.archived)),
       onError: (err) =>
@@ -543,7 +561,7 @@ export function InboxPage() {
   };
 
   const handleUnarchive = (id: string) => {
-    advanceSelectionPast(id, selectionItems);
+    advanceSelectionPast(id, listedItems);
     unarchiveMutation.mutate(id, {
       onSuccess: () => toast.success(t(($) => $.toasts.unarchived)),
       onError: (err) =>
@@ -810,7 +828,7 @@ export function InboxPage() {
           view={view}
           onClose={() => setDeleteTarget(null)}
           onDeleted={(id) => {
-            advanceSelectionPast(id, selectionItems);
+            advanceSelectionPast(id, listedItems);
             toast.success(t(($) => $.toasts.deleted));
           }}
         />
@@ -895,6 +913,7 @@ export function InboxPage() {
           defaultSidebarOpen={false}
           layoutId="multica_inbox_issue_detail_layout"
           highlightCommentId={detailItem.details?.comment_id ?? undefined}
+          highlightRequestToken={highlightRequestToken}
           highlightAppRequestId={
             detailItem.type.startsWith("app_") ? (detailItem.details?.request_id ?? undefined) : undefined
           }

@@ -68,7 +68,7 @@ export function KeptRowsRelease() {
 export function WorkPanel() {
   const { t } = useT("layout");
   const p = useWorkspacePaths();
-  const { pathname } = useNavigation();
+  const { pathname, searchParams } = useNavigation();
   const wsId = useCurrentWorkspace()?.id;
   const userId = useAuthStore((s) => s.user?.id);
   const viewActions = useIssueViewActions();
@@ -99,11 +99,19 @@ export function WorkPanel() {
     (clickedIssue.segment === currentIssueId || clickedIssue.segment === currentIssue?.identifier)
       ? clickedIssue.list
       : undefined;
-  const inboxRows = useInboxSectionRows(wsId);
   // An issue opened from the Inbox, by a row or by the issue header moving on
   // to the next notification, lights there while the section still shows it;
   // once archived, it falls back to the other lists.
   const inboxIssueId = useInboxSelectionStore((s) => (wsId ? s.sidebarIssueByWorkspace[wsId] : null));
+  // The notification open beside the section: an issue opened from it, or an
+  // issue-less one on the Inbox page.
+  const inboxOpenKey =
+    pathname === p.inbox()
+      ? searchParams.get("issue")
+      : currentIssueId && inboxIssueId === currentIssueId
+        ? currentIssueId
+        : null;
+  const inboxRows = useInboxSectionRows(wsId, inboxOpenKey);
   const rememberSidebarIssue = useInboxSelectionStore((s) => s.rememberSidebarIssue);
   const inboxClaimsIssue =
     !!currentIssueId && inboxIssueId === currentIssueId && inboxRows.shownIssueIds.has(currentIssueId);

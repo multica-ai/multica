@@ -93,13 +93,15 @@ export function resolveDetailItem(
 }
 
 /**
- * Where a notification row leads: its issue, at the comment it is about when
- * it names one. An issue-less notification opens on the Inbox page, which
- * shows the detail of the row picked there.
+ * Where a notification row leads: its issue, at the comment or app request it
+ * is about when it names one. An issue-less notification opens on the Inbox
+ * page, which shows the detail of the row picked there.
  */
 export function inboxRowHref(p: WorkspacePaths, item: InboxItem): string {
   if (!item.issue_id) return `${p.inbox()}?${new URLSearchParams({ issue: item.id }).toString()}`;
   const issueHref = p.issueDetail(item.issue_id);
   const commentId = item.details?.comment_id;
-  return commentId ? `${issueHref}#comment-${commentId}` : issueHref;
+  if (commentId) return `${issueHref}#comment-${commentId}`;
+  const requestId = item.type.startsWith("app_") ? item.details?.request_id : undefined;
+  return requestId ? `${issueHref}#app-request-${requestId}` : issueHref;
 }

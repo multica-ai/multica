@@ -16,7 +16,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
-import { inboxTypeGroup } from "@multica/core/inbox/filter-store";
+import { inboxTypeGroup, useInboxFilterStore } from "@multica/core/inbox/filter-store";
 import {
   useArchiveAllInbox,
   useArchiveAllReadInbox,
@@ -26,20 +26,25 @@ import {
   useMarkInboxRead,
   useMarkInboxUnread,
 } from "@multica/core/inbox/mutations";
-import { deduplicateInboxItems, inboxListOptions, useInboxUnreadCount } from "@multica/core/inbox/queries";
+import { useInboxUnreadCount } from "@multica/core/inbox/queries";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
+import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
 import { useWorkspacePaths } from "@multica/core/paths";
 import type { InboxItem } from "@multica/core/types";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { AppLink, useNavigation } from "../../navigation";
+import { useViewStateWriter } from "../../platform";
+import { issueHighlightMementoKey } from "../../issues/components/issue-detail";
 import { useT } from "../../i18n";
 import { INBOX_TYPE_ICONS } from "../../inbox/components/inbox-filter-options";
 import { getInboxDisplayTitle, inboxRowHref, isAutopilotQuotaNotice } from "../../inbox/components/inbox-display";
 import { ARCHIVED_VIEW_PARAM } from "../../inbox/components/inbox-view";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { InboxDetailLabel, useTypeLabels } from "../../inbox/components/inbox-detail-label";
+import { InboxFilterMenu } from "../../inbox/components/inbox-filter-menu";
+import { useFilteredInboxRows } from "../../inbox/components/use-filtered-inbox-rows";
 import { useTimeAgo } from "../../inbox/components/inbox-list-item";
 import { StatusIcon } from "../../issues/components";
 import { useStatusLabel } from "../../issues/utils/status-label";
@@ -54,8 +59,6 @@ import {
 } from "../panel-nav";
 import { InboxSectionSettings, SECTION_SETTINGS_REVEAL_CLASS } from "./sidebar-settings";
 import { ISSUE_ROW_LINK_CLASS, TREE_ROW_BUTTON_CLASS } from "./sidebar-tree";
-
-const EMPTY_INBOX: InboxItem[] = [];
 
 /**
  * The unread count sits in the panel's number column (the rows' trailing
@@ -74,16 +77,17 @@ export const INBOX_LIST = "inbox";
 
 /**
  * The Inbox section's rows: one per issue, newest first, read and unread
- * alike. A row leaves only when archived, by hand or by its issue reaching
- * Done. Lifted out of the section so the panel knows which issues it shows.
+ * alike, under the Inbox filters. A row leaves only when archived, by hand or
+ * by its issue reaching Done. Lifted out of the section so the panel knows
+ * which issues it shows. `openKey`: see `useFilteredInboxRows`.
  */
-export function useInboxSectionRows(wsId: string | undefined) {
-  const { data: raw = EMPTY_INBOX } = useQuery({ ...inboxListOptions(wsId ?? ""), enabled: !!wsId });
+export function useInboxSectionRows(wsId: string | undefined, openKey: string | null) {
+  const list = useFilteredInboxRows(wsId ?? "", openKey);
+  const { rows } = list;
   const limit = useSidebarTreeStore((s) => s.inboxSettings.limit);
   const collapsed = useSidebarTreeStore((s) => s.inboxCollapsed);
   const [expandedWsId, setExpandedWsId] = useState<string | null>(null);
   const expanded = expandedWsId === (wsId ?? null);
-  const rows = useMemo(() => deduplicateInboxItems(raw), [raw]);
   const displayed = useMemo(() => (expanded ? rows : rows.slice(0, limit)), [expanded, rows, limit]);
   // A collapsed section shows no rows, so it lights none.
   const shownIssueIds = useMemo(
@@ -92,6 +96,7 @@ export function useInboxSectionRows(wsId: string | undefined) {
   );
 
   return {
+    list,
     rows,
     displayed,
     expanded,
@@ -116,6 +121,7 @@ export function InboxSection({
   activeIssueId: string | null;
 }) {
   const { t } = useT("layout");
+  const { t: tInbox } = useT("inbox");
   const p = useWorkspacePaths();
   const collapsed = useSidebarTreeStore((s) => s.inboxCollapsed);
   const setCollapsed = useSidebarTreeStore((s) => s.setInboxCollapsed);
@@ -125,7 +131,8 @@ export function InboxSection({
   const archive = useArchiveInbox();
   const { searchParams } = useNavigation();
   const isCompact = useIsCompact();
-  const { rows: all, displayed, expanded, limit, setExpanded } = rows;
+  const { list, rows: all, displayed, expanded, limit, setExpanded } = rows;
+  const clearFilters = useInboxFilterStore((state) => state.clearFilters);
   // The notification the Inbox page has open, keyed as it groups rows.
   const openKey = pathname === p.inbox() ? searchParams.get("issue") : null;
 
@@ -137,6 +144,18 @@ export function InboxSection({
       action={
         <div className="relative flex items-center gap-1">
           {showCount && <PanelCount value={unread} className={HEADER_COUNT_CLASS} />}
+          <InboxFilterMenu
+            wsId={wsId}
+            items={list.notifications}
+            priorityFilterSupport={list.priorityFilterSupport}
+            issueFieldsSupport={list.issueFieldsSupport}
+            activeIssueIds={list.activeIssueIds}
+            sectionTrigger={{
+              className: cn(TREE_ROW_BUTTON_CLASS, "text-muted-foreground", SECTION_SETTINGS_REVEAL_CLASS),
+              // A filtered list says so even while the section is not hovered.
+              activeClassName: "w-auto gap-0.5 px-1 text-brand opacity-100 hover:text-brand",
+            }}
+          />
           <InboxSectionSettings className={SECTION_SETTINGS_REVEAL_CLASS} />
           <InboxSectionActions className={SECTION_SETTINGS_REVEAL_CLASS} />
         </div>
@@ -158,6 +177,17 @@ export function InboxSection({
             />
           ))}
         </PanelList>
+      ) : list.filtered ? (
+        <div className={cn(PANEL_ROW_CLASS, "pl-[2.375rem] text-caption text-faint-foreground")}>
+          <span className="min-w-0 flex-1 truncate">{tInbox(($) => $.filters.empty)}</span>
+          <button
+            type="button"
+            className="shrink-0 rounded-md px-1 font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+            onClick={() => clearFilters(wsId)}
+          >
+            {tInbox(($) => $.filters.clear)}
+          </button>
+        </div>
       ) : (
         <p className={cn(PANEL_ROW_CLASS, "pl-[2.375rem] text-caption text-faint-foreground")}>
           {t(($) => $.panels.work.inbox_empty)}
@@ -288,6 +318,15 @@ function InboxRow({
   const timeAgo = useTimeAgo();
   const Icon = INBOX_TYPE_ICONS[inboxTypeGroup(item.type)];
   const title = inboxRowTitle(item, typeLabels);
+  const writeViewState = useViewStateWriter();
+  const requestLanding = useInboxSelectionStore((s) => s.requestLanding);
+  // Every click is a fresh intent to land on what the notification is about,
+  // even on the issue already open, or one whose landing ran before.
+  const land = () => {
+    if (!item.issue_id) return;
+    writeViewState(issueHighlightMementoKey(item.issue_id), undefined);
+    requestLanding(item.issue_id);
+  };
   const unread = item.read !== true;
   const archiveLabel = t(($) => $.list.archive_tooltip);
   // Hidden while the archive button stands in its place.
@@ -326,6 +365,7 @@ function InboxRow({
             newTabTitle={title}
             draggable={false}
             aria-current={active ? "page" : undefined}
+            onNavigateInPlace={land}
             className={cn(ISSUE_ROW_LINK_CLASS, compact ? "gap-2.5" : "flex-col items-stretch gap-0")}
           >
             {compact ? (
@@ -350,7 +390,7 @@ function InboxRow({
           </AppLink>
         </HoverCardTrigger>
         <HoverCardContent side="right" align="start" sideOffset={12} alignOffset={-8} className="w-72 p-3">
-          <InboxRowCard item={item} href={href} title={title} onArchive={onArchive} />
+          <InboxRowCard item={item} href={href} title={title} onOpen={land} onArchive={onArchive} />
         </HoverCardContent>
       </HoverCard>
       <TooltipHint label={archiveLabel}>
@@ -409,11 +449,13 @@ function InboxRowCard({
   item,
   href,
   title,
+  onOpen,
   onArchive,
 }: {
   item: InboxItem;
   href: string;
   title: string;
+  onOpen: () => void;
   onArchive: () => void;
 }) {
   const { t } = useT("layout");
@@ -461,7 +503,7 @@ function InboxRowCard({
         </div>
       )}
       <div className="-mx-1 mt-1 flex items-center gap-1 border-t border-border pt-2">
-        <AppLink href={href} className={buttonVariants({ size: "sm", variant: "secondary" })}>
+        <AppLink href={href} onNavigateInPlace={onOpen} className={buttonVariants({ size: "sm", variant: "secondary" })}>
           {t(($) => $.panels.work.inbox_open)}
         </AppLink>
         <Button
