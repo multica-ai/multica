@@ -9,7 +9,7 @@ import {
 import { useInboxFilterStore } from "@multica/core/inbox/filter-store";
 import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
-import type { InboxItem } from "@multica/core/types";
+import type { AgentTask, InboxItem } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 import { InboxSection, useInboxSectionRows } from "./inbox-section";
@@ -51,6 +51,9 @@ vi.mock("@multica/core/workspace/hooks", () => ({
   useActorName: () => ({ getActorName: () => "Leo Park", getActorInitials: () => "LP", getActorAvatarUrl: () => null }),
 }));
 vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => null }));
+vi.mock("../../agents/components/agent-avatar-stack", () => ({
+  AgentAvatarStack: ({ agentIds }: { agentIds: string[] }) => <span data-testid="agents">{agentIds.join(",")}</span>,
+}));
 vi.mock("@multica/ui/hooks/use-mobile", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/ui/hooks/use-mobile")>()),
   useIsCompact: () => state.compact,
@@ -99,10 +102,15 @@ function Harness({ activeIssueId, pathname, openKey }: { activeIssueId: string |
   return <InboxSection wsId="ws-1" rows={rows} pathname={pathname} activeIssueId={activeIssueId} />;
 }
 
-function renderSection(items: InboxItem[], activeIssueId: string | null = null, url = "/acme/issues") {
+function renderSection(
+  items: InboxItem[],
+  activeIssueId: string | null = null,
+  url = "/acme/issues",
+  tasks: Partial<AgentTask>[] = [],
+) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   client.setQueryData(["inbox", "ws-1", "list"], items);
-  client.setQueryData(agentTaskSnapshotOptions("ws-1").queryKey, []);
+  client.setQueryData(agentTaskSnapshotOptions("ws-1").queryKey, tasks as AgentTask[]);
   const nav = adapter(url);
   // As the Work panel keys it: the issue opened from the section, or the Inbox page's notification.
   const openKey = nav.pathname === "/acme/inbox" ? nav.searchParams.get("issue") : activeIssueId;
@@ -165,6 +173,41 @@ describe("InboxSection", () => {
     expect(screen.getByRole("link", { name: /^Commented/ })).toHaveAttribute("href", "/acme/issues/issue-a#comment-c-1");
     expect(screen.getByRole("link", { name: /^Assigned/ })).toHaveAttribute("href", "/acme/issues/issue-b");
     expect(screen.getByRole("link", { name: /^Autopilot paused/ })).toHaveAttribute("href", "/acme/inbox?issue=n3");
+  });
+
+  it("opens the issue at its oldest unread comment, or its newest once read", () => {
+    renderSection([
+      item({ id: "n1", issue_id: "issue-a", title: "Unread thread", details: { comment_id: "c-2" }, created_at: "2026-11-10T09:00:00Z" }),
+      item({ id: "n2", issue_id: "issue-a", title: "Unread thread", details: { comment_id: "c-1" }, created_at: "2026-11-10T08:00:00Z" }),
+      item({ id: "n3", issue_id: "issue-b", title: "Read thread", read: true, details: { comment_id: "c-4" }, created_at: "2026-11-09T09:00:00Z" }),
+      item({ id: "n4", issue_id: "issue-b", title: "Read thread", read: true, details: { comment_id: "c-3" }, created_at: "2026-11-09T08:00:00Z" }),
+    ]);
+
+    expect(screen.getByRole("link", { name: /^Unread thread/ })).toHaveAttribute("href", "/acme/issues/issue-a#comment-c-1");
+    expect(screen.getByRole("link", { name: /^Read thread/ })).toHaveAttribute("href", "/acme/issues/issue-b#comment-c-4");
+  });
+
+  it("marks issues an agent is working on or queued for", () => {
+    renderSection(
+      [
+        item({ id: "n1", issue_id: "issue-a", title: "Working one" }),
+        item({ id: "n2", issue_id: "issue-b", title: "Queued one", created_at: "2026-11-09T08:00:00Z" }),
+        item({ id: "n3", issue_id: "issue-c", title: "Idle one", created_at: "2026-11-08T08:00:00Z" }),
+      ],
+      null,
+      "/acme/issues",
+      [
+        { id: "t1", issue_id: "issue-a", agent_id: "a1", status: "running" },
+        { id: "t2", issue_id: "issue-b", agent_id: "a2", status: "queued" },
+      ],
+    );
+
+    const [working, queued, idle] = rows();
+    expect(working).toHaveTextContent("Working");
+    expect(working!.querySelector(".shimmer-text")).not.toBeNull();
+    expect(queued).toHaveTextContent("Queued");
+    expect(queued!.querySelector(".shimmer-text")).toBeNull();
+    expect(idle!.querySelector("[data-testid=agents]")).toBeNull();
   });
 
   it("opens an app's request on its issue at that request", () => {
