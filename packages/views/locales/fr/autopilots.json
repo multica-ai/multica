@@ -545,6 +545,26 @@
         "reply": "« La PR est fusionnée. Je mets à jour la doc et je ferme la tâche. »",
         "event_examples": "PR fusionnée, nouveau commentaire"
       }
+    },
+    "defaults": {
+      "title": "À la fin des sous-tâches",
+      "description": "Réveille le responsable de la tâche parente quand une étape se termine alors qu’une étape suivante attend, puis une fois de plus quand toutes les sous-tâches sont fermées. Un responsable humain reçoit une notification à la place.",
+      "badge": "Valeur par défaut de l’espace",
+      "enabled": "Activé par défaut",
+      "instruction": "Instruction par défaut",
+      "instruction_hint": "Envoyée à l’agent réveillé. Laissez vide pour utiliser l’instruction intégrée ci-dessous.",
+      "instruction_placeholder": "Laisser vide pour l’instruction intégrée",
+      "builtin": "Instruction intégrée",
+      "instruction_invalid": "Limitez l’instruction à 4 000 octets.",
+      "save": "Enregistrer",
+      "saving": "Enregistrement…",
+      "save_error": "Impossible d’enregistrer la valeur par défaut.",
+      "customized_one": "{{count}} tâche ouverte a son propre réglage et ignore cette valeur par défaut.",
+      "customized_other": "{{count}} tâches ouvertes ont leur propre réglage et ignorent cette valeur par défaut.",
+      "admin_only": "Seuls les propriétaires et administrateurs peuvent modifier ces valeurs.",
+      "load_error": "Impossible de charger les valeurs par défaut des réveils.",
+      "edit_instruction": "Modifier l’instruction par défaut",
+      "view_instruction": "Voir l’instruction par défaut"
     }
   },
   "intro": {

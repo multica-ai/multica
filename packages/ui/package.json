@@ -23,10 +23,14 @@
     "./lib/data-table": "./lib/data-table.ts",
     "./lib/code-style": "./lib/code-style.ts",
     "./lib/clipboard": "./lib/clipboard.ts",
+    "./lib/context-menu-origin": "./lib/context-menu-origin.ts",
     "./lib/motion": "./lib/motion.ts",
+    "./lib/multica-brand": "./lib/multica-brand.ts",
     "./icons": "./icons/index.ts",
     "./i18n-types": "./types/i18next.ts",
     "./styles/tokens.css": "./styles/tokens.css",
+    "./styles/theme-variables.css": "./styles/theme-variables.css",
+    "./styles/appearance.css": "./styles/appearance.css",
     "./styles/base.css": "./styles/base.css"
   },
   "dependencies": {

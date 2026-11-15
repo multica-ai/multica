@@ -427,6 +427,7 @@ describe("useTabPresentation — restored issue tabs", () => {
     );
     await waitFor(() => expect(result.current.title).toBe("MUL-7: Restore tabs"));
     expect(result.current.titleResolved).toBe(true);
+    expect(result.current.issueIdentity).toEqual({ id: issue.id, identifier: "MUL-7" });
     expect(qc.getQueryData(issueDetailOptions("ws1", issue.id).queryKey)).toEqual(issue);
     expect(getIssue).toHaveBeenCalledExactlyOnceWith("MUL-7");
 

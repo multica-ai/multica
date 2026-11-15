@@ -36,6 +36,7 @@ Multica détecte actuellement ces commandes :
 | Kiro CLI | `kiro-cli` | [Installer Kiro CLI](https://kiro.dev/docs/cli/installation/) |
 | MiniMax Code | `mcode` | [Installer MiniMax Code CLI](https://www.npmjs.com/package/@minimax-ai/code) |
 | Muse Code | `muse` | [Installer Muse Code](https://dev.meta.ai/docs/muse-code) |
+| ZCode | `zcode` / ZCode Desktop | [ZCode](https://zcode.z.ai/) |
 | Devin CLI | `devin` | [Installer Devin CLI](https://docs.devin.ai/cli/quickstart) (3000.3.22+). ACP local ; exécuter d'abord `devin auth login` |
 | OpenClaw | `openclaw` | [Installer OpenClaw](https://docs.openclaw.ai/install) |
 | OpenCode | `opencode` | [Démarrage rapide d'OpenCode](https://opencode.ai/en/docs) |
@@ -45,6 +46,8 @@ Multica détecte actuellement ces commandes :
 | Qoder CN CLI | `qoderclicn` | [Démarrage rapide de Qoder CN CLI](https://help.aliyun.com/en/lingma/qodercli-cn/user-guide/qoder-cli-cn-get-started-quickly) |
 | Qwen Code | `qwen` | [Qwen Code](https://github.com/QwenLM/qwen-code) |
 | QwenPaw | `qwenpaw` | [QwenPaw](https://github.com/agentscope-ai/QwenPaw) |
+| Amp | `amp` | [Amp CLI](https://ampcode.com/docs/cli) |
+| Factory Droid | `droid` | [Factory Droid](https://docs.factory.com/droid-exec/overview) |
 | Reasonix | `reasonix` | [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) |
 | TRAE CLI | `traecli` | [Site officiel de TRAE](https://www.trae.cn/) |
 | Dim | `dim` | [DimCode](https://dimagent.cn/en/docs/cli) |
@@ -71,10 +74,14 @@ En dessous de la version minimale, le daemon n'enregistre pas le runtime corresp
 | Copilot | 1.0.0 |
 | Grok | 0.2.89 |
 | Qwen Code | 0.20.0 |
+| Factory Droid | 1.8.0 |
 | MiniMax Code | 0.1.2 |
+| Muse Code | 1.4.10 |
 | OpenCode | 1.1.54 |
 | Dim | 0.3.10 |
+| Devin CLI | 3000.3.22 |
 | ZeroClaw | 0.8.0 |
+| ZCode | 0.16.0 |
 
 Quelques outils demandent une configuration en plus de la connexion :
 
@@ -209,3 +216,5 @@ Si l'outil apparaît en ligne mais que les exécutions échouent toujours, ouvre
 - [Créer et configurer un agent](/agents-create) — sélectionner le runtime que vous venez de connecter.
 - [Daemon et runtimes](/daemon-runtimes) — statut en ligne, parallélisme et runtimes personnalisés.
 - [Comparatif des outils de codage IA](/providers) — comparer ce que chaque outil peut faire dans Multica.
+
+Sur macOS, ZCode Desktop est détecté depuis son bundle d'application et nécessite Node.js. Sur Linux, le daemon détecte ZCode Desktop via `zcode` dans le PATH ou `/opt/ZCode/zcode` et exécute son CLI intégré sans ouvrir de fenêtre. Sur Linux, aucune installation séparée de Node.js ni configuration manuelle de variables d'environnement n'est nécessaire. Activez une connexion API fonctionnelle dans l'application. Les choix de modèle et de raisonnement viennent de ZCode ; voir [la comparaison des outils](/providers#zcode).

@@ -90,9 +90,7 @@
     "section_labels": "標籤",
     "filter_search_placeholder": "篩選...",
     "no_labels": "還沒有標籤",
-    "no_results": "無結果",
-    "manage_labels": "管理標籤...",
-    "manage_labels_title": "Skill 標籤"
+    "no_results": "無結果"
   },
   "detail": {
     "read_only": "只讀",
@@ -243,15 +241,9 @@
     }
   },
   "create": {
-    "back": "返回",
-    "back_aria": "返回方式選擇",
     "close": "關閉",
     "close_aria": "關閉",
     "method": {
-      "chooser": {
-        "title": "新建 skill",
-        "desc": "選擇新增 skill 的方式。"
-      },
       "manual": {
         "title": "手動建立",
         "desc": "從空白 SKILL.md 開始寫。"

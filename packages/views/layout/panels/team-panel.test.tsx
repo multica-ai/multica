@@ -216,6 +216,19 @@ describe("TeamPanel agent previews", () => {
   });
 });
 
+describe("TeamPanel agent menu", () => {
+  it("opens the agents page's row menu on right-click", async () => {
+    seedAgents(1);
+    renderPanel([runtime()]);
+
+    fireEvent.contextMenu(screen.getByText("running agent 1"), { clientX: 20, clientY: 40 });
+    const menu = await screen.findByRole("menu");
+    expect(
+      Array.from(menu.querySelectorAll('[role="menuitem"]'), (el) => el.textContent?.trim()),
+    ).toEqual(["Open in new tab", "Settings", "Duplicate"]);
+  });
+});
+
 describe("TeamPanel runtime badge", () => {
   it("shows a green online machine count without a total or duplicate providers", () => {
     renderPanel([

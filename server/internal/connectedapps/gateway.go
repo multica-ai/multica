@@ -140,6 +140,11 @@ func (s *Service) loadRun(ctx context.Context, taskID string) (*run, error) {
 	if err != nil {
 		return nil, err
 	}
+	// A task can remain running on another member's runtime after its
+	// initiator loses access. Recheck on every gateway request, not at enqueue.
+	if !s.mayRun(ctx, task, agent) {
+		return nil, ErrNoLongerAllowed
+	}
 	apps, err := s.q.ListAgentApps(ctx, agent.ID)
 	if err != nil {
 		return nil, err
@@ -158,6 +163,18 @@ func (s *Service) loadRun(ctx context.Context, taskID string) (*run, error) {
 		}
 	}
 	return rn, nil
+}
+
+func (s *Service) mayRun(ctx context.Context, task db.AgentTaskQueue, agent db.Agent) bool {
+	if agent.ArchivedAt.Valid || s.resumer == nil {
+		return false
+	}
+	if task.OriginatorUserID.Valid {
+		return s.mayUseAgent(ctx, agent.WorkspaceID, agent.ID, task.OriginatorUserID)
+	}
+	// Without a human originator, use the system invocation grant. The
+	// accountable member is audit metadata and must never lend authority.
+	return s.resumer.CanActFor(ctx, agent.WorkspaceID, agent.ID, pgtype.UUID{})
 }
 
 func (s *Service) dispatch(ctx context.Context, rn *run, req rpcRequest) (rpcResponse, bool) {
@@ -203,8 +220,8 @@ func (s *Service) dispatch(ctx context.Context, rn *run, req rpcRequest) (rpcRes
 }
 
 const gatewayInstructions = "Multica apps. Use apps_list to see your apps, apps_search_tools to find a tool, apps_get_tool for its input schema, then apps_run_tool. " +
-	"Some calls need a person's confirmation: apps_run_tool then answers that the call was submitted. When that happens, end your turn — " +
-	"you will be resumed with the outcome after they decide. Never retry a submitted call or work around a blocked one."
+	"Allowed calls run immediately and return their result. Never work around a blocked call. " +
+	"If an account is not connected, use apps_request_connection and end your turn; you will be resumed after it is connected."
 
 func gatewayTools() []map[string]any {
 	str := func(desc string) map[string]any { return map[string]any{"type": "string", "description": desc} }
@@ -216,7 +233,7 @@ func gatewayTools() []map[string]any {
 		},
 		{
 			"name":        toolSearchTools,
-			"description": "Search the tools of one app. Returns tool slugs, what they do, and whether a call runs directly, needs confirmation, or is blocked.",
+			"description": "Search the tools of one app. Returns tool slugs, what they do, and whether a call is allowed or blocked.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -236,15 +253,14 @@ func gatewayTools() []map[string]any {
 			},
 		},
 		{
-			"name": toolRunTool,
-			"description": "Run an app tool. Reads and allowed writes run immediately. A call that needs confirmation is submitted to the person who triggered this run " +
-				"and this tool answers 'submitted'; end your turn then — you will be resumed with the result. Blocked calls return an error; do not try to work around them.",
+			"name":        toolRunTool,
+			"description": "Run an app tool immediately and return its result. Blocked calls return an error; do not try to work around them.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"tool":      str("Tool slug, e.g. GMAIL_SEND_EMAIL"),
 					"arguments": map[string]any{"type": "object", "description": "Arguments matching the tool's input schema"},
-					"summary":   str("One sentence for the person confirming: what this call does and why."),
+					"summary":   str("Optional summary of what this call does and why."),
 				},
 				"required": []string{"tool", "arguments"},
 			},
@@ -318,13 +334,17 @@ func (s *Service) toolListApps(ctx context.Context, rn *run) map[string]any {
 	}
 	out := []appView{}
 	for slug, app := range rn.apps {
+		level := app.Level
+		if level == LevelConfirmWrites {
+			level = LevelWrite
+		}
 		status := "connected"
 		if _, err := s.resolveAccount(ctx, rn.workspaceID, rn.triggeredBy, slug, app.AccountScope); err != nil {
 			status = "not_connected"
 		}
 		out = append(out, appView{
 			App: slug, Name: runtimeapps.DisplayNameForToolkitSlug(slug),
-			Account: app.AccountScope, Level: app.Level, Status: status,
+			Account: app.AccountScope, Level: level, Status: status,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].App < out[j].App })
@@ -478,20 +498,11 @@ func (s *Service) toolRun(ctx context.Context, rn *run, toolSlug string, args ma
 			}, NotifActionResult)
 		}
 		return textResult(fmt.Sprintf("blocked: %s calls (%s) are not allowed for you on %s. Do not work around this; tell the person what you would have done.", class, tool.Slug, slug), true)
-	case PolicyConfirm:
-		if !rn.triggeredBy.Valid {
-			call.outcome = "blocked"
-			s.recordCall(ctx, call)
-			return textResult("blocked: this call needs a person's confirmation, but no person triggered this run", true)
-		}
-		req, err := s.submit(ctx, rn, app, tool, class, args, summary)
-		if err != nil {
-			slog.Warn("connectedapps: submit request failed", "tool", tool.Slug, "error", err)
-			return textResult("could not submit this call for confirmation", true)
-		}
-		call.outcome, call.requestID = "pending", req.ID
-		s.recordCall(ctx, call)
-		return textResult(fmt.Sprintf("submitted: request %s is waiting for confirmation. End your turn now; you will be resumed with the result after the person decides. Do not call this tool again for the same action.", util.UUIDToString(req.ID)), false)
+	}
+	// Tool lookup may involve a network call, and one gateway request may
+	// contain a batch. Check again immediately before allowing execution.
+	if !s.mayRun(ctx, rn.task, rn.agent) {
+		return textResult("this run is no longer allowed to use this agent", true)
 	}
 	if s.overLimit(ctx, rn.workspaceID, slug, acct) {
 		call.outcome = "rate_limited"

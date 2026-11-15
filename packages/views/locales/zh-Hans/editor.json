@@ -53,6 +53,8 @@
     "zoom_actual": "实际大小"
   },
   "attachment": {
+    "install_theme": "安装主题",
+    "install_theme_failed": "无法读取附件，请稍后重试。",
     "download_failed": "下载链接获取失败，请稍后重试。",
     "preview": "预览",
     "preview_loading": "加载预览中…",
@@ -178,5 +180,49 @@
     "clear_filter": "清除筛选",
     "no_matches": "没有匹配的行",
     "close": "关闭"
+  },
+  "voice": {
+    "dictate": "语音输入",
+    "hold_to_talk": "按住说话",
+    "tap_or_hold": "语音输入（点按，或按住说话）",
+    "cancel": "取消",
+    "insert": "插入",
+    "send": "发送",
+    "retry": "重试",
+    "dismiss": "关闭",
+    "requesting": "正在等待麦克风…",
+    "transcribing": "正在转写…",
+    "release_to_insert": "松开插入",
+    "recording": "录音中",
+    "errors": {
+      "permission_denied": "麦克风权限被阻止。请在浏览器或系统设置中允许后重试。",
+      "no_microphone": "未找到麦克风。连接后重试。",
+      "microphone_failed": "无法启动麦克风。",
+      "no_speech": "没有听到说话声。靠近麦克风再试一次。",
+      "unavailable": "这台电脑无法在本地转写语音。",
+      "transcription_failed": "转写失败。录音已保留，可以重试。"
+    },
+    "models": {
+      "more_languages": "其他 {{more}} 种语言",
+      "in_use": "使用中",
+      "recommended": "推荐",
+      "most_accurate": "最准确",
+      "fastest": "最快",
+      "by": "来自 {{author}}",
+      "license": "许可协议",
+      "downloading": "正在下载，{{percent}}%",
+      "failed": "下载失败。重试会从中断处继续。",
+      "download": "下载",
+      "retry": "重试",
+      "cancel": "取消",
+      "use": "使用",
+      "delete": "删除 {{name}}"
+    },
+    "setup": {
+      "title": "设置语音输入",
+      "description": "语音在这台电脑上转写，录音不会离开本机。先下载一个语音模型即可开始。",
+      "later": "以后再说",
+      "start": "开始口述"
+    }
   }
 }

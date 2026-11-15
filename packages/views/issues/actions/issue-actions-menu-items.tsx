@@ -4,6 +4,7 @@ import { useCallback, useMemo, useRef, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
+  AppWindow,
   ArrowDown,
   ArrowUp,
   Calendar,
@@ -26,12 +27,13 @@ import {
   Trash2,
   Unlink,
   UserMinus,
+  Zap,
 } from "@multica/ui/icons";
 import { useIssueDeletion } from "@multica/core/issues/use-issue-deletion";
 import type { AgentTask, Issue } from "@multica/core/types";
+import { quickActionListOptions } from "@multica/core/quick-actions";
 import { resolveWorkdirCopyTarget } from "@multica/core/issues";
-import { todayDateOnly, addDaysDateOnly } from "@multica/core/issues/date";
-import { api } from "@multica/core/api";
+import { todayDateOnly, addDaysDateOnly, formatDateOnly } from "@multica/core/issues/date";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import {
   PRIORITY_DISPLAY_ORDER,
@@ -45,60 +47,24 @@ import { stepHandsOff, workflowAllowsStatus, workflowStep } from "@multica/core/
 import { useModalStore } from "@multica/core/modals";
 import { useIssueStatusOptions } from "../utils/status-options";
 import { useStatusLabel } from "../utils/status-label";
-import { issueKeys } from "@multica/core/issues/queries";
+import { issueTasksOptions } from "@multica/core/issues/queries";
 import { StatusIcon } from "../components/status-icon";
 import { PriorityIcon } from "../components/priority-icon";
 import { selectIssueTasks } from "../surface/activity";
 import { AssigneePickerPanel } from "../components/pickers";
-import {
-  DropdownMenuItem,
-  DropdownMenuSub,
-  DropdownMenuSubTrigger,
-  DropdownMenuSubContent,
-  DropdownMenuSeparator,
-} from "@multica/ui/components/ui/dropdown-menu";
-import {
-  ContextMenuItem,
-  ContextMenuSub,
-  ContextMenuSubTrigger,
-  ContextMenuSubContent,
-  ContextMenuSeparator,
-} from "@multica/ui/components/ui/context-menu";
+import { useQuickActionRunner } from "../hooks/use-quick-action-runner";
 import { copyText } from "@multica/ui/lib/clipboard";
+import {
+  contextPrimitives,
+  dropdownPrimitives,
+  type MenuPrimitives,
+} from "../../common/menu-primitives";
 import type { UseIssueActionsResult } from "./use-issue-actions";
 import { InboxRestoreMenuItem } from "./inbox-restore";
 import { PluginHookMenuItems, PluginModalMenuItems } from "../../plugins";
-import { useT } from "../../i18n";
+import { useLocale, useT } from "../../i18n";
 
-// Both Dropdown and Context menu wrappers expose an API-compatible surface
-// (variant, inset, onClick, etc.). We bundle the primitives we need into a
-// single object so `IssueActionsMenuItems` can render the same JSX for both.
-export interface MenuPrimitives {
-  Item: typeof DropdownMenuItem;
-  Sub: typeof DropdownMenuSub;
-  SubTrigger: typeof DropdownMenuSubTrigger;
-  SubContent: typeof DropdownMenuSubContent;
-  Separator: typeof DropdownMenuSeparator;
-}
-
-export const dropdownPrimitives: MenuPrimitives = {
-  Item: DropdownMenuItem,
-  Sub: DropdownMenuSub,
-  SubTrigger: DropdownMenuSubTrigger,
-  SubContent: DropdownMenuSubContent,
-  Separator: DropdownMenuSeparator,
-};
-
-// Context primitives are API-compatible with Dropdown primitives, but their
-// TypeScript identities differ. Cast once here and call it a day — this is the
-// single bridge between the two primitive sets.
-export const contextPrimitives: MenuPrimitives = {
-  Item: ContextMenuItem as unknown as typeof DropdownMenuItem,
-  Sub: ContextMenuSub as unknown as typeof DropdownMenuSub,
-  SubTrigger: ContextMenuSubTrigger as unknown as typeof DropdownMenuSubTrigger,
-  SubContent: ContextMenuSubContent as unknown as typeof DropdownMenuSubContent,
-  Separator: ContextMenuSeparator as unknown as typeof DropdownMenuSeparator,
-};
+export { contextPrimitives, dropdownPrimitives, type MenuPrimitives };
 
 interface IssueActionsMenuItemsProps {
   issue: Issue;
@@ -115,8 +81,7 @@ interface IssueActionsMenuItemsProps {
   /** The reader's archived inbox notification for this issue; adds "Restore to inbox". */
   archivedInboxItemId?: string;
   /** `sidebar` is the trimmed menu for sidebar rows, where only the title is
-   *  visible: it names the issue in a header, shows current values beside
-   *  Status / Priority / Assignee, and keeps only triage and navigation
+   *  visible: it names the issue in a header and keeps only triage and navigation
    *  entries — in the full menu's order, so the shared entries sit where
    *  users already expect them. */
   variant?: "full" | "sidebar";
@@ -138,6 +103,8 @@ export function IssueActionsMenuItems({
   onShowInSidebar,
 }: IssueActionsMenuItemsProps) {
   const { t } = useT("issues");
+  const locale = useLocale();
+  const formatDate = (date: string) => formatDateOnly(date, { month: "short", day: "numeric" }, locale);
   const wsId = useWorkspaceId();
   const { canDelete } = useIssueDeletion(wsId);
   const sidebar = variant === "sidebar";
@@ -161,6 +128,7 @@ export function IssueActionsMenuItems({
     isPinned,
     updateField,
     openInNewTab,
+    openInNewWindow,
     openInDesktop,
     togglePin,
     copyLink,
@@ -182,9 +150,7 @@ export function IssueActionsMenuItems({
   // The query shares its key with ExecutionLogSection, so navigating from
   // the issue detail page is a free cache hit.
   const { data: tasks } = useQuery({
-    queryKey: issueKeys.tasks(issue.id),
-    queryFn: () => api.listTasksByIssue(issue.id),
-    staleTime: 30_000,
+    ...issueTasksOptions(issue.id),
     enabled: !sidebar,
   });
   const workdirCopyTarget = useMemo(
@@ -257,6 +223,7 @@ export function IssueActionsMenuItems({
             <Plus className="h-3.5 w-3.5" />
             {t(($) => $.actions.create_sub_issue)}
           </P.Item>
+          <QuickActionsSub issueId={issue.id} primitives={P} />
 
           <P.Separator />
         </>
@@ -274,7 +241,7 @@ export function IssueActionsMenuItems({
           />
           <ItemLabel
             label={t(($) => $.actions.status)}
-            value={sidebar ? statusLabel(issue.status) : undefined}
+            value={statusLabel(issue.status)}
           />
         </P.SubTrigger>
         <P.SubContent>
@@ -308,7 +275,7 @@ export function IssueActionsMenuItems({
           <PriorityIcon priority={issue.priority} />
           <ItemLabel
             label={t(($) => $.actions.priority)}
-            value={sidebar ? t(($) => $.priority[issue.priority]) : undefined}
+            value={t(($) => $.priority[issue.priority])}
           />
         </P.SubTrigger>
         <P.SubContent>
@@ -337,7 +304,7 @@ export function IssueActionsMenuItems({
           <UserMinus className="h-3.5 w-3.5" />
           <ItemLabel
             label={t(($) => $.actions.assignee)}
-            value={sidebar ? <AssigneeName issue={issue} /> : undefined}
+            value={<AssigneeName issue={issue} />}
           />
         </P.SubTrigger>
         <P.SubContent className="w-64 p-0">
@@ -358,7 +325,10 @@ export function IssueActionsMenuItems({
           <P.Sub>
             <P.SubTrigger>
               <CalendarClock className="h-3.5 w-3.5" />
-              {t(($) => $.actions.start_date)}
+              <ItemLabel
+                label={t(($) => $.actions.start_date)}
+                value={issue.start_date ? formatDate(issue.start_date) : undefined}
+              />
             </P.SubTrigger>
             <P.SubContent>
               <P.Item onClick={() => updateField({ start_date: todayDateOnly() })}>
@@ -385,7 +355,10 @@ export function IssueActionsMenuItems({
           <P.Sub>
             <P.SubTrigger>
               <Calendar className="h-3.5 w-3.5" />
-              {t(($) => $.actions.due_date)}
+              <ItemLabel
+                label={t(($) => $.actions.due_date)}
+                value={issue.due_date ? formatDate(issue.due_date) : undefined}
+              />
             </P.SubTrigger>
             <P.SubContent>
               <P.Item onClick={() => updateField({ due_date: todayDateOnly() })}>
@@ -419,6 +392,12 @@ export function IssueActionsMenuItems({
         <ExternalLink className="h-3.5 w-3.5" />
         {t(($) => $.actions.open_in_new_tab)}
       </P.Item>
+      {openInNewWindow && (
+        <P.Item onClick={openInNewWindow}>
+          <AppWindow className="h-3.5 w-3.5" />
+          {t(($) => $.actions.open_in_new_window)}
+        </P.Item>
+      )}
       {openInDesktop && (
         <P.Item onClick={openInDesktop}>
           <Monitor className="h-3.5 w-3.5" />
@@ -554,7 +533,7 @@ function ItemLabel({ label, value }: { label: string; value?: ReactNode }) {
 /** Hosts a search box and list inside a submenu. The menu's typeahead and
  *  arrow-key navigation would otherwise take the keys typed into the search
  *  box; Escape and Tab still reach the menu so it can close. */
-function SubmenuPanel({ children }: { children: ReactNode }) {
+export function SubmenuPanel({ children }: { children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   return (
     <div
@@ -578,6 +557,42 @@ function AssigneeName({ issue }: { issue: Issue }) {
   const { getActorName } = useActorName();
   if (!issue.assignee_type || !issue.assignee_id) return <>{t(($) => $.actions.unassigned)}</>;
   return <>{getActorName(issue.assignee_type, issue.assignee_id)}</>;
+}
+
+/** The workspace's quick actions, run against this issue on pick — the same
+ *  catalog the issue sidebar and the command palette offer. Renders nothing
+ *  when the workspace has none. */
+function QuickActionsSub({ issueId, primitives: P }: { issueId: string; primitives: MenuPrimitives }) {
+  const { t } = useT("issues");
+  const wsId = useWorkspaceId();
+  const { data } = useQuery(quickActionListOptions(wsId));
+  const quickActions = useMemo(
+    () => (data ?? []).filter((action) => action.status === "active"),
+    [data],
+  );
+  const run = useQuickActionRunner(issueId);
+  if (quickActions.length === 0) return null;
+  return (
+    <P.Sub>
+      <P.SubTrigger>
+        <Zap className="h-3.5 w-3.5" />
+        {t(($) => $.actions.quick_actions)}
+      </P.SubTrigger>
+      <P.SubContent className="max-w-80">
+        {quickActions.map((action) => (
+          <P.Item key={action.id} onClick={() => run(action)}>
+            <Zap className="h-3.5 w-3.5" />
+            <span className="min-w-0 flex-1 truncate">{action.name}</span>
+            {action.target_name && (
+              <span className="max-w-28 truncate pl-3 text-caption text-muted-foreground">
+                {action.target_name}
+              </span>
+            )}
+          </P.Item>
+        ))}
+      </P.SubContent>
+    </P.Sub>
+  );
 }
 
 const NO_TASKS: AgentTask[] = [];

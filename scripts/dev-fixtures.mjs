@@ -8,9 +8,9 @@
 //
 // Replies come from the daemon API, driven with the environment profile's user
 // token: the script registers a fixture runtime, then claims, starts and
-// completes each task it caused with canned Markdown. That path works inside a
-// daemon-managed task, where `make up C=daemon` is refused. Every run adds new
-// sessions and issues and then exits; nothing keeps running.
+// completes each task it caused with canned Markdown, so content appears without
+// running a model through `make up C=daemon`. Every run adds new sessions and
+// issues and then exits; nothing keeps running.
 
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";

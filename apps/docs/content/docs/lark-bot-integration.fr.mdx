@@ -19,17 +19,17 @@ Le propriétaire de l'agent ainsi que les propriétaires et administrateurs de l
 Ouvrez **Agents** et sélectionnez l'agent à connecter à Feishu.
 </Step>
 <Step>
-Accédez à **Intégrations** et cliquez sur **Associer à Feishu**.
+Dans **Messagerie**, cliquez sur **Ajouter un canal de messagerie**, puis choisissez **Feishu**.
 </Step>
 <Step>
 Scannez le QR code avec Feishu et confirmez l'autorisation. Le QR code ne sert qu'une fois ; s'il expire, générez-en un nouveau.
 </Step>
 <Step>
-Revenez dans Multica. Lorsque la page affiche **Connecté à Feishu**, le bot est prêt.
+Revenez dans Multica : l'état **En attente du premier message** s'affiche. Envoyez un message au bot dans Feishu/Lark. L'état **Connecté** indique seulement qu'un message valide a été reçu sur cette connexion ; il ne garantit ni la continuité de la connexion, ni l'exécution de l'agent, ni ses réponses. Une nouvelle connexion réinitialise cette preuve de réception.
 </Step>
 </Steps>
 
-Un agent déjà connecté n'affiche plus le point d'entrée de scan ; pour renommer le bot ou ajuster ses permissions, cliquez sur **Gérer dans Feishu**.
+Un agent déjà connecté n'affiche plus le point d'entrée de scan ; pour renommer le bot ou ajuster ses permissions, ouvrez le menu de gestion du bot, puis cliquez sur **Gérer dans Feishu**.
 
 <Callout type="info">
 Les nouvelles connexions ne sont actuellement ouvertes qu'à Feishu en Chine continentale. Les connexions Lark internationales existantes continuent de fonctionner et peuvent toujours être gérées.
@@ -63,6 +63,8 @@ C'est cette association qui permet à Multica de savoir de quel membre de l'espa
 
 Ajoutez d'abord le bot au groupe, puis mentionnez-le avec `@Bot` et décrivez votre besoin. Le bot ne répond qu'aux messages qui le @mentionnent explicitement, et chaque exécution reçoit les derniers messages du groupe comme contexte.
 
+En message direct comme en groupe, le prompt de chaque exécution indique aussi les identifiants Feishu du message auquel il répond : `chat_id`, `chat_type`, `message_id`, le `thread_id` du sujet lorsque le message se trouve dans un sujet, et l'`open_id` de l'expéditeur. Ce sont des identifiants Feishu, pas Multica : un agent disposant de son propre accès à Feishu peut s'en servir pour retrouver le message ou la conversation d'origine. L'`open_id` n'est valable que dans l'application du bot connecté. Les identifiants que Multica n'a pas enregistrés sont omis.
+
 ### Créer une tâche
 
 Envoyez :
@@ -80,7 +82,7 @@ Lorsque l’envoi de pièces jointes est activé, le texte et les images prises 
 
 ## Gérer les connexions
 
-Ouvrez **Paramètres → Messagerie → Lark** pour voir les bots connectés dans l'espace de travail. Les propriétaires et administrateurs de l'espace de travail peuvent les déconnecter ici ; le propriétaire d'un agent peut aussi gérer son propre bot depuis la page **Intégrations** de cet agent.
+Ouvrez **Paramètres → Messagerie** pour voir les agents connectés, regroupés par plateforme. Sélectionnez un agent pour ouvrir sa section **Messagerie**. Le propriétaire de l'agent et les propriétaires/administrateurs de l'espace de travail peuvent y déconnecter le bot depuis son menu de gestion.
 
 Après la déconnexion, le bot ne reçoit plus de nouveaux messages. Les conversations et enregistrements d'audit existants ne sont pas supprimés.
 
@@ -98,7 +100,7 @@ Générez-en une ainsi :
 openssl rand -base64 32
 ```
 
-Redémarrez le serveur API, puis connectez le bot depuis la page **Intégrations** de l'agent. Conservez cette clé durablement : si elle est renouvelée ou perdue, les identifiants existants ne peuvent plus être déchiffrés et le bot doit être reconnecté.
+Redémarrez le serveur API, puis connectez le bot depuis la page **Messagerie** de l'agent. Conservez cette clé durablement : si elle est renouvelée ou perdue, les identifiants existants ne peuvent plus être déchiffrés et le bot doit être reconnecté.
 
 `MULTICA_LARK_HTTP_BASE_URL` et `MULTICA_LARK_CALLBACK_BASE_URL` n'existent que pour des déploiements particuliers, comme les proxys et les tests ; laissez-les non définies en fonctionnement normal.
 
@@ -108,7 +110,7 @@ Redémarrez le serveur API, puis connectez le bot depuis la page **Intégrations
 - **QR code expiré** : fermez la boîte de dialogue et relancez la connexion.
 - **Le bot demande d'associer le compte** : ouvrez le lien d'association et connectez-vous avec le compte Multica de cet espace de travail.
 - **Le bot ne s'exécute pas** : vérifiez si l'agent est archivé et si le [runtime](/daemon-runtimes) qu'il utilise est en ligne.
-- **Le bot ne répond jamais** : l'application doit transmettre les événements via une connexion longue ; Multica n'a pas de point de terminaison webhook. Dans la console développeur Feishu/Lark, ouvrez **Events & Callbacks → Event Configuration** et vérifiez que la méthode d'abonnement est la connexion longue et non une URL de requête, que `im.message.receive_v1` est bien souscrit, et que la version de l'application qui porte cette configuration est publiée (et approuvée, si le tenant fait valider les publications). Une application configurée avec une URL de requête s'associe quand même, affiche toujours l'état Connecté, mais ne reçoit silencieusement rien.
+- **Le bot ne répond jamais** : l'application doit transmettre les événements via une connexion longue ; Multica n'a pas de point de terminaison webhook. Dans la console développeur Feishu/Lark, ouvrez **Events & Callbacks → Event Configuration** et vérifiez que la méthode d'abonnement est la connexion longue et non une URL de requête, que `im.message.receive_v1` est bien souscrit, et que la version de l'application qui porte cette configuration est publiée (et approuvée, si le tenant fait valider les publications). Une application configurée avec une URL de requête s'associe quand même, affiche **En attente du premier message**, mais ne reçoit silencieusement rien.
 
 ## Étapes suivantes
 

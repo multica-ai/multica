@@ -34,10 +34,6 @@ func issueWithAgentAssignee() db.Issue {
 	}
 }
 
-func issueNoAssignee() db.Issue {
-	return db.Issue{}
-}
-
 func TestHasAgentOrSquadMention(t *testing.T) {
 	tests := []struct {
 		name    string

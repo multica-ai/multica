@@ -543,6 +543,25 @@
         "reply": "\"PR 已合併，開始更新文件並關閉任務。\"",
         "event_examples": "PR 合併、有新評論"
       }
+    },
+    "defaults": {
+      "title": "子任務結束時",
+      "description": "某個階段的子任務全部結束、且後面還有階段在等待時，喚醒父任務的負責人；全部子任務結束時再喚醒一次。負責人是成員時，改為傳送收件箱通知。",
+      "badge": "工作區預設值",
+      "enabled": "預設開啟",
+      "instruction": "預設指令",
+      "instruction_hint": "發給被喚醒的 AI 代理。留空則使用下方的內建指令。",
+      "instruction_placeholder": "留空則使用內建指令",
+      "builtin": "內建指令",
+      "instruction_invalid": "指令最多 4,000 位元組。",
+      "save": "儲存",
+      "saving": "儲存中…",
+      "save_error": "無法儲存預設值。",
+      "customized_other": "{{count}} 個進行中的任務使用了自己的設定，不跟隨此預設值。",
+      "admin_only": "只有所有者和管理員可以修改預設值。",
+      "load_error": "無法載入喚醒預設值。",
+      "edit_instruction": "編輯預設指令",
+      "view_instruction": "查看預設指令"
     }
   },
   "intro": {

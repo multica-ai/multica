@@ -355,9 +355,15 @@ MULTICA_WORKSPACES_ROOT=/owner/workspaces \
   dev_env exec clean-env-903 -- sh -c '
     test -z "${MULTICA_TASK_CONFIG_ROOT:-}" &&
     test -z "${MULTICA_TASK_WORKSPACES_ROOT:-}" &&
-    test "$MULTICA_WORKSPACES_ROOT" = "$1"
+    test "$MULTICA_WORKSPACES_ROOT" = "$1" &&
+    test "$MULTICA_DEV_ENV" = clean-env-903
   ' _ "$MULTICA_DEV_WORKSPACES_PARENT/multica_workspaces_dev-dev-env-test-903" \
-  > "$out" 2>&1 || fail "env-exec leaked daemon task identity or owner workspaces root"
+  > "$out" 2>&1 || fail "env-exec leaked daemon task identity or owner workspaces root, or did not name its environment"
+# Outside a task nothing was stripped, so the CLI must still be free to call a
+# marker in the checkout a leftover.
+env -u MULTICA_TASK_ID -u MULTICA_AGENT_ID -u MULTICA_TASK_CONFIG_ROOT -u MULTICA_DEV_ENV \
+  bash "$root_dir/scripts/dev-env.sh" exec clean-env-903 -- sh -c 'test -z "${MULTICA_DEV_ENV:-}"' \
+  > "$out" 2>&1 || fail "env-exec named its environment for a run that stripped no task identity"
 
 # scripts/desktop-cdp.mjs finds Desktop through env-exec: a recorded CDP port
 # becomes its endpoint, and an environment without one never inherits a URL.

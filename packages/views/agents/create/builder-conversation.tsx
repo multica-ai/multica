@@ -1,21 +1,8 @@
 "use client";
 
-import type { ReactNode } from "react";
-import { Loader2, MessageSquare, X } from "@multica/ui/icons";
-import {
-  applyDraftModelChange,
-  applyDraftRuntimeChange,
-  stripBuilderDraft,
-  type AgentDraft,
-  type BuilderRestore,
-} from "@multica/core/agents";
-import { isRuntimeUsableForUser } from "@multica/core/runtimes";
-import type {
-  ChatMessage,
-  MemberWithUser,
-  RuntimeDevice,
-} from "@multica/core/types";
-import { Button } from "@multica/ui/components/ui/button";
+import { X } from "@multica/ui/icons";
+import { stripBuilderDraft, type BuilderRestore } from "@multica/core/agents";
+import type { ChatMessage } from "@multica/core/types";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { cn } from "@multica/ui/lib/utils";
 import { ChatInput } from "../../chat/components/chat-input";
@@ -25,113 +12,6 @@ import {
   ChatMessageSkeleton,
 } from "../../chat/components/chat-message-list";
 import { useT } from "../../i18n";
-import { AppLink } from "../../navigation";
-import { ModelDropdown } from "../components/model-dropdown";
-import { RuntimePicker } from "../components/runtime-picker";
-
-/**
- * Pre-conversation card: the builder runs on a real runtime, so the runtime and
- * model have to be chosen before the first message — they are frozen onto the
- * hidden carrier agent when the session is created.
- */
-export function BuilderSetup({
-  draft,
-  onChange,
-  runtimes,
-  runtimesLoading,
-  members,
-  currentUserId,
-  selectedRuntime,
-  starting,
-  error,
-  onStart,
-  connectRuntimeHref,
-  banner,
-}: {
-  draft: AgentDraft;
-  onChange: (draft: AgentDraft) => void;
-  runtimes: RuntimeDevice[];
-  runtimesLoading: boolean;
-  members: MemberWithUser[];
-  currentUserId: string | null;
-  selectedRuntime: RuntimeDevice | null;
-  starting: boolean;
-  error: string | null;
-  onStart: () => void;
-  connectRuntimeHref: string;
-  /** Rendered above the card: the way back to an unfinished conversation, so
-   *  this screen cannot silently start yet another one. */
-  banner?: ReactNode;
-}) {
-  const { t } = useT("agents");
-  const hasOnline = runtimes.some(
-    (runtime) =>
-      runtime.status === "online" &&
-      isRuntimeUsableForUser(runtime, currentUserId),
-  );
-  return (
-    <main className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-5 py-10">
-      <div className="w-full max-w-xl">
-        {banner}
-        <div className="rounded-xl border bg-card p-6 shadow-sm">
-        <span className="flex size-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
-          <MessageSquare className="size-5" />
-        </span>
-        <h2 className="mt-5 text-title-lg font-semibold">
-          {t(($) => $.creation_studio.builder.setup_title)}
-        </h2>
-        <p className="mt-2 text-body leading-6 text-muted-foreground">
-          {t(($) => $.creation_studio.builder.setup_description)}
-        </p>
-        <div className="mt-6 space-y-4">
-          <RuntimePicker
-            runtimes={runtimes}
-            runtimesLoading={runtimesLoading}
-            members={members}
-            currentUserId={currentUserId}
-            selectedRuntimeId={draft.runtimeId}
-            onSelect={(runtimeId) => {
-              if (runtimeId !== draft.runtimeId) {
-                onChange(applyDraftRuntimeChange(draft, runtimeId));
-              }
-            }}
-          />
-          <ModelDropdown
-            runtimeId={selectedRuntime?.id ?? null}
-            runtimeOnline={selectedRuntime?.status === "online"}
-            value={draft.model}
-            onChange={(model) => onChange(applyDraftModelChange(draft, model))}
-            disabled={!selectedRuntime}
-          />
-        </div>
-        {error && (
-          <div role="alert" className="mt-4 text-body text-destructive">
-            {error}
-          </div>
-        )}
-        <div className="mt-6 flex justify-end">
-          {hasOnline ? (
-            <Button
-              onClick={onStart}
-              disabled={starting || selectedRuntime?.status !== "online"}
-            >
-              {starting && <Loader2 className="size-4 animate-spin" />}
-              {t(($) => $.creation_studio.builder.start)}
-            </Button>
-          ) : (
-            <Button
-              render={<AppLink href={connectRuntimeHref} />}
-              nativeButton={false}
-            >
-              {t(($) => $.creation_studio.builder.connect_runtime)}
-            </Button>
-          )}
-        </div>
-        </div>
-      </div>
-    </main>
-  );
-}
 
 export function BuilderConversation({
   sessionId,

@@ -71,7 +71,8 @@ func TestPatchNotificationPreferencesMergesWithoutReplacing(t *testing.T) {
 	testHandler.PatchNotificationPreferences(
 		patchRecorder,
 		notificationPreferenceRequest(t, http.MethodPatch, map[string]string{
-			"comments": "muted",
+			"comments":     "muted",
+			"chat_replies": "muted",
 		}),
 	)
 	if patchRecorder.Code != http.StatusOK {
@@ -93,6 +94,9 @@ func TestPatchNotificationPreferencesMergesWithoutReplacing(t *testing.T) {
 	}
 	if response.Preferences["comments"] != "muted" {
 		t.Fatalf("comments patch missing: %#v", response.Preferences)
+	}
+	if response.Preferences["chat_replies"] != "muted" {
+		t.Fatalf("chat_replies patch missing: %#v", response.Preferences)
 	}
 
 	enableRecorder := httptest.NewRecorder()

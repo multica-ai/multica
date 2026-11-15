@@ -397,6 +397,53 @@ describe("ChatMessageList live timeline (MUL-3960 regression)", () => {
     expect(screen.getByText("3 steps")).toBeInTheDocument();
     expect(screen.queryByText("Intermediate narration")).not.toBeInTheDocument();
   });
+
+  it("marks only the settled answer as an annotation source, without remounting it", async () => {
+    const qc = new QueryClient();
+    qc.setQueryData(chatKeys.taskMessages(TASK_ID), [
+      taskMsg(0, "tool_use", { tool: "Read", input: { path: "/tmp/x" } }),
+      taskMsg(1, "text", { content: "Stable final answer" }),
+    ]);
+    const revealSourceRef: { current: ((messageId: string) => boolean) | null } = { current: null };
+    const annotations = {
+      cardRef: () => {},
+      captureProps: {
+        "data-annotation-thread": "chat:session-1" as const,
+        onPointerUp: () => {}, onKeyUp: () => {}, onKeyDown: () => {},
+      },
+      popup: <></>,
+      revealSourceRef,
+    };
+    const view = (
+      messages: Parameters<typeof ChatMessageList>[0]["messages"],
+      pendingTask: Parameters<typeof ChatMessageList>[0]["pendingTask"],
+    ) => (
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={qc}>
+          <ChatMessageList messages={messages} pendingTask={pendingTask} availability="online" annotations={annotations} />
+        </QueryClientProvider>
+      </I18nProvider>
+    );
+
+    const { rerender, container } = render(view([], { task_id: TASK_ID, status: "running" }));
+    const answerBefore = await screen.findByText("Stable final answer");
+    expect(container.querySelector("[data-comment-content]")).toBeNull();
+    expect(revealSourceRef.current?.("persisted-answer")).toBe(false);
+
+    rerender(view([{
+      id: "persisted-answer",
+      chat_session_id: "session-1",
+      role: "assistant",
+      content: "Stable final answer",
+      task_id: TASK_ID,
+      created_at: "2026-09-17T00:00:00Z",
+    }], null));
+
+    const answer = await screen.findByText("Stable final answer");
+    expect(answer).toBe(answerBefore);
+    expect(answer.closest("[data-comment-content]")?.getAttribute("data-comment-content")).toBe("persisted-answer");
+    expect(answer.closest("[data-annotation-thread]")).not.toBeNull();
+  });
 });
 
 describe("ChatMessageList tool rows (#8835 regression)", () => {
@@ -476,6 +523,43 @@ describe("ChatMessageList tool rows (#8835 regression)", () => {
     );
 
     expect(await screen.findByText("src/a.go，另有 1 个文件")).toBeInTheDocument();
+  });
+});
+
+describe("ChatMessageList command tool rows", () => {
+  it("shows a command line by line, not as escaped JSON", async () => {
+    const qc = new QueryClient();
+    qc.setQueryData(chatKeys.taskMessages(TASK_ID), [
+      taskMsg(0, "tool_use", {
+        tool: "Bash",
+        input: { command: "pnpm test\npnpm lint", description: "Run checks" },
+      }),
+    ]);
+
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={qc}>
+          <ChatMessageList
+            messages={[]}
+            pendingTask={{ task_id: TASK_ID, status: "running" }}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    fireEvent.click(await screen.findByText("Bash"));
+
+    // Match the raw text: the default matcher collapses the newline that this
+    // test is about.
+    const command = Array.from(document.querySelectorAll("pre > div")).find(
+      (line) => line.textContent === "pnpm test\npnpm lint",
+    );
+    expect(command).toHaveClass("text-foreground");
+    // Same capped, scrolling box as the panel's other inputs and results.
+    expect(command?.parentElement).toHaveClass("max-h-32", "overflow-auto");
+    expect(screen.queryByText(/"command":/)).not.toBeInTheDocument();
+    expect(command?.nextElementSibling?.textContent).toContain('"description": "Run checks"');
   });
 });
 

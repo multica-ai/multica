@@ -17,6 +17,8 @@ const mocks = vi.hoisted(() => ({
   copyText: vi.fn(),
   deleteProject: vi.fn(),
   getProject: vi.fn(),
+  getProjectSubscription: vi.fn(),
+  setProjectSubscription: vi.fn(),
   getShareableUrl: vi.fn((path: string) => `https://app.example${path}`),
   push: vi.fn(),
   recordVisit: vi.fn(),
@@ -28,8 +30,9 @@ vi.mock("@multica/ui/lib/clipboard", () => ({
   copyText: mocks.copyText,
 }));
 
-vi.mock("../../workflows/project-workflow-menu", () => ({
-  ProjectWorkflowMenuHost: ({ children }: { children: (submenu: null) => React.ReactNode }) => children(null),
+vi.mock("../../workflows/project-workflow-sheet", () => ({
+  ProjectWorkflowMenuItem: () => null,
+  ProjectWorkflowSheet: () => null,
 }));
 vi.mock("../../workflows/project-workflow-row", () => ({ ProjectWorkflowControl: () => null }));
 
@@ -128,14 +131,6 @@ vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
     </button>
   ),
   DropdownMenuSeparator: () => <hr />,
-}));
-
-vi.mock("@multica/ui/components/ui/popover", () => ({
-  Popover: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  PopoverTrigger: ({ render }: { render: React.ReactNode }) => <>{render}</>,
-  PopoverContent: ({ children }: { children: React.ReactNode }) => (
-    <div>{children}</div>
-  ),
 }));
 
 vi.mock("@multica/ui/components/ui/tooltip", () => ({
@@ -279,7 +274,14 @@ beforeEach(() => {
   mocks.copyText.mockReset().mockResolvedValue(true);
   mocks.deleteProject.mockReset().mockReturnValue(pending.promise);
   mocks.getProject.mockReset().mockResolvedValue(PROJECT);
-  setApiInstance({ deleteProject: mocks.deleteProject, getProject: mocks.getProject } as unknown as ApiClient);
+  mocks.getProjectSubscription.mockReset().mockResolvedValue(false);
+  mocks.setProjectSubscription.mockReset().mockImplementation(async (_id: string, subscribed: boolean) => subscribed);
+  setApiInstance({
+    deleteProject: mocks.deleteProject,
+    getProject: mocks.getProject,
+    getProjectSubscription: mocks.getProjectSubscription,
+    setProjectSubscription: mocks.setProjectSubscription,
+  } as unknown as ApiClient);
   mocks.getShareableUrl.mockClear();
   mocks.push.mockReset();
   mocks.recordVisit.mockReset();
@@ -307,6 +309,25 @@ describe("ProjectDetail rename", () => {
   });
 });
 
+describe("ProjectDetail lead permissions", () => {
+  it("does not let ordinary members change the lead of a private project", async () => {
+    mocks.role = "member";
+    qc.setQueryData(projectKeys.detail("workspace-1", PROJECT.id), { ...PROJECT, visibility: "private" });
+    renderProjectDetail();
+    expect(screen.getByRole("button", { name: "No lead" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "No lead" }));
+    expect(screen.queryByPlaceholderText("Assign lead...")).not.toBeInTheDocument();
+  });
+
+  it("keeps the lead of a workspace project editable for ordinary members", async () => {
+    mocks.role = "member";
+    renderProjectDetail();
+    expect(screen.getByRole("button", { name: "No lead" })).toBeEnabled();
+    await userEvent.click(screen.getByRole("button", { name: "No lead" }));
+    expect(screen.getByPlaceholderText("Assign lead...")).toBeInTheDocument();
+  });
+});
+
 describe("ProjectDetail sharing", () => {
   it("copies the platform shareable URL instead of the renderer URL", async () => {
     const user = userEvent.setup();
@@ -320,6 +341,31 @@ describe("ProjectDetail sharing", () => {
     expect(mocks.copyText).toHaveBeenCalledWith(
       "https://app.example/test-workspace/projects/project-1",
     );
+  });
+});
+
+describe("ProjectDetail subscription", () => {
+  it("subscribes to every issue in the project and can unsubscribe again", async () => {
+    const user = userEvent.setup();
+    renderProjectDetail();
+
+    await user.click(await screen.findByRole("button", { name: "Subscribe to all issues" }));
+    expect(mocks.setProjectSubscription).toHaveBeenCalledWith("project-1", true);
+    expect(mocks.toastSuccess).toHaveBeenCalled();
+
+    await user.click(await screen.findByRole("button", { name: "Unsubscribe from project" }));
+    expect(mocks.setProjectSubscription).toHaveBeenLastCalledWith("project-1", false);
+    expect(await screen.findByRole("button", { name: "Subscribe to all issues" })).toBeInTheDocument();
+  });
+
+  it("keeps the current state and reports a failed update", async () => {
+    mocks.setProjectSubscription.mockRejectedValueOnce(new Error("boom"));
+    const user = userEvent.setup();
+    renderProjectDetail();
+
+    await user.click(await screen.findByRole("button", { name: "Subscribe to all issues" }));
+    await waitFor(() => expect(mocks.toastError).toHaveBeenCalled());
+    expect(screen.getByRole("button", { name: "Subscribe to all issues" })).toBeInTheDocument();
   });
 });
 
