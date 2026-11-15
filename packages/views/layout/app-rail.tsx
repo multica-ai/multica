@@ -18,7 +18,11 @@ import { toast } from "sonner";
 import { useChatStore } from "@multica/core/chat";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
 import { countUnreadChatMessages } from "@multica/core/chat/unread";
-import { useInboxUnreadCount } from "@multica/core/inbox/queries";
+import {
+  deduplicateInboxItems,
+  inboxListOptions,
+  useInboxUnreadCount,
+} from "@multica/core/inbox/queries";
 import { useMarkAllInboxRead } from "@multica/core/inbox/mutations";
 import { resolveRailOrder, useRailOrderStore } from "@multica/core/navigation";
 import {
@@ -125,6 +129,30 @@ function RailBadgeMark({ badge }: { badge: RailBadge }) {
       )}
     />
   );
+}
+
+/**
+ * The Inbox item returns to the last notification opened there. Once that
+ * notification has left the active list (archived here, on another device, or
+ * by the server), the Inbox page treats `?issue=` as a shared link and
+ * replaces itself with the issue, so the click looks like it did nothing.
+ * Drop a selection the cached list no longer holds; with no cached list the
+ * page still decides.
+ */
+function useInboxReturnHref(href: string, wsId: string | undefined): string {
+  const { data: items } = useQuery({ ...inboxListOptions(wsId ?? ""), enabled: false });
+  return useMemo(() => {
+    const queryAt = href.indexOf("?");
+    if (!items || queryAt < 0) return href;
+    const params = new URLSearchParams(href.slice(queryAt + 1));
+    const key = params.get("issue");
+    if (!key || params.has("view")) return href;
+    if (deduplicateInboxItems(items).some((item) => (item.issue_id ?? item.id) === key)) return href;
+    params.delete("issue");
+    const query = params.toString();
+    const path = href.slice(0, queryAt);
+    return query ? `${path}?${query}` : path;
+  }, [href, items]);
 }
 
 /** Hover previews of a collapsed nav. Mouse only: a touch tap navigates. */
@@ -306,6 +334,8 @@ export function AppRail({
   const shell = useAppShell();
   const badges = useRailBadges();
   const space = shell?.space ?? null;
+  const wsId = useCurrentWorkspace()?.id;
+  const inboxHref = useInboxReturnHref(shell?.spaceHref("inbox", p.inbox()) ?? p.inbox(), wsId);
   const settingsPeek = usePeekHandlers("settings", space === "settings");
   const savedOrder = useRailOrderStore((s) => s.order);
   const setOrder = useRailOrderStore((s) => s.setOrder);
@@ -397,7 +427,7 @@ export function AppRail({
                 <RailSpaceLink
                   space={id}
                   {...items[id]}
-                  href={shell?.spaceHref(id, items[id].href) ?? items[id].href}
+                  href={id === "inbox" ? inboxHref : (shell?.spaceHref(id, items[id].href) ?? items[id].href)}
                   active={space === id}
                   badge={badges[id]}
                 />

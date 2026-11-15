@@ -26,13 +26,13 @@ import {
 import { SearchCommand } from "@multica/views/search";
 import { FloatingChat } from "@multica/views/chat";
 import { StarPrompt } from "@multica/views/star-prompt";
-import { WorkspaceSlugProvider, paths, useCurrentWorkspace } from "@multica/core/paths";
+import { WorkspaceSlugProvider, useCurrentWorkspace } from "@multica/core/paths";
 import { workspaceListOptions } from "@multica/core/workspace";
 import {
   useNavigation,
   type LinkClickIntent,
 } from "@multica/views/navigation";
-import { getCurrentSlug, subscribeToCurrentSlug } from "@multica/core/platform";
+import { getCurrentSlug, subscribeToCurrentSlug, systemNotificationPath } from "@multica/core/platform";
 import { useDesktopUnreadBadge } from "@multica/views/platform";
 import { useT } from "@multica/views/i18n";
 import {
@@ -104,13 +104,14 @@ function MainTopBar({ railMounted }: { railMounted: boolean }) {
       >
         <TabBar />
       </div>
-      {/* pr-6 is the canvas's mr-2 plus the page header's PAGE_GUTTER (px-4),
-          and gap-1 is the page header's action gap, so each icon here stands
-          on the same column as a trailing icon of the page header below. */}
+      {/* The right padding is the canvas's mr-2 plus the page header's
+          PAGE_GUTTER, and gap-1 is the page header's action gap, so each icon
+          here stands on the same column as a trailing icon of the page header
+          below. */}
       {railMounted && (
         <div
           data-slot="title-bar-actions"
-          className="relative z-10 ml-auto flex shrink-0 items-center gap-1 pr-6"
+          className="relative z-10 ml-auto flex shrink-0 items-center gap-1 pr-[calc(var(--page-padding-x,var(--space-md,1rem))+0.5rem)]"
           style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
         >
           <NewIssueButton className={TITLE_BAR_ACTION_CLASS} tooltipSide="bottom" />
@@ -185,26 +186,10 @@ function useInternalLinkHandler() {
 }
 
 /**
- * Bridge between the renderer and the Electron main process for inbox-level
- * OS integration. Mounted inside WorkspaceSlugProvider so it can resolve the
- * current workspace's id for the badge hook.
- *
- * Two responsibilities:
- *   1. Mirror the unread inbox count onto the dock/taskbar badge.
- *   2. When the user clicks an OS notification, open the notified
- *      workspace's inbox focused on that item. The route uses the `slug`
- *      that the notification was *emitted* with — not the currently active
- *      workspace — so a notification from workspace A always opens A's
- *      inbox even if the user has since switched to workspace B. Marking
- *      the row read is handled by InboxPage's selected-item effect, which
- *      covers both click-to-select and URL-param-select paths.
- *
- * The click routes through `useNavigation().push` — NOT the
- * `multica:navigate` event, whose handler `openTab`s into the ACTIVE
- * workspace's tab group. The navigation adapter detects a cross-workspace
- * path and translates it into `switchWorkspace(slug, path)`, so clicking a
- * workspace-A notification while B is active performs a real workspace
- * switch instead of mounting A's inbox inside B's tab group (#3766).
+ * Mirrors Inbox and Chat unread badges and routes native notification clicks. Chat alerts
+ * open Chat directly; inbox alerts retain their row selector. The shared path
+ * resolver uses the source workspace, and the navigation adapter performs a
+ * workspace switch when needed. Each destination owns its mark-read behavior.
  */
 function DesktopInboxBridge() {
   const workspace = useCurrentWorkspace();
@@ -218,10 +203,9 @@ function DesktopInboxBridge() {
   }, [push]);
 
   useEffect(() => {
-    return window.desktopAPI.onInboxOpen(({ slug, issueKey }) => {
-      if (!slug) return;
-      const inboxPath = `${paths.workspace(slug).inbox()}?issue=${encodeURIComponent(issueKey)}`;
-      pushRef.current(inboxPath);
+    return window.desktopAPI.onInboxOpen((payload) => {
+      const path = systemNotificationPath(payload);
+      if (path) pushRef.current(path);
     });
   }, []);
 
@@ -278,8 +262,10 @@ export function DesktopShell() {
           IndexRedirect, not a route. */}
       <WorkspaceSlugProvider slug={slug}>
         <DesktopInboxBridge />
-        <div className="flex h-screen bg-app-shell">
-          {/* bg-app-shell is the wrapper's non-inset fill, so it also owns the
+        <div className="flex h-screen">
+          {/* The wrapper alone paints the frame: a second fill under it would
+              double the frame's glass over a theme's backdrop.
+              bg-app-shell is the wrapper's non-inset fill, so it also owns the
               non-inset half of --sidebar-wrapper-fill. sidebar.tsx supplies the
               inset half of both. Anything that has to paint an opaque layer
               over this wrapper (the tab flares) reads the variable rather than

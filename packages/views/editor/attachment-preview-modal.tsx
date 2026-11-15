@@ -568,8 +568,9 @@ export function AttachmentPreviewModal({
       {open && (
         <motion.div
           // Blurred as well as dimmed: at any opacity that still reads as a
-          // backdrop, the page's text shows through behind the top bar.
-          className="fixed inset-0 z-50 flex flex-col bg-black/95 backdrop-blur-xl"
+          // backdrop, the page's text shows through behind the top bar. The
+          // backdrop runs to the screen edge; the controls stay in the safe area.
+          className="fixed inset-0 z-50 flex flex-col bg-black/95 pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] backdrop-blur-xl"
           // Only a click that lands on the backdrop itself closes. A pan that
           // starts on the zoom canvas and releases out here retargets its
           // click through pointer capture, but this makes the intent explicit

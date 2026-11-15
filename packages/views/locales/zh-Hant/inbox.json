@@ -39,7 +39,8 @@
     "mark_unread": "標為未讀",
     "archive": "歸檔",
     "unarchive": "取消歸檔",
-    "open_in_new_tab": "在新標籤頁開啟"
+    "open_in_new_tab": "在新標籤頁開啟",
+    "delete": "刪除"
   },
   "list": {
     "loading_selection": "正在載入通知…",
@@ -118,7 +119,8 @@
   "toasts": {
     "source_context_retry_started": "已使用原始上下文開始重試",
     "archived": "已歸檔通知",
-    "unarchived": "已恢復通知"
+    "unarchived": "已恢復通知",
+    "deleted": "通知已刪除"
   },
   "errors": {
     "archived_lookup_failed": "無法載入連結指向的通知",
@@ -134,6 +136,14 @@
     "archive_completed_failed": "歸檔已完成失敗",
     "unarchive_failed": "取消歸檔失敗",
     "archived_load_failed": "無法載入已歸檔通知",
-    "filters_load_failed": "無法載入篩選項"
+    "filters_load_failed": "無法載入篩選項",
+    "delete_failed": "無法刪除通知，請重試。"
+  },
+  "delete_dialog": {
+    "title": "刪除通知？",
+    "description": "此通知將被永久刪除，相關任務和執行記錄不受影響。",
+    "issue_description": "目前檢視中此任務的通知將被永久刪除，任務和執行記錄不受影響。",
+    "cancel": "取消",
+    "active_issue_description": "此任務在收件箱中的通知將被永久刪除。先前歸檔的通知會保留，並重新顯示在已歸檔檢視中。任務和執行記錄不受影響。"
   }
 }

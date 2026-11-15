@@ -107,6 +107,7 @@
       "views": "Представления",
       "new_project": "Новый проект",
       "new_issue_in_project": "Новая задача в «{{name}}»",
+      "private_project": "Видно участникам проекта, а также owner и admin рабочего пространства",
       "all_projects_one": "Всего {{count}} проект",
       "all_projects_other": "Всего {{count}} проекта",
       "project_issues": "Задачи в «{{name}}»",

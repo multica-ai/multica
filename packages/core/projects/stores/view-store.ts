@@ -8,6 +8,8 @@ import {
   type CollectionViewCore,
 } from "../../collections/view-store";
 
+export type ProjectScope = ProjectLifecycleView | "archived";
+
 // Projects is the one dual-view list: a dense table (compact) and a card
 // grid (comfortable), toggled by viewMode. Sort + filters feed both views;
 // hiddenColumns only applies to the table. Lifecycle scopes and explicit
@@ -59,8 +61,8 @@ export interface ProjectViewState
     ProjectColumnKey,
     ProjectListFilters
   > {
-  lifecycleView: ProjectLifecycleView;
-  setLifecycleView: (view: ProjectLifecycleView) => void;
+  lifecycleView: ProjectScope;
+  setLifecycleView: (view: ProjectScope) => void;
   viewMode: ProjectViewMode;
   setViewMode: (mode: ProjectViewMode) => void;
 }
@@ -69,8 +71,8 @@ export const useProjectViewStore = createCollectionViewStore<
   ProjectSortField,
   ProjectColumnKey,
   ProjectListFilters,
-  { viewMode: ProjectViewMode; lifecycleView: ProjectLifecycleView },
-  { setViewMode: (mode: ProjectViewMode) => void; setLifecycleView: (view: ProjectLifecycleView) => void }
+  { viewMode: ProjectViewMode; lifecycleView: ProjectScope },
+  { setViewMode: (mode: ProjectViewMode) => void; setLifecycleView: (view: ProjectScope) => void }
 >({
   name: "multica_projects_view",
   version: 1,
@@ -78,7 +80,7 @@ export const useProjectViewStore = createCollectionViewStore<
     const p = persisted as Omit<Partial<ProjectViewState>, "lifecycleView"> & { lifecycleView?: string };
     return {
       ...p,
-      lifecycleView: p.lifecycleView === "active" || p.lifecycleView === "all"
+      lifecycleView: p.lifecycleView === "active" || p.lifecycleView === "all" || p.lifecycleView === "archived"
         ? p.lifecycleView
         : p.lifecycleView === "closed" || p.lifecycleView === "completed"
           ? "closed"

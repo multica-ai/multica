@@ -142,3 +142,15 @@ describe("project lifecycle preferences", () => {
   });
 
 });
+
+
+it.each([0, 1])("preserves an Archived preference from persisted version %s", async (version) => {
+  localStorage.setItem("multica_projects_view:acme", JSON.stringify({
+    state: { lifecycleView: "archived", viewMode: "comfortable", filters: { statuses: ["completed"] } }, version,
+  }));
+  setCurrentWorkspace("acme", "ws_a");
+  await flush();
+  expect(useProjectViewStore.getState()).toMatchObject({
+    lifecycleView: "archived", viewMode: "comfortable", filters: { statuses: ["completed"] },
+  });
+});

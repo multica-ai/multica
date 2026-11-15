@@ -9,7 +9,7 @@ import type { ReactNode } from "react";
 import { setApiInstance } from "../api";
 import type { ApiClient } from "../api/client";
 import type { InboxItem, InboxWorkspaceUnread } from "../types";
-import { useMarkInboxRead, useMarkInboxUnread, useMarkIssueInboxRead, useUnarchiveInbox } from "./mutations";
+import { useDeleteInbox, useMarkInboxRead, useMarkInboxUnread, useMarkIssueInboxRead, useUnarchiveInbox } from "./mutations";
 import { inboxKeys, useInboxUnreadCount } from "./queries";
 import { onInboxSummaryInvalidate } from "./ws-updaters";
 import { createQueryClient } from "../query-client";
@@ -64,6 +64,39 @@ function summaryCount(qc: QueryClient) {
   );
   return summary?.find((e) => e.workspace_id === WORKSPACE_ID)?.count;
 }
+
+describe("useDeleteInbox", () => {
+  it("does not remove cached rows before confirmation and refreshes both views and unread summary on success", async () => {
+    const qc = createQueryClient();
+    let confirm!: () => void;
+    setApiInstance({ deleteInbox: vi.fn(() => new Promise<{ count: number }>((resolve) => {
+      confirm = () => resolve({ count: 1 });
+    })) } as unknown as ApiClient);
+    const keys = [inboxKeys.list(WORKSPACE_ID), inboxKeys.archived(WORKSPACE_ID), inboxKeys.unreadSummary()];
+    for (const key of keys) qc.setQueryData(key, [item()]);
+    const { result } = renderHook(() => useDeleteInbox(), { wrapper: createWrapper(qc) });
+    act(() => result.current.mutate("inbox-1"));
+    await waitFor(() => expect(result.current.isPending).toBe(true));
+    expect(archivedCache(qc)).toHaveLength(1);
+    expect(listCache(qc)).toHaveLength(1);
+    await act(async () => confirm());
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await waitFor(() => {
+      for (const key of keys) expect(qc.getQueryState(key)?.isInvalidated).toBe(true);
+    });
+  });
+
+  it("keeps caches untouched on failure", async () => {
+    const qc = createQueryClient();
+    setApiInstance({ deleteInbox: vi.fn().mockRejectedValue(new Error("offline")) } as unknown as ApiClient);
+    qc.setQueryData(inboxKeys.list(WORKSPACE_ID), [item()]);
+    const { result } = renderHook(() => useDeleteInbox(), { wrapper: createWrapper(qc) });
+    act(() => result.current.mutate("inbox-1"));
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(listCache(qc)).toHaveLength(1);
+    expect(qc.getQueryState(inboxKeys.list(WORKSPACE_ID))?.isInvalidated).toBe(false);
+  });
+});
 
 describe("useMarkInboxRead", () => {
   let queryClient: QueryClient;

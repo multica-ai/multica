@@ -82,6 +82,6 @@
     "inbox_notifications": "Inbox notifications",
     "system": "System",
     "system_notifications": "System notifications",
-    "system_description": "Account changes, security alerts, product updates."
+    "chat_replies": "Include chat replies"
   }
 }

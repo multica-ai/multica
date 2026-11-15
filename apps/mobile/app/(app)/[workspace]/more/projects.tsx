@@ -48,7 +48,7 @@ function ProjectsBrowser({ wsId, wsSlug }: { wsId: string | null; wsSlug: string
 
   const sorted = useMemo(() => {
     if (!data) return [];
-    return data.filter((p) => matchesProjectLifecycle(p.status, lifecycleView)).sort(
+    return data.filter((p) => !p.archived_at && matchesProjectLifecycle(p.status, lifecycleView)).sort(
       (a, b) =>
         new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
     );
@@ -69,7 +69,7 @@ function ProjectsBrowser({ wsId, wsSlug }: { wsId: string | null; wsSlug: string
         <SegmentedControl
           accessibilityLabel={t("lifecycle.label")}
           values={PROJECT_LIFECYCLE_VIEWS.map((view) =>
-            `${t(`lifecycle.${view}`)} (${data?.filter((p) => matchesProjectLifecycle(p.status, view)).length ?? 0})`,
+            `${t(`lifecycle.${view}`)} (${data?.filter((p) => !p.archived_at && matchesProjectLifecycle(p.status, view)).length ?? 0})`,
           )}
           selectedIndex={PROJECT_LIFECYCLE_VIEWS.indexOf(lifecycleView)}
           onChange={(event) => {

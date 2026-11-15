@@ -97,6 +97,7 @@ import type {
   TimelineEntry,
   AssigneeFrequencyEntry,
   TaskMessagePayload,
+  TaskContextReceiptResponse,
   Attachment,
   ChatSession,
   ChatPinnedAgent,
@@ -111,6 +112,7 @@ import type {
   StartMikaOnboardingResponse,
   CancelTaskResponse,
   Project,
+  ArchiveProjectResponse,
   CreateProjectRequest,
   UpdateProjectRequest,
   ListProjectsResponse,
@@ -190,6 +192,7 @@ import type {
   IssueEnvironmentAction,
   IssueEnvironmentCommand,
   StartIssueEnvironmentRequest,
+  IssuePullRequestSummariesResponse,
   ListGitHubInstallationsResponse,
   ListGitHubRepositoriesResponse,
   GitHubConnectResponse,
@@ -281,6 +284,7 @@ import { type Logger, noopLogger } from "../logger";
 import { createRequestId, createSafeId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
 import { parseWithFallback } from "./schema";
+import { getApiRequestObserver } from "./request-observer";
 import {
   RuntimeProfileSchema,
   RuntimeProfileListSchema,
@@ -375,6 +379,7 @@ import {
   RuntimeUsageListSchema,
   SearchIssuesResponseSchema,
   ProjectSchema,
+  ArchiveProjectResponseSchema,
   ListProjectMembersResponseSchema,
   ProjectSubscriptionSchema,
   ListProjectsResponseSchema,
@@ -389,6 +394,7 @@ import {
   SquadMemberStatusListResponseSchema,
   SubscribersListSchema,
   TaskMessageListSchema,
+  TaskContextReceiptResponseSchema,
   TimelineEntriesSchema,
   UserSchema,
   WebhookDeliveryResponseSchema,
@@ -468,6 +474,7 @@ import {
   SubscribedIssueIdsSchema,
   InvolvedSquadIdsSchema,
   IssueInboxReadSchema,
+  InboxDeleteSchema,
   InboxItemListSchema,
   ArchivedInboxPageSchema,
   ArchivedInboxFacetsSchema,
@@ -505,6 +512,8 @@ import {
   EMPTY_ISSUE_ENVIRONMENTS_RESPONSE,
   IssueEnvironmentsResponseSchema,
   IssueEnvironmentCommandSchema,
+  EMPTY_ISSUE_PULL_REQUEST_SUMMARIES_RESPONSE,
+  IssuePullRequestSummariesResponseSchema,
   ResourceLabelsResponseSchema,
   EMPTY_LABEL,
   EMPTY_LIST_LABELS_RESPONSE,
@@ -804,6 +813,9 @@ function subscriberTarget(
  */
 type WorkspaceScope = string | { workspaceId: string };
 
+/** `readOnly` marks a POST that changes nothing on the server. */
+type ApiRequestInit = RequestInit & { readOnly?: boolean };
+
 function workspaceHeader(
   scope?: WorkspaceScope,
 ): Record<string, string> | undefined {
@@ -992,11 +1004,14 @@ export class ApiClient {
   // path, plain text for the attachment-preview proxy, etc.
   private async fetchRaw(
     path: string,
-    init?: RequestInit & { extraHeaders?: Record<string, string> },
+    init?: ApiRequestInit & { extraHeaders?: Record<string, string> },
   ): Promise<Response> {
     const rid = createRequestId();
     const start = Date.now();
     const method = init?.method ?? "GET";
+    const observer = getApiRequestObserver();
+    const refusal = observer?.refuse?.({ method, path, readOnly: init?.readOnly === true });
+    if (refusal) throw new Error(refusal);
 
     // Rebuilt per attempt rather than captured once: authHeaders() reads the
     // CSRF cookie at call time, and the retry below exists precisely because
@@ -1014,12 +1029,30 @@ export class ApiClient {
 
     this.logger.info(`→ ${method} ${path}`, { rid });
 
-    const send = () =>
-      fetch(`${this.baseUrl}${path}`, {
-        ...init,
-        headers: buildHeaders(),
-        credentials: "include",
-      });
+    observer?.onStart({
+      requestId: rid,
+      method,
+      path,
+      body: typeof init?.body === "string" ? init.body : null,
+    });
+
+    const { readOnly: _readOnly, ...requestInit } = init ?? {};
+    const send = async () => {
+      try {
+        return await fetch(`${this.baseUrl}${path}`, {
+          ...requestInit,
+          headers: buildHeaders(),
+          credentials: "include",
+        });
+      } catch (err) {
+        observer?.onEnd({
+          requestId: rid,
+          status: null,
+          error: err instanceof Error && err.name === "AbortError" ? "aborted" : String(err),
+        });
+        throw err;
+      }
+    };
 
     let res = await send();
 
@@ -1050,14 +1083,16 @@ export class ApiClient {
       const { message, body } = await this.parseErrorBody(res, `API error: ${res.status} ${res.statusText}`);
       const logLevel = res.status === 404 ? "warn" : "error";
       this.logger[logLevel](`← ${res.status} ${path}`, { rid, duration: `${Date.now() - start}ms`, error: message });
+      observer?.onEnd({ requestId: rid, status: res.status, error: message });
       throw new ApiError(message, res.status, res.statusText, body);
     }
 
     this.logger.info(`← ${res.status} ${path}`, { rid, duration: `${Date.now() - start}ms` });
+    observer?.onEnd({ requestId: rid, status: res.status, error: null });
     return res;
   }
 
-  private async fetch<T>(path: string, init?: RequestInit): Promise<T> {
+  private async fetch<T>(path: string, init?: ApiRequestInit): Promise<T> {
     const res = await this.fetchRaw(path, {
       ...init,
       extraHeaders: { "Content-Type": "application/json" },
@@ -1328,6 +1363,7 @@ export class ApiClient {
   async listIssueTableGroups(params: IssueTableGroupsRequest): Promise<IssueTableGroupsResponse> {
     const raw = await this.fetch<unknown>("/api/issues/table/groups", {
       method: "POST",
+      readOnly: true,
       body: JSON.stringify(params),
     });
     return parseWithFallback(
@@ -1341,6 +1377,7 @@ export class ApiClient {
   async listIssueTableRows(params: IssueTableRowsRequest): Promise<IssueTableRowsResponse> {
     const raw = await this.fetch<unknown>("/api/issues/table/rows", {
       method: "POST",
+      readOnly: true,
       body: JSON.stringify(params),
     });
     return parseWithFallback(
@@ -1354,6 +1391,7 @@ export class ApiClient {
   async listIssueTableFacets(params: IssueTableFacetsRequest): Promise<IssueTableFacetsResponse> {
     const raw = await this.fetch<unknown>("/api/issues/table/facets", {
       method: "POST",
+      readOnly: true,
       body: JSON.stringify(params),
     });
     return parseWithFallback(
@@ -1378,11 +1416,12 @@ export class ApiClient {
     });
   }
 
-  async searchProjects(params: { q: string; limit?: number; offset?: number; include_closed?: boolean; signal?: AbortSignal }): Promise<SearchProjectsResponse> {
+  async searchProjects(params: { q: string; limit?: number; offset?: number; include_closed?: boolean; include_archived?: boolean; signal?: AbortSignal }): Promise<SearchProjectsResponse> {
     const search = new URLSearchParams({ q: params.q });
     if (params.limit !== undefined) search.set("limit", String(params.limit));
     if (params.offset !== undefined) search.set("offset", String(params.offset));
     if (params.include_closed) search.set("include_closed", "true");
+    if (params.include_archived) search.set("include_archived", "true");
     const raw = await this.fetch<unknown>(
       `/api/projects/search?${search}`,
       params.signal ? { signal: params.signal } : undefined,
@@ -1809,6 +1848,7 @@ export class ApiClient {
   async previewCommentTriggers(issueId: string, content: string, parentId?: string, editingCommentId?: string): Promise<CommentTriggerPreview> {
     const raw = await this.fetch<unknown>(`/api/issues/${issueId}/comments/trigger-preview`, {
       method: "POST",
+      readOnly: true,
       body: JSON.stringify({
         content,
         ...(parentId ? { parent_id: parentId } : {}),
@@ -1827,6 +1867,7 @@ export class ApiClient {
   async previewIssueTrigger(params: IssueTriggerPreviewParams): Promise<IssueTriggerPreview> {
     const raw = await this.fetch<unknown>("/api/issues/preview-trigger", {
       method: "POST",
+      readOnly: true,
       body: JSON.stringify({
         ...(params.issueIds?.length ? { issue_ids: params.issueIds } : {}),
         ...(params.isCreate ? { is_create: true } : {}),
@@ -2145,7 +2186,7 @@ export class ApiClient {
   }
 
   async listQoderEnvironments(wsId: string, token: string, baseUrl: string, signal?: AbortSignal) {
-    return parseQoderCatalog(await this.fetch(`/api/workspaces/${wsId}/qoder/environments`, { method: "POST", body: JSON.stringify({ qoder_token: token, base_url: baseUrl }), signal }));
+    return parseQoderCatalog(await this.fetch(`/api/workspaces/${wsId}/qoder/environments`, { method: "POST", readOnly: true, body: JSON.stringify({ qoder_token: token, base_url: baseUrl }), signal }));
   }
   async listQoderAgents(wsId: string) {
     return parseQoderCatalog(await this.fetch(`/api/workspaces/${wsId}/qoder/agents`));
@@ -2997,6 +3038,16 @@ export class ApiClient {
     });
   }
 
+  async getTaskContextReceipt(taskId: string): Promise<TaskContextReceiptResponse> {
+    const raw = await this.fetch<unknown>(`/api/tasks/${taskId}/context-receipt`);
+    return parseWithFallback<TaskContextReceiptResponse>(
+      raw,
+      TaskContextReceiptResponseSchema,
+      { receipt: null },
+      { endpoint: "GET /api/tasks/:id/context-receipt" },
+    );
+  }
+
   async listTasksByIssue(issueId: string, includeDescendants = false, options?: { view: "timeline" }): Promise<AgentTask[]> {
     const search = new URLSearchParams();
     if (includeDescendants) search.set("scope", "subtree");
@@ -3098,6 +3149,13 @@ export class ApiClient {
 
   async archiveInbox(id: string): Promise<InboxItem> {
     return this.fetch(`/api/inbox/${id}/archive`, { method: "POST" });
+  }
+
+  async deleteInbox(id: string): Promise<{ count: number | null }> {
+    const raw = await this.fetch<unknown>(`/api/inbox/${id}`, { method: "DELETE" });
+    return parseWithFallback<{ count: number | null }>(raw, InboxDeleteSchema, { count: null }, {
+      endpoint: "DELETE /api/inbox/{id}",
+    });
   }
 
   // Archived notifications, backing the inbox's "Archived" sub-view. Capped
@@ -3489,6 +3547,7 @@ export class ApiClient {
   async previewPlugin(workspaceId: string, request: PluginPreviewRequest): Promise<PluginPreview> {
     const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/plugins/preview`, {
       method: "POST",
+      readOnly: true,
       body: JSON.stringify(request),
     });
     return parseWithFallback(raw, PluginPreviewSchema, EMPTY_PLUGIN_PREVIEW, {
@@ -4350,9 +4409,10 @@ export class ApiClient {
   }
 
   // Projects
-  async listProjects(params?: { status?: string }): Promise<ListProjectsResponse> {
+  async listProjects(params?: { status?: string; include_archived?: boolean }): Promise<ListProjectsResponse> {
     const search = new URLSearchParams();
     if (params?.status) search.set("status", params.status);
+    if (params?.include_archived) search.set("include_archived", "true");
     const raw = await this.fetch<unknown>(`/api/projects?${search}`);
     return parseWithFallback(raw, ListProjectsResponseSchema, EMPTY_LIST_PROJECTS_RESPONSE, {
       endpoint: "GET /api/projects",
@@ -4382,6 +4442,18 @@ export class ApiClient {
 
   async deleteProject(id: string): Promise<void> {
     await this.fetch(`/api/projects/${id}`, { method: "DELETE" });
+  }
+
+  async archiveProject(id: string): Promise<ArchiveProjectResponse> {
+    const raw = await this.fetch<unknown>(`/api/projects/${id}/archive`, { method: "POST" });
+    return parseWithFallback(raw, ArchiveProjectResponseSchema, { ...EMPTY_PROJECT, paused_autopilot_ids: [] }, {
+      endpoint: "POST /api/projects/:id/archive",
+    });
+  }
+
+  async restoreProject(id: string): Promise<Project> {
+    const raw = await this.fetch<unknown>(`/api/projects/${id}/restore`, { method: "POST" });
+    return parseWithFallback(raw, ProjectSchema, EMPTY_PROJECT, { endpoint: "POST /api/projects/:id/restore" });
   }
 
   async getProjectMembers(id: string): Promise<ListProjectMembersResponse> {
@@ -4619,6 +4691,7 @@ export class ApiClient {
   async dryRunProjectWorkflow(projectId: string, workflowId: string | null): Promise<IssueWorkflowDryRunResponse> {
     const raw = await this.fetch<unknown>(`/api/projects/${projectId}/workflow`, {
       method: "POST",
+      readOnly: true,
       body: JSON.stringify({ workflow_id: workflowId, dry_run: true }),
     });
     return parseWithFallback(raw, IssueWorkflowDryRunResponseSchema, EMPTY_ISSUE_WORKFLOW_DRY_RUN, {
@@ -5386,6 +5459,17 @@ export class ApiClient {
       actor_type: "member", actor_id: null, created_at: new Date().toISOString(), completed_at: null, output: null,
     };
     return parseWithFallback(raw, IssueEnvironmentCommandSchema, fallback, { endpoint: `${init?.method ?? "GET"} ${path.replace(/[0-9a-f-]{36}/g, ":id")}` });
+  }
+
+  /** Every linked PR in the workspace, for PR chips on issue cards and rows. */
+  async listIssuePullRequestSummaries(): Promise<IssuePullRequestSummariesResponse> {
+    const raw = await this.fetch<unknown>("/api/issues/pull-requests");
+    return parseWithFallback(
+      raw,
+      IssuePullRequestSummariesResponseSchema,
+      EMPTY_ISSUE_PULL_REQUEST_SUMMARIES_RESPONSE,
+      { endpoint: "GET /api/issues/pull-requests" },
+    );
   }
 
   /** Link a PR the workspace already mirrors, by pasted URL or by id (undo). */

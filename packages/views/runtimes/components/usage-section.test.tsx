@@ -403,3 +403,31 @@ describe("UsageSection — KPI row layout", () => {
     expect(classes).toContain("sm:divide-y-0");
   });
 });
+
+describe("UsageSection — cost-by-model label truncation", () => {
+  it("renders model keys as block elements so long provider-qualified ids truncate before the spend bar", () => {
+    usageOverride.rows = [
+      {
+        runtime_id: "r-1",
+        date: new Date().toISOString().slice(0, 10),
+        provider: "antigravity",
+        model: "claude-opus-5-5-high",
+        input_tokens: 1_000,
+        output_tokens: 500,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+      },
+    ];
+
+    render(<UsageSection runtime={RUNTIME} />, { wrapper: Wrapper });
+    fireEvent.click(screen.getByRole("button", { name: "By model" }));
+
+    const label = screen.getByText("antigravity/claude-opus-5-5-high");
+    // `truncate` (`overflow: hidden; text-overflow: ellipsis`) is inert on an
+    // inline `<span>` inside the non-flex `div.min-w-0` cell, letting long
+    // provider-qualified keys bleed beneath the `relative` spend bar next to them.
+    expect(label.className.split(/\s+/)).toEqual(
+      expect.arrayContaining(["block", "truncate"]),
+    );
+  });
+});

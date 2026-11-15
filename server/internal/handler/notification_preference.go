@@ -21,6 +21,7 @@ var validNotifGroups = map[string]bool{
 	"assignments":          true,
 	"status_changes":       true,
 	"comments":             true,
+	"chat_replies":         true,
 	"mentions":             true,
 	"updates":              true,
 	"agent_activity":       true,

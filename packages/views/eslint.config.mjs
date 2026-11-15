@@ -58,4 +58,13 @@ export default [
       ],
     },
   },
+  {
+    // The dev toolbar only exists in development builds and speaks to the
+    // people building Multica, so its copy is not translated.
+    files: ["dev-toolbar/**/*.{ts,tsx}"],
+    rules: {
+      "i18next/no-literal-string": "off",
+      "no-restricted-syntax": ["error", NO_ROUND_CONTROLS, NO_FULL_PAGE_NAVIGATION],
+    },
+  },
 ];

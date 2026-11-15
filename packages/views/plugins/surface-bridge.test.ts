@@ -101,6 +101,26 @@ describe("surface bridge", () => {
     expect(heights).toEqual([4000, 0]);
   });
 
+  it("sends the theme current at connection, then each pushed change", async () => {
+    const bridge = createSurfaceBridge({ installationId: "installation-1", bridgeToken: TOKEN });
+    const frame = { contentWindow: {} } as unknown as HTMLIFrameElement;
+    const themes: unknown[] = [];
+    const channel = new MessageChannel();
+    channel.port2.onmessage = (event) => {
+      if ((event.data as { kind?: string } | null)?.kind === "theme") themes.push(event.data.theme);
+    };
+    channel.port2.start();
+    let current = { "--foreground": "black" };
+    bridge.pushTheme({ "--foreground": "ignored before connecting" });
+    bridge.connect(frame, () => current);
+    current = { "--foreground": "white" };
+    connectMessage(frame.contentWindow, channel.port1);
+    bridge.pushTheme({ "--foreground": "red" });
+    await vi.waitFor(() => expect(themes).toHaveLength(2));
+    expect(themes).toEqual([{ "--foreground": "white" }, { "--foreground": "red" }]);
+    bridge.close();
+  });
+
   it("refuses the wrong frame, protocol, challenge, and a replay", async () => {
     const bridge = createSurfaceBridge({ installationId: "installation-1", bridgeToken: TOKEN });
     const frame = { contentWindow: {} } as unknown as HTMLIFrameElement;

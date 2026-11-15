@@ -923,3 +923,62 @@ func TestPrivateProjectChildProgressSkipsHiddenSubIssues(t *testing.T) {
 		}
 	}
 }
+
+func TestPrivateProjectPullRequestSummariesSkipHiddenIssues(t *testing.T) {
+	f := newPrivateProjectFixture(t)
+	now := time.Now()
+	linkGitHub := func(issueID string, number int) string {
+		prID := dbfx.Insert(t, "github_pull_request", testutil.Cols{
+			"workspace_id": testWorkspaceID, "installation_id": 0,
+			"repo_owner": "acme", "repo_name": f.marker, "pr_number": number,
+			"title": "pr", "state": "open", "html_url": "https://github.test/pr",
+			"pr_created_at": now, "pr_updated_at": now,
+		})
+		dbfx.InsertNoID(t, "issue_pull_request", testutil.Cols{"issue_id": issueID, "pull_request_id": prID},
+			"pull_request_id = $1", prID)
+		return prID
+	}
+	publicPR := linkGitHub(f.publicIssue, 1)
+	secretGitHubPR := linkGitHub(f.secretIssue, 2)
+	secretGitLabPR := dbfx.Insert(t, "vcs_pull_request", testutil.Cols{
+		"workspace_id": testWorkspaceID, "connection_id": testWorkspaceID, "provider": "gitlab",
+		"repo_owner": "acme", "repo_name": f.marker, "pr_number": 3,
+		"title": "mr", "state": "open", "html_url": "https://gitlab.test/mr",
+		"pr_created_at": now, "pr_updated_at": now,
+	})
+	dbfx.InsertNoID(t, "issue_vcs_pull_request", testutil.Cols{"issue_id": f.secretIssue, "pull_request_id": secretGitLabPR},
+		"pull_request_id = $1", secretGitLabPR)
+
+	visible := func(userID string) map[string]bool {
+		t.Helper()
+		var body struct {
+			PullRequests []IssuePullRequestSummaryResponse `json:"pull_requests"`
+		}
+		req := asUser(newRequest(http.MethodGet, "/api/issues/pull-requests", nil), userID)
+		testutil.Call(t, testHandler.ListIssuePullRequestSummaries, req).Want(http.StatusOK).JSON(&body)
+		out := map[string]bool{}
+		for _, pr := range body.PullRequests {
+			out[pr.ID] = true
+		}
+		return out
+	}
+	for _, tc := range []struct {
+		name       string
+		userID     string
+		seesSecret bool
+	}{
+		{"project member", f.insider, true},
+		{"workspace owner outside the member list", testUserID, true},
+		{"workspace member outside the project", f.outsider, false},
+	} {
+		got := visible(tc.userID)
+		if !got[publicPR] {
+			t.Errorf("%s: missing the PR linked to a public issue", tc.name)
+		}
+		for _, prID := range []string{secretGitHubPR, secretGitLabPR} {
+			if got[prID] != tc.seesSecret {
+				t.Errorf("%s: sees PR %s on a private-project issue = %v, want %v", tc.name, prID, got[prID], tc.seesSecret)
+			}
+		}
+	}
+}

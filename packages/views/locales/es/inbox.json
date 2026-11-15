@@ -41,7 +41,8 @@
     "mark_unread": "Marcar como no leído",
     "archive": "Archivar",
     "unarchive": "Desarchivar",
-    "open_in_new_tab": "Abrir en una pestaña nueva"
+    "open_in_new_tab": "Abrir en una pestaña nueva",
+    "delete": "Eliminar"
   },
   "list": {
     "loading_selection": "Cargando notificación…",
@@ -120,7 +121,8 @@
   "toasts": {
     "source_context_retry_started": "Reintento iniciado con el contexto original",
     "archived": "Notificación archivada",
-    "unarchived": "Notificación restaurada"
+    "unarchived": "Notificación restaurada",
+    "deleted": "Notificación eliminada"
   },
   "errors": {
     "archived_lookup_failed": "No se ha podido cargar la notificación enlazada",
@@ -136,6 +138,14 @@
     "archive_completed_failed": "No se ha podido archivar lo completado",
     "unarchive_failed": "No se ha podido desarchivar",
     "archived_load_failed": "No se han podido cargar las notificaciones archivadas",
-    "filters_load_failed": "No se han podido cargar los filtros"
+    "filters_load_failed": "No se han podido cargar los filtros",
+    "delete_failed": "No se pudo eliminar la notificación. Inténtalo de nuevo."
+  },
+  "delete_dialog": {
+    "title": "¿Eliminar notificación?",
+    "description": "Esta notificación se eliminará permanentemente. Las tareas y ejecuciones relacionadas se conservarán.",
+    "issue_description": "Las notificaciones de esta tarea en esta vista se eliminarán permanentemente. La tarea y sus ejecuciones se conservarán.",
+    "cancel": "Cancelar",
+    "active_issue_description": "Las notificaciones activas de esta tarea se eliminarán permanentemente. Las notificaciones archivadas anteriormente se conservarán y volverán a aparecer en Archivadas. La tarea y sus ejecuciones se conservarán."
   }
 }

@@ -2324,6 +2324,75 @@ describe("IssueDetail (shared)", () => {
     expect(screen.queryByRole("button", { name: "Retry run" })).not.toBeInTheDocument();
   });
 
+  describe("an issue an agent created for a member (#7995)", () => {
+    const created = (actorType: "agent" | "member", actorId: string): TimelineEntry => ({
+      type: "activity",
+      id: "act-created",
+      actor_type: actorType,
+      actor_id: actorId,
+      action: "created",
+      details: {},
+      created_at: "2026-01-15T00:00:00Z",
+    });
+
+    it("names the requester in the created entry and under the creator", async () => {
+      mockApiObj.getIssue.mockResolvedValue({
+        ...mockIssue,
+        creator_type: "agent",
+        creator_id: "agent-1",
+        requester_id: "user-1",
+      });
+      mockApiObj.listTimeline.mockResolvedValue([created("agent", "agent-1")]);
+
+      renderIssueDetail();
+
+      expect(await screen.findByText("created this issue on behalf of Test User")).toBeInTheDocument();
+      fireEvent.click(screen.getByText("Details"));
+      const creatorRow = screen.getByText("Created by").parentElement!;
+      expect(creatorRow).toHaveTextContent("Claude Agent");
+      expect(within(creatorRow).getByRole("link", { name: "On behalf of Test User" }))
+        .toHaveAttribute("href", "/test/members/user-1");
+      expect(screen.queryByText("Requested by")).not.toBeInTheDocument();
+    });
+
+    it.each([
+      { creatorType: "agent", creatorId: "agent-1", requesterId: null },
+      { creatorType: "agent", creatorId: "agent-1", requesterId: undefined },
+      { creatorType: "member", creatorId: "user-1", requesterId: "user-1" },
+    ] as const)("keeps plain creation for $creatorType with requester $requesterId", async ({ creatorType, creatorId, requesterId }) => {
+      mockApiObj.getIssue.mockResolvedValue({
+        ...mockIssue,
+        creator_type: creatorType,
+        creator_id: creatorId,
+        requester_id: requesterId,
+      });
+      mockApiObj.listTimeline.mockResolvedValue([created(creatorType, creatorId)]);
+
+      renderIssueDetail();
+
+      expect(await screen.findByText("created this issue")).toBeInTheDocument();
+      fireEvent.click(screen.getByText("Details"));
+      expect(screen.queryByText(/On behalf of/)).not.toBeInTheDocument();
+      expect(screen.queryByText("Requested by")).not.toBeInTheDocument();
+    });
+
+    it("uses the existing member-name fallback when the requester is unavailable", async () => {
+      mockApiObj.getIssue.mockResolvedValue({
+        ...mockIssue,
+        creator_type: "agent",
+        creator_id: "agent-1",
+        requester_id: "former-member",
+      });
+      mockApiObj.listTimeline.mockResolvedValue([created("agent", "agent-1")]);
+
+      renderIssueDetail();
+
+      expect(await screen.findByText("created this issue on behalf of Unknown")).toBeInTheDocument();
+      fireEvent.click(screen.getByText("Details"));
+      expect(screen.getByText("Created by").parentElement).toHaveTextContent("On behalf of Unknown");
+    });
+  });
+
   it("collapses non-trailing activity blocks and expands the last one by default", async () => {
     // Timeline shape:
     //   [activities: status_changed, priority_changed] ← block A (older)
@@ -2549,7 +2618,7 @@ describe("IssueDetail (shared)", () => {
         screen.getByText(/from In Review to Awaiting Response/i),
       ).toBeInTheDocument();
     });
-    expect(statusChangeIcon("Awaiting Response").style.color).toBe("rgb(255, 0, 0)");
+    expect(statusChangeIcon("Awaiting Response").style.color).toBe("var(--palette-red, #ff0000)");
   });
 
   it("leaves a built-in status-change activity on its semantic token colour", async () => {

@@ -46,6 +46,8 @@ Multica는 현재 다음 명령을 감지합니다.
 | Qoder CN CLI | `qoderclicn` | [Qoder CN CLI 빠른 시작](https://help.aliyun.com/en/lingma/qodercli-cn/user-guide/qoder-cli-cn-get-started-quickly) |
 | Qwen Code | `qwen` | [Qwen Code](https://github.com/QwenLM/qwen-code) |
 | QwenPaw | `qwenpaw` | [QwenPaw](https://github.com/agentscope-ai/QwenPaw) |
+| Amp | `amp` | [Amp CLI](https://ampcode.com/docs/cli) |
+| Factory Droid | `droid` | [Factory Droid](https://docs.factory.com/droid-exec/overview) |
 | Reasonix | `reasonix` | [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) |
 | TRAE CLI | `traecli` | [TRAE 공식 사이트](https://www.trae.cn/) |
 | Dim | `dim` | [DimCode](https://dimagent.cn/en/docs/cli) |
@@ -72,6 +74,7 @@ Multica는 현재 다음 명령을 감지합니다.
 | Copilot | 1.0.0 |
 | Grok | 0.2.89 |
 | Qwen Code | 0.20.0 |
+| Factory Droid | 1.8.0 |
 | MiniMax Code | 0.1.2 |
 | Muse Code | 1.4.10 |
 | OpenCode | 1.1.54 |
@@ -214,4 +217,4 @@ Multica Desktop을 종료한 뒤 다시 엽니다.
 - [데몬과 런타임](/daemon-runtimes) — 온라인 상태, 동시 실행, 사용자 지정 런타임을 알아봅니다.
 - [AI 코딩 도구 비교](/providers) — Multica에서 도구별 기능을 비교합니다.
 
-macOS의 ZCode Desktop은 앱 번들에서 자동으로 감지됩니다. Node.js를 설치하고 데스크톱 앱에서 작동하는 API 연결을 활성화하세요. 모델과 추론 수준 선택지는 ZCode에서 제공합니다. [도구 비교](/providers#zcode)를 참고하세요.
+macOS의 ZCode Desktop은 앱 번들에서 자동으로 감지되며 Node.js가 설치되어 있어야 합니다. Linux에서는 데몬이 PATH의 `zcode` 또는 `/opt/ZCode/zcode`를 통해 ZCode Desktop을 자동으로 감지하고 데스크톱 창을 열지 않고 내장 CLI를 실행합니다. Linux에서는 Node.js를 별도로 설치하거나 환경 변수를 직접 설정할 필요가 없습니다. 데스크톱 앱에서 작동하는 API 연결을 활성화하세요. 모델과 추론 수준 선택지는 ZCode에서 제공합니다. [도구 비교](/providers#zcode)를 참고하세요.

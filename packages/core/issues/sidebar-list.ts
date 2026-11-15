@@ -174,6 +174,7 @@ export function viewSidebarRequest(
         ...(advanced ? { advanced } : {}),
         ...(Object.keys(fields.propertyFilters).length > 0 ? { properties: fields.propertyFilters } : {}),
         ...(fields.agentRunningFilter ? { working_only: true } : {}),
+        ...(fields.agentIdleFilter ? { idle_only: true } : {}),
         ...(fields.unreadFilter ? { unread_issue_ids: [...unreadIssueIds].sort() } : {}),
         include_sub_issues: display.showSubIssues !== false,
       },
@@ -210,7 +211,9 @@ export function builtinSidebarRequest(
 }
 
 /** The projects the sidebar lists, filtered and ordered by its settings. */
-export function sidebarProjects<P extends Pick<Project, "id" | "title" | "status" | "lead_type" | "lead_id" | "created_at" | "updated_at">>(
+export function sidebarProjects<
+  P extends Pick<Project, "id" | "title" | "status" | "lead_type" | "lead_id" | "created_at" | "updated_at" | "archived_at">,
+>(
   projects: readonly P[],
   settings: SidebarProjectSettings,
   manualOrder: readonly string[],
@@ -219,6 +222,7 @@ export function sidebarProjects<P extends Pick<Project, "id" | "title" | "status
   const statuses = new Set<string>(settings.statuses);
   const shown = projects.filter(
     (p) =>
+      !p.archived_at &&
       statuses.has(p.status) &&
       (!settings.onlyMine || (p.lead_type === "member" && !!userId && p.lead_id === userId)),
   );

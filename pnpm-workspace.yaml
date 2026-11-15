@@ -8,6 +8,7 @@ catalog:
   '@dnd-kit/modifiers': ^9.0.0
   '@dnd-kit/sortable': ^10.0.0
   '@dnd-kit/utilities': ^3.2.2
+  '@fontsource-variable/inter': ^5.2.5
   '@formatjs/intl-localematcher': ^0.8.4
   '@tailwindcss/postcss': ^4
   '@tailwindcss/vite': ^4

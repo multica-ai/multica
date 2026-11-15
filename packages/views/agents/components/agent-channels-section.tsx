@@ -105,17 +105,8 @@ export function AgentChannelsSection({ agent }: { agent: Agent }) {
         available(id) &&
         !installed.some((entry) => entry.channel === id),
     );
-  const unavailable = isAdmin
-    ? CHANNEL_INTEGRATIONS.filter(
-        (id) => queries[id].isSuccess && !queries[id].data.configured,
-      )
-    : [];
   const failed = CHANNEL_INTEGRATIONS.filter((id) => queries[id].isError);
-  const visible =
-    installed.length > 0 ||
-    canAdd ||
-    unavailable.length > 0 ||
-    failed.length > 0;
+  const visible = installed.length > 0 || canAdd || failed.length > 0;
   useEffect(() => {
     if (visible && (view === "channels" || view === "integrations"))
       sectionRef.current?.scrollIntoView({ block: "start" });
@@ -175,15 +166,6 @@ export function AgentChannelsSection({ agent }: { agent: Agent }) {
             </Button>
           </div>
         ))}
-        {unavailable.length ? (
-          <p className="mt-2 text-caption text-muted-foreground">
-            {t(($) => $.channels.server_unavailable, {
-              platforms: unavailable
-                .map((id) => t(($) => $[id].section_title))
-                .join(", "),
-            })}
-          </p>
-        ) : null}
       </ObjectSection>
       <ChannelConnectDialog
         agents={[agent]}

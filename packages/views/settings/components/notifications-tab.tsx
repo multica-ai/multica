@@ -88,18 +88,32 @@ export function NotificationsTab() {
 
       <SettingsSection
         title={t(($) => $.notifications.system.title)}
+        anchor={systemEnabled ? undefined : "chat_replies"}
       >
         <SettingsCard>
           <SettingsRow
             anchor="system"
             label={t(($) => $.notifications.system.label)}
           >
-              <Switch
-                checked={systemEnabled}
-                aria-label={t(($) => $.notifications.system.label)}
-                onCheckedChange={(checked) => handleToggle("system_notifications", checked)}
-              />
+            <Switch
+              checked={systemEnabled}
+              aria-label={t(($) => $.notifications.system.label)}
+              onCheckedChange={(checked) => handleToggle("system_notifications", checked)}
+            />
           </SettingsRow>
+          {systemEnabled && (
+            <SettingsRow
+              anchor="chat_replies"
+              className="pl-8"
+              label={t(($) => $.notifications.groups.chat_replies.label)}
+            >
+              <Switch
+                checked={preferences.chat_replies !== "muted"}
+                aria-label={t(($) => $.notifications.groups.chat_replies.label)}
+                onCheckedChange={(checked) => handleToggle("chat_replies", checked)}
+              />
+            </SettingsRow>
+          )}
         </SettingsCard>
 
         {/* Web-only: the browser permission banners require. Renders nothing on

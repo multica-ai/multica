@@ -9,7 +9,7 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from "react";
-import { WSClient } from "../api/ws-client";
+import { WSClient, type WSConnectionStatus } from "../api/ws-client";
 import type { WSEventType, StorageAdapter } from "../types";
 import type { ClientIdentity } from "../platform/types";
 import type { StoreApi, UseBoundStore } from "zustand";
@@ -26,9 +26,14 @@ import { useRealtimeSync, type RealtimeSyncStores } from "./use-realtime-sync";
 
 type EventHandler = (payload: unknown, actorId?: string, actorType?: string) => void;
 
+/** `offline` means no connection is wanted: signed out or outside a workspace. */
+export type WSStatus = WSConnectionStatus | "offline";
+
 interface WSContextValue {
   subscribe: (event: WSEventType, handler: EventHandler) => () => void;
   onReconnect: (callback: () => void) => () => void;
+  subscribeStatus: (listener: () => void) => () => void;
+  getStatus: () => WSStatus;
 }
 
 const WSContext = createContext<WSContextValue | null>(null);
@@ -149,8 +154,23 @@ export function WSProvider({
     [wsClient],
   );
 
+  const subscribeStatus = useCallback(
+    (listener: () => void) => {
+      if (!wsClient) return () => {};
+      return wsClient.onStatusChange(listener);
+    },
+    [wsClient],
+  );
+
+  const getStatus = useCallback(
+    (): WSStatus => wsClient?.getStatus() ?? "offline",
+    [wsClient],
+  );
+
   return (
-    <WSContext.Provider value={{ subscribe, onReconnect: onReconnectCb }}>
+    <WSContext.Provider
+      value={{ subscribe, onReconnect: onReconnectCb, subscribeStatus, getStatus }}
+    >
       {children}
     </WSContext.Provider>
   );

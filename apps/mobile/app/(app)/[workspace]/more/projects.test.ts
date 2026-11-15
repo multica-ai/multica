@@ -106,3 +106,15 @@ describe("native project browse screen wiring", () => {
     expect(render().page.key).toBe("ws-2");
   });
 });
+
+
+it("excludes archived projects from every native lifecycle count and row set", () => {
+  state.data.push({ ...fixtures[0]!, id: "archived-active", archived_at: "2026-11-15T00:00:00Z" });
+  state.data.push({ ...fixtures[3]!, id: "archived-closed", archived_at: "2026-11-15T00:00:00Z" });
+  expect(render().segment.props.values).toEqual(["lifecycle.active (3)", "lifecycle.closed (2)", "lifecycle.all (5)"]);
+  for (const index of [0, 1, 2]) {
+    render().segment.props.onChange({ nativeEvent: { selectedSegmentIndex: index } });
+    expect(render().list.props.data.every((project: Project) => !project.archived_at)).toBe(true);
+  }
+  expect(state.data).toHaveLength(7);
+});

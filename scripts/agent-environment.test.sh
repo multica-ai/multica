@@ -192,4 +192,85 @@ start_in_background web
 grep -q -- "--ttl 25" "$repo/calls.log" || fail "start did not give a new environment its TTL"
 stop_job "$start_pid"
 
+# 9. Both stops observed the same dead lock holder. Delay the second reaper
+# until the first owns a new lock: stale observations must not remove that
+# new lock and let both callers destroy the environment.
+new_repo stale-lock
+touch "$repo/registered"
+live_claim web
+live_claim desktop
+mkdir -p "$repo/.multica/agent-environments/lock.d" "$repo/bin"
+printf '%s\n' "$dead" > "$repo/.multica/agent-environments/lock.d/pid"
+cp "$repo/.multica/agent-environments/lock.d/pid" "$repo/stale-pid"
+real_cat="$(command -v cat)"
+real_rm="$(command -v rm)"
+cat > "$repo/bin/cat" <<'EOF'
+#!/usr/bin/env bash
+set -eu
+if [ "$1" = "$RACE_REPO/.multica/agent-environments/lock.d/pid" ] && [ ! -f "$RACE_REPO/$RACE_COMPONENT.observed" ]; then
+  touch "$RACE_REPO/$RACE_COMPONENT.observed"
+  for i in $(seq 1 300); do
+    [ ! -f "$RACE_REPO/web.observed" ] || [ ! -f "$RACE_REPO/desktop.observed" ] || break
+    sleep 0.01
+  done
+  exec "$REAL_CAT" "$RACE_REPO/stale-pid"
+fi
+exec "$REAL_CAT" "$@"
+EOF
+cat > "$repo/bin/rm" <<'EOF'
+#!/usr/bin/env bash
+set -eu
+if [ "$RACE_COMPONENT" = desktop ] && [ ! -f "$RACE_REPO/desktop.reaping" ]; then
+  case "$*" in
+    *agent-environments/lock.d*)
+      touch "$RACE_REPO/desktop.reaping"
+      for i in $(seq 1 300); do
+        [ ! -f "$RACE_REPO/web.down" ] || break
+        sleep 0.01
+      done
+      [ -f "$RACE_REPO/web.down" ] || { echo 'first stop never acquired its lock' >&2; exit 1; }
+      result=0
+      "$REAL_RM" "$@" || result=$?
+      touch "$RACE_REPO/desktop.reaped"
+      exit "$result" ;;
+  esac
+fi
+exec "$REAL_RM" "$@"
+EOF
+chmod +x "$repo/bin/cat" "$repo/bin/rm"
+# Keep the first lock holder in down until the stale reap actually finishes.
+mv "$repo/scripts/dev-env.sh" "$repo/scripts/dev-env.original"
+cat > "$repo/scripts/dev-env.sh" <<'EOF'
+#!/usr/bin/env bash
+set -eu
+if [ "$1" = down ]; then
+  touch "$RACE_REPO/$3.down"
+  if [ "$3" = web ]; then
+    for i in $(seq 1 300); do
+      [ ! -f "$RACE_REPO/desktop.reaped" ] || break
+      sleep 0.01
+    done
+    [ -f "$RACE_REPO/desktop.reaped" ] || { echo 'second stale reap never finished' >&2; exit 1; }
+  fi
+fi
+exec bash "$(dirname "$0")/dev-env.original" "$@"
+EOF
+PATH="$repo/bin:$PATH" RACE_REPO="$repo" RACE_COMPONENT=web REAL_CAT="$real_cat" REAL_RM="$real_rm" \
+  bash "$repo/scripts/agent-environment.sh" stop web > /dev/null &
+first=$!
+PATH="$repo/bin:$PATH" RACE_REPO="$repo" RACE_COMPONENT=desktop REAL_CAT="$real_cat" REAL_RM="$real_rm" \
+  bash "$repo/scripts/agent-environment.sh" stop desktop > /dev/null &
+second=$!
+wait "$first" || fail "first stale-lock stop failed"
+wait "$second" || fail "second stale-lock stop failed"
+[ "$(count destroy)" = 1 ] || fail "stale lock observations destroyed $(count destroy) times, want once"
+
+# The PID-specific format can also be reclaimed after a killed holder.
+new_repo stale-owner
+touch "$repo/registered"
+mkdir -p "$repo/.multica/agent-environments/lock.d"
+touch "$repo/.multica/agent-environments/lock.d/owner-$dead"
+bash "$repo/scripts/agent-environment.sh" stop web > /dev/null
+[ "$(count destroy)" = 1 ] || fail "a dead PID-specific lock prevented cleanup"
+
 echo "✓ agent-environment.sh lifecycle verified"

@@ -3,6 +3,7 @@
 import { cloneElement, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
+  BotOff,
   BellRing,
   Bot,
   CalendarClock,
@@ -168,6 +169,7 @@ function getActiveFilterCount(
     advancedFilter?: AdvancedFilterGroup | null;
     dateFilter?: IssueDateFilter | null;
     agentRunningFilter?: boolean;
+    agentIdleFilter?: boolean;
     unreadFilter?: boolean;
   },
   // Inside a saved view only the user's additions on top of the view's own
@@ -216,6 +218,7 @@ function getActiveFilterCount(
   }
   if (state.dateFilter) count++;
   if (state.agentRunningFilter && !baseline?.agentRunning) count++;
+  if (state.agentIdleFilter && !baseline?.agentIdle) count++;
   if (state.unreadFilter && !baseline?.unread) count++;
   return count;
 }
@@ -1075,6 +1078,7 @@ export function IssueFilterMenu({
   const negatedFilters = useViewStore((s) => s.negatedFilters);
   const propertyFilters = useViewStore((s) => s.propertyFilters);
   const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
+  const agentIdleFilter = useViewStore((s) => s.agentIdleFilter);
   const unreadFilter = useViewStore((s) => s.unreadFilter);
   const viewStoreApi = useViewStoreApi();
   const act = viewStoreApi.getState();
@@ -1139,6 +1143,7 @@ export function IssueFilterMenu({
         advancedFilter,
         dateFilter: showDateFilter ? dateFilter : null,
         agentRunningFilter,
+        agentIdleFilter,
         unreadFilter,
       },
       viewBaseline,
@@ -1176,7 +1181,7 @@ export function IssueFilterMenu({
     key === "date"
       ? t(($) => $.filters.section_date)
       : key === "agentRunning"
-        ? `${t(($) => $.filters.section_agent_status)} ${t(($) => $.filters.agent_status_running)}`
+        ? `${t(($) => $.filters.section_agent_status)} ${t(($) => $.filters.agent_status_running)} ${t(($) => $.filters.agent_status_idle)}`
         : key === "unread"
           ? `${t(($) => $.filters.section_read_state)} ${t(($) => $.filters.read_state_unread)}`
         : key.startsWith("property:")
@@ -1252,14 +1257,25 @@ export function IssueFilterMenu({
               <DropdownMenuSubContent className="w-auto min-w-44">
                 <DropdownMenuCheckboxItem
                   checked={agentRunningFilter}
-                  disabled={viewBaseline?.agentRunning === true}
-                  title={viewBaseline?.agentRunning === true ? fixedTitle : undefined}
+                  disabled={viewBaseline?.agentRunning === true || viewBaseline?.agentIdle === true}
+                  title={viewBaseline?.agentRunning || viewBaseline?.agentIdle ? fixedTitle : undefined}
                   onCheckedChange={() => act.toggleAgentRunningFilter()}
                   className={FILTER_ITEM_CLASS}
                 >
                   <HoverCheck checked={agentRunningFilter} />
                   <Activity className="size-3.5 text-muted-foreground" />
                   {t(($) => $.filters.agent_status_running)}
+                </DropdownMenuCheckboxItem>
+                <DropdownMenuCheckboxItem
+                  checked={agentIdleFilter}
+                  disabled={viewBaseline?.agentRunning === true || viewBaseline?.agentIdle === true}
+                  title={viewBaseline?.agentRunning || viewBaseline?.agentIdle ? fixedTitle : undefined}
+                  onCheckedChange={() => act.toggleAgentIdleFilter()}
+                  className={FILTER_ITEM_CLASS}
+                >
+                  <HoverCheck checked={agentIdleFilter} />
+                  <BotOff className="size-3.5 text-muted-foreground" />
+                  {t(($) => $.filters.agent_status_idle)}
                 </DropdownMenuCheckboxItem>
               </DropdownMenuSubContent>
             </DropdownMenuSub>
@@ -1877,6 +1893,7 @@ export function IssueDisplayControls({
   const advancedFilter = useViewStore((s) => s.advancedFilter);
   const negatedFilters = useViewStore((s) => s.negatedFilters);
   const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
+  const agentIdleFilter = useViewStore((s) => s.agentIdleFilter);
   const unreadFilter = useViewStore((s) => s.unreadFilter);
   const cardPropertyIds = useViewStore((s) => s.cardPropertyIds);
   const sortBy = useViewStore((s) => s.sortBy);
@@ -1959,6 +1976,7 @@ export function IssueDisplayControls({
       advancedFilter,
       dateFilter: showDateFilter ? dateFilter : null,
       agentRunningFilter,
+      agentIdleFilter,
       unreadFilter,
     },
     viewBaseline,
@@ -1985,7 +2003,7 @@ export function IssueDisplayControls({
     project: "group_project",
     assignee: "group_assignee",
   };
-  const CARD_PROPERTY_LABEL_KEY: Record<typeof CARD_PROPERTY_OPTIONS[number]["key"], "card_priority" | "card_description" | "card_assignee" | "card_start_date" | "card_due_date" | "card_project" | "card_labels" | "card_child_progress"> = {
+  const CARD_PROPERTY_LABEL_KEY: Record<typeof CARD_PROPERTY_OPTIONS[number]["key"], "card_priority" | "card_description" | "card_assignee" | "card_start_date" | "card_due_date" | "card_project" | "card_labels" | "card_child_progress" | "card_pull_requests"> = {
     priority: "card_priority",
     description: "card_description",
     assignee: "card_assignee",
@@ -1994,6 +2012,7 @@ export function IssueDisplayControls({
     project: "card_project",
     labels: "card_labels",
     childProgress: "card_child_progress",
+    pullRequests: "card_pull_requests",
   };
   const availableCardPropertyOptions = cardPropertyOptionsForView(viewMode);
   const availableSortOptions = sortOptionsForView(viewMode, grouping);

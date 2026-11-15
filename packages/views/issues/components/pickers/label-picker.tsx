@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Tag, Plus, Settings2 } from "@multica/ui/icons";
 import { toast } from "sonner";
@@ -26,6 +26,7 @@ import {
   PickerEmpty,
 } from "./property-picker";
 import { useT } from "../../../i18n";
+import { paletteColor } from "@multica/core/appearance";
 
 interface LabelPickerProps {
   /**
@@ -125,6 +126,13 @@ export function LabelPicker({
   // for an error the user didn't cause. A ref closes the window cleanly.
   const creatingRef = useRef(false);
 
+  // A create request may finish after the user edits the controlled draft
+  // selection. Read the latest committed props when that response arrives.
+  const draftSelectionRef = useRef({ selectedIds, onSelectedIdsChange });
+  useLayoutEffect(() => {
+    draftSelectionRef.current = { selectedIds, onSelectedIdsChange };
+  }, [selectedIds, onSelectedIdsChange]);
+
   const resourceType: LabelScope = skillId !== undefined ? "skill" : "issue";
   // Draft mode when no issue exists yet: hold selection in the caller instead
   // of hitting the attach/detach endpoints.
@@ -203,7 +211,10 @@ export function LabelPicker({
       {
         onSuccess: (label) => {
           if (isDraft) {
-            onSelectedIdsChange?.([...selectedIds, label.id]);
+            const latest = draftSelectionRef.current;
+            if (!latest.selectedIds.includes(label.id)) {
+              latest.onSelectedIdsChange?.([...latest.selectedIds, label.id]);
+            }
           } else {
             attach.mutate(label.id);
           }
@@ -230,11 +241,13 @@ export function LabelPicker({
 
   // In a custom trigger (PillButton) the trigger is itself a button, so the
   // chips can't carry their own remove button. Otherwise fall back to the
-  // chip-wrap div used by the issue-detail sidebar.
+  // chip-wrap div used by the issue-detail sidebar. Its `py-1.5` puts the
+  // first line of 20px chips at the centre of a 32px property row, level with
+  // the row's label, however many lines the chips wrap onto.
   const resolvedTriggerRender =
     triggerRender ??
     (hasLabels ? (
-      <div className="flex flex-wrap items-center gap-1 cursor-pointer rounded-xs px-1 -mx-1 hover:bg-accent/30 transition-colors" />
+      <div className="flex flex-wrap items-center gap-1 cursor-pointer rounded-xs px-1 -mx-1 py-1.5 hover:bg-accent/30 transition-colors" />
     ) : undefined);
 
   return (
@@ -294,7 +307,7 @@ export function LabelPicker({
             >
               <span
                 className="inline-block h-3 w-3 shrink-0 rounded-full"
-                style={{ backgroundColor: label.color }}
+                style={{ backgroundColor: paletteColor(label.color) }}
                 aria-hidden
               />
               <span className="truncate">{label.name}</span>
@@ -310,7 +323,7 @@ export function LabelPicker({
             </span>
             <span
               className="ml-auto inline-block h-3 w-3 shrink-0 rounded-full"
-              style={{ backgroundColor: pickInlineColor(query) }}
+              style={{ backgroundColor: paletteColor(pickInlineColor(query)) }}
               aria-hidden
             />
           </PickerItem>

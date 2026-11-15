@@ -96,6 +96,12 @@ const EXPECTED = [
     source: "packages/views/layout/panel-nav.tsx",
   },
   {
+    what: "the frame",
+    find: (els) => els.filter((el) => el.attrs["data-slot"] === "sidebar-wrapper"),
+    classes: ["bg-app-shell"],
+    source: "packages/views/layout/dashboard-layout.tsx",
+  },
+  {
     what: "the page",
     find: (els) => anchors(els, "page"),
     classes: ["rounded-page", "bg-page-canvas", "ring-page-border"],
@@ -138,8 +144,35 @@ const EXPECTED = [
     source: "packages/views/issues/components/issue-peek.tsx",
   },
   {
+    what: "the switches",
+    find: (els) => els.filter((el) => el.attrs["data-slot"] === "switch"),
+    classes: ["border-switch-border", "data-checked:bg-switch-checked", "data-unchecked:bg-switch-unchecked", "dark:data-unchecked:bg-switch-unchecked-dark"],
+    source: "packages/ui/components/ui/switch.tsx",
+  },
+  {
+    what: "the switch thumbs",
+    find: (els) => els.filter((el) => el.attrs["data-slot"] === "switch-thumb"),
+    classes: [
+      "data-checked:bg-switch-checked-thumb",
+      "dark:data-checked:bg-switch-checked-thumb-dark",
+      "data-unchecked:bg-switch-unchecked-thumb",
+      "dark:data-unchecked:bg-switch-unchecked-thumb-dark",
+    ],
+    source: "packages/ui/components/ui/switch.tsx",
+  },
+  ...[
+    ["open", "git-pull-request-arrow"],
+    ["merged", "git-merge"],
+    ["closed", "git-pull-request-closed"],
+  ].map(([state, icon]) => ({
+    what: `the ${state} pull request chip icons`,
+    find: (els) => els.filter((el) => el.tag === "svg" && el.classes.has(`icon-${icon}`)),
+    classes: [`text-pr-${state}`, `dark:text-pr-${state}-dark`],
+    source: "packages/views/issues/components/pull-request-chips.tsx",
+  })),
+  {
     what: "the small buttons",
-    find: (els) => els.filter((el) => ["sm", "icon-sm", "icon-xs"].includes(el.attrs["data-size"])),
+    find: (els) => els.filter((el) => "data-variant" in el.attrs && ["sm", "icon-sm", "icon-xs"].includes(el.attrs["data-size"])),
     classes: ["rounded-button-sm"],
     source: "packages/ui/components/ui/button.tsx",
   },
@@ -182,6 +215,7 @@ const NOT_DRAWN = {
     "status-blocked": "no blocked issue is listed",
     "status-cancelled": "no cancelled issue is listed",
     "priority-none": "every listed issue has a priority",
+    "pr-merged-text": "the issue's pull request list is not shown",
   },
 };
 
@@ -223,6 +257,21 @@ test("status and priority glyphs use the colour of their status and priority", (
   }
 });
 
+test("switches are drawn on and off, with thumbs in the same state", () => {
+  const elements = parseFixture();
+  const switches = elements.filter((el) => el.attrs["data-slot"] === "switch");
+  for (const state of ["data-checked", "data-unchecked"]) {
+    assert.ok(switches.some((el) => state in el.attrs), `fixture.html draws no switch with ${state}`);
+  }
+  for (const el of switches) {
+    const state = "data-checked" in el.attrs ? "data-checked" : "data-unchecked";
+    assert.equal(el.attrs["aria-checked"], String(state === "data-checked"), `a switch with ${state} has the wrong aria-checked`);
+    const thumbs = descendants(elements, el).filter((child) => child.attrs["data-slot"] === "switch-thumb");
+    assert.equal(thumbs.length, 1, "each switch has one thumb");
+    assert.ok(state in thumbs[0].attrs, `the thumb of a switch with ${state} lacks it`);
+  }
+});
+
 test("every component alias is drawn or listed as not drawn", () => {
   const elements = parseFixture();
   const { radius, color } = componentAliases();
@@ -256,7 +305,8 @@ test("anchors nest as they do in the app", () => {
   assert.ok(inside(sidebar, "page"), "the sidebar sits inside the page canvas");
   assert.ok(!inside(rail, "page"), "the rail sits outside the page canvas");
   for (const el of anchors(elements, "nav-item")) assert.ok(inside(el, "sidebar"), "nav items sit inside the sidebar");
-  for (const name of ["issue-group-header", "issue-row", "comment", "comment-composer"]) {
+  for (const el of anchors(elements, "panel-section")) assert.ok(inside(el, "sidebar"), "panel sections sit inside the sidebar");
+  for (const name of ["page-header", "issue-group-header", "issue-row", "comment", "comment-composer"]) {
     for (const el of anchors(elements, name)) assert.ok(inside(el, "page"), `${name} sits inside the page`);
   }
   for (const el of anchors(elements, "comment-reply")) assert.ok(inside(el, "comment"), "replies sit inside their comment");
