@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useStoryEnv } from "../voice-input/env";
 import { UPDATES, type Text } from "./copy";
-import { Carousel, Corner, Deck, Launcher, Stack, type OptionProps } from "./options";
+import { Carousel, Corner, Deck, Stack, type OptionProps } from "./options";
 import { Frame, TryItStage } from "./stage";
 
 const meta = {
@@ -13,7 +13,7 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-type OptionId = "deck" | "stack" | "carousel" | "pill";
+type OptionId = "deck" | "stack" | "carousel";
 
 interface Option {
   letter: string;
@@ -34,7 +34,7 @@ const OPTIONS: Record<OptionId, Option> = {
     notes: [
       { zh: "一眼看出还有几条，圆点也能直接跳", en: "You can see how many are left, and the dots jump straight to one" },
       { zh: "点露出来的那条边也能翻到下一张", en: "Clicking the peeking edge also moves on" },
-      { zh: "× 关掉全部，没看的留在「新功能」里", en: "× dismisses them all; unread ones stay in What's new" },
+      { zh: "× 关掉全部，没看的留在帮助菜单的「新功能」里", en: "× dismisses them all; unread ones stay in What's new in the help menu" },
       { zh: "← → 翻页，Esc 关闭", en: "← → to page, Esc to close" },
     ],
     play: (p) => (
@@ -78,29 +78,15 @@ const OPTIONS: Record<OptionId, Option> = {
       </Corner>
     ),
   },
-  pill: {
-    letter: "D",
-    name: { zh: "底栏入口", en: "Bottom bar entry" },
-    pitch: {
-      zh: "不主动弹出。底栏「问 Multica」旁边多一个「4 条更新」，点开才是 A 的叠牌。",
-      en: "Nothing pops up. A “4 updates” entry waits in the bottom bar beside Ask Multica; clicking it opens A's deck.",
-    },
-    notes: [
-      { zh: "完全不打断，用户自己决定什么时候看", en: "Never interrupts; people open it when they choose" },
-      { zh: "看过的会从计数里减掉，全看完入口就消失", en: "Seen cards leave the count, and the entry goes once all are seen" },
-      { zh: "也可以只在大改动时直接弹 A，小更新走 D", en: "Could pop A for big changes and use D for small ones" },
-    ],
-    play: (p) => <Launcher {...p} />,
-  },
 };
 
-const IDS: OptionId[] = ["deck", "stack", "carousel", "pill"];
+const IDS: OptionId[] = ["deck", "stack", "carousel"];
 
 const PAGE = {
-  title: { zh: "右下角的更新卡片：四个方案", en: "Update cards in the corner: four options" },
+  title: { zh: "右下角的更新卡片：三个方案", en: "Update cards in the corner: three options" },
   lead: {
-    zh: "都放在 GitHub 星标提示用的那个位置：页面卡片右下角，宽度也一样。左侧每个方案都有一个可以直接玩的故事，顶部可以切换卡片数量、重新开始。",
-    en: "All four use the GitHub star prompt's spot: the page card's bottom-right corner, at the same width. Each option has a playable story in the sidebar, where the top bar switches the card count and restarts.",
+    zh: "三个方案都放在 GitHub 星标提示用的那个位置：页面卡片右下角，宽度也一样。左侧每个方案都有一个可以直接玩的故事，顶部可以切换卡片数量、重新开始。",
+    en: "All three use the GitHub star prompt's spot: the page card's bottom-right corner, at the same width. Each option has a playable story in the sidebar, where the top bar switches the card count and restarts.",
   },
   states: { zh: "所有状态", en: "Every state" },
 };
@@ -133,7 +119,7 @@ function OverviewPage() {
         <h1 className="text-title font-semibold">{PAGE.title[lang]}</h1>
         <p className="mt-1.5 text-body text-muted-foreground">{PAGE.lead[lang]}</p>
       </header>
-      <div className="mt-8 grid grid-cols-[repeat(4,27rem)] gap-6">
+      <div className="mt-8 grid grid-cols-[repeat(3,27rem)] gap-6">
         {IDS.map((id) => {
           const option = OPTIONS[id];
           return (
@@ -176,13 +162,6 @@ function StatesPage() {
         { label: L("第 2 页", "Page 2"), node: <Corner><Carousel updates={UPDATES} initialIndex={1} /></Corner> },
       ],
     },
-    {
-      id: "pill",
-      frames: [
-        { label: L("等着被点开", "Waiting to be opened"), node: <Launcher updates={UPDATES} /> },
-        { label: L("点开后就是 A", "Opened: it is A's deck"), node: <Launcher updates={UPDATES} initialOpen /> },
-      ],
-    },
   ];
   return (
     <div key={lang} className="min-h-screen bg-background p-10">
@@ -221,5 +200,4 @@ export const Overview: Story = { render: () => <OverviewPage /> };
 export const ADeck: Story = { name: "A · Deck", render: () => <TryIt id="deck" /> };
 export const BStack: Story = { name: "B · Stack", render: () => <TryIt id="stack" /> };
 export const CCarousel: Story = { name: "C · Carousel", render: () => <TryIt id="carousel" /> };
-export const DEntry: Story = { name: "D · Bottom bar entry", render: () => <TryIt id="pill" /> };
 export const AllStates: Story = { name: "All states", render: () => <StatesPage /> };

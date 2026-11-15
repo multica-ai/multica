@@ -1,12 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { createPortal } from "react-dom";
 import { Button } from "@multica/ui/components/ui/button";
-import { ArrowLeft, ArrowRight, ChevronLeft, ChevronRight, Gift } from "@multica/ui/icons";
+import { ArrowLeft, ArrowRight, ChevronLeft, ChevronRight } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { useStoryEnv } from "../voice-input/env";
 import { countLabel, UI, type Update, type UpdateId } from "./copy";
 import { CARD_FRAME, CompactCard, Dots, Hero, UpdateBody, UpdateCard, UpdateContent } from "./card";
-import { BOTTOM_BAR_ITEM_CLASS, useBottomBarSlot } from "./stage";
 
 const EASE = "cubic-bezier(0.2, 0.8, 0.2, 1)";
 const MOVE = `transform 420ms ${EASE}, opacity 260ms ${EASE}, height 320ms ${EASE}`;
@@ -344,67 +342,5 @@ export function Carousel({
         }
       />
     </div>
-  );
-}
-
-/* ── D · An entry in the bottom bar, opens the deck ───────────────────── */
-
-export function UpdatesEntry({ count, open = false, onToggle }: { count: number; open?: boolean; onToggle: () => void }) {
-  const { lang } = useStoryEnv();
-  const slot = useBottomBarSlot();
-  if (!slot) return null;
-  return createPortal(
-    <button
-      type="button"
-      aria-pressed={open}
-      onClick={onToggle}
-      className={cn(BOTTOM_BAR_ITEM_CLASS, "text-foreground animate-in fade-in-0 slide-in-from-right-2 duration-300")}
-    >
-      <Gift className="text-brand" />
-      {countLabel(count, lang)}
-      <span className="size-1.5 rounded-full bg-brand" />
-    </button>,
-    slot,
-  );
-}
-
-export function Launcher({
-  updates,
-  onFinished,
-  onCta,
-  keyboard = false,
-  initialOpen = false,
-}: OptionProps & { initialOpen?: boolean }) {
-  const [seen, setSeen] = useState<Set<UpdateId>>(() => new Set());
-  const unseen = updates.filter((u) => !seen.has(u.id));
-  // The deck keeps the list it opened with while cards turn seen under it.
-  const [deck, setDeck] = useState<Update[] | null>(initialOpen ? updates : null);
-  const markSeen = useRef((id: UpdateId) => setSeen((prev) => (prev.has(id) ? prev : new Set(prev).add(id)))).current;
-
-  const done = !deck && unseen.length === 0;
-  useEffect(() => {
-    if (done) onFinished?.();
-  }, [done, onFinished]);
-
-  if (done) return null;
-  return (
-    <>
-      <UpdatesEntry
-        count={deck ? deck.length : unseen.length}
-        open={!!deck}
-        onToggle={() => setDeck((d) => (d ? null : unseen))}
-      />
-      {deck && (
-        <Corner>
-          <Deck
-            updates={deck}
-            keyboard={keyboard}
-            onCta={onCta}
-            onIndexChange={(i) => deck[i] && markSeen(deck[i].id)}
-            onFinished={() => setDeck(null)}
-          />
-        </Corner>
-      )}
-    </>
   );
 }

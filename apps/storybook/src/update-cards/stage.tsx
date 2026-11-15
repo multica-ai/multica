@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Bell,
@@ -28,12 +28,8 @@ import { UI, UPDATES, type Text, type Update } from "./copy";
 const tx = (text: Text, lang: Lang) => text[lang];
 
 /** packages/views/layout/bottom-bar-styles.ts */
-export const BOTTOM_BAR_ITEM_CLASS =
+const BOTTOM_BAR_ITEM_CLASS =
   "inline-flex h-6 min-w-0 shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2 text-caption text-muted-foreground transition-colors outline-none hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground focus-visible:outline-2 focus-visible:outline-ring aria-pressed:bg-sidebar-accent aria-pressed:text-sidebar-accent-foreground [&_svg]:size-3.5 [&_svg]:shrink-0";
-
-/** Where a bottom bar entry renders; null when the stage has no bottom bar. */
-const BottomBarSlot = createContext<HTMLElement | null>(null);
-export const useBottomBarSlot = () => useContext(BottomBarSlot);
 
 function RailItem({ icon, label, active, badge }: { icon: ReactNode; label: Text; active?: boolean; badge?: number }) {
   const { lang } = useStoryEnv();
@@ -158,12 +154,11 @@ function Sidebar() {
   );
 }
 
-/** The desktop bottom bar: quick chat on the right, and a slot for an entry before it. */
-function BottomBar({ onSlot }: { onSlot: (el: HTMLElement | null) => void }) {
+/** The desktop bottom bar: quick chat on the right. */
+function BottomBar() {
   const { lang } = useStoryEnv();
   return (
     <div className="flex h-8 shrink-0 items-center justify-end gap-1 pr-[18px] pl-3">
-      <span ref={onSlot} className="contents" />
       <span className={BOTTOM_BAR_ITEM_CLASS}>
         <Sparkles />
         {tx({ zh: "问 Multica", en: "Ask Multica" }, lang)}
@@ -177,32 +172,29 @@ function BottomBar({ onSlot }: { onSlot: (el: HTMLElement | null) => void }) {
 
 /** A Multica desktop window: rail, page card (Work panel and content), bottom bar. */
 export function AppWindow({ children, toast, sidebar = true }: { children?: ReactNode; toast?: string | null; sidebar?: boolean }) {
-  const [slot, setSlot] = useState<HTMLElement | null>(null);
   return (
-    <BottomBarSlot.Provider value={slot}>
-      <div className="flex h-full min-h-0 flex-col bg-app-shell text-foreground">
-        <div className="flex min-h-0 flex-1">
-          {sidebar && (
-            <div className="flex w-16 shrink-0 flex-col items-center gap-1.5 py-3">
-              <div className="mb-2 flex size-9 items-center justify-center rounded-lg bg-background text-label font-semibold ring-1 ring-border">
-                D
-              </div>
-              <RailItem icon={<SquarePen />} label={{ zh: "新建", en: "New" }} />
-              <RailItem icon={<Search />} label={{ zh: "搜索", en: "Search" }} />
-              <RailItem icon={<ListTodo />} label={{ zh: "工作", en: "Work" }} active badge={2} />
-              <RailItem icon={<Users />} label={{ zh: "团队", en: "Squads" }} />
-              <RailItem icon={<MessageSquare />} label={{ zh: "聊天", en: "Chat" }} />
-              <RailItem icon={<Zap />} label={{ zh: "自动化", en: "Autopilot" }} />
+    <div className="flex h-full min-h-0 flex-col bg-app-shell text-foreground">
+      <div className="flex min-h-0 flex-1">
+        {sidebar && (
+          <div className="flex w-16 shrink-0 flex-col items-center gap-1.5 py-3">
+            <div className="mb-2 flex size-9 items-center justify-center rounded-lg bg-background text-label font-semibold ring-1 ring-border">
+              D
             </div>
-          )}
-          <div className={cn("mt-2 mr-2 flex min-w-0 flex-1 overflow-hidden rounded-xl bg-background ring-1 ring-border", !sidebar && "ml-2")}>
-            {sidebar && <Sidebar />}
-            <Content toast={toast}>{children}</Content>
+            <RailItem icon={<SquarePen />} label={{ zh: "新建", en: "New" }} />
+            <RailItem icon={<Search />} label={{ zh: "搜索", en: "Search" }} />
+            <RailItem icon={<ListTodo />} label={{ zh: "工作", en: "Work" }} active badge={2} />
+            <RailItem icon={<Users />} label={{ zh: "团队", en: "Squads" }} />
+            <RailItem icon={<MessageSquare />} label={{ zh: "聊天", en: "Chat" }} />
+            <RailItem icon={<Zap />} label={{ zh: "自动化", en: "Autopilot" }} />
           </div>
+        )}
+        <div className={cn("mt-2 mr-2 flex min-w-0 flex-1 overflow-hidden rounded-xl bg-background ring-1 ring-border", !sidebar && "ml-2")}>
+          {sidebar && <Sidebar />}
+          <Content toast={toast}>{children}</Content>
         </div>
-        <BottomBar onSlot={setSlot} />
       </div>
-    </BottomBarSlot.Provider>
+      <BottomBar />
+    </div>
   );
 }
 
