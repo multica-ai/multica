@@ -131,6 +131,14 @@ Below them, **Notify me about** turns each kind of notification on or off. These
 
 A kind that's turned off creates no notification, and turning it back on doesn't bring back what you missed; the changes are still recorded on the issue. A few types, such as quick-create results and autopilot pauses, sit outside these groups and are always delivered. System and browser notifications control desktop banners and don't change the inbox itself.
 
+## Email notifications [#email-notifications]
+
+When the server can send email, Multica also emails you each new inbox notification. **Settings → Notifications → Email notifications** turns this off for the current workspace; it's on by default.
+
+Email follows the inbox: a kind turned off under **Notify me about** sends no email, and neither does a notification that arrives while its issue is snoozed. Each email says what happened on which issue and links to it. Only current workspace members receive them.
+
+If the server has no email configured, the switch shows **Unavailable**. Self-hosted servers set it up in [Environment variables](/environment-variables#email-notifications).
+
 ## Next steps
 
 - [Comments](/comments) — replies, mentions, and discussion threads.

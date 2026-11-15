@@ -98,6 +98,14 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `SMTP_TLS_INSECURE` | `false` | 跳過憑證校驗，僅用於可信內網 |
 | `SMTP_EHLO_NAME` | 主機名 | 嚴格 relay 要求的 EHLO/FQDN |
 
+### 通知郵件 [#email-notifications]
+
+設定了 Resend 或 SMTP 後，伺服器還會把新的收件箱通知寄給成員（見[收件箱](/inbox#email-notifications)）。郵件裡的連結使用 `MULTICA_APP_URL`。每個後端副本會控制傳送間隔；短時間內通知特別多時，部分郵件會被略過，收件箱裡仍保留全部通知。
+
+| 變數 | 預設值 | 說明 |
+|---|---|---|
+| `EMAIL_NOTIFICATION_SEND_INTERVAL` | `1s` | 每個後端副本傳送通知郵件的最小間隔，Go duration 格式。預設值低於 Resend 每秒 2 次請求的限制，使用同一個 key 傳送的登入驗證碼和邀請郵件不會被限流。N 個副本共用一個 key 時，設為約 N × `1s` |
+
 ### Google OAuth
 
 | 變數 | 預設值 | 說明 |

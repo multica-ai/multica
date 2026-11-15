@@ -98,6 +98,14 @@ primary와 복제본의 연결 한도는 서로 독립적입니다. 모든 API �
 | `SMTP_TLS_INSECURE` | `false` | 인증서 검증 건너뛰기. 신뢰할 수 있는 내부 네트워크에서만 사용 |
 | `SMTP_EHLO_NAME` | host 이름 | 엄격한 relay에서 요구하는 EHLO/FQDN |
 
+### 알림 이메일 [#email-notifications]
+
+Resend 또는 SMTP가 설정되어 있으면 서버는 멤버에게 새 인박스 알림을 이메일로도 보냅니다([인박스](/inbox#email-notifications) 참고). 이메일 속 링크는 `MULTICA_APP_URL`을 사용합니다. 발송은 백엔드 레플리카마다 간격을 두고 이루어지며, 알림이 한꺼번에 매우 많이 생기면 일부 이메일은 보내지 않습니다. 인박스에는 모든 알림이 그대로 남습니다.
+
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `EMAIL_NOTIFICATION_SEND_INTERVAL` | `1s` | 백엔드 레플리카마다 알림 이메일 사이의 최소 간격(Go duration 형식). 기본값은 Resend의 초당 2회 요청보다 낮아서, 같은 키로 보내는 로그인 코드와 초대 이메일이 속도 제한에 걸리지 않습니다. 레플리카 N개가 키 하나를 공유하면 약 N × `1s`로 설정합니다 |
+
 ### Google OAuth
 
 | 변수 | 기본값 | 설명 |
