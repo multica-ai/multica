@@ -130,7 +130,7 @@ describe("resolveTimelineHighlight", () => {
   });
 
   it("leaves a task id with nothing posted unmatched", () => {
-    expect(resolveTimelineHighlight([comment({ id: "comment-1" })], "task-1")).toBe("task-1");
+    expect(resolveTimelineHighlight([comment({ id: "comment-1" })], "task-1")).toBeNull();
   });
 });
 

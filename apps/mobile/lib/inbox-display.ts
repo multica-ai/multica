@@ -138,20 +138,21 @@ export function getInboxNavigationTarget(
 /**
  * The timeline row a deep-link `highlight` lands on. A failed run's
  * notification names its task; mobile renders no run rows, so the run shows
- * only as the failure notice it posted, and the link lands there. A run
- * that posted nothing leaves the id unmatched, so nothing is highlighted.
+ * only as the failure notice it posted, and the link lands there. Null
+ * while the timeline has no such row — a cached timeline may not have it
+ * yet, and a run that posted nothing never will.
  */
 export function resolveTimelineHighlight(
   entries: readonly TimelineEntry[],
   highlight: string,
-): string {
+): string | null {
   if (entries.some((entry) => entry.id === highlight)) return highlight;
   const posted = entries.filter(
     (entry) => entry.type === "comment" && entry.source_task_id === highlight,
   );
   return (
     posted.find((entry) => entry.comment_type === "system") ?? posted.at(-1)
-  )?.id ?? highlight;
+  )?.id ?? null;
 }
 
 /**
