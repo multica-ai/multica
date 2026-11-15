@@ -68,7 +68,7 @@ describe("Inbox notification settings", () => {
     renderTab();
     const leaving = screen.getByRole("region", { name: "Leaving the Inbox" });
     expect(leaving).toHaveTextContent("Reading a notification doesn't take it out of the Inbox.");
-    expect(leaving).toHaveTextContent("Cancelling it doesn't.");
+    expect(leaving).toHaveTextContent("reaches a Done or Cancelled status");
     expect(within(leaving).getByRole("link", { name: "View archived" })).toHaveAttribute(
       "href",
       "/acme/inbox?view=archived",

@@ -242,10 +242,11 @@ func archiveStaleTaskFailedInbox(
 		"row_count", len(rows), "recipient_count", count)
 }
 
-// archiveDoneIssueInbox archives every recipient's notifications for an issue
-// that reached a done status: finished work leaves the inbox whether or not
-// it was read. Cancelled issues keep theirs.
-func archiveDoneIssueInbox(
+// archiveTerminalIssueInbox archives every recipient's notifications for an
+// issue that reached a done or closed status: finished or abandoned work
+// leaves the inbox whether or not it was read, the same set "Archive
+// completed" clears by hand.
+func archiveTerminalIssueInbox(
 	ctx context.Context,
 	queries *db.Queries,
 	bus *events.Bus,
@@ -257,7 +258,7 @@ func archiveDoneIssueInbox(
 		IssueID:     parseUUID(issueID),
 	})
 	if err != nil {
-		slog.Error("auto-archive done issue inbox: query failed",
+		slog.Error("auto-archive terminal issue inbox: query failed",
 			"workspace_id", workspaceID, "issue_id", issueID, "error", err)
 		return
 	}
@@ -270,7 +271,7 @@ func archiveDoneIssueInbox(
 	}
 	count := publishInboxBatchArchived(bus, workspaceID, issueID, recipients)
 
-	slog.Info("auto-archive done issue inbox: archived rows",
+	slog.Info("auto-archive terminal issue inbox: archived rows",
 		"workspace_id", workspaceID, "issue_id", issueID,
 		"row_count", len(rows), "recipient_count", count)
 }
@@ -1030,10 +1031,10 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			category, categoryErr := issuestatus.CategoryWithError(ctx, queries, parseUUID(e.WorkspaceID), issue.Status)
 			switch {
 			case categoryErr != nil:
-				slog.Warn("resolve issue status category for done-issue inbox archive; keeping rows",
+				slog.Warn("resolve issue status category for terminal-issue inbox archive; keeping rows",
 					"issue_id", issue.ID, "status", issue.Status, "error", categoryErr)
-			case category == issuestatus.CategoryDone:
-				archiveDoneIssueInbox(ctx, queries, bus, e.WorkspaceID, issue.ID)
+			case category == issuestatus.CategoryDone, category == issuestatus.CategoryClosed:
+				archiveTerminalIssueInbox(ctx, queries, bus, e.WorkspaceID, issue.ID)
 			}
 		}
 
