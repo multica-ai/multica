@@ -975,7 +975,7 @@
     "set_parent_description_other": "搜索一个任务，设为所选 {{count}} 个任务的父任务",
     "skipped_title_other": "已更新 {{updated}} 个任务，{{count}} 个未更新",
     "skipped_more": "还有 {{count}} 个",
-    "select_skipped": "只选中这 {{count}} 个",
+    "select_skipped_other": "只选中这 {{count}} 个",
     "server_outdated": "当前服务器版本还不支持批量修改标签和自定义属性，请升级后重试。",
     "skip_reason": {
       "invalid_id": "不是有效的任务",

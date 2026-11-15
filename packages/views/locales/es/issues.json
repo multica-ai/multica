@@ -942,7 +942,8 @@
     "skipped_title_one": "Actualizadas {{updated}}, {{count}} tarea sin actualizar",
     "skipped_title_other": "Actualizadas {{updated}}, {{count}} tareas sin actualizar",
     "skipped_more": "y {{count}} más",
-    "select_skipped": "Seleccionar solo estas {{count}}",
+    "select_skipped_one": "Seleccionar solo esta tarea",
+    "select_skipped_other": "Seleccionar solo estas {{count}}",
     "server_outdated": "Este servidor aún no permite cambiar etiquetas ni propiedades personalizadas en bloque. Actualiza el servidor e inténtalo de nuevo.",
     "skip_reason": {
       "invalid_id": "No es una tarea válida",

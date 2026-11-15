@@ -1028,7 +1028,8 @@
     "skipped_title_one": "{{updated}} mises à jour, {{count}} tâche ignorée",
     "skipped_title_other": "{{updated}} mises à jour, {{count}} tâches ignorées",
     "skipped_more": "et {{count}} de plus",
-    "select_skipped": "Sélectionner seulement ces {{count}}",
+    "select_skipped_one": "Sélectionner seulement cette tâche",
+    "select_skipped_other": "Sélectionner seulement ces {{count}}",
     "server_outdated": "Ce serveur ne permet pas encore de modifier les étiquettes ou les propriétés personnalisées en masse. Mettez le serveur à jour, puis réessayez.",
     "skip_reason": {
       "invalid_id": "Tâche non valide",

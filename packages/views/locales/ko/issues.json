@@ -975,7 +975,7 @@
     "set_parent_description_other": "선택한 태스크 {{count}}개의 상위로 지정할 태스크를 검색하세요.",
     "skipped_title_other": "{{updated}}개 업데이트, {{count}}개는 업데이트되지 않음",
     "skipped_more": "외 {{count}}개",
-    "select_skipped": "이 {{count}}개만 선택",
+    "select_skipped_other": "이 {{count}}개만 선택",
     "server_outdated": "이 서버는 아직 라벨과 사용자 지정 속성의 일괄 변경을 지원하지 않습니다. 서버를 업데이트한 후 다시 시도하세요.",
     "skip_reason": {
       "invalid_id": "유효한 태스크가 아닙니다",

@@ -975,7 +975,7 @@
     "set_parent_description_other": "選択したタスク {{count}} 件の親にするタスクを検索します。",
     "skipped_title_other": "{{updated}} 件を更新、{{count}} 件は更新されませんでした",
     "skipped_more": "ほか {{count}} 件",
-    "select_skipped": "この {{count}} 件だけを選択",
+    "select_skipped_other": "この {{count}} 件だけを選択",
     "server_outdated": "このサーバーはラベルやカスタムプロパティの一括変更にまだ対応していません。サーバーを更新してから再試行してください。",
     "skip_reason": {
       "invalid_id": "有効なタスクではありません",

@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import type { ReactElement } from "react";
 import type { BatchUpdateIssuesResponse } from "@multica/core/types";
 import { BatchOpsUnsupportedError } from "@multica/core/api";
 import { renderWithI18n } from "../../test/i18n";
 import { useBatchResultToast, type BatchResultToastOptions } from "./batch-result-toast";
 
-const toast = vi.hoisted(() => ({ success: vi.fn(), warning: vi.fn(), error: vi.fn() }));
+const toast = vi.hoisted(() => ({ success: vi.fn(), warning: vi.fn(), error: vi.fn(), dismiss: vi.fn() }));
 vi.mock("sonner", () => ({ toast }));
 
 type Reporter = ReturnType<typeof useBatchResultToast>;
@@ -65,20 +65,24 @@ describe("useBatchResultToast", () => {
 
     expect(applied).toBe(false);
     expect(toast.success).not.toHaveBeenCalled();
-    const [title, options] = toast.warning.mock.calls[0]! as [
-      string,
-      { description: ReactElement; action: { label: string; onClick: () => void } },
-    ];
+    const [title, options] = toast.warning.mock.calls[0]! as [string, { id: string; description: ReactElement }];
     expect(title).toBe("Updated 1, skipped 2 issues");
-    renderWithI18n(options.description);
+    // Toast content renders outside the app's providers.
+    render(options.description);
     expect(screen.getByText("B")).toBeInTheDocument();
-    expect(screen.getByText("C")).toBeInTheDocument();
+    expect(screen.getByText("Its project's workflow doesn't allow this change")).toBeInTheDocument();
     // An unknown code falls back to the server's message.
     expect(screen.getByText("server message")).toBeInTheDocument();
 
-    expect(options.action.label).toBe("Select only these 2");
-    options.action.onClick();
+    fireEvent.click(screen.getByRole("button", { name: "Select only these 2" }));
     expect(onSelectSkipped).toHaveBeenCalledWith(["b", "c"]);
+    expect(toast.dismiss).toHaveBeenCalledWith(options.id);
+  });
+
+  it("names the single skipped issue in the select action", () => {
+    report({ updated: 1, results: [updated("a"), skipped("b", "not_found")] }, 2, { onSelectSkipped: vi.fn() });
+    render((toast.warning.mock.calls[0]![1] as { description: ReactElement }).description);
+    expect(screen.getByRole("button", { name: "Select only this issue" })).toBeInTheDocument();
   });
 
   it("summarises skips beyond the first three", () => {
@@ -86,9 +90,9 @@ describe("useBatchResultToast", () => {
       { updated: 0, results: ["a", "b", "c", "d", "e"].map((id) => skipped(id, "not_found")) },
       5,
     );
-    const options = toast.warning.mock.calls[0]![1] as { description: ReactElement; action?: unknown };
-    expect(options.action).toBeUndefined();
-    renderWithI18n(options.description);
+    const options = toast.warning.mock.calls[0]![1] as { description: ReactElement };
+    render(options.description);
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
     expect(screen.queryByText("D")).not.toBeInTheDocument();
     expect(screen.getByText("and 2 more")).toBeInTheDocument();
   });

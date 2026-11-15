@@ -2,7 +2,7 @@
 
 import { useCallback } from "react";
 import { toast } from "sonner";
-import type { BatchIssueResult, BatchUpdateIssuesResponse } from "@multica/core/types";
+import type { BatchUpdateIssuesResponse } from "@multica/core/types";
 import { BatchOpsUnsupportedError } from "@multica/core/api";
 import { useT } from "../../i18n";
 
@@ -26,25 +26,36 @@ const isSkipReason = (code: string | undefined): code is SkipReason =>
 /** How many skipped issues the toast names before summarising the rest. */
 const LISTED_SKIPS = 3;
 
-function SkippedList({ skipped }: { skipped: BatchIssueResult[] }) {
-  const { t } = useT("issues");
-  const listed = skipped.slice(0, LISTED_SKIPS);
+let skippedToastSeq = 0;
+
+// Rendered under <Toaster />, outside the app's providers: no hooks here, every
+// string arrives translated.
+function SkippedList({
+  rows,
+  more,
+  action,
+}: {
+  rows: { id: string; identifier: string; reason: string }[];
+  more: string | null;
+  action: { label: string; onClick: () => void } | null;
+}) {
   return (
     <div className="mt-1 flex flex-col gap-1">
-      {listed.map((result) => (
-        <div key={result.issue_id} className="flex min-w-0 gap-2 text-caption">
-          <span className="shrink-0 font-mono text-muted-foreground">{result.identifier ?? result.issue_id.slice(0, 8)}</span>
-          <span className="min-w-0 truncate">
-            {isSkipReason(result.code)
-              ? t(($) => $.batch.skip_reason[result.code as SkipReason])
-              : result.message || t(($) => $.batch.skip_reason.write_failed)}
-          </span>
+      {rows.map((row) => (
+        <div key={row.id} className="flex min-w-0 gap-2 text-caption">
+          <span className="shrink-0 font-mono text-muted-foreground">{row.identifier}</span>
+          <span className="min-w-0 break-words">{row.reason}</span>
         </div>
       ))}
-      {skipped.length > LISTED_SKIPS && (
-        <div className="text-caption text-muted-foreground">
-          {t(($) => $.batch.skipped_more, { count: skipped.length - LISTED_SKIPS })}
-        </div>
+      {more && <div className="text-caption text-muted-foreground">{more}</div>}
+      {action && (
+        <button
+          type="button"
+          className="mt-1 self-start text-caption font-medium text-primary hover:underline cursor-pointer"
+          onClick={action.onClick}
+        >
+          {action.label}
+        </button>
       )}
     </div>
   );
@@ -87,15 +98,31 @@ export function useBatchResultToast() {
         return true;
       }
       const { onSelectSkipped } = options;
+      const toastId = `batch-skipped-${++skippedToastSeq}`;
+      const rows = skipped.slice(0, LISTED_SKIPS).map((result) => ({
+        id: result.issue_id,
+        identifier: result.identifier ?? result.issue_id.slice(0, 8),
+        reason: isSkipReason(result.code)
+          ? t(($) => $.batch.skip_reason[result.code as SkipReason])
+          : result.message || t(($) => $.batch.skip_reason.write_failed),
+      }));
+      const more =
+        skipped.length > LISTED_SKIPS
+          ? t(($) => $.batch.skipped_more, { count: skipped.length - LISTED_SKIPS })
+          : null;
+      const action = onSelectSkipped
+        ? {
+            label: t(($) => $.batch.select_skipped, { count: skipped.length }),
+            onClick: () => {
+              onSelectSkipped(skipped.map((result) => result.issue_id));
+              toast.dismiss(toastId);
+            },
+          }
+        : null;
       toast.warning(t(($) => $.batch.skipped_title, { updated: response.updated, count: skipped.length }), {
-        description: <SkippedList skipped={skipped} />,
+        id: toastId,
+        description: <SkippedList rows={rows} more={more} action={action} />,
         duration: 10_000,
-        action: onSelectSkipped
-          ? {
-              label: t(($) => $.batch.select_skipped, { count: skipped.length }),
-              onClick: () => onSelectSkipped(skipped.map((result) => result.issue_id)),
-            }
-          : undefined,
       });
       return false;
     },

@@ -1133,7 +1133,10 @@
     "skipped_title_many": "Обновлено: {{updated}}, пропущено {{count}} задач",
     "skipped_title_other": "Обновлено: {{updated}}, пропущено {{count}} задачи",
     "skipped_more": "и ещё {{count}}",
-    "select_skipped": "Выбрать только эти ({{count}})",
+    "select_skipped_one": "Выбрать только эту задачу",
+    "select_skipped_few": "Выбрать только эти ({{count}})",
+    "select_skipped_many": "Выбрать только эти ({{count}})",
+    "select_skipped_other": "Выбрать только эти ({{count}})",
     "server_outdated": "Этот сервер пока не умеет массово менять метки и пользовательские свойства. Обновите сервер и попробуйте снова.",
     "skip_reason": {
       "invalid_id": "Недопустимая задача",
