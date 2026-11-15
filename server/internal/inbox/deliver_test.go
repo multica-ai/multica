@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -108,5 +109,13 @@ func TestNewEventShape(t *testing.T) {
 	}
 	if system.ActorType != "system" || system.ActorID != "" {
 		t.Fatalf("system event actor = %s/%q", system.ActorType, system.ActorID)
+	}
+}
+
+// A row that joined a snooze must not banner or push.
+func TestNewEventAnnouncesSnoozedRowAsSnoozed(t *testing.T) {
+	item := db.InboxItem{SnoozedUntil: pgtype.Timestamptz{Time: time.Now().Add(time.Hour), Valid: true}}
+	if got := newEvent(item, nil).Type; got != protocol.EventInboxSnoozed {
+		t.Fatalf("snoozed row announced as %s, want %s", got, protocol.EventInboxSnoozed)
 	}
 }
