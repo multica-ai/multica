@@ -26,9 +26,15 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { PROJECT_STATUS_ORDER, PROJECT_STATUS_CONFIG, PROJECT_PRIORITY_ORDER } from "@multica/core/projects/config";
 import { ProjectProgressSection } from "./project-progress-section";
+import { ProjectOverviewBody, ProjectOverviewHeader, ProjectTabs } from "./project-overview";
+import {
+  defaultProjectTab,
+  isProjectTab,
+  useProjectTabStore,
+  type ProjectTab,
+} from "@multica/core/projects/tab-store";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { AppLink, currentPath, useNavigation } from "../../navigation";
-import { TitleEditor, ContentEditor, type ContentEditorRef } from "../../editor";
 import { PriorityIcon } from "../../issues/components/priority-icon";
 import { ProjectResourcesSection } from "./project-resources-section";
 import { ProjectStartDatePicker } from "./project-start-date-picker";
@@ -41,7 +47,6 @@ import { ProjectWorkflowMenuItem, ProjectWorkflowSheet } from "../../workflows/p
 import { IssueSurface } from "../../issues/surface/issue-surface";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button, buttonVariants } from "@multica/ui/components/ui/button";
-import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
@@ -53,16 +58,10 @@ import {
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import {
-  Popover,
-  PopoverTrigger,
-  PopoverContent,
-} from "@multica/ui/components/ui/popover";
-import {
   Tooltip,
   TooltipTrigger,
   TooltipContent,
 } from "@multica/ui/components/ui/tooltip";
-import { EmojiPicker } from "@multica/ui/components/common/emoji-picker";
 import { IssueViewHeader } from "../../issue-views/view-header";
 import {
   AnimatedRightSidebar,
@@ -195,13 +194,31 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       },
     );
   };
-  const descEditorRef = useRef<ContentEditorRef>(null);
   const isMobile = useIsMobile();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const [propertiesOpen, setPropertiesOpen] = useState(true);
   const [progressOpen, setProgressOpen] = useState(true);
-  const [descriptionOpen, setDescriptionOpen] = useState(true);
+
+  // Overview / Issues. An explicit ?tab= wins and is remembered; otherwise the
+  // project opens on the tab this person last left it on.
+  const tabParam = router.searchParams.get("tab");
+  const rememberedTab = useProjectTabStore((s) => s.lastTab[projectId]);
+  const rememberTab = useProjectTabStore((s) => s.remember);
+  const tab: ProjectTab = isProjectTab(tabParam)
+    ? tabParam
+    : defaultProjectTab(rememberedTab, project?.issue_count ?? 0);
+  useEffect(() => {
+    if (isProjectTab(tabParam)) rememberTab(projectId, tabParam);
+  }, [projectId, tabParam, rememberTab]);
+  const handleTabChange = useCallback(
+    (next: ProjectTab) => {
+      rememberTab(projectId, next);
+      const params = new URLSearchParams(router.searchParams);
+      params.set("tab", next);
+      router.replace(`${router.pathname}?${params.toString()}`);
+    },
+    [projectId, rememberTab, router],
+  );
 
   // Sidebar panel
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
@@ -333,43 +350,6 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
 
   const sidebarContent = (
     <div className="space-y-5">
-      {/* Icon + Title */}
-      <div>
-        <Popover open={iconPickerOpen} onOpenChange={setIconPickerOpen}>
-          <TooltipHint label={t(($) => $.detail.icon_tooltip)}>
-            <PopoverTrigger
-              render={
-                <button
-                  type="button"
-                  className="text-display-sm cursor-pointer rounded-lg p-1 -ml-1 hover:bg-accent/60 transition-colors"
-                  aria-label={t(($) => $.detail.icon_tooltip)}
-                >
-                  {project.icon || "📁"}
-                </button>
-              }
-            />
-          </TooltipHint>
-          <PopoverContent align="start" className="w-auto p-0">
-            <EmojiPicker
-              onSelect={(emoji) => {
-                handleUpdateField({ icon: emoji });
-                setIconPickerOpen(false);
-              }}
-            />
-          </PopoverContent>
-        </Popover>
-        <TitleEditor
-          key={`title-${projectId}`}
-          defaultValue={project.title}
-          placeholder={t(($) => $.detail.title_placeholder)}
-          className="mt-2 w-full text-title-sm font-semibold leading-snug tracking-tight"
-          onBlur={(value) => {
-            const trimmed = value.trim();
-            if (trimmed && trimmed !== project.title) handleUpdateField({ title: trimmed });
-          }}
-        />
-      </div>
-
       {/* Properties */}
       <div>
         <button
@@ -481,34 +461,112 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
         </div>}
       </div>
 
-      {/* Description */}
-      <div>
-        <button
-          type="button"
-          className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-caption font-medium transition-colors mb-2 hover:bg-accent/70 ${descriptionOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
-          onClick={() => setDescriptionOpen(!descriptionOpen)}
-        >
-          {t(($) => $.detail.section_description)}
-          <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${descriptionOpen ? "rotate-90" : ""}`} />
-        </button>
-        {descriptionOpen && <div className="pl-2">
-          <ContentEditor
-            ref={descEditorRef}
-            key={projectId}
-            value={project.description || ""}
-            placeholder={t(($) => $.detail.description_placeholder)}
-            onUpdate={(md) => handleUpdateField({ description: md || null })}
-            debounceMs={1500}
-          />
-          <p className="mt-1 px-2 text-caption text-muted-foreground">
-            {t(($) => $.detail.description_hint)}
-          </p>
-        </div>}
-      </div>
-
       {/* Resources */}
       <ProjectResourcesSection projectId={projectId} />
     </div>
+  );
+
+  const projectMenu = (
+    <>
+      <DropdownMenuItem
+        onClick={() =>
+          useModalStore
+            .getState()
+            .open("project-rename", { projectId: project.id, title: project.title })
+        }
+      >
+        <Pencil className="h-3.5 w-3.5" />
+        {t(($) => $.detail.rename_action)}
+      </DropdownMenuItem>
+      <DropdownMenuItem onClick={() => {
+        void copyText(router.getShareableUrl(currentPath(router))).then((ok) => {
+          if (ok) toast.success(t(($) => $.detail.toast_link_copied));
+        });
+      }}>
+        <Link2 className="h-3.5 w-3.5" />
+        {t(($) => $.detail.copy_link)}
+      </DropdownMenuItem>
+      <DropdownMenuItem onClick={() => {
+        const { text, html } = titleLinkPayload(
+          project.title,
+          router.getShareableUrl(currentPath(router)),
+        );
+        void copyTextAndHtml(text, html).then((ok) => {
+          if (ok) {
+            toast.success(t(($) => $.detail.toast_title_link_copied));
+          } else {
+            toast.error(t(($) => $.detail.toast_title_link_copy_failed));
+          }
+        });
+      }}>
+        <Type className="h-3.5 w-3.5" />
+        {t(($) => $.detail.copy_title_as_link)}
+      </DropdownMenuItem>
+      <DropdownMenuItem onClick={() => {
+        if (isPinned) {
+          deletePinMut.mutate({ itemType: "project", itemId: projectId });
+        } else {
+          createPin.mutate({ item_type: "project", item_id: projectId });
+        }
+      }}>
+        {isPinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
+        {isPinned ? t(($) => $.detail.unpin_tooltip) : t(($) => $.detail.pin_tooltip)}
+      </DropdownMenuItem>
+      <DropdownMenuItem
+        disabled={setSubscription.isPending}
+        onClick={handleToggleSubscription}
+      >
+        {isSubscribed ? <BellOff className="h-3.5 w-3.5" /> : <BellRing className="h-3.5 w-3.5" />}
+        {isSubscribed ? t(($) => $.detail.unsubscribe_action) : t(($) => $.detail.subscribe_action)}
+      </DropdownMenuItem>
+      <ProjectWorkflowMenuItem project={project} onOpen={() => setWorkflowSheetOpen(true)} />
+      <DropdownMenuSeparator />
+      {archived ? (
+        <DropdownMenuItem onClick={() => restore(project)}>
+          <ArchiveRestore className="h-3.5 w-3.5" />
+          {t(($) => $.detail.restore_action)}
+        </DropdownMenuItem>
+      ) : (
+        <DropdownMenuItem onClick={() => requestArchive([project])}>
+          <Archive className="h-3.5 w-3.5" />
+          {t(($) => $.detail.archive_action)}
+        </DropdownMenuItem>
+      )}
+      {canDelete && (
+        <DropdownMenuItem
+          variant="destructive"
+          disabled={deleting}
+          aria-busy={deleting}
+          onClick={() => setDeleteDialogOpen(true)}
+        >
+          {deleting ? <Spinner className="size-3.5" aria-hidden="true" /> : <Trash2 className="h-3.5 w-3.5" />}
+          {t(($) => $.detail.delete_action)}
+        </DropdownMenuItem>
+      )}
+    </>
+  );
+
+  const sidebarToggle = (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            variant={sidebarOpen ? "secondary" : "ghost"}
+            size="icon-sm"
+            className={sidebarOpen ? "" : "text-muted-foreground"}
+            aria-label={t(($) => $.detail.sidebar_tooltip)}
+            onClick={handleToggleSidebar}
+          >
+            <PanelRight />
+          </Button>
+        }
+      />
+      <TooltipContent side="bottom">{t(($) => $.detail.sidebar_tooltip)}</TooltipContent>
+    </Tooltip>
+  );
+
+  const projectTabs = (
+    <ProjectTabs tab={tab} onTabChange={handleTabChange} issueCount={project.issue_count} />
   );
 
   return (
@@ -523,123 +581,46 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
     >
       <ResizablePanel id="content" minSize="50%">
         <div ref={rightSidebarShortcutTargetRef} className="flex h-full flex-col">
-          <IssueSurface
-            scope={issueScope}
-            modes={["board", "list", "table", "swimlane", "gantt"]}
-            allowCreate={!archived}
-            renderHeader={({ controller }) => (
-              <>
-              <IssueViewHeader
-                controller={controller}
-                base={{ kind: "project", project }}
-                baseBadge={archived ? <ArchivedProjectTag /> : undefined}
-                hideCreate={archived}
-                baseMenu={
-                  <>
-                    <DropdownMenuItem
-                      onClick={() =>
-                        useModalStore
-                          .getState()
-                          .open("project-rename", { projectId: project.id, title: project.title })
-                      }
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                      {t(($) => $.detail.rename_action)}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => {
-                      void copyText(router.getShareableUrl(currentPath(router))).then((ok) => {
-                        if (ok) toast.success(t(($) => $.detail.toast_link_copied));
-                      });
-                    }}>
-                      <Link2 className="h-3.5 w-3.5" />
-                      {t(($) => $.detail.copy_link)}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => {
-                      const { text, html } = titleLinkPayload(
-                        project.title,
-                        router.getShareableUrl(currentPath(router)),
-                      );
-                      void copyTextAndHtml(text, html).then((ok) => {
-                        if (ok) {
-                          toast.success(t(($) => $.detail.toast_title_link_copied));
-                        } else {
-                          toast.error(t(($) => $.detail.toast_title_link_copy_failed));
-                        }
-                      });
-                    }}>
-                      <Type className="h-3.5 w-3.5" />
-                      {t(($) => $.detail.copy_title_as_link)}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => {
-                      if (isPinned) {
-                        deletePinMut.mutate({ itemType: "project", itemId: projectId });
-                      } else {
-                        createPin.mutate({ item_type: "project", item_id: projectId });
-                      }
-                    }}>
-                      {isPinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
-                      {isPinned ? t(($) => $.detail.unpin_tooltip) : t(($) => $.detail.pin_tooltip)}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      disabled={setSubscription.isPending}
-                      onClick={handleToggleSubscription}
-                    >
-                      {isSubscribed ? <BellOff className="h-3.5 w-3.5" /> : <BellRing className="h-3.5 w-3.5" />}
-                      {isSubscribed ? t(($) => $.detail.unsubscribe_action) : t(($) => $.detail.subscribe_action)}
-                    </DropdownMenuItem>
-                    <ProjectWorkflowMenuItem project={project} onOpen={() => setWorkflowSheetOpen(true)} />
-                    <DropdownMenuSeparator />
-                    {archived ? (
-                      <DropdownMenuItem onClick={() => restore(project)}>
-                        <ArchiveRestore className="h-3.5 w-3.5" />
-                        {t(($) => $.detail.restore_action)}
-                      </DropdownMenuItem>
-                    ) : (
-                      <DropdownMenuItem onClick={() => requestArchive([project])}>
-                        <Archive className="h-3.5 w-3.5" />
-                        {t(($) => $.detail.archive_action)}
-                      </DropdownMenuItem>
-                    )}
-                    {canDelete && (
-                      <DropdownMenuItem
-                        variant="destructive"
-                        disabled={deleting}
-                        aria-busy={deleting}
-                        onClick={() => setDeleteDialogOpen(true)}
-                      >
-                        {deleting ? <Spinner className="size-3.5" aria-hidden="true" /> : <Trash2 className="h-3.5 w-3.5" />}
-                        {t(($) => $.detail.delete_action)}
-                      </DropdownMenuItem>
-                    )}
-                  </>
-                }
-                trailing={
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <Button
-                          variant={sidebarOpen ? "secondary" : "ghost"}
-                          size="icon-sm"
-                          className={sidebarOpen ? "" : "text-muted-foreground"}
-                          aria-label={t(($) => $.detail.sidebar_tooltip)}
-                          onClick={handleToggleSidebar}
-                        >
-                          <PanelRight />
-                        </Button>
-                      }
-                    />
-                    <TooltipContent side="bottom">{t(($) => $.detail.sidebar_tooltip)}</TooltipContent>
-                  </Tooltip>
-                }
+          {tab === "overview" ? (
+            <>
+              <ProjectOverviewHeader
+                project={project}
+                tabs={projectTabs}
+                menu={projectMenu}
+                trailing={sidebarToggle}
               />
               {archived && (
                 <div className={cn("shrink-0 pt-2", PAGE_GUTTER)}>
                   <ArchivedProjectNotice project={project} />
                 </div>
               )}
-              </>
-            )}
-          />
+              <ProjectOverviewBody project={project} onUpdate={handleUpdateField} />
+            </>
+          ) : (
+            <IssueSurface
+              scope={issueScope}
+              modes={["board", "list", "table", "swimlane", "gantt"]}
+              allowCreate={!archived}
+              renderHeader={({ controller }) => (
+                <>
+                  <IssueViewHeader
+                    controller={controller}
+                    base={{ kind: "project", project }}
+                    baseBadge={archived ? <ArchivedProjectTag /> : undefined}
+                    hideCreate={archived}
+                    afterTitle={projectTabs}
+                    baseMenu={projectMenu}
+                    trailing={sidebarToggle}
+                  />
+                  {archived && (
+                    <div className={cn("shrink-0 pt-2", PAGE_GUTTER)}>
+                      <ArchivedProjectNotice project={project} />
+                    </div>
+                  )}
+                </>
+              )}
+            />
+          )}
           </div>
         </ResizablePanel>
         {!isMobile && <ResizableHandle />}

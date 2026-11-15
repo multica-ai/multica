@@ -65,3 +65,35 @@ func TestProjectProgressTables(t *testing.T) {
 		t.Errorf("by assignee = %v, want %v", byAssignee, wantAssignee)
 	}
 }
+
+func TestProjectOverviewTable(t *testing.T) {
+	overview := map[string]any{
+		"project": map[string]any{
+			"title": "Mobile 2.0", "status": "in_progress", "due_date": "2026-12-18",
+			"description": "Rebuild the mobile app.", "lead_type": "agent", "lead_id": "xyz",
+		},
+		"progress":  decodeSampleProgress(t),
+		"resources": []any{map[string]any{"id": "r1"}},
+	}
+	actors := actorDisplayLookup{state: &actorDisplayLookupState{
+		agents:        map[string]string{"xyz": "CodeBot"},
+		membersLoaded: true,
+		agentsLoaded:  true,
+		squadsLoaded:  true,
+	}}
+	_, rows := projectOverviewTable(overview, actors)
+	got := map[string]string{}
+	for _, row := range rows {
+		got[row[0]] = row[1]
+	}
+	want := map[string]string{
+		"TITLE": "Mobile 2.0", "LEAD": "agent:CodeBot", "DUE": "2026-12-18",
+		"PROGRESS": "5/11 (45%)", "FORECAST": "2026-12-13 (1.25/week)", "RESOURCES": "1",
+		"DESCRIPTION": "Rebuild the mobile app.",
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("%s = %q, want %q", k, got[k], v)
+		}
+	}
+}

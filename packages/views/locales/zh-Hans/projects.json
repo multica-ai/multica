@@ -82,6 +82,8 @@
     "copy_link": "复制链接",
     "copy_title_as_link": "复制带标题的链接",
     "delete_action": "删除项目",
+    "tab_overview": "概览",
+    "tab_issues": "任务",
     "section_properties": "属性",
     "section_progress": "进度",
     "section_description": "描述",

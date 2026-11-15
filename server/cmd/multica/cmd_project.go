@@ -56,6 +56,19 @@ JSON output always carries the full response.`,
 	RunE: runProjectProgress,
 }
 
+var projectOverviewCmd = &cobra.Command{
+	Use:   "overview <id>",
+	Short: "Show everything on a project's Overview in one read",
+	Long: `Show a project's Overview: the project itself (description included),
+its progress with weekly history, forecast and by-assignee breakdown, and its
+attached resources.
+
+The JSON shape is {"project": ..., "progress": ..., "resources": [...]}; new
+Overview sections are added as new top-level keys.`,
+	Args: exactArgs(1),
+	RunE: runProjectOverview,
+}
+
 var projectCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a new project",
@@ -191,6 +204,7 @@ func init() {
 	projectCmd.AddCommand(projectListCmd)
 	projectCmd.AddCommand(projectGetCmd)
 	projectCmd.AddCommand(projectProgressCmd)
+	projectCmd.AddCommand(projectOverviewCmd)
 	projectCmd.AddCommand(projectCreateCmd)
 	projectCmd.AddCommand(projectUpdateCmd)
 	projectCmd.AddCommand(projectDeleteCmd)
@@ -218,6 +232,7 @@ func init() {
 	projectGetCmd.Flags().String("output", "json", "Output format: table or json")
 
 	projectProgressCmd.Flags().String("output", "table", "Output format: table or json")
+	projectOverviewCmd.Flags().String("output", "json", "Output format: table or json")
 	projectProgressCmd.Flags().Bool("history", false, "Print the weekly trend")
 	projectProgressCmd.Flags().String("by", "", "Break progress down by: assignee")
 
@@ -1319,6 +1334,68 @@ func runProjectProgress(cmd *cobra.Command, args []string) error {
 		cli.PrintTable(os.Stdout, headers, rows)
 	}
 	return nil
+}
+
+func runProjectOverview(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	projectRef, err := resolveProjectID(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve project: %w", err)
+	}
+	base := "/api/projects/" + projectRef.ID
+	var project, progress, resources map[string]any
+	if err := client.GetJSON(ctx, base, &project); err != nil {
+		return fmt.Errorf("get project: %w", err)
+	}
+	if err := client.GetJSON(ctx, base+"/progress", &progress); err != nil {
+		return fmt.Errorf("get project progress: %w", err)
+	}
+	if err := client.GetJSON(ctx, base+"/resources", &resources); err != nil {
+		return fmt.Errorf("list project resources: %w", err)
+	}
+	overview := map[string]any{
+		"project":   project,
+		"progress":  progress,
+		"resources": resources["resources"],
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output != "table" {
+		return cli.PrintJSON(os.Stdout, overview)
+	}
+	headers, rows := projectOverviewTable(overview, loadActorDisplayLookup(ctx, client))
+	cli.PrintTable(os.Stdout, headers, rows)
+	return nil
+}
+
+// projectOverviewTable lays the overview out as FIELD / VALUE rows.
+func projectOverviewTable(overview map[string]any, actors actorDisplayLookup) ([]string, [][]string) {
+	project, _ := overview["project"].(map[string]any)
+	progress, _ := overview["progress"].(map[string]any)
+	resources, _ := overview["resources"].([]any)
+	_, summary := projectProgressSummaryTable(progress)
+	forecast := ""
+	if len(summary) == 1 {
+		forecast = summary[0][len(summary[0])-1]
+	}
+	rows := [][]string{
+		{"TITLE", strVal(project, "title")},
+		{"STATUS", strVal(project, "status")},
+		{"LEAD", formatLead(project, actors)},
+		{"START", strVal(project, "start_date")},
+		{"DUE", strVal(project, "due_date")},
+		{"PROGRESS", formatProjectProgress(progress["progress"])},
+		{"FORECAST", forecast},
+		{"RESOURCES", fmt.Sprint(len(resources))},
+		{"DESCRIPTION", strVal(project, "description")},
+	}
+	return []string{"FIELD", "VALUE"}, rows
 }
 
 func progressInt(m map[string]any, key string) int64 {

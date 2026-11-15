@@ -80,6 +80,8 @@
     "copy_link": "Скопировать ссылку",
     "copy_title_as_link": "Копировать ссылку с заголовком",
     "delete_action": "Удалить проект",
+    "tab_overview": "Обзор",
+    "tab_issues": "Задачи",
     "section_properties": "Свойства",
     "section_progress": "Прогресс",
     "section_description": "Описание",
