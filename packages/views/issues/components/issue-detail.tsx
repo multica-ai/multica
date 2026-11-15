@@ -2083,11 +2083,17 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     userId: user?.id,
     resetKey: id,
   });
-  const pendingHighlight = !!highlightCommentId && consumedHighlightId !== highlightCommentId;
+  const timelineReady = !issueLoading && !timelineLoading && !commentTasksLoading;
+  // A target the loaded timeline lacks (its comment was deleted) has nothing
+  // to land on, so the issue opens where the reader left off instead of at
+  // the top. If it arrives later, the landing still runs.
+  const highlightMissing = timelineReady && targetIdx < 0;
+  const pendingHighlight =
+    !!highlightCommentId && consumedHighlightId !== highlightCommentId && !highlightMissing;
   const { pending: readingAnchor, complete: completeAnchorRestore } = useIssueTimelineAnchor({
     containerKey: scrollContainerKey,
     container: scrollContainerEl,
-    ready: !issueLoading && !timelineLoading && !commentTasksLoading,
+    ready: timelineReady,
     skipRestore: isPeek || pendingHighlight,
   });
   useEffect(() => {
