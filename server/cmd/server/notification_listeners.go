@@ -683,6 +683,58 @@ func notifyDirect(
 	})
 }
 
+// notifyDelegatedIssueCreated tells the human behind an agent-created issue
+// that it exists. The delegated tier otherwise stays silent until a handoff
+// status, which left a new top-level issue findable only from the comment of
+// the run that filed it (MUL-9314). It reads the delegated subscription the
+// subscriber listener wrote for this same event, and adds each recipient to
+// skip so the project fanout that follows does not notify them twice.
+//
+// A sub-issue under a parent the human already watches stays quiet: the parent
+// leads there, and an agent splitting work into many children is the noise
+// the delegated tier exists to suppress (MUL-5483).
+func notifyDelegatedIssueCreated(
+	ctx context.Context,
+	queries *db.Queries,
+	bus *events.Bus,
+	issue handler.IssueResponse,
+	e events.Event,
+	skip map[string]bool,
+) {
+	if issue.CreatorType != "agent" {
+		return
+	}
+	subs, err := queries.ListIssueSubscribers(ctx, parseUUID(issue.ID))
+	if err != nil {
+		slog.Error("delegated issue_created: list subscribers failed", "issue_id", issue.ID, "error", err)
+		return
+	}
+	for _, sub := range subs {
+		subID := util.UUIDToString(sub.UserID)
+		if sub.UserType != "member" || sub.Reason != "delegated" || skip[subID] {
+			continue
+		}
+		if issue.ParentIssueID != nil {
+			watchingParent, err := queries.IsIssueSubscriber(ctx, db.IsIssueSubscriberParams{
+				IssueID:  parseUUID(*issue.ParentIssueID),
+				UserType: "member",
+				UserID:   sub.UserID,
+			})
+			if err != nil {
+				slog.Error("delegated issue_created: parent subscription check failed",
+					"issue_id", issue.ID, "error", err)
+				continue
+			}
+			if watchingParent {
+				continue
+			}
+		}
+		skip[subID] = true
+		notifyDirect(ctx, queries, bus, "member", subID, issue.WorkspaceID, e, issue.ID, issue.Status,
+			"issue_created", "info", issue.Title, "", emptyDetails)
+	}
+}
+
 // notifyMentionedMembers creates inbox items for each @mentioned member,
 // excluding the actor and any IDs in the skip set. When an @all mention is
 // present, all workspace members are notified (excluding agents).
@@ -845,6 +897,8 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			notifyMentionedMembers(bus, queries, e, mentions, issue.ID, issue.Title, issue.Status,
 				issue.Title, skip, emptyDetails)
 		}
+
+		notifyDelegatedIssueCreated(ctx, queries, bus, issue, e, skip)
 
 		// Members watching the project hear about every new issue in it.
 		if issue.ProjectID != nil {

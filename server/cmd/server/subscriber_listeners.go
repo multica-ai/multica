@@ -4,7 +4,6 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/attribution"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -256,52 +255,6 @@ func subscribeDelegatedHuman(bus *events.Bus, pool *pgxpool.Pool, queries *db.Qu
 		return
 	}
 	publishSubscriberAdded(bus, workspaceID, issueID, "member", util.UUIDToString(human), reason)
-
-	if reason == "delegated" {
-		notifyDelegatedIssueCreated(ctx, bus, queries, workspaceID, issue, human)
-	}
-}
-
-// notifyDelegatedIssueCreated tells the human behind an agent-created issue
-// that it exists. The delegated tier otherwise stays silent until a handoff
-// status, which left a new top-level issue findable only from the comment of
-// the run that filed it (MUL-9314).
-//
-// A sub-issue under a parent the human already watches stays quiet: the parent
-// leads there, and an agent splitting work into many children is the noise
-// the delegated tier exists to suppress (MUL-5483).
-func notifyDelegatedIssueCreated(ctx context.Context, bus *events.Bus, queries *db.Queries, workspaceID string, issue db.Issue, human pgtype.UUID) {
-	if issue.ParentIssueID.Valid {
-		watchingParent, err := queries.IsIssueSubscriber(ctx, db.IsIssueSubscriberParams{
-			IssueID:  issue.ParentIssueID,
-			UserType: "member",
-			UserID:   human,
-		})
-		if err != nil {
-			slog.Error("delegated issue_created: parent subscription check failed",
-				"issue_id", util.UUIDToString(issue.ID), "error", err)
-			return
-		}
-		if watchingParent {
-			return
-		}
-	}
-
-	creatorID := util.UUIDToString(issue.CreatorID)
-	notifyDirect(ctx, queries, bus,
-		"member", util.UUIDToString(human),
-		workspaceID,
-		events.Event{
-			Type:        protocol.EventIssueCreated,
-			WorkspaceID: workspaceID,
-			ActorType:   issue.CreatorType,
-			ActorID:     creatorID,
-		},
-		util.UUIDToString(issue.ID), issue.Status,
-		"issue_created", "info",
-		issue.Title, "",
-		emptyDetails,
-	)
 }
 
 // extractIssueFields normalizes an issue payload that may be either a

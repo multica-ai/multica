@@ -673,18 +673,72 @@ func TestDelegatedIssueCreated_NotifiesTheHumanOwner(t *testing.T) {
 		}
 		return n
 	}
-	file := func(t *testing.T, originType string, parent pgtype.UUID) string {
+	// fileIn runs the agent create through both listener sets in main.go's
+	// order and returns the issue with the inbox:new events it published for
+	// the human.
+	fileIn := func(t *testing.T, originType string, parent pgtype.UUID, projectID string) (string, int) {
 		t.Helper()
 		bus := events.New()
 		registerSubscriberListeners(bus, testPool)
+		registerNotificationListeners(bus, queries)
+		inboxNew := 0
+		bus.Subscribe(protocol.EventInboxNew, func(e events.Event) {
+			item, _ := e.Payload.(map[string]any)["item"].(map[string]any)
+			if item["recipient_id"] == testUserID {
+				inboxNew++
+			}
+		})
+
 		task := createAgentTaskWithOriginator(t, agentID, runtimeID, util.MustParseUUID(testUserID))
 		issueID := createAgentOriginIssue(t, agentID, originType, task, parent)
 		t.Cleanup(func() {
 			testPool.Exec(context.Background(), `DELETE FROM inbox_item WHERE issue_id = $1`, issueID)
 		})
-		publishAgentIssueCreated(bus, issueID, agentID)
+		resp := handler.IssueResponse{
+			ID:          issueID,
+			WorkspaceID: testWorkspaceID,
+			Title:       "delegated subscriber test issue",
+			Status:      "todo",
+			Priority:    "medium",
+			CreatorType: "agent",
+			CreatorID:   agentID,
+		}
+		if parent.Valid {
+			parentID := util.UUIDToString(parent)
+			resp.ParentIssueID = &parentID
+		}
+		if projectID != "" {
+			if _, err := testPool.Exec(ctx, `UPDATE issue SET project_id = $1 WHERE id = $2`, projectID, issueID); err != nil {
+				t.Fatalf("set project: %v", err)
+			}
+			resp.ProjectID = &projectID
+		}
+		bus.Publish(events.Event{
+			Type:        protocol.EventIssueCreated,
+			WorkspaceID: testWorkspaceID,
+			ActorType:   "agent",
+			ActorID:     agentID,
+			Payload:     map[string]any{"issue": resp},
+		})
+		return issueID, inboxNew
+	}
+	file := func(t *testing.T, originType string, parent pgtype.UUID) string {
+		t.Helper()
+		issueID, _ := fileIn(t, originType, parent, "")
 		return issueID
 	}
+
+	t.Run("also watching the project notifies once", func(t *testing.T) {
+		projectID := createTestProject(t)
+		addProjectSubscribers(t, projectID, testUserID)
+		issueID, inboxNew := fileIn(t, "agent_create", pgtype.UUID{}, projectID)
+		if n := issueCreatedRows(issueID); n != 1 {
+			t.Fatalf("issue_created rows = %d, want 1", n)
+		}
+		if inboxNew != 1 {
+			t.Fatalf("inbox:new events = %d, want 1", inboxNew)
+		}
+	})
 
 	t.Run("top-level issue", func(t *testing.T) {
 		issueID := file(t, "agent_create", pgtype.UUID{})
