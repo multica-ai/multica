@@ -25,8 +25,8 @@ const state = vi.hoisted(() => ({
   archiveCompleted: vi.fn(),
   markRead: vi.fn(),
   markUnread: vi.fn(),
-  snooze: vi.fn(),
-  unsnooze: vi.fn(),
+  snooze: vi.fn(() => Promise.resolve()),
+  unsnooze: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock("@multica/core/paths", async (importOriginal) => {
@@ -45,8 +45,9 @@ vi.mock("@multica/core/inbox/mutations", () => ({
   useArchiveCompletedInbox: () => ({ mutate: state.archiveCompleted }),
   useMarkInboxRead: () => ({ mutate: state.markRead }),
   useMarkInboxUnread: () => ({ mutate: state.markUnread }),
-  useSnoozeInbox: () => ({ mutate: state.snooze }),
-  useUnsnoozeInbox: () => ({ mutate: state.unsnooze }),
+  useSnoozeInbox: () => ({ mutateAsync: state.snooze }),
+  useUnsnoozeInbox: () => ({ mutateAsync: state.unsnooze }),
+  cachedInboxSnoozedUntil: () => null,
 }));
 vi.mock("@multica/core/hooks", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/hooks")>()),
@@ -482,7 +483,7 @@ describe("InboxSection", () => {
     renderSection([item({ id: "n1", issue_id: "issue-a" })]);
     fireEvent.click(screen.getByRole("button", { name: "Snooze" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: /^1 day/ }));
-    expect(state.snooze).toHaveBeenCalledWith({ id: "n1", until: expect.any(Date) }, expect.anything());
+    expect(state.snooze).toHaveBeenCalledWith({ id: "n1", until: expect.any(Date) });
   });
 
   it("opens the snoozed list from the section header, with its count", async () => {

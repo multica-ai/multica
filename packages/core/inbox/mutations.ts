@@ -280,6 +280,24 @@ export function useArchiveCompletedInbox() {
   });
 }
 
+/**
+ * When the issue of an inbox item is snoozed until, as far as the cache knows;
+ * null when it isn't snoozed or its time has passed.
+ */
+export function cachedInboxSnoozedUntil(qc: QueryClient, wsId: string, id: string): Date | null {
+  const snoozed = qc.getQueryData<SnoozedInboxIssue[]>(inboxKeys.snoozed(wsId));
+  const issueId = cachedInboxIssueId(qc, wsId, id) ?? snoozed?.find((entry) => entry.item_id === id)?.issue_id;
+  if (!issueId) return null;
+  const until =
+    snoozed?.find((entry) => entry.issue_id === issueId)?.snoozed_until ??
+    qc
+      .getQueryData<InboxItem[]>(inboxKeys.list(wsId))
+      ?.find((item) => item.issue_id === issueId && !item.archived && item.snoozed_until)?.snoozed_until;
+  if (!until) return null;
+  const date = new Date(until);
+  return date.getTime() > Date.now() ? date : null;
+}
+
 export interface SnoozeInboxInput {
   /** Any notification on the issue; the snooze covers the whole issue. */
   id: string;

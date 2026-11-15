@@ -12,8 +12,8 @@ import { IssueInboxActions } from "../issue-inbox-actions";
 
 const state = vi.hoisted(() => ({
   archive: vi.fn(),
-  snooze: vi.fn(),
-  unsnooze: vi.fn(),
+  snooze: vi.fn(() => Promise.resolve()),
+  unsnooze: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
@@ -24,8 +24,9 @@ vi.mock("@multica/core/paths", async (importOriginal) => {
 });
 vi.mock("@multica/core/inbox/mutations", () => ({
   useArchiveInbox: () => ({ mutate: state.archive }),
-  useSnoozeInbox: () => ({ mutate: state.snooze }),
-  useUnsnoozeInbox: () => ({ mutate: state.unsnooze }),
+  useSnoozeInbox: () => ({ mutateAsync: state.snooze }),
+  useUnsnoozeInbox: () => ({ mutateAsync: state.unsnooze }),
+  cachedInboxSnoozedUntil: () => null,
 }));
 
 function item(overrides: Partial<InboxItem> & { id: string }): InboxItem {
@@ -121,10 +122,7 @@ describe("IssueInboxActions", () => {
     const nav = setup();
     fireEvent.keyDown(document, { key: "h", code: "KeyH" });
     fireEvent.click(await screen.findByRole("menuitem", { name: /^1 hour/ }));
-    expect(state.snooze).toHaveBeenCalledWith(
-      { id: "n-1", until: expect.any(Date) },
-      expect.anything(),
-    );
+    expect(state.snooze).toHaveBeenCalledWith({ id: "n-1", until: expect.any(Date) });
     expect(nav.push).toHaveBeenCalledWith("/acme/issues/issue-2#comment-c-9");
   });
 
@@ -139,7 +137,7 @@ describe("IssueInboxActions", () => {
     expect(screen.queryByRole("button", { name: "Archive" })).toBeNull();
 
     fireEvent.keyDown(document, { key: "h", code: "KeyH" });
-    expect(state.unsnooze).toHaveBeenCalledWith({ id: "n-1" }, expect.anything());
+    expect(state.unsnooze).toHaveBeenCalledWith({ id: "n-1" });
   });
 
   it("archives and moves on to the next notification", () => {

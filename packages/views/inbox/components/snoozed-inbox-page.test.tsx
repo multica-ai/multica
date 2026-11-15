@@ -8,7 +8,10 @@ import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 import { SnoozedInboxPage } from "./snoozed-inbox-page";
 
-const state = vi.hoisted(() => ({ snooze: vi.fn(), unsnooze: vi.fn() }));
+const state = vi.hoisted(() => ({
+  snooze: vi.fn(() => Promise.resolve()),
+  unsnooze: vi.fn(() => Promise.resolve()),
+}));
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 vi.mock("@multica/core/hooks", async (importOriginal) => ({
@@ -20,8 +23,9 @@ vi.mock("@multica/core/paths", async (importOriginal) => {
   return { ...actual, useWorkspacePaths: () => actual.paths.workspace("acme") };
 });
 vi.mock("@multica/core/inbox/mutations", () => ({
-  useSnoozeInbox: () => ({ mutate: state.snooze }),
-  useUnsnoozeInbox: () => ({ mutate: state.unsnooze }),
+  useSnoozeInbox: () => ({ mutateAsync: state.snooze }),
+  useUnsnoozeInbox: () => ({ mutateAsync: state.unsnooze }),
+  cachedInboxSnoozedUntil: () => null,
 }));
 
 const HOUR = 60 * 60 * 1000;
@@ -84,7 +88,7 @@ describe("SnoozedInboxPage", () => {
   it("brings an issue back now", () => {
     renderPage([entry("issue-1", new Date(Date.now() + HOUR))]);
     fireEvent.click(screen.getByRole("button", { name: /Bring back now/ }));
-    expect(state.unsnooze).toHaveBeenCalledWith({ id: "item-issue-1" }, expect.anything());
+    expect(state.unsnooze).toHaveBeenCalledWith({ id: "item-issue-1" });
   });
 
   it("says when nothing is snoozed", () => {
