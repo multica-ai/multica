@@ -3,13 +3,17 @@ package handler
 import (
 	"context"
 	"net/http"
+	"slices"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/inbox"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 type snoozeFixture struct {
@@ -255,6 +259,70 @@ func TestInboxBatchActionsSkipSnoozedIssues(t *testing.T) {
 		Want(http.StatusOK)
 	if got := dbfx.Count(t, "SELECT count(*) FROM inbox_item WHERE id = $1 AND archived = true AND snoozed_until IS NULL", snoozedItem); got != 1 {
 		t.Fatal("archiving kept the snooze")
+	}
+}
+
+// subscribeInboxEvents records the inbox events published for one workspace.
+// Bus handlers are never unsubscribed in this suite, and Publish is
+// synchronous, so the slice is complete once a request returns.
+func subscribeInboxEvents(workspaceID string) *[]string {
+	var seen []string
+	var mu sync.Mutex
+	for _, eventType := range []string{
+		protocol.EventInboxNew, protocol.EventInboxSnoozed, protocol.EventInboxUnsnoozed, protocol.EventInboxBatchRead,
+	} {
+		testHandler.Bus.Subscribe(eventType, func(e events.Event) {
+			if e.WorkspaceID != workspaceID {
+				return
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			seen = append(seen, e.Type)
+		})
+	}
+	return &seen
+}
+
+func TestSnoozeInboxRefreshesClientsThatPredateIt(t *testing.T) {
+	f := newSnoozeFixture(t)
+	item := f.insert(t, f.issueID, "row", false, time.Now())
+	seen := subscribeInboxEvents(f.workspaceID)
+
+	f.snooze(t, item, time.Now().Add(time.Hour)).Want(http.StatusOK)
+	want := []string{protocol.EventInboxSnoozed, protocol.EventInboxBatchRead}
+	if !slices.Equal(*seen, want) {
+		t.Fatalf("snooze published %v, want %v", *seen, want)
+	}
+
+	// A row written into the snooze is announced as snoozed only: never as new,
+	// and without the refresh, since the list does not change.
+	*seen = nil
+	row, inserted, err := inbox.CreateIfEligible(context.Background(), testHandler.Queries, db.CreateInboxItemParams{
+		WorkspaceID:   parseUUID(f.workspaceID),
+		RecipientType: "member",
+		RecipientID:   parseUUID(testUserID),
+		Type:          "new_comment",
+		Severity:      "info",
+		IssueID:       parseUUID(f.issueID),
+		Title:         "Snoozed issue",
+		Details:       []byte(`{}`),
+	})
+	if err != nil || !inserted {
+		t.Fatalf("create: inserted=%v err=%v", inserted, err)
+	}
+	if got := inbox.NewItemEventType(row); got != protocol.EventInboxSnoozed {
+		t.Fatalf("a row written into a snooze is announced as %s, want %s", got, protocol.EventInboxSnoozed)
+	}
+
+	req := testutil.WithHeaders(
+		testutil.JSONRequest(http.MethodPost, "/api/inbox/"+item+"/unsnooze", map[string]any{}),
+		"X-User-ID", testUserID,
+		"X-Workspace-ID", f.workspaceID,
+	)
+	testutil.Call(t, inboxWorkspaceHandler(testHandler.UnsnoozeInboxItem), withURLParam(req, "id", item)).Want(http.StatusOK)
+	want = []string{protocol.EventInboxUnsnoozed, protocol.EventInboxBatchRead}
+	if !slices.Equal(*seen, want) {
+		t.Fatalf("unsnooze published %v, want %v", *seen, want)
 	}
 }
 

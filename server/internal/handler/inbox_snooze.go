@@ -117,6 +117,7 @@ func (h *Handler) SnoozeInboxItem(w http.ResponseWriter, r *http.Request) {
 		"recipient_id":  uuidToString(prev.RecipientID),
 		"snoozed_until": until.UTC().Format(time.RFC3339),
 	})
+	h.publishInboxRefresh(r, prev)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"issue_id":      uuidToString(prev.IssueID),
 		"snoozed_until": until.UTC().Format(time.RFC3339),
@@ -171,8 +172,21 @@ func (h *Handler) UnsnoozeInboxItem(w http.ResponseWriter, r *http.Request) {
 		"issue_id":     uuidToPtr(prev.IssueID),
 		"recipient_id": uuidToString(prev.RecipientID),
 	})
+	h.publishInboxRefresh(r, prev)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"issue_id": uuidToString(prev.IssueID),
 		"count":    len(rows),
+	})
+}
+
+// publishInboxRefresh repeats a snooze or unsnooze as a batch read of no rows.
+// Mobile builds from before snooze refetch the inbox only on the event names
+// they subscribe to, and this is the one every client takes as "refetch the
+// inbox and badge" with no other effect. Rows written into a snooze don't send
+// it: they stay out of the list and must not reach anyone as new.
+func (h *Handler) publishInboxRefresh(r *http.Request, prev db.InboxItem) {
+	h.publish(protocol.EventInboxBatchRead, uuidToString(prev.WorkspaceID), "member", requestUserID(r), map[string]any{
+		"recipient_id": uuidToString(prev.RecipientID),
+		"count":        0,
 	})
 }
