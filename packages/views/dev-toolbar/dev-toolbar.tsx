@@ -11,6 +11,7 @@ import {
   subscribeToCurrentSlug,
 } from "@multica/core/platform";
 import { useWSStatus, type WSStatus } from "@multica/core/realtime";
+import { useSessionPromptStore } from "@multica/core/session-prompt";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { Popover, PopoverContent, PopoverTrigger } from "@multica/ui/components/ui/popover";
@@ -36,6 +37,7 @@ import {
   SyncPanel,
   TONE_CLASS,
 } from "./panels";
+import { PromptsPanel } from "./prompts-panel";
 import { CachePanel, EventsPanel, RuntimesPanel, TasksPanel } from "./realtime-panels";
 import { useDevRecorder, useMainThreadBlocked, useNavDuration, useNow } from "./use-dev-metrics";
 
@@ -147,6 +149,7 @@ export function DevToolbar({ build, apiUrl, route, onNavigate }: DevToolbarProps
   const fetching = useIsFetching();
   const online = runtimes?.filter((r) => r.status === "online").length ?? 0;
   const running = activeTasks(tasks ?? []).filter((t) => t.status === "running").length;
+  const corner = useSessionPromptStore((s) => s.corner);
   const openIssue = slug ? (issueId: string) => onNavigate(paths.workspace(slug).issueDetail(issueId)) : null;
 
   const syncDot = (
@@ -262,6 +265,9 @@ export function DevToolbar({ build, apiUrl, route, onNavigate }: DevToolbarProps
             </Metric>
           </>
         )}
+        <Metric label="Prompts" value={corner ?? "idle"}>
+          <PromptsPanel wsId={wsId} now={now} />
+        </Metric>
         <Metric label="Errors" value={String(errors)} tone={errors > 0 ? "bad" : "normal"}>
           <ErrorsPanel recording={recording} />
         </Metric>
