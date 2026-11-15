@@ -120,6 +120,7 @@ import type {
   UpdateProjectRequest,
   ListProjectsResponse,
   ListProjectMembersResponse,
+  ListPrivateProjectsResponse,
   ProjectResource,
   CreateProjectResourceRequest,
   UpdateProjectResourceRequest,
@@ -388,6 +389,7 @@ import {
   ProjectSchema,
   ArchiveProjectResponseSchema,
   ListProjectMembersResponseSchema,
+  ListPrivateProjectsResponseSchema,
   ProjectSubscriptionSchema,
   ListProjectsResponseSchema,
   EMPTY_PROJECT,
@@ -4489,7 +4491,7 @@ export class ApiClient {
 
   async getProjectMembers(id: string): Promise<ListProjectMembersResponse> {
     const raw = await this.fetch<unknown>(`/api/projects/${id}/members`);
-    return parseWithFallback(raw, ListProjectMembersResponseSchema, { members: [], total: 0 }, {
+    return parseWithFallback(raw, ListProjectMembersResponseSchema, { members: [], total: 0, manager_id: null }, {
       endpoint: "GET /api/projects/:id/members",
     });
   }
@@ -4517,13 +4519,27 @@ export class ApiClient {
     const raw = await this.fetch<unknown>(`/api/projects/${id}/members`, {
       method: "POST", body: JSON.stringify({ user_ids: userIds }),
     });
-    return parseWithFallback(raw, ListProjectMembersResponseSchema, { members: [], total: 0 }, {
+    return parseWithFallback(raw, ListProjectMembersResponseSchema, { members: [], total: 0, manager_id: null }, {
       endpoint: "POST /api/projects/:id/members",
     });
   }
 
   async removeProjectMember(id: string, userId: string): Promise<void> {
     await this.fetch(`/api/projects/${id}/members/${userId}`, { method: "DELETE" });
+  }
+
+  // Workspace owners only: every private project with its member list, so an
+  // owner who is not in one can still find it and add themselves.
+  async listPrivateProjectsForOwner(): Promise<ListPrivateProjectsResponse> {
+    const raw = await this.fetch<unknown>("/api/projects/private");
+    return parseWithFallback(raw, ListPrivateProjectsResponseSchema, { projects: [], total: 0 }, {
+      endpoint: "GET /api/projects/private",
+    });
+  }
+
+  async joinPrivateProject(id: string): Promise<Project> {
+    const raw = await this.fetch<unknown>(`/api/projects/${id}/join`, { method: "POST" });
+    return parseWithFallback(raw, ProjectSchema, EMPTY_PROJECT, { endpoint: "POST /api/projects/:id/join" });
   }
 
   // Project resources

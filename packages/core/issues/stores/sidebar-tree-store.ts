@@ -37,6 +37,8 @@ export interface SidebarProjectSettings {
   showCount: boolean;
   /** The row after the projects that lists issues outside every project. */
   showNoProject: boolean;
+  /** Every project row shows the default folder icon instead of the project's own. */
+  minimalIcons: boolean;
 }
 
 export const DEFAULT_SIDEBAR_PROJECT_SETTINGS: SidebarProjectSettings = {
@@ -45,6 +47,7 @@ export const DEFAULT_SIDEBAR_PROJECT_SETTINGS: SidebarProjectSettings = {
   onlyMine: false,
   showCount: true,
   showNoProject: true,
+  minimalIcons: false,
 };
 
 /** How many rows a capped sidebar section shows before "Show more". */

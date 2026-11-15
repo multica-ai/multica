@@ -59,8 +59,9 @@ import { SettingsTab } from "./settings-layout";
 // where the "unused" cleanup signal belongs.
 //
 // Layout deliberately mirrors the Labels and Properties tabs: same search +
-// primary-action row, same bordered card, same responsive column grid that
-// collapses to stacked rows under `md`, same overflow menu. These three are
+// primary-action row, same bordered card, same responsive column grid, same
+// overflow menu. When the card is too narrow for the columns, a row
+// collapses to the name and menu over one wrapping meta line. These three are
 // the workspace's "catalog of small named things" and reading as one surface
 // matters more than any per-tab cleverness.
 
@@ -228,8 +229,8 @@ export function QuickActionsTab() {
           </Button>
         </div>
 
-        <div className="overflow-hidden rounded-lg border border-surface-border bg-card">
-          <div className="hidden grid-cols-[minmax(10rem,1fr)_minmax(9rem,1fr)_6rem_5rem_7rem_2rem] gap-4 border-b border-surface-border bg-muted/20 px-4 py-2.5 text-caption font-medium text-muted-foreground md:grid">
+        <div className="@container/quick-actions overflow-hidden rounded-lg border border-surface-border bg-card">
+          <div className="hidden grid-cols-[minmax(10rem,1fr)_minmax(9rem,1fr)_6rem_5rem_7rem_2rem] gap-4 border-b border-surface-border bg-muted/20 px-4 py-2.5 text-caption font-medium text-muted-foreground @min-[48rem]/quick-actions:grid">
             <span>{t(($) => $.quick_actions.columns.name)}</span>
             <span>{t(($) => $.quick_actions.columns.target)}</span>
             <span>{t(($) => $.quick_actions.columns.visibility)}</span>
@@ -264,7 +265,7 @@ export function QuickActionsTab() {
                   <div
                     key={action.id}
                     className={cn(
-                      "grid gap-2 px-4 py-3 md:grid-cols-[minmax(10rem,1fr)_minmax(9rem,1fr)_6rem_5rem_7rem_2rem] md:items-center md:gap-4",
+                      "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1.5 px-4 py-3 @min-[48rem]/quick-actions:grid-cols-[minmax(10rem,1fr)_minmax(9rem,1fr)_6rem_5rem_7rem_2rem] @min-[48rem]/quick-actions:gap-4",
                       action.status !== "active" && "opacity-60",
                     )}
                   >
@@ -277,64 +278,68 @@ export function QuickActionsTab() {
                         </Badge>
                       ) : null}
                     </div>
-                    <div className="min-w-0 truncate text-caption text-muted-foreground md:text-body">
-                      <TargetLine action={action} t={t} />
+                    {/* One wrapping meta line when narrow; `contents` when wide so
+                        each field lands in its own column. */}
+                    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-caption text-muted-foreground @min-[48rem]/quick-actions:contents">
+                      <div className="min-w-0 max-w-full truncate @min-[48rem]/quick-actions:text-body">
+                        <TargetLine action={action} t={t} />
+                      </div>
+                      <div className="min-w-0">
+                        <VisibilityBadge action={action} t={t} />
+                      </div>
+                      <span
+                        className={cn(
+                          "tabular-nums @min-[48rem]/quick-actions:text-body",
+                          stale && "text-warning",
+                        )}
+                      >
+                        {action.use_count === 0
+                          ? t(($) => $.quick_actions.never_used)
+                          : t(($) => $.quick_actions.used_count, { count: action.use_count })}
+                      </span>
+                      <span>{new Date(action.updated_at).toLocaleDateString(locale)}</span>
                     </div>
-                    <div className="min-w-0">
-                      <VisibilityBadge action={action} t={t} />
-                    </div>
-                    <span
-                      className={cn(
-                        "text-caption tabular-nums text-muted-foreground md:text-body",
-                        stale && "text-warning",
-                      )}
-                    >
-                      {action.use_count === 0
-                        ? t(($) => $.quick_actions.never_used)
-                        : t(($) => $.quick_actions.used_count, { count: action.use_count })}
-                    </span>
-                    <span className="text-caption text-muted-foreground">
-                      {new Date(action.updated_at).toLocaleDateString(locale)}
-                    </span>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger
-                        render={
-                          <IconButton
-                            variant="ghost"
-                            size="icon-sm"
-                            label={t(($) => $.quick_actions.actions_open, { name: action.name })}
+                    <div className="col-[2] row-[1/span_2] @min-[48rem]/quick-actions:col-auto @min-[48rem]/quick-actions:row-auto">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger
+                          render={
+                            <IconButton
+                              variant="ghost"
+                              size="icon-sm"
+                              label={t(($) => $.quick_actions.actions_open, { name: action.name })}
+                            >
+                              <MoreHorizontal className="size-4" />
+                            </IconButton>
+                          }
+                        />
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => setEditing(action)}>
+                            <Pencil className="size-4" />
+                            {t(($) => $.quick_actions.edit)}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => void handleArchiveToggle(action)}>
+                            {action.status === "active" ? (
+                              <>
+                                <Archive className="size-4" />
+                                {t(($) => $.quick_actions.archive)}
+                              </>
+                            ) : (
+                              <>
+                                <ArchiveRestore className="size-4" />
+                                {t(($) => $.quick_actions.unarchive)}
+                              </>
+                            )}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            variant="destructive"
+                            onClick={() => setDeleteTarget(action)}
                           >
-                            <MoreHorizontal className="size-4" />
-                          </IconButton>
-                        }
-                      />
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => setEditing(action)}>
-                          <Pencil className="size-4" />
-                          {t(($) => $.quick_actions.edit)}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => void handleArchiveToggle(action)}>
-                          {action.status === "active" ? (
-                            <>
-                              <Archive className="size-4" />
-                              {t(($) => $.quick_actions.archive)}
-                            </>
-                          ) : (
-                            <>
-                              <ArchiveRestore className="size-4" />
-                              {t(($) => $.quick_actions.unarchive)}
-                            </>
-                          )}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          variant="destructive"
-                          onClick={() => setDeleteTarget(action)}
-                        >
-                          <Trash2 className="size-4" />
-                          {t(($) => $.quick_actions.delete)}
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                            <Trash2 className="size-4" />
+                            {t(($) => $.quick_actions.delete)}
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
                   </div>
                 );
               })}

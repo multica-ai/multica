@@ -21,8 +21,8 @@ import (
 
 // privateProjectAudience narrows realtime fanout for events about a private
 // project (MUL-8472): the project itself, its resources, its issues, their
-// comments and their runs reach only project members and workspace
-// owners/admins. Every other event keeps workspace fanout, and so does an
+// comments and their runs reach only project members; a workspace role
+// adds nobody (MUL-9284). Every other event keeps workspace fanout, and so does an
 // event whose project cannot be resolved (a deleted issue's id, a
 // workspace-level object): narrowing anything wider is how #9133 silenced
 // realtime for whole workspaces.
@@ -35,7 +35,6 @@ type privateProjectAudience interface {
 
 type audienceQuerier interface {
 	ListPrivateProjectAudience(ctx context.Context, workspaceID pgtype.UUID) ([]db.ListPrivateProjectAudienceRow, error)
-	ListWorkspaceManagerUserIDs(ctx context.Context, workspaceID pgtype.UUID) ([]pgtype.UUID, error)
 	GetIssueProjectID(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error)
 	GetCommentIssueProjectID(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error)
 	GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error)
@@ -71,7 +70,6 @@ type workspaceAudience struct {
 	loadedAt time.Time
 	// projects maps a private project id to its member user ids.
 	projects map[string][]string
-	managers []string
 }
 
 const (
@@ -150,18 +148,7 @@ func (a *dbPrivateProjectAudience) Audience(ctx context.Context, e events.Event)
 	if !private {
 		return nil, false, nil
 	}
-	seen := make(map[string]struct{}, len(members)+len(ws.managers))
-	out := make([]string, 0, len(members)+len(ws.managers))
-	for _, ids := range [][]string{ws.managers, members} {
-		for _, id := range ids {
-			if _, dup := seen[id]; dup {
-				continue
-			}
-			seen[id] = struct{}{}
-			out = append(out, id)
-		}
-	}
-	return out, true, nil
+	return members, true, nil
 }
 
 func intersect(a, b []string) []string {
@@ -201,15 +188,6 @@ func (a *dbPrivateProjectAudience) workspace(ctx context.Context, workspaceID st
 			members = append(members, util.UUIDToString(row.UserID))
 		}
 		loaded.projects[pid] = members
-	}
-	if len(loaded.projects) > 0 {
-		managers, err := a.q.ListWorkspaceManagerUserIDs(ctx, wsUUID)
-		if err != nil {
-			return workspaceAudience{}, err
-		}
-		for _, id := range managers {
-			loaded.managers = append(loaded.managers, util.UUIDToString(id))
-		}
 	}
 	a.mu.Lock()
 	a.workspaces[workspaceID] = loaded

@@ -1977,5 +1977,26 @@
       "retry_failed": "No se pudo transcribir esta grabación",
       "show_more": "Mostrar más"
     }
+  },
+  "private_projects": {
+    "title": "Proyectos privados",
+    "description": "Solo los miembros de un proyecto privado pueden abrirlo. Como propietario del espacio de trabajo puedes ver quién está en cada uno y añadirte cuando tengas que intervenir.",
+    "empty": "Este espacio de trabajo no tiene proyectos privados.",
+    "load_failed": "No se pudieron cargar los proyectos privados.",
+    "retry": "Reintentar",
+    "no_members": "Sin miembros",
+    "lead_name": "{{name}} (responsable)",
+    "more_members": "+{{count}} más",
+    "archived": "Archivado",
+    "member": "Eres miembro",
+    "open": "Abrir",
+    "join": "Unirme",
+    "join_title": "¿Unirte a «{{title}}»?",
+    "join_description": "Se te añadirá a la lista de miembros de este proyecto y verás sus tareas, comentarios y archivos adjuntos. Se avisará a sus miembros actuales.",
+    "join_description_empty": "Este proyecto no tiene miembros. Serás su único miembro y verás sus tareas, comentarios y archivos adjuntos.",
+    "join_confirm": "Unirme al proyecto",
+    "cancel": "Cancelar",
+    "toast_joined": "Te uniste a {{title}}",
+    "toast_failed": "No se pudo unir al proyecto."
   }
 }

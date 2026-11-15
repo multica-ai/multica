@@ -206,6 +206,8 @@ export type {
   ProjectVisibility,
   ProjectMember,
   ListProjectMembersResponse,
+  PrivateProjectOverview,
+  ListPrivateProjectsResponse,
   ProjectPriority,
   CreateProjectRequest,
   UpdateProjectRequest,

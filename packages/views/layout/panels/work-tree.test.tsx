@@ -153,11 +153,18 @@ describe("ProjectsSection", () => {
     expect(iconSlot("Mobile")?.querySelector("svg")).not.toBeNull();
   });
 
+  it("shows the folder for every project when minimal icons are on", () => {
+    renderSection([project("p1", "Desktop", "🚀")], { minimalIcons: true });
+    const iconSlot = screen.getByRole("button", { name: "Issues in Desktop" }).previousElementSibling;
+    expect(iconSlot).not.toHaveTextContent("🚀");
+    expect(iconSlot?.querySelector("svg")).not.toBeNull();
+  });
+
   it("marks a private project with a lock inside its link", () => {
     renderSection([{ ...project("p1", "Desktop"), visibility: "private" }, { ...project("p2", "Mobile"), visibility: "workspace" }]);
-    const lock = screen.getByRole("img", { name: "Visible to project members and workspace owners and admins" });
+    const lock = screen.getByRole("img", { name: "Visible to project members only" });
     expect(lock.closest("a")).toHaveTextContent("Desktop");
-    expect(screen.getAllByRole("img", { name: "Visible to project members and workspace owners and admins" })).toHaveLength(1);
+    expect(screen.getAllByRole("img", { name: "Visible to project members only" })).toHaveLength(1);
   });
 
   it("expands a project in place, keeping its count", () => {
