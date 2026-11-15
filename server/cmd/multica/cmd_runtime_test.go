@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/spf13/cobra"
 )
 
@@ -276,6 +277,42 @@ func TestRuntimeDeleteDoesNotConfirmIncompleteSnapshot(t *testing.T) {
 			err := runRuntimeDelete(cmd, []string{"rt-1"})
 			if err == nil || strings.Contains(err.Error(), marker) {
 				t.Fatal("expected a safe error without agent instructions")
+			}
+		})
+	}
+}
+
+func TestRuntimeDeleteCascadeRefusalDoesNotExposeInstructions(t *testing.T) {
+	redirectTestHome(t, t.TempDir())
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	const marker = "private-instruction-fixture"
+	for _, tc := range []struct{ name, body string }{
+		{"complete JSON", `{"code":"runtime_delete_plan_changed","error":"bindings changed","active_agents":[{"instructions":"` + marker + `"}]}`},
+		{"large JSON", `{"code":"runtime_delete_plan_changed","error":"bindings changed","active_agents":[{"instructions":"` + marker + strings.Repeat("a", 80<<10) + `"}]}`},
+		{"malformed JSON", `{"active_agents":[{"instructions":"` + marker},
+		{"proxy plaintext", "proxy: " + marker},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			deletes, confirmations := 0, 0
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusConflict)
+				if r.Method == http.MethodDelete {
+					deletes++
+					_, _ = io.WriteString(w, `{"code":"runtime_has_active_agents","active_agents":[{"id":"agent-1"}]}`)
+					return
+				}
+				confirmations++
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			defer srv.Close()
+			cmd := newRuntimeDeleteTestCmd(srv.URL)
+			_ = cmd.Flags().Set("cascade", "true")
+			err := runRuntimeDelete(cmd, []string{"rt-1"})
+			if err == nil || strings.Contains(cli.FormatError(err, true), marker) {
+				t.Fatal("expected a safe cascade refusal, including debug output")
+			}
+			if deletes != 1 || confirmations != 1 {
+				t.Fatalf("requests DELETE/POST=%d/%d, want 1/1 without retry", deletes, confirmations)
 			}
 		})
 	}

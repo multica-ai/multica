@@ -269,6 +269,18 @@ func runRuntimeDelete(cmd *cobra.Command, args []string) error {
 	}
 	var result map[string]any
 	if err := client.PostJSON(ctx, "/api/runtimes/"+runtimeID+"/unbind-agents-and-delete", body, &result); err != nil {
+		var httpErr *cli.HTTPError
+		if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusConflict {
+			// A changed plan includes fresh agent instructions. Do not retain
+			// that body in the error chain, even for --debug output.
+			var refusal struct {
+				Error string `json:"error"`
+			}
+			if json.Unmarshal([]byte(httpErr.Body), &refusal) == nil && refusal.Error != "" {
+				return fmt.Errorf("cascade delete runtime: %s", refusal.Error)
+			}
+			return errors.New("cascade delete runtime: server refused confirmation; recheck active-agent bindings and retry")
+		}
 		return fmt.Errorf("cascade delete runtime: %w", err)
 	}
 	result["id"] = runtimeID
