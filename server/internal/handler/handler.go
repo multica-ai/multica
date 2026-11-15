@@ -641,8 +641,8 @@ func writeRevisionConflict(w http.ResponseWriter, resourceType string, resourceI
 	// same values for automation that parses JSON instead of the sentence.
 	writeJSON(w, http.StatusConflict, map[string]any{
 		"error": fmt.Sprintf(
-			"%s revision is now %d, but this write expected %d; re-read it and retry with expected_revision=%d",
-			resourceType, actual, expected, actual),
+			"%s revision is now %d, but this write expected %d; re-read and reconcile the changes before retrying",
+			resourceType, actual, expected),
 		"code":              "revision_conflict",
 		"resource_type":     resourceType,
 		"resource_id":       uuidToString(resourceID),

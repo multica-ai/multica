@@ -195,6 +195,8 @@ func init() {
 	issuePropertyCmd.AddCommand(issuePropertyUnsetCmd)
 
 	issuePropertyListCmd.Flags().String("output", "table", "Output format: table or json")
+	registerIssueExpectedRevisionFlag(issuePropertySetCmd)
+	registerIssueExpectedRevisionFlag(issuePropertyUnsetCmd)
 	issuePropertySetCmd.Flags().String("output", "table", "Output format: table or json")
 	issuePropertySetCmd.Flags().String("name", "", "Property name or UUID (required)")
 	issuePropertySetCmd.Flags().String("value", "", "Property value (required; see --help for per-type forms)")
@@ -949,6 +951,10 @@ func runIssuePropertyList(cmd *cobra.Command, args []string) error {
 }
 
 func runIssuePropertySet(cmd *cobra.Command, args []string) error {
+	expectedRevision, err := readExpectedRevision(cmd)
+	if err != nil {
+		return err
+	}
 	name, _ := cmd.Flags().GetString("name")
 	if name == "" {
 		return fmt.Errorf("--name is required")
@@ -984,11 +990,15 @@ func runIssuePropertySet(cmd *cobra.Command, args []string) error {
 	}
 
 	var result struct {
-		Properties map[string]any `json:"properties"`
+		Properties    map[string]any `json:"properties"`
+		IssueRevision int64          `json:"issue_revision"`
 	}
-	path := "/api/issues/" + issueRef.ID + "/properties/" + property.ID
+	path := issueMutationPath(issueRef.ID, "/properties/"+property.ID, expectedRevision)
 	if err := client.PutJSON(ctx, path, map[string]any{"value": value}, &result); err != nil {
-		return fmt.Errorf("set property: %w", err)
+		return issueMutationError(cmd, "set property", err)
+	}
+	if output, _ := cmd.Flags().GetString("output"); expectedRevision > 0 && output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
 	}
 	// The value is already written; a failed member lookup must not fail the command.
 	actorNames, _ := fetchActorPropertyNames(ctx, client, &members, properties, result.Properties)
@@ -1002,6 +1012,10 @@ func runIssuePropertySet(cmd *cobra.Command, args []string) error {
 }
 
 func runIssuePropertyUnset(cmd *cobra.Command, args []string) error {
+	expectedRevision, err := readExpectedRevision(cmd)
+	if err != nil {
+		return err
+	}
 	name, _ := cmd.Flags().GetString("name")
 	if name == "" {
 		return fmt.Errorf("--name is required")
@@ -1027,9 +1041,20 @@ func runIssuePropertyUnset(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	path := "/api/issues/" + issueRef.ID + "/properties/" + property.ID
+	path := issueMutationPath(issueRef.ID, "/properties/"+property.ID, expectedRevision)
+	if expectedRevision > 0 {
+		var result map[string]any
+		if err := client.DeleteJSONResponse(ctx, path, &result); err != nil {
+			return issueMutationError(cmd, "unset property", err)
+		}
+		if output, _ := cmd.Flags().GetString("output"); output == "json" {
+			return cli.PrintJSON(os.Stdout, result)
+		}
+		fmt.Fprintf(os.Stdout, "Property %q unset.\n", property.Name)
+		return nil
+	}
 	if err := client.DeleteJSON(ctx, path); err != nil {
-		return fmt.Errorf("unset property: %w", err)
+		return issueMutationError(cmd, "unset property", err)
 	}
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {

@@ -1,20 +1,42 @@
 # Conditional issue writes
 
-Every issue read carries a server-owned `revision` that advances by one on each
-mutation. When another writer might touch the issue between your read and your
-write, take the `revision` from the issue you read and pass it as
-`--expected-revision <n>` on the mutating command, so the server applies the
-change only if the issue is still at that revision:
+Read the issue with `multica issue get <id> --output json` and retain its
+server-owned `revision`. Pass that value as `--expected-revision` to protect a
+write against concurrent changes:
 
 ```bash
-multica issue status <issue-id> in_progress --expected-revision <revision>
-multica issue update <issue-id> --title "..." --expected-revision <revision>
-multica issue assign <issue-id> --to-id <agent-id> --expected-revision <revision>
+multica issue update <id> --title "Reconciled title" --expected-revision 7 --output json
+multica issue status <id> in_progress --expected-revision 7 --output json
+multica issue assign <id> --to-id <agent-id> --expected-revision 7 --output json
+multica issue reorder <id> --top --expected-revision 7 --output json
+multica issue metadata set <id> --key state --value ready --expected-revision 7 --output json
+multica issue metadata delete <id> --key state --expected-revision 7 --output json
+multica issue property set <id> --name Severity --value High --expected-revision 7 --output json
+multica issue property unset <id> --name Severity --expected-revision 7 --output json
+multica issue label add <id> <label-id> --expected-revision 7 --output json
+multica issue label remove <id> <label-id> --expected-revision 7 --output json
 ```
 
-On a match the write applies and the response carries the new revision. On a
-mismatch the command fails with a revision conflict, changes nothing, and does
-not advance the revision; the error names the current revision so you can re-read
-and retry. Omit the flag to keep the prior unconditional behaviour. This closes
-the read/compare/write race that a plain read followed by a write cannot.
+These are independent examples, not a sequence using the same revision. A
+state-changing conditional request advances the revision once. A matched no-op
+preserves its revision; a stale no-op still conflicts. Read the resulting
+revision before the next write. Main issue commands return `revision`;
+metadata/property/label mutations return `issue_revision` alongside their values.
 
+A stale precondition changes no protected field, association, or revision.
+With `--output json`, the command emits a structured `revision_conflict` to
+stdout with `expected_revision` and `actual_revision`, then exits nonzero.
+Re-read the issue and reconcile the intended change before retrying. Never
+blindly replace the expected revision with the latest number.
+
+Omitting the flag keeps the existing request and output formats, including
+unconditional no-op behavior. Conditional metadata/property/label writes require
+a server with conditional mutation routes. Older servers reject those routes;
+the CLI never retries an unconditional write instead.
+
+`issue update` rejects `--expected-revision` combined with `--attachment` or
+`--pr-auto-complete` before sending any requests. File uploads and the PR
+completion override are separate mutations, so those combinations cannot make
+one atomic issue write. Reading description text from a local file remains
+supported. Comment edits use their own comment revision; conditional issue
+comment appends are not provided here.

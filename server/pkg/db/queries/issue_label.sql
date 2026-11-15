@@ -103,14 +103,18 @@ WHERE EXISTS (SELECT 1 FROM touched_issue)
 ON CONFLICT DO NOTHING;
 
 -- name: AttachLabelToIssue :one
-WITH inserted AS (
+-- Lock the owner before association writes so a conditional mutation cannot
+-- insert a label while another writer consumes its expected issue revision.
+WITH locked_issue AS MATERIALIZED (
+    SELECT id, revision FROM issue
+    WHERE id = sqlc.arg('issue_id')::uuid
+      AND workspace_id = sqlc.arg('workspace_id')::uuid
+      AND (sqlc.narg('expected_revision')::bigint IS NULL OR revision = sqlc.narg('expected_revision')::bigint)
+    FOR NO KEY UPDATE
+), inserted AS (
     INSERT INTO issue_to_label (issue_id, label_id)
     SELECT sqlc.arg('issue_id')::uuid, sqlc.arg('label_id')::uuid
-    WHERE EXISTS (
-        SELECT 1 FROM issue i
-        WHERE i.id = sqlc.arg('issue_id')::uuid
-          AND i.workspace_id = sqlc.arg('workspace_id')::uuid
-    )
+    WHERE EXISTS (SELECT 1 FROM locked_issue)
       AND EXISTS (
         SELECT 1 FROM issue_label l
         WHERE l.id = sqlc.arg('label_id')::uuid
@@ -127,20 +131,22 @@ WITH inserted AS (
     RETURNING revision
 )
 SELECT EXISTS(SELECT 1 FROM inserted) AS changed,
-       COALESCE((SELECT revision FROM bumped), 0)::bigint AS issue_revision;
+       COALESCE((SELECT revision FROM bumped), CASE WHEN sqlc.narg('expected_revision')::bigint IS NOT NULL THEN (SELECT revision FROM locked_issue) ELSE 0 END)::bigint AS issue_revision
+WHERE sqlc.narg('expected_revision')::bigint IS NULL OR EXISTS (SELECT 1 FROM locked_issue);
 
 -- name: DetachLabelFromIssue :one
--- Workspace-guarded DELETE: only deletes if the issue is in the given
--- workspace. Mirror of the attach query.
-WITH deleted AS (
+-- Workspace-guarded DELETE, serialized with every issue revision writer.
+WITH locked_issue AS MATERIALIZED (
+    SELECT id, revision FROM issue
+    WHERE id = sqlc.arg('issue_id')::uuid
+      AND workspace_id = sqlc.arg('workspace_id')::uuid
+      AND (sqlc.narg('expected_revision')::bigint IS NULL OR revision = sqlc.narg('expected_revision')::bigint)
+    FOR NO KEY UPDATE
+), deleted AS (
     DELETE FROM issue_to_label
     WHERE issue_id = sqlc.arg('issue_id')::uuid
       AND label_id = sqlc.arg('label_id')::uuid
-      AND EXISTS (
-          SELECT 1 FROM issue i
-          WHERE i.id = sqlc.arg('issue_id')::uuid
-            AND i.workspace_id = sqlc.arg('workspace_id')::uuid
-      )
+      AND EXISTS (SELECT 1 FROM locked_issue)
     RETURNING issue_id
 ), bumped AS (
     UPDATE issue
@@ -150,7 +156,8 @@ WITH deleted AS (
     RETURNING revision
 )
 SELECT EXISTS(SELECT 1 FROM deleted) AS changed,
-       COALESCE((SELECT revision FROM bumped), 0)::bigint AS issue_revision;
+       COALESCE((SELECT revision FROM bumped), CASE WHEN sqlc.narg('expected_revision')::bigint IS NOT NULL THEN (SELECT revision FROM locked_issue) ELSE 0 END)::bigint AS issue_revision
+WHERE sqlc.narg('expected_revision')::bigint IS NULL OR EXISTS (SELECT 1 FROM locked_issue);
 
 -- name: ListLabelsByIssue :many
 -- Workspace filter at the SQL layer (mirrors GetProjectInWorkspace). Any caller

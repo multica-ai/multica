@@ -41,26 +41,6 @@ import (
 // to a native command), so Chinese / Cyrillic / any non-ASCII content
 // arrives as `?`. Reading a UTF-8 file directly bypasses the shell's pipe
 // re-encoding entirely. See issues #2198 / #2236 / #2376.
-// expectedRevisionFlag is the name of the optimistic-concurrency precondition
-// flag shared by the mutating issue commands.
-const expectedRevisionFlag = "expected-revision"
-
-// readExpectedRevision validates the optional precondition before any request.
-// Zero means the flag was omitted and preserves unconditional writes.
-func readExpectedRevision(cmd *cobra.Command) (int64, error) {
-	if !cmd.Flags().Changed(expectedRevisionFlag) {
-		return 0, nil
-	}
-	rev, err := cmd.Flags().GetInt64(expectedRevisionFlag)
-	if err != nil {
-		return 0, err
-	}
-	if rev < 1 {
-		return 0, fmt.Errorf("--%s must be a positive integer", expectedRevisionFlag)
-	}
-	return rev, nil
-}
-
 func resolveTextFlag(cmd *cobra.Command, flagName string) (string, bool, error) {
 	stdinFlag := flagName + "-stdin"
 	fileFlag := flagName + "-file"
@@ -1822,6 +1802,12 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	if expectedRevision > 0 && len(attachmentPaths) > 0 {
+		return fmt.Errorf("--expected-revision cannot be combined with --attachment: uploads happen before the conditional issue write")
+	}
+	if expectedRevision > 0 && prAutoCompleteDisabled != nil {
+		return fmt.Errorf("--expected-revision cannot be combined with --pr-auto-complete: PR automation is a separate write")
+	}
 	noStart, _ := cmd.Flags().GetBool("no-start")
 	statusChanged := cmd.Flags().Changed("status")
 	statusFlag, _ := cmd.Flags().GetString("status")
@@ -2004,7 +1990,7 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 			if len(attachmentIDs) > 0 {
 				return fmt.Errorf("update issue (uploaded IDs: %v): %w", attachmentIDs, err)
 			}
-			return fmt.Errorf("update issue: %w", err)
+			return issueMutationError(cmd, "update issue", err)
 		}
 	} else {
 		// Keep issue update's response shape without issuing an empty update.
@@ -2104,7 +2090,7 @@ func runIssueAssign(cmd *cobra.Command, args []string) error {
 
 	var result map[string]any
 	if err := client.PutJSON(ctx, "/api/issues/"+issueRef.ID, body, &result); err != nil {
-		return fmt.Errorf("assign issue: %w", err)
+		return issueMutationError(cmd, "assign issue", err)
 	}
 
 	if unassign {
@@ -2166,7 +2152,7 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 	}
 	var result map[string]any
 	if err := client.PutJSON(ctx, "/api/issues/"+issueRef.ID, body, &result); err != nil {
-		return fmt.Errorf("update status: %w", err)
+		return issueMutationError(cmd, "update status", err)
 	}
 
 	if duplicateOf != "" {
@@ -2234,6 +2220,7 @@ func recordedDuplicateOf(result map[string]any, ref string) (string, error) {
 // — it hides the sibling target flags once one of them is set. It is shared with
 // the command's tests so they exercise the exact flag-group wiring that ships.
 func registerIssueReorderFlags(cmd *cobra.Command) {
+	registerIssueExpectedRevisionFlag(cmd)
 	cmd.Flags().String("before", "", "Place the issue directly above this issue (same column)")
 	cmd.Flags().String("after", "", "Place the issue directly below this issue (same column)")
 	cmd.Flags().Bool("top", false, "Move the issue to the top of its status column")
@@ -2251,6 +2238,10 @@ func registerIssueReorderFlags(cmd *cobra.Command) {
 // (status) is left untouched, so cross-column moves still go through
 // `issue status`.
 func runIssueReorder(cmd *cobra.Command, args []string) error {
+	expectedRevision, err := readExpectedRevision(cmd)
+	if err != nil {
+		return err
+	}
 	before, _ := cmd.Flags().GetString("before")
 	after, _ := cmd.Flags().GetString("after")
 	top, _ := cmd.Flags().GetBool("top")
@@ -2339,6 +2330,7 @@ func runIssueReorder(cmd *cobra.Command, args []string) error {
 	// Build the column order with the target removed, plus a lookup of every
 	// position in the column (the target's own included, for the no-op check).
 	positions := make(map[string]float64, len(column))
+	positions[issueRef.ID] = floatVal(target, "position")
 	ordered := make([]string, 0, len(column))
 	for _, raw := range column {
 		id := strVal(raw, "id")
@@ -2357,8 +2349,10 @@ func runIssueReorder(cmd *cobra.Command, args []string) error {
 		if relative {
 			return reorderTargetNotInColumnError(ctx, client, otherRef, targetDisplay, status)
 		}
-		fmt.Fprintf(os.Stderr, "Issue %s is the only issue in the %s column; nothing to reorder.\n", targetDisplay, status)
-		return issueReorderOutput(cmd, target)
+		if expectedRevision == 0 {
+			fmt.Fprintf(os.Stderr, "Issue %s is the only issue in the %s column; nothing to reorder.\n", targetDisplay, status)
+			return issueReorderOutput(cmd, target)
+		}
 	}
 
 	insertIdx := 0
@@ -2386,14 +2380,18 @@ func runIssueReorder(cmd *cobra.Command, args []string) error {
 
 	currentPos := positions[issueRef.ID]
 	newPos := computeReorderPosition(reordered, issueRef.ID, positions, currentPos)
-	if newPos == currentPos {
+	if newPos == currentPos && expectedRevision == 0 {
 		fmt.Fprintf(os.Stderr, "Issue %s is already in that position.\n", targetDisplay)
 		return issueReorderOutput(cmd, target)
 	}
 
+	body := map[string]any{"position": newPos}
+	if expectedRevision > 0 {
+		body["expected_revision"] = expectedRevision
+	}
 	var result map[string]any
-	if err := client.PutJSON(ctx, "/api/issues/"+url.PathEscape(issueRef.ID), map[string]any{"position": newPos}, &result); err != nil {
-		return fmt.Errorf("reorder issue: %w", err)
+	if err := client.PutJSON(ctx, "/api/issues/"+url.PathEscape(issueRef.ID), body, &result); err != nil {
+		return issueMutationError(cmd, "reorder issue", err)
 	}
 	fmt.Fprintf(os.Stderr, "Issue %s reordered.\n", issueDisplayKey(result))
 	return issueReorderOutput(cmd, result)

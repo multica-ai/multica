@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"sort"
 	"strconv"
@@ -106,6 +107,8 @@ func init() {
 	issueMetadataListCmd.Flags().String("output", "table", "Output format: table or json")
 	issueMetadataGetCmd.Flags().String("output", "json", "Output format: table or json")
 	issueMetadataGetCmd.Flags().String("key", "", "Metadata key (required)")
+	registerIssueExpectedRevisionFlag(issueMetadataSetCmd)
+	registerIssueExpectedRevisionFlag(issueMetadataDeleteCmd)
 	issueMetadataSetCmd.Flags().String("output", "table", "Output format: table or json")
 	issueMetadataSetCmd.Flags().String("key", "", "Metadata key (required)")
 	issueMetadataSetCmd.Flags().String("value", "", "Metadata value (required)")
@@ -249,6 +252,10 @@ func runIssueMetadataGet(cmd *cobra.Command, args []string) error {
 }
 
 func runIssueMetadataSet(cmd *cobra.Command, args []string) error {
+	expectedRevision, err := readExpectedRevision(cmd)
+	if err != nil {
+		return err
+	}
 	key, _ := cmd.Flags().GetString("key")
 	if key == "" {
 		return fmt.Errorf("--key is required")
@@ -277,14 +284,17 @@ func runIssueMetadataSet(cmd *cobra.Command, args []string) error {
 
 	body := map[string]any{"value": value}
 	var result map[string]any
-	path := "/api/issues/" + issueRef.ID + "/metadata/" + key
+	path := issueMutationPath(issueRef.ID, "/metadata/"+url.PathEscape(key), expectedRevision)
 	if err := client.PutJSON(ctx, path, body, &result); err != nil {
-		return fmt.Errorf("set metadata: %w", err)
+		return issueMutationError(cmd, "set metadata", err)
 	}
 	metadata, _ := result["metadata"].(map[string]any)
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
+		if expectedRevision > 0 {
+			return cli.PrintJSON(os.Stdout, result)
+		}
 		return cli.PrintJSON(os.Stdout, metadata)
 	}
 	printMetadataTable(metadata)
@@ -292,6 +302,10 @@ func runIssueMetadataSet(cmd *cobra.Command, args []string) error {
 }
 
 func runIssueMetadataDelete(cmd *cobra.Command, args []string) error {
+	expectedRevision, err := readExpectedRevision(cmd)
+	if err != nil {
+		return err
+	}
 	key, _ := cmd.Flags().GetString("key")
 	if key == "" {
 		return fmt.Errorf("--key is required")
@@ -309,9 +323,22 @@ func runIssueMetadataDelete(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("resolve issue: %w", err)
 	}
 
-	path := "/api/issues/" + issueRef.ID + "/metadata/" + key
+	path := issueMutationPath(issueRef.ID, "/metadata/"+url.PathEscape(key), expectedRevision)
+	if expectedRevision > 0 {
+		var result map[string]any
+		if err := client.DeleteJSONResponse(ctx, path, &result); err != nil {
+			return issueMutationError(cmd, "delete metadata", err)
+		}
+		output, _ := cmd.Flags().GetString("output")
+		if output == "json" {
+			return cli.PrintJSON(os.Stdout, result)
+		}
+		metadata, _ := result["metadata"].(map[string]any)
+		printMetadataTable(metadata)
+		return nil
+	}
 	if err := client.DeleteJSON(ctx, path); err != nil {
-		return fmt.Errorf("delete metadata: %w", err)
+		return issueMutationError(cmd, "delete metadata", err)
 	}
 
 	// Refresh the metadata so the user sees the result.

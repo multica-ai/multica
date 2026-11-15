@@ -573,14 +573,16 @@ UPDATE issue SET
     last_activity_at = GREATEST(COALESCE(last_activity_at, updated_at), now()),
     updated_at = now()
 WHERE id = $2 AND workspace_id = $3
+  AND ($4::bigint IS NULL OR revision = $4::bigint)
   AND metadata ? $1::text
 RETURNING id, workspace_id, metadata, revision
 `
 
 type DeleteIssueMetadataKeyParams struct {
-	Key         string      `json:"key"`
-	ID          pgtype.UUID `json:"id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Key              string      `json:"key"`
+	ID               pgtype.UUID `json:"id"`
+	WorkspaceID      pgtype.UUID `json:"workspace_id"`
+	ExpectedRevision pgtype.Int8 `json:"expected_revision"`
 }
 
 type DeleteIssueMetadataKeyRow struct {
@@ -593,7 +595,12 @@ type DeleteIssueMetadataKeyRow struct {
 // Atomically removes a single key from the issue's metadata JSONB.
 // Deleting a missing key is a no-op (returns no rows).
 func (q *Queries) DeleteIssueMetadataKey(ctx context.Context, arg DeleteIssueMetadataKeyParams) (DeleteIssueMetadataKeyRow, error) {
-	row := q.db.QueryRow(ctx, deleteIssueMetadataKey, arg.Key, arg.ID, arg.WorkspaceID)
+	row := q.db.QueryRow(ctx, deleteIssueMetadataKey,
+		arg.Key,
+		arg.ID,
+		arg.WorkspaceID,
+		arg.ExpectedRevision,
+	)
 	var i DeleteIssueMetadataKeyRow
 	err := row.Scan(
 		&i.ID,
@@ -2141,15 +2148,17 @@ UPDATE issue SET
     last_activity_at = GREATEST(COALESCE(last_activity_at, updated_at), now()),
     updated_at = now()
 WHERE id = $3 AND workspace_id = $4
+  AND ($5::bigint IS NULL OR revision = $5::bigint)
   AND metadata -> $1::text IS DISTINCT FROM $2::jsonb
 RETURNING id, workspace_id, metadata, revision
 `
 
 type SetIssueMetadataKeyParams struct {
-	Key         string      `json:"key"`
-	Value       []byte      `json:"value"`
-	ID          pgtype.UUID `json:"id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Key              string      `json:"key"`
+	Value            []byte      `json:"value"`
+	ID               pgtype.UUID `json:"id"`
+	WorkspaceID      pgtype.UUID `json:"workspace_id"`
+	ExpectedRevision pgtype.Int8 `json:"expected_revision"`
 }
 
 type SetIssueMetadataKeyRow struct {
@@ -2165,12 +2174,14 @@ type SetIssueMetadataKeyRow struct {
 // issue first so this is also the tenant check. A no-op, a missing issue, or
 // a workspace mismatch returns no rows; callers that must distinguish those
 // cases need a separate workspace-scoped read.
+// A stale precondition also returns no rows; callers reload the current revision.
 func (q *Queries) SetIssueMetadataKey(ctx context.Context, arg SetIssueMetadataKeyParams) (SetIssueMetadataKeyRow, error) {
 	row := q.db.QueryRow(ctx, setIssueMetadataKey,
 		arg.Key,
 		arg.Value,
 		arg.ID,
 		arg.WorkspaceID,
+		arg.ExpectedRevision,
 	)
 	var i SetIssueMetadataKeyRow
 	err := row.Scan(

@@ -458,14 +458,24 @@ func (h *Handler) AttachLabel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	expectedRevision, ok := parseIssueExpectedRevision(w, r)
+	if !ok {
+		return
+	}
+
 	attached, err := wakeupWrite(h, r, func(q *db.Queries) (db.AttachLabelToIssueRow, error) {
 		return q.AttachLabelToIssue(r.Context(), db.AttachLabelToIssueParams{
-			IssueID:     issue.ID,
-			LabelID:     labelID,
-			WorkspaceID: issue.WorkspaceID,
+			IssueID:          issue.ID,
+			LabelID:          labelID,
+			WorkspaceID:      issue.WorkspaceID,
+			ExpectedRevision: expectedRevision,
 		})
 	})
 	if err != nil {
+		if expectedRevision.Valid && errors.Is(err, pgx.ErrNoRows) {
+			h.writeCurrentIssueRevisionConflict(w, r, issue, expectedRevision.Int64)
+			return
+		}
 		slog.Warn("AttachLabelToIssue failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to attach label")
 		return
@@ -477,7 +487,11 @@ func (h *Handler) AttachLabel(w http.ResponseWriter, r *http.Request) {
 	// subscriber's optimistic state with an incorrect empty list.
 	labels, ok2 := h.listLabelsForIssueSafe(r, issue.ID, issue.WorkspaceID)
 	if !ok2 {
-		writeJSON(w, http.StatusOK, map[string]any{})
+		payload := map[string]any{}
+		if expectedRevision.Valid {
+			payload["issue_revision"] = attached.IssueRevision
+		}
+		writeJSON(w, http.StatusOK, payload)
 		return
 	}
 	resp := labelsToResponse(labels)
@@ -534,14 +548,24 @@ func (h *Handler) DetachLabel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	expectedRevision, ok := parseIssueExpectedRevision(w, r)
+	if !ok {
+		return
+	}
+
 	detached, err := wakeupWrite(h, r, func(q *db.Queries) (db.DetachLabelFromIssueRow, error) {
 		return q.DetachLabelFromIssue(r.Context(), db.DetachLabelFromIssueParams{
-			IssueID:     issue.ID,
-			LabelID:     labelUUID,
-			WorkspaceID: issue.WorkspaceID,
+			IssueID:          issue.ID,
+			LabelID:          labelUUID,
+			WorkspaceID:      issue.WorkspaceID,
+			ExpectedRevision: expectedRevision,
 		})
 	})
 	if err != nil {
+		if expectedRevision.Valid && errors.Is(err, pgx.ErrNoRows) {
+			h.writeCurrentIssueRevisionConflict(w, r, issue, expectedRevision.Int64)
+			return
+		}
 		slog.Warn("DetachLabelFromIssue failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to detach label")
 		return
@@ -549,7 +573,11 @@ func (h *Handler) DetachLabel(w http.ResponseWriter, r *http.Request) {
 
 	labels, ok2 := h.listLabelsForIssueSafe(r, issue.ID, issue.WorkspaceID)
 	if !ok2 {
-		writeJSON(w, http.StatusOK, map[string]any{})
+		payload := map[string]any{}
+		if expectedRevision.Valid {
+			payload["issue_revision"] = detached.IssueRevision
+		}
+		writeJSON(w, http.StatusOK, payload)
 		return
 	}
 	resp := labelsToResponse(labels)

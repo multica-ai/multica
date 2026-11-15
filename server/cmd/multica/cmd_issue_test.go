@@ -6300,6 +6300,7 @@ func TestRunIssueUpdateSurfacesRevisionConflict(t *testing.T) {
 	t.Setenv("MULTICA_TOKEN", "test-token")
 
 	cmd := newIssueUpdateTestCmd()
+	_ = cmd.Flags().Set("output", "table")
 	_ = cmd.Flags().Set("title", "updated")
 	_ = cmd.Flags().Set("expected-revision", "4")
 	err := runIssueUpdate(cmd, []string{testIssueUUID})

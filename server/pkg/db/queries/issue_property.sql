@@ -61,6 +61,7 @@ SET properties = jsonb_set(properties, ARRAY[sqlc.arg('key')::text], sqlc.arg('v
     END,
     updated_at = CASE WHEN properties -> sqlc.arg('key')::text IS DISTINCT FROM sqlc.arg('value')::jsonb THEN now() ELSE updated_at END
 WHERE id = sqlc.arg('id')::uuid AND workspace_id = sqlc.arg('workspace_id')::uuid
+  AND (sqlc.narg('expected_revision')::bigint IS NULL OR revision = sqlc.narg('expected_revision')::bigint)
 RETURNING *;
 
 -- name: DeleteIssuePropertyValue :one
@@ -74,6 +75,7 @@ SET properties = properties - sqlc.arg('key')::text,
     END,
     updated_at = CASE WHEN properties ? sqlc.arg('key')::text THEN now() ELSE updated_at END
 WHERE id = sqlc.arg('id')::uuid AND workspace_id = sqlc.arg('workspace_id')::uuid
+  AND (sqlc.narg('expected_revision')::bigint IS NULL OR revision = sqlc.narg('expected_revision')::bigint)
 RETURNING *;
 
 -- name: CountIssuesUsingPropertyOptions :many
