@@ -507,6 +507,9 @@ export function InboxPage() {
   const [landing, setLanding] = useState<{ key: string; token: number; commentId: string | undefined } | null>(null);
   if (selected && (landing?.key !== selectedKey || landing.token !== highlightRequestToken)) {
     setLanding({ key: selectedKey, token: highlightRequestToken, commentId: selected.details?.comment_id ?? undefined });
+  } else if (landing && !selectedKey && !detailKey) {
+    // Back on the list: opening the row again chooses afresh.
+    setLanding(null);
   }
   const detailItemKey = detailItem ? (detailItem.issue_id ?? detailItem.id) : null;
   const landingCommentId =
