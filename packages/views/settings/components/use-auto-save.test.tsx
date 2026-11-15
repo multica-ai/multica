@@ -218,6 +218,20 @@ describe("useAutoSave reverted drafts", () => {
     expect(hook.onSuccess).not.toHaveBeenCalled();
   });
 
+  it("persists a draft queued by blur after unmount without success feedback", async () => {
+    const hook = setup();
+    hook.edit("BC");
+    act(() => hook.result.current.flush());
+    expect(hook.onSave).toHaveBeenCalledExactlyOnceWith("B");
+
+    hook.unmount();
+    await act(async () => hook.first.resolve());
+    expect(hook.onSave.mock.calls).toEqual([["B"], ["BC"]]);
+
+    await act(async () => hook.second.resolve());
+    expect(hook.onSuccess).not.toHaveBeenCalled();
+  });
+
   it("persists an empty reverted draft after the in-flight write", async () => {
     vi.useFakeTimers();
     const first = deferred<void>();

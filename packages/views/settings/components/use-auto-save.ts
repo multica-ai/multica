@@ -62,7 +62,7 @@ export function useAutoSave<T>({
   }
 
   const runSave = useCallback(async (next: T) => {
-    if (!mountedRef.current || !enabledRef.current) {
+    if (!enabledRef.current) {
       return;
     }
     if (savingRef.current) {
