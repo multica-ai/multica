@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import type {
@@ -36,7 +37,7 @@ function donePayload(over: Partial<ChatDonePayload> = {}): ChatDonePayload {
 }
 
 describe("applyChatDoneToCache", () => {
-  it("patches the assistant bubble inline AND invalidates messages so bound attachments refetch", () => {
+  it("patches the assistant bubble inline AND invalidates messages so bound attachments refetch", async () => {
     const qc = new QueryClient();
     qc.setQueryData<ChatMessage[]>(chatKeys.messages(SESSION), []);
     const invalidate = vi.spyOn(qc, "invalidateQueries");
@@ -54,9 +55,9 @@ describe("applyChatDoneToCache", () => {
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: chatKeys.messages(SESSION),
     });
-    expect(invalidate).toHaveBeenCalledWith({
+    await vi.waitFor(() => expect(invalidate).toHaveBeenCalledWith({
       queryKey: chatKeys.pendingTask(SESSION),
-    });
+    }));
   });
 
   it("invalidates even when the payload lacks an inline message (legacy shape)", () => {
@@ -187,7 +188,7 @@ describe("pending task queue events", () => {
     });
   });
 
-  it("keeps dispatch state when the send response arrives later", () => {
+  it("keeps dispatch state when the send response arrives later", async () => {
     const qc = new QueryClient();
     qc.setQueryData<ChatPendingTask>(chatKeys.pendingTask(SESSION), {
       task_id: "task-1",
@@ -214,12 +215,12 @@ describe("pending task queue events", () => {
       task_id: "task-1",
       status: "running",
     });
-    expect(invalidate).toHaveBeenCalledWith({
+    await vi.waitFor(() => expect(invalidate).toHaveBeenCalledWith({
       queryKey: chatKeys.pendingTask(SESSION),
-    });
+    }));
   });
 
-  it("does not replace an active head with a sparse follow-up queued event", () => {
+  it("does not replace an active head with a sparse follow-up queued event", async () => {
     const qc = new QueryClient();
     const active: ChatPendingTask = {
       task_id: "task-active",
@@ -238,12 +239,12 @@ describe("pending task queue events", () => {
     });
 
     expect(qc.getQueryData(chatKeys.pendingTask(SESSION))).toEqual(active);
-    expect(invalidate).toHaveBeenCalledWith({
+    await vi.waitFor(() => expect(invalidate).toHaveBeenCalledWith({
       queryKey: chatKeys.pendingTask(SESSION),
-    });
+    }));
   });
 
-  it("refetches pending state and messages when a task is dispatched", () => {
+  it("refetches pending state and messages when a task is dispatched", async () => {
     const qc = new QueryClient();
     qc.setQueryData<ChatPendingTask>(chatKeys.pendingTask(SESSION), {
       task_id: "task-active",
@@ -262,9 +263,9 @@ describe("pending task queue events", () => {
     expect(qc.getQueryData<ChatPendingTask>(
       chatKeys.pendingTask(SESSION),
     )?.task_id).toBe("task-active");
-    expect(invalidate).toHaveBeenCalledWith({
+    await vi.waitFor(() => expect(invalidate).toHaveBeenCalledWith({
       queryKey: chatKeys.pendingTask(SESSION),
-    });
+    }));
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: chatKeys.messages(SESSION),
     });
