@@ -71,6 +71,36 @@ describe("deduplicateInboxItems", () => {
     ]);
     expect(read[0]?.details?.comment_id).toBe("comment-2");
   });
+
+  it("anchors an unread failed run at the run, and no unread entry at nothing", () => {
+    const failed = deduplicateInboxItems([
+      item({ id: "read", read: true, created_at: "2026-06-15T08:00:00Z", details: { comment_id: "comment-1" } }),
+      item({ id: "failed", type: "task_failed", created_at: "2026-06-15T08:02:00Z", details: { task_id: "task-1" } }),
+    ]);
+    expect(failed[0]?.details?.comment_id).toBe("task-1");
+
+    const status = deduplicateInboxItems([
+      item({ id: "read", read: true, created_at: "2026-06-15T08:00:00Z", details: { comment_id: "comment-1" } }),
+      item({ id: "status", type: "status_changed", created_at: "2026-06-15T08:02:00Z", details: { to: "in_review" } }),
+    ]);
+    expect(status[0]?.details?.comment_id).toBeUndefined();
+  });
+
+  it("lets an unread reply lead over an earlier unread reaction", () => {
+    const merged = deduplicateInboxItems([
+      item({ id: "reaction", type: "reaction_added", created_at: "2026-06-15T08:00:00Z", details: { comment_id: "old-comment" } }),
+      item({ id: "reply", created_at: "2026-06-15T08:02:00Z", details: { comment_id: "comment-2" } }),
+    ]);
+    expect(merged[0]?.details?.comment_id).toBe("comment-2");
+  });
+
+  it("keeps an app request row on its own request", () => {
+    const merged = deduplicateInboxItems([
+      item({ id: "comment", created_at: "2026-06-15T08:00:00Z", details: { comment_id: "comment-1" } }),
+      item({ id: "app", type: "app_action_requested", created_at: "2026-06-15T08:02:00Z", details: { request_id: "request-1" } }),
+    ]);
+    expect(merged[0]?.details).toEqual({ request_id: "request-1" });
+  });
 });
 
 describe("getInboxDisplayTitle", () => {

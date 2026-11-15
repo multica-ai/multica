@@ -19,19 +19,37 @@ export function groupInboxRows(items: readonly InboxItem[]): InboxItem[][] {
 }
 
 /**
- * The row a group renders as, opening where the reader left off: the oldest
- * unread comment, so the thread reads forward from there, or the newest
- * comment once the issue is read. An app notification lands on its own
- * request instead, so it never borrows one.
+ * The timeline entry a notification is about: its comment, or the failed run
+ * it reports, which the timeline addresses by task id like a comment.
+ */
+function inboxTimelineTarget(item: InboxItem): string | undefined {
+  if (item.details?.comment_id) return item.details.comment_id;
+  if (item.type === "task_failed" && item.details?.task_id) return item.details.task_id;
+  return undefined;
+}
+
+/**
+ * The row a group renders as, with `details.comment_id` naming the timeline
+ * entry it opens at. Unread, it opens at the oldest unread comment or run, so
+ * the issue reads forward from there; a reaction leads only when nothing
+ * else unread has an entry, since the comment it marks is usually old.
+ * Unread with no entry at all (a status change, an assignment), it opens
+ * where the reader left off rather than at a comment already read. Read, it
+ * opens at the newest notification's entry. An app notification lands on its
+ * own request instead, so it never borrows one.
  */
 export function withCommentAnchor(row: InboxItem, group: readonly InboxItem[]): InboxItem {
   if (row.type.startsWith("app_") && row.details?.request_id) return row;
-  const hasComment = (item: InboxItem) => !!item.details?.comment_id;
+  const unread = group.filter((item) => item.read !== true);
   const anchor =
-    group.findLast((item) => item.read !== true && hasComment(item)) ?? group.find(hasComment);
-  const commentId = anchor?.details?.comment_id;
-  if (!commentId || commentId === row.details?.comment_id) return row;
-  return { ...row, details: { ...(row.details ?? {}), comment_id: commentId } };
+    unread.length > 0
+      ? (unread.findLast((item) => item.type !== "reaction_added" && !!inboxTimelineTarget(item)) ??
+        unread.findLast((item) => !!inboxTimelineTarget(item)))
+      : group.find((item) => !!inboxTimelineTarget(item));
+  const target = anchor ? inboxTimelineTarget(anchor) : undefined;
+  if (target === row.details?.comment_id) return row;
+  const { comment_id: _dropped, ...details } = row.details ?? {};
+  return { ...row, details: target ? { ...details, comment_id: target } : details };
 }
 
 /** One row per issue: its newest notification. Newest group first. */
