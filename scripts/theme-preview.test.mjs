@@ -172,7 +172,14 @@ const EXPECTED = [
   })),
   {
     what: "the small buttons",
-    find: (els) => els.filter((el) => "data-variant" in el.attrs && ["sm", "icon-sm", "icon-xs"].includes(el.attrs["data-size"])),
+    // The composer's send button is the one round button (submit-button.tsx).
+    find: (els) =>
+      els.filter(
+        (el) =>
+          el.attrs["data-slot"] === "button" &&
+          ["sm", "icon-sm", "icon-xs"].includes(el.attrs["data-size"]) &&
+          !el.classes.has("rounded-full"),
+      ),
     classes: ["rounded-button-sm"],
     source: "packages/ui/components/ui/button.tsx",
   },

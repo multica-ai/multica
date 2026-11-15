@@ -134,7 +134,7 @@ export function DeferredTooltip({
     },
     onPointerOver: (e: React.PointerEvent) => {
       (trigger.props.onPointerOver as ((e: React.PointerEvent) => void) | undefined)?.(e);
-      const nested = (e.target as Element).closest?.('[data-slot="tooltip-trigger"]');
+      const nested = (e.target as Element).closest?.('[data-trigger="tooltip"]');
       const onNested = !!nested && nested !== anchorRef.current && !!anchorRef.current?.contains(nested);
       if (onNested === onNestedTriggerRef.current) return;
       onNestedTriggerRef.current = onNested;
