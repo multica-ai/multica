@@ -67,7 +67,7 @@ import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import { createShortcutChord } from "@multica/core/shortcuts";
 import { cn } from "@multica/ui/lib/utils";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
-import { copyImage } from "@multica/ui/lib/clipboard";
+import { copyImage, copyText } from "@multica/ui/lib/clipboard";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import {
   UI_EASE_OUT,
@@ -827,6 +827,17 @@ function PreviewPanel({
   // headers), and there the browser's own context menu has Copy image. Copies
   // the frame on screen, which during a sequence swap is still the last one.
   const canCopyImage = kind === "image" && isDesktopShell();
+  const canCopyText =
+    kind !== null && TEXT_BACKED_KINDS.has(kind) && (kind !== "html" || htmlSource);
+  const copyContent = useAttachmentHtmlText(canCopyText ? state.attachmentId : null);
+  const handleCopyText = async () => {
+    if (!copyContent.data || copyContent.isError) return;
+    if (await copyText(copyContent.data.text)) {
+      toast.success(t(($) => $.attachment.contents_copied));
+    } else {
+      toast.error(t(($) => $.attachment.copy_failed));
+    }
+  };
   const handleCopyImage = async () => {
     if (await copyImage(mediaUrl)) {
       toast.success(t(($) => $.image.image_copied));
@@ -1009,6 +1020,15 @@ function PreviewPanel({
           {locate && (
             <ChromeButton label={locate.label} onClick={locate.onSelect}>
               <MessageSquareText className="size-4" />
+            </ChromeButton>
+          )}
+          {canCopyText && (
+            <ChromeButton
+              label={t(($) => $.attachment.copy_contents)}
+              disabled={!copyContent.data || copyContent.isError}
+              onClick={() => void handleCopyText()}
+            >
+              <Copy className="size-4" />
             </ChromeButton>
           )}
           {copyLink && (
