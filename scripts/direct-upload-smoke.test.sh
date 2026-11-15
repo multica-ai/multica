@@ -90,8 +90,7 @@ fi
 
 step "An existing database is refused, never dropped"
 # A stub `docker` that reports the database as already present. A correct script
-# stops here; a buggy one would DROP it to "start clean" — the exact failure the
-# review reported.
+# stops here; a buggy one would DROP it to "start clean".
 STUB_DIR="$TMP/stub"
 mkdir -p "$STUB_DIR"
 cat > "$STUB_DIR/docker" <<'STUB'
@@ -256,8 +255,8 @@ else
   bad "cleanup did not drop its own database: $dropped"
 fi
 # The decisive check: a destructive command may only name the one container and
-# the one database in the ledger. Anything else is the failure the review
-# reported. Compared as exact tokens, so unrelated words in the same command
+# the one database in the ledger. Anything else is a bug. Compared as exact
+# tokens, so unrelated words in the same command
 # line (the `psql -d postgres` maintenance connection, for instance) do not
 # produce a false positive.
 removed_names="$(printf '%s\n' "$removed_containers" | sed -n 's/^rm -f //p' | tr ' ' '\n' | grep -v '^$' | sort -u)"
