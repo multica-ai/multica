@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"slices"
 	"sort"
 	"testing"
 	"time"
@@ -64,116 +63,6 @@ func (f fakeAudienceQuerier) ListPrivateProjectAudience(context.Context, pgtype.
 
 func (fakeAudienceQuerier) ListWorkspaceManagerUserIDs(context.Context, pgtype.UUID) ([]pgtype.UUID, error) {
 	return []pgtype.UUID{ppUUID(ppAdmin)}, nil
-}
-
-func (fakeAudienceQuerier) ListWorkspaceOwnerUserIDs(context.Context, pgtype.UUID) ([]pgtype.UUID, error) {
-	return nil, nil
-}
-
-// hideFromAdminsAudienceQuerier adds ppHidden, a private project that hides
-// from admins, and a workspace owner.
-type hideFromAdminsAudienceQuerier struct{ fakeAudienceQuerier }
-
-const (
-	ppHidden = "00000000-0000-0000-0000-0000000000b4"
-	ppOwner  = "00000000-0000-0000-0000-0000000000c4"
-)
-
-func (q hideFromAdminsAudienceQuerier) ListPrivateProjectAudience(ctx context.Context, ws pgtype.UUID) ([]db.ListPrivateProjectAudienceRow, error) {
-	rows, err := q.fakeAudienceQuerier.ListPrivateProjectAudience(ctx, ws)
-	return append(rows, db.ListPrivateProjectAudienceRow{ProjectID: ppUUID(ppHidden), HideFromAdmins: true, UserID: ppUUID(ppMember)}), err
-}
-
-func (hideFromAdminsAudienceQuerier) ListWorkspaceManagerUserIDs(context.Context, pgtype.UUID) ([]pgtype.UUID, error) {
-	return []pgtype.UUID{ppUUID(ppOwner), ppUUID(ppAdmin)}, nil
-}
-
-func (hideFromAdminsAudienceQuerier) ListWorkspaceOwnerUserIDs(context.Context, pgtype.UUID) ([]pgtype.UUID, error) {
-	return []pgtype.UUID{ppUUID(ppOwner)}, nil
-}
-
-func TestRegisterListeners_HideFromAdminsLeavesAdminsOutOfTheAudience(t *testing.T) {
-	for _, tc := range []struct {
-		projectID string
-		want      []string
-	}{
-		{ppHidden, []string{ppMember, ppOwner}},
-		{ppPrivate, []string{ppMember, ppAdmin, ppOwner}},
-	} {
-		bus := events.New()
-		fb := &fakeBroadcaster{}
-		registerListeners(bus, fb, newPrivateProjectAudience(hideFromAdminsAudienceQuerier{}))
-		bus.Publish(events.Event{Type: protocol.EventIssueUpdated, WorkspaceID: ppWorkspace,
-			Payload: map[string]any{"issue": map[string]any{"id": "i", "project_id": tc.projectID}}})
-		want := make([]string, 0, len(tc.want))
-		for _, id := range tc.want {
-			want = append(want, realtime.WorkspaceMemberScopeID(ppWorkspace, id))
-		}
-		sort.Strings(want)
-		got := privateAudienceScopes(fb)
-		if len(fb.workspaceCalls) != 0 || len(got) != len(want) {
-			t.Fatalf("%s: workspace=%d scoped=%v, want %v", tc.projectID, len(fb.workspaceCalls), got, want)
-		}
-		for i := range want {
-			if got[i] != want[i] {
-				t.Fatalf("%s: delivered to %v, want %v", tc.projectID, got, want)
-			}
-		}
-	}
-}
-
-// mixedHideAudienceQuerier makes ppPrivate hide from admins and leaves
-// ppPrivate2 visible to them; adminInHidden makes ppAdmin a member of
-// ppPrivate.
-type mixedHideAudienceQuerier struct {
-	hideFromAdminsAudienceQuerier
-	adminInHidden bool
-}
-
-func (q mixedHideAudienceQuerier) ListPrivateProjectAudience(context.Context, pgtype.UUID) ([]db.ListPrivateProjectAudienceRow, error) {
-	rows := []db.ListPrivateProjectAudienceRow{
-		{ProjectID: ppUUID(ppPrivate), HideFromAdmins: true, UserID: ppUUID(ppMember)},
-		{ProjectID: ppUUID(ppPrivate2), UserID: ppUUID(ppOther)},
-	}
-	if q.adminInHidden {
-		rows = append(rows, db.ListPrivateProjectAudienceRow{ProjectID: ppUUID(ppPrivate), HideFromAdmins: true, UserID: ppUUID(ppAdmin)})
-	}
-	return rows, nil
-}
-
-func TestPrivateProjectAudienceAcrossHiddenAndVisibleProjects(t *testing.T) {
-	crossProject := []events.Event{
-		{Type: protocol.EventPullRequestUpdated, WorkspaceID: ppWorkspace,
-			Payload: map[string]any{"pull_request": map[string]any{"id": "pr"}, "linked_issue_ids": []string{ppSecretIssue, ppSecretIssue2}}},
-		{Type: protocol.EventTaskMessage, WorkspaceID: ppWorkspace, TaskID: ppCrossProjectTask,
-			Payload: map[string]any{"task_id": ppCrossProjectTask}},
-	}
-	for _, tc := range []struct {
-		name          string
-		adminInHidden bool
-		want          []string
-	}{
-		// A member of the hidden project who is an admin of the visible one
-		// can read both.
-		{"admin member of hidden project", true, []string{ppAdmin, ppOwner}},
-		// Without membership the hidden project stays closed to the admin, and
-		// a member of only one project never qualifies.
-		{"admin outside hidden project", false, []string{ppOwner}},
-	} {
-		for _, e := range crossProject {
-			t.Run(tc.name+"/"+e.Type, func(t *testing.T) {
-				a := newPrivateProjectAudience(mixedHideAudienceQuerier{adminInHidden: tc.adminInHidden})
-				got, private, err := a.Audience(context.Background(), e)
-				if err != nil || !private {
-					t.Fatalf("private=%v err=%v", private, err)
-				}
-				sort.Strings(got)
-				if !slices.Equal(got, tc.want) {
-					t.Fatalf("delivered to %v, want %v", got, tc.want)
-				}
-			})
-		}
-	}
 }
 
 func (fakeAudienceQuerier) GetIssueProjectID(_ context.Context, id pgtype.UUID) (pgtype.UUID, error) {

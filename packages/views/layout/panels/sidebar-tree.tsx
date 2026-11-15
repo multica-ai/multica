@@ -170,14 +170,12 @@ export const TreeRow = forwardRef<HTMLAnchorElement, TreeRowProps>(function Tree
   );
 });
 
-/** Marks a private project, which only its members and workspace owners can
- *  see, plus admins unless it hides from them. It sits above the row link's
+/** Marks a private project, which only its members and workspace owners and
+ *  admins can see. It sits above the row link's
  *  stretched hit area so its tooltip opens; a click still reaches the link. */
-export function PrivateProjectLock({ hideFromAdmins = false }: { hideFromAdmins?: boolean }) {
+export function PrivateProjectLock() {
   const { t } = useT("layout");
-  const label = hideFromAdmins
-    ? t(($) => $.panels.work.private_project_hidden_from_admins)
-    : t(($) => $.panels.work.private_project);
+  const label = t(($) => $.panels.work.private_project);
   return (
     <TooltipHint label={label}>
       <span

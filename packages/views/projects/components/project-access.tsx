@@ -11,7 +11,6 @@ import { projectMembersOptions } from "@multica/core/projects/queries";
 import { canManageProjectAccess, useProjectAccessMutation } from "@multica/core/projects/access";
 import { Button } from "@multica/ui/components/ui/button";
 import { Spinner } from "@multica/ui/components/ui/spinner";
-import { Switch } from "@multica/ui/components/ui/switch";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@multica/ui/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@multica/ui/components/ui/popover";
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@multica/ui/components/ui/command";
@@ -22,11 +21,9 @@ import { useT } from "../../i18n";
 
 const EMPTY_IDS: string[] = [];
 
-function AccessFields({ visibility, onVisibilityChange, hideFromAdmins = false, onHideFromAdminsChange, members, selected, leadId, userId, disabled, canChangeScope, canUsePrivate, canAdd, canRemove, onAdd, onRemove }: {
+function AccessFields({ visibility, onVisibilityChange, members, selected, leadId, userId, disabled, canChangeScope, canUsePrivate, canAdd, canRemove, onAdd, onRemove }: {
   visibility: ProjectVisibility;
   onVisibilityChange: (value: ProjectVisibility) => void;
-  hideFromAdmins?: boolean;
-  onHideFromAdminsChange?: (value: boolean) => void;
   members: MemberWithUser[];
   selected: string[];
   leadId?: string | null;
@@ -91,7 +88,7 @@ function AccessFields({ visibility, onVisibilityChange, hideFromAdmins = false, 
                   <p className="truncate text-body">{member.name}{member.user_id === userId ? <span className="ml-1.5 text-caption text-muted-foreground">{t(($) => $.access.you)}</span> : null}</p>
                   <p className="truncate text-caption text-muted-foreground">{member.email}</p>
                 </div>
-                {member.user_id === leadId ? <span className="shrink-0 text-caption text-muted-foreground">{t(($) => $.table.lead)}</span> : member.role === "owner" || (member.role === "admin" && !hideFromAdmins) ? (
+                {member.user_id === leadId ? <span className="shrink-0 text-caption text-muted-foreground">{t(($) => $.table.lead)}</span> : member.role === "owner" || member.role === "admin" ? (
                   <span className="shrink-0 text-caption text-muted-foreground">{member.role}</span>
                 ) : canRemove(member.user_id) ? (
                   <Button type="button" variant="ghost" size="icon-xs" disabled={disabled}
@@ -104,19 +101,9 @@ function AccessFields({ visibility, onVisibilityChange, hideFromAdmins = false, 
           </div>
         </div>
       ) : null}
-      {visibility === "private" && onHideFromAdminsChange ? (
-        <label className="flex cursor-pointer items-start gap-3 rounded-lg border px-4 py-3 has-disabled:cursor-default has-disabled:opacity-60">
-          <div className="min-w-0 flex-1">
-            <p className="text-body font-medium">{t(($) => $.access.hide_from_admins)}</p>
-            <p className="text-caption text-muted-foreground">{t(($) => $.access.hide_from_admins_description)}</p>
-          </div>
-          <Switch className="mt-0.5" checked={hideFromAdmins} disabled={disabled || !canChangeScope}
-            onCheckedChange={(value) => onHideFromAdminsChange(value)} />
-        </label>
-      ) : null}
       {visibility === "private" ? (
         <div className="space-y-2">
-          <p className="flex items-start gap-2 text-caption text-muted-foreground"><Shield className="mt-0.5 size-4 shrink-0" aria-hidden="true" />{hideFromAdmins ? t(($) => $.access.owner_notice) : t(($) => $.access.admin_notice)}</p>
+          <p className="flex items-start gap-2 text-caption text-muted-foreground"><Shield className="mt-0.5 size-4 shrink-0" aria-hidden="true" />{t(($) => $.access.admin_notice)}</p>
           <p className="flex items-start gap-2 text-caption text-muted-foreground"><Bot className="mt-0.5 size-4 shrink-0" aria-hidden="true" />{t(($) => $.access.agent_notice)}</p>
         </div>
       ) : null}
@@ -150,9 +137,6 @@ function ProjectAccessEditor({ project, onClose, changeAccess }: { project: Proj
   const projectMembers = useQuery(projectMembersOptions(wsId, project.id));
   const [visibility, setVisibility] = useState<ProjectVisibility>(project.visibility ?? "workspace");
   const [draftIds, setDraftIds] = useState<string[] | null>(null);
-  // A switch to private starts with the switch on, the server's default.
-  const [draftHideFromAdmins, setDraftHideFromAdmins] = useState(true);
-  const savedPrivate = project.visibility === "private";
   const [error, setError] = useState("");
   const [confirmPublic, setConfirmPublic] = useState(false);
   const members = workspaceMembers.data ?? [];
@@ -171,8 +155,7 @@ function ProjectAccessEditor({ project, onClose, changeAccess }: { project: Proj
     catch (err) { setError(err instanceof Error ? err.message : t(($) => $.access.failed)); return false; }
   };
   const saveScope = async () => {
-    const hideFromAdmins = visibility === "private" ? draftHideFromAdmins : undefined;
-    if (await run({ type: "visibility", visibility, memberIds: selected, hideFromAdmins })) { setConfirmPublic(false); onClose(); }
+    if (await run({ type: "visibility", visibility, memberIds: selected })) { setConfirmPublic(false); onClose(); }
   };
   return (
     <>
@@ -181,8 +164,6 @@ function ProjectAccessEditor({ project, onClose, changeAccess }: { project: Proj
           <div role="alert" className="space-y-2 text-body"><p>{t(($) => $.access.load_failed)}</p><Button variant="outline" size="sm" onClick={() => { void workspaceMembers.refetch(); void projectMembers.refetch(); }}>{t(($) => $.access.retry)}</Button></div>
         ) : (
           <AccessFields visibility={visibility} onVisibilityChange={setVisibility} members={members} selected={selected} userId={userId} leadId={leadId}
-            hideFromAdmins={visibility === "private" && (savedPrivate ? !!project.hide_from_admins : draftHideFromAdmins)}
-            onHideFromAdminsChange={savedPrivate ? (value) => { void run({ type: "hide_from_admins", hideFromAdmins: value }); } : setDraftHideFromAdmins}
             disabled={pending} canChangeScope={canManage} canUsePrivate
             canAdd={canManage}
             canRemove={(id) => canManage && id !== leadId}
@@ -212,14 +193,12 @@ function ProjectAccessEditor({ project, onClose, changeAccess }: { project: Proj
   );
 }
 
-export function ProjectAccessDraftPicker({ visibility, memberIds, leadId, members, onChange, hideFromAdmins, onHideFromAdminsChange }: {
+export function ProjectAccessDraftPicker({ visibility, memberIds, leadId, members, onChange }: {
   visibility: ProjectVisibility;
   memberIds: string[];
   leadId?: string;
   members: MemberWithUser[];
   onChange: (visibility: ProjectVisibility, ids: string[]) => void;
-  hideFromAdmins: boolean;
-  onHideFromAdminsChange: (value: boolean) => void;
 }) {
   const { t } = useT("projects");
   const userId = useAuthStore((s) => s.user?.id);
@@ -236,7 +215,6 @@ export function ProjectAccessDraftPicker({ visibility, memberIds, leadId, member
       } />
       <PopoverContent side="top" align="end" className="max-h-[70dvh] w-96 max-w-[calc(100vw-2rem)] overflow-y-auto">
         <AccessFields visibility={visibility} onVisibilityChange={(value) => onChange(value, selected)} members={members} selected={selected} leadId={leadId} userId={userId}
-          hideFromAdmins={visibility === "private" && hideFromAdmins} onHideFromAdminsChange={onHideFromAdminsChange}
           disabled={false} canChangeScope canUsePrivate canAdd
           canRemove={(id) => !fixed.includes(id)}
           onAdd={(id) => onChange(visibility, [...selected, id])}

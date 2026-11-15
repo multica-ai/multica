@@ -237,32 +237,6 @@ func (q *Queries) ListWorkspaceManagerUserIDs(ctx context.Context, workspaceID p
 	return items, nil
 }
 
-const listWorkspaceOwnerUserIDs = `-- name: ListWorkspaceOwnerUserIDs :many
-SELECT user_id FROM member
-WHERE workspace_id = $1 AND role = 'owner'
-ORDER BY created_at ASC
-`
-
-func (q *Queries) ListWorkspaceOwnerUserIDs(ctx context.Context, workspaceID pgtype.UUID) ([]pgtype.UUID, error) {
-	rows, err := q.db.Query(ctx, listWorkspaceOwnerUserIDs, workspaceID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []pgtype.UUID{}
-	for rows.Next() {
-		var user_id pgtype.UUID
-		if err := rows.Scan(&user_id); err != nil {
-			return nil, err
-		}
-		items = append(items, user_id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const updateMemberRole = `-- name: UpdateMemberRole :one
 UPDATE member SET role = $2
 WHERE id = $1

@@ -174,24 +174,21 @@ const listHiddenProjectIDsForUser = `-- name: ListHiddenProjectIDsForUser :many
 SELECT p.id FROM project p
 WHERE p.workspace_id = $1
   AND p.visibility = 'private'
-  AND (NOT $2::bool OR p.hide_from_admins)
   AND NOT EXISTS (
       SELECT 1 FROM project_member pm
-      WHERE pm.project_id = p.id AND pm.user_id = $3
+      WHERE pm.project_id = p.id AND pm.user_id = $2
   )
 `
 
 type ListHiddenProjectIDsForUserParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	IsAdmin     bool        `json:"is_admin"`
 	UserID      pgtype.UUID `json:"user_id"`
 }
 
-// Private projects a non-owner workspace member cannot see. Owners see every
-// project; callers skip this query for them. Admins (is_admin) are hidden only
-// from projects that set hide_from_admins.
+// Private projects a regular (non owner/admin) workspace member cannot see.
+// Owners and admins see every project; callers skip this query for them.
 func (q *Queries) ListHiddenProjectIDsForUser(ctx context.Context, arg ListHiddenProjectIDsForUserParams) ([]pgtype.UUID, error) {
-	rows, err := q.db.Query(ctx, listHiddenProjectIDsForUser, arg.WorkspaceID, arg.IsAdmin, arg.UserID)
+	rows, err := q.db.Query(ctx, listHiddenProjectIDsForUser, arg.WorkspaceID, arg.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -242,16 +239,15 @@ func (q *Queries) ListIssueProjectIDs(ctx context.Context, ids []pgtype.UUID) ([
 }
 
 const listPrivateProjectAudience = `-- name: ListPrivateProjectAudience :many
-SELECT p.id AS project_id, p.hide_from_admins, pm.user_id
+SELECT p.id AS project_id, pm.user_id
 FROM project p
 LEFT JOIN project_member pm ON pm.project_id = p.id
 WHERE p.workspace_id = $1 AND p.visibility = 'private'
 `
 
 type ListPrivateProjectAudienceRow struct {
-	ProjectID      pgtype.UUID `json:"project_id"`
-	HideFromAdmins bool        `json:"hide_from_admins"`
-	UserID         pgtype.UUID `json:"user_id"`
+	ProjectID pgtype.UUID `json:"project_id"`
+	UserID    pgtype.UUID `json:"user_id"`
 }
 
 // Realtime fanout for private-project events: each private project with its
@@ -265,7 +261,7 @@ func (q *Queries) ListPrivateProjectAudience(ctx context.Context, workspaceID pg
 	items := []ListPrivateProjectAudienceRow{}
 	for rows.Next() {
 		var i ListPrivateProjectAudienceRow
-		if err := rows.Scan(&i.ProjectID, &i.HideFromAdmins, &i.UserID); err != nil {
+		if err := rows.Scan(&i.ProjectID, &i.UserID); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -420,48 +416,10 @@ func (q *Queries) TouchProjectSearchIndexEntries(ctx context.Context, arg TouchP
 	return err
 }
 
-const updateProjectHideFromAdmins = `-- name: UpdateProjectHideFromAdmins :one
-UPDATE project SET hide_from_admins = $1, updated_at = now()
-WHERE id = $2 AND workspace_id = $3
-RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, creator_type, creator_id, visibility, hide_from_admins
-`
-
-type UpdateProjectHideFromAdminsParams struct {
-	HideFromAdmins bool        `json:"hide_from_admins"`
-	ID             pgtype.UUID `json:"id"`
-	WorkspaceID    pgtype.UUID `json:"workspace_id"`
-}
-
-func (q *Queries) UpdateProjectHideFromAdmins(ctx context.Context, arg UpdateProjectHideFromAdminsParams) (Project, error) {
-	row := q.db.QueryRow(ctx, updateProjectHideFromAdmins, arg.HideFromAdmins, arg.ID, arg.WorkspaceID)
-	var i Project
-	err := row.Scan(
-		&i.ID,
-		&i.WorkspaceID,
-		&i.Title,
-		&i.Description,
-		&i.Icon,
-		&i.Status,
-		&i.LeadType,
-		&i.LeadID,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.Priority,
-		&i.StartDate,
-		&i.DueDate,
-		&i.WorkflowID,
-		&i.CreatorType,
-		&i.CreatorID,
-		&i.Visibility,
-		&i.HideFromAdmins,
-	)
-	return i, err
-}
-
 const updateProjectVisibility = `-- name: UpdateProjectVisibility :one
 UPDATE project SET visibility = $1, updated_at = now()
 WHERE id = $2 AND workspace_id = $3
-RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, creator_type, creator_id, visibility, hide_from_admins
+RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, creator_type, creator_id, visibility
 `
 
 type UpdateProjectVisibilityParams struct {
@@ -491,7 +449,6 @@ func (q *Queries) UpdateProjectVisibility(ctx context.Context, arg UpdateProject
 		&i.CreatorType,
 		&i.CreatorID,
 		&i.Visibility,
-		&i.HideFromAdmins,
 	)
 	return i, err
 }

@@ -380,7 +380,7 @@ function PinRow({
       onUnpin={onUnpin}
       label={project.title}
       active={active}
-      labelSuffix={project.visibility === "private" && <PrivateProjectLock hideFromAdmins={project.hide_from_admins} />}
+      labelSuffix={project.visibility === "private" && <PrivateProjectLock />}
       iconNode={
         project.icon ? <ProjectIcon project={project} size="md" /> : <Folder className="size-4 shrink-0" />
       }

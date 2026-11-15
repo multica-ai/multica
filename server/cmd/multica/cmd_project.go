@@ -184,7 +184,6 @@ func init() {
 	projectCreateCmd.Flags().String("due-date", "", "Due date (calendar day, YYYY-MM-DD)")
 	projectCreateCmd.Flags().StringArray("repo", nil, "Attach a github_repo resource by URL (may be repeated)")
 	projectCreateCmd.Flags().String("visibility", "", "Who can see the project: workspace (default) or private")
-	projectCreateCmd.Flags().Bool("hide-from-admins", false, "With --visibility private, also hide it from workspace admins who are not project members (owners keep access). On by default; --hide-from-admins=false turns it off")
 	projectCreateCmd.Flags().StringArray("member", nil, "Member of a private project (name, email or user id; may be repeated). You are always added")
 	projectCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
@@ -234,7 +233,6 @@ func init() {
 	projectUpdateCmd.Flags().String("due-date", "", "New due date (calendar day, YYYY-MM-DD; pass empty string to clear)")
 	projectUpdateCmd.Flags().String("visibility", "", "Switch visibility: workspace or private")
 	projectUpdateCmd.Flags().StringArray("member", nil, "Members to add when switching to private (name, email or user id; may be repeated)")
-	projectUpdateCmd.Flags().Bool("hide-from-admins", false, "On a private project, also hide it from workspace admins who are not project members (owners keep access). On by default when switching to private; --hide-from-admins=false turns it off")
 	projectUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// project delete
@@ -496,7 +494,7 @@ func runProjectUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use flags like --title, --status, --description, --icon, --lead, --start-date, --due-date, --visibility, --hide-from-admins")
+		return fmt.Errorf("no fields to update; use flags like --title, --status, --description, --icon, --lead, --start-date, --due-date, --visibility")
 	}
 
 	var result map[string]any
@@ -1037,13 +1035,9 @@ func formatLead(project map[string]any, actors actorDisplayLookup) string {
 	return actors.actor(lType, lID)
 }
 
-// applyProjectVisibilityFlags maps --visibility / --member / --hide-from-admins
-// onto a project create or update body.
+// applyProjectVisibilityFlags maps --visibility / --member onto a project
+// create or update body.
 func applyProjectVisibilityFlags(ctx context.Context, cmd *cobra.Command, client *cli.APIClient, body map[string]any) error {
-	if cmd.Flags().Changed("hide-from-admins") {
-		v, _ := cmd.Flags().GetBool("hide-from-admins")
-		body["hide_from_admins"] = v
-	}
 	visibility, _ := cmd.Flags().GetString("visibility")
 	members, _ := cmd.Flags().GetStringArray("member")
 	if visibility == "" {

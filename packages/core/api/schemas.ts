@@ -1791,7 +1791,6 @@ export const ProjectSchema = z.object({
   workspace_id: z.string(),
   title: z.string(),
   visibility: z.enum(["workspace", "private"]).default("workspace").catch("private"),
-  hide_from_admins: z.boolean().default(false).catch(false),
   description: z.string().nullable(),
   icon: z.string().nullable(),
   status: z.string(),

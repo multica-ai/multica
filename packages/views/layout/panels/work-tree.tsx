@@ -317,7 +317,7 @@ function ProjectTreeItem({
         listId={listId}
         toggleLabel={t(($) => $.panels.work.project_issues, { name: project.title })}
         onPrefetch={prefetch}
-        labelSuffix={project.visibility === "private" && <PrivateProjectLock hideFromAdmins={project.hide_from_admins} />}
+        labelSuffix={project.visibility === "private" && <PrivateProjectLock />}
         onContextMenu={(event: MouseEvent) => {
           if (shouldOpenRowMenu(event)) rowMenu.openAtPointer(event);
         }}

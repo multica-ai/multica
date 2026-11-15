@@ -3,9 +3,8 @@
 // realtime fanout all call into it instead of re-deriving visibility.
 //
 // The rule: a project with visibility "private" is visible to its
-// project_member rows, to workspace owners, and to workspace admins unless the
-// project sets hide_from_admins (MUL-9284). Every other project is visible to
-// every workspace member. An issue's visibility is its project's.
+// project_member rows and to workspace owners/admins. Every other project is
+// visible to every workspace member. An issue's visibility is its project's.
 //
 // A viewer is a set of principals (human user ids). A member request has one
 // principal: the member. An agent run has two: the human who triggered it and
@@ -33,9 +32,7 @@ func ValidVisibility(v string) bool {
 	return v == VisibilityWorkspace || v == VisibilityPrivate
 }
 
-// IsManagerRole reports whether a workspace role manages private project
-// access. Only owners see every private project; admins are hidden from the
-// ones that set hide_from_admins.
+// IsManagerRole reports whether a workspace role sees every private project.
 func IsManagerRole(role string) bool {
 	return role == "owner" || role == "admin"
 }
@@ -103,13 +100,12 @@ func (h Hidden) IDs() []pgtype.UUID {
 // caller already knows (request middleware loaded it).
 func ForMember(ctx context.Context, q Querier, workspaceID, userID pgtype.UUID, role string) (Hidden, error) {
 	h := newHidden()
-	if role == "owner" {
+	if IsManagerRole(role) {
 		return h, nil
 	}
 	ids, err := q.ListHiddenProjectIDsForUser(ctx, db.ListHiddenProjectIDsForUserParams{
 		WorkspaceID: workspaceID,
 		UserID:      userID,
-		IsAdmin:     role == "admin",
 	})
 	if err != nil {
 		return Hidden{}, err

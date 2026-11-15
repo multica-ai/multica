@@ -21,9 +21,8 @@ import (
 
 // privateProjectAudience narrows realtime fanout for events about a private
 // project (MUL-8472): the project itself, its resources, its issues, their
-// comments and their runs reach only project members, workspace owners and,
-// unless the project sets hide_from_admins, workspace admins. Every other
-// event keeps workspace fanout, and so does an
+// comments and their runs reach only project members and workspace
+// owners/admins. Every other event keeps workspace fanout, and so does an
 // event whose project cannot be resolved (a deleted issue's id, a
 // workspace-level object): narrowing anything wider is how #9133 silenced
 // realtime for whole workspaces.
@@ -37,7 +36,6 @@ type privateProjectAudience interface {
 type audienceQuerier interface {
 	ListPrivateProjectAudience(ctx context.Context, workspaceID pgtype.UUID) ([]db.ListPrivateProjectAudienceRow, error)
 	ListWorkspaceManagerUserIDs(ctx context.Context, workspaceID pgtype.UUID) ([]pgtype.UUID, error)
-	ListWorkspaceOwnerUserIDs(ctx context.Context, workspaceID pgtype.UUID) ([]pgtype.UUID, error)
 	GetIssueProjectID(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error)
 	GetCommentIssueProjectID(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error)
 	GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error)
@@ -73,11 +71,7 @@ type workspaceAudience struct {
 	loadedAt time.Time
 	// projects maps a private project id to its member user ids.
 	projects map[string][]string
-	// hideFromAdmins holds the private projects whose audience leaves out
-	// admins: only owners are added to it, not every manager.
-	hideFromAdmins map[string]bool
-	managers       []string
-	owners         []string
+	managers []string
 }
 
 const (
@@ -139,39 +133,26 @@ func (a *dbPrivateProjectAudience) Audience(ctx context.Context, e events.Event)
 	}
 	// A run can read more than one project (a quick-create into one project
 	// under a parent in another), and a pull request can be linked to issues in
-	// several; only users who can access every private one may see it. Each
-	// project grants access on its own terms, so a user can qualify for one
-	// as a member and for another as an admin.
-	var out []string
+	// several; only members of every private one may see it.
+	var members []string
 	private := false
 	for _, projectID := range projectIDs {
-		if _, ok := ws.projects[projectID]; !ok {
+		projectMembers, ok := ws.projects[projectID]
+		if !ok {
 			continue
 		}
-		access := ws.projectAccess(projectID)
 		if !private {
-			out, private = access, true
+			members, private = projectMembers, true
 			continue
 		}
-		out = intersect(out, access)
+		members = intersect(members, projectMembers)
 	}
 	if !private {
 		return nil, false, nil
 	}
-	return out, true, nil
-}
-
-// projectAccess lists the users who can see a private project: workspace
-// managers (only owners when it hides from admins), then its members.
-func (ws workspaceAudience) projectAccess(projectID string) []string {
-	managers := ws.managers
-	if ws.hideFromAdmins[projectID] {
-		managers = ws.owners
-	}
-	members := ws.projects[projectID]
-	seen := make(map[string]struct{}, len(managers)+len(members))
-	out := make([]string, 0, len(managers)+len(members))
-	for _, ids := range [][]string{managers, members} {
+	seen := make(map[string]struct{}, len(members)+len(ws.managers))
+	out := make([]string, 0, len(members)+len(ws.managers))
+	for _, ids := range [][]string{ws.managers, members} {
 		for _, id := range ids {
 			if _, dup := seen[id]; dup {
 				continue
@@ -180,7 +161,7 @@ func (ws workspaceAudience) projectAccess(projectID string) []string {
 			out = append(out, id)
 		}
 	}
-	return out
+	return out, true, nil
 }
 
 func intersect(a, b []string) []string {
@@ -212,7 +193,7 @@ func (a *dbPrivateProjectAudience) workspace(ctx context.Context, workspaceID st
 	if err != nil {
 		return workspaceAudience{}, err
 	}
-	loaded := workspaceAudience{loadedAt: a.now(), projects: map[string][]string{}, hideFromAdmins: map[string]bool{}}
+	loaded := workspaceAudience{loadedAt: a.now(), projects: map[string][]string{}}
 	for _, row := range rows {
 		pid := util.UUIDToString(row.ProjectID)
 		members := loaded.projects[pid]
@@ -220,9 +201,6 @@ func (a *dbPrivateProjectAudience) workspace(ctx context.Context, workspaceID st
 			members = append(members, util.UUIDToString(row.UserID))
 		}
 		loaded.projects[pid] = members
-		if row.HideFromAdmins {
-			loaded.hideFromAdmins[pid] = true
-		}
 	}
 	if len(loaded.projects) > 0 {
 		managers, err := a.q.ListWorkspaceManagerUserIDs(ctx, wsUUID)
@@ -231,15 +209,6 @@ func (a *dbPrivateProjectAudience) workspace(ctx context.Context, workspaceID st
 		}
 		for _, id := range managers {
 			loaded.managers = append(loaded.managers, util.UUIDToString(id))
-		}
-	}
-	if len(loaded.hideFromAdmins) > 0 {
-		owners, err := a.q.ListWorkspaceOwnerUserIDs(ctx, wsUUID)
-		if err != nil {
-			return workspaceAudience{}, err
-		}
-		for _, id := range owners {
-			loaded.owners = append(loaded.owners, util.UUIDToString(id))
 		}
 	}
 	a.mu.Lock()
