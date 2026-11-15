@@ -223,6 +223,7 @@
     "select_row": "Seleccionar fila",
     "row_actions": "Acciones de fila",
     "sort_by": "Ordenar por",
+    "group_by": "Agrupación",
     "direction_asc": "Ascendente",
     "direction_desc": "Descendente",
     "section_columns": "Columnas",

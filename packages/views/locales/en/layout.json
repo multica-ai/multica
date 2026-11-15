@@ -223,6 +223,7 @@
     "select_row": "Select row",
     "row_actions": "Row actions",
     "sort_by": "Sort by",
+    "group_by": "Grouping",
     "direction_asc": "Ascending",
     "direction_desc": "Descending",
     "section_columns": "Columns",

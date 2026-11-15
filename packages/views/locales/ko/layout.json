@@ -213,6 +213,7 @@
     "select_row": "행 선택",
     "row_actions": "행 작업",
     "sort_by": "정렬",
+    "group_by": "그룹화",
     "direction_asc": "오름차순",
     "direction_desc": "내림차순",
     "section_columns": "열",

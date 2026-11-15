@@ -213,6 +213,7 @@
     "select_row": "選擇此列",
     "row_actions": "更多操作",
     "sort_by": "排序",
+    "group_by": "分組",
     "direction_asc": "升序",
     "direction_desc": "降序",
     "section_columns": "欄",

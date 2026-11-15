@@ -91,7 +91,7 @@ describe("ProjectsPage deletion lifecycle", () => {
   const listProjects = vi.fn();
 
   beforeEach(() => {
-    useProjectViewStore.setState({ viewMode: "compact" });
+    useProjectViewStore.setState({ layout: "table" });
     qc = new QueryClient({
       defaultOptions: {
         queries: { staleTime: Infinity, retry: false },
@@ -309,8 +309,8 @@ describe("ProjectsPage deletion lifecycle", () => {
     },
   );
 
-  it.each(["compact", "comfortable"] as const)("retains a %s row after offline rejection and allows an explicit retry", async (mode) => {
-    useProjectViewStore.setState({ viewMode: mode });
+  it.each(["table", "board"] as const)("retains a %s row after offline rejection and allows an explicit retry", async (layout) => {
+    useProjectViewStore.setState({ layout });
     onlineManager.setOnline(false);
     renderPage();
     await confirmDeletion();

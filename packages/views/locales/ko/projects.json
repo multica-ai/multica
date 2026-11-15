@@ -9,7 +9,7 @@
     "view_comfortable": "넓게",
     "no_search_results": "검색 결과가 없습니다",
     "view_table": "테이블",
-    "view_cards": "카드",
+    "view_board": "보드",
     "row_menu": "프로젝트 작업",
     "rename": "이름 변경",
     "pin": "사이드바에 고정",
@@ -19,7 +19,10 @@
     "scope_archived": "보관된 프로젝트",
     "archive": "보관",
     "restore": "복원",
-    "no_archived": "보관된 프로젝트가 없습니다"
+    "no_archived": "보관된 프로젝트가 없습니다",
+    "search": "프로젝트 검색",
+    "group_none": "그룹 없음",
+    "board_column_empty": "프로젝트 없음"
   },
   "table": {
     "name": "이름",
@@ -27,6 +30,8 @@
     "status": "상태",
     "progress": "진행률",
     "lead": "리드",
+    "start_date": "시작일",
+    "due_date": "마감일",
     "created": "생성일",
     "issues": "태스크 수",
     "archived": "보관일"

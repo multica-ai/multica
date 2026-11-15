@@ -211,6 +211,7 @@
     "select_row": "Выбрать строку",
     "row_actions": "Действия со строкой",
     "sort_by": "Сортировать по",
+    "group_by": "Группировка",
     "direction_asc": "По возрастанию",
     "direction_desc": "По убыванию",
     "section_columns": "Столбцы",

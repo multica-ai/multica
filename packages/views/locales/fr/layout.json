@@ -223,6 +223,7 @@
     "select_row": "Sélectionner la ligne",
     "row_actions": "Actions de la ligne",
     "sort_by": "Trier par",
+    "group_by": "Regroupement",
     "direction_asc": "Croissant",
     "direction_desc": "Décroissant",
     "section_columns": "Colonnes",

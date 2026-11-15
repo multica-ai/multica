@@ -9,7 +9,7 @@
     "view_comfortable": "Comfortable",
     "no_search_results": "No results match your search",
     "view_table": "Table",
-    "view_cards": "Cards",
+    "view_board": "Board",
     "row_menu": "Project actions",
     "rename": "Rename",
     "pin": "Pin to sidebar",
@@ -19,7 +19,10 @@
     "scope_archived": "Archived projects",
     "archive": "Archive",
     "restore": "Restore",
-    "no_archived": "No archived projects"
+    "no_archived": "No archived projects",
+    "search": "Search projects",
+    "group_none": "No grouping",
+    "board_column_empty": "No projects"
   },
   "table": {
     "name": "Name",
@@ -27,6 +30,8 @@
     "status": "Status",
     "progress": "Progress",
     "lead": "Lead",
+    "start_date": "Start date",
+    "due_date": "Due date",
     "created": "Created",
     "issues": "Issues",
     "archived": "Archived"
