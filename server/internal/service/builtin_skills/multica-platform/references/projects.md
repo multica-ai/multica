@@ -121,7 +121,10 @@ archived or not, and restoring it keeps its status. An archived project has a
 non-null `archived_at` (plus `archived_by_type` / `archived_by_id`).
 
 - `project list` hides archived projects; `--archived` lists only them.
-  `project get`, ID prefixes and `issue list --project` still resolve them.
+  `project get`, `project restore` and `issue list --project` still reach
+  them. An ID prefix resolves to a live project first and to an archived one
+  only when nothing live matches; `--project` on issue and autopilot writes
+  refuses an archived-only match and prints the restore command.
 - It accepts no new issues. Creating an issue with `--project` set to it, or
   moving an issue into it, fails with HTTP 409 code `project_archived`. Issues
   already in it stay readable and editable, and sub-issues of those issues
