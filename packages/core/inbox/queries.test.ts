@@ -79,22 +79,24 @@ describe("deduplicateInboxItems", () => {
     expect(merged[0]?.details).toEqual({ request_id: "request-1" });
   });
 
-  it("preserves the newest row's own comment anchor", () => {
+  it("opens at the oldest unread comment, so the thread reads forward from there", () => {
     const merged = deduplicateInboxItems([
-      item({
-        id: "older-comment",
-        created_at: "2026-06-15T08:00:00Z",
-        details: { comment_id: "comment-1" },
-      }),
-      item({
-        id: "newer-comment",
-        created_at: "2026-06-15T08:02:00Z",
-        details: { comment_id: "comment-2" },
-      }),
+      item({ id: "read-comment", read: true, created_at: "2026-06-15T07:00:00Z", details: { comment_id: "comment-0" } }),
+      item({ id: "older-comment", created_at: "2026-06-15T08:00:00Z", details: { comment_id: "comment-1" } }),
+      item({ id: "newer-comment", created_at: "2026-06-15T08:02:00Z", details: { comment_id: "comment-2" } }),
     ]);
 
     expect(merged).toHaveLength(1);
     expect(merged[0]?.id).toBe("newer-comment");
+    expect(merged[0]?.details?.comment_id).toBe("comment-1");
+  });
+
+  it("opens at the newest comment once every notification is read", () => {
+    const merged = deduplicateInboxItems([
+      item({ id: "older-comment", read: true, created_at: "2026-06-15T08:00:00Z", details: { comment_id: "comment-1" } }),
+      item({ id: "newer-comment", read: true, created_at: "2026-06-15T08:02:00Z", details: { comment_id: "comment-2" } }),
+    ]);
+
     expect(merged[0]?.details?.comment_id).toBe("comment-2");
   });
 

@@ -19,15 +19,18 @@ export function groupInboxRows(items: readonly InboxItem[]): InboxItem[][] {
 }
 
 /**
- * The row a group renders as. It keeps the group's newest comment anchor when
- * it has none of its own, so opening it still scrolls to the comment. An app
- * notification lands on its own request instead, so it never borrows one.
+ * The row a group renders as, opening where the reader left off: the oldest
+ * unread comment, so the thread reads forward from there, or the newest
+ * comment once the issue is read. An app notification lands on its own
+ * request instead, so it never borrows one.
  */
 export function withCommentAnchor(row: InboxItem, group: readonly InboxItem[]): InboxItem {
-  if (row.details?.comment_id) return row;
   if (row.type.startsWith("app_") && row.details?.request_id) return row;
-  const commentId = group.find((item) => item.details?.comment_id)?.details?.comment_id;
-  if (!commentId) return row;
+  const hasComment = (item: InboxItem) => !!item.details?.comment_id;
+  const anchor =
+    group.findLast((item) => item.read !== true && hasComment(item)) ?? group.find(hasComment);
+  const commentId = anchor?.details?.comment_id;
+  if (!commentId || commentId === row.details?.comment_id) return row;
   return { ...row, details: { ...(row.details ?? {}), comment_id: commentId } };
 }
 
