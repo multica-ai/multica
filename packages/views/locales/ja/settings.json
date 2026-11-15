@@ -836,9 +836,8 @@
       "manual_label": "手動でアーカイブ",
       "manual_description": "サイドバーの行、または通知の上部から",
       "manual_value": "いつでも",
-      "done_label": "タスクが完了・キャンセル",
-      "done_description": "タスクが完了系またはキャンセル系のステータスになると、その通知はアーカイブされます。",
-      "done_value": "自動",
+      "done_label": "自分が完了したタスクをアーカイブ",
+      "done_description": "タスクを完了系またはキャンセル系のステータスにすると、その通知はアーカイブされます。他の人が完了したタスクはインボックスに残ります。",
       "archived_label": "アーカイブ済みの通知",
       "archived_description": "ここから見つけてアーカイブを解除できます",
       "archived_action": "アーカイブ済みを表示"

@@ -845,9 +845,8 @@
       "manual_label": "Archivar a mano",
       "manual_description": "Desde su fila en la barra lateral o desde la parte superior de la notificación",
       "manual_value": "En cualquier momento",
-      "done_label": "Tarea completada o cancelada",
-      "done_description": "Cuando una tarea pasa a un estado Completado o Cancelado, sus notificaciones se archivan.",
-      "done_value": "Automático",
+      "done_label": "Archivar las tareas que completas",
+      "done_description": "Cuando pasas una tarea a un estado Completado o Cancelado, sus notificaciones se archivan. Las que completan otros se quedan en la bandeja de entrada.",
       "archived_label": "Notificaciones archivadas",
       "archived_description": "Encuéntralas de nuevo y desarchívalas",
       "archived_action": "Ver archivadas"

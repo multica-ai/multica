@@ -113,12 +113,15 @@ export function NotificationsTab() {
             </span>
           </SettingsRow>
           <SettingsRow
+            anchor="auto_archive_completed"
             label={t(($) => $.notifications.leaving.done_label)}
             description={t(($) => $.notifications.leaving.done_description)}
           >
-            <span className="text-caption text-muted-foreground">
-              {t(($) => $.notifications.leaving.done_value)}
-            </span>
+            <Switch
+              checked={preferences.auto_archive_completed !== "muted"}
+              aria-label={t(($) => $.notifications.leaving.done_label)}
+              onCheckedChange={(checked) => handleToggle("auto_archive_completed", checked)}
+            />
           </SettingsRow>
           <SettingsRow
             anchor="archived"

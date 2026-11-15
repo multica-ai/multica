@@ -184,6 +184,12 @@ export function useSettingsSearchIndex(
       })),
       {
         tab: "notifications",
+        anchor: "auto_archive_completed",
+        title: t(($) => $.notifications.leaving.done_label),
+        description: t(($) => $.notifications.leaving.done_description),
+      },
+      {
+        tab: "notifications",
         anchor: "archived",
         title: t(($) => $.notifications.leaving.archived_label),
         description: t(($) => $.notifications.leaving.archived_description),

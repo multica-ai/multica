@@ -1253,11 +1253,15 @@ func countInboxByTypeForRecipient(t *testing.T, recipientID, notifType string) (
 // publishStatusChange is a small helper to publish the issue:updated event
 // shape used by the notification listener for status-only transitions.
 func publishStatusChange(bus *events.Bus, issueID, newStatus, prevStatus string) {
+	publishStatusChangeBy(bus, issueID, newStatus, prevStatus, "member", testUserID)
+}
+
+func publishStatusChangeBy(bus *events.Bus, issueID, newStatus, prevStatus, actorType, actorID string) {
 	bus.Publish(events.Event{
 		Type:        protocol.EventIssueUpdated,
 		WorkspaceID: testWorkspaceID,
-		ActorType:   "member",
-		ActorID:     testUserID,
+		ActorType:   actorType,
+		ActorID:     actorID,
 		Payload: map[string]any{
 			"issue": handler.IssueResponse{
 				ID:          issueID,
@@ -1399,8 +1403,9 @@ func countActiveInboxForIssue(t *testing.T, recipientID, issueID string) int {
 }
 
 // TestNotification_StatusChange_DoneArchivesIssueInbox verifies that moving an
-// issue to Done archives every notification on it for every recipient, read
-// or unread, including the status_changed row the transition itself writes.
+// issue to Done archives the actor's own notifications on it, read or unread,
+// while every other recipient keeps theirs, including the status_changed row
+// that tells them the issue is done.
 func TestNotification_StatusChange_DoneArchivesIssueInbox(t *testing.T) {
 	queries := db.New(testPool)
 	bus := newNotificationBus(t, queries)
@@ -1436,10 +1441,12 @@ func TestNotification_StatusChange_DoneArchivesIssueInbox(t *testing.T) {
 
 	publishStatusChange(bus, issueID, "done", "in_review")
 
-	for _, recipient := range []string{testUserID, subID} {
-		if active := countActiveInboxForIssue(t, recipient, issueID); active != 0 {
-			t.Fatalf("recipient %s: expected no active inbox rows on a done issue, got %d", recipient, active)
-		}
+	if active := countActiveInboxForIssue(t, testUserID, issueID); active != 0 {
+		t.Fatalf("actor: expected no active inbox rows on an issue they completed, got %d", active)
+	}
+	// The seeded comment plus the "moved to Done" notification.
+	if active := countActiveInboxForIssue(t, subID, issueID); active != 2 {
+		t.Fatalf("other recipient: expected 2 active inbox rows, got %d", active)
 	}
 	seen := map[string]bool{}
 	for _, e := range batchArchived {
@@ -1449,9 +1456,63 @@ func TestNotification_StatusChange_DoneArchivesIssueInbox(t *testing.T) {
 		}
 		recipientID, _ := payload["recipient_id"].(string)
 		seen[recipientID] = true
+		if count, _ := payload["count"].(int64); count != 2 {
+			t.Fatalf("inbox:batch-archived: expected count=2, got %v", payload["count"])
+		}
 	}
-	if !seen[testUserID] || !seen[subID] {
-		t.Fatalf("expected inbox:batch-archived for both recipients, got %v", seen)
+	if len(seen) != 1 || !seen[testUserID] {
+		t.Fatalf("expected inbox:batch-archived for the actor only, got %v", seen)
+	}
+}
+
+// TestNotification_StatusChange_DoneKeepsInboxWhenNotArchivedByActor verifies
+// that completing an issue leaves the inbox alone when the actor turned
+// auto_archive_completed off, or when an agent made the change.
+func TestNotification_StatusChange_DoneKeepsInboxWhenNotArchivedByActor(t *testing.T) {
+	queries := db.New(testPool)
+
+	actorEmail := "notif-done-keep-actor@multica.ai"
+	actorID := createNotificationMember(t, actorEmail)
+	t.Cleanup(func() { cleanupTestUser(t, actorEmail) })
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO notification_preference (workspace_id, user_id, preferences)
+		VALUES ($1, $2, '{"auto_archive_completed":"muted"}'::jsonb)
+	`, testWorkspaceID, actorID); err != nil {
+		t.Fatalf("seed preference: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM notification_preference WHERE user_id = $1`, actorID)
+	})
+
+	for _, tc := range []struct {
+		name      string
+		actorType string
+		actorID   string
+		recipient string
+	}{
+		{"setting off", "member", actorID, actorID},
+		{"agent actor", "agent", "00000000-0000-0000-0000-aaaaaaaaaaaa", testUserID},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bus := newNotificationBus(t, queries)
+			issueID := createTestIssue(t, testWorkspaceID, testUserID)
+			t.Cleanup(func() {
+				cleanupInboxForIssue(t, issueID)
+				cleanupTestIssue(t, issueID)
+			})
+			if _, err := testPool.Exec(context.Background(), `
+				INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, details)
+				VALUES ($1, 'member', $2, 'new_comment', 'info', $3, 'done keep test', '{}')
+			`, testWorkspaceID, tc.recipient, issueID); err != nil {
+				t.Fatalf("seed notification: %v", err)
+			}
+
+			publishStatusChangeBy(bus, issueID, "done", "in_review", tc.actorType, tc.actorID)
+
+			if active := countActiveInboxForIssue(t, tc.recipient, issueID); active != 1 {
+				t.Fatalf("expected the notification to stay in the inbox, got %d active", active)
+			}
+		})
 	}
 }
 

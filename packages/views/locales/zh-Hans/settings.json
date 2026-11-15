@@ -836,9 +836,8 @@
       "manual_label": "手动归档",
       "manual_description": "在侧栏行上或通知详情顶部点归档",
       "manual_value": "随时",
-      "done_label": "任务已完成或已取消",
-      "done_description": "任务进入「已完成」或「已取消」类状态时，它的通知自动归档。",
-      "done_value": "自动",
+      "done_label": "自动归档我完成的任务",
+      "done_description": "你把任务改为「已完成」或「已取消」类状态时，它的通知自动归档。别人完成的任务会留在收件箱。",
       "archived_label": "已归档的通知",
       "archived_description": "可以在这里找回并取消归档",
       "archived_action": "查看已归档"
