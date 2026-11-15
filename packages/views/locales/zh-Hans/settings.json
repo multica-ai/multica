@@ -717,6 +717,7 @@
     "save_failed": "保存属性失败",
     "limit_hint": "{{count}}/{{max}} 个启用中属性",
     "archived_badge": "已归档",
+    "options_preview": "查看 {{name}} 的全部选项",
     "types": {
       "text": "文本",
       "number": "数字",

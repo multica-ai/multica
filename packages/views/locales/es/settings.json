@@ -726,6 +726,7 @@
     "save_failed": "No se ha podido guardar la propiedad",
     "limit_hint": "{{count}}/{{max}} propiedades activas",
     "archived_badge": "Archivada",
+    "options_preview": "Ver todas las opciones de {{name}}",
     "types": {
       "text": "Texto",
       "number": "Número",

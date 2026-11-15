@@ -717,6 +717,7 @@
     "save_failed": "儲存屬性失敗",
     "limit_hint": "{{count}}/{{max}} 個啟用中屬性",
     "archived_badge": "已歸檔",
+    "options_preview": "查看 {{name}} 的全部選項",
     "types": {
       "text": "文字",
       "number": "數字",

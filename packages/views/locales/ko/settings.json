@@ -717,6 +717,7 @@
     "save_failed": "속성을 저장하지 못했습니다",
     "limit_hint": "활성 속성 {{count}}/{{max}}",
     "archived_badge": "보관됨",
+    "options_preview": "{{name}}의 모든 옵션 보기",
     "types": {
       "text": "텍스트",
       "number": "숫자",
