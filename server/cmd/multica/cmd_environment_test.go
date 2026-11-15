@@ -122,15 +122,21 @@ func TestEnvironmentUnauthorizedUsesTheFinalRequest(t *testing.T) {
 		name       string
 		token      string
 		redirect   bool
+		locale     string
 		wantScoped bool
 	}{
 		{name: "task credential", token: "mat_synthetic", wantScoped: true},
+		{name: "task credential in Chinese", token: "mat_synthetic", locale: "zh_CN.UTF-8", wantScoped: true},
 		{name: "other credential", token: "synthetic_other"},
 		{name: "cross host redirect", token: "mat_synthetic", redirect: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			const message = "environment commands need the credential of a task running in this daemon"
-			t.Setenv("LC_ALL", "en_US.UTF-8")
+			locale := tc.locale
+			if locale == "" {
+				locale = "en_US.UTF-8"
+			}
+			t.Setenv("LC_ALL", locale)
 			t.Setenv("MULTICA_DEBUG", "")
 			final := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if tc.redirect && r.Header.Get("Authorization") != "" {
@@ -159,7 +165,8 @@ func TestEnvironmentUnauthorizedUsesTheFinalRequest(t *testing.T) {
 				t.Errorf("exit = %d, want auth", cli.ExitCodeFor(err))
 			}
 			formatted := cli.FormatError(err, false)
-			if !strings.Contains(formatted, message) || strings.Contains(formatted, "multica login") || strings.Contains(formatted, "Stop here") != tc.wantScoped {
+			stop := cli.TaskTokenRejectedMessage()
+			if !strings.Contains(formatted, message) || strings.Contains(formatted, "multica login") || strings.Contains(formatted, stop) != tc.wantScoped {
 				t.Errorf("formatted error = %q", formatted)
 			}
 		})

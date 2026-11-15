@@ -255,15 +255,12 @@ func callDaemonEnvironment(parent context.Context, path string, body, out any, t
 			Path:       path,
 			StatusCode: resp.StatusCode,
 			Body:       strings.TrimSpace(string(respBody)),
-			TaskScoped: resp.Request != nil && strings.HasPrefix(resp.Request.Header.Get("Authorization"), "Bearer "+cli.TaskTokenPrefix),
+			TaskScoped: cli.RequestUsedTaskToken(resp),
 		}
+		// Keep the daemon's explanation: it says what the daemon wanted.
 		message := httpErr.Body
 		if httpErr.TaskScoped {
-			hint := "This task token was rejected. Stop here. Do not retry or fall back to a profile or member credential. Only the runtime that started this task can supply a valid task token."
-			if cli.DetectLanguage() == cli.LangZH {
-				hint = "这个 task token 已被拒绝。请到此为止。不要重试，也不要改用 profile 或成员凭证。只有启动这次 task 的运行时才能提供有效的 task token。"
-			}
-			message += "\n" + hint
+			message += "\n" + cli.TaskTokenRejectedMessage()
 		}
 		return cli.WithUserMessage(message, httpErr)
 	}
