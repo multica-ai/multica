@@ -1,0 +1,4 @@
+-- Nothing to undo. The up migration only added member rows and leads that
+-- match who could already see each private project, and they are not told
+-- apart from rows people added themselves. The role-based rule this replaced
+-- still reads those projects correctly with the extra rows in place.
