@@ -182,7 +182,16 @@ function Interim({ text, className }: { text: string; className?: string }) {
  * The mic every composer carries. Tap to dictate into the toolbar strip;
  * press and hold to talk, release to insert.
  */
-export function VoiceMicButton({ voice, className }: { voice: ComposerVoice; className?: string }) {
+export function VoiceMicButton({
+  voice,
+  size = "default",
+  className,
+}: {
+  voice: ComposerVoice;
+  /** `sm` matches the small attach button under an issue description. */
+  size?: "sm" | "default";
+  className?: string;
+}) {
   const { t } = useT("editor");
   const activation = useVoiceSettingsStore((state) => state.activation);
   if (!voice.available) return null;
@@ -218,13 +227,14 @@ export function VoiceMicButton({ voice, className }: { voice: ComposerVoice; cla
         // pointer phase and cannot be held.
         if (event.detail === 0) toggleVoice(voice.id);
       }}
+      size={size === "sm" ? "icon-xs" : undefined}
       className={cn(
         "touch-none text-muted-foreground",
         live && "bg-brand/10 text-brand hover:bg-brand/15 hover:text-brand",
         className,
       )}
     >
-      {live && session.phase === "recording" ? <LevelBars /> : <Mic />}
+      {live && session.phase === "recording" ? <LevelBars /> : <Mic className={size === "sm" ? "size-3.5" : undefined} />}
     </IconButton>
   );
 }
@@ -362,6 +372,8 @@ function useErrorMessage(error: VoiceErrorKind): string {
       return t(($) => $.voice.errors.unavailable);
     case "transcription-failed":
       return t(($) => $.voice.errors.transcription_failed);
+    case "stream-failed":
+      return t(($) => $.voice.errors.stream_failed);
     case "failed":
       return t(($) => $.voice.errors.microphone_failed);
   }

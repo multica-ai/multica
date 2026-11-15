@@ -207,7 +207,8 @@
       "microphone_failed": "Couldn't start the microphone.",
       "no_speech": "Didn't catch any speech. Try again a little closer to the mic.",
       "unavailable": "Voice input can't transcribe on this computer.",
-      "transcription_failed": "Transcription failed. Your recording is kept, so you can retry."
+      "transcription_failed": "Transcription failed. Your recording is kept, so you can retry.",
+      "stream_failed": "Lost the connection to the speech service. Retry to start again."
     },
     "models": {
       "more_languages": "{{more}} more",

@@ -190,12 +190,13 @@ describe("a streaming runtime", () => {
     stream.start.mockRejectedValueOnce(new Error("no token"));
     tap("box");
     await untilPhase("error");
-    expect(getVoiceState().error).toBe("transcription-failed");
+    expect(getVoiceState().error).toBe("stream-failed");
 
     retryVoice();
     await untilPhase("recording");
     stream.handlers!.onError();
     expect(getVoiceState().phase).toBe("error");
+    expect(getVoiceState().error).toBe("stream-failed");
     expect(stream.discard).toHaveBeenCalled();
   });
 

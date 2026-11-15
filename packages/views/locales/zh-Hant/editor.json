@@ -203,7 +203,8 @@
       "microphone_failed": "無法啟動麥克風。",
       "no_speech": "沒有聽到說話聲。靠近麥克風再試一次。",
       "unavailable": "這台電腦無法在本機轉寫語音。",
-      "transcription_failed": "轉寫失敗。錄音已保留，可以重試。"
+      "transcription_failed": "轉寫失敗。錄音已保留，可以重試。",
+      "stream_failed": "與語音服務的連線已中斷。重試以重新開始。"
     },
     "models": {
       "more_languages": "其他 {{more}} 種語言",

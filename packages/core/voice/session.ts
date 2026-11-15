@@ -109,7 +109,13 @@ export interface VoiceHistoryRuntime {
 export type VoicePhase = "idle" | "setup" | "requesting" | "recording" | "transcribing" | "error";
 /** `pending` is a press in "auto" activation that is not yet a tap or a hold. */
 export type VoiceMode = "pending" | "strip" | "hud";
-export type VoiceErrorKind = VoiceRecorderFailure | "no-speech" | "unavailable" | "transcription-failed";
+/** `stream-failed`: a streaming runtime could not open its stream, or lost it. */
+export type VoiceErrorKind =
+  | VoiceRecorderFailure
+  | "no-speech"
+  | "unavailable"
+  | "transcription-failed"
+  | "stream-failed";
 
 export interface VoiceState {
   targetId: string | null;
@@ -333,7 +339,7 @@ function beginStream(targetId: string, mode: VoiceMode, open: NonNullable<VoiceR
         if (token !== session) return;
         endStream();
         clearHold();
-        fail("transcription-failed", false);
+        fail("stream-failed", false);
       },
     },
     (next) => {
@@ -354,7 +360,7 @@ function beginStream(targetId: string, mode: VoiceMode, open: NonNullable<VoiceR
       if (token !== session) return;
       endStream();
       clearHold();
-      fail(err instanceof VoiceRecorderError ? err.failure : "transcription-failed", false);
+      fail(err instanceof VoiceRecorderError ? err.failure : "stream-failed", false);
     },
   );
 }

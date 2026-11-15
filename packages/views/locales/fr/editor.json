@@ -207,7 +207,8 @@
       "microphone_failed": "Impossible de démarrer le micro.",
       "no_speech": "Aucune parole détectée. Réessayez un peu plus près du micro.",
       "unavailable": "La saisie vocale ne peut pas transcrire sur cet ordinateur.",
-      "transcription_failed": "La transcription a échoué. L’enregistrement est conservé, vous pouvez réessayer."
+      "transcription_failed": "La transcription a échoué. L’enregistrement est conservé, vous pouvez réessayer.",
+      "stream_failed": "La connexion au service vocal a été perdue. Réessayez pour recommencer."
     },
     "models": {
       "more_languages": "{{more}} autres",

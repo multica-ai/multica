@@ -207,7 +207,8 @@
       "microphone_failed": "No se pudo iniciar el micrófono.",
       "no_speech": "No se detectó voz. Vuelve a intentarlo un poco más cerca del micrófono.",
       "unavailable": "La entrada de voz no puede transcribir en este ordenador.",
-      "transcription_failed": "La transcripción falló. La grabación se conserva, así que puedes reintentarlo."
+      "transcription_failed": "La transcripción falló. La grabación se conserva, así que puedes reintentarlo.",
+      "stream_failed": "Se perdió la conexión con el servicio de voz. Reintenta para empezar de nuevo."
     },
     "models": {
       "more_languages": "{{more}} más",
