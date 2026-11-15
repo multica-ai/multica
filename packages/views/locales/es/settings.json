@@ -432,6 +432,10 @@
         "label": "Archivar notificación",
         "description": "Archiva la notificación de la bandeja abierta, o restaúrala mientras lees el archivo."
       },
+      "unsubscribeArchiveInboxItem": {
+        "label": "Darse de baja y archivar",
+        "description": "Date de baja de la tarea de la notificación abierta y archívala. Disponible en tareas que no son tuyas ni de tus agentes."
+      },
       "snoozeInboxItem": {
         "label": "Posponer notificación",
         "description": "Pospone el issue abierto de la bandeja, o lo recupera ahora si ya está pospuesto."
@@ -726,6 +730,7 @@
     "save_failed": "No se ha podido guardar la propiedad",
     "limit_hint": "{{count}}/{{max}} propiedades activas",
     "archived_badge": "Archivada",
+    "options_preview": "Ver todas las opciones de {{name}}",
     "types": {
       "text": "Texto",
       "number": "Número",

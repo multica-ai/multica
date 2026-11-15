@@ -41,6 +41,7 @@ import {
   useArchiveAllReadInbox,
   useArchiveCompletedInbox,
   useRetrySourceContextQuickCreate,
+  type InboxUnsubscribeScope,
 } from "@multica/core/inbox/mutations";
 import {
   effectiveInboxFilters,
@@ -105,6 +106,7 @@ import { InboxList } from "./inbox-list";
 import { InboxFilterMenu } from "./inbox-filter-menu";
 import { InboxFilterChipsBar } from "./inbox-filter-options";
 import { InboxContextMenuProvider } from "./inbox-context-menu";
+import { useInboxUnsubscribable, useUnsubscribeArchive } from "./use-unsubscribe-archive";
 import { ARCHIVED_VIEW_PARAM, type InboxView } from "./inbox-view";
 import { useTypeLabels } from "./inbox-detail-label";
 import {
@@ -589,6 +591,15 @@ export function InboxPage() {
     });
   };
 
+  const unsubscribable = useInboxUnsubscribable(wsId);
+  const unsubscribeArchive = useUnsubscribeArchive();
+  const handleUnsubscribeArchive = (id: string, scope: InboxUnsubscribeScope = "issue") => {
+    const item = listedItems.find((i) => i.id === id);
+    if (!item?.issue_id) return;
+    advanceSelectionPast(id, listedItems);
+    unsubscribeArchive({ id, issueId: item.issue_id }, scope);
+  };
+
   // Keep the listener stable while using the latest selected-item action.
   const actionOnSelectedRef = useRef<(() => void) | null>(null);
   useEffect(() => {
@@ -809,6 +820,8 @@ export function InboxPage() {
         onMarkUnread: handleMarkUnread,
         onAction: isArchivedView ? handleUnarchive : handleArchive,
         onDelete: (id) => setDeleteTarget(selectionItems.find((item) => item.id === id) ?? null),
+        onUnsubscribeArchive: handleUnsubscribeArchive,
+        canUnsubscribe: unsubscribable,
       }}
     >
       <InboxList
@@ -950,6 +963,9 @@ export function InboxPage() {
           onDone={() => {
             handleArchive(detailItem.id);
           }}
+          onUnsubscribeArchive={
+            isArchivedView ? undefined : (scope) => handleUnsubscribeArchive(detailItem.id, scope)
+          }
         />
       </IssuePeekHost>
     </ErrorBoundary>

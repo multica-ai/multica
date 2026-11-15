@@ -426,6 +426,10 @@
         "label": "通知をアーカイブ",
         "description": "開いているインボックス通知をアーカイブします。アーカイブ表示中はアーカイブを解除します。"
       },
+      "unsubscribeArchiveInboxItem": {
+        "label": "購読解除してアーカイブ",
+        "description": "開いている通知のタスクの購読を解除し、アーカイブします。自分や自分のエージェントのタスク以外で使えます。"
+      },
       "snoozeInboxItem": {
         "label": "通知をスヌーズ",
         "description": "インボックスから開いたタスクをスヌーズします。スヌーズ中なら今すぐ戻します。"
@@ -717,6 +721,7 @@
     "save_failed": "プロパティを保存できませんでした",
     "limit_hint": "{{count}}/{{max}} 個の有効なプロパティ",
     "archived_badge": "アーカイブ済み",
+    "options_preview": "{{name}} のすべてのオプションを表示",
     "types": {
       "text": "テキスト",
       "number": "数値",

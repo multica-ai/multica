@@ -109,6 +109,8 @@ vi.mock("@multica/core/inbox/mutations", () => {
     useArchiveAllInbox: mutation,
     useArchiveAllReadInbox: mutation,
     useArchiveCompletedInbox: mutation,
+    useUnsubscribeArchiveInbox: mutation,
+    undoUnsubscribeArchiveInbox: vi.fn(),
     useRetrySourceContextQuickCreate: () => ({
       mutateAsync: retrySourceContextMutateAsync,
       isPending: false,

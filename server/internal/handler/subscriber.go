@@ -293,6 +293,63 @@ func (h *Handler) unsubscribeFromIssue(w http.ResponseWriter, r *http.Request, s
 	writeJSON(w, http.StatusOK, map[string]bool{"subscribed": false})
 }
 
+// UndoUnsubscribeFromIssue reverses the caller's own issue-scope unsubscribe,
+// restoring the subscription as it was (see UndoIssueUnsubscribe) rather than
+// subscribing again: a member who left a commenter or delegated subscription
+// gets that back, not a manual one that delivers every event. It acts on the
+// caller only. A separate route, so an older server answers 404 instead of
+// quietly doing something else (as UnsubscribeFromIssueSubtree explains).
+// 409 when there is no opt-out to undo, e.g. it was already reversed.
+func (h *Handler) UndoUnsubscribeFromIssue(w http.ResponseWriter, r *http.Request) {
+	issueID := chi.URLParam(r, "id")
+	issue, ok := h.loadIssueForUser(w, r, issueID)
+	if !ok {
+		return
+	}
+	workspaceID := uuidToString(issue.WorkspaceID)
+	actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
+	actorID = uuidToString(parseUUID(actorID))
+
+	row, err := h.Queries.UndoIssueUnsubscribe(r.Context(), db.UndoIssueUnsubscribeParams{
+		IssueID:  issue.ID,
+		UserType: actorType,
+		UserID:   parseUUID(actorID),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to undo unsubscribe")
+		return
+	}
+
+	reason := row.RevivedReason
+	if row.DroppedOptOut && actorType == "member" {
+		projectSubscribers, err := h.Queries.ListProjectSubscribersForIssue(r.Context(), issue.ID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to undo unsubscribe")
+			return
+		}
+		for _, ps := range projectSubscribers {
+			if uuidToString(ps.UserID) == actorID {
+				reason = subscriberReasonProject
+				break
+			}
+		}
+	}
+	if reason == "" && !row.DroppedOptOut {
+		writeError(w, http.StatusConflict, "no unsubscribe to undo")
+		return
+	}
+
+	if reason != "" {
+		h.publish(protocol.EventSubscriberAdded, workspaceID, actorType, actorID, map[string]any{
+			"issue_id":  issueID,
+			"user_type": actorType,
+			"user_id":   actorID,
+			"reason":    reason,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"subscribed": reason != "", "reason": reason})
+}
+
 // errTargetNoLongerMember reports that the target left the workspace between
 // the handler's pre-check and the serialized write, so the caller can answer
 // 403 exactly as the pre-check would have.

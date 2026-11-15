@@ -9,7 +9,8 @@ import {
 import { useInboxFilterStore } from "@multica/core/inbox/filter-store";
 import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
-import type { AgentTask, InboxItem, SnoozedInboxIssue } from "@multica/core/types";
+import type { Agent, AgentTask, InboxItem, SnoozedInboxIssue } from "@multica/core/types";
+import { agentListOptions } from "@multica/core/workspace/queries";
 import { snoozedInboxOptions } from "@multica/core/inbox/queries";
 import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
@@ -19,6 +20,7 @@ const state = vi.hoisted(() => ({
   unread: 0,
   compact: false,
   archive: vi.fn(),
+  unsubscribeArchive: vi.fn(),
   markAllRead: vi.fn(),
   archiveAll: vi.fn(),
   archiveAllRead: vi.fn(),
@@ -45,6 +47,8 @@ vi.mock("@multica/core/inbox/mutations", () => ({
   useArchiveCompletedInbox: () => ({ mutate: state.archiveCompleted }),
   useMarkInboxRead: () => ({ mutate: state.markRead }),
   useMarkInboxUnread: () => ({ mutate: state.markUnread }),
+  useUnsubscribeArchiveInbox: () => ({ mutate: state.unsubscribeArchive }),
+  undoUnsubscribeArchiveInbox: vi.fn(),
   useSnoozeInbox: () => ({ mutateAsync: state.snooze }),
   useUnsnoozeInbox: () => ({ mutateAsync: state.unsnooze }),
   cachedInboxSnoozedUntil: () => null,
@@ -114,10 +118,12 @@ function renderSection(
   url = "/acme/issues",
   tasks: Partial<AgentTask>[] = [],
   snoozed: SnoozedInboxIssue[] = [],
+  agents: Pick<Agent, "id" | "owner_id">[] = [],
 ) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   client.setQueryData(["inbox", "ws-1", "list"], items);
   client.setQueryData(snoozedInboxOptions("ws-1").queryKey, snoozed);
+  client.setQueryData(agentListOptions("ws-1").queryKey, agents as Agent[]);
   client.setQueryData(agentTaskSnapshotOptions("ws-1").queryKey, tasks as AgentTask[]);
   const nav = adapter(url);
   // As the Work panel keys it: the issue opened from the section, or the Inbox page's notification.
@@ -332,6 +338,31 @@ describe("InboxSection", () => {
     expect(state.markRead).toHaveBeenCalledWith("n1");
     fireEvent.click(actions.getByRole("button", { name: "Archive" }));
     expect(state.archive).toHaveBeenCalledWith("n1");
+  });
+
+  it("offers unsubscribe & archive on the card only for issues that are not the viewer's", async () => {
+    renderSection(
+      [
+        item({ id: "n1", issue_id: "issue-a", title: "Theirs", body: "Their comment", issue_assignee_type: "agent", issue_assignee_id: "agent-x" }),
+        item({ id: "n2", issue_id: "issue-b", title: "Mine", body: "My comment", issue_assignee_type: "agent", issue_assignee_id: "agent-mine" }),
+      ],
+      null,
+      "/acme/issues",
+      [],
+      [],
+      [{ id: "agent-x", owner_id: "someone" }, { id: "agent-mine", owner_id: "member-1" }],
+    );
+    const label = "Unsubscribe & archive";
+
+    fireEvent.mouseEnter(rows()[1]!.firstElementChild!);
+    const mine = await screen.findByText("My comment", { selector: "[data-inbox-card] p" }, { timeout: 2000 });
+    expect(within(mine.closest<HTMLElement>("[data-inbox-card]")!).queryByRole("button", { name: label })).toBeNull();
+    fireEvent.mouseLeave(rows()[1]!.firstElementChild!);
+
+    fireEvent.mouseEnter(rows()[0]!.firstElementChild!);
+    const theirs = await screen.findByText("Their comment", { selector: "[data-inbox-card] p" }, { timeout: 2000 });
+    fireEvent.click(within(theirs.closest<HTMLElement>("[data-inbox-card]")!).getByRole("button", { name: label }));
+    expect(state.unsubscribeArchive).toHaveBeenCalledWith({ id: "n1", issueId: "issue-a", scope: "issue" });
   });
 
   it("closes the card when the row is pressed, and keeps a pending hover from reopening it", async () => {
