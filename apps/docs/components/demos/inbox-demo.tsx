@@ -621,7 +621,7 @@ export function InboxDemo() {
             </button>
           </CoachMark>
           {phase === "menu" && (
-            <span className="absolute top-full left-0 z-30 mt-1 flex w-max min-w-44 flex-col rounded-lg border bg-popover p-1 text-popover-foreground shadow-md motion-safe:animate-in motion-safe:fade-in">
+            <span className="absolute top-full right-0 z-30 sm:right-auto sm:left-0 mt-1 flex w-max min-w-44 flex-col rounded-lg border bg-popover p-1 text-popover-foreground shadow-md motion-safe:animate-in motion-safe:fade-in">
               {t.menu.map((label, index) =>
                 index === 0 ? (
                   <CoachMark key={label} active quiet ringClassName="rounded-md" className="flex w-full">
