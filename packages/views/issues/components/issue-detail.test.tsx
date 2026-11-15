@@ -4119,7 +4119,7 @@ describe("IssueDetail (shared)", () => {
     async function openSubscriberPicker() {
       const heading = await screen.findByText("Activity");
       const header = heading.parentElement?.parentElement;
-      const trigger = header?.querySelector('[data-slot="popover-trigger"]');
+      const trigger = header?.querySelector('[data-trigger="popover"]');
       if (!trigger) throw new Error("subscriber picker trigger not found");
       fireEvent.click(trigger);
       return waitFor(() => {

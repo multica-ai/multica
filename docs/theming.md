@@ -316,6 +316,12 @@ UI primitives carry a `data-slot`; these are public too: `button` (also
 `alert-dialog-content`, `sheet-content`, `tabs-list`, `tabs-trigger`,
 `card`, `kbd`, `separator`. Line icons are `svg.icon`.
 
+Every button is `[data-slot="button"]`, including one that opens a menu,
+popover, tooltip or dialog. `data-variant` is `default`, `outline`, `brand`,
+`brandSubtle`, `secondary`, `ghost`, `destructive` or `link`; `data-size` is
+`default`, `xs`, `sm`, `lg`, `icon`, `icon-xs`, `icon-sm` or `icon-lg`. A
+button whose menu or popover is open also has `aria-expanded="true"`.
+
 ### State on `<html>`
 
 | Class or attribute | When |

@@ -451,7 +451,6 @@ function SidebarTrigger({
   return (
     <IconButton
       data-sidebar="trigger"
-      data-slot="sidebar-trigger"
       label={t(($) => $.toggle_sidebar)}
       shortcut={shortcut}
       tooltipSide="bottom"
