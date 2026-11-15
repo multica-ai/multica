@@ -88,6 +88,40 @@ func fakeExecutable(t *testing.T, name string) string {
 	return path
 }
 
+func TestHandleModelListTomcatReportsRealCatalogAndFailure(t *testing.T) {
+	fx := newModelListFixture(t)
+	listModels = agent.ListModels
+	spec, root := tomcatDaemonModelCommand(t)
+	d := fx.daemon
+	d.cfg.Agents = map[string]AgentEntry{"tomcat": {Path: filepath.Join(root, "must-not-run-builtin")}}
+	rt := Runtime{ID: "tomcat-runtime", Provider: "tomcat", ProfileID: "tomcat-profile"}
+	d.runtimeIndex[rt.ID] = rt
+	d.profileLaunchSpecs[rt.ProfileID] = spec
+	d.handleModelList(t.Context(), rt, "catalog-success")
+	_, _, _, report := fx.snapshot()
+	models, ok := report["models"].([]any)
+	if report["status"] != "completed" || report["supported"] != true || !ok || len(models) != 1 {
+		t.Fatalf("real adapter report: %+v", report)
+	}
+	model := models[0].(map[string]any)
+	if model["id"] != "team/alias" || model["label"] != "team/alias" || model["provider"] != "team" {
+		t.Fatalf("model identity changed: %+v", model)
+	}
+	encoded, _ := json.Marshal(report)
+	if strings.Contains(string(encoded), "PRIVATE_LOCAL_METADATA") || strings.Contains(string(encoded), "wire-model") || strings.Contains(string(encoded), "keyPresent") {
+		t.Fatalf("local catalog metadata escaped the adapter: %s", encoded)
+	}
+	if err := os.WriteFile(filepath.Join(root, "discovery-error"), []byte("old CLI"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	d.handleModelList(t.Context(), rt, "catalog-failure")
+	_, _, _, report = fx.snapshot()
+	reason, _ := report["error"].(string)
+	if report["status"] != "failed" || !strings.Contains(reason, "unrecognized subcommand") || !strings.Contains(reason, "update") || strings.Contains(reason, "PRIVATE_STDOUT_SENTINEL") {
+		t.Fatalf("adapter failure was not reported honestly: %+v", report)
+	}
+}
+
 // TestHandleModelList_CustomProfileEnumeratesProfileBinary pins the core of
 // MUL-5789: a profile-backed runtime must have its models discovered from the
 // binary the profile pinned, not from the built-in CLI of the same protocol

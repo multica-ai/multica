@@ -29,6 +29,10 @@ func TestResolveTaskModelSelectionThinkingLevelWarning(t *testing.T) {
 		level    string
 		want     string
 	}{
+		{name: "Tomcat supported", provider: "tomcat", model: "claude-sonnet-5", level: "medium"},
+		{name: "Tomcat default model", provider: "tomcat", level: "medium"},
+		{name: "Tomcat stale level", provider: "tomcat", model: "claude-sonnet-5", level: "max", want: `Thinking level "max" was not applied: model "claude-sonnet-5" does not support this thinking level. The runtime will use its default thinking level.`},
+		{name: "Tomcat no effort", provider: "tomcat", model: "claude-haiku-4-5-20251001", level: "medium", want: `Thinking level "medium" was not applied: model "claude-haiku-4-5-20251001" does not advertise thinking-level control. The runtime will use its default thinking level.`},
 		{name: "supported", provider: "claude", model: "claude-sonnet-5", level: "medium"},
 		{name: "unlisted medium", provider: "claude", model: "claude-sonnet-4-6", level: "medium"},
 		{name: "unlisted max", provider: "claude", model: "claude-sonnet-4-6", level: "max"},

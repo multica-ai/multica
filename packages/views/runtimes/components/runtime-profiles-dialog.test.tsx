@@ -185,6 +185,21 @@ describe("RuntimeProfilesDialog", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("creates a Tomcat target through the existing runtime form", async () => {
+    renderDialog({ intent: "create" });
+    fireEvent.click(screen.getByRole("button", { name: /^tomcat$/i }));
+    fireEvent.change(screen.getByLabelText("Display name"), {
+      target: { value: "Team Tomcat" },
+    });
+    fireEvent.change(screen.getByLabelText("Command"), {
+      target: { value: "tomcat" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create runtime" }));
+    await waitFor(() => expect(mutationState.createProfile).toHaveBeenCalledWith({
+      display_name: "Team Tomcat", runtime_type: "tomcat", command_name: "tomcat", fixed_args: [],
+    }));
+  });
+
   it("creates an Oh-My-Pi compatibility target without a client protocol mapping", async () => {
     renderDialog({ intent: "create" });
     fireEvent.click(screen.getByRole("button", { name: "Oh-My-Pi" }));
