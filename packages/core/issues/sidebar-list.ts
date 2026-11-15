@@ -9,6 +9,7 @@ import type {
   IssueTableSortField,
   Project,
 } from "../types";
+import { projectLastActivityAt } from "../projects/activity";
 import { assigneeTypesForActorKind } from "./surface/scope";
 import { effectiveNegatedFilters } from "./stores/view-store";
 import { FILTER_DIMENSION_TABLE_FIELD, advancedFilterToTableQuery, advancedFilterUsesField } from "./stores/filter-tree";
@@ -230,7 +231,7 @@ export function sidebarProjects<
     case "name":
       return shown.sort((a, b) => a.title.localeCompare(b.title));
     case "updated":
-      return shown.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+      return shown.sort((a, b) => Date.parse(projectLastActivityAt(b)) - Date.parse(projectLastActivityAt(a)));
     case "created":
       return shown.sort((a, b) => b.created_at.localeCompare(a.created_at));
     case "manual": {

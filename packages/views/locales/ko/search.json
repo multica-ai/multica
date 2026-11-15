@@ -122,7 +122,6 @@
     "unsubscribed": "구독을 취소했습니다",
     "label_added": "라벨 {{name}}을 추가했습니다",
     "label_removed": "라벨 {{name}}을 제거했습니다",
-    "label_failed": "일부 태스크에 라벨 {{name}}을 추가하지 못했습니다",
     "update_failed": "업데이트에 실패했습니다",
     "assigned": "{{identifier}}를 {{name}}에게 지정했습니다"
   },

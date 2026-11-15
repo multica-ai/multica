@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -22,7 +23,14 @@ var projectCmd = &cobra.Command{
 var projectListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List projects in the workspace",
-	RunE:  runProjectList,
+	Long: "List projects in the workspace.\n\n" +
+		"--status, --priority and --lead take several values, repeated or comma-separated;\n" +
+		"a project matches when it has any of them. --lead takes a member or agent name\n" +
+		"(fuzzy match), me, or none for projects without a lead.\n\n" +
+		"Without --limit every matching project is listed. --output json prints the\n" +
+		"projects as an array, as before; when --limit leaves more, a hint with the next\n" +
+		"--offset goes to stderr.",
+	RunE: runProjectList,
 }
 
 var projectGetCmd = &cobra.Command{
@@ -187,10 +195,7 @@ func init() {
 	projectMemberAddCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// project list
-	projectListCmd.Flags().String("output", "table", "Output format: table or json")
-	projectListCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
-	projectListCmd.Flags().String("status", "", "Filter by status")
-	projectListCmd.Flags().Bool("archived", false, "List archived projects instead of active ones")
+	registerProjectListFlags(projectListCmd)
 
 	// project get
 	projectGetCmd.Flags().String("output", "json", "Output format: table or json")
@@ -269,6 +274,22 @@ func init() {
 
 // Project commands
 
+const projectListMaxPageSize = 200
+
+func registerProjectListFlags(cmd *cobra.Command) {
+	cmd.Flags().String("output", "table", "Output format: table or json")
+	cmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
+	cmd.Flags().StringSlice("status", nil, "Filter by status: planned, in_progress, paused, completed, cancelled (repeatable or comma-separated)")
+	cmd.Flags().StringSlice("priority", nil, "Filter by priority: urgent, high, medium, low, none (repeatable or comma-separated)")
+	cmd.Flags().StringSlice("lead", nil, "Filter by lead: member or agent name, me, or none (repeatable or comma-separated)")
+	cmd.Flags().Bool("archived", false, "List archived projects instead of active ones")
+	cmd.Flags().String("search", "", "Only projects whose title contains this text (case-insensitive)")
+	cmd.Flags().String("sort", "", "Sort by: name, priority, status, progress, start_date, due_date, created_at (default) or last_activity_at")
+	cmd.Flags().String("direction", "", "Sort direction, asc or desc (defaults to the natural one for --sort: newest, highest or earliest first)")
+	cmd.Flags().Int("limit", 0, fmt.Sprintf("Page size, 1 to %d (default: every matching project)", projectListMaxPageSize))
+	cmd.Flags().Int("offset", 0, "Number of matching projects to skip (with --limit)")
+}
+
 func runProjectList(cmd *cobra.Command, _ []string) error {
 	client, err := newAPIClient(cmd)
 	if err != nil {
@@ -282,12 +303,44 @@ func runProjectList(cmd *cobra.Command, _ []string) error {
 	if client.WorkspaceID != "" {
 		params.Set("workspace_id", client.WorkspaceID)
 	}
-	if v, _ := cmd.Flags().GetString("status"); v != "" {
-		params.Set("status", v)
+	for _, flag := range []string{"status", "priority"} {
+		if values, _ := cmd.Flags().GetStringSlice(flag); len(values) > 0 {
+			params.Set(flag, strings.Join(values, ","))
+		}
+	}
+	if leads, _ := cmd.Flags().GetStringSlice("lead"); len(leads) > 0 {
+		refs, err := resolveProjectLeadFilters(ctx, client, leads)
+		if err != nil {
+			return err
+		}
+		params.Set("lead", strings.Join(refs, ","))
+	}
+	if v, _ := cmd.Flags().GetString("search"); v != "" {
+		params.Set("q", v)
+	}
+	for _, flag := range []string{"sort", "direction"} {
+		if v, _ := cmd.Flags().GetString(flag); v != "" {
+			params.Set(flag, v)
+		}
+	}
+	limit, _ := cmd.Flags().GetInt("limit")
+	offset, _ := cmd.Flags().GetInt("offset")
+	if cmd.Flags().Changed("limit") && (limit < 1 || limit > projectListMaxPageSize) {
+		return fmt.Errorf("--limit must be between 1 and %d", projectListMaxPageSize)
+	}
+	if offset < 0 {
+		return fmt.Errorf("--offset must be 0 or more")
+	}
+	if limit > 0 {
+		params.Set("limit", strconv.Itoa(limit))
+	}
+	if offset > 0 {
+		params.Set("offset", strconv.Itoa(offset))
 	}
 	archivedOnly, _ := cmd.Flags().GetBool("archived")
 	if archivedOnly {
 		params.Set("include_archived", "true")
+		params.Set("archived", "only")
 	}
 
 	path := "/api/projects"
@@ -302,6 +355,7 @@ func runProjectList(cmd *cobra.Command, _ []string) error {
 
 	projectsRaw, _ := result["projects"].([]any)
 	if archivedOnly {
+		// Servers without archived=only return active projects too.
 		archived := make([]any, 0, len(projectsRaw))
 		for _, raw := range projectsRaw {
 			if p, ok := raw.(map[string]any); ok && strVal(p, "archived_at") != "" {
@@ -309,6 +363,11 @@ func runProjectList(cmd *cobra.Command, _ []string) error {
 			}
 		}
 		projectsRaw = archived
+	}
+	if hasMore, _ := result["has_more"].(bool); hasMore {
+		total, _ := result["total"].(float64)
+		fmt.Fprintf(os.Stderr, "Showing %d–%d of %d projects; next page: --offset %d\n",
+			offset+1, offset+len(projectsRaw), int(total), offset+len(projectsRaw))
 	}
 
 	output, _ := cmd.Flags().GetString("output")
@@ -318,28 +377,71 @@ func runProjectList(cmd *cobra.Command, _ []string) error {
 
 	fullID, _ := cmd.Flags().GetBool("full-id")
 	actors := loadActorDisplayLookup(ctx, client)
-	headers := []string{"ID", "TITLE", "STATUS", "LEAD", "CREATED"}
+	headers := []string{"ID", "TITLE", "STATUS", "PRIORITY", "PROGRESS", "LEAD", "DUE", "LAST ACTIVITY", "CREATED"}
 	rows := make([][]string, 0, len(projectsRaw))
 	for _, raw := range projectsRaw {
 		p, ok := raw.(map[string]any)
 		if !ok {
 			continue
 		}
-		lead := formatLead(p, actors)
-		created := strVal(p, "created_at")
-		if len(created) >= 10 {
-			created = created[:10]
-		}
 		rows = append(rows, []string{
 			displayID(strVal(p, "id"), fullID),
 			strVal(p, "title"),
 			strVal(p, "status"),
-			lead,
-			created,
+			strVal(p, "priority"),
+			formatProjectProgress(p),
+			formatLead(p, actors),
+			strVal(p, "due_date"),
+			dayOf(strVal(p, "last_activity_at")),
+			dayOf(strVal(p, "created_at")),
 		})
 	}
 	cli.PrintTable(os.Stdout, headers, rows)
 	return nil
+}
+
+// dayOf keeps the calendar day of an RFC 3339 timestamp.
+func dayOf(ts string) string {
+	if len(ts) >= 10 {
+		return ts[:10]
+	}
+	return ts
+}
+
+func formatProjectProgress(p map[string]any) string {
+	total, _ := p["issue_count"].(float64)
+	if total == 0 {
+		return ""
+	}
+	done, _ := p["done_count"].(float64)
+	return fmt.Sprintf("%d/%d", int(done), int(total))
+}
+
+// resolveProjectLeadFilters turns --lead values into the API's lead refs:
+// member:<id>, agent:<id> or none.
+func resolveProjectLeadFilters(ctx context.Context, client *cli.APIClient, leads []string) ([]string, error) {
+	refs := make([]string, 0, len(leads))
+	for _, lead := range leads {
+		switch strings.ToLower(strings.TrimSpace(lead)) {
+		case "none":
+			refs = append(refs, "none")
+		case "me":
+			var me struct {
+				ID string `json:"id"`
+			}
+			if err := client.GetJSON(ctx, "/api/me", &me); err != nil {
+				return nil, fmt.Errorf("resolve lead me: %w", err)
+			}
+			refs = append(refs, "member:"+me.ID)
+		default:
+			actorType, id, err := resolveAssignee(ctx, client, lead, memberOrAgentKinds)
+			if err != nil {
+				return nil, fmt.Errorf("resolve lead: %w", err)
+			}
+			refs = append(refs, actorType+":"+id)
+		}
+	}
+	return refs, nil
 }
 
 func runProjectGet(cmd *cobra.Command, args []string) error {

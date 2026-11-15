@@ -645,6 +645,18 @@ func TestGetConfigDeclaresIssueCreatePropertiesSupport(t *testing.T) {
 	}
 }
 
+func TestGetConfigDeclaresIssueBatchOpsSupport(t *testing.T) {
+	w := httptest.NewRecorder()
+	testHandler.GetConfig(w, httptest.NewRequest(http.MethodGet, "/api/config", nil))
+	var raw map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if raw["issue_batch_ops_supported"] != true {
+		t.Fatalf("issue_batch_ops_supported = %v; clients gate dry runs on it", raw["issue_batch_ops_supported"])
+	}
+}
+
 // Web/Desktop, mobile and the CLI promise that a delete keeps the replies only
 // when the server declares it (#8296). Older servers omit the field and delete
 // the replies too, so this build must advertise the contract explicitly.

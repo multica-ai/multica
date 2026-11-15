@@ -86,7 +86,7 @@ beforeEach(async () => {
   await Promise.resolve();
   useProjectViewStore.getState().clearFilters();
   useProjectViewStore.getState().setLifecycleView("active");
-  useProjectViewStore.getState().setViewMode("compact");
+  useProjectViewStore.getState().setLayout("table");
 });
 
 afterEach(() => { cleanup(); qc.clear(); setCurrentWorkspace(null, null); vi.restoreAllMocks(); });
@@ -191,15 +191,15 @@ describe("project lifecycle browse integration", () => {
     await act(async () => useProjectViewStore.getState().toggleFilter("priorities", "high"));
     expect(screen.getByText("No projects match")).toBeVisible();
     await userEvent.click(screen.getByRole("button", { name: "Reset" }));
-    await act(async () => useProjectViewStore.getState().setViewMode("comfortable"));
+    await act(async () => useProjectViewStore.getState().setLayout("board"));
     expect(screen.getByRole("link", { name: /Project completed/ })).toHaveAttribute("href", "/acme/projects/completed");
     await act(async () => qc.setQueryData(projectKeys.list("ws-1"), { projects: [], total: 0 }));
     await waitFor(() => expect(screen.getByRole("region", { name: "Break big work into projects" })).toBeVisible());
   });
 
-  it.each(["compact", "comfortable"] as const)("keeps first-run onboarding and creation when the saved lifecycle is closed in %s", async (mode) => {
+  it.each(["table", "board"] as const)("keeps first-run onboarding and creation when the saved lifecycle is closed in %s", async (mode) => {
     useProjectViewStore.getState().setLifecycleView("closed");
-    useProjectViewStore.getState().setViewMode(mode);
+    useProjectViewStore.getState().setLayout(mode);
     useModalStore.getState().close();
     qc.setQueryData(projectKeys.list("ws-1"), { projects: [], total: 0 });
     renderWithI18n(page());
@@ -231,8 +231,8 @@ describe("project lifecycle browse integration", () => {
       "Project planned", "Project paused", "Project in_progress",
     ]);
   });
-  it.each(["compact", "comfortable"] as const)("keeps lifecycle empty copy and the shared clear-filters action in %s", async (mode) => {
-    useProjectViewStore.getState().setViewMode(mode);
+  it.each(["table", "board"] as const)("keeps lifecycle empty copy and the shared clear-filters action in %s", async (mode) => {
+    useProjectViewStore.getState().setLayout(mode);
     qc.setQueryData(projectKeys.list("ws-1"), { projects: [fixtures[3]], total: 1 });
     renderWithI18n(page());
     expect(screen.getByText("No active projects")).toBeVisible();
@@ -267,7 +267,7 @@ describe("project lifecycle browse integration", () => {
     await act(async () => qc.setQueryData(["workspaces", "ws-1", "members"], [{ user_id: "user-1", role: "admin", name: "Fixture Admin" }]));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     await userEvent.click(screen.getByRole("button", { name: "Delete" }));
-    await act(async () => useProjectViewStore.getState().setViewMode("comfortable"));
+    await act(async () => useProjectViewStore.getState().setLayout("board"));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     await waitFor(() => expect(screen.queryByText("1 selected")).toBeNull());
   });

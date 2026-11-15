@@ -38,6 +38,11 @@ export interface Project {
   due_date: string | null;
   created_at: string;
   updated_at: string;
+  /**
+   * The later of the project's own last edit and the latest activity on its
+   * issues. Older servers omit it; read it through projectLastActivityAt.
+   */
+  last_activity_at?: string;
   issue_count: number;
   done_count: number;
   resource_count: number;

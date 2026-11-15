@@ -30,6 +30,8 @@ let client: ReturnType<typeof createQueryClient>;
 let unbind: () => void;
 let rows: Project[];
 let failedDelete: string | null;
+let savedPrefs: Record<string, Record<string, unknown>>;
+let prefsUpdatedAt: Record<string, string>;
 let requests: Array<{ method: string; url: URL }>;
 
 function tree(slug = "acme", picker = false) {
@@ -66,6 +68,8 @@ beforeEach(async () => {
   localStorage.clear();
   rows = fixtures.map((project) => ({ ...project }));
   failedDelete = null;
+  savedPrefs = {};
+  prefsUpdatedAt = {};
   requests = [];
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, options?: RequestInit) => {
     const url = new URL(String(input));
@@ -81,6 +85,14 @@ beforeEach(async () => {
       id: "fixture-member", workspace_id: "ws-acme", user_id: "fixture-user", role: "owner", name: "Fixture",
       email: "fixture@example.invalid", created_at: timestamp,
     }]);
+    if (url.pathname === "/api/issue-view-preferences") {
+      const slug = new Headers(options?.headers).get("X-Workspace-Slug") ?? "acme";
+      if (method === "PUT") {
+        savedPrefs[slug] = JSON.parse(String(options?.body)).prefs;
+        prefsUpdatedAt[slug] = timestamp;
+      }
+      return json({ scope_type: "projects_page", scope_id: null, updated_at: prefsUpdatedAt[slug] ?? "", prefs: savedPrefs[slug] ?? {} });
+    }
     if (url.pathname === "/api/projects") return json({ projects: rows, total: rows.length });
     if (url.pathname === "/api/autopilots") return json({ autopilots: [], total: 0 });
     if (["/api/agents", "/api/squads", "/api/pins"].includes(url.pathname)) return json([]);
@@ -147,6 +159,7 @@ describe("archive and lifecycle with the registered API, cache and providers", (
     const view = renderWithI18n(tree());
     await screen.findByText("Project 0");
     await chooseScope("Archived projects");
+    await waitFor(() => expect(savedPrefs.acme?.lifecycleView).toBe("archived"));
     await act(async () => useProjectViewStore.persist.rehydrate());
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Archived projects");
     await act(async () => useProjectViewStore.getState().toggleFilter("statuses", "completed"));
@@ -247,4 +260,43 @@ it("restores the selected archived batch without changing either lifecycle statu
   await chooseScope("Closed projects");
   expect(screen.getByText("Project 6")).toBeVisible();
   expect(rows.find((project) => project.id === "project-6")?.status).toBe("completed");
+});
+
+it("applies saved board and lifecycle settings without losing archived lookup rows", async () => {
+  savedPrefs.acme = { layout: "board", groupBy: "priority", lifecycleView: "closed" };
+  prefsUpdatedAt.acme = timestamp;
+  renderWithI18n(tree());
+  await screen.findByRole("link", { name: /Project 3/ });
+  expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Closed projects");
+  expect(screen.getByRole("link", { name: /Project 4/ })).toBeVisible();
+  expect(screen.queryByRole("link", { name: /Project 6/ })).toBeNull();
+  expect(client.getQueryData<ListProjectsResponse>(projectKeys.list("ws-acme"))?.projects).toHaveLength(7);
+});
+
+it("opens a saved explicit status filter from an older server document in All", async () => {
+  savedPrefs.acme = { layout: "table", filters: { statuses: ["completed"], priorities: [], leads: [] } };
+  prefsUpdatedAt.acme = timestamp;
+  renderWithI18n(tree());
+  await screen.findByText("Project 3");
+  expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("All projects");
+  expect(screen.queryByText("Project 0")).toBeNull();
+  expect(screen.queryByText("Project 6")).toBeNull();
+});
+
+it("discards an archive request whose autopilot lookup finishes after the selection context changed", async () => {
+  const fetchMock = vi.mocked(fetch);
+  const handle = fetchMock.getMockImplementation()!;
+  let resolve!: (response: Response) => void;
+  const pending = new Promise<Response>((done) => { resolve = done; });
+  fetchMock.mockImplementation((input, options) => new URL(String(input)).pathname === "/api/autopilots"
+    ? pending : handle(input, options));
+  renderWithI18n(tree());
+  await screen.findByText("Project 0");
+  await select("Project 0");
+  await userEvent.click(within(screen.getByRole("toolbar")).getByRole("button", { name: "Archive" }));
+  await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/autopilots"))).toBe(true));
+  await act(async () => useProjectViewStore.getState().toggleFilter("priorities", "high"));
+  await act(async () => { resolve(new Response(JSON.stringify({ autopilots: [] }), { headers: { "Content-Type": "application/json" } })); });
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(requests.filter((request) => request.method === "POST")).toHaveLength(0);
 });

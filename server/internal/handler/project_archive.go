@@ -74,7 +74,7 @@ func (h *Handler) loadArchivableProject(w http.ResponseWriter, r *http.Request) 
 
 func (h *Handler) projectResponseWithCounts(ctx context.Context, project db.Project) ProjectResponse {
 	resp := projectToResponse(project)
-	resp.IssueCount, resp.DoneCount = h.loadProjectIssueStats(ctx, project.WorkspaceID, project.ID)
+	h.fillProjectIssueStats(ctx, &resp, project)
 	resp.ResourceCount = h.loadProjectResourceCount(ctx, project.ID)
 	return resp
 }

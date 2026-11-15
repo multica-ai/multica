@@ -9,7 +9,7 @@
     "view_comfortable": "ゆったり",
     "no_search_results": "検索条件に一致する結果はありません",
     "view_table": "テーブル",
-    "view_cards": "カード",
+    "view_board": "ボード",
     "row_menu": "プロジェクトの操作",
     "rename": "名前を変更",
     "pin": "サイドバーにピン留め",
@@ -19,7 +19,10 @@
     "scope_archived": "アーカイブ済みのプロジェクト",
     "archive": "アーカイブ",
     "restore": "復元",
-    "no_archived": "アーカイブ済みのプロジェクトはありません"
+    "no_archived": "アーカイブ済みのプロジェクトはありません",
+    "search": "プロジェクトを検索",
+    "group_none": "グループ化なし",
+    "board_column_empty": "プロジェクトなし"
   },
   "table": {
     "name": "名前",
@@ -27,6 +30,9 @@
     "status": "ステータス",
     "progress": "進捗",
     "lead": "リード",
+    "start_date": "開始日",
+    "due_date": "期限",
+    "last_activity": "最近のアクティビティ",
     "created": "作成日",
     "issues": "タスク数",
     "archived": "アーカイブ日"

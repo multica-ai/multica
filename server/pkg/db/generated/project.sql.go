@@ -199,7 +199,8 @@ func (q *Queries) GetProjectInWorkspace(ctx context.Context, arg GetProjectInWor
 const getProjectIssueStats = `-- name: GetProjectIssueStats :many
 SELECT project_id,
        count(*)::bigint AS total_count,
-       count(*) FILTER (WHERE status = ANY($1::text[]))::bigint AS done_count
+       count(*) FILTER (WHERE status = ANY($1::text[]))::bigint AS done_count,
+       max(GREATEST(updated_at, last_activity_at))::timestamptz AS last_issue_activity_at
 FROM issue
 WHERE workspace_id = $2::uuid
   AND project_id = ANY($3::uuid[])
@@ -213,9 +214,10 @@ type GetProjectIssueStatsParams struct {
 }
 
 type GetProjectIssueStatsRow struct {
-	ProjectID  pgtype.UUID `json:"project_id"`
-	TotalCount int64       `json:"total_count"`
-	DoneCount  int64       `json:"done_count"`
+	ProjectID           pgtype.UUID        `json:"project_id"`
+	TotalCount          int64              `json:"total_count"`
+	DoneCount           int64              `json:"done_count"`
+	LastIssueActivityAt pgtype.Timestamptz `json:"last_issue_activity_at"`
 }
 
 func (q *Queries) GetProjectIssueStats(ctx context.Context, arg GetProjectIssueStatsParams) ([]GetProjectIssueStatsRow, error) {
@@ -227,7 +229,12 @@ func (q *Queries) GetProjectIssueStats(ctx context.Context, arg GetProjectIssueS
 	items := []GetProjectIssueStatsRow{}
 	for rows.Next() {
 		var i GetProjectIssueStatsRow
-		if err := rows.Scan(&i.ProjectID, &i.TotalCount, &i.DoneCount); err != nil {
+		if err := rows.Scan(
+			&i.ProjectID,
+			&i.TotalCount,
+			&i.DoneCount,
+			&i.LastIssueActivityAt,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
