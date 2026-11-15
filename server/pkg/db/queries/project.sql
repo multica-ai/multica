@@ -3,7 +3,28 @@ SELECT * FROM project
 WHERE workspace_id = $1
   AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
   AND (sqlc.narg('priority')::text IS NULL OR priority = sqlc.narg('priority'))
+  AND (sqlc.arg('include_archived')::boolean OR archived_at IS NULL)
 ORDER BY created_at DESC;
+
+-- name: ArchiveProject :one
+-- Guarded on archived_at IS NULL so a repeated archive keeps the first
+-- actor and time; no row means it was already archived (or is gone).
+UPDATE project SET
+    archived_at = now(),
+    archived_by_type = sqlc.narg('archived_by_type'),
+    archived_by_id = sqlc.narg('archived_by_id'),
+    updated_at = now()
+WHERE id = $1 AND workspace_id = $2 AND archived_at IS NULL
+RETURNING *;
+
+-- name: RestoreProject :one
+UPDATE project SET
+    archived_at = NULL,
+    archived_by_type = NULL,
+    archived_by_id = NULL,
+    updated_at = now()
+WHERE id = $1 AND workspace_id = $2 AND archived_at IS NOT NULL
+RETURNING *;
 
 -- name: GetProjectInWorkspace :one
 SELECT * FROM project

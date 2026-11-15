@@ -154,7 +154,8 @@ func issueWorkflowToResponse(row db.IssueWorkflow, def issueworkflow.Definition,
 // without a workflow, or pointing at a deleted one, count for Default.
 // Projects the caller may not see (visible returns false) are left out.
 func (h *Handler) projectIDsByWorkflow(ctx context.Context, wsUUID pgtype.UUID, rows []db.IssueWorkflow, visible func(db.Project) bool) (map[string][]string, error) {
-	projects, err := h.Queries.ListProjects(ctx, db.ListProjectsParams{WorkspaceID: wsUUID})
+	// Archived projects still run on their workflow, so they count as users.
+	projects, err := h.Queries.ListProjects(ctx, db.ListProjectsParams{WorkspaceID: wsUUID, IncludeArchived: true})
 	if err != nil {
 		return nil, err
 	}
@@ -189,7 +190,7 @@ func (h *Handler) workflowStatusCatalog(ctx context.Context, q *db.Queries, wsUU
 	if err := issuestatus.Ensure(ctx, q, wsUUID); err != nil {
 		return nil, err
 	}
-	rows, err := q.ListIssueStatusEntries(ctx, db.ListIssueStatusEntriesParams{WorkspaceID: wsUUID, IncludeArchived: true})
+	rows, err := q.ListIssueStatusEntries(ctx, db.ListIssueStatusEntriesParams{WorkspaceID: wsUUID})
 	if err != nil {
 		return nil, err
 	}

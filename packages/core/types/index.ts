@@ -210,6 +210,7 @@ export type {
   CreateProjectRequest,
   UpdateProjectRequest,
   ListProjectsResponse,
+  ArchiveProjectResponse,
   ProjectResource,
   ProjectResourceType,
   ProjectResourceRef,
