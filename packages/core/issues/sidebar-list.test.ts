@@ -178,28 +178,31 @@ describe("viewSidebarRequest", () => {
 });
 
 describe("builtinSidebarRequest", () => {
-  it("scopes each built-in like its page and lists with the sidebar settings", () => {
-    const request = (builtin: Parameters<typeof builtinSidebarRequest>[0], relation: Parameters<typeof builtinSidebarRequest>[1] = "assigned") =>
-      builtinSidebarRequest(builtin, relation, DEFAULT_SIDEBAR_ISSUE_SETTINGS, STATUSES)?.table;
-    expect(request("all_issues")).toEqual({
+  it("filters All issues like each built-in's page and lists with the sidebar settings", () => {
+    const filters = (builtin: Parameters<typeof builtinSidebarRequest>[0], working?: string[]) =>
+      builtinSidebarRequest(builtin, { ...DEFAULT_SIDEBAR_ISSUE_SETTINGS, hiddenStatuses: [] }, STATUSES, working)
+        ?.table.filters;
+    expect(builtinSidebarRequest("all_issues", DEFAULT_SIDEBAR_ISSUE_SETTINGS, STATUSES)?.table).toEqual({
       scope: { kind: "workspace" },
       filters: { statuses: ["backlog", "todo", "in_progress", "merged"], include_sub_issues: true },
       sort: { field: "updated_at", direction: "desc" },
     });
-    expect(request("my_issues", "created")?.scope).toEqual({ kind: "my", relation: "created" });
-    expect(request("my_issues", "all")?.scope).toEqual({ kind: "my", relation: "any" });
-    expect(request("my_agents", "assigned")?.scope).toEqual({ kind: "my", relation: "involved" });
+    expect(filters("my_work")).toEqual({ relations: ["assigned", "my_agents"], include_sub_issues: true });
+    expect(filters("subscribed")).toEqual({ relations: ["subscribed"], include_sub_issues: true });
+    expect(filters("working", ["i2", "i1"])).toEqual({ working_issue_ids: ["i1", "i2"], include_sub_issues: true });
+    expect(filters("working")).toEqual({ working_issue_ids: [], include_sub_issues: true });
   });
 
   it("ignores the project-only assignee setting and lists nothing when every status is hidden", () => {
     for (const assignee of ["me", "my_agents", "me_and_my_agents"] as const) {
       const settings = { ...DEFAULT_SIDEBAR_ISSUE_SETTINGS, hiddenStatuses: [], assignee };
-      expect(builtinSidebarRequest("my_agents", "assigned", settings, STATUSES)?.table.filters).toEqual({
+      expect(builtinSidebarRequest("subscribed", settings, STATUSES)?.table.filters).toEqual({
+        relations: ["subscribed"],
         include_sub_issues: true,
       });
     }
     const none = { ...DEFAULT_SIDEBAR_ISSUE_SETTINGS, hiddenStatuses: STATUSES.map((s) => s.key) };
-    expect(builtinSidebarRequest("all_issues", "assigned", none, STATUSES)).toBeNull();
+    expect(builtinSidebarRequest("all_issues", none, STATUSES)).toBeNull();
   });
 });
 

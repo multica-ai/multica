@@ -116,7 +116,7 @@ describe("PinnedSectionSettings", () => {
 
 describe("ViewsSectionSettings", () => {
   const sidebar = {
-    isStarred: (id: string) => id === "builtin:my_issues",
+    isStarred: (id: string) => id === "builtin:my_work",
     star: vi.fn(),
     unstar: vi.fn(),
   };
@@ -128,13 +128,15 @@ describe("ViewsSectionSettings", () => {
 
   it("stars and unstars the built-in views", () => {
     open();
-    expect(toggle("My Issues")).toBeChecked();
+    expect(toggle("My work")).toBeChecked();
     expect(toggle("All issues")).not.toBeChecked();
+    expect(toggle("Working")).not.toBeChecked();
+    expect(toggle("Subscribed")).not.toBeChecked();
 
-    fireEvent.click(toggle("All issues"));
-    expect(sidebar.star).toHaveBeenCalledWith("builtin:all_issues");
-    fireEvent.click(toggle("My Issues"));
-    expect(sidebar.unstar).toHaveBeenCalledWith("builtin:my_issues");
+    fireEvent.click(toggle("Subscribed"));
+    expect(sidebar.star).toHaveBeenCalledWith("builtin:subscribed");
+    fireEvent.click(toggle("My work"));
+    expect(sidebar.unstar).toHaveBeenCalledWith("builtin:my_work");
   });
 
   it("turns the row counts off", () => {

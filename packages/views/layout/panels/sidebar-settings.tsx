@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { Switch } from "@multica/ui/components/ui/switch";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
-import { BUILTIN_VIEW_KEYS, builtinViewItemId, type BuiltinViewKey } from "@multica/core/issue-views/sidebar-views";
+import { BUILTIN_VIEW_KEYS, builtinViewItemId } from "@multica/core/issue-views/sidebar-views";
 import { shownSidebarStatuses } from "@multica/core/issues/sidebar-list";
 import { useSidebarProjectPrefs, useUpdateSidebarProjectPrefs } from "@multica/core/issues/sidebar-project-prefs";
 import {
@@ -35,6 +35,7 @@ import { StatusIcon } from "../../issues/components/status-icon";
 import { sortDirectionLabelKey } from "../../issues/utils/sort-direction";
 import { useProjectStatusLabels } from "../../projects/components/labels";
 import type { IssueViewActions } from "../../issue-views/use-view-actions";
+import { useBuiltinViewLabel } from "../../issue-views/builtin-views";
 import { useT } from "../../i18n";
 import { AppLink } from "../../navigation";
 import { TREE_ROW_BUTTON_CLASS } from "./sidebar-tree";
@@ -478,12 +479,7 @@ export function PinnedSectionSettings({ className }: { className?: string }) {
 /** Which built-in views the Views section lists. Mounted only while the popover is open. */
 function BuiltinViewSwitches({ sidebar }: { sidebar: IssueViewActions["sidebar"] }) {
   const { t } = useT("layout");
-  const builtinLabel: Record<BuiltinViewKey, string> = {
-    my_issues: t(($) => $.nav.my_issues),
-    my_agents: t(($) => $.panels.work.my_agents),
-    all_issues: t(($) => $.panels.work.all_issues),
-    unread: t(($) => $.panels.work.unread),
-  };
+  const builtinLabel = useBuiltinViewLabel();
   return (
     <section className="space-y-3">
       <h3 className="text-label font-medium text-foreground">{t(($) => $.panels.work.views_builtin)}</h3>
@@ -492,7 +488,7 @@ function BuiltinViewSwitches({ sidebar }: { sidebar: IssueViewActions["sidebar"]
         return (
           <SwitchField
             key={key}
-            label={builtinLabel[key]}
+            label={builtinLabel(key)}
             checked={sidebar.isStarred(id)}
             onChange={(on) => (on ? sidebar.star(id) : sidebar.unstar(id))}
           />

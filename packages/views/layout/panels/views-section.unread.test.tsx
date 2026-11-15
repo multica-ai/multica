@@ -6,9 +6,7 @@ import { setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
 import { builtinSidebarSource, viewSidebarSource } from "@multica/core/issues/sidebar-list";
-import { issueUnreadOptions } from "@multica/core/issues/unread";
 import { issueViewContainerKey, useActiveIssueViewStore } from "@multica/core/issue-views/active-view-store";
-import { UNREAD_VIEW_ID } from "@multica/core/issue-views/unread-view";
 import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 import { ViewsSection } from "./views-section";
@@ -71,6 +69,7 @@ const UNREAD_VIEW = {
 let listIssueUnread: ReturnType<typeof vi.fn>;
 let listIssueTableRows: ReturnType<typeof vi.fn>;
 let listIssueStatuses: ReturnType<typeof vi.fn>;
+let getWorkspaceWorkingAgents: ReturnType<typeof vi.fn>;
 
 function renderSection({ activeIssueId = null }: { activeIssueId?: string | null } = {}) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -83,7 +82,7 @@ function renderSection({ activeIssueId = null }: { activeIssueId?: string | null
           plainRowsLit
           issueInAllIssues={false}
           activeIssueId={issueId}
-          litSource={viewSidebarSource(UNREAD_VIEW_ID)}
+          litSource={null}
           actions={actions as unknown as IssueViewActions}
         />
       </NavigationProvider>
@@ -104,10 +103,12 @@ beforeEach(() => {
     parent_id: null,
   }));
   listIssueStatuses = vi.fn(async () => ({ statuses: [], categories: [], total: 0 }));
+  getWorkspaceWorkingAgents = vi.fn(async () => []);
   setApiInstance({
     listIssueUnread,
     listIssueTableRows,
     listIssueStatuses,
+    getWorkspaceWorkingAgents,
     listIssueViews: vi.fn(async () => []),
     getIssueViewPreference: vi.fn(() => new Promise(() => {})),
   } as unknown as ApiClient);
@@ -181,76 +182,80 @@ const TODO_STATUS = {
   updated_at: "",
 };
 
-const mark = (issueId: string) => ({
-  issue_id: issueId,
-  outcome: "completed",
-  agent_id: null,
-  created_at: "2026-01-01T00:00:00Z",
-});
+describe("ViewsSection built-in filtered views", () => {
+  const items = (...keys: string[]) => keys.map((key) => ({ id: `builtin:${key}`, kind: "builtin", key }));
 
-describe("ViewsSection built-in Unread view", () => {
   beforeEach(() => {
-    actions.sidebar.items = [
-      { id: "builtin:all_issues", kind: "builtin", key: "all_issues" },
-      { id: "view:v1", kind: "view", view: UNREAD_VIEW },
-    ];
+    listIssueUnread.mockResolvedValue([]);
+    listIssueStatuses.mockResolvedValue({ statuses: [TODO_STATUS], categories: [], total: 1 });
+    actions.sidebar.items = items("all_issues", "my_work", "working", "subscribed");
     useSidebarTreeStore.setState({ viewsCollapsed: false, expanded: [] });
   });
 
-  it("is not in the sidebar until starred, even with unread issues", async () => {
-    listIssueUnread.mockResolvedValue([mark("a"), mark("b")]);
+  it("opens All issues under each built-in's filter", async () => {
     renderSection();
-    await waitFor(() => expect(listIssueUnread).toHaveBeenCalled());
     await screen.findByRole("link", { name: "All issues" });
-    expect(screen.queryByRole("link", { name: /^Unread/ })).toBeNull();
+    const href = (name: string) => screen.getByRole("link", { name: new RegExp(`^${name}`) }).getAttribute("href");
+    expect(href("My work")).toBe("/acme/issues?view=my_work");
+    expect(href("Working")).toBe("/acme/issues?view=working");
+    expect(href("Subscribed")).toBe("/acme/issues?view=subscribed");
   });
 
-  describe("once starred", () => {
-    beforeEach(() => {
-      actions.sidebar.items = [...actions.sidebar.items, { id: "builtin:unread", kind: "builtin", key: "unread" }];
-    });
+  it.each([
+    ["my_work", "My work", { relations: ["assigned", "my_agents"] }],
+    ["subscribed", "Subscribed", { relations: ["subscribed"] }],
+  ])("lists %s's issues when expanded", async (key, name, filters) => {
+    useSidebarTreeStore.setState({ expanded: [builtinSidebarSource(key as "my_work")] });
+    renderSection();
+    await screen.findByRole("link", { name });
+    await waitFor(() =>
+      expect(listIssueTableRows).toHaveBeenCalledWith(
+        expect.objectContaining({
+          query: expect.objectContaining({
+            scope: { kind: "workspace" },
+            filters: expect.objectContaining(filters),
+          }),
+        }),
+      ),
+    );
+  });
 
-    it("sits where it was starred, with the unread count", async () => {
-      listIssueUnread.mockResolvedValue([mark("a"), mark("b")]);
-      renderSection();
-      const link = await screen.findByRole("link", { name: /^Unread/ });
-      expect(link).toHaveAttribute("href", "/acme/issues?view=unread");
-      await waitFor(() => expect(link.closest("li")).toHaveTextContent(/^Unread2/));
-      const names = screen.getAllByRole("link").map((l) => l.textContent);
-      expect(names.slice(0, 3)).toEqual(["All issues", "Mine unread", "Unread"]);
-    });
+  it("counts and lists the issues agents are running on under Working", async () => {
+    getWorkspaceWorkingAgents.mockResolvedValue([
+      { id: "a1", name: "A", avatar_url: null, running_task_count: 2, issue_ids: ["i2", "i1"] },
+      { id: "a2", name: "B", avatar_url: null, running_task_count: 1, issue_ids: ["i1"] },
+    ]);
+    useSidebarTreeStore.setState({ expanded: [builtinSidebarSource("working")] });
+    renderSection();
 
-    it("stays when the count reaches 0", async () => {
-      listIssueUnread.mockResolvedValue([mark("a")]);
-      const { qc } = renderSection({ activeIssueId: "a" });
-      const link = await screen.findByRole("link", { name: /^Unread/ });
-      await waitFor(() => expect(link.closest("li")).toHaveTextContent(/^Unread1/));
+    const link = await screen.findByRole("link", { name: /^Working/ });
+    await waitFor(() => expect(link.closest("div")).toHaveTextContent(/^Working2/));
+    await waitFor(() =>
+      expect(listIssueTableRows).toHaveBeenCalledWith(
+        expect.objectContaining({
+          query: expect.objectContaining({
+            filters: expect.objectContaining({ working_issue_ids: ["i1", "i2"] }),
+          }),
+        }),
+      ),
+    );
+  });
 
-      qc.setQueryData(issueUnreadOptions("ws-1").queryKey, []);
-      await waitFor(() => expect(link.closest("li")).toHaveTextContent(/^Unread$/));
-      expect(screen.getByRole("link", { name: /^Unread/ })).toBe(link);
-    });
+  it("lights while its page is open, instead of All issues", async () => {
+    useActiveIssueViewStore
+      .getState()
+      .setActive(issueViewContainerKey("ws-1", { scope_type: "workspace" }), "subscribed");
+    renderSection();
+    const link = await screen.findByRole("link", { name: "Subscribed" });
+    expect(link).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "All issues" })).not.toHaveAttribute("aria-current");
+  });
 
-    it("lights while its page is open", async () => {
-      listIssueUnread.mockResolvedValue([]);
-      useActiveIssueViewStore
-        .getState()
-        .setActive(issueViewContainerKey("ws-1", { scope_type: "workspace" }), UNREAD_VIEW_ID);
-      renderSection();
-      const link = await screen.findByRole("link", { name: /^Unread/ });
-      expect(link).toHaveAttribute("aria-current", "page");
-      expect(screen.getByRole("link", { name: /^All issues/ })).not.toHaveAttribute("aria-current");
-    });
-
-    it("is removed from the sidebar from its row menu", async () => {
-      listIssueUnread.mockResolvedValue([]);
-      renderSection();
-      const link = await screen.findByRole("link", { name: /^Unread/ });
-
-      fireEvent.contextMenu(link);
-      fireEvent.click(await screen.findByRole("menuitem", { name: "Remove from sidebar" }));
-      expect(actions.sidebar.unstar).toHaveBeenCalledWith("builtin:unread");
-    });
+  it("is removed from the sidebar from its row menu", async () => {
+    renderSection();
+    fireEvent.contextMenu(await screen.findByRole("link", { name: "Subscribed" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Remove from sidebar" }));
+    expect(actions.sidebar.unstar).toHaveBeenCalledWith("builtin:subscribed");
   });
 });
 

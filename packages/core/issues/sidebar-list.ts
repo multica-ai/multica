@@ -13,7 +13,6 @@ import type {
 import { assigneeTypesForActorKind } from "./surface/scope";
 import { effectiveNegatedFilters } from "./stores/view-store";
 import { FILTER_DIMENSION_TABLE_FIELD, advancedFilterToTableQuery, advancedFilterUsesField } from "./stores/filter-tree";
-import type { MyIssuesRelation } from "./stores/my-issues-view-store";
 import type { SidebarIssueAssignee, SidebarIssueSettings, SidebarProjectSettings } from "./stores/sidebar-tree-store";
 
 /** Rows an expanded sidebar list shows before "Load more". */
@@ -230,25 +229,35 @@ export function viewSidebarRequest(
   };
 }
 
+/** What each built-in adds to All issues, as the issues page applies it. */
+const BUILTIN_FILTERS: Record<Exclude<BuiltinViewKey, "working">, IssueTableQuerySpec["filters"]> = {
+  all_issues: {},
+  my_work: { relations: ASSIGNEE_RELATIONS.me_and_my_agents },
+  subscribed: { relations: ["subscribed"] },
+};
+
 /**
- * The request for an expanded built-in view: the page's scope, listed with
- * the same status, sub-issue and ordering settings as an expanded project.
- * The assignee setting is for projects only: the scope already says whose
- * issues a built-in lists. `null` when the settings leave nothing to list.
+ * The request for an expanded built-in view: its filter, listed with the same
+ * status, sub-issue and ordering settings as an expanded project. The
+ * assignee setting is for projects only: a built-in already says whose
+ * issues it lists. Working lists `workingIssueIds`, the issues agents are
+ * running on, as the page does. `null` when the settings leave nothing to list.
  */
 export function builtinSidebarRequest(
-  builtin: Exclude<BuiltinViewKey, "unread">,
-  myRelation: MyIssuesRelation,
+  builtin: BuiltinViewKey,
   settings: SidebarIssueSettings,
   statuses: readonly StatusRef[],
+  workingIssueIds: readonly string[] = [],
 ): SidebarIssuesRequest | null {
   const shown = shownSidebarStatuses(settings, statuses);
   if (shown.length === 0) return null;
-  const relation = builtin === "my_agents" ? "involved" : myRelation === "all" ? "any" : myRelation;
   return {
     table: {
-      scope: builtin === "all_issues" ? { kind: "workspace" } : { kind: "my", relation },
+      scope: { kind: "workspace" },
       filters: {
+        ...(builtin === "working"
+          ? { working_issue_ids: [...workingIssueIds].sort() }
+          : BUILTIN_FILTERS[builtin]),
         ...(shown.length < statuses.length ? { statuses: shown } : {}),
         include_sub_issues: settings.showSubIssues,
       },

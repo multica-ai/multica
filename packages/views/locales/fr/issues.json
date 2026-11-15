@@ -1858,7 +1858,9 @@
       "my_issues": "Mes tâches",
       "my_agents": "Travail de mes agents",
       "all_issues": "Toutes les tâches",
-      "unread": "Non lues"
+      "my_work": "Mon travail",
+      "working": "En cours d'exécution",
+      "subscribed": "Abonnements"
     },
     "untitled": "Vue sans titre",
     "copy_name": "{{name}} (copie)",

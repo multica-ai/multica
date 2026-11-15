@@ -37,7 +37,7 @@ const apiMock = vi.hoisted(() => ({ listIssueTableRows: vi.fn(), getIssue: vi.fn
 const actions = vi.hoisted(() => ({
   sidebar: {
     items: [
-      { id: "builtin:my_issues", kind: "builtin", key: "my_issues" },
+      { id: "builtin:my_work", kind: "builtin", key: "my_work" },
       { id: "builtin:all_issues", kind: "builtin", key: "all_issues" },
     ],
     reorder: vi.fn(),
@@ -225,7 +225,7 @@ const noProjectLocated = () => !!screen.getByRole("button", { name: "No project"
 
 beforeEach(() => {
   useSidebarTreeStore.setState({
-    expanded: ["builtin:my_issues"],
+    expanded: ["builtin:my_work"],
     viewsCollapsed: false,
     pinnedCollapsed: false,
     projectsCollapsed: false,
@@ -275,7 +275,7 @@ describe("WorkPanel sections", () => {
 
 describe("WorkPanel Inbox highlight", () => {
   const inInbox = () => document.querySelector('[data-sidebar-list="inbox"]') as HTMLElement;
-  const inMyIssues = () => document.querySelector('[data-sidebar-list="builtin:my_issues"]') as HTMLElement;
+  const inMyIssues = () => document.querySelector('[data-sidebar-list="builtin:my_work"]') as HTMLElement;
 
   it("lights an issue opened from the Inbox there only", async () => {
     renderPanel("/acme/my-issues", [], [], [], [inboxItem(ISSUE)]);
@@ -475,11 +475,11 @@ describe("WorkPanel and the open issue's project", () => {
   });
 
   it("lights the issue only in the list it was clicked in", async () => {
-    useSidebarTreeStore.setState({ expanded: ["builtin:my_issues", PROJECT_SOURCE] });
+    useSidebarTreeStore.setState({ expanded: ["builtin:my_work", PROJECT_SOURCE] });
     const qc = renderPanel("/acme/my-issues", [], [PROJECT]);
     await openInProject(qc);
     await waitFor(() => expect(screen.getAllByRole("link", { name: ISSUE.title })).toHaveLength(2));
-    const inMyIssues = document.querySelector('[data-sidebar-list="builtin:my_issues"]') as HTMLElement;
+    const inMyIssues = document.querySelector('[data-sidebar-list="builtin:my_work"]') as HTMLElement;
     fireEvent.click(within(inMyIssues).getByRole("link", { name: ISSUE.title }));
 
     expect(litIssueRows()).toEqual([within(inMyIssues).getByRole("link", { name: ISSUE.title })]);
@@ -566,7 +566,7 @@ describe("WorkPanel and the open issue's project", () => {
     const qc = renderPanel("/acme/my-issues", [], [PROJECT]);
     await openInProject(qc);
     const inMyIssues = await waitFor(() => {
-      const element = document.querySelector('[data-sidebar-list="builtin:my_issues"]') as HTMLElement;
+      const element = document.querySelector('[data-sidebar-list="builtin:my_work"]') as HTMLElement;
       expect(within(element).getByRole("link", { name: ISSUE.title })).toBeInTheDocument();
       return element;
     });
@@ -618,60 +618,5 @@ describe("WorkPanel and the open issue's project", () => {
     });
     expect(litIssueRows()).toEqual([within(list).getByRole("link", { name: ISSUE.title })]);
     await waitFor(() => expect(useSidebarTreeStore.getState().locate).toBeNull());
-  });
-});
-
-describe("WorkPanel starred Unread view after its last issue is read", () => {
-  const unreadRow = (scope: Pick<typeof screen, "queryByRole"> = screen) =>
-    scope.queryByRole("link", { name: /^Unread/ });
-  const defaultItems = actions.sidebar.items;
-
-  beforeEach(() => {
-    actions.sidebar.items = [...defaultItems, { id: "builtin:unread", kind: "builtin", key: "unread" }];
-    return () => {
-      actions.sidebar.items = defaultItems;
-    };
-  });
-
-  async function openAndReadLastUnread() {
-    useSidebarTreeStore.setState({ expanded: ["view:unread"] });
-    apiMock.listIssueTableRows.mockResolvedValue({ rows: [{ issue: ISSUE }], total: 1, next_cursor: null });
-    const qc = renderPanel("/acme/my-issues", [], [], [ISSUE.id]);
-    // The unread dot's label is part of the link's name until it is read.
-    fireEvent.click(await screen.findByRole("link", { name: new RegExp(`^${ISSUE.title}`) }));
-    apiMock.listIssueTableRows.mockResolvedValue({ rows: [], total: 0, next_cursor: null });
-    await act(async () => {
-      qc.setQueryData(issueDetailOptions("ws-1", ISSUE.id).queryKey, ISSUE);
-      qc.setQueryData(issueUnreadOptions("ws-1").queryKey, []);
-    });
-    await waitFor(() => expect(unreadRow()?.closest("li")).toHaveTextContent(/^Unread/));
-    expect(unreadRow()?.closest("li")).not.toHaveTextContent("Unread1");
-    expect(issueRow()).toHaveAttribute("aria-current", "page");
-    return qc;
-  }
-
-  it("keeps the row and the open issue in the hover peek", async () => {
-    await openAndReadLastUnread();
-    fireEvent.click(screen.getByRole("button", { name: "Open peek" }));
-    const peek = within(screen.getByTestId("peek"));
-    expect(unreadRow(peek)).not.toBeNull();
-    expect(peek.getByRole("link", { name: ISSUE.title })).toHaveAttribute("aria-current", "page");
-  });
-
-  it("keeps the row and the open issue when the compact sheet reopens", async () => {
-    await openAndReadLastUnread();
-    fireEvent.click(screen.getByRole("button", { name: "Toggle sheet" }));
-    fireEvent.click(screen.getByRole("button", { name: "Toggle sheet" }));
-    expect(unreadRow()).not.toBeNull();
-    expect(issueRow()).toHaveAttribute("aria-current", "page");
-  });
-
-  it("keeps the row but drops the read issue once it is no longer the page", async () => {
-    await openAndReadLastUnread();
-    fireEvent.click(screen.getByRole("button", { name: "Leave Work" }));
-    fireEvent.click(screen.getByRole("button", { name: "Return to issue" }));
-    await screen.findByRole("link", { name: "All issues" });
-    expect(unreadRow()).not.toBeNull();
-    await waitFor(() => expect(screen.queryByRole("link", { name: ISSUE.title })).toBeNull());
   });
 });

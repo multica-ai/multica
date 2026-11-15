@@ -172,17 +172,21 @@ describe("AllViewsPage", () => {
     expect(useActiveIssueViewStore.getState().active[WORKSPACE_KEY]).toBe("v2");
   });
 
-  it("lists Unread as a built-in that is starred on demand and opens its view", async () => {
+  it.each([
+    ["My work", "my_work"],
+    ["Working", "working"],
+    ["Subscribed", "subscribed"],
+  ])("lists %s as a built-in that is starred on demand and opens its view", async (name, id) => {
     const user = userEvent.setup();
     const { push } = renderPage();
 
-    await user.click(screen.getByRole("button", { name: "Add Unread to sidebar" }));
-    expect(mocks.star).toHaveBeenCalledWith("builtin:unread");
+    await user.click(screen.getByRole("button", { name: `Add ${name} to sidebar` }));
+    expect(mocks.star).toHaveBeenCalledWith(`builtin:${id}`);
     expect(push).not.toHaveBeenCalled();
 
-    await user.click(screen.getByText("Unread"));
-    expect(push).toHaveBeenCalledWith("/acme/issues?view=unread");
-    expect(useActiveIssueViewStore.getState().active[WORKSPACE_KEY]).toBe("unread");
+    await user.click(screen.getByText(name));
+    expect(push).toHaveBeenCalledWith(`/acme/issues?view=${id}`);
+    expect(useActiveIssueViewStore.getState().active[WORKSPACE_KEY]).toBe(id);
   });
 
   it("opens a view in place for a shift-click, which rows never hand to the browser", async () => {
@@ -214,23 +218,17 @@ describe("AllViewsPage", () => {
     expect(useActiveIssueViewStore.getState().active[WORKSPACE_KEY]).toBe("v-open");
   });
 
-  it("gives My Issues and My agents' work their own URLs", async () => {
+  it("opens a built-in view's own URL in a new tab", async () => {
     const user = userEvent.setup();
     const openInNewTab = vi.fn();
-    const { push } = renderPage({ openInNewTab });
-    const row = (name: string) =>
-      screen
-        .getByRole("button", { name: new RegExp(`^(Add ${name} to|Remove ${name} from) sidebar$`) })
-        .closest('[role="row"]')!;
+    renderPage({ openInNewTab });
+    const row = screen
+      .getByRole("button", { name: /^(Add My work to|Remove My work from) sidebar$/ })
+      .closest('[role="row"]')!;
 
     await user.keyboard("{Meta>}");
-    await user.click(row("My Issues"));
-    await user.click(row("My agents' work"));
+    await user.click(row);
     await user.keyboard("{/Meta}");
-    expect(openInNewTab).toHaveBeenCalledWith("/acme/my-issues", "My Issues");
-    expect(openInNewTab).toHaveBeenCalledWith("/acme/my-issues?scope=agents", "My agents' work");
-
-    await user.click(row("My agents' work"));
-    expect(push).toHaveBeenCalledWith("/acme/my-issues?scope=agents");
+    expect(openInNewTab).toHaveBeenCalledWith("/acme/issues?view=my_work", "My work");
   });
 });

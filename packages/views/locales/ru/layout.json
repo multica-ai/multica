@@ -101,8 +101,6 @@
   },
   "panels": {
     "work": {
-      "my_agents": "Работа моих агентов",
-      "all_issues": "Все задачи",
       "views": "Представления",
       "new_project": "Новый проект",
       "new_issue_in_project": "Новая задача в «{{name}}»",
@@ -146,7 +144,6 @@
       "all_projects_few": "Всего {{count}} проекта",
       "all_projects_many": "Всего {{count}} проектов",
       "project_issues_retry": "Повторить",
-      "unread": "Непрочитанные",
       "new_issue_here": "Новая задача в этом проекте",
       "inbox_actions": "Действия со входящими",
       "inbox_view_archived": "Открыть архив",

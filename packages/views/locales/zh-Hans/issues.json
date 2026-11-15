@@ -1786,7 +1786,9 @@
       "my_issues": "我的任务",
       "my_agents": "我的智能体在做",
       "all_issues": "全部任务",
-      "unread": "未读"
+      "my_work": "我的工作",
+      "working": "执行中",
+      "subscribed": "已订阅"
     },
     "untitled": "未命名视图",
     "copy_name": "{{name}}（副本）",
