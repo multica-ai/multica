@@ -343,6 +343,16 @@ function InboxRow({
     writeViewState(issueHighlightMementoKey(item.issue_id), undefined);
     requestLanding(item.issue_id);
   };
+  // The card previews a notification you have not opened. A press opens it,
+  // so the card goes at once, with no exit animation to compete with the
+  // issue's first render, and a hover delay already running must not bring it
+  // back over the opened issue. It may return once the pointer leaves the row.
+  const [cardOpen, setCardOpen] = useState(false);
+  const [cardDismissed, setCardDismissed] = useState(false);
+  const dismissCard = () => {
+    setCardDismissed(true);
+    setCardOpen(false);
+  };
   const agents = useIssueAgentState(item.workspace_id, item.issue_id ?? "");
   const running = !!agents?.running;
   const unread = item.read !== true;
@@ -388,11 +398,24 @@ function InboxRow({
 
   return (
     <li data-inbox-row data-read={unread ? "false" : "true"} className="group/inbox relative">
-      <HoverCard>
+      <HoverCard
+        open={cardOpen}
+        onOpenChange={(open) => {
+          if (open && cardDismissed) return;
+          setCardOpen(open);
+        }}
+      >
         <HoverCardTrigger
           delay={500}
           closeDelay={100}
           render={<div />}
+          onPointerDown={dismissCard}
+          onPointerLeave={() => setCardDismissed(false)}
+          // Enter on the focused link opens the issue too. Focus does not
+          // move, so the card stays shut without the dismissed flag.
+          onKeyDown={(event) => {
+            if (event.key === "Enter") setCardOpen(false);
+          }}
           {...panelRowAnchor(active)}
           className={cn(PANEL_ROW_CLASS, panelRowStateClass(active), "relative", !compact && "items-start py-[5px]")}
         >
@@ -444,8 +467,23 @@ function InboxRow({
             )}
           </AppLink>
         </HoverCardTrigger>
-        <HoverCardContent side="right" align="start" sideOffset={12} alignOffset={-8} className="w-72 p-3">
-          <InboxRowCard item={item} href={href} title={title} onOpen={land} onArchive={onArchive} />
+        <HoverCardContent
+          side="right"
+          align="start"
+          sideOffset={12}
+          alignOffset={-8}
+          className={cn("w-72 p-3", cardDismissed && "data-closed:duration-0")}
+        >
+          <InboxRowCard
+            item={item}
+            href={href}
+            title={title}
+            onOpen={() => {
+              dismissCard();
+              land();
+            }}
+            onArchive={onArchive}
+          />
         </HoverCardContent>
       </HoverCard>
       <TooltipHint label={archiveLabel}>
