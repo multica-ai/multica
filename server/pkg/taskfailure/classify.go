@@ -86,7 +86,7 @@ func isUsageLimit403(lower string) bool {
 // failure_reason today and lets per-backend structured upgrades land
 // independently.
 func Classify(rawError string) Reason {
-	trimmed := strings.TrimSpace(withoutCodebuddyProtocolSummary(rawError))
+	trimmed := strings.TrimSpace(WithoutCodebuddyProtocolSummary(rawError))
 	if trimmed == "" {
 		// SQL maps NULL/empty to a separate bucket ("empty_error"),
 		// but that bucket is not part of the canonical taxonomy. In-flight
@@ -666,7 +666,7 @@ var legacyUsageLimit403Reasons = map[string]bool{
 // can be deleted once no daemon old enough to produce its wire shape is still
 // reporting.
 func NormalizeDaemonReason(reason, rawError string) Reason {
-	rawError = withoutCodebuddyProtocolSummary(rawError)
+	rawError = WithoutCodebuddyProtocolSummary(rawError)
 	if legacyConcurrentRequestLimitReasons[reason] &&
 		strings.Contains(strings.ToLower(rawError), concurrentRequestLimitWitness) {
 		return ReasonAgentProviderCapacityOrRateLimit

@@ -367,6 +367,7 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 		if finalError != "" {
 			finalError = withAgentStderr(finalError, "codebuddy", stderrTail)
 		}
+		// Context shutdown closes stdout itself; exclude that read error.
 		observation := streamProtocolObservation{
 			provider:                   "codebuddy",
 			cliVersion:                 b.cfg.CLIVersion,
@@ -380,7 +381,7 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 			resultIsError:              resultIsError,
 			resultBytes:                len(finalResultText),
 			lastAssistantBytes:         len(lastAssistantText),
-			scannerError:               scanErr != nil,
+			scannerError:               scanErr != nil && runCtx.Err() == nil,
 			unreadableAssistantCount:   unreadableAssistantCount,
 			anthropicBaseURLConfigured: strings.TrimSpace(b.cfg.Env["ANTHROPIC_BASE_URL"]) != "",
 		}

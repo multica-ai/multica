@@ -166,6 +166,39 @@ func TestCodebuddySuccessIgnoresErrorMetadata(t *testing.T) {
 	}
 }
 
+func TestCodebuddyFailureDiagnosticsContextEnd(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixtures are POSIX-only")
+	}
+	for _, outcome := range []string{"aborted", "timeout"} {
+		t.Run(outcome, func(t *testing.T) {
+			t.Parallel()
+			fakePath := filepath.Join(t.TempDir(), "codebuddy")
+			writeTestExecutable(t, fakePath, []byte("#!/bin/sh\nIFS= read -r _\n"+`printf '%s\n' '{"type":"system","session_id":"context-end"}'`+"\nsleep 60\n"))
+			b := &codebuddyBackend{cfg: Config{ExecutablePath: fakePath, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			opts := ExecOptions{}
+			if outcome == "timeout" {
+				opts.Timeout = 300 * time.Millisecond
+			}
+			session, err := b.Execute(ctx, "fixture", opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for msg := range session.Messages {
+				if outcome == "aborted" && msg.Type == MessageStatus {
+					cancel()
+				}
+			}
+			result := <-session.Result
+			if result.Status != outcome || !strings.Contains(result.Error, "scanner_error=false") {
+				t.Fatalf("context shutdown reported as a scanner error: %+v", result)
+			}
+		})
+	}
+}
+
 func runCodebuddyFailureFixture(t *testing.T, body string) Result {
 	t.Helper()
 	fakePath := filepath.Join(t.TempDir(), "codebuddy")
