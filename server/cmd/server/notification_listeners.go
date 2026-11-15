@@ -1310,6 +1310,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		}
 		agentID, _ := payload["agent_id"].(string)
 		issueID, _ := payload["issue_id"].(string)
+		taskID, _ := payload["task_id"].(string)
 		if issueID == "" {
 			return
 		}
@@ -1325,6 +1326,13 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			exclude[agentID] = true
 		}
 
+		// The task id lets opening the notification land on the failed run
+		// in the issue's timeline.
+		details := emptyDetails
+		if taskID != "" {
+			details, _ = json.Marshal(map[string]string{"task_id": taskID})
+		}
+
 		notifySubscribers(ctx, queries, bus, issueID, issue.Status, e.WorkspaceID,
 			events.Event{
 				Type:        e.Type,
@@ -1334,7 +1342,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			},
 			exclude, "task_failed", "action_required",
 			issue.Title, "",
-			emptyDetails)
+			details)
 	})
 }
 

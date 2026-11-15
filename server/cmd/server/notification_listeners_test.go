@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -868,6 +869,13 @@ func TestNotification_TaskFailed(t *testing.T) {
 	}
 	if creatorItems[0].Severity != "action_required" {
 		t.Fatalf("expected severity 'action_required', got %q", creatorItems[0].Severity)
+	}
+	var details map[string]string
+	if err := json.Unmarshal(creatorItems[0].Details, &details); err != nil {
+		t.Fatalf("unmarshal details: %v", err)
+	}
+	if details["task_id"] != "00000000-0000-0000-0000-bbbbbbbbbbbb" {
+		t.Fatalf("expected details to name the failed task, got %v", details)
 	}
 }
 

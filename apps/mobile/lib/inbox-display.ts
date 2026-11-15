@@ -6,7 +6,7 @@
  * the title a user sees in the mobile inbox MUST match what they see on
  * web for the same item. When the web version changes, sync this file.
  */
-import type { InboxItem } from "@multica/core/types";
+import type { InboxItem, TimelineEntry } from "@multica/core/types";
 import { i18n } from "@/lib/i18n/singleton";
 
 function formatResetAt(value: string | undefined): string {
@@ -136,6 +136,26 @@ export function getInboxNavigationTarget(
 }
 
 /**
+ * The timeline row a deep-link `highlight` lands on. A failed run's
+ * notification names its task; mobile renders no run rows, so the run shows
+ * only as the failure notice it posted, and the link lands there. Null
+ * while the timeline has no such row — a cached timeline may not have it
+ * yet, and a run that posted nothing never will.
+ */
+export function resolveTimelineHighlight(
+  entries: readonly TimelineEntry[],
+  highlight: string,
+): string | null {
+  if (entries.some((entry) => entry.id === highlight)) return highlight;
+  const posted = entries.filter(
+    (entry) => entry.type === "comment" && entry.source_task_id === highlight,
+  );
+  return (
+    posted.find((entry) => entry.comment_type === "system") ?? posted.at(-1)
+  )?.id ?? null;
+}
+
+/**
  * Deduplicate inbox items by issue_id (Linear-style: one entry per issue).
  *
  * Mirrors packages/core/inbox/queries.ts deduplicateInboxItems. **MUST stay
@@ -149,8 +169,12 @@ export function getInboxNavigationTarget(
  *   2. Group by `issue_id` (fall back to `id` for items with no issue
  *      attached — e.g. quick_create_failed).
  *   3. In each group, keep the newest by `created_at`.
- *   4. Anchor the row where the reader left off: the oldest unread
- *      `comment_id` in the group, or the newest one once all are read.
+ *   4. Anchor the row (`details.comment_id`) on the timeline entry it opens
+ *      at, as web's `withCommentAnchor` does: unread, the oldest unread
+ *      comment or failed run, a reaction only when nothing else unread has
+ *      one, and none when no unread notification has an entry; read, the
+ *      newest notification's entry. Mobile renders no app requests, so
+ *      unlike web an app request row gets no target of its own.
  *   5. Sort the result newest-first.
  */
 export function deduplicateInboxItems(items: InboxItem[]): InboxItem[] {
@@ -171,21 +195,28 @@ export function deduplicateInboxItems(items: InboxItem[]): InboxItem[] {
     const newest = group[0];
     if (!newest) continue;
 
-    const hasComment = (item: InboxItem) => !!item.details?.comment_id;
-    const commentId = (
-      group.findLast((item) => item.read !== true && hasComment(item)) ??
-      group.find(hasComment)
-    )?.details?.comment_id;
+    const target = (item: InboxItem) =>
+      item.details?.comment_id ||
+      (item.type === "task_failed" ? item.details?.task_id : undefined) ||
+      undefined;
+    const unread = group.filter((item) => item.read !== true);
+    const anchor =
+      unread.length > 0
+        ? (unread.findLast(
+            (item) => item.type !== "reaction_added" && !!target(item),
+          ) ?? unread.findLast((item) => !!target(item)))
+        : group.find((item) => !!target(item));
+    const anchorId = anchor ? target(anchor) : undefined;
 
-    if (commentId && newest.details?.comment_id !== commentId) {
-      merged.push({
-        ...newest,
-        details: { ...(newest.details ?? {}), comment_id: commentId },
-      });
+    if (anchorId === newest.details?.comment_id) {
+      merged.push(newest);
       continue;
     }
-
-    merged.push(newest);
+    const { comment_id: _dropped, ...details } = newest.details ?? {};
+    merged.push({
+      ...newest,
+      details: anchorId ? { ...details, comment_id: anchorId } : details,
+    });
   }
   return merged.sort(
     (a, b) =>
