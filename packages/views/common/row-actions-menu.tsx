@@ -104,7 +104,11 @@ export function RowActionsPointMenu({
     <DropdownMenu
       open={menu.open && filled.length > 0}
       onOpenChange={(open, details) => {
-        if (nextRowMenuState(menu, open, details.reason)) onOpenChange(open);
+        if (!nextRowMenuState(menu, open, details.reason)) {
+          details.cancel();
+          return;
+        }
+        onOpenChange(open);
       }}
     >
       <DropdownMenuContent align="start" anchor={anchor} className="w-auto">

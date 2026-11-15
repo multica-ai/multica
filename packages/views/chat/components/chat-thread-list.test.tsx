@@ -365,4 +365,22 @@ describe("ChatThreadList right-click menu", () => {
     expect(onArchive).not.toHaveBeenCalled();
     expect(onSelectSession).not.toHaveBeenCalled();
   });
+
+  it("keeps the modal dismissal layer after pointer departure", async () => {
+    const { onArchive, onSelectSession } = renderList("s1");
+    fireEvent.contextMenu(screen.getByText("Chat s2"), { clientX: 30, clientY: 90 });
+    const menu = await screen.findByRole("menu");
+    // The real Base UI backdrop prevents an outside press reaching the row below.
+    const backdrop = document.querySelector<HTMLElement>(
+      'div[role="presentation"][data-base-ui-inert]',
+    )!;
+    expect(backdrop).toBeInTheDocument();
+
+    fireEvent.mouseLeave(menu.parentElement!, { relatedTarget: document.body });
+    expect(backdrop).toBeInTheDocument();
+    await userEvent.click(backdrop);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(onArchive).not.toHaveBeenCalled();
+    expect(onSelectSession).not.toHaveBeenCalled();
+  });
 });
