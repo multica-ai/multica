@@ -13,25 +13,22 @@ import {
 import { ArrowRight, X } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
-import { useAuthStore } from "@multica/core/auth";
 import { useChatStore } from "@multica/core/chat";
-import { needsSourceBackfill } from "@multica/core/onboarding";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
-import { useSessionPromptStore } from "@multica/core/session-prompt";
+import { useDevPromptStore, useSessionPromptStore } from "@multica/core/session-prompt";
 import { isFloatingChatRouteSuppressed } from "../chat/floating-chat-visibility";
 import { isQuietMoment } from "../common/quiet-moment";
 import { useT } from "../i18n";
 import { useNavigation } from "../navigation";
-import { readSourceBackfillDismissCount } from "../onboarding/source-backfill-dismiss";
 import { HighlightActionButton } from "./highlight-action";
 import { HeroFrame, type WhatsNewHero } from "./heroes";
-import { highlightCopy, type WhatsNewHighlight, type WhatsNewRelease } from "./releases";
+import { highlightCopy, WHATS_NEW_RELEASES, type WhatsNewHighlight, type WhatsNewRelease } from "./releases";
 import { useWhatsNew } from "./use-whats-new";
 import { formatReleaseDate, versionLabel } from "./whats-new-panel";
 
-/** Long enough for the workspace to render and for the source survey (700ms) to claim the session first. */
+/** Long enough for the workspace to render and for the source survey (700ms) to open first. */
 export const WHATS_NEW_DECK_DELAY_MS = 3000;
-/** How often a busy moment (typing, a dialog, the chat window) is checked again. */
+/** How often a busy moment (the survey, another card, typing, the chat window) is checked again. */
 export const WHATS_NEW_DECK_RETRY_MS = 5000;
 export const WHATS_NEW_DECK_MAX_CARDS = 5;
 
@@ -45,23 +42,39 @@ interface DeckCard {
 }
 
 /** Only highlights with hero art are dealt; the rest stay in the What's new panel. */
-function deckCards(unread: readonly WhatsNewRelease[]): DeckCard[] {
-  return unread
+export function deckCards(releases: readonly WhatsNewRelease[]): DeckCard[] {
+  return releases
     .flatMap((release) =>
       release.highlights.flatMap((highlight) => (highlight.hero ? [{ release, highlight, hero: highlight.hero }] : [])),
     )
     .slice(0, WHATS_NEW_DECK_MAX_CARDS);
 }
 
+/** What the deck is waiting on. `dealt` is final for the session; the rest pass. */
+export type DeckBlocker = "dealt" | "survey" | "corner" | "chat" | "busy";
+
+/** Why the deck would hold its cards back right now, or null when it would deal them. */
+export function deckBlocker(): DeckBlocker | null {
+  const session = useSessionPromptStore.getState();
+  if (session.deckDealt) return "dealt";
+  if (session.surveyPending) return "survey";
+  if (session.corner !== null && session.corner !== "whats-new") return "corner";
+  if (useChatStore.getState().isOpen) return "chat";
+  if (!isQuietMoment()) return "busy";
+  return null;
+}
+
 /**
- * Unread release highlights as a deck of cards in the star prompt's corner.
- * Opens once per app session when nothing else is happening; closing it marks
- * the release seen, and the highlights stay in What's new in the Help menu.
+ * Unread release highlights as a deck of cards in the bottom-right corner.
+ * Deals once per app session, after the source survey and when nothing else
+ * is happening. It only informs, so other prompts having shown does not keep
+ * it away. Closing it marks the release seen; the highlights stay in What's
+ * new in the Help menu.
  */
 export function WhatsNewDeck() {
   // Shells mount this while the workspace slug is still resolving.
   const wsId = useCurrentWorkspace()?.id ?? null;
-  const { unread, markSeen } = useWhatsNew();
+  const { visible, unread, markSeen } = useWhatsNew();
   const chatOpen = useChatStore((s) => s.isOpen);
   const floatingChatEnabled = useChatStore((s) => s.floatingChatEnabled);
   const { pathname } = useNavigation();
@@ -69,44 +82,74 @@ export function WhatsNewDeck() {
   const launcherVisible =
     floatingChatEnabled && !chatOpen && !isFloatingChatRouteSuppressed(pathname, chatPath);
   const [cards, setCards] = useState<DeckCard[] | null>(null);
+  // Dealt from the dev toolbar: shown whether or not anything is unread.
+  const [forced, setForced] = useState(false);
   const [leaving, setLeaving] = useState(false);
+  const [checkNow, setCheckNow] = useState(0);
 
   const hasUnread = unread.length > 0;
   const dealable = useMemo(() => deckCards(unread), [unread]);
   const dealableRef = useRef(dealable);
   dealableRef.current = dealable;
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
   const hasDealable = dealable.length > 0;
 
   useEffect(() => {
     if (cards || !wsId || !hasDealable) return;
     let timer: number | undefined;
     const consider = () => {
-      if (useSessionPromptStore.getState().prompted) return;
-      const user = useAuthStore.getState().user;
-      // The attribution survey owns this session's one interruption.
-      if (needsSourceBackfill(user, readSourceBackfillDismissCount(user?.id))) return;
-      if (useChatStore.getState().isOpen || !isQuietMoment()) {
+      const blocker = deckBlocker();
+      if (blocker === "dealt") return;
+      if (blocker || !useSessionPromptStore.getState().claimCorner("whats-new")) {
         timer = window.setTimeout(consider, WHATS_NEW_DECK_RETRY_MS);
         return;
       }
-      useSessionPromptStore.getState().markPrompted();
+      useSessionPromptStore.getState().markDeckDealt();
       setCards(dealableRef.current);
     };
-    timer = window.setTimeout(consider, WHATS_NEW_DECK_DELAY_MS);
+    timer = window.setTimeout(consider, checkNow > 0 ? 0 : WHATS_NEW_DECK_DELAY_MS);
     return () => window.clearTimeout(timer);
-  }, [cards, wsId, hasDealable]);
+  }, [cards, wsId, hasDealable, checkNow]);
+
+  useEffect(() => {
+    if (!wsId) return;
+    const answer = () => {
+      const devPrompts = useDevPromptStore.getState();
+      if (devPrompts.take("whats-new-check")) setCheckNow((n) => n + 1);
+      if (devPrompts.take("whats-new")) {
+        const fromVisible = deckCards(visibleRef.current);
+        const preview = fromVisible.length > 0 ? fromVisible : deckCards(WHATS_NEW_RELEASES);
+        if (preview.length === 0) return;
+        useSessionPromptStore.getState().claimCorner("whats-new");
+        useSessionPromptStore.getState().markDeckDealt();
+        setLeaving(false);
+        setForced(true);
+        setCards(preview);
+      }
+    };
+    answer();
+    return useDevPromptStore.subscribe(answer);
+  }, [wsId]);
 
   useEffect(() => {
     if (!leaving) return;
     const timer = window.setTimeout(() => {
       setCards(null);
+      setForced(false);
       setLeaving(false);
     }, LEAVE_MS);
     return () => window.clearTimeout(timer);
   }, [leaving]);
 
   // Opening What's new from the Help menu also marks the release seen.
-  if (!cards || (!hasUnread && !leaving)) return null;
+  const onScreen = cards !== null && (hasUnread || leaving || forced);
+  useEffect(() => {
+    if (!onScreen) useSessionPromptStore.getState().releaseCorner("whats-new");
+  }, [onScreen]);
+  useEffect(() => () => useSessionPromptStore.getState().releaseCorner("whats-new"), []);
+
+  if (!cards || !onScreen) return null;
 
   const finish = () => {
     markSeen();
@@ -115,6 +158,8 @@ export function WhatsNewDeck() {
 
   return (
     <Deck
+      // A fresh deal from the dev toolbar starts again from the first card.
+      key={cards.map((c) => `${c.release.version}:${c.highlight.id}`).join()}
       cards={cards}
       leaving={leaving}
       // The chat window covers this corner while it is open; the deck keeps its place behind it.

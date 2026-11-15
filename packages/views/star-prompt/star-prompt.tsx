@@ -11,7 +11,7 @@ import { formatStarCount, githubStarsOptions, MULTICA_GITHUB_URL } from "@multic
 import { createLogger } from "@multica/core/logger";
 import { needsSourceBackfill } from "@multica/core/onboarding";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
-import { useSessionPromptStore } from "@multica/core/session-prompt";
+import { useDevPromptStore, useSessionPromptStore } from "@multica/core/session-prompt";
 import {
   agentDoneIssueCountOptions,
   claimStarPromptShowing,
@@ -80,6 +80,8 @@ export function StarPrompt() {
       // The attribution survey owns this session's one interruption.
       if (needsSourceBackfill(user, readSourceBackfillDismissCount(user?.id))) return;
       if (!isQuietMoment()) return;
+      // The What's new deck holds the corner; the next finished issue tries again.
+      if (useSessionPromptStore.getState().corner !== null) return;
 
       const [doneCount, agents] = await Promise.all([
         qc.fetchQuery(agentDoneIssueCountOptions(workspaceId, m.agentId)),
@@ -88,8 +90,9 @@ export function StarPrompt() {
       const agent = agents.find((a) => a.id === m.agentId);
       if (!agent || doneCount < STAR_PROMPT_MIN_AGENT_DONE_ISSUES) return;
       if (!mountedRef.current || !(await claimStarPromptShowing())) return;
+      if (!mountedRef.current || !useSessionPromptStore.getState().claimCorner("star")) return;
       useSessionPromptStore.getState().markPrompted();
-      if (mountedRef.current) setShowing({ agentName: agent.name, doneCount });
+      setShowing({ agentName: agent.name, doneCount });
     };
 
     const timer = window.setTimeout(() => {
@@ -99,10 +102,26 @@ export function StarPrompt() {
     return () => window.clearTimeout(timer);
   }, [moment, wsId, qc]);
 
+  useEffect(() => {
+    if (!wsId) return;
+    const answer = () => {
+      if (!useDevPromptStore.getState().take("star")) return;
+      useSessionPromptStore.getState().claimCorner("star");
+      setShowing({ agentName: "Dev agent", doneCount: STAR_PROMPT_MIN_AGENT_DONE_ISSUES });
+    };
+    answer();
+    return useDevPromptStore.subscribe(answer);
+  }, [wsId]);
+
+  useEffect(() => () => useSessionPromptStore.getState().releaseCorner("star"), []);
+
   // The chat window covers this corner while it is open.
   if (!showing || chatOpen) return null;
 
-  const close = () => setShowing(null);
+  const close = () => {
+    setShowing(null);
+    useSessionPromptStore.getState().releaseCorner("star");
+  };
   const star = () => {
     close();
     markStarPromptStarred().catch((err) => logger.warn("failed to record star click", err));
