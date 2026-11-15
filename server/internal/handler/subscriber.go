@@ -20,6 +20,10 @@ type SubscriberResponse struct {
 	UserID    string `json:"user_id"`
 	Reason    string `json:"reason"`
 	CreatedAt string `json:"created_at"`
+	// ProjectCovered marks a direct row whose member also subscribes to the
+	// issue's project. The project path delivers every event regardless of the
+	// direct reason, so clients must not read that reason as a reduced tier.
+	ProjectCovered bool `json:"project_covered,omitempty"`
 }
 
 func subscriberToResponse(s db.IssueSubscriber) SubscriberResponse {
@@ -55,13 +59,20 @@ func (h *Handler) ListIssueSubscribers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	projectCovered := make(map[string]bool, len(projectSubscribers))
+	for _, ps := range projectSubscribers {
+		projectCovered[uuidToString(ps.UserID)] = true
+	}
+
 	resp := make([]SubscriberResponse, 0, len(subscribers)+len(projectSubscribers))
 	direct := make(map[string]bool, len(subscribers))
 	for _, s := range subscribers {
-		resp = append(resp, subscriberToResponse(s))
+		row := subscriberToResponse(s)
 		if s.UserType == "member" {
-			direct[uuidToString(s.UserID)] = true
+			direct[row.UserID] = true
+			row.ProjectCovered = projectCovered[row.UserID]
 		}
+		resp = append(resp, row)
 	}
 	for _, ps := range projectSubscribers {
 		userID := uuidToString(ps.UserID)

@@ -25,11 +25,13 @@ const me = "user-me";
 function renderBadge({
   assignee,
   reason = "commenter",
+  projectCovered = false,
   preferences = {},
   onFollowAll = vi.fn(),
 }: {
   assignee: { assignee_type: "member" | "agent" | null; assignee_id: string | null };
   reason?: "commenter" | "manual" | "creator";
+  projectCovered?: boolean;
   preferences?: Record<string, string>;
   onFollowAll?: () => void;
 }) {
@@ -43,6 +45,7 @@ function renderBadge({
           issue={assignee}
           userId={me}
           reason={reason}
+          projectCovered={projectCovered}
           pending={false}
           onFollowAll={onFollowAll}
         />
@@ -83,5 +86,23 @@ describe("KeyUpdatesSubscriptionBadge", () => {
     cleanup();
     renderBadge({ assignee: theirs, preferences: { others_issues: "all" } });
     expect(screen.queryByRole("button", { name: "Key updates only" })).toBeNull();
+  });
+
+  // Commenting on someone else's issue in a project the member watches leaves
+  // a commenter row, but the project still delivers every event (MUL-9343).
+  it("stays hidden when the project already delivers everything", () => {
+    renderBadge({
+      assignee: { assignee_type: "member", assignee_id: "user-other" },
+      projectCovered: true,
+    });
+    expect(screen.queryByRole("button", { name: "Key updates only" })).toBeNull();
+  });
+
+  // Clickable chips use rounded-md (packages/ui/docs/button.md).
+  it("uses the clickable chip radius", () => {
+    renderBadge({ assignee: { assignee_type: "member", assignee_id: "user-other" } });
+    const trigger = screen.getByRole("button", { name: "Key updates only" });
+    expect(trigger.className).toContain("rounded-md");
+    expect(trigger.className).not.toContain("rounded-full");
   });
 });

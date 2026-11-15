@@ -191,3 +191,58 @@ func TestBystanderTier_ThreadReply(t *testing.T) {
 		t.Fatalf("watcher after a reply in their thread: %+v, want one new_comment", items)
 	}
 }
+
+// A member who watches the project and commented on someone else's issue in it
+// has a commenter row, but the project path still delivers every event — once.
+func TestBystanderTier_ProjectWatcherKeepsEveryEvent(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	owner := createNotificationMember(t, "bystander-project-owner@multica.ai")
+	t.Cleanup(func() { cleanupTestUser(t, "bystander-project-owner@multica.ai") })
+	watcher := createNotificationMember(t, "bystander-project-watcher@multica.ai")
+	t.Cleanup(func() { cleanupTestUser(t, "bystander-project-watcher@multica.ai") })
+	bystander := createNotificationMember(t, "bystander-project-plain@multica.ai")
+	t.Cleanup(func() { cleanupTestUser(t, "bystander-project-plain@multica.ai") })
+
+	projectID := createTestProject(t)
+	f := workspaceFixture(t)
+	issueID := f.Issue(t, "bystander tier issue", testutil.Cols{
+		"assignee_type": "member",
+		"assignee_id":   owner,
+		"project_id":    projectID,
+	})
+	t.Cleanup(func() { cleanupInboxForIssue(t, issueID) })
+	addProjectSubscribers(t, projectID, watcher)
+	addTestSubscriber(t, issueID, "member", watcher, "commenter")
+	addTestSubscriber(t, issueID, "member", bystander, "commenter")
+
+	content := "a routine update"
+	commentID := f.Comment(t, issueID, content, testutil.Cols{"author_id": owner})
+	bus.Publish(events.Event{
+		Type:        protocol.EventCommentCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     owner,
+		Payload: map[string]any{
+			"comment": handler.CommentResponse{
+				ID:         commentID,
+				IssueID:    issueID,
+				AuthorType: "member",
+				AuthorID:   owner,
+				Content:    content,
+				Type:       "comment",
+			},
+			"issue_title":  "bystander tier issue",
+			"issue_status": "in_progress",
+		},
+	})
+	publishStatusChange(bus, issueID, "in_progress", "todo")
+
+	if got := inboxTypes(t, queries, watcher); len(got) != 2 {
+		t.Errorf("project watcher: inbox %v, want the comment and the status change once each", got)
+	}
+	if got := inboxCount(t, queries, bystander); got != 0 {
+		t.Errorf("plain bystander: %d inbox items, want 0", got)
+	}
+}

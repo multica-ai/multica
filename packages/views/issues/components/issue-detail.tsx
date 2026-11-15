@@ -2415,7 +2415,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   } = useIssueReactions(id, user?.id);
 
   const {
-    subscribers, isSubscribed, subscriptionReason, subscriptionKnown,
+    subscribers, isSubscribed, subscriptionReason, subscriptionProjectCovered, subscriptionKnown,
     togglePending, subtreePending,
     toggleSubscribe: handleToggleSubscribe, toggleSubscriber, followAllActivity,
     unsubscribeFromSubtree: handleUnsubscribeSubtree,
@@ -4092,6 +4092,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                     issue={issue}
                     userId={user?.id}
                     reason={subscriptionReason}
+                    projectCovered={subscriptionProjectCovered}
                     pending={togglePending}
                     onFollowAll={followAllActivity}
                   />

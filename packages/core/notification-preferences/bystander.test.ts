@@ -36,4 +36,17 @@ describe("receivesKeyUpdatesOnly", () => {
     expect(check("project", theirs)).toBe(false);
     expect(check("commenter", theirs, { others_issues: "all" })).toBe(false);
   });
+
+  it("keeps full delivery when the member also watches the project", () => {
+    expect(
+      receivesKeyUpdatesOnly({
+        reason: "commenter",
+        projectCovered: true,
+        issue: { assignee_type: "member", assignee_id: "user-other" },
+        userId: me,
+        agents,
+        preferences: {},
+      }),
+    ).toBe(false);
+  });
 });

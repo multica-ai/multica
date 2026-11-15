@@ -75,9 +75,17 @@ export function useIssueSubscribers(issueId: string, userId?: string) {
             // delegation that no longer applies (MUL-5483).
             if (existing) {
               if (existing.reason === p.reason) return old;
+              // A project watcher who now has a direct row (they commented,
+              // say) still receives everything through the project.
+              const projectCovered =
+                existing.project_covered || existing.reason === "project";
               return old.map((s) =>
                 s.user_id === p.user_id && s.user_type === p.user_type
-                  ? { ...s, reason: p.reason as IssueSubscriber["reason"] }
+                  ? {
+                      ...s,
+                      reason: p.reason as IssueSubscriber["reason"],
+                      ...(projectCovered ? { project_covered: true } : {}),
+                    }
                   : s,
               );
             }
@@ -136,6 +144,7 @@ export function useIssueSubscribers(issueId: string, userId?: string) {
   // your behalf" explanation — a subscription nobody remembers opting into
   // reads as the product being creepy unless it says why (MUL-5483).
   const subscriptionReason = ownSubscription?.reason;
+  const subscriptionProjectCovered = !!ownSubscription?.project_covered;
 
   // Serializes direct toggles. Disabling the button covers the ordinary case,
   // but React Query flushes `isPending` in a microtask, so two clicks in the
@@ -229,6 +238,7 @@ export function useIssueSubscribers(issueId: string, userId?: string) {
     subscriptionKnown,
     isSubscribed,
     subscriptionReason,
+    subscriptionProjectCovered,
     // Serializing the UI on these is what keeps the whole-list optimistic
     // snapshot in useToggleIssueSubscriber safe: concurrent toggles would each
     // snapshot the other's in-flight patch and roll back to the wrong list.

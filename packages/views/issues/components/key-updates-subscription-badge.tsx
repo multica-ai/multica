@@ -30,12 +30,14 @@ export function KeyUpdatesSubscriptionBadge({
   issue,
   userId,
   reason,
+  projectCovered,
   pending,
   onFollowAll,
 }: {
   issue: { assignee_type?: IssueAssigneeType | null; assignee_id?: string | null };
   userId: string | undefined;
   reason: IssueSubscriber["reason"] | undefined;
+  projectCovered: boolean;
   pending: boolean;
   onFollowAll: () => void;
 }) {
@@ -53,6 +55,7 @@ export function KeyUpdatesSubscriptionBadge({
     !agentsKnown ||
     !receivesKeyUpdatesOnly({
       reason,
+      projectCovered,
       issue,
       userId,
       agents: agents ?? [],
@@ -68,7 +71,7 @@ export function KeyUpdatesSubscriptionBadge({
           menu holds the one action that changes it. */}
       <DropdownMenuTrigger
         disabled={pending}
-        className="cursor-pointer rounded-full bg-muted px-2 py-0.5 text-caption text-muted-foreground transition-colors hover:text-foreground"
+        className="cursor-pointer rounded-md bg-muted px-2 py-0.5 text-caption text-muted-foreground transition-colors hover:text-foreground"
       >
         {t(($) => $.detail.key_updates_subscription_badge)}
       </DropdownMenuTrigger>
