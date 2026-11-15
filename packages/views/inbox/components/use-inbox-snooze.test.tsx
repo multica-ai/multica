@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import { inboxKeys } from "@multica/core/inbox/queries";
@@ -60,10 +60,14 @@ function undoFromToast() {
 
 describe("useInboxSnooze", () => {
   beforeEach(() => {
+    // Only the clock is faked, so promises and waitFor still run.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-16T06:20:00Z"));
     vi.clearAllMocks();
     vi.mocked(api.snoozeInbox).mockResolvedValue({ issue_id: "i1", snoozed_until: later.toISOString() });
     vi.mocked(api.unsnoozeInbox).mockResolvedValue({ issue_id: "i1" });
   });
+  afterEach(() => vi.useRealTimers());
 
   it("still shows the toast with Undo after the snoozing component unmounts", async () => {
     let finish!: (value: { issue_id: string; snoozed_until: string }) => void;
