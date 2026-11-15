@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@multica/core/i18n/react";
-import { useSessionPromptStore } from "@multica/core/session-prompt";
+import { useDevPromptStore, useSessionPromptStore } from "@multica/core/session-prompt";
 import type { User } from "@multica/core/types";
 import { Command, Globe, Terminal } from "@multica/ui/icons";
 import enCommon from "../locales/en/common.json";
@@ -119,7 +119,8 @@ beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   mocks.markWhatsNewSeen.mockResolvedValue(undefined);
   stores.chat.setState({ isOpen: false });
-  useSessionPromptStore.setState({ prompted: false });
+  useSessionPromptStore.setState({ prompted: false, deckDealt: false, surveyPending: false, corner: null });
+  useDevPromptStore.setState({ request: null });
   signIn();
 });
 
@@ -140,7 +141,7 @@ describe("WhatsNewDeck", () => {
     expect(within(screen.getByRole("group", { name: "Palette title" })).getByText("v0.3.0 · Mar 1")).toBeInTheDocument();
     // 0.1.0 shipped before the account existed.
     expect(screen.getAllByRole("button", { name: /^Update \d of 3$/ })).toHaveLength(3);
-    expect(useSessionPromptStore.getState().prompted).toBe(true);
+    expect(useSessionPromptStore.getState()).toMatchObject({ deckDealt: true, corner: "whats-new", prompted: false });
   });
 
   it("walks the deck with Next and marks the newest release seen on Got it", async () => {
@@ -177,6 +178,7 @@ describe("WhatsNewDeck", () => {
     expect(mocks.markWhatsNewSeen).toHaveBeenCalledWith("0.3.0");
     await wait(300);
     expect(screen.queryByRole("region", { name: "What's new" })).not.toBeInTheDocument();
+    expect(useSessionPromptStore.getState().corner).toBeNull();
   });
 
   it("follows a card's action and puts the deck away", async () => {
@@ -211,7 +213,7 @@ describe("WhatsNewDeck", () => {
     renderDeck();
     await wait(WHATS_NEW_DECK_DELAY_MS);
     expect(title("Palette title")).not.toBeInTheDocument();
-    expect(useSessionPromptStore.getState().prompted).toBe(false);
+    expect(useSessionPromptStore.getState().deckDealt).toBe(false);
 
     act(() => stores.chat.setState({ isOpen: false }));
     await wait(WHATS_NEW_DECK_RETRY_MS);
@@ -229,19 +231,69 @@ describe("WhatsNewDeck", () => {
     expect(title("Runtimes title")).toBeInTheDocument();
   });
 
-  it("stays away once the session has had its interruption", async () => {
+  it("deals even after another prompt has shown this session", async () => {
     useSessionPromptStore.setState({ prompted: true });
+    renderDeck();
+    await wait(WHATS_NEW_DECK_DELAY_MS);
+    expect(title("Palette title")).toBeInTheDocument();
+  });
+
+  it("deals for a user who still owes the source survey", async () => {
+    signIn({ onboarding_questionnaire: undefined });
+    renderDeck();
+    await wait(WHATS_NEW_DECK_DELAY_MS);
+    expect(title("Palette title")).toBeInTheDocument();
+  });
+
+  it("deals only once per session", async () => {
+    useSessionPromptStore.setState({ deckDealt: true });
     renderDeck();
     await wait(WHATS_NEW_DECK_DELAY_MS + WHATS_NEW_DECK_RETRY_MS);
     expect(title("Palette title")).not.toBeInTheDocument();
   });
 
-  it("leaves the session to the source survey when it is due", async () => {
-    signIn({ onboarding_questionnaire: undefined });
+  it("waits for the source survey to open and close first", async () => {
+    useSessionPromptStore.setState({ surveyPending: true });
     renderDeck();
     await wait(WHATS_NEW_DECK_DELAY_MS);
     expect(title("Palette title")).not.toBeInTheDocument();
-    expect(useSessionPromptStore.getState().prompted).toBe(false);
+
+    act(() => useSessionPromptStore.setState({ surveyPending: false }));
+    await wait(WHATS_NEW_DECK_RETRY_MS);
+    expect(title("Palette title")).toBeInTheDocument();
+  });
+
+  it("waits for the star card to leave the corner", async () => {
+    useSessionPromptStore.setState({ corner: "star" });
+    renderDeck();
+    await wait(WHATS_NEW_DECK_DELAY_MS);
+    expect(title("Palette title")).not.toBeInTheDocument();
+
+    act(() => useSessionPromptStore.setState({ corner: null }));
+    await wait(WHATS_NEW_DECK_RETRY_MS);
+    expect(title("Palette title")).toBeInTheDocument();
+    expect(useSessionPromptStore.getState().corner).toBe("whats-new");
+  });
+
+  it("runs its check at once when the dev toolbar asks", async () => {
+    renderDeck();
+    act(() => useDevPromptStore.getState().trigger("whats-new-check"));
+    await wait(0);
+    expect(title("Palette title")).toBeInTheDocument();
+  });
+
+  it("shows every card with hero art on demand from the dev toolbar, read or not", async () => {
+    signIn({ whats_new_seen_version: "0.3.0" });
+    useSessionPromptStore.setState({ deckDealt: true });
+    renderDeck();
+    act(() => useDevPromptStore.getState().trigger("whats-new"));
+    expect(title("Palette title")).toBeInTheDocument();
+    expect(screen.getAllByTestId("hero-art")).toHaveLength(3);
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    await wait(300);
+    expect(screen.queryByRole("region", { name: "What's new" })).not.toBeInTheDocument();
+    expect(useSessionPromptStore.getState().corner).toBeNull();
   });
 
   it("leaves highlights without hero art to the What's new panel", async () => {
@@ -258,7 +310,7 @@ describe("WhatsNewDeck", () => {
       renderDeck();
       await wait(WHATS_NEW_DECK_DELAY_MS);
       expect(screen.queryByRole("region", { name: "What's new" })).not.toBeInTheDocument();
-      expect(useSessionPromptStore.getState().prompted).toBe(false);
+      expect(useSessionPromptStore.getState().deckDealt).toBe(false);
     } finally {
       RELEASES[0]!.highlights[0]!.hero = ART;
       RELEASES[0]!.highlights[1]!.hero = ART;
@@ -270,7 +322,7 @@ describe("WhatsNewDeck", () => {
     renderDeck();
     await wait(WHATS_NEW_DECK_DELAY_MS);
     expect(screen.queryByRole("region", { name: "What's new" })).not.toBeInTheDocument();
-    expect(useSessionPromptStore.getState().prompted).toBe(false);
+    expect(useSessionPromptStore.getState().deckDealt).toBe(false);
   });
 
   it("goes away when the release is marked seen elsewhere", async () => {
@@ -280,5 +332,6 @@ describe("WhatsNewDeck", () => {
 
     act(() => signIn({ whats_new_seen_version: "0.3.0" }));
     expect(title("Palette title")).not.toBeInTheDocument();
+    expect(useSessionPromptStore.getState().corner).toBeNull();
   });
 });
