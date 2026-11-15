@@ -1956,5 +1956,26 @@
       "retry_failed": "这段录音转写失败",
       "show_more": "显示更多"
     }
+  },
+  "private_projects": {
+    "title": "私有项目",
+    "description": "私有项目只有项目成员能打开。作为工作区所有者，你可以看到每个私有项目里有哪些成员，并在需要介入时把自己加进去。",
+    "empty": "这个工作区还没有私有项目。",
+    "load_failed": "无法加载私有项目。",
+    "retry": "重试",
+    "no_members": "没有成员",
+    "lead_name": "{{name}}（负责人）",
+    "more_members": "另外 {{count}} 人",
+    "archived": "已归档",
+    "member": "你已是成员",
+    "open": "打开",
+    "join": "加入",
+    "join_title": "加入「{{title}}」？",
+    "join_description": "你会出现在这个项目的成员名单里，并能看到其中的任务、评论和附件。现有成员会收到通知。",
+    "join_description_empty": "这个项目目前没有成员。加入后你将是唯一的成员，并能看到其中的任务、评论和附件。",
+    "join_confirm": "加入项目",
+    "cancel": "取消",
+    "toast_joined": "已加入 {{title}}",
+    "toast_failed": "加入项目失败。"
   }
 }

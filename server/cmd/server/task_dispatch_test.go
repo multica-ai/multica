@@ -47,6 +47,11 @@ func TestPrivateProjectQuickCreateDispatchOmitsPrompt(t *testing.T) {
 	ctx := context.Background()
 	fx := testutil.New(testPool, testWorkspaceID, testUserID)
 	project := fx.Project(t, "Private client project", testutil.Cols{"visibility": "private"})
+	// The run's human and the agent's owner are the same user, who has to be
+	// a project member for the run to exist at all.
+	fx.InsertNoID(t, "project_member", testutil.Cols{
+		"workspace_id": testWorkspaceID, "project_id": project, "user_id": testUserID,
+	}, "project_id = $1 AND user_id = $2", project, testUserID)
 	runtime := fx.Runtime(t, "Dispatch runtime")
 	agent := fx.Agent(t, "Dispatch agent", runtime)
 	q := db.New(testPool)

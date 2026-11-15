@@ -68,6 +68,8 @@
     "retry_with_context": "保留上下文重試",
     "edit_advanced": "在完整表單中編輯",
     "autopilot_quota_exceeded_body": "當前週期的 {{limit}} 次自動化執行額度已用完。在 {{resetAt}} 重置前，後續自動化執行將不會啟動。",
+    "project_owner_joined_body": "{{name}} 是工作區所有者，已把自己加入這個私有專案，現在可以看到其中的任務、評論和附件。",
+    "open_project": "開啟專案",
     "autopilot_quota_upgrade": "檢視升級方案",
     "archive": "歸檔",
     "unarchive": "取消歸檔"
@@ -95,6 +97,7 @@
     "quick_create_unconfirmed": "透過 AI 代理建立結果未確認",
     "autopilot_paused": "自動化已暫停",
     "children_done": "子任務已全部結束",
+    "project_owner_joined": "所有者加入了專案",
     "autopilot_quota_exceeded": "自動化執行次數已用完",
     "app_action_requested": "等待你確認",
     "app_action_reminder": "確認即將過期",

@@ -16,6 +16,34 @@ export interface ProjectMember {
 export interface ListProjectMembersResponse {
   members: ProjectMember[];
   total: number;
+  /**
+   * The member who manages a private project's access besides the workspace
+   * owners and admins on its list: its lead when that is a person, otherwise
+   * its creator, otherwise its longest-standing member. Null for a
+   * workspace-visible project.
+   */
+  manager_id: string | null;
+}
+
+/**
+ * A private project as a workspace owner sees it from settings: who is in it,
+ * never what is in it. `is_member` says whether the owner is one of them.
+ */
+export interface PrivateProjectOverview {
+  id: string;
+  title: string;
+  icon: string | null;
+  lead_type: "member" | "agent" | null;
+  lead_id: string | null;
+  created_at: string;
+  archived_at: string | null;
+  is_member: boolean;
+  members: Omit<ProjectMember, "project_id">[];
+}
+
+export interface ListPrivateProjectsResponse {
+  projects: PrivateProjectOverview[];
+  total: number;
 }
 
 export interface Project {

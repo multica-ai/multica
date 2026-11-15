@@ -128,7 +128,7 @@ WHERE (($2::text = 'member' AND EXISTS (
     SELECT 1 FROM agent WHERE workspace_id = $1 AND id = $3
 )))
 -- MUL-8472: a member outside a private project gets no notification about its
--- issues. Owners/admins and project members do.
+-- issues, whatever their workspace role. Only project members do.
 AND NOT ($2::text = 'member' AND EXISTS (
     SELECT 1 FROM issue private_issue
     JOIN project private_project ON private_project.id = private_issue.project_id
@@ -137,11 +137,6 @@ AND NOT ($2::text = 'member' AND EXISTS (
       AND NOT EXISTS (
           SELECT 1 FROM project_member pm
           WHERE pm.project_id = private_project.id AND pm.user_id = $3
-      )
-      AND NOT EXISTS (
-          SELECT 1 FROM member manager
-          WHERE manager.workspace_id = $1 AND manager.user_id = $3
-            AND manager.role IN ('owner', 'admin')
       )
 ))
 RETURNING *;
@@ -271,9 +266,9 @@ FROM (
     WHERE i.recipient_type = 'member'
       AND i.recipient_id = $1
       AND i.archived = false
-      -- MUL-8472: issues in private projects the recipient is outside of
-      -- (neither a project member nor a workspace owner/admin) do not count.
-      AND NOT (m.role NOT IN ('owner', 'admin') AND EXISTS (
+      -- MUL-8472: issues in private projects the recipient is not a member
+      -- of do not count.
+      AND NOT EXISTS (
           SELECT 1 FROM issue private_issue
           JOIN project private_project ON private_project.id = private_issue.project_id
           WHERE private_issue.id = i.issue_id
@@ -282,7 +277,7 @@ FROM (
                 SELECT 1 FROM project_member pm
                 WHERE pm.project_id = private_project.id AND pm.user_id = i.recipient_id
             )
-      ))
+      )
     ORDER BY i.workspace_id, COALESCE(i.issue_id, i.id), i.created_at DESC
 ) newest
 WHERE newest.read = false

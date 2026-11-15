@@ -132,7 +132,7 @@
       "new_issue_in_project": "Nouvelle tâche dans {{name}}",
       "new_issue_no_project": "Nouvelle tâche sans projet",
       "no_project": "Aucun projet",
-      "private_project": "Visible par les membres du projet et les owner et admin de l’espace de travail",
+      "private_project": "Visible uniquement par les membres du projet",
       "all_projects_one": "Tous les projets ({{count}})",
       "all_projects_other": "Tous les projets ({{count}})",
       "project_issues": "Tâches de {{name}}",

@@ -39,8 +39,14 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@tanstack/react-query", () => ({
+  queryOptions: (options: unknown) => options,
   useQuery: (options: { queryKey?: readonly unknown[] }) => {
     const key = options.queryKey?.[0];
+    // One project's member list, which a lead picker reads for the access
+    // manager of a private project. Nothing here is private.
+    if (key === "projects" && options.queryKey?.[2] === "detail") {
+      return { data: undefined, isLoading: false };
+    }
     if (key === "projects") {
       return { data: mocks.projects, isLoading: false };
     }
