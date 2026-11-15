@@ -38,6 +38,18 @@ import { ISSUE_ROW_LINK_CLASS, TREE_ROW_BUTTON_CLASS } from "./sidebar-tree";
 
 const EMPTY_INBOX: InboxItem[] = [];
 
+/**
+ * The unread count sits in the panel's number column (the rows' trailing
+ * edge, 12px in from the label row's) and yields that spot to the section's
+ * buttons while they show. Where they always show (coarse pointers) it stays
+ * in line before them.
+ */
+const HEADER_COUNT_CLASS = cn(
+  "pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 font-medium text-brand transition-opacity duration-150",
+  "group-hover/section:opacity-0 group-focus-within/section:opacity-0",
+  "[@media(pointer:coarse)]:pointer-events-auto [@media(pointer:coarse)]:static [@media(pointer:coarse)]:translate-y-0 [@media(pointer:coarse)]:px-1 [@media(pointer:coarse)]:group-focus-within/section:opacity-100",
+);
+
 /** The Inbox rows' place in the clicked-issue record, apart from every sidebar source. */
 export const INBOX_LIST = "inbox";
 
@@ -102,11 +114,11 @@ export function InboxSection({
       collapsed={collapsed}
       onCollapsedChange={setCollapsed}
       action={
-        <>
-          {showCount && <PanelCount value={unread} className="px-1 font-medium text-brand" />}
+        <div className="relative flex items-center gap-1">
+          {showCount && <PanelCount value={unread} className={HEADER_COUNT_CLASS} />}
           <InboxSectionSettings className={SECTION_SETTINGS_REVEAL_CLASS} />
           <InboxSectionActions className={SECTION_SETTINGS_REVEAL_CLASS} />
-        </>
+        </div>
       }
     >
       {displayed.length > 0 ? (
@@ -167,6 +179,8 @@ function InboxSectionActions({ className }: { className?: string }) {
             aria-label={label}
             className={cn(
               TREE_ROW_BUTTON_CLASS,
+              // The slot of the other sections' create button.
+              "size-[var(--button-height-xs)]",
               "text-muted-foreground data-popup-open:bg-surface-selected data-popup-open:text-foreground data-popup-open:opacity-100",
               className,
             )}
@@ -240,7 +254,7 @@ function InboxRow({
 
   return (
     <li data-inbox-row data-read={unread ? "false" : "true"} className="group/inbox relative">
-      <div {...panelRowAnchor(active)} className={cn(PANEL_ROW_CLASS, panelRowStateClass(active), "relative pr-2")}>
+      <div {...panelRowAnchor(active)} className={cn(PANEL_ROW_CLASS, panelRowStateClass(active), "relative")}>
         <span title={typeLabels[item.type]} className="flex shrink-0 items-center">
           <Icon aria-hidden className="size-4" />
         </span>
