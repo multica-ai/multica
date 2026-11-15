@@ -17,6 +17,13 @@ import (
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
+func TestTomcatSessionConfigFailureDoesNotRejectResume(t *testing.T) {
+	err := &acpRPCError{Method: "session/load", Code: -32603, Message: "session_config_failed"}
+	if isACPResumeRejected(err) {
+		t.Fatal("a startup configuration failure must not discard the existing session")
+	}
+}
+
 // The current test executable is the fake ACP peer; never discover a user's CLI.
 func TestTomcatHelperProcess(t *testing.T) {
 	mode := os.Getenv("MULTICA_TOMCAT_TEST_HELPER")

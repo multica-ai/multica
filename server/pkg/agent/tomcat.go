@@ -247,7 +247,7 @@ func (b *tomcatBackend) runTomcatTurn(ctx context.Context, c *hermesClient, prom
 		return fail(method, fmt.Errorf("missing session ID")), ""
 	}
 	c.sessionID = result.SessionID
-	model := tomcatCurrentModel(session)
+	model, _ := acpConfigOptionCurrentValue(session, "model")
 	if opts.Model != "" {
 		configured, err := c.request(ctx, "session/set_config_option", map[string]any{"sessionId": result.SessionID, "configId": "model", "value": opts.Model})
 		if err != nil {
@@ -256,7 +256,7 @@ func (b *tomcatBackend) runTomcatTurn(ctx context.Context, c *hermesClient, prom
 			}
 			return fail("session/set_config_option", err), model
 		}
-		model = tomcatCurrentModel(configured)
+		model, _ = acpConfigOptionCurrentValue(configured, "model")
 		session = configured
 	}
 	if err := setTomcatEffort(ctx, c.request, result.SessionID, opts.ThinkingLevel, session); err != nil {
@@ -302,21 +302,4 @@ func setTomcatEffort(ctx context.Context, request acpRequestFn, sessionID, level
 		return fmt.Errorf("Tomcat did not confirm effort %q", level)
 	}
 	return nil
-}
-
-func tomcatCurrentModel(raw json.RawMessage) string {
-	var response struct {
-		ConfigOptions []struct {
-			ID           string `json:"id"`
-			CurrentValue string `json:"currentValue"`
-		} `json:"configOptions"`
-	}
-	if json.Unmarshal(raw, &response) == nil {
-		for _, option := range response.ConfigOptions {
-			if option.ID == "model" {
-				return option.CurrentValue
-			}
-		}
-	}
-	return ""
 }

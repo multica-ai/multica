@@ -25,10 +25,14 @@ func TestResolveTaskModelSelectionThinkingLevelWarning(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		provider string
+		resume   bool
 		model    string
 		level    string
 		want     string
 	}{
+		{name: "Tomcat resume default model", provider: "tomcat", resume: true, level: "high"},
+		{name: "Tomcat new default model lacks High", provider: "tomcat", level: "high", want: `Thinking level "high" was not applied: model "claude-sonnet-5" does not support this thinking level. The runtime will use its default thinking level.`},
+		{name: "Tomcat resume explicit model", provider: "tomcat", resume: true, model: "claude-haiku-4-5-20251001", level: "medium", want: `Thinking level "medium" was not applied: model "claude-haiku-4-5-20251001" does not advertise thinking-level control. The runtime will use its default thinking level.`},
 		{name: "Tomcat supported", provider: "tomcat", model: "claude-sonnet-5", level: "medium"},
 		{name: "Tomcat default model", provider: "tomcat", level: "medium"},
 		{name: "Tomcat stale level", provider: "tomcat", model: "claude-sonnet-5", level: "max", want: `Thinking level "max" was not applied: model "claude-sonnet-5" does not support this thinking level. The runtime will use its default thinking level.`},
@@ -39,13 +43,13 @@ func TestResolveTaskModelSelectionThinkingLevelWarning(t *testing.T) {
 		{name: "no effort", provider: "claude", model: "claude-haiku-4-5-20251001", level: "medium", want: `Thinking level "medium" was not applied: model "claude-haiku-4-5-20251001" does not advertise thinking-level control. The runtime will use its default thinking level.`},
 		{name: "unsupported level", provider: "claude", model: "claude-sonnet-5", level: "max", want: `Thinking level "max" was not applied: model "claude-sonnet-5" does not support this thinking level. The runtime will use its default thinking level.`},
 		{name: "unavailable", provider: "claude", model: "disabled", level: "max", want: `Thinking level "max" was not applied: model "disabled" is unavailable in the installed CLI. The runtime will use its default thinking level.`},
-		{name: "Codex requires model", provider: "codex", level: "medium", want: `Thinking level "medium" was not applied: codex requires an explicit model. The runtime will use its default thinking level.`},
+		{name: "Codex requires model", provider: "codex", resume: true, level: "medium", want: `Thinking level "medium" was not applied: codex requires an explicit model. The runtime will use its default thinking level.`},
 		{name: "OMP requires model", provider: "omp", level: "max", want: `Thinking level "max" was not applied: omp requires an explicit model. The runtime will use its default thinking level.`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			stubModelDiscovery(t, map[string]agent.Catalog{tc.provider: catalog})
 			sel := resolveTaskModelSelection(context.Background(), tc.provider, agent.Command{}, taskModelSelection{
-				Model: tc.model, ThinkingLevel: tc.level,
+				Resume: tc.resume, Model: tc.model, ThinkingLevel: tc.level,
 			}, quietTaskLog())
 			if sel.Model != tc.model || sel.ThinkingLevelWarning != tc.want {
 				t.Fatalf("selection = %+v, want model %q and warning %q", sel, tc.model, tc.want)

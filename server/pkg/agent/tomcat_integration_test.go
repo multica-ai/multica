@@ -25,13 +25,6 @@ import (
 	"time"
 )
 
-func TestTomcatSessionConfigFailureDoesNotRejectResume(t *testing.T) {
-	err := &acpRPCError{Method: "session/load", Code: -32603, Message: "session_config_failed"}
-	if isACPResumeRejected(err) {
-		t.Fatal("a startup configuration failure must not discard the existing session")
-	}
-}
-
 func TestTomcatSharedServeDiscoveryHelperProcess(t *testing.T) {
 	if os.Getenv("MULTICA_TOMCAT_DISCOVERY_HELPER") != "1" {
 		return
