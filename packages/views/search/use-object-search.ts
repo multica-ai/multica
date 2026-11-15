@@ -5,7 +5,10 @@ import { useQuery } from "@tanstack/react-query";
 import { autopilotListOptions } from "@multica/core/autopilots/queries";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { issueViewEverywhereOptions } from "@multica/core/issue-views/queries";
+import { BUILTIN_VIEW_KEYS, type BuiltinViewKey } from "@multica/core/issue-views/sidebar-views";
 import { skillListOptions, workspaceListOptions } from "@multica/core/workspace/queries";
+import type { IssueView } from "@multica/core/api/schemas";
 import type {
   Autopilot,
   ChatSession,
@@ -13,6 +16,7 @@ import type {
   SkillSummary,
   Workspace,
 } from "@multica/core/types";
+import { useBuiltinViewLabel } from "../issue-views/builtin-views";
 import { scoreRow, scoreText } from "./matching";
 import { useActorDirectory, type AgentEntry, type SquadEntry } from "./use-actor-directory";
 
@@ -21,10 +25,16 @@ export interface Scored<T> {
   score: number;
 }
 
+/** A built-in view, or a saved view the user can open. */
+export type PaletteView =
+  | { kind: "builtin"; key: BuiltinViewKey; name: string }
+  | { kind: "view"; view: IssueView; name: string };
+
 export interface ObjectHits {
   agents: Scored<AgentEntry>[];
   squads: Scored<SquadEntry>[];
   members: Scored<MemberWithUser>[];
+  views: Scored<PaletteView>[];
   autopilots: Scored<Autopilot>[];
   chats: Scored<ChatSession>[];
   skills: Scored<SkillSummary>[];
@@ -34,12 +44,15 @@ export interface ObjectHits {
 const EMPTY_AUTOPILOTS: Autopilot[] = [];
 const EMPTY_CHATS: ChatSession[] = [];
 const EMPTY_SKILLS: SkillSummary[] = [];
+const EMPTY_VIEWS: IssueView[] = [];
 const EMPTY_WORKSPACES: Workspace[] = [];
 
 // Hidden aliases for the Workspaces group, prefix-matched like page keywords:
 // typing "workspace" lists every workspace the user can switch to.
 const WORKSPACE_KEYWORDS = ["switch", "workspace"];
 const ALL_MEMBERS_WORDS = ["members", "people", "users", "team"];
+// Typing "views" lists every view under the Views page row.
+const ALL_VIEWS_WORDS = ["views", "视图"];
 
 function rank<T>(items: readonly T[], score: (item: T) => number, limit: number): Scored<T>[] {
   return items
@@ -58,15 +71,24 @@ function memberScore(member: MemberWithUser, query: string): number {
   return 0;
 }
 
+function viewScore(view: PaletteView, query: string): number {
+  const byName = scoreText(view.name, query);
+  if (byName > 0) return byName;
+  if (query.length >= 2 && ALL_VIEWS_WORDS.some((word) => word.startsWith(query))) return 20;
+  return 0;
+}
+
 /**
  * Client-side search over the workspace lists the app already caches. Lists
- * the palette does not otherwise need (autopilots, chats, skills) load only
- * once the user types.
+ * the palette does not otherwise need (views, autopilots, chats, skills) load
+ * only once the user types.
  */
 export function useObjectSearch(query: string, open: boolean): ObjectHits & { directory: ReturnType<typeof useActorDirectory> } {
   const wsId = useWorkspaceId();
   const directory = useActorDirectory(open);
   const typing = open && query.length > 0;
+  const builtinLabel = useBuiltinViewLabel();
+  const { data: savedViews = EMPTY_VIEWS } = useQuery({ ...issueViewEverywhereOptions(wsId), enabled: typing && !!wsId });
   const { data: autopilots = EMPTY_AUTOPILOTS } = useQuery({ ...autopilotListOptions(wsId), enabled: typing });
   const { data: chats = EMPTY_CHATS } = useQuery({ ...chatSessionsOptions(wsId), enabled: typing });
   const { data: skills = EMPTY_SKILLS } = useQuery({ ...skillListOptions(wsId), enabled: typing });
@@ -74,14 +96,23 @@ export function useObjectSearch(query: string, open: boolean): ObjectHits & { di
   // holds, so the Workspaces group adds no request of its own.
   const { data: workspaces = EMPTY_WORKSPACES } = useQuery(workspaceListOptions());
 
+  const views = useMemo<PaletteView[]>(
+    () => [
+      ...BUILTIN_VIEW_KEYS.map((key) => ({ kind: "builtin" as const, key, name: builtinLabel(key) })),
+      ...savedViews.map((view) => ({ kind: "view" as const, view, name: view.name })),
+    ],
+    [builtinLabel, savedViews],
+  );
+
   const hits = useMemo<ObjectHits>(() => {
     if (!query) {
-      return { agents: [], squads: [], members: [], autopilots: [], chats: [], skills: [], workspaces: [] };
+      return { agents: [], squads: [], members: [], views: [], autopilots: [], chats: [], skills: [], workspaces: [] };
     }
     return {
       agents: rank(directory.agents, (e) => scoreText(e.agent.name, query), 8),
       squads: rank(directory.squads, (e) => scoreText(e.squad.name, query), 5),
       members: rank(directory.members, (m) => memberScore(m, query), 10),
+      views: rank(views, (v) => viewScore(v, query), 8),
       autopilots: rank(
         autopilots.filter((a) => a.status !== "archived"),
         (a) => scoreText(a.title, query),
@@ -102,7 +133,7 @@ export function useObjectSearch(query: string, open: boolean): ObjectHits & { di
         50,
       ),
     };
-  }, [autopilots, chats, directory, query, skills, workspaces, wsId]);
+  }, [autopilots, chats, directory, query, skills, views, workspaces, wsId]);
 
   return { ...hits, directory };
 }

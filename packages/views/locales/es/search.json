@@ -4,6 +4,7 @@
   "placeholder": "Busca o escribe lo que necesitas hacer...",
   "groups": {
     "pages": "Páginas",
+    "views": "Vistas",
     "commands": "Comandos",
     "members": "Miembros",
     "projects": "Proyectos",
