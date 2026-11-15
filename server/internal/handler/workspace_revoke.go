@@ -266,7 +266,8 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 	}
 
 	// A private project is managed by its lead, so one the leaver leads goes
-	// to its longest-standing other member before the leaver's rows are gone.
+	// to its creator, or failing that its longest-standing other member,
+	// before the leaver's rows are gone.
 	result.HandedOverProjects, err = qtx.HandOverPrivateProjectLeads(ctx, db.HandOverPrivateProjectLeadsParams{
 		WorkspaceID: workspaceID, UserID: userID,
 	})

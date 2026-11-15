@@ -143,7 +143,8 @@ UPDATE project
 SET lead_id = (
         SELECT pm.user_id FROM project_member pm
         WHERE pm.project_id = project.id AND pm.user_id <> $1
-        ORDER BY pm.created_at ASC, pm.user_id ASC
+        ORDER BY (project.creator_type = 'member' AND project.creator_id = pm.user_id) DESC NULLS LAST,
+                 pm.created_at ASC, pm.user_id ASC
         LIMIT 1
     ),
     lead_type = CASE WHEN EXISTS (
@@ -164,10 +165,12 @@ type HandOverPrivateProjectLeadsParams struct {
 }
 
 // A private project always has a human lead, who manages its access
-// (MUL-9284). When that lead leaves the workspace the project's
-// longest-standing other member takes over. A project with no other member is
-// left without a lead, for a workspace owner to recover. Run before the
-// leaver's project_member rows are deleted.
+// (MUL-9284). When that lead leaves the workspace the project goes to its
+// creator if they are still a member of it, and otherwise to its
+// longest-standing other member. People added together share a join time, so
+// without the creator rule that choice would fall to the user id. A project
+// with no other member is left without a lead, for a workspace owner to
+// recover. Run before the leaver's project_member rows are deleted.
 func (q *Queries) HandOverPrivateProjectLeads(ctx context.Context, arg HandOverPrivateProjectLeadsParams) ([]Project, error) {
 	rows, err := q.db.Query(ctx, handOverPrivateProjectLeads, arg.UserID, arg.WorkspaceID)
 	if err != nil {

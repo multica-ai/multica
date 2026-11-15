@@ -231,16 +231,24 @@ func TestPrivateProjectLeadHandedOverWhenLeadLeavesWorkspace(t *testing.T) {
 	open := dbfx.Project(t, marker+" open", testutil.Cols{"lead_type": "member", "lead_id": leaver})
 	// Private and led by someone else: untouched.
 	other := dbfx.Project(t, marker+" other", testutil.Cols{"visibility": projectaccess.VisibilityPrivate, "lead_type": "member", "lead_id": early})
+	// Created by someone who is still a member, alongside one who joined earlier.
+	founded := dbfx.Project(t, marker+" founded", testutil.Cols{
+		"visibility": projectaccess.VisibilityPrivate, "lead_type": "member", "lead_id": leaver,
+		"creator_type": "member", "creator_id": late,
+	})
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM project_member WHERE project_id = ANY($1::uuid[])`, []string{shared, solo, open, other})
+		testPool.Exec(context.Background(), `DELETE FROM project_member WHERE project_id = ANY($1::uuid[])`, []string{shared, solo, open, other, founded})
 	})
 	addProjectMemberRow(t, solo, leaver)
 	addProjectMemberRow(t, other, early)
 	addProjectMemberRow(t, other, leaver)
-	// Explicit join times: the handover goes to whoever has been in longest.
-	for i, userID := range []string{leaver, late, early} {
-		addProjectMemberRow(t, shared, userID)
-		dbfx.Exec(t, `UPDATE project_member SET created_at = now() - make_interval(days => $3) WHERE project_id = $1 AND user_id = $2`, shared, userID, i*10)
+	// Explicit join times: the handover goes to whoever has been in longest,
+	// unless the project's creator is among those who stay.
+	for _, projectID := range []string{shared, founded} {
+		for i, userID := range []string{leaver, late, early} {
+			addProjectMemberRow(t, projectID, userID)
+			dbfx.Exec(t, `UPDATE project_member SET created_at = now() - make_interval(days => $3) WHERE project_id = $1 AND user_id = $2`, projectID, userID, i*10)
+		}
 	}
 
 	result, err := testHandler.revokeAndRemoveMember(ctx, parseUUID(testWorkspaceID), parseUUID(leaver), parseUUID(memberID(leaver)), parseUUID(testUserID))
@@ -253,6 +261,9 @@ func TestPrivateProjectLeadHandedOverWhenLeadLeavesWorkspace(t *testing.T) {
 	}
 	if members := projectMemberIDs(t, shared); members[leaver] || !members[early] || !members[late] {
 		t.Errorf("shared project members = %v, want only the two who stayed", members)
+	}
+	if got := loadProjectLead(t, founded); got != (projectLead{"member", late}) {
+		t.Errorf("founded project lead = %+v, want its creator, who is still a member", got)
 	}
 	// Nobody is left to take it: no lead, no members, still private. The
 	// workspace owner recovers it (TestWorkspaceOwnerJoinsPrivateProject).
@@ -273,7 +284,7 @@ func TestPrivateProjectLeadHandedOverWhenLeadLeavesWorkspace(t *testing.T) {
 	for _, p := range result.HandedOverProjects {
 		handed[uuidToString(p.ID)] = true
 	}
-	if len(handed) != 2 || !handed[shared] || !handed[solo] {
-		t.Errorf("handed-over projects = %v, want the two private projects the leaver led", handed)
+	if len(handed) != 3 || !handed[shared] || !handed[solo] || !handed[founded] {
+		t.Errorf("handed-over projects = %v, want the three private projects the leaver led", handed)
 	}
 }
