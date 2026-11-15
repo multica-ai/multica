@@ -23,6 +23,7 @@ export type ProjectSortField =
   | "progress"
   | "start_date"
   | "due_date"
+  | "last_activity"
   | "created";
 
 export type ProjectSortDirection = CollectionSortDirection;
@@ -37,6 +38,7 @@ export const PROJECT_SORT_DEFAULT_DIRECTION: Record<
   progress: "desc",
   start_date: "asc",
   due_date: "asc",
+  last_activity: "desc",
   created: "desc",
 };
 
@@ -64,8 +66,22 @@ export type ProjectColumnKey =
   | "lead"
   | "start_date"
   | "due_date"
+  | "last_activity"
   | "issues"
   | "created";
+
+export const PROJECT_COLUMN_KEYS: readonly ProjectColumnKey[] = [
+  "priority",
+  "progress",
+  "lead",
+  "start_date",
+  "due_date",
+  "last_activity",
+  "issues",
+  "created",
+];
+
+export const PROJECT_GROUP_BY_VALUES: readonly ProjectGroupBy[] = ["none", "status", "priority", "lead"];
 
 /** Issues count and start date are opt-in; the rest show by default. */
 export const PROJECT_DEFAULT_HIDDEN_COLUMNS: ProjectColumnKey[] = ["issues", "start_date"];
@@ -117,7 +133,7 @@ export const useProjectViewStore = createCollectionViewStore<
   name: "multica_projects_view",
   version: 1,
   migrate: migrateProjectViewState,
-  defaultSortField: "created",
+  defaultSortField: "last_activity",
   sortDefaultDirection: PROJECT_SORT_DEFAULT_DIRECTION,
   defaultHiddenColumns: PROJECT_DEFAULT_HIDDEN_COLUMNS,
   emptyFilters: EMPTY_PROJECT_FILTERS,

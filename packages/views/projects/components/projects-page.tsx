@@ -14,6 +14,8 @@ import { useQuery } from "@tanstack/react-query";
 import {
   boardGroupBy,
   isProjectArchived,
+  projectLastActivityAt,
+  useProjectsPagePrefsSync,
   projectListOptions,
   useUpdateProject,
   useProjectViewStore,
@@ -313,21 +315,29 @@ export function ProjectsPage() {
   const { getActorName } = useActorName();
 
   const layout = useProjectViewStore((s) => s.layout);
-  const setLayout = useProjectViewStore((s) => s.setLayout);
   const groupBy = useProjectViewStore((s) => s.groupBy);
-  const setGroupBy = useProjectViewStore((s) => s.setGroupBy);
   const search = useProjectViewStore((s) => s.search);
   const setSearch = useProjectViewStore((s) => s.setSearch);
   const sortField = useProjectViewStore((s) => s.sortField);
   const sortDirection = useProjectViewStore((s) => s.sortDirection);
   const hiddenColumns = useProjectViewStore((s) => s.hiddenColumns);
   const filters = useProjectViewStore((s) => s.filters);
-  const toggleSort = useProjectViewStore((s) => s.toggleSort);
-  const setSortField = useProjectViewStore((s) => s.setSortField);
-  const setSortDirection = useProjectViewStore((s) => s.setSortDirection);
-  const toggleColumn = useProjectViewStore((s) => s.toggleColumn);
-  const toggleFilter = useProjectViewStore((s) => s.toggleFilter);
-  const clearFilters = useProjectViewStore((s) => s.clearFilters);
+  // Every change the user makes to the display is saved for their other devices.
+  const savePrefs = useProjectsPagePrefsSync(wsId);
+  const persisted =
+    <A extends unknown[]>(action: (...args: A) => void) =>
+    (...args: A) => {
+      action(...args);
+      savePrefs();
+    };
+  const toggleSort = persisted(useProjectViewStore((s) => s.toggleSort));
+  const setSortField = persisted(useProjectViewStore((s) => s.setSortField));
+  const setSortDirection = persisted(useProjectViewStore((s) => s.setSortDirection));
+  const toggleColumn = persisted(useProjectViewStore((s) => s.toggleColumn));
+  const toggleFilter = persisted(useProjectViewStore((s) => s.toggleFilter));
+  const clearFilters = persisted(useProjectViewStore((s) => s.clearFilters));
+  const setLayout = persisted(useProjectViewStore((s) => s.setLayout));
+  const setGroupBy = persisted(useProjectViewStore((s) => s.setGroupBy));
   const isTable = layout === "table";
   const formatRelativeDate = useFormatRelativeDate();
   const updateProject = useUpdateProject();
@@ -426,6 +436,12 @@ export function ProjectsPage() {
       }
       if (sortField === "start_date" || sortField === "due_date") {
         return compareDates(a[sortField], b[sortField], dir) || a.title.localeCompare(b.title);
+      }
+      if (sortField === "last_activity") {
+        return (
+          (Date.parse(projectLastActivityAt(a)) - Date.parse(projectLastActivityAt(b))) * dir ||
+          a.title.localeCompare(b.title)
+        );
       }
       return (Date.parse(a.created_at) - Date.parse(b.created_at)) * dir;
     });
@@ -660,6 +676,16 @@ export function ProjectsPage() {
         hideable: true,
         cell: (project) => (
           <ProjectDate value={project.due_date} dueState={projectDueState(project)} />
+        ),
+      },
+      {
+        key: "last_activity",
+        header: t(($) => $.table.last_activity),
+        width: 104,
+        sortKey: "last_activity",
+        hideable: true,
+        cell: (project) => (
+          <span className="tabular-nums">{formatRelativeDate(projectLastActivityAt(project))}</span>
         ),
       },
       {

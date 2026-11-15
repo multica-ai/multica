@@ -32,6 +32,7 @@
     "lead": "Responsable",
     "start_date": "Date de début",
     "due_date": "Date d'échéance",
+    "last_activity": "Activité récente",
     "created": "Création",
     "issues": "Tâches",
     "archived": "Archivé"

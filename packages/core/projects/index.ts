@@ -1,4 +1,11 @@
 export { canDeleteProject } from "./deletion-permissions";
+export { projectLastActivityAt } from "./activity";
+export {
+  PROJECTS_PAGE_SCOPE,
+  projectsPagePrefsFromDoc,
+  useProjectsPagePrefsSync,
+  type ProjectsPagePrefs,
+} from "./page-prefs";
 export { projectKeys, projectListOptions, projectDetailOptions, projectSubscriptionOptions } from "./queries";
 export {
   useCreateProject,

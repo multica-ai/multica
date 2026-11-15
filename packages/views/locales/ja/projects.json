@@ -32,6 +32,7 @@
     "lead": "リード",
     "start_date": "開始日",
     "due_date": "期限",
+    "last_activity": "最近のアクティビティ",
     "created": "作成日",
     "issues": "タスク数",
     "archived": "アーカイブ日"

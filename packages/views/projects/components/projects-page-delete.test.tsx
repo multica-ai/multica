@@ -195,7 +195,7 @@ describe("ProjectsPage deletion lifecycle", () => {
   );
 
   it("reports a partial batch failure and retries only the remaining projects", async () => {
-    const other = { ...project, id: "project-2", title: "Another project" };
+    const other = { ...project, id: "project-2", title: "Another project", updated_at: "2026-05-31T00:00:00Z" };
     qc.setQueryData(listKey, { projects: [project, other], total: 2 });
     qc.setQueryData(projectKeys.detail("workspace-1", other.id), other);
     listProjects.mockResolvedValue({ projects: [other], total: 1 });
@@ -241,7 +241,7 @@ describe("ProjectsPage deletion lifecycle", () => {
   );
 
   it("stops a batch if connectivity is lost between projects and retries only after confirmation", async () => {
-    const other = { ...project, id: "project-2", title: "Another project" };
+    const other = { ...project, id: "project-2", title: "Another project", updated_at: "2026-05-31T00:00:00Z" };
     qc.setQueryData(listKey, { projects: [project, other], total: 2 });
     qc.setQueryData(projectKeys.detail("workspace-1", other.id), other);
     listProjects.mockResolvedValue({ projects: [other], total: 1 });

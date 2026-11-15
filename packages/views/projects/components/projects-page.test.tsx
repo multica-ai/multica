@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   createPin: vi.fn(),
   deletePin: vi.fn(),
   openModal: vi.fn(),
+  savePrefs: vi.fn(),
   projectViewState: {
     layout: "table",
     groupBy: "none",
@@ -67,6 +68,8 @@ vi.mock("@multica/core/projects", () => ({
   useProjectViewStore: (selector: (state: unknown) => unknown) =>
     selector(mocks.projectViewState),
   boardGroupBy: (groupBy: string) => (groupBy === "none" ? "status" : groupBy),
+  projectLastActivityAt: (p: Project) => p.last_activity_at || p.updated_at,
+  useProjectsPagePrefsSync: () => mocks.savePrefs,
 }));
 
 vi.mock("@multica/core/pins", () => ({
@@ -289,6 +292,7 @@ beforeEach(() => {
   mocks.createPin.mockClear();
   mocks.deletePin.mockClear();
   mocks.openModal.mockClear();
+  mocks.savePrefs.mockClear();
   mocks.projectViewState.setLayout.mockClear();
   mocks.projectViewState.setGroupBy.mockClear();
   mocks.projectViewState.setSearch.mockClear();
@@ -547,6 +551,7 @@ describe("ProjectsPage header", () => {
     expect(screen.queryByRole("button", { name: "Cards" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Board", pressed: false }));
     expect(mocks.projectViewState.setLayout).toHaveBeenCalledWith("board");
+    expect(mocks.savePrefs).toHaveBeenCalledTimes(1);
   });
 
   it("offers no grouping only in the table, and sets the grouping", async () => {
@@ -557,6 +562,7 @@ describe("ProjectsPage header", () => {
     expect(within(grouping()).getAllByRole("button", { name: "No grouping" }).length).toBeGreaterThan(0);
     await user.click(within(grouping()).getByRole("button", { name: "Priority" }));
     expect(mocks.projectViewState.setGroupBy).toHaveBeenCalledWith("priority");
+    expect(mocks.savePrefs).toHaveBeenCalled();
 
     cleanup();
     mocks.projectViewState.layout = "board";
@@ -662,6 +668,23 @@ describe("ProjectsPage dates", () => {
     mocks.projectViewState.sortDirection = "desc";
     renderProjects();
     expect(titles()).toEqual(["Due later", "Due sooner", "No due date"]);
+  });
+
+  it("sorts by recent activity, counting issue activity over the project's own edit", () => {
+    mocks.projects = [
+      { ...PROJECT, id: "a", title: "Due edited", updated_at: "2026-06-03T00:00:00Z" },
+      {
+        ...PROJECT,
+        id: "b",
+        title: "Due busy",
+        updated_at: "2026-06-01T00:00:00Z",
+        last_activity_at: "2026-06-05T00:00:00Z",
+      },
+    ];
+    mocks.projectViewState.sortField = "last_activity";
+    mocks.projectViewState.sortDirection = "desc";
+    renderProjects();
+    expect(titles()).toEqual(["Due busy", "Due edited"]);
   });
 
   it("marks an open project's overdue due date, but not a closed one's", () => {

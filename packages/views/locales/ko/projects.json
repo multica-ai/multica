@@ -32,6 +32,7 @@
     "lead": "리드",
     "start_date": "시작일",
     "due_date": "마감일",
+    "last_activity": "최근 활동",
     "created": "생성일",
     "issues": "태스크 수",
     "archived": "보관일"

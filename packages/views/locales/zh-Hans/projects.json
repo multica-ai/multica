@@ -32,6 +32,7 @@
     "lead": "负责人",
     "start_date": "开始日期",
     "due_date": "截止日期",
+    "last_activity": "最近活动",
     "created": "创建时间",
     "issues": "任务数",
     "archived": "归档于"

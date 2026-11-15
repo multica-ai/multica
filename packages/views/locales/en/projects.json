@@ -32,6 +32,7 @@
     "lead": "Lead",
     "start_date": "Start date",
     "due_date": "Due date",
+    "last_activity": "Recent activity",
     "created": "Created",
     "issues": "Issues",
     "archived": "Archived"

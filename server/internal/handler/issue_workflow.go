@@ -903,7 +903,7 @@ func (h *Handler) publishIssueWorkflowChanged(workspaceID string, actor db.Membe
 // changed and returns the project as the API shapes it.
 func (h *Handler) publishProjectWorkflowUpdate(ctx context.Context, workspaceID string, member db.Member, project db.Project) ProjectResponse {
 	resp := projectToResponse(project)
-	resp.IssueCount, resp.DoneCount = h.loadProjectIssueStats(ctx, project.WorkspaceID, project.ID)
+	h.fillProjectIssueStats(ctx, &resp, project)
 	resp.ResourceCount = h.loadProjectResourceCount(ctx, project.ID)
 	h.publish(protocol.EventProjectUpdated, workspaceID, "member", uuidToString(member.UserID), map[string]any{"project": resp})
 	return resp
