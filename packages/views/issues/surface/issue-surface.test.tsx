@@ -950,6 +950,36 @@ describe("IssueSurface — filtered empty state", () => {
     expect(store.getState().negatedFilters).toEqual([]);
   });
 
+  it("keeps a built-in view to exactly its relations: another one would widen it", async () => {
+    const store = getIssueSurfaceViewStore("view:subscribed");
+    render(subscribedViewSurface());
+    await screen.findByText("filtered_empty.title");
+
+    act(() => store.getState().toggleRelationFilter("assigned"));
+
+    expect(store.getState().relationFilters).toEqual(["subscribed"]);
+  });
+
+  it("keeps Working to running agents: adding idle would list every issue", async () => {
+    const store = getIssueSurfaceViewStore("view:working");
+    useActiveIssueViewStore.getState().setActive("ws-1:workspace", "working");
+    render(
+      <QueryClientProvider client={qc}>
+        <IssueSurface
+          scope={{ type: "workspace", actorKind: "all" }}
+          modes={["list"]}
+          renderHeader={() => null}
+          batchToolbar="never"
+        />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(store.getState().agentRunningFilter).toBe(true));
+
+    act(() => store.setState({ agentIdleFilter: true }));
+
+    expect(store.getState()).toMatchObject({ agentRunningFilter: true, agentIdleFilter: false });
+  });
+
   it("puts back the agent filter Working is defined by", async () => {
     const store = getIssueSurfaceViewStore("view:working");
     act(() => store.setState({ agentRunningFilter: false, agentIdleFilter: true }));

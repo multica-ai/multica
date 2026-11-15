@@ -202,16 +202,25 @@ export function IssueSurface({
   );
 }
 
-/** Puts back a built-in view's condition: the relations and agent filter it is defined by. */
+/**
+ * Holds a built-in view to its condition: exactly the relations and agent
+ * filter it is defined by. Other dimensions narrow it; these would widen it,
+ * since a dimension's values are ORed (Subscribed + Assigned is "subscribed
+ * or assigned").
+ */
 function keepFixedFilters(store: StoreApi<IssueViewState>, baseline: IssueViewBaseline) {
   const state = store.getState();
   const patch: Partial<IssueViewState> = {};
-  if (baseline.agentRunning && !state.agentRunningFilter) {
+  if (baseline.agentRunning && (!state.agentRunningFilter || state.agentIdleFilter)) {
     Object.assign(patch, { agentRunningFilter: true, agentIdleFilter: false });
   }
   const relations = baseline.raw.relationFilters;
-  if (relations.some((relation) => !state.relationFilters.includes(relation))) {
-    patch.relationFilters = [...new Set([...relations, ...state.relationFilters])];
+  if (
+    relations.length > 0 &&
+    (relations.length !== state.relationFilters.length ||
+      relations.some((relation) => !state.relationFilters.includes(relation)))
+  ) {
+    patch.relationFilters = [...relations];
   }
   if (relations.length > 0 && state.negatedFilters.includes("relation")) {
     patch.negatedFilters = state.negatedFilters.filter((dimension) => dimension !== "relation");
