@@ -145,6 +145,19 @@ If an open issue with the same title (case-insensitive, extra spaces ignored) al
 
 For sequential PR delivery, use `issue create --title "..." --pr-auto-complete off` or `issue update <id> --pr-auto-complete off` to keep that issue's status when PRs merge. Use `--pr-auto-complete on` to restore the workspace rule; this takes effect at the next PR event. `issue pull-requests <id>` shows the issue override, workspace setting, target status, and decision state, even with no linked PRs. Supported servers save the creation override atomically; older servers receive a follow-up PUT. If that fails, the CLI reports the created issue ID and an update command to retry, so do not repeat the create.
 
+### Deleting issues
+
+Delete one issue or pass several issue keys or full UUIDs to delete them in one batch:
+
+```bash
+multica issue delete MUL-123
+multica issue delete MUL-123 MUL-124 --yes --output json
+```
+
+Deletion is permanent: it removes comments and attachments, cancels in-flight runs, fails linked autopilot runs, clears duplicate marks pointing to the deleted issues, and detaches child issues without deleting them. Every ID is resolved before confirmation; an unknown or inaccessible issue aborts the command before deletion.
+
+The command asks for confirmation. `--yes` skips the prompt; without it, a non-interactive run that cannot answer fails without deleting anything.
+
 ### Timeline
 
 `issue get` shows an issue as it is now. `issue timeline` lists, in order, the changes to status, priority, assignee, title, and dates and the run outcomes, interleaved with comments, which answers questions like "when did it move to in_review" or "how long has it been stuck in this status":
@@ -280,7 +293,7 @@ multica runtime profile create --display-name "Internal Claude wrapper" \
   --command-name ccms --runtime-type claude
 ```
 
-`daemon autostart` registers the current profile to start at login; see [Start at login](/daemon-runtimes#autostart) for platform details. `runtime usage` covers 90 days by default, and `--days` goes up to 365. `runtime update` asks the daemon on that computer to update its CLI to the given version; `--wait` keeps polling until the update finishes. `runtime profile create` takes the compatible tool through `--runtime-type` (the older `--protocol-family` still works); fixed arguments can currently be set only in the web app.
+`daemon autostart` registers the current profile to start at login; see [Start at login](/daemon-runtimes#autostart) for platform details. `runtime usage` covers 90 days by default, and `--days` goes up to 365. `runtime update` asks the daemon on that computer to update its CLI to the given version; `--wait` waits for completion and exits non-zero if the update fails or times out, or if the wait itself times out. `runtime profile create` takes the compatible tool through `--runtime-type` (the older `--protocol-family` still works); fixed arguments can currently be set only in the web app.
 
 Deleting a runtime that still has active agents bound to it is refused by default. `multica runtime delete <id> --cascade` unbinds those agents, preserves their configuration and history, and cancels their active runs.
 
@@ -405,6 +418,7 @@ Migration from CSV parsing: replace `--attachment a,b` with `--attachment a --at
 | | `get <id>` | Show a single issue | `--resolve-properties` (JSON only; rows with property, option and member names beside the stored ids) |
 | | `create` | Create an issue | `--title` (required), `--description` / `--description-stdin` / `--description-file`, `--pr-auto-complete on/off`, `--status`, `--priority`, `--assignee`, `--parent`, `--stage`, `--project`, `--start-date`, `--due-date`, `--attachment` (repeatable), `--property` (repeatable), `--allow-duplicate` (create even when an open issue with the same title exists) |
 | | `update <id>` | Update issue fields | Same fields as `create`, plus `--position`, `--no-start`, `--duplicate-of` |
+| | `delete <id>...` | Permanently delete one or more issues | `--yes` skips confirmation; accepts issue keys or full UUIDs |
 | | `assign <id>` | Assign or unassign | `--to` (fuzzy name match against members, agents, and squads), `--to-id`, `--unassign`, `--no-start` |
 | | `status <id> <status>` | Change status | `--no-start`, `--duplicate-of` |
 | | `reorder <id>` | Move within a column | |
@@ -432,7 +446,7 @@ Migration from CSV parsing: replace `--attachment a,b` with `--attachment a --at
 | `issue-status` | `list/get/create/update/archive` | Manage the workspace status catalog — the statuses every workflow picks from. To change an issue's current status, use `issue status` | `create`: `--name`, `--category`, `--color`, `--key`, `--icon`; `update`: `--name`, `--description`, `--color`, `--icon` (empty resets to the category default), `--position`; `list`: `--include-archived`. Mutations require workspace owner/admin |
 | `label` | `list/get/create/update/delete` | Manage workspace labels | `list`: `--resource-type` (`issue` or `skill`), `--full-id`; `create`: `--name`, `--color`, `--resource-type` (`issue` or `skill`), `--description` |
 | `property` | `list/get/create/update/archive/unarchive` | Manage workspace custom properties | `create`: `--name`, `--type` (`text`, `number`, `select`, `multi_select`, `date`, `checkbox`, `url`, `actor`, `multi_actor`, `multi_text`, `multi_url`), `--option` (repeatable, select types only); `list`: `--include-archived`; the type cannot be changed after creation |
-| `view` | `list/get/issues` | Read the saved views you can open (your own and workspace-shared ones); `issues` lists what a view shows, in its saved order, with every saved filter applied by the server. Inside an agent run, the views and any "my" conditions are the runtime owner's | `<view>` accepts an ID, ID prefix, or exact name; `list`: `--scope` (`workspace`, `my`, `project`), `--project`, `--full-id`; `issues`: `--limit` (at most 100), `--cursor` (the previous page's `next_cursor`), `--today` (the day relative due-date filters resolve against; default today), `--fields` (JSON only), `--full-id` |
+| `view` | `list/get/issues/create/update/duplicate/delete` | Read the saved views you can open (your own and workspace-shared ones); `issues` lists what a view shows, in its saved order, with every saved filter applied by the server. `create`, `update`, `duplicate` and `delete` write views exactly as the app saves them, so they show in the sidebar and stay editable there; `update` changes only what its flags name and refuses to overwrite a view that changed since it was read. Only the owner, or a workspace owner/admin for a shared view, can change or delete one. Inside an agent run, the views and any "my" conditions are the runtime owner's | `<view>` accepts an ID, ID prefix, or exact name; `list`: `--scope` (`workspace`, `my`, `project`), `--project`, `--full-id`; `issues`: `--limit` (at most 100), `--cursor` (the previous page's `next_cursor`), `--today` (the day relative due-date filters resolve against; default today), `--fields` (JSON only), `--full-id`; `create`: `--name`, `--scope`, `--project`, `--scope-variant`, `--visibility`; `create/update/duplicate` filters: `--status`, `--priority`, `--assignee`, `--creator`, `--label`, `--project-filter`, `--project-status`, `--relation`, `--due`, `--property "Name=Value"`, `--negate <filter>`, `--include-no-assignee`, `--include-no-project`, `--agent-running`, `--agent-idle`, `--unread`; display: `--view-mode`, `--grouping`, `--table-grouping`, `--swimlane-grouping`, `--gantt-zoom`, `--sort`, `--direction`, `--show-sub-issues`; `--definition-file` (JSON `query`/`display`, e.g. edited `view get` output), `--clear-filters` (update/duplicate), `--dry-run` |
 | `agent` | `list/get/create/update/archive/restore` | Manage agents | `--name`, `--runtime-id` (required for `create`), `--instructions`, `--conversation-starters`, `--model`, `--thinking-level`, `--custom-env` / `--custom-env-file` / `--custom-env-stdin` (`create` only), `--custom-args`, `--mcp-config` / `--mcp-config-file` / `--mcp-config-stdin`, `--permission-mode`, `--visibility` (older form), `--max-concurrent-tasks` |
 | | `copy <agent-id>` | Copy into a new agent; the original is untouched | `--name` (defaults to the original name plus ` (copy)`), `--runtime-id` (copying to another runtime also requires `--model`), `--no-skills`; secret configuration such as `custom_env`, `mcp_config`, and `runtime_config` is not copied — re-provide it with the same flags as `create` |
 | | `tasks <id>` | View an agent's runs | |

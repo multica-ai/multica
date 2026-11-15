@@ -87,6 +87,7 @@ describe("AppearanceSync", () => {
     expect(html().style.getPropertyValue("--font-content-cjk")).toBe("var(--font-cjk-serif)");
     expect(html().style.getPropertyValue("--font-scale")).toBe(String(15 / 14));
     expect(html().style.getPropertyValue("--issue-row-height")).toBe("42px");
+    expect(html().style.getPropertyValue("--nav-item-height")).toBe("2.25rem");
     expect(themeCss()?.textContent).toContain("--button-primary:");
     expect(themeCss()?.textContent).toContain('[data-mc="issue-group-header"]');
     expect(sheet()?.textContent).toContain("--muted-foreground: color-mix(");
@@ -158,8 +159,8 @@ describe("AppearanceSync", () => {
 
   describe("on Desktop", () => {
     const encode = (text: string) => new TextEncoder().encode(text);
-    const folder = (css: string) => [
-      { path: "manifest.json", data: encode(JSON.stringify({ apiVersion: 1, id: "paper", name: "Paper" })) },
+    const folder = (css: string, id = "paper") => [
+      { path: "manifest.json", data: encode(JSON.stringify({ apiVersion: 1, id, name: id })) },
       { path: "theme.css", data: encode(css) },
     ];
     let onChange: () => void = () => {};
@@ -210,6 +211,26 @@ describe("AppearanceSync", () => {
       desktop.readThemeFolder.mockResolvedValue({ path: "/data/themes", entries: [] });
       await act(async () => onChange());
       await vi.waitFor(() => expect(html().hasAttribute("data-theme")).toBe(false));
+    });
+
+    it("lists a new folder theme without switching to it, and applies saves to the theme in use", async () => {
+      const paper = (canvas: string) => ({ folder: "paper", files: folder(`.theme-light { --page-canvas: ${canvas}; }`) });
+      const dusk = { folder: "dusk", files: folder(".theme-light { --page-canvas: #2a2438; }", "dusk") };
+      desktop.readThemeFolder.mockResolvedValue({ path: "/data/themes", entries: [paper("#fffdf8")] });
+      useAppearanceStore.setState({ theme: "paper" });
+      render(<AppearanceSync />);
+      await vi.waitFor(() => expect(themeCss()?.textContent).toContain("#fffdf8"));
+
+      desktop.readThemeFolder.mockResolvedValue({ path: "/data/themes", entries: [paper("#fffdf8"), dusk] });
+      await act(async () => onChange());
+      await vi.waitFor(() => expect(useInstalledThemesStore.getState().folders).toHaveProperty("dusk"));
+      expect(useAppearanceStore.getState().theme).toBe("paper");
+      expect(html().getAttribute("data-theme")).toBe("paper");
+
+      desktop.readThemeFolder.mockResolvedValue({ path: "/data/themes", entries: [paper("#f0f0ff"), dusk] });
+      await act(async () => onChange());
+      await vi.waitFor(() => expect(themeCss()?.textContent).toContain("#f0f0ff"));
+      expect(html().getAttribute("data-theme")).toBe("paper");
     });
   });
 });

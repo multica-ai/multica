@@ -2618,7 +2618,7 @@ describe("IssueDetail (shared)", () => {
         screen.getByText(/from In Review to Awaiting Response/i),
       ).toBeInTheDocument();
     });
-    expect(statusChangeIcon("Awaiting Response").style.color).toBe("rgb(255, 0, 0)");
+    expect(statusChangeIcon("Awaiting Response").style.color).toBe("var(--palette-red, #ff0000)");
   });
 
   it("leaves a built-in status-change activity on its semantic token colour", async () => {

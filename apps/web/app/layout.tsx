@@ -76,6 +76,11 @@ const sourceSerif = Source_Serif_4({
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
+  // Draw under the camera, rounded corners and home indicator instead of
+  // letterboxing the page inside the safe area. Without it iOS reports every
+  // env(safe-area-inset-*) as 0. globals.css keeps content clear of those
+  // regions.
+  viewportFit: "cover",
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#ffffff" },
     { media: "(prefers-color-scheme: dark)", color: "#05070b" },
@@ -105,9 +110,10 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     title: "Multica",
-    // `default` keeps the web view below the status bar. Going edge-to-edge
-    // (`black-translucent` + viewport-fit=cover) needs env(safe-area-inset-*)
-    // padding, which no surface in the app has yet.
+    // `default` keeps the web view below the status bar, which iOS paints in
+    // the theme colour with legible text. `black-translucent` would put the
+    // page under it too, but always draws the status text white, unreadable
+    // on the light themes.
     statusBarStyle: "default",
   },
   openGraph: {

@@ -193,7 +193,7 @@ export function AgentAdvancedSettings({
           if (!open) request(null);
         }}
       >
-        <DialogContent className="flex h-[min(85dvh,52rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl">
+        <DialogContent className="flex h-[min(85%,52rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl">
           <DialogHeader className="shrink-0 gap-1 border-b px-5 py-4 pr-12">
             <DialogTitle>{t(($) => $.detail.settings)}</DialogTitle>
             <DialogDescription className="truncate">{agent.name}</DialogDescription>
