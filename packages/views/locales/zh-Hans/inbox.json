@@ -177,7 +177,7 @@
     "failed": "延后失败",
     "unsnooze_failed": "恢复失败",
     "view_empty": "没有延后的事项",
-    "view_empty_description": "在收件箱里延后一个 issue，它会在这里等到时间再回来。",
+    "view_empty_description": "在收件箱里延后一个任务，它会在这里等到时间再回来。",
     "col_updates": "延后期间",
     "col_back": "回来时间"
   }

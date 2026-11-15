@@ -121,6 +121,20 @@ export function noProjectCountRequest(statuses: readonly StatusRef[]): IssueTabl
   };
 }
 
+/**
+ * Counts what an expanded row lists, as the facet total. The server folds the
+ * total into a facet's own scan only while the query does not filter that
+ * facet's dimension, so the facet is one the request leaves unfiltered.
+ */
+export function sidebarCountRequest(request: SidebarIssuesRequest): IssueTableFacetsRequest {
+  const { table } = request;
+  return {
+    query: { ...table, sort: { field: "position", direction: "asc" } },
+    facets: [{ kind: table.filters.priorities?.length ? "creator" : "priority" }],
+    include_total: true,
+  };
+}
+
 const VIEW_SORTS = new Set<string>([
   "position",
   "status",

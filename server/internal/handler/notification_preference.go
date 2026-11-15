@@ -16,17 +16,20 @@ import (
 // not an inbox event group — it's a delivery-channel toggle controlling
 // whether native OS notification banners fire — but it shares the same
 // preferences map so a single endpoint covers all user notification
-// preferences.
+// preferences. `auto_archive_completed` is not an event group either: "muted"
+// stops your notifications from being archived when you complete an issue.
 var validNotifGroups = map[string]bool{
-	"assignments":          true,
-	"status_changes":       true,
-	"comments":             true,
-	"chat_replies":         true,
-	"mentions":             true,
-	"updates":              true,
-	"agent_activity":       true,
-	"new_issues":           true,
-	"system_notifications": true,
+	"assignments":            true,
+	"status_changes":         true,
+	"comments":               true,
+	"chat_replies":           true,
+	"mentions":               true,
+	"reactions":              true,
+	"updates":                true,
+	"agent_activity":         true,
+	"new_issues":             true,
+	"system_notifications":   true,
+	"auto_archive_completed": true,
 }
 
 // validNotifValues is the set of allowed preference values per group.

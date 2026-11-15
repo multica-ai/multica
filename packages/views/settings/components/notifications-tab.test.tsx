@@ -51,6 +51,7 @@ describe("Inbox notification settings", () => {
       "About you",
       "Assignments",
       "Mentions",
+      "Reactions",
       "Issues you subscribe to",
       "Status changes",
       "Comments",
@@ -68,11 +69,22 @@ describe("Inbox notification settings", () => {
     renderTab();
     const leaving = screen.getByRole("region", { name: "Leaving the Inbox" });
     expect(leaving).toHaveTextContent("Reading a notification doesn't take it out of the Inbox.");
-    expect(leaving).toHaveTextContent("reaches a Done or Cancelled status");
+    expect(leaving).toHaveTextContent("Issues others complete stay in your Inbox.");
     expect(within(leaving).getByRole("link", { name: "View archived" })).toHaveAttribute(
       "href",
       "/acme/inbox?view=archived",
     );
+  });
+
+  it.each<{ preferences: Record<string, string>; checked: boolean }>([
+    { preferences: {}, checked: true },
+    { preferences: { auto_archive_completed: "muted" }, checked: false },
+  ])("toggles archiving issues you complete: %j", ({ preferences, checked }) => {
+    renderTab(preferences);
+    const leaving = screen.getByRole("region", { name: "Leaving the Inbox" });
+    const toggle = within(leaving).getByRole("switch", { name: "Archive issues you complete" });
+    if (checked) expect(toggle).toBeChecked();
+    else expect(toggle).not.toBeChecked();
   });
 });
 

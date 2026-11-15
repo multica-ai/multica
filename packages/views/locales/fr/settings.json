@@ -434,7 +434,7 @@
       },
       "snoozeInboxItem": {
         "label": "Reporter la notification",
-        "description": "Reporte l'issue ouverte de la boîte de réception, ou la fait revenir si elle est reportée."
+        "description": "Reporte la tâche ouverte depuis la boîte de réception, ou la fait revenir si elle est reportée."
       },
       "send": {
         "label": "Envoyer",
@@ -849,9 +849,8 @@
       "manual_label": "Archiver à la main",
       "manual_description": "Depuis sa ligne dans la barre latérale ou le haut de la notification",
       "manual_value": "À tout moment",
-      "done_label": "Tâche terminée ou annulée",
-      "done_description": "Quand une tâche passe à un statut Terminé ou Annulé, ses notifications sont archivées.",
-      "done_value": "Automatique",
+      "done_label": "Archiver les tâches que vous terminez",
+      "done_description": "Quand vous passez une tâche à un statut Terminé ou Annulé, ses notifications sont archivées. Celles terminées par d'autres restent dans la boîte de réception.",
       "archived_label": "Notifications archivées",
       "archived_description": "Retrouvez-les et désarchivez-les",
       "archived_action": "Voir les archivées"
@@ -874,6 +873,10 @@
         "label": "Mentions",
         "description": "Quand quelqu'un vous @mentionne, y compris via @all et @squad"
       },
+      "reactions": {
+        "label": "Réactions",
+        "description": "Quand quelqu'un réagit à une tâche que vous avez créée ou à un commentaire que vous avez écrit"
+      },
       "updates": {
         "label": "Priorité et date d'échéance",
         "description": "Quand la priorité ou la date d'échéance change sur les tâches que vous suivez"
@@ -884,7 +887,7 @@
       },
       "agent_activity": {
         "label": "Activité des agents",
-        "description": "Lorsqu'une exécution d'agent échoue"
+        "description": "Lorsqu'une exécution d'agent échoue, ou qu'une action d'app demandée par un agent est bloquée ou expire"
       },
       "chat_replies": {
         "label": "Inclure les réponses du chat"

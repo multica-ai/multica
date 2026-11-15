@@ -172,12 +172,12 @@
     "returned": "延後到期",
     "updates_other": "期間 {{count}} 則動態",
     "toast_snoozed": "已延後到 {{time}}",
-    "toast_unsnoozed": "已回到收件匣",
+    "toast_unsnoozed": "已回到收件箱",
     "undo": "復原",
     "failed": "延後失敗",
     "unsnooze_failed": "恢復失敗",
     "view_empty": "沒有延後的項目",
-    "view_empty_description": "在收件匣裡延後一個 issue，它會在這裡等到時間再回來。",
+    "view_empty_description": "在收件箱裡延後一個任務，它會在這裡等到時間再回來。",
     "col_updates": "延後期間",
     "col_back": "回來時間"
   }

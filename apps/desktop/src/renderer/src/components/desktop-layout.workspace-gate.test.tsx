@@ -185,7 +185,7 @@ describe("DesktopShell workspace gating", () => {
 
     expect(queryByTestId("app-rail")).toBeNull();
     expect(
-      container.querySelectorAll("[data-slot='sidebar-trigger']"),
+      container.querySelectorAll("[data-sidebar='trigger']"),
     ).toHaveLength(0);
     expect(
       container.querySelector('[data-slot="main-top-bar"]'),

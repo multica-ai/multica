@@ -190,7 +190,7 @@ export function InboxSection({
       }
     >
       {displayed.length > 0 ? (
-        <PanelList data-sidebar-list={INBOX_LIST}>
+        <PanelList data-sidebar-list={INBOX_LIST} className={compact ? undefined : "space-y-0.5"}>
           {displayed.map((item) => (
             <InboxRow
               key={item.id}
@@ -379,12 +379,21 @@ function InboxRow({
     writeViewState(issueHighlightMementoKey(item.issue_id), undefined);
     requestLanding(item.issue_id);
   };
+  // The card previews a notification you have not opened. A press opens it,
+  // so the card goes at once, with no exit animation to compete with the
+  // issue's first render, and a hover delay already running must not bring it
+  // back over the opened issue. It may return once the pointer leaves the row.
+  const [cardOpen, setCardOpen] = useState(false);
+  const [cardDismissed, setCardDismissed] = useState(false);
+  const dismissCard = () => {
+    setCardDismissed(true);
+    setCardOpen(false);
+  };
   const agents = useIssueAgentState(item.workspace_id, item.issue_id ?? "");
   const running = !!agents?.running;
   const unread = item.read !== true;
   const archiveLabel = t(($) => $.list.archive_tooltip);
   const snoozeLabel = t(($) => $.snooze.action);
-  const [cardOpen, setCardOpen] = useState(false);
   const [snoozeOpen, setSnoozeOpen] = useState(false);
   // Back from a snooze, until it is read: the row says so in place of the actor line.
   const returned = unread && inboxSnoozeReturnedAt(item) !== null;
@@ -433,13 +442,26 @@ function InboxRow({
 
   return (
     <li data-inbox-row data-read={unread ? "false" : "true"} className="group/inbox relative">
-      <HoverCard open={cardOpen && !snoozeOpen} onOpenChange={setCardOpen}>
+      <HoverCard
+        open={cardOpen && !snoozeOpen}
+        onOpenChange={(open) => {
+          if (open && cardDismissed) return;
+          setCardOpen(open);
+        }}
+      >
         <HoverCardTrigger
           delay={500}
           closeDelay={100}
           render={<div />}
+          onPointerDown={dismissCard}
+          onPointerLeave={() => setCardDismissed(false)}
+          // Enter on the focused link opens the issue too. Focus does not
+          // move, so the card stays shut without the dismissed flag.
+          onKeyDown={(event) => {
+            if (event.key === "Enter") setCardOpen(false);
+          }}
           {...panelRowAnchor(active)}
-          className={cn(PANEL_ROW_CLASS, panelRowStateClass(active), "relative", !compact && "items-start py-[5px]")}
+          className={cn(PANEL_ROW_CLASS, panelRowStateClass(active), "relative", !compact && "items-start py-1.5")}
         >
           {statusIcon ||
             (compact ? (
@@ -479,7 +501,7 @@ function InboxRow({
                   {statusText}
                   {agentBadge || time}
                 </span>
-                <span className="flex min-w-0 items-center gap-2 text-caption leading-4 text-muted-foreground">
+                <span className="mt-0.5 flex min-w-0 items-center gap-2 text-caption leading-4 text-muted-foreground">
                   <span className="flex min-w-0 flex-1 items-center gap-1.5">
                     {/* The status took the avatar's column; it stays with the name. */}
                     {statusIcon && <InboxActorAvatar item={item} size="xs" />}
@@ -499,12 +521,21 @@ function InboxRow({
             )}
           </AppLink>
         </HoverCardTrigger>
-        <HoverCardContent side="right" align="start" sideOffset={12} alignOffset={-8} className="w-72 p-3">
+        <HoverCardContent
+          side="right"
+          align="start"
+          sideOffset={12}
+          alignOffset={-8}
+          className={cn("w-72 p-3", cardDismissed && "data-closed:duration-0")}
+        >
           <InboxRowCard
             item={item}
             href={href}
             title={title}
-            onOpen={land}
+            onOpen={() => {
+              dismissCard();
+              land();
+            }}
             onArchive={onArchive}
             onSnooze={
               item.issue_id
@@ -559,11 +590,12 @@ function InboxRow({
   );
 }
 
-/** A row's hover button, on the title's line where the time was. */
+/** A row's hover button. */
 function rowButtonClass(compact: boolean) {
   return cn(
     "absolute z-10 hidden size-5 items-center justify-center rounded-md text-muted-foreground group-hover/inbox:flex group-focus-within/inbox:flex hover:bg-surface-selected hover:text-foreground",
-    compact ? "top-1/2 -translate-y-1/2" : "top-[5px]",
+    // On the title's line, where the time was.
+    compact ? "top-1/2 -translate-y-1/2" : "top-1.5",
   );
 }
 

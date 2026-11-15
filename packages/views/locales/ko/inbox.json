@@ -172,12 +172,12 @@
     "returned": "다시 알림 종료",
     "updates_other": "미뤄둔 동안 업데이트 {{count}}개",
     "toast_snoozed": "{{time}}까지 미뤘습니다",
-    "toast_unsnoozed": "받은 편지함으로 돌아왔습니다",
+    "toast_unsnoozed": "인박스로 돌아왔습니다",
     "undo": "실행 취소",
     "failed": "미루지 못했습니다",
     "unsnooze_failed": "되돌리지 못했습니다",
     "view_empty": "미뤄둔 항목이 없습니다",
-    "view_empty_description": "받은 편지함에서 issue를 미루면 돌아올 시간까지 여기에서 기다립니다.",
+    "view_empty_description": "인박스에서 태스크를 미루면 돌아올 시간까지 여기에서 기다립니다.",
     "col_updates": "미뤄둔 동안",
     "col_back": "돌아오는 시간"
   }

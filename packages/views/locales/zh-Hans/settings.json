@@ -428,7 +428,7 @@
       },
       "snoozeInboxItem": {
         "label": "延后通知",
-        "description": "延后当前打开的收件箱 issue；已延后时让它现在回来。"
+        "description": "延后从收件箱打开的任务；已延后时让它现在回来。"
       },
       "send": {
         "label": "发送",
@@ -840,9 +840,8 @@
       "manual_label": "手动归档",
       "manual_description": "在侧栏行上或通知详情顶部点归档",
       "manual_value": "随时",
-      "done_label": "任务已完成或已取消",
-      "done_description": "任务进入「已完成」或「已取消」类状态时，它的通知自动归档。",
-      "done_value": "自动",
+      "done_label": "自动归档我完成的任务",
+      "done_description": "你把任务改为「已完成」或「已取消」类状态时，它的通知自动归档。别人完成的任务会留在收件箱。",
       "archived_label": "已归档的通知",
       "archived_description": "可以在这里找回并取消归档",
       "archived_action": "查看已归档"
@@ -865,6 +864,10 @@
         "label": "提及",
         "description": "有人 @ 你时，包括 @all 和 @squad"
       },
+      "reactions": {
+        "label": "表情回应",
+        "description": "有人对你创建的任务或你写的评论添加表情时"
+      },
       "updates": {
         "label": "优先级与截止日期",
         "description": "你订阅的任务优先级或截止日期变更时"
@@ -875,7 +878,7 @@
       },
       "agent_activity": {
         "label": "智能体活动",
-        "description": "智能体运行失败时"
+        "description": "智能体运行失败，或智能体请求的应用操作被拦截、过期时"
       },
       "chat_replies": {
         "label": "包含聊天回复"

@@ -180,7 +180,7 @@
     "failed": "Impossible de reporter",
     "unsnooze_failed": "Impossible de faire revenir",
     "view_empty": "Rien de reporté",
-    "view_empty_description": "Reportez une issue depuis votre boîte de réception : elle attend ici jusqu'à son retour.",
+    "view_empty_description": "Reportez une tâche depuis votre boîte de réception : elle attend ici jusqu'à son retour.",
     "col_updates": "Pendant le report",
     "col_back": "Retour"
   }

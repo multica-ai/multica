@@ -32,8 +32,12 @@ func TestIsNotifMutedGroupSplit(t *testing.T) {
 		{"status group intact", map[string]string{"status_changes": "muted"}, "status_changed", true},
 		{"muting comments leaves assignments alone", map[string]string{"comments": "muted"}, "issue_assigned", false},
 
+		// Reactions have their own group, apart from comments.
+		{"muted reactions drops reaction_added", map[string]string{"reactions": "muted"}, "reaction_added", true},
+		{"muted comments still delivers reactions", map[string]string{"comments": "muted"}, "reaction_added", false},
+
 		// Types outside the map are always delivered.
-		{"unconfigurable type always delivered", map[string]string{"comments": "muted"}, "reaction_added", false},
+		{"unconfigurable type always delivered", map[string]string{"comments": "muted"}, "children_done", false},
 	}
 
 	for _, tc := range cases {

@@ -172,12 +172,12 @@
     "returned": "スヌーズ終了",
     "updates_other": "スヌーズ中に {{count}} 件の更新",
     "toast_snoozed": "{{time}} までスヌーズしました",
-    "toast_unsnoozed": "受信トレイに戻しました",
+    "toast_unsnoozed": "インボックスに戻しました",
     "undo": "元に戻す",
     "failed": "スヌーズできませんでした",
     "unsnooze_failed": "戻せませんでした",
     "view_empty": "スヌーズ中の項目はありません",
-    "view_empty_description": "受信トレイで issue をスヌーズすると、戻る時間までここで待機します。",
+    "view_empty_description": "インボックスでタスクをスヌーズすると、戻る時間までここで待機します。",
     "col_updates": "スヌーズ中",
     "col_back": "戻る時間"
   }

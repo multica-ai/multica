@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { fireEvent, screen, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -331,6 +331,31 @@ describe("InboxSection", () => {
     expect(state.markRead).toHaveBeenCalledWith("n1");
     fireEvent.click(actions.getByRole("button", { name: "Archive" }));
     expect(state.archive).toHaveBeenCalledWith("n1");
+  });
+
+  it("closes the card when the row is pressed, and keeps a pending hover from reopening it", async () => {
+    renderSection([item({ id: "n1", issue_id: "issue-a", title: "Commented", body: "Ship it on Friday" })]);
+    const trigger = rows()[0]!.firstElementChild!;
+    const card = () => document.querySelector("[data-inbox-card]");
+
+    fireEvent.mouseEnter(trigger);
+    await screen.findByText("Ship it on Friday", { selector: "[data-inbox-card] p" }, { timeout: 2000 });
+    fireEvent.pointerDown(trigger);
+    await waitFor(() => expect(card()).toBeNull());
+
+    // Pressed before the hover delay ran out: the card stays shut.
+    fireEvent.mouseLeave(trigger);
+    fireEvent.pointerLeave(trigger);
+    fireEvent.mouseEnter(trigger);
+    fireEvent.pointerDown(trigger);
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    expect(card()).toBeNull();
+
+    // Leaving the row lets the next hover show it again.
+    fireEvent.mouseLeave(trigger);
+    fireEvent.pointerLeave(trigger);
+    fireEvent.mouseEnter(trigger);
+    await screen.findByText("Ship it on Friday", { selector: "[data-inbox-card] p" }, { timeout: 2000 });
   });
 
   it("archives a row from its hover button", () => {

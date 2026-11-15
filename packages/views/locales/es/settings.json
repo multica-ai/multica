@@ -849,9 +849,8 @@
       "manual_label": "Archivar a mano",
       "manual_description": "Desde su fila en la barra lateral o desde la parte superior de la notificación",
       "manual_value": "En cualquier momento",
-      "done_label": "Tarea completada o cancelada",
-      "done_description": "Cuando una tarea pasa a un estado Completado o Cancelado, sus notificaciones se archivan.",
-      "done_value": "Automático",
+      "done_label": "Archivar las tareas que completas",
+      "done_description": "Cuando pasas una tarea a un estado Completado o Cancelado, sus notificaciones se archivan. Las que completan otros se quedan en la bandeja de entrada.",
       "archived_label": "Notificaciones archivadas",
       "archived_description": "Encuéntralas de nuevo y desarchívalas",
       "archived_action": "Ver archivadas"
@@ -874,6 +873,10 @@
         "label": "Menciones",
         "description": "Cuando alguien te @menciona, incluidos @all y @squad"
       },
+      "reactions": {
+        "label": "Reacciones",
+        "description": "Cuando alguien reacciona a una tarea que creaste o a un comentario que escribiste"
+      },
       "updates": {
         "label": "Prioridad y fecha de entrega",
         "description": "Cuando cambian la prioridad o la fecha de entrega de tareas que sigues"
@@ -884,7 +887,7 @@
       },
       "agent_activity": {
         "label": "Actividad de agentes",
-        "description": "Cuando falla una ejecución de agente"
+        "description": "Cuando falla una ejecución de agente, o una acción de app que pidió un agente se bloquea o caduca"
       },
       "chat_replies": {
         "label": "Incluir respuestas del chat"
