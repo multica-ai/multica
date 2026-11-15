@@ -25,6 +25,7 @@ import { InboxSnoozeMenu } from "../../inbox/components/inbox-snooze-menu";
 import { formatSnoozeTime } from "../../inbox/components/inbox-snooze-time";
 import { useInboxSnooze } from "../../inbox/components/use-inbox-snooze";
 import { useFilteredInboxRows } from "../../inbox/components/use-filtered-inbox-rows";
+import { useSidebarInboxIssue } from "../../inbox/components/use-sidebar-inbox-issue";
 import { useNavigation } from "../../navigation";
 import { useLocale, useT } from "../../i18n";
 
@@ -52,7 +53,7 @@ export function IssueInboxActions({
   const wsId = useWorkspaceId();
   const p = useWorkspacePaths();
   const { push } = useNavigation();
-  const fromInbox = useInboxSelectionStore((s) => s.sidebarIssueByWorkspace[wsId] === issueId);
+  const { fromInbox } = useSidebarInboxIssue(wsId, issueId);
   const rememberSidebarIssue = useInboxSelectionStore((s) => s.rememberSidebarIssue);
   const { rows } = useFilteredInboxRows(wsId, issueId, fromInbox);
   const index = fromInbox ? rows.findIndex((row) => row.issue_id === issueId) : -1;
