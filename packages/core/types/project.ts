@@ -18,6 +18,27 @@ export interface ListProjectMembersResponse {
   total: number;
 }
 
+/**
+ * A private project as a workspace owner sees it from settings: who is in it,
+ * never what is in it. `is_member` says whether the owner is one of them.
+ */
+export interface PrivateProjectOverview {
+  id: string;
+  title: string;
+  icon: string | null;
+  lead_type: "member" | "agent" | null;
+  lead_id: string | null;
+  created_at: string;
+  archived_at: string | null;
+  is_member: boolean;
+  members: Omit<ProjectMember, "project_id">[];
+}
+
+export interface ListPrivateProjectsResponse {
+  projects: PrivateProjectOverview[];
+  total: number;
+}
+
 export interface Project {
   id: string;
   workspace_id: string;

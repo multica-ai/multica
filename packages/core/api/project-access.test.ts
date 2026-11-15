@@ -33,4 +33,41 @@ describe("project access API contracts", () => {
     expect(fetchMock.mock.calls[3]?.[0]).toBe("https://api.example.test/api/projects/p1/members/m1");
     expect(fetchMock.mock.calls[3]?.[1].method).toBe("DELETE");
   });
+
+  it("reads the owner's overview of private projects and survives malformed rows", async () => {
+    const member = { user_id: "m1", name: "Alice", email: "alice@example.test" };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        projects: [
+          { id: "p1", title: "Secret", lead_type: "member", lead_id: "m1", created_at: "2026-01-01T00:00:00Z", is_member: false, members: [member] },
+          // No id: dropped. One bad row must not hide the others from the
+          // only person who can still reach them.
+          { title: "Broken" },
+          // Wrong field shapes degrade to safe values instead of failing.
+          { id: "p2", title: 7, lead_type: "robot", is_member: "yes", members: "invalid" },
+        ],
+        total: 3,
+      })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ projects: "invalid" })))
+      .mockResolvedValueOnce(new Response(JSON.stringify(null)))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ...EMPTY_PROJECT, id: "p1", visibility: "private" })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 1 })));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+
+    const overview = await client.listPrivateProjectsForOwner();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://api.example.test/api/projects/private");
+    expect(overview.projects).toEqual([
+      { id: "p1", title: "Secret", icon: null, lead_type: "member", lead_id: "m1", created_at: "2026-01-01T00:00:00Z", archived_at: null, is_member: false, members: [{ ...member, avatar_url: null }] },
+      { id: "p2", title: "", icon: null, lead_type: null, lead_id: null, created_at: "", archived_at: null, is_member: false, members: [] },
+    ]);
+    expect((await client.listPrivateProjectsForOwner()).projects).toEqual([]);
+    expect(await client.listPrivateProjectsForOwner()).toEqual({ projects: [], total: 0 });
+
+    const joined = await client.joinPrivateProject("p1");
+    expect(fetchMock.mock.calls[3]?.[0]).toBe("https://api.example.test/api/projects/p1/join");
+    expect(fetchMock.mock.calls[3]?.[1].method).toBe("POST");
+    expect(joined).toMatchObject({ id: "p1", visibility: "private" });
+    expect(await client.joinPrivateProject("p1")).toEqual(EMPTY_PROJECT);
+  });
 });

@@ -1937,5 +1937,27 @@
       "retry_failed": "이 녹음을 변환하지 못했습니다",
       "show_more": "더 보기"
     }
+  },
+  "private_projects": {
+    "title": "비공개 프로젝트",
+    "description": "비공개 프로젝트는 해당 프로젝트 멤버만 열 수 있습니다. 워크스페이스 소유자는 각 프로젝트의 멤버를 확인하고, 개입이 필요할 때 자신을 추가할 수 있습니다.",
+    "empty": "이 워크스페이스에는 비공개 프로젝트가 없습니다.",
+    "load_failed": "비공개 프로젝트를 불러오지 못했습니다.",
+    "retry": "다시 시도",
+    "no_members": "멤버 없음",
+    "lead_name": "{{name}}(리드)",
+    "more_members": "외 {{count}}명",
+    "archived": "보관됨",
+    "member": "참여 중",
+    "open": "열기",
+    "join": "참여",
+    "join_title": "“{{title}}” 프로젝트에 참여할까요?",
+    "join_description": "이 프로젝트의 멤버 목록에 추가되며 태스크, 댓글, 첨부 파일을 볼 수 있게 됩니다. 현재 멤버에게 알림이 전송됩니다.",
+    "join_description_empty": "이 프로젝트에는 멤버가 없습니다. 참여하면 유일한 멤버이자 리드가 되며 태스크, 댓글, 첨부 파일을 볼 수 있게 됩니다.",
+    "join_lead_note": "현재 리드가 없으므로 내가 리드가 됩니다.",
+    "join_confirm": "프로젝트 참여",
+    "cancel": "취소",
+    "toast_joined": "{{title}}에 참여했습니다",
+    "toast_failed": "프로젝트에 참여하지 못했습니다."
   }
 }

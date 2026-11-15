@@ -1937,5 +1937,27 @@
       "retry_failed": "這段錄音轉寫失敗",
       "show_more": "顯示更多"
     }
+  },
+  "private_projects": {
+    "title": "私有專案",
+    "description": "私有專案只有專案成員能開啟。身為工作區所有者，你可以看到每個私有專案裡有哪些成員，並在需要介入時把自己加進去。",
+    "empty": "這個工作區還沒有私有專案。",
+    "load_failed": "無法載入私有專案。",
+    "retry": "重試",
+    "no_members": "沒有成員",
+    "lead_name": "{{name}}（負責人）",
+    "more_members": "另外 {{count}} 人",
+    "archived": "已歸檔",
+    "member": "你已是成員",
+    "open": "開啟",
+    "join": "加入",
+    "join_title": "加入「{{title}}」？",
+    "join_description": "你會出現在這個專案的成員名單裡，並能看到其中的任務、評論和附件。現有成員會收到通知。",
+    "join_description_empty": "這個專案目前沒有成員。加入後你將是唯一的成員和負責人，並能看到其中的任務、評論和附件。",
+    "join_lead_note": "這個專案目前沒有負責人，加入後你將成為負責人。",
+    "join_confirm": "加入專案",
+    "cancel": "取消",
+    "toast_joined": "已加入 {{title}}",
+    "toast_failed": "加入專案失敗。"
   }
 }

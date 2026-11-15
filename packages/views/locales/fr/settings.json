@@ -1958,5 +1958,27 @@
       "retry_failed": "Impossible de transcrire cet enregistrement",
       "show_more": "Afficher plus"
     }
+  },
+  "private_projects": {
+    "title": "Projets privés",
+    "description": "Seuls les membres d’un projet privé peuvent l’ouvrir. En tant que propriétaire de l’espace de travail, vous voyez qui fait partie de chacun et pouvez vous y ajouter quand vous devez intervenir.",
+    "empty": "Cet espace de travail n’a aucun projet privé.",
+    "load_failed": "Impossible de charger les projets privés.",
+    "retry": "Réessayer",
+    "no_members": "Aucun membre",
+    "lead_name": "{{name}} (responsable)",
+    "more_members": "+{{count}} autres",
+    "archived": "Archivé",
+    "member": "Vous êtes membre",
+    "open": "Ouvrir",
+    "join": "Rejoindre",
+    "join_title": "Rejoindre « {{title}} » ?",
+    "join_description": "Vous serez ajouté à la liste des membres de ce projet et verrez ses tâches, commentaires et pièces jointes. Ses membres actuels seront prévenus.",
+    "join_description_empty": "Ce projet n’a aucun membre. Vous en serez le seul membre et le responsable, et verrez ses tâches, commentaires et pièces jointes.",
+    "join_lead_note": "Il n’a pas de responsable pour l’instant : vous le deviendrez.",
+    "join_confirm": "Rejoindre le projet",
+    "cancel": "Annuler",
+    "toast_joined": "Vous avez rejoint {{title}}",
+    "toast_failed": "Impossible de rejoindre le projet."
   }
 }
