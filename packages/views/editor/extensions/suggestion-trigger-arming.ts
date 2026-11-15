@@ -79,8 +79,9 @@ export const SuggestionTriggerArmingExtension = Extension.create({
   name: "suggestionTriggerArming",
   // Ahead of every suggestion plugin so both `handleTextInput` (which must see
   // the keystroke before an input rule can consume it) and `apply` (which must
-  // refresh the mirror before `shouldShow` reads it) run first.
-  priority: 1000,
+  // refresh the mirror before `shouldShow` reads it) run first. Also ahead of
+  // BulkTextInput (1001), so a phrase inserted in one call is seen whole.
+  priority: 1002,
 
   addProseMirrorPlugins() {
     const editor = this.editor;
