@@ -175,7 +175,7 @@ export function InboxSection({
       }
     >
       {displayed.length > 0 ? (
-        <PanelList data-sidebar-list={INBOX_LIST}>
+        <PanelList data-sidebar-list={INBOX_LIST} className={compact ? undefined : "space-y-0.5"}>
           {displayed.map((item) => (
             <InboxRow
               key={item.id}
@@ -394,7 +394,7 @@ function InboxRow({
           closeDelay={100}
           render={<div />}
           {...panelRowAnchor(active)}
-          className={cn(PANEL_ROW_CLASS, panelRowStateClass(active), "relative", !compact && "items-start py-[5px]")}
+          className={cn(PANEL_ROW_CLASS, panelRowStateClass(active), "relative", !compact && "items-start py-2")}
         >
           {statusIcon ||
             (compact ? (
@@ -428,7 +428,7 @@ function InboxRow({
                   {statusText}
                   {agentBadge || time}
                 </span>
-                <span className="flex min-w-0 items-center gap-2 text-caption leading-4 text-muted-foreground">
+                <span className="mt-0.5 flex min-w-0 items-center gap-2 text-caption leading-4 text-muted-foreground">
                   <span className="flex min-w-0 flex-1 items-center gap-1.5">
                     {/* The status took the avatar's column; it stays with the name. */}
                     {statusIcon && <InboxActorAvatar item={item} size="xs" />}
@@ -455,7 +455,7 @@ function InboxRow({
           className={cn(
             "absolute right-1.5 z-10 hidden size-5 items-center justify-center rounded-md text-muted-foreground group-hover/inbox:flex group-focus-within/inbox:flex hover:bg-surface-selected hover:text-foreground",
             // On the title's line, where the time was.
-            compact ? "top-1/2 -translate-y-1/2" : "top-[5px]",
+            compact ? "top-1/2 -translate-y-1/2" : "top-2",
           )}
           onClick={(event) => {
             event.preventDefault();
