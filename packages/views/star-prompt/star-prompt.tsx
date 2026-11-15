@@ -23,6 +23,7 @@ import {
 } from "@multica/core/star-prompt";
 import { agentListOptions } from "@multica/core/workspace/queries";
 import { isFloatingChatRouteSuppressed } from "../chat/floating-chat-visibility";
+import { isQuietMoment } from "../common/quiet-moment";
 import { useT } from "../i18n";
 import { useNavigation } from "../navigation";
 import { GitHubIcon } from "../onboarding/components/brand-icons";
@@ -32,24 +33,6 @@ const logger = createLogger("star-prompt");
 
 /** Lets the status change settle before the card slides in. */
 export const STAR_PROMPT_DELAY_MS = 2500;
-
-/**
- * Nothing is open or being typed into. A card that appears mid-sentence or
- * over a dialog reads as an interruption, so such moments are skipped rather
- * than deferred.
- */
-function isQuietMoment(): boolean {
-  if (document.visibilityState !== "visible") return false;
-  if (document.querySelector("[role='dialog'][aria-modal='true'], [role='alertdialog']")) return false;
-  const active = document.activeElement;
-  if (
-    active instanceof HTMLElement &&
-    (active.isContentEditable || active.tagName === "INPUT" || active.tagName === "TEXTAREA")
-  ) {
-    return false;
-  }
-  return true;
-}
 
 interface Showing {
   agentName: string;

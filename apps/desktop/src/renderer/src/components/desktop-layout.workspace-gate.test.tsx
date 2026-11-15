@@ -119,6 +119,7 @@ vi.mock("@multica/views/chat", () => ({
 vi.mock("@multica/views/star-prompt", () => ({
   StarPrompt: () => <div data-testid="star-prompt" />,
 }));
+vi.mock("@multica/views/whats-new", () => ({ WhatsNewDeck: () => null }));
 
 vi.mock("./tab-bar", () => ({ TabBar: () => null }));
 vi.mock("./window-overlay", () => ({ WindowOverlay: () => null }));

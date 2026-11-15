@@ -52,6 +52,12 @@
       "try": "사용해 보기",
       "open": "열기",
       "learn_more": "자세히 알아보기"
+    },
+    "deck": {
+      "tag": "새 기능",
+      "next": "다음",
+      "done": "확인",
+      "page": "{{total}}개 중 {{current}}번째"
     }
   },
   "star_prompt": {

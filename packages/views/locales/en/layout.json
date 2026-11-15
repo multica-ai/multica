@@ -52,6 +52,12 @@
       "try": "Try it",
       "open": "Open",
       "learn_more": "Learn more"
+    },
+    "deck": {
+      "tag": "New",
+      "next": "Next",
+      "done": "Got it",
+      "page": "Update {{current}} of {{total}}"
     }
   },
   "star_prompt": {

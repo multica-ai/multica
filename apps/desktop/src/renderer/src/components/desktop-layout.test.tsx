@@ -88,6 +88,7 @@ vi.mock("@multica/views/search", () => ({
 }));
 vi.mock("@multica/views/chat", () => ({ FloatingChat: () => null }));
 vi.mock("@multica/views/star-prompt", () => ({ StarPrompt: () => null }));
+vi.mock("@multica/views/whats-new", () => ({ WhatsNewDeck: () => null }));
 vi.mock("./tab-bar", () => ({ TabBar: () => null }));
 vi.mock("./window-overlay", () => ({ WindowOverlay: () => null }));
 
