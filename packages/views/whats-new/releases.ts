@@ -30,12 +30,19 @@ export interface WhatsNewRelease extends ReleaseStamp {
   highlights: WhatsNewHighlight[];
 }
 
+/** The first release dealt as a corner deck; see WHATS_NEW_RELEASES. */
+export const WHATS_NEW_DECK_SINCE = "0.9.0";
+
 /**
  * In-app highlights per release, newest first. Not the changelog: only
  * user-visible changes worth discovering, 0–3 per release, with copy that
  * says how to use the feature. Fix-only releases get no entry, so they are
  * never marked as new in the panel. Versions and dates must
  * match the changelog entry the highlights come from.
+ *
+ * From WHATS_NEW_DECK_SINCE on, every entry needs at least one highlight with
+ * hero art: only those reach the corner deck, and an entry without one would
+ * reach users only through the Help menu.
  */
 export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
   {
