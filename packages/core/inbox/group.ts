@@ -18,6 +18,11 @@ export function groupInboxRows(items: readonly InboxItem[]): InboxItem[][] {
   return out;
 }
 
+export interface InboxAnchorOptions {
+  /** An app request row opens at its request rather than a timeline entry. Defaults to true. */
+  keepRequestTarget?: boolean;
+}
+
 /**
  * The timeline entry a notification is about: its comment, or the failed run
  * it reports, which the timeline addresses by task id like a comment.
@@ -36,10 +41,15 @@ function inboxTimelineTarget(item: InboxItem): string | undefined {
  * Unread with no entry at all (a status change, an assignment), it opens
  * where the reader left off rather than at a comment already read. Read, it
  * opens at the newest notification's entry. An app notification lands on its
- * own request instead, so it never borrows one.
+ * own request instead, so it never borrows one — unless `keepRequestTarget`
+ * is off, for a client that renders no requests.
  */
-export function withCommentAnchor(row: InboxItem, group: readonly InboxItem[]): InboxItem {
-  if (row.type.startsWith("app_") && row.details?.request_id) return row;
+export function withCommentAnchor(
+  row: InboxItem,
+  group: readonly InboxItem[],
+  { keepRequestTarget = true }: InboxAnchorOptions = {},
+): InboxItem {
+  if (keepRequestTarget && row.type.startsWith("app_") && row.details?.request_id) return row;
   const unread = group.filter((item) => item.read !== true);
   const anchor =
     unread.length > 0
@@ -53,9 +63,12 @@ export function withCommentAnchor(row: InboxItem, group: readonly InboxItem[]): 
 }
 
 /** One row per issue: its newest notification. Newest group first. */
-export function groupInboxItemsByIssue(items: readonly InboxItem[]): InboxItem[] {
+export function groupInboxItemsByIssue(
+  items: readonly InboxItem[],
+  options?: InboxAnchorOptions,
+): InboxItem[] {
   return groupInboxRows(items)
-    .flatMap((group) => (group[0] ? [withCommentAnchor(group[0], group)] : []))
+    .flatMap((group) => (group[0] ? [withCommentAnchor(group[0], group, options)] : []))
     .sort(byNewest);
 }
 
