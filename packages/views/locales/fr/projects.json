@@ -56,7 +56,8 @@
     "assign_placeholder": "Assigner un responsable...",
     "members_group": "Membres",
     "agents_group": "Agents",
-    "no_results": "Aucun résultat"
+    "no_results": "Aucun résultat",
+    "private_needs_person": "Un projet privé doit avoir une personne pour responsable."
   },
   "relative_date": {
     "today": "Aujourd'hui",

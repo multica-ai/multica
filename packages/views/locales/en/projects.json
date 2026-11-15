@@ -56,7 +56,8 @@
     "assign_placeholder": "Assign lead...",
     "members_group": "Members",
     "agents_group": "Agents",
-    "no_results": "No results"
+    "no_results": "No results",
+    "private_needs_person": "A private project needs a person as its lead."
   },
   "relative_date": {
     "today": "Today",

@@ -56,7 +56,8 @@
     "assign_placeholder": "Назначить руководителя...",
     "members_group": "Участники",
     "agents_group": "Агенты",
-    "no_results": "Нет результатов"
+    "no_results": "Нет результатов",
+    "private_needs_person": "Руководителем закрытого проекта должен быть участник."
   },
   "relative_date": {
     "today": "Сегодня",

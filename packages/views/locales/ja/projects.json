@@ -56,7 +56,8 @@
     "assign_placeholder": "リードを割り当て...",
     "members_group": "メンバー",
     "agents_group": "エージェント",
-    "no_results": "結果なし"
+    "no_results": "結果なし",
+    "private_needs_person": "プライベートプロジェクトのリードはメンバーである必要があります。"
   },
   "relative_date": {
     "today": "今日",

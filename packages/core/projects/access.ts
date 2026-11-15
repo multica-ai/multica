@@ -21,6 +21,12 @@ export function canChangeProjectLead(project: Pick<Project, "lead_type" | "lead_
   return project.visibility !== "private" || canManageProjectAccess(project, userId, role);
 }
 
+// A private project is always led by a person, because its lead manages who
+// can see it. Mirrors the server, which refuses anything else.
+export function isAllowedProjectLead(project: Pick<Project, "visibility">, lead: { lead_type?: Project["lead_type"]; lead_id?: string | null }): boolean {
+  return project.visibility !== "private" || (lead.lead_type === "member" && !!lead.lead_id);
+}
+
 type AccessChange =
   | { type: "visibility"; visibility: ProjectVisibility; memberIds: string[] }
   | { type: "add"; userId: string }

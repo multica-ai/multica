@@ -56,7 +56,8 @@
     "assign_placeholder": "指派负责人...",
     "members_group": "成员",
     "agents_group": "智能体",
-    "no_results": "未找到结果"
+    "no_results": "未找到结果",
+    "private_needs_person": "私有项目的负责人必须是一位成员。"
   },
   "relative_date": {
     "today": "今天",
