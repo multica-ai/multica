@@ -122,7 +122,6 @@
     "unsubscribed": "已取消訂閱",
     "label_added": "已新增標籤 {{name}}",
     "label_removed": "已移除標籤 {{name}}",
-    "label_failed": "未能給所有任務新增標籤 {{name}}",
     "update_failed": "更新失敗",
     "assigned": "已把 {{identifier}} 指派給 {{name}}"
   },

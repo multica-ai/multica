@@ -208,4 +208,18 @@ describe("sidebarProjects", () => {
       sidebarProjects(projects, { ...DEFAULT_SIDEBAR_PROJECT_SETTINGS, onlyMine: true }, [], "u1").map((p) => p.id),
     ).toEqual(["p1"]);
   });
+
+  it("orders by recent activity, issues included, falling back to the project's own edit", () => {
+    const settings: SidebarProjectSettings = {
+      ...DEFAULT_SIDEBAR_PROJECT_SETTINGS,
+      ordering: "updated",
+      statuses: ["in_progress", "planned", "paused"],
+    };
+    const withActivity = [
+      { ...projects[0]!, last_activity_at: "2026-10-01T00:00:00.000000Z" },
+      { ...projects[1]!, last_activity_at: "2026-10-09T00:00:00Z" },
+      projects[3]!,
+    ];
+    expect(sidebarProjects(withActivity, settings, [], "u1").map((p) => p.id)).toEqual(["p2", "p4", "p1"]);
+  });
 });

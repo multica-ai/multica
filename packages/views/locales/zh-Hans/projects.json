@@ -9,7 +9,7 @@
     "view_comfortable": "舒适视图",
     "no_search_results": "未找到匹配的项目",
     "view_table": "表格",
-    "view_cards": "卡片",
+    "view_board": "看板",
     "row_menu": "项目操作",
     "rename": "重命名",
     "pin": "固定到侧边栏",
@@ -19,7 +19,10 @@
     "scope_archived": "已归档的项目",
     "archive": "归档",
     "restore": "恢复",
-    "no_archived": "没有已归档的项目"
+    "no_archived": "没有已归档的项目",
+    "search": "搜索项目",
+    "group_none": "不分组",
+    "board_column_empty": "暂无项目"
   },
   "table": {
     "name": "名称",
@@ -27,6 +30,9 @@
     "status": "状态",
     "progress": "进度",
     "lead": "负责人",
+    "start_date": "开始日期",
+    "due_date": "截止日期",
+    "last_activity": "最近活动",
     "created": "创建时间",
     "issues": "任务数",
     "archived": "归档于"

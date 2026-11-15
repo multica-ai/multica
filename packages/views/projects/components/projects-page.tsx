@@ -4,23 +4,28 @@ import { useCallback, useMemo, useState } from "react";
 import {
   Archive,
   ArchiveRestore,
+  Columns3,
   FolderKanban,
-  LayoutGrid,
   Pin,
   Rows3,
   Trash2,
 } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import {
+  boardGroupBy,
   isProjectArchived,
+  projectLastActivityAt,
+  useProjectsPagePrefsSync,
   projectListOptions,
   useUpdateProject,
   useProjectViewStore,
   type ProjectColumnKey,
+  type ProjectGroupBy,
+  type ProjectLayout,
   type ProjectListFilters,
   type ProjectSortField,
-  type ProjectViewMode,
 } from "@multica/core/projects";
+import { PROJECT_STATUS_CONFIG } from "@multica/core/projects/config";
 import {
   pinListOptions,
   useCreatePin,
@@ -35,10 +40,8 @@ import {
 } from "@multica/core/workspace/queries";
 import { canDeleteProject } from "@multica/core/projects/deletion-permissions";
 import { useModalStore } from "@multica/core/modals";
-import { AppLink } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
-import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   DropdownMenu,
@@ -64,6 +67,7 @@ import {
   CollectionPageHeader,
   CollectionResetButton,
   CollectionScopeItems,
+  CollectionSearch,
 } from "../../layout/collection-page";
 import {
   CollectionBatchBar,
@@ -72,6 +76,7 @@ import {
   CollectionList,
   CollectionNameCell,
   type CollectionColumn,
+  type CollectionGroup,
   type CollectionSort,
 } from "../../layout/collection-list";
 import { ProjectIcon } from "./project-icon";
@@ -82,7 +87,15 @@ import { useArchiveProjects, useRestoreProjects } from "./project-archive";
 import { useFormatRelativeDate } from "./labels";
 import { ProjectStatusBadge, ProjectPriorityBadge } from "./project-badge";
 import { ProjectLeadPicker } from "./project-lead-picker";
-import { PAGE_GUTTER } from "../../layout/page-header";
+import { ProjectBoard, ProjectBoardLoading, type ProjectBoardColumn } from "./project-board";
+import { ProjectDate, projectDueState } from "./project-date";
+import {
+  NO_LEAD_KEY,
+  groupProjects,
+  projectGroupUpdate,
+  type ProjectGroupField,
+} from "./project-groups";
+import { PriorityIcon } from "../../issues/components/priority-icon";
 import { cn } from "@multica/ui/lib/utils";
 
 // Sort order maps for the enum columns (header sort needs a total order).
@@ -153,102 +166,6 @@ function ProjectInlineCell({
   return <>{children(handleUpdate)}</>;
 }
 
-// Card (comfortable) view — kept from the prior page.
-
-function ProjectCard({
-  project,
-  pinned,
-  canDelete,
-}: {
-  project: Project;
-  pinned: boolean;
-  canDelete: boolean;
-}) {
-  const { t } = useT("projects");
-  const wsPaths = useWorkspacePaths();
-  const formatRelativeDate = useFormatRelativeDate();
-  const updateProject = useUpdateProject();
-  const handleUpdate = useCallback(
-    (data: UpdateProjectRequest) => updateProject.mutate({ id: project.id, ...data }),
-    [project.id, updateProject],
-  );
-  const progressPercent =
-    project.issue_count > 0
-      ? Math.round((project.done_count / project.issue_count) * 100)
-      : 0;
-
-  return (
-    <div className="group/card group/row flex flex-col rounded-md border bg-card transition-colors hover:border-primary/50">
-      <div className="p-3 pb-2">
-        <div className="flex items-center gap-2">
-          <AppLink
-            href={wsPaths.projectDetail(project.id)}
-            className="flex min-w-0 flex-1 items-center gap-2"
-          >
-            <ProjectIcon project={project} size="sm" />
-            <h3 className="truncate text-body font-medium">{project.title}</h3>
-          </AppLink>
-          <ProjectRowActions project={project} pinned={pinned} canDelete={canDelete} />
-          <ProjectStatusBadge project={project} handleUpdate={handleUpdate} triggerClassName="shrink-0" />
-        </div>
-
-        {project.issue_count > 0 ? (
-          <div className="flex items-center justify-end gap-1.5 pt-2">
-            <div className="relative h-4 w-4">
-              <svg className="h-4 w-4 -rotate-90" viewBox="0 0 16 16">
-                <circle className="text-muted" strokeWidth="2" stroke="currentColor" fill="none" r="6" cx="8" cy="8" />
-                <circle
-                  className="text-emerald-500"
-                  strokeWidth="2"
-                  stroke="currentColor"
-                  fill="none"
-                  r="6"
-                  cx="8"
-                  cy="8"
-                  strokeDasharray={`${progressPercent * 0.377} 37.7`}
-                  strokeLinecap="round"
-                />
-              </svg>
-            </div>
-            <span className="text-micro tabular-nums text-muted-foreground">
-              {project.done_count}/{project.issue_count}
-            </span>
-          </div>
-        ) : (
-          <span className="flex justify-end pt-2 text-micro text-muted-foreground">
-            {t(($) => $.detail.no_issues_yet)}
-          </span>
-        )}
-      </div>
-
-      <div className="mt-0 flex items-center justify-between border-t px-3 pb-3 pt-2">
-        <ProjectLeadPicker
-          project={project}
-          handleUpdate={handleUpdate}
-          renderTrigger={(leadName) => (
-            <button type="button" className="-mx-1.5 flex items-center gap-1.5 rounded-xs px-1.5 py-0.5 transition-colors hover:bg-accent/60">
-              {project.lead_type && project.lead_id ? (
-                <ActorAvatar actorType={project.lead_type} actorId={project.lead_id} size="sm" enableHoverCard />
-              ) : (
-                <span className="inline-flex h-5 w-5 rounded-full border border-dashed border-muted-foreground/30" />
-              )}
-              <span className="max-w-[60px] truncate text-micro text-muted-foreground">
-                {leadName ?? t(($) => $.lead.no_lead)}
-              </span>
-            </button>
-          )}
-        />
-        <div className="flex items-center gap-2">
-          <ProjectPriorityBadge project={project} handleUpdate={handleUpdate} align="start" />
-          <span className="text-micro text-muted-foreground">
-            {formatRelativeDate(project.created_at)}
-          </span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // Header tools — scope menu, filter, display (view, sort, columns).
 
 // Scope splits the lifecycle in two: still being worked on, or closed. The
@@ -258,17 +175,32 @@ type ProjectScope = "all" | "active" | "closed" | "archived";
 const PROJECT_SCOPES: ProjectScope[] = ["all", "active", "closed", "archived"];
 const CLOSED_STATUSES: ReadonlySet<ProjectStatus> = new Set(["completed", "cancelled"]);
 
+function statusInScope(status: ProjectStatus, scope: ProjectScope): boolean {
+  if (scope === "all" || scope === "archived") return true;
+  return CLOSED_STATUSES.has(status) === (scope === "closed");
+}
+
 function inScope(project: Project, scope: ProjectScope): boolean {
   if (isProjectArchived(project)) return scope === "archived";
   if (scope === "archived") return false;
-  if (scope === "all") return true;
-  return CLOSED_STATUSES.has(project.status) === (scope === "closed");
+  return statusInScope(project.status, scope);
 }
 
-const VIEW_MODES: { mode: ProjectViewMode; Icon: typeof Rows3 }[] = [
-  { mode: "compact", Icon: Rows3 },
-  { mode: "comfortable", Icon: LayoutGrid },
+const LAYOUTS: { layout: ProjectLayout; Icon: typeof Rows3 }[] = [
+  { layout: "table", Icon: Rows3 },
+  { layout: "board", Icon: Columns3 },
 ];
+
+const GROUP_FIELDS: ProjectGroupField[] = ["status", "priority", "lead"];
+
+// Calendar days compare as strings. Projects without the date sort last
+// whichever way the sort runs.
+function compareDates(a: string | null, b: string | null, dir: number): number {
+  if (a === b) return 0;
+  if (!a) return 1;
+  if (!b) return -1;
+  return (a < b ? -1 : 1) * dir;
+}
 
 const STATUS_VALUES: ProjectStatus[] = [
   "planned",
@@ -382,20 +314,33 @@ export function ProjectsPage() {
   const currentUser = useAuthStore((s) => s.user);
   const { getActorName } = useActorName();
 
-  const viewMode = useProjectViewStore((s) => s.viewMode);
-  const setViewMode = useProjectViewStore((s) => s.setViewMode);
+  const layout = useProjectViewStore((s) => s.layout);
+  const groupBy = useProjectViewStore((s) => s.groupBy);
+  const search = useProjectViewStore((s) => s.search);
+  const setSearch = useProjectViewStore((s) => s.setSearch);
   const sortField = useProjectViewStore((s) => s.sortField);
   const sortDirection = useProjectViewStore((s) => s.sortDirection);
   const hiddenColumns = useProjectViewStore((s) => s.hiddenColumns);
   const filters = useProjectViewStore((s) => s.filters);
-  const toggleSort = useProjectViewStore((s) => s.toggleSort);
-  const setSortField = useProjectViewStore((s) => s.setSortField);
-  const setSortDirection = useProjectViewStore((s) => s.setSortDirection);
-  const toggleColumn = useProjectViewStore((s) => s.toggleColumn);
-  const toggleFilter = useProjectViewStore((s) => s.toggleFilter);
-  const clearFilters = useProjectViewStore((s) => s.clearFilters);
-  const isCompact = viewMode === "compact";
+  // Every change the user makes to the display is saved for their other devices.
+  const savePrefs = useProjectsPagePrefsSync(wsId);
+  const persisted =
+    <A extends unknown[]>(action: (...args: A) => void) =>
+    (...args: A) => {
+      action(...args);
+      savePrefs();
+    };
+  const toggleSort = persisted(useProjectViewStore((s) => s.toggleSort));
+  const setSortField = persisted(useProjectViewStore((s) => s.setSortField));
+  const setSortDirection = persisted(useProjectViewStore((s) => s.setSortDirection));
+  const toggleColumn = persisted(useProjectViewStore((s) => s.toggleColumn));
+  const toggleFilter = persisted(useProjectViewStore((s) => s.toggleFilter));
+  const clearFilters = persisted(useProjectViewStore((s) => s.clearFilters));
+  const setLayout = persisted(useProjectViewStore((s) => s.setLayout));
+  const setGroupBy = persisted(useProjectViewStore((s) => s.setGroupBy));
+  const isTable = layout === "table";
   const formatRelativeDate = useFormatRelativeDate();
+  const updateProject = useUpdateProject();
 
   const { data: projects = [], isLoading } = useQuery(projectListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
@@ -421,6 +366,12 @@ export function ProjectsPage() {
 
   const activeFilterCount = countActiveFilters(filters);
   const hasActiveFilters = activeFilterCount > 0;
+  const query = search.trim().toLowerCase();
+  const hasSearch = query !== "";
+  const resetNarrowing = () => {
+    clearFilters();
+    setSearch("");
+  };
 
   // Filter option counts derive from the full set so toggling one dimension
   // doesn't make the others vanish.
@@ -453,6 +404,7 @@ export function ProjectsPage() {
   const visible = useMemo(() => {
     const filtered = projects.filter((p) => {
       if (!inScope(p, scope)) return false;
+      if (query && !p.title.toLowerCase().includes(query)) return false;
       if (filters.statuses.length && !filters.statuses.includes(p.status)) return false;
       if (filters.priorities.length && !filters.priorities.includes(p.priority)) {
         return false;
@@ -482,10 +434,140 @@ export function ProjectsPage() {
       if (sortField === "progress") {
         return (progressOf(a) - progressOf(b)) * dir || a.title.localeCompare(b.title);
       }
+      if (sortField === "start_date" || sortField === "due_date") {
+        return compareDates(a[sortField], b[sortField], dir) || a.title.localeCompare(b.title);
+      }
+      if (sortField === "last_activity") {
+        return (
+          (Date.parse(projectLastActivityAt(a)) - Date.parse(projectLastActivityAt(b))) * dir ||
+          a.title.localeCompare(b.title)
+        );
+      }
       return (Date.parse(a.created_at) - Date.parse(b.created_at)) * dir;
     });
     return sorted;
-  }, [projects, scope, filters, sortField, sortDirection]);
+  }, [projects, scope, query, filters, sortField, sortDirection]);
+
+  // The board always groups (status unless another field is chosen); the
+  // table only when asked to.
+  const groupField: ProjectGroupField | null = isTable
+    ? groupBy === "none"
+      ? null
+      : groupBy
+    : boardGroupBy(groupBy);
+
+  const leadKeyName = useCallback(
+    (key: string) => {
+      const [type, id] = key.split(":");
+      return type && id ? getActorName(type, id) : key;
+    },
+    [getActorName],
+  );
+
+  // Every group the scope and filters allow, in a stable order, so a board
+  // column can be dropped on while empty. Leads are the ones projects have.
+  const groupKeys = useMemo<string[]>(() => {
+    if (groupField === "status") {
+      return STATUS_VALUES.filter(
+        (s) =>
+          statusInScope(s, scope) &&
+          (filters.statuses.length === 0 || filters.statuses.includes(s)),
+      );
+    }
+    if (groupField === "priority") {
+      return PRIORITY_VALUES.filter(
+        (p) => filters.priorities.length === 0 || filters.priorities.includes(p),
+      );
+    }
+    if (groupField === "lead") {
+      const leads = [...(filters.leads.length ? filters.leads : leadOptions.keys())].sort(
+        (a, b) => leadKeyName(a).localeCompare(leadKeyName(b)),
+      );
+      return filters.leads.length ? leads : [...leads, NO_LEAD_KEY];
+    }
+    return [];
+  }, [groupField, scope, filters, leadOptions, leadKeyName]);
+
+  const groupHeading = useCallback(
+    (field: ProjectGroupField, key: string): { label: string; icon: React.ReactNode } => {
+      if (field === "status") {
+        const status = key as ProjectStatus;
+        return {
+          label: t(($) => $.status[status]),
+          icon: (
+            <span
+              className={cn("size-2 shrink-0 rounded-full", PROJECT_STATUS_CONFIG[status].dotColor)}
+            />
+          ),
+        };
+      }
+      if (field === "priority") {
+        const priority = key as ProjectPriority;
+        return {
+          label: t(($) => $.priority[priority]),
+          icon: <PriorityIcon priority={priority} />,
+        };
+      }
+      if (key === NO_LEAD_KEY) {
+        return {
+          label: t(($) => $.lead.no_lead),
+          icon: (
+            <span className="inline-flex size-[18px] shrink-0 rounded-full border border-dashed border-muted-foreground/30" />
+          ),
+        };
+      }
+      const [type, id] = key.split(":") as [string, string];
+      return {
+        label: leadKeyName(key),
+        icon: <ActorAvatar actorType={type} actorId={id} size="sm" />,
+      };
+    },
+    [t, leadKeyName],
+  );
+
+  const buckets = useMemo(
+    () => (groupField ? groupProjects(visible, groupField, groupKeys) : []),
+    [visible, groupField, groupKeys],
+  );
+
+  const tableGroups = useMemo<CollectionGroup<Project>[] | undefined>(() => {
+    if (!isTable || !groupField) return undefined;
+    return buckets
+      .filter((bucket) => bucket.projects.length > 0)
+      .map((bucket) => {
+        const { label, icon } = groupHeading(groupField, bucket.key);
+        return {
+          key: bucket.key,
+          label: (
+            <span className="inline-flex min-w-0 items-center gap-2">
+              {icon}
+              <span className="truncate">{label}</span>
+            </span>
+          ),
+          count: bucket.projects.length,
+          rows: bucket.projects,
+        };
+      });
+  }, [isTable, groupField, buckets, groupHeading]);
+
+  const boardColumns = useMemo<ProjectBoardColumn[]>(() => {
+    if (isTable || !groupField) return [];
+    return buckets.map((bucket) => ({
+      key: bucket.key,
+      ...groupHeading(groupField, bucket.key),
+      projects: bucket.projects,
+    }));
+  }, [isTable, groupField, buckets, groupHeading]);
+
+  const moveToGroup = (project: Project, key: string) => {
+    if (!groupField) return;
+    updateProject.mutate({ id: project.id, ...projectGroupUpdate(groupField, key) });
+  };
+
+  const changeLayout = (next: ProjectLayout) => {
+    setLayout(next);
+    setSelectedIds(new Set());
+  };
 
   const selectedProjects = visible.filter((p) => selectedIds.has(p.id));
 
@@ -579,6 +661,34 @@ export function ProjectsPage() {
         ),
       },
       {
+        key: "start_date",
+        header: t(($) => $.table.start_date),
+        width: 96,
+        sortKey: "start_date",
+        hideable: true,
+        cell: (project) => <ProjectDate value={project.start_date} />,
+      },
+      {
+        key: "due_date",
+        header: t(($) => $.table.due_date),
+        width: 96,
+        sortKey: "due_date",
+        hideable: true,
+        cell: (project) => (
+          <ProjectDate value={project.due_date} dueState={projectDueState(project)} />
+        ),
+      },
+      {
+        key: "last_activity",
+        header: t(($) => $.table.last_activity),
+        width: 104,
+        sortKey: "last_activity",
+        hideable: true,
+        cell: (project) => (
+          <span className="tabular-nums">{formatRelativeDate(projectLastActivityAt(project))}</span>
+        ),
+      },
+      {
         key: "issues",
         header: t(($) => $.table.issues),
         width: 64,
@@ -639,8 +749,23 @@ export function ProjectsPage() {
     closed: t(($) => $.page.scope_closed),
     archived: t(($) => $.page.scope_archived),
   };
-  const noMatchesTitle =
-    scope === "archived" && !hasActiveFilters ? t(($) => $.page.no_archived) : t(($) => $.page.no_matches);
+  const groupFieldLabels: Record<ProjectGroupField, string> = {
+    status: t(($) => $.toolbar.section_status),
+    priority: t(($) => $.toolbar.section_priority),
+    lead: t(($) => $.toolbar.section_lead),
+  };
+  const noMatches = (
+    <CollectionNoMatches
+      title={
+        scope === "archived" && !hasActiveFilters && !hasSearch
+          ? t(($) => $.page.no_archived)
+          : t(($) => $.page.no_matches)
+      }
+      onReset={resetNarrowing}
+      hasFilters={hasActiveFilters}
+      hasSearch={hasSearch}
+    />
+  );
 
   return (
     // relative: positioning anchor for the page-centered batch toolbar.
@@ -731,35 +856,53 @@ export function ProjectsPage() {
                 </DropdownMenuSub>
               </DropdownMenuContent>
             </DropdownMenu>
-            {hasActiveFilters ? <CollectionResetButton onClick={clearFilters} /> : null}
+            <CollectionSearch
+              value={search}
+              onChange={setSearch}
+              label={t(($) => $.page.search)}
+            />
+            {hasActiveFilters || hasSearch ? (
+              <CollectionResetButton onClick={resetNarrowing} />
+            ) : null}
           </>
         }
         actions={
           <>
-            {/* Sort applies to both views; columns only to the table. */}
+            {/* Sort and grouping apply to both layouts; columns only to the table. */}
             <CollectionDisplayMenu
               columns={columns}
               hiddenColumns={hiddenColumns}
               onToggleColumn={(key) => toggleColumn(key as ProjectColumnKey)}
               sort={sort}
-              showColumns={isCompact}
-              triggerIcon={isCompact ? Rows3 : LayoutGrid}
+              showColumns={isTable}
+              triggerIcon={isTable ? Rows3 : Columns3}
+              grouping={{
+                value: isTable ? groupBy : boardGroupBy(groupBy),
+                options: [
+                  ...(isTable ? [{ value: "none", label: t(($) => $.page.group_none) }] : []),
+                  ...GROUP_FIELDS.map((field) => ({
+                    value: field,
+                    label: groupFieldLabels[field],
+                  })),
+                ],
+                onChange: (value) => setGroupBy(value as ProjectGroupBy),
+              }}
               extra={
                 <div
                   role="group"
                   aria-label={t(($) => $.toolbar.view)}
                   className="grid grid-cols-2 gap-0.5 rounded-lg bg-muted p-0.5"
                 >
-                  {VIEW_MODES.map(({ mode, Icon }) => (
+                  {LAYOUTS.map(({ layout: option, Icon }) => (
                     <Toggle
-                      key={mode}
-                      pressed={viewMode === mode}
-                      onPressedChange={() => setViewMode(mode)}
+                      key={option}
+                      pressed={layout === option}
+                      onPressedChange={() => changeLayout(option)}
                       className="h-auto min-w-0 flex-col gap-1 rounded-md px-0.5 py-1.5 text-caption font-normal text-muted-foreground hover:bg-transparent hover:text-foreground aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm aria-pressed:hover:bg-background"
                     >
                       <Icon className="size-4" />
                       <span className="max-w-full truncate">
-                        {mode === "compact" ? t(($) => $.page.view_table) : t(($) => $.page.view_cards)}
+                        {option === "table" ? t(($) => $.page.view_table) : t(($) => $.page.view_board)}
                       </span>
                     </Toggle>
                   ))}
@@ -778,12 +921,13 @@ export function ProjectsPage() {
         <ProjectsIntro onCreate={openCreateProject} />
       ) : (
         <>
-          {isCompact ? (
+          {isTable ? (
             <CollectionList
               label={scopeLabels[scope]}
               columns={columns}
               hiddenColumns={hiddenColumns}
               rows={visible}
+              groups={tableGroups}
               loading={isLoading}
               getRowId={(project) => project.id}
               getRowHref={(project) => wsPaths.projectDetail(project.id)}
@@ -797,35 +941,20 @@ export function ProjectsPage() {
               )}
               sort={sort}
               selection={{ selectedIds, onChange: setSelectedIds }}
-              empty={
-                <CollectionNoMatches
-                  title={noMatchesTitle}
-                  onReset={clearFilters}
-                  hasFilters={hasActiveFilters}
-                />
-              }
+              empty={noMatches}
             />
           ) : isLoading ? (
-            <CardsLoading />
-          ) : visible.length === 0 ? (
-            <CollectionNoMatches
-              title={noMatchesTitle}
-              onReset={clearFilters}
-              hasFilters={hasActiveFilters}
-            />
+            <ProjectBoardLoading />
+          ) : visible.length === 0 && (hasActiveFilters || hasSearch || scope === "archived") ? (
+            noMatches
           ) : (
-            <div className={cn("min-h-0 flex-1 overflow-y-auto pt-4 pb-16", PAGE_GUTTER)}>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                {visible.map((project) => (
-                  <ProjectCard
-                    key={project.id}
-                    project={project}
-                    pinned={pinnedProjectIds.has(project.id)}
-                    canDelete={mayDelete(project)}
-                  />
-                ))}
-              </div>
-            </div>
+            <ProjectBoard
+              columns={boardColumns}
+              pinnedIds={pinnedProjectIds}
+              mayDelete={mayDelete}
+              onMove={moveToGroup}
+              onUpdate={(project, data) => updateProject.mutate({ id: project.id, ...data })}
+            />
           )}
 
           <ProjectBatchToolbar
@@ -836,25 +965,6 @@ export function ProjectsPage() {
           />
         </>
       )}
-    </div>
-  );
-}
-
-function CardsLoading() {
-  return (
-    <div className={cn("grid grid-cols-1 gap-3 pt-4 sm:grid-cols-2 lg:grid-cols-4", PAGE_GUTTER)}>
-      {Array.from({ length: 8 }).map((_, i) => (
-        <div key={i} className="flex flex-col gap-2 rounded-md border p-3">
-          <div className="flex items-center gap-2">
-            <Skeleton className="h-8 w-8 rounded-xs" />
-            <Skeleton className="h-4 w-3/4" />
-          </div>
-          <div className="flex gap-1.5">
-            <Skeleton className="h-5 w-16 rounded-xs" />
-            <Skeleton className="h-5 w-20 rounded-xs" />
-          </div>
-        </div>
-      ))}
     </div>
   );
 }
