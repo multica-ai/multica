@@ -148,5 +148,31 @@
     "issue_description": "目前檢視中此任務的通知將被永久刪除，任務和執行記錄不受影響。",
     "cancel": "取消",
     "active_issue_description": "此任務在收件箱中的通知將被永久刪除。先前歸檔的通知會保留，並重新顯示在已歸檔檢視中。任務和執行記錄不受影響。"
+  },
+  "snooze": {
+    "action": "延後",
+    "menu_title": "延後到…",
+    "unsnooze": "現在回來",
+    "change_time": "修改時間",
+    "in_one_hour": "1 小時後",
+    "later_today": "今天稍晚",
+    "tomorrow": "明天早上",
+    "next_week": "下週一",
+    "pick_time": "選擇日期和時間…",
+    "hint": "被點名 @、被指派或執行失敗時會提前回來。",
+    "custom_title": "延後到",
+    "custom_invalid": "請選擇一年內的未來時間。",
+    "back_at": "{{time}} 回來",
+    "returned": "延後到期",
+    "updates_other": "期間 {{count}} 則動態",
+    "toast_snoozed": "已延後到 {{time}}",
+    "toast_unsnoozed": "已回到收件匣",
+    "undo": "復原",
+    "failed": "延後失敗",
+    "unsnooze_failed": "恢復失敗",
+    "view_empty": "沒有延後的項目",
+    "view_empty_description": "在收件匣裡延後一個 issue，它會在這裡等到時間再回來。",
+    "col_updates": "延後期間",
+    "col_back": "回來時間"
   }
 }

@@ -150,5 +150,32 @@
     "issue_description": "This permanently deletes the notifications for this issue in this view. The issue and its runs are kept.",
     "cancel": "Cancel",
     "active_issue_description": "This permanently deletes the active notifications for this issue. Previously archived notifications remain and will be visible again in Archived. The issue and its runs are kept."
+  },
+  "snooze": {
+    "action": "Snooze",
+    "menu_title": "Snooze until…",
+    "unsnooze": "Bring back now",
+    "change_time": "Change time",
+    "in_one_hour": "In 1 hour",
+    "later_today": "Later today",
+    "tomorrow": "Tomorrow morning",
+    "next_week": "Next Monday",
+    "pick_time": "Pick a date and time…",
+    "hint": "Comes back early when you're mentioned by name, assigned, or a run fails.",
+    "custom_title": "Snooze until",
+    "custom_invalid": "Pick a time in the future, within a year.",
+    "back_at": "Back {{time}}",
+    "returned": "Snooze ended",
+    "updates_one": "{{count}} update while snoozed",
+    "updates_other": "{{count}} updates while snoozed",
+    "toast_snoozed": "Snoozed until {{time}}",
+    "toast_unsnoozed": "Back in your inbox",
+    "undo": "Undo",
+    "failed": "Failed to snooze",
+    "unsnooze_failed": "Failed to bring back",
+    "view_empty": "Nothing snoozed",
+    "view_empty_description": "Snooze an issue from your inbox and it waits here until it's time to come back.",
+    "col_updates": "While snoozed",
+    "col_back": "Back"
   }
 }

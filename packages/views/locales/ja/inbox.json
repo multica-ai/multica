@@ -148,5 +148,31 @@
     "issue_description": "このビューにあるこのタスクの通知は完全に削除されます。タスクと実行記録は残ります。",
     "cancel": "キャンセル",
     "active_issue_description": "このタスクの受信トレイ内の通知は完全に削除されます。以前アーカイブした通知は残り、アーカイブに再表示されます。タスクと実行記録は残ります。"
+  },
+  "snooze": {
+    "action": "スヌーズ",
+    "menu_title": "スヌーズする時間…",
+    "unsnooze": "今すぐ戻す",
+    "change_time": "時間を変更",
+    "in_one_hour": "1 時間後",
+    "later_today": "今日の夕方",
+    "tomorrow": "明日の朝",
+    "next_week": "来週の月曜日",
+    "pick_time": "日時を選択…",
+    "hint": "名指しでメンションされたとき、割り当てられたとき、実行が失敗したときは早めに戻ります。",
+    "custom_title": "スヌーズする時間",
+    "custom_invalid": "1 年以内の未来の時間を選択してください。",
+    "back_at": "{{time}} に戻る",
+    "returned": "スヌーズ終了",
+    "updates_other": "スヌーズ中に {{count}} 件の更新",
+    "toast_snoozed": "{{time}} までスヌーズしました",
+    "toast_unsnoozed": "受信トレイに戻しました",
+    "undo": "元に戻す",
+    "failed": "スヌーズできませんでした",
+    "unsnooze_failed": "戻せませんでした",
+    "view_empty": "スヌーズ中の項目はありません",
+    "view_empty_description": "受信トレイで issue をスヌーズすると、戻る時間までここで待機します。",
+    "col_updates": "スヌーズ中",
+    "col_back": "戻る時間"
   }
 }

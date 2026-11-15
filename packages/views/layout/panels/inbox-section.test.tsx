@@ -9,7 +9,8 @@ import {
 import { useInboxFilterStore } from "@multica/core/inbox/filter-store";
 import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
-import type { AgentTask, InboxItem } from "@multica/core/types";
+import type { AgentTask, InboxItem, SnoozedInboxIssue } from "@multica/core/types";
+import { snoozedInboxOptions } from "@multica/core/inbox/queries";
 import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 import { InboxSection, useInboxSectionRows } from "./inbox-section";
@@ -24,6 +25,8 @@ const state = vi.hoisted(() => ({
   archiveCompleted: vi.fn(),
   markRead: vi.fn(),
   markUnread: vi.fn(),
+  snooze: vi.fn(),
+  unsnooze: vi.fn(),
 }));
 
 vi.mock("@multica/core/paths", async (importOriginal) => {
@@ -42,6 +45,8 @@ vi.mock("@multica/core/inbox/mutations", () => ({
   useArchiveCompletedInbox: () => ({ mutate: state.archiveCompleted }),
   useMarkInboxRead: () => ({ mutate: state.markRead }),
   useMarkInboxUnread: () => ({ mutate: state.markUnread }),
+  useSnoozeInbox: () => ({ mutate: state.snooze }),
+  useUnsnoozeInbox: () => ({ mutate: state.unsnooze }),
 }));
 vi.mock("@multica/core/hooks", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/hooks")>()),
@@ -107,9 +112,11 @@ function renderSection(
   activeIssueId: string | null = null,
   url = "/acme/issues",
   tasks: Partial<AgentTask>[] = [],
+  snoozed: SnoozedInboxIssue[] = [],
 ) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   client.setQueryData(["inbox", "ws-1", "list"], items);
+  client.setQueryData(snoozedInboxOptions("ws-1").queryKey, snoozed);
   client.setQueryData(agentTaskSnapshotOptions("ws-1").queryKey, tasks as AgentTask[]);
   const nav = adapter(url);
   // As the Work panel keys it: the issue opened from the section, or the Inbox page's notification.
@@ -426,6 +433,44 @@ describe("InboxSection", () => {
     expect(state.archiveCompleted).toHaveBeenCalledTimes(1);
     fireEvent.click(within(await open()).getByRole("menuitem", { name: "Archive all" }));
     expect(state.archiveAll).toHaveBeenCalledTimes(1);
+  });
+
+  it("says a row is back from a snooze, with what arrived meanwhile, until it is read", () => {
+    const snooze = { snoozed_until: "2026-11-12T09:00:00Z", snoozed_at: "2026-11-10T09:00:00Z" };
+    const items = [
+      item({ id: "n3", issue_id: "issue-a", created_at: "2026-11-11T10:00:00Z", ...snooze }),
+      item({ id: "n2", issue_id: "issue-a", created_at: "2026-11-11T08:00:00Z", ...snooze }),
+      item({ id: "n1", issue_id: "issue-a", created_at: "2026-11-10T08:00:00Z", ...snooze }),
+      item({ id: "n4", issue_id: "issue-b", title: "Newer", created_at: "2026-11-11T12:00:00Z" }),
+    ];
+    const { unmount } = renderSection(items);
+    // Back at 09:00 on the 12th, so it sorts above the newer notification.
+    expect(rows()[0]).toHaveTextContent("Snooze ended · 2 updates while snoozed");
+    expect(rows()[1]).toHaveTextContent("Newer");
+    unmount();
+
+    renderSection(items.map((row) => ({ ...row, read: true })));
+    expect(rows()[0]).not.toHaveTextContent("Snooze ended");
+  });
+
+  it("snoozes a row from its hover button", async () => {
+    renderSection([item({ id: "n1", issue_id: "issue-a" })]);
+    fireEvent.click(screen.getByRole("button", { name: "Snooze" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Tomorrow morning/ }));
+    expect(state.snooze).toHaveBeenCalledWith({ id: "n1", until: expect.any(Date) }, expect.anything());
+  });
+
+  it("opens the snoozed list from the section header, with its count", async () => {
+    const until = "2099-01-01T09:00:00Z";
+    const { nav } = renderSection([item({ id: "n1", issue_id: "issue-a" })], null, "/acme/issues", [], [
+      { issue_id: "issue-z", item_id: "z1", snoozed_until: until, snoozed_at: "2026-11-10T09:00:00Z", updates: 0 },
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Inbox actions" }));
+    const entry = within(await screen.findByRole("menu")).getByRole("menuitem", { name: /View snoozed/ });
+    expect(entry).toHaveTextContent("1");
+    fireEvent.click(entry);
+    expect(nav.push).toHaveBeenCalledWith("/acme/issues?view=snoozed");
   });
 
   it("opens the archive from the section header", async () => {

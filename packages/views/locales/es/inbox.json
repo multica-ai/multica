@@ -150,5 +150,32 @@
     "issue_description": "Las notificaciones de esta tarea en esta vista se eliminarán permanentemente. La tarea y sus ejecuciones se conservarán.",
     "cancel": "Cancelar",
     "active_issue_description": "Las notificaciones activas de esta tarea se eliminarán permanentemente. Las notificaciones archivadas anteriormente se conservarán y volverán a aparecer en Archivadas. La tarea y sus ejecuciones se conservarán."
+  },
+  "snooze": {
+    "action": "Posponer",
+    "menu_title": "Posponer hasta…",
+    "unsnooze": "Recuperar ahora",
+    "change_time": "Cambiar hora",
+    "in_one_hour": "En 1 hora",
+    "later_today": "Esta tarde",
+    "tomorrow": "Mañana por la mañana",
+    "next_week": "El próximo lunes",
+    "pick_time": "Elegir fecha y hora…",
+    "hint": "Vuelve antes si te mencionan por tu nombre, te asignan o falla una ejecución.",
+    "custom_title": "Posponer hasta",
+    "custom_invalid": "Elige una hora futura, dentro de un año.",
+    "back_at": "Vuelve {{time}}",
+    "returned": "Pospuesto hasta ahora",
+    "updates_one": "{{count}} novedad mientras estaba pospuesto",
+    "updates_other": "{{count}} novedades mientras estaba pospuesto",
+    "toast_snoozed": "Pospuesto hasta {{time}}",
+    "toast_unsnoozed": "De vuelta en tu bandeja",
+    "undo": "Deshacer",
+    "failed": "No se pudo posponer",
+    "unsnooze_failed": "No se pudo recuperar",
+    "view_empty": "Nada pospuesto",
+    "view_empty_description": "Pospón un issue desde tu bandeja de entrada y esperará aquí hasta que sea hora de volver.",
+    "col_updates": "Mientras estaba pospuesto",
+    "col_back": "Vuelve"
   }
 }

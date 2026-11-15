@@ -3,17 +3,17 @@ import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { useInboxFilterStore } from "@multica/core/inbox/filter-store";
-import { inboxListOptions } from "@multica/core/inbox/queries";
+import { inboxListOptions, snoozedInboxOptions } from "@multica/core/inbox/queries";
 import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
-import type { InboxItem } from "@multica/core/types";
+import type { InboxItem, SnoozedInboxIssue } from "@multica/core/types";
 import { renderWithI18n } from "../../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../../navigation";
 import { IssueInboxActions } from "../issue-inbox-actions";
 
 const state = vi.hoisted(() => ({
-  markRead: vi.fn(),
-  markUnread: vi.fn(),
   archive: vi.fn(),
+  snooze: vi.fn(),
+  unsnooze: vi.fn(),
 }));
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
@@ -23,9 +23,9 @@ vi.mock("@multica/core/paths", async (importOriginal) => {
   return { ...actual, useWorkspacePaths: () => actual.paths.workspace("acme") };
 });
 vi.mock("@multica/core/inbox/mutations", () => ({
-  useMarkInboxRead: () => ({ mutate: state.markRead }),
-  useMarkInboxUnread: () => ({ mutate: state.markUnread }),
   useArchiveInbox: () => ({ mutate: state.archive }),
+  useSnoozeInbox: () => ({ mutate: state.snooze }),
+  useUnsnoozeInbox: () => ({ mutate: state.unsnooze }),
 }));
 
 function item(overrides: Partial<InboxItem> & { id: string }): InboxItem {
@@ -50,6 +50,8 @@ function item(overrides: Partial<InboxItem> & { id: string }): InboxItem {
   };
 }
 
+const SNOOZED_AT = "2026-11-12T09:00:00Z";
+
 const ROWS = [
   item({ id: "n-1", issue_id: "issue-1", created_at: "2026-11-12T08:00:00Z" }),
   item({ id: "n-2", issue_id: "issue-2", created_at: "2026-11-11T08:00:00Z", details: { comment_id: "c-9" } }),
@@ -59,7 +61,13 @@ function setup({
   rows = ROWS,
   issueId = "issue-1",
   onMarkDone,
-}: { rows?: InboxItem[]; issueId?: string; onMarkDone?: (onSaved: () => void) => void } = {}) {
+  snoozed = [],
+}: {
+  rows?: InboxItem[];
+  issueId?: string;
+  onMarkDone?: (onSaved: () => void) => void;
+  snoozed?: SnoozedInboxIssue[];
+} = {}) {
   const nav: NavigationAdapter = {
     push: vi.fn(),
     replace: vi.fn(),
@@ -71,6 +79,7 @@ function setup({
   };
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   qc.setQueryData(inboxListOptions("ws").queryKey, rows);
+  qc.setQueryData(snoozedInboxOptions("ws").queryKey, snoozed);
   qc.setQueryData(agentTaskSnapshotOptions("ws").queryKey, []);
   renderWithI18n(
     <QueryClientProvider client={qc}>
@@ -101,15 +110,36 @@ describe("IssueInboxActions", () => {
     expect(screen.queryByRole("button", { name: "Archive" })).toBeNull();
   });
 
-  it("toggles the read state of the issue's notification", () => {
+  it("offers snooze in place of a read toggle", () => {
     setup();
-    fireEvent.click(screen.getByRole("button", { name: "Mark as unread" }));
-    expect(state.markUnread).toHaveBeenCalledWith("n-1", expect.anything());
-    cleanup();
+    expect(screen.queryByRole("button", { name: "Mark as unread" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Mark as read" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Snooze" })).toBeInTheDocument();
+  });
 
-    setup({ rows: [{ ...ROWS[0]!, read: false }, ROWS[1]!] });
-    fireEvent.click(screen.getByRole("button", { name: "Mark as read" }));
-    expect(state.markRead).toHaveBeenCalledWith("n-1", expect.anything());
+  it("snoozes and moves on to the next notification", async () => {
+    const nav = setup();
+    fireEvent.keyDown(document, { key: "h", code: "KeyH" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: /In 1 hour/ }));
+    expect(state.snooze).toHaveBeenCalledWith(
+      { id: "n-1", until: expect.any(Date) },
+      expect.anything(),
+    );
+    expect(nav.push).toHaveBeenCalledWith("/acme/issues/issue-2#comment-c-9");
+  });
+
+  it("shows when a snoozed issue comes back, and brings it back with the shortcut", () => {
+    useInboxSelectionStore.setState({ sidebarIssueByWorkspace: {} });
+    const until = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    setup({
+      rows: [ROWS[1]!],
+      snoozed: [{ issue_id: "issue-1", item_id: "n-1", snoozed_until: until, snoozed_at: SNOOZED_AT, updates: 0 }],
+    });
+    expect(screen.getByTitle(/^Back /)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Archive" })).toBeNull();
+
+    fireEvent.keyDown(document, { key: "h", code: "KeyH" });
+    expect(state.unsnooze).toHaveBeenCalledWith({ id: "n-1" }, expect.anything());
   });
 
   it("archives and moves on to the next notification", () => {
