@@ -54,8 +54,7 @@ func IsSnoozed(item db.InboxItem, now time.Time) bool {
 	return item.SnoozedUntil.Valid && item.SnoozedUntil.Time.After(now)
 }
 
-// NewItemEventType names the event that announces a row CreateIfEligible
-// wrote. A row that joined a snooze is announced as inbox:snoozed, so no
+// NewItemEventType names the event that announces a row Deliver wrote. A row that joined a snooze is announced as inbox:snoozed, so no
 // client raises a banner and no channel pushes it.
 func NewItemEventType(item db.InboxItem) string {
 	if IsSnoozed(item, time.Now()) {

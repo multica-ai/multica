@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -27,7 +26,7 @@ vi.mock("@multica/core/paths", async (importOriginal) => {
   return { ...actual, useWorkspacePaths: () => actual.paths.workspace("acme") };
 });
 // Archive runs through the real mutation, so the tests see React Query drop
-// per-call callbacks when opening the next issue unmounts the header.
+// per-call callbacks when the next issue's page replaces the header.
 vi.mock("@multica/core/inbox/mutations", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/inbox/mutations")>()),
   useSnoozeInbox: () => ({ mutateAsync: state.snooze }),
@@ -64,15 +63,6 @@ const ROWS = [
   item({ id: "n-2", issue_id: "issue-2", created_at: "2026-11-11T08:00:00Z", details: { comment_id: "c-9" } }),
 ];
 
-let leaveIssue = () => {};
-
-/** Opening another issue replaces the page, taking these actions with it. */
-function IssuePage(props: { issueId: string; onMarkDone?: (onSaved: () => void) => void }) {
-  const [here, setHere] = useState(true);
-  leaveIssue = () => setHere(false);
-  return here ? <IssueInboxActions {...props} /> : <span>Next issue</span>;
-}
-
 function setup({
   rows = ROWS,
   issueId = "issue-1",
@@ -85,7 +75,7 @@ function setup({
   snoozed?: SnoozedInboxIssue[];
 } = {}) {
   const nav: NavigationAdapter = {
-    push: vi.fn(() => leaveIssue()),
+    push: vi.fn(),
     replace: vi.fn(),
     back: vi.fn(),
     pathname: `/acme/issues/${issueId}`,
@@ -106,14 +96,19 @@ function setup({
   qc.setQueryData(inboxListOptions("ws").queryKey, rows);
   qc.setQueryData(snoozedInboxOptions("ws").queryKey, snoozed);
   qc.setQueryData(agentTaskSnapshotOptions("ws").queryKey, []);
-  renderWithI18n(
+  const page = (id: string | null) => (
     <QueryClientProvider client={qc}>
       <NavigationProvider value={nav}>
-        <IssuePage issueId={issueId} onMarkDone={onMarkDone} />
+        {id ? <IssueInboxActions issueId={id} onMarkDone={onMarkDone} /> : <span>Next issue</span>}
       </NavigationProvider>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
-  return nav;
+  const { rerender } = renderWithI18n(page(issueId));
+  /** The route reaching another issue, which the same header then shows. */
+  const arrive = (id: string) => rerender(page(id));
+  /** The next page replacing this one, taking the header with it. */
+  const leave = () => rerender(page(null));
+  return Object.assign(nav, { arrive, leave });
 }
 
 /** An archive request the test settles by hand, after the header is gone. */
@@ -131,7 +126,7 @@ function pendingArchive() {
 beforeEach(() => {
   vi.clearAllMocks();
   state.archiveInbox.mockImplementation(async (id: string) => item({ id, archived: true }));
-  useInboxSelectionStore.setState({ sidebarIssueByWorkspace: { ws: "issue-1" } });
+  useInboxSelectionStore.setState({ sidebarIssueByWorkspace: { ws: "issue-1" }, sidebarTabIssuesByWorkspace: {} });
   useInboxFilterStore.getState().clearFilters("ws");
 });
 afterEach(cleanup);
@@ -140,6 +135,37 @@ describe("IssueInboxActions", () => {
   it("stays out of an issue that was not opened from the Inbox", () => {
     useInboxSelectionStore.setState({ sidebarIssueByWorkspace: { ws: "issue-2" } });
     setup();
+    expect(screen.queryByRole("button", { name: "Archive" })).toBeNull();
+  });
+
+  it("stays on the open issue until the next notification's issue arrives", async () => {
+    const nav = setup();
+    act(() => {
+      useInboxSelectionStore.getState().rememberSidebarIssue("ws", "issue-2");
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+    await waitFor(() => expect(state.archiveInbox).toHaveBeenLastCalledWith("n-1"));
+
+    nav.arrive("issue-2");
+    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+    await waitFor(() => expect(state.archiveInbox).toHaveBeenLastCalledWith("n-2"));
+  });
+
+  it("shows on an issue the Inbox opened in another tab", async () => {
+    useInboxSelectionStore.setState({
+      sidebarIssueByWorkspace: { ws: "issue-1" },
+      sidebarTabIssuesByWorkspace: { ws: ["issue-2"] },
+    });
+    setup({ issueId: "issue-2" });
+    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+    await waitFor(() => expect(state.archiveInbox).toHaveBeenCalledWith("n-2"));
+  });
+
+  it("leaves once the issue is opened from outside the Inbox", () => {
+    setup();
+    act(() => {
+      useInboxSelectionStore.getState().rememberSidebarIssue("ws", null);
+    });
     expect(screen.queryByRole("button", { name: "Archive" })).toBeNull();
   });
 
@@ -187,10 +213,10 @@ describe("IssueInboxActions", () => {
 
   it("still confirms the archive after the next issue replaces this one", async () => {
     const archive = pendingArchive();
-    setup();
+    const nav = setup();
     fireEvent.click(screen.getByRole("button", { name: "Archive" }));
-    expect(screen.getByText("Next issue")).toBeInTheDocument();
     await waitFor(() => expect(state.archiveInbox).toHaveBeenCalledWith("n-1"));
+    nav.leave();
     await archive.resolve();
 
     expect(toast.success).toHaveBeenCalledWith("Notification archived");
@@ -199,10 +225,10 @@ describe("IssueInboxActions", () => {
 
   it("still reports a failed archive after the next issue replaces this one", async () => {
     const archive = pendingArchive();
-    setup();
+    const nav = setup();
     fireEvent.click(screen.getByRole("button", { name: "Archive" }));
-    expect(screen.getByText("Next issue")).toBeInTheDocument();
     await waitFor(() => expect(state.archiveInbox).toHaveBeenCalled());
+    nav.leave();
     await archive.reject(new Error("Archive rejected"));
 
     expect(toast.error).toHaveBeenCalledWith("Archive rejected");
@@ -246,11 +272,11 @@ describe("IssueInboxActions", () => {
 
   it("still reports a failed archive after marking done moves on", async () => {
     const archive = pendingArchive();
-    setup({ onMarkDone: (onSaved) => onSaved() });
+    const nav = setup({ onMarkDone: (onSaved) => onSaved() });
 
     fireEvent.click(screen.getByRole("button", { name: "Mark as done" }));
-    expect(screen.getByText("Next issue")).toBeInTheDocument();
     await waitFor(() => expect(state.archiveInbox).toHaveBeenCalled());
+    nav.leave();
     await archive.reject(new Error("Archive rejected"));
 
     expect(toast.error).toHaveBeenCalledWith("Archive rejected");

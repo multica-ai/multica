@@ -9,6 +9,14 @@ interface InboxSelectionState {
   sidebarIssueByWorkspace: Record<string, string | null>;
   rememberSidebarIssue: (wsId: string, issueId: string | null) => void;
   /**
+   * Issues the Inbox section opened in another tab of this window. Desktop
+   * tabs share this store, so each of these keeps counting as opened from
+   * the Inbox beside the issue the current tab last opened from it.
+   */
+  sidebarTabIssuesByWorkspace: Record<string, string[]>;
+  rememberSidebarTabIssue: (wsId: string, issueId: string) => void;
+  forgetSidebarTabIssue: (wsId: string, issueId: string) => void;
+  /**
    * The issue a notification row was last clicked for, with a counter that
    * moves on every click. The issue page replays its landing (the comment or
    * app request the link names) when the counter moves, which a click on the
@@ -30,6 +38,24 @@ export const useInboxSelectionStore = create<InboxSelectionState>()((set) => ({
   rememberSidebarIssue: (wsId, issueId) =>
     set((state) => (state.sidebarIssueByWorkspace[wsId] ?? null) === issueId ? state : {
       sidebarIssueByWorkspace: { ...state.sidebarIssueByWorkspace, [wsId]: issueId },
+    }),
+  sidebarTabIssuesByWorkspace: {},
+  rememberSidebarTabIssue: (wsId, issueId) =>
+    set((state) => {
+      const issueIds = state.sidebarTabIssuesByWorkspace[wsId] ?? [];
+      return issueIds.includes(issueId) ? state : {
+        sidebarTabIssuesByWorkspace: { ...state.sidebarTabIssuesByWorkspace, [wsId]: [...issueIds, issueId] },
+      };
+    }),
+  forgetSidebarTabIssue: (wsId, issueId) =>
+    set((state) => {
+      const issueIds = state.sidebarTabIssuesByWorkspace[wsId] ?? [];
+      return issueIds.includes(issueId) ? {
+        sidebarTabIssuesByWorkspace: {
+          ...state.sidebarTabIssuesByWorkspace,
+          [wsId]: issueIds.filter((id) => id !== issueId),
+        },
+      } : state;
     }),
   landing: null,
   requestLanding: (issueId) =>
