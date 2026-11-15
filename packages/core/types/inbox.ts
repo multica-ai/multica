@@ -34,6 +34,10 @@ export type InboxItemType =
   // Sub-issues of an issue assigned to the recipient closed (the child_done
   // system rule notifies a member assignee instead of waking an agent).
   | "children_done"
+  // A workspace owner added themselves to a private project the recipient is
+  // a member of. Issue-less: details carry project_id, project_title and
+  // joined_by (the owner's name).
+  | "project_owner_joined"
   // Connected Apps (MUL-8516): an agent waits on the recipient to confirm an
   // app call, or to connect their account.
   | "app_action_requested"

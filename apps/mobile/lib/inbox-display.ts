@@ -38,6 +38,19 @@ export function getAutopilotQuotaBody(item: InboxItem): string | null {
   });
 }
 
+/**
+ * Body of an issue-less notice, in the UI locale where the client has the
+ * facts to write it and as the server sent it otherwise.
+ */
+export function getInboxNoticeBody(item: InboxItem): string | null {
+  if (item.type === "project_owner_joined" && item.details?.joined_by) {
+    return i18n.t("inbox:body.project_owner_joined", {
+      name: item.details.joined_by,
+    });
+  }
+  return getAutopilotQuotaBody(item);
+}
+
 function singleLine(value: string | null | undefined): string {
   return (value ?? "").replace(/\s+/g, " ").trim();
 }
@@ -87,6 +100,15 @@ export function getInboxDisplayTitle(item: InboxItem): string {
   return item.title;
 }
 
+/** Issue-less notices that open in the inbox's own detail sheet. */
+export function isInboxNotice(type: InboxItem["type"]): boolean {
+  return (
+    type === "autopilot_quota_exceeded" ||
+    type === "autopilot_paused" ||
+    type === "project_owner_joined"
+  );
+}
+
 export function getInboxNavigationTarget(
   item: InboxItem,
   workspace: string | null,
@@ -104,10 +126,7 @@ export function getInboxNavigationTarget(
       },
     };
   }
-  if (
-    item.type === "autopilot_quota_exceeded" ||
-    item.type === "autopilot_paused"
-  ) {
+  if (isInboxNotice(item.type)) {
     return {
       pathname: "/[workspace]/inbox/[id]" as const,
       params: { workspace, id: item.id },
@@ -130,8 +149,8 @@ export function getInboxNavigationTarget(
  *   2. Group by `issue_id` (fall back to `id` for items with no issue
  *      attached — e.g. quick_create_failed).
  *   3. In each group, keep the newest by `created_at`.
- *   4. Preserve the newest grouped `comment_id` anchor when the newest row
- *      is a later status/metadata event for the same issue.
+ *   4. Anchor the row where the reader left off: the oldest unread
+ *      `comment_id` in the group, or the newest one once all are read.
  *   5. Sort the result newest-first.
  */
 export function deduplicateInboxItems(items: InboxItem[]): InboxItem[] {
@@ -152,9 +171,11 @@ export function deduplicateInboxItems(items: InboxItem[]): InboxItem[] {
     const newest = group[0];
     if (!newest) continue;
 
-    const commentId =
-      newest.details?.comment_id ??
-      group.find((item) => item.details?.comment_id)?.details?.comment_id;
+    const hasComment = (item: InboxItem) => !!item.details?.comment_id;
+    const commentId = (
+      group.findLast((item) => item.read !== true && hasComment(item)) ??
+      group.find(hasComment)
+    )?.details?.comment_id;
 
     if (commentId && newest.details?.comment_id !== commentId) {
       merged.push({

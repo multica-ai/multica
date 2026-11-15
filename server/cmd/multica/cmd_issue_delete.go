@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -39,7 +40,9 @@ var issueDeleteCmd = &cobra.Command{
 		"aborts the whole command instead of leaving a partial batch. Ids may be issue\n" +
 		"keys (e.g. MUL-123) or full UUIDs.\n\n" +
 		"Without --yes the command asks for confirmation. A non-interactive run that\n" +
-		"cannot answer the prompt fails without deleting; pass --yes to skip it.",
+		"cannot answer the prompt fails without deleting; pass --yes to skip it.\n\n" +
+		"--dry-run checks the selection, including permission to delete it, and lists\n" +
+		"what would be deleted without deleting anything or asking for confirmation.",
 	Args: minimumArgs(1),
 	RunE: runIssueDelete,
 }
@@ -55,6 +58,10 @@ func runIssueDelete(cmd *cobra.Command, args []string) error {
 	cancelResolve()
 	if err != nil {
 		return err
+	}
+
+	if dryRun, _ := cmd.Flags().GetBool("dry-run"); dryRun {
+		return runIssueDeleteDryRun(cmd, client, refs)
 	}
 
 	yes, _ := cmd.Flags().GetBool("yes")
@@ -124,6 +131,26 @@ func runIssueDelete(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stdout, "Deleted issue %s\n", ref.Display)
 	}
 	return nil
+}
+
+func runIssueDeleteDryRun(cmd *cobra.Command, client *cli.APIClient, refs []resolvedID) error {
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	if err := requireIssueBatchOps(ctx, client); err != nil {
+		return err
+	}
+	ids := make([]string, len(refs))
+	for i, ref := range refs {
+		ids[i] = ref.ID
+	}
+	var resp issueBatchResponse
+	if err := client.PostJSON(ctx, "/api/issues/batch-delete", map[string]any{"issue_ids": ids, "dry_run": true}, &resp); err != nil {
+		return issueDeleteError("check deletion", err)
+	}
+	if !resp.DryRun {
+		return errors.New("the server did not confirm a dry run; nothing is known about what it did — run `multica issue list` before retrying")
+	}
+	return finishIssueBatch(cmd, resp)
 }
 
 // issueDeleteError keeps the step that failed and the server's own refusal

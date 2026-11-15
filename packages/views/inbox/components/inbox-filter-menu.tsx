@@ -126,6 +126,7 @@ export function InboxFilterMenu({
   issueFieldsSupport = "supported",
   activeIssueIds = EMPTY_ISSUE_IDS,
   archived = false,
+  sectionTrigger,
 }: {
   wsId: string;
   items: InboxItem[];
@@ -134,6 +135,11 @@ export function InboxFilterMenu({
   /** Issues an agent is running or queued on. */
   activeIssueIds?: ReadonlySet<string>;
   archived?: boolean;
+  /**
+   * In a panel section's header instead of a page header: a plain row button
+   * styled by the section, its menu opening to the right.
+   */
+  sectionTrigger?: { className: string; activeClassName: string };
 }) {
   const { t } = useT("inbox");
   const { t: tIssues } = useT("issues");
@@ -144,6 +150,9 @@ export function InboxFilterMenu({
   const clearPriorityFilters = useInboxFilterStore((state) => state.clearPriorityFilters);
   const clearIssueFieldFilters = useInboxFilterStore((state) => state.clearIssueFieldFilters);
   const [open, setOpen] = useState(false);
+  // The body is built only while the menu is open or closing: the trigger
+  // also sits in the always-mounted Work panel, which re-renders often.
+  const [bodyMounted, setBodyMounted] = useState(false);
   const [search, setSearch] = useState("");
   const [activeAtOpen, setActiveAtOpen] = useState<ReadonlySet<InboxFilterKey> | null>(null);
   const query = search.trim().toLowerCase();
@@ -524,7 +533,7 @@ export function InboxFilterMenu({
   }
   const matchedValues = valueHits.filter((hit) => matchesFilterQuery(hit.label, query)).slice(0, 50);
 
-  const menuBody = query ? (
+  const menuBody = !bodyMounted ? null : query ? (
     <>
       {fieldHits.length > 0 && (
         <DropdownMenuGroup>
@@ -595,33 +604,63 @@ export function InboxFilterMenu({
   return (
     <DropdownMenu
       open={open}
+      onOpenChangeComplete={(next) => {
+        if (!next) setBodyMounted(false);
+      }}
       onOpenChange={(next) => {
         setOpen(next);
+        if (next) setBodyMounted(true);
         setActiveAtOpen(next ? new Set(activeInboxFilterKeys(effectiveFilters)) : null);
         if (!next) setSearch("");
       }}
     >
-      <DropdownMenuTrigger
-        render={
-          <IconButton
-            variant={activeCount > 0 ? "default" : "ghost"}
-            size="icon-sm"
-            label={triggerLabel}
-            tooltipSide="bottom"
-            className={cn(
-              "text-muted-foreground",
-              activeCount > 0 &&
-                "w-auto gap-1 bg-brand px-2 text-white hover:bg-brand/90",
-            )}
-          />
-        }
+      {sectionTrigger ? (
+        <DropdownMenuTrigger
+          render={
+            <button
+              type="button"
+              aria-label={triggerLabel}
+              className={cn(
+                sectionTrigger.className,
+                "data-popup-open:bg-surface-selected data-popup-open:opacity-100",
+                activeCount > 0 ? sectionTrigger.activeClassName : "data-popup-open:text-foreground",
+              )}
+            />
+          }
+        >
+          <Filter className="size-3.5" />
+          {activeCount > 0 && (
+            <span className="text-caption tabular-nums">{activeCount}</span>
+          )}
+        </DropdownMenuTrigger>
+      ) : (
+        <DropdownMenuTrigger
+          render={
+            <IconButton
+              variant={activeCount > 0 ? "default" : "ghost"}
+              size="icon-sm"
+              label={triggerLabel}
+              tooltipSide="bottom"
+              className={cn(
+                "text-muted-foreground",
+                activeCount > 0 &&
+                  "w-auto gap-1 bg-brand px-2 text-white hover:bg-brand/90",
+              )}
+            />
+          }
+        >
+          <Filter className="size-4" />
+          {activeCount > 0 && (
+            <span className="text-caption tabular-nums">{activeCount}</span>
+          )}
+        </DropdownMenuTrigger>
+      )}
+      <DropdownMenuContent
+        side={sectionTrigger ? "right" : undefined}
+        align={sectionTrigger ? "start" : "end"}
+        sideOffset={sectionTrigger ? 8 : undefined}
+        className="w-auto min-w-64 p-0"
       >
-        <Filter className="size-4" />
-        {activeCount > 0 && (
-          <span className="text-caption tabular-nums">{activeCount}</span>
-        )}
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-auto min-w-64 p-0">
         <div data-filter-search className="flex items-center gap-1.5 border-b border-foreground/5 px-2.5 py-2">
           <Search className="size-3.5 shrink-0 text-muted-foreground" />
           <input

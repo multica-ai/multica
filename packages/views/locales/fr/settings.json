@@ -832,8 +832,27 @@
     "toast_profile_failed": "Échec de la mise à jour du profil"
   },
   "notifications": {
-    "title": "Notifications de la boîte de réception",
-    "description": "Les événements désactivés restent visibles dans la tâche.",
+    "title": "Boîte de réception",
+    "description": "Choisissez les événements qui arrivent dans la boîte de réception de la barre latérale Travail. Un événement désactivé ne crée aucune notification, et le réactiver ne récupère pas celles manquées.",
+    "categories": {
+      "direct": "Vous concernant",
+      "issues": "Tâches que vous suivez",
+      "projects": "Projets que vous suivez",
+      "agents": "Agents"
+    },
+    "leaving": {
+      "title": "Sortir de la boîte de réception",
+      "description": "Lire une notification ne la retire pas de la boîte de réception.",
+      "manual_label": "Archiver à la main",
+      "manual_description": "Depuis sa ligne dans la barre latérale ou le haut de la notification",
+      "manual_value": "À tout moment",
+      "done_label": "Tâche terminée",
+      "done_description": "Quand une tâche passe à un statut Terminé, ses notifications sont archivées. L'annuler ne les archive pas.",
+      "done_value": "Automatique",
+      "archived_label": "Notifications archivées",
+      "archived_description": "Retrouvez-les et désarchivez-les",
+      "archived_action": "Voir les archivées"
+    },
     "toast_failed": "Échec de la mise à jour des réglages de notification",
     "groups": {
       "assignments": {
@@ -1959,5 +1978,26 @@
       "retry_failed": "Impossible de transcrire cet enregistrement",
       "show_more": "Afficher plus"
     }
+  },
+  "private_projects": {
+    "title": "Projets privés",
+    "description": "Seuls les membres d’un projet privé peuvent l’ouvrir. En tant que propriétaire de l’espace de travail, vous voyez qui fait partie de chacun et pouvez vous y ajouter quand vous devez intervenir.",
+    "empty": "Cet espace de travail n’a aucun projet privé.",
+    "load_failed": "Impossible de charger les projets privés.",
+    "retry": "Réessayer",
+    "no_members": "Aucun membre",
+    "lead_name": "{{name}} (responsable)",
+    "more_members": "+{{count}} autres",
+    "archived": "Archivé",
+    "member": "Vous êtes membre",
+    "open": "Ouvrir",
+    "join": "Rejoindre",
+    "join_title": "Rejoindre « {{title}} » ?",
+    "join_description": "Vous serez ajouté à la liste des membres de ce projet et verrez ses tâches, commentaires et pièces jointes. Ses membres actuels seront prévenus.",
+    "join_description_empty": "Ce projet n’a aucun membre. Vous en serez le seul membre et verrez ses tâches, commentaires et pièces jointes.",
+    "join_confirm": "Rejoindre le projet",
+    "cancel": "Annuler",
+    "toast_joined": "Vous avez rejoint {{title}}",
+    "toast_failed": "Impossible de rejoindre le projet."
   }
 }

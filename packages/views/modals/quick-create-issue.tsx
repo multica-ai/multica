@@ -34,6 +34,7 @@ import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { AppLink, resolveClickIntent } from "../navigation";
 import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
+import { isProjectArchived } from "@multica/core/projects";
 import {
   useQuickCreateStore,
   type QuickCreateActorType,
@@ -278,10 +279,11 @@ export function AgentCreatePanel({
   // Project has exactly two seeds, both carrying explicit user intent: the
   // project page (or manual panel) the modal was opened from, and the user's
   // own unfinished draft. It is deliberately NOT seeded from the last create
-  // — see quick-create-store (MUL-5862).
+  // — see quick-create-store (MUL-5862). An opener that passes `project_id:
+  // null` ("No project") means none, so the draft's does not fill in.
   const [projectId, setProjectId] = useState<string | null>(() => {
-    const seed = (data?.project_id as string | undefined) ?? draft.shared.projectId;
-    return seed ?? null;
+    if (data && "project_id" in data) return (data.project_id as string | null | undefined) ?? null;
+    return draft.shared.projectId ?? null;
   });
   const [priority, setPriority] = useState<IssuePriority>(
     (data?.priority as IssuePriority | undefined) ?? draft.shared.priority,
@@ -310,12 +312,13 @@ export function AgentCreatePanel({
   // Stale-id sweep. Once the project list query has actually resolved
   // (`isSuccess` — distinct from "data is the empty default during loading"),
   // a `projectId` that isn't in the list means the project was deleted in
-  // another session. Clear local state AND the unfinished draft — the draft
-  // is the only persisted copy left, and leaving it would make the next open
-  // re-seed and submit the same dead value.
+  // another session; an archived one takes no new issues either. Clear local
+  // state AND the unfinished draft — the draft is the only persisted copy
+  // left, and leaving it would make the next open re-seed and submit the same
+  // dead value.
   useEffect(() => {
     if (!projectsLoaded || projectId === null) return;
-    if (projects.some((p) => p.id === projectId)) return;
+    if (projects.some((p) => p.id === projectId && !isProjectArchived(p))) return;
     setProjectId(null);
     if (draft.shared.projectId === projectId) {
       setShared({ projectId: undefined });

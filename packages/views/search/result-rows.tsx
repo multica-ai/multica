@@ -21,6 +21,7 @@ import { ActorAvatar } from "../common/actor-avatar";
 import { availabilityConfig } from "../agents/presence";
 import { StatusIcon } from "../issues/components";
 import { ProjectIcon } from "../projects/components/project-icon";
+import { ArchivedProjectTag } from "../projects/components/project-archive";
 import { useProjectStatusLabels } from "../projects/components/labels";
 import { useT } from "../i18n";
 import { HighlightText } from "./highlight-text";
@@ -77,6 +78,7 @@ export function ProjectResultRow({
         <span className="min-w-0 flex-1 truncate">
           <HighlightText text={project.title} query={query} />
         </span>
+        {project.archived_at && <ArchivedProjectTag />}
         <span
           className={`shrink-0 text-caption ${PROJECT_STATUS_CONFIG[status]?.color ?? "text-muted-foreground"}`}
         >

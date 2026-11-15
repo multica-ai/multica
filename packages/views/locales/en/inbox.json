@@ -70,6 +70,8 @@
     "retry_with_context": "Retry with context",
     "edit_advanced": "Edit as advanced form",
     "autopilot_quota_exceeded_body": "This workspace has reached its limit of {{limit}} autopilot runs for the current period. Further autopilot runs will not start until the allowance resets {{resetAt}}.",
+    "project_owner_joined_body": "{{name}} is a workspace owner and added themselves to this private project. They can now see its issues, comments, and attachments.",
+    "open_project": "Open project",
     "autopilot_quota_upgrade": "View upgrade options",
     "archive": "Archive",
     "unarchive": "Unarchive"
@@ -97,6 +99,7 @@
     "quick_create_unconfirmed": "Create with agent unconfirmed",
     "autopilot_paused": "Autopilot paused",
     "children_done": "Sub-issues finished",
+    "project_owner_joined": "Owner joined project",
     "autopilot_quota_exceeded": "Autopilot run limit reached",
     "app_action_requested": "Needs your confirmation",
     "app_action_reminder": "Confirmation expiring soon",

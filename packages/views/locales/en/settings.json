@@ -832,8 +832,27 @@
     "toast_profile_failed": "Failed to update profile"
   },
   "notifications": {
-    "title": "Inbox Notifications",
-    "description": "Muted events remain visible on the issue.",
+    "title": "Inbox",
+    "description": "Choose which events reach the Inbox in the Work sidebar. A turned-off event creates no notification, and turning it back on doesn't bring back what you missed.",
+    "categories": {
+      "direct": "About you",
+      "issues": "Issues you subscribe to",
+      "projects": "Projects you subscribe to",
+      "agents": "Agents"
+    },
+    "leaving": {
+      "title": "Leaving the Inbox",
+      "description": "Reading a notification doesn't take it out of the Inbox.",
+      "manual_label": "Archive by hand",
+      "manual_description": "From its row in the sidebar, or the top of the notification",
+      "manual_value": "Anytime",
+      "done_label": "Issue done",
+      "done_description": "When an issue reaches a Done status, its notifications are archived. Cancelling it doesn't.",
+      "done_value": "Automatic",
+      "archived_label": "Archived notifications",
+      "archived_description": "Find them again and unarchive them",
+      "archived_action": "View archived"
+    },
     "toast_failed": "Failed to update notification settings",
     "groups": {
       "assignments": {
@@ -1959,5 +1978,26 @@
       "retry_failed": "Couldn't transcribe this recording",
       "show_more": "Show more"
     }
+  },
+  "private_projects": {
+    "title": "Private projects",
+    "description": "Only the members of a private project can open it. As a workspace owner you can see who is in each one, and add yourself when you need to step in.",
+    "empty": "This workspace has no private projects.",
+    "load_failed": "Could not load private projects.",
+    "retry": "Retry",
+    "no_members": "No members",
+    "lead_name": "{{name}} (lead)",
+    "more_members": "+{{count}} more",
+    "archived": "Archived",
+    "member": "You're a member",
+    "open": "Open",
+    "join": "Join",
+    "join_title": "Join “{{title}}”?",
+    "join_description": "You will be added to this project's member list and will see its issues, comments, and attachments. Its current members will be notified.",
+    "join_description_empty": "This project has no members. You will be its only member, and will see its issues, comments, and attachments.",
+    "join_confirm": "Join project",
+    "cancel": "Cancel",
+    "toast_joined": "You joined {{title}}",
+    "toast_failed": "Could not join the project."
   }
 }

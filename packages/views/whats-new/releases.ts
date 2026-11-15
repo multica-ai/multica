@@ -2,6 +2,7 @@ import { CircleDot, Command, Gauge, Globe, History, Layers, ListPlus, Lock, Pale
 import type { SupportedLocale } from "@multica/core/i18n";
 import type { WorkspacePaths } from "@multica/core/paths";
 import type { ReleaseStamp } from "@multica/core/whats-new";
+import { ANNOTATIONS_HERO, ENVIRONMENTS_HERO, THEMES_HERO, type WhatsNewHero } from "./heroes";
 
 export interface HighlightCopy {
   title: string;
@@ -21,6 +22,8 @@ export interface WhatsNewHighlight {
   /** English is required; a missing locale falls back to it. */
   copy: { en: HighlightCopy } & Partial<Record<SupportedLocale, HighlightCopy>>;
   action?: HighlightAction;
+  /** Puts the highlight in the What's new deck; highlights without one stay in the panel. */
+  hero?: WhatsNewHero;
 }
 
 export interface WhatsNewRelease extends ReleaseStamp {
@@ -42,6 +45,7 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
       {
         id: "community-themes",
         icon: Palette,
+        hero: THEMES_HERO,
         action: { kind: "route", to: (p) => `${p.settings()}?tab=appearance` },
         copy: {
           en: {
@@ -73,6 +77,7 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
       {
         id: "environment-controls",
         icon: Server,
+        hero: ENVIRONMENTS_HERO,
         copy: {
           en: {
             title: "Run an issue's services from its sidebar",
@@ -103,6 +108,7 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
       {
         id: "chat-annotations",
         icon: Quote,
+        hero: ANNOTATIONS_HERO,
         action: { kind: "route", to: (p) => p.chat() },
         copy: {
           en: {

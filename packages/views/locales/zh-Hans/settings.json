@@ -823,8 +823,27 @@
     "toast_profile_failed": "更新资料失败"
   },
   "notifications": {
-    "title": "收件箱通知",
-    "description": "关闭通知后，仍可在任务中查看相关动态。",
+    "title": "收件箱",
+    "description": "决定哪些动态会进入「工作」侧栏的收件箱。关闭后不再产生这类通知，重新打开也找不回关闭期间的通知。",
+    "categories": {
+      "direct": "与你直接相关",
+      "issues": "你订阅的任务",
+      "projects": "你订阅的项目",
+      "agents": "智能体"
+    },
+    "leaving": {
+      "title": "移出收件箱",
+      "description": "通知不会因为已读而离开收件箱。",
+      "manual_label": "手动归档",
+      "manual_description": "在侧栏行上或通知详情顶部点归档",
+      "manual_value": "随时",
+      "done_label": "任务已完成",
+      "done_description": "任务进入「已完成」类状态时，它的通知自动归档；取消不会。",
+      "done_value": "自动",
+      "archived_label": "已归档的通知",
+      "archived_description": "可以在这里找回并取消归档",
+      "archived_action": "查看已归档"
+    },
     "toast_failed": "更新通知设置失败",
     "groups": {
       "assignments": {
@@ -1938,5 +1957,26 @@
       "retry_failed": "这段录音转写失败",
       "show_more": "显示更多"
     }
+  },
+  "private_projects": {
+    "title": "私有项目",
+    "description": "私有项目只有项目成员能打开。作为工作区所有者，你可以看到每个私有项目里有哪些成员，并在需要介入时把自己加进去。",
+    "empty": "这个工作区还没有私有项目。",
+    "load_failed": "无法加载私有项目。",
+    "retry": "重试",
+    "no_members": "没有成员",
+    "lead_name": "{{name}}（负责人）",
+    "more_members": "另外 {{count}} 人",
+    "archived": "已归档",
+    "member": "你已是成员",
+    "open": "打开",
+    "join": "加入",
+    "join_title": "加入「{{title}}」？",
+    "join_description": "你会出现在这个项目的成员名单里，并能看到其中的任务、评论和附件。现有成员会收到通知。",
+    "join_description_empty": "这个项目目前没有成员。加入后你将是唯一的成员，并能看到其中的任务、评论和附件。",
+    "join_confirm": "加入项目",
+    "cancel": "取消",
+    "toast_joined": "已加入 {{title}}",
+    "toast_failed": "加入项目失败。"
   }
 }

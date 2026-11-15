@@ -70,6 +70,8 @@
     "retry_with_context": "Réessayer avec le contexte",
     "edit_advanced": "Modifier en mode avancé",
     "autopilot_quota_exceeded_body": "Cet espace de travail a atteint sa limite de {{limit}} exécutions d'automatisation pour la période actuelle. Les prochaines exécutions d'automatisation ne démarreront qu'après la réinitialisation du quota {{resetAt}}.",
+    "project_owner_joined_body": "{{name}}, propriétaire de l’espace de travail, s’est ajouté à ce projet privé et peut désormais voir ses tâches, commentaires et pièces jointes.",
+    "open_project": "Ouvrir le projet",
     "autopilot_quota_upgrade": "Voir les options de mise à niveau",
     "archive": "Archiver",
     "unarchive": "Désarchiver"
@@ -97,6 +99,7 @@
     "quick_create_unconfirmed": "Création avec un agent non confirmée",
     "autopilot_paused": "Automatisation en pause",
     "children_done": "Sous-tâches terminées",
+    "project_owner_joined": "Le propriétaire a rejoint le projet",
     "autopilot_quota_exceeded": "Limite d'exécutions d'automatisation atteinte",
     "app_action_requested": "Confirmation requise",
     "app_action_reminder": "Confirmation bientôt expirée",

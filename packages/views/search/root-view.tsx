@@ -544,15 +544,17 @@ function BestMatchGroups({
         trailing={<RowHint>{t(($) => $.types.project)}</RowHint>}
       />
     );
-    actions.push({
-      id: "new-issue",
-      label: t(($) => $.best.new_issue_in, { name: project.title }),
-      icon: SquarePen,
-      run: () => {
-        palette.close();
-        openCreateIssueWithPreference({ project_id: project.id });
-      },
-    });
+    if (!project.archived_at) {
+      actions.push({
+        id: "new-issue",
+        label: t(($) => $.best.new_issue_in, { name: project.title }),
+        icon: SquarePen,
+        run: () => {
+          palette.close();
+          openCreateIssueWithPreference({ project_id: project.id });
+        },
+      });
+    }
   }
 
   return (

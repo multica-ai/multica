@@ -832,8 +832,27 @@
     "toast_profile_failed": "Error al actualizar el perfil"
   },
   "notifications": {
-    "title": "Notificaciones de la bandeja",
-    "description": "Los eventos silenciados siguen visibles en la tarea.",
+    "title": "Bandeja de entrada",
+    "description": "Elige qué eventos llegan a la bandeja de entrada de la barra lateral de Trabajo. Un evento desactivado no crea notificaciones, y al reactivarlo no se recuperan las que te perdiste.",
+    "categories": {
+      "direct": "Sobre ti",
+      "issues": "Tareas a las que te suscribes",
+      "projects": "Proyectos a los que te suscribes",
+      "agents": "Agentes"
+    },
+    "leaving": {
+      "title": "Salir de la bandeja de entrada",
+      "description": "Leer una notificación no la saca de la bandeja de entrada.",
+      "manual_label": "Archivar a mano",
+      "manual_description": "Desde su fila en la barra lateral o desde la parte superior de la notificación",
+      "manual_value": "En cualquier momento",
+      "done_label": "Tarea completada",
+      "done_description": "Cuando una tarea pasa a un estado Completado, sus notificaciones se archivan. Cancelarla no las archiva.",
+      "done_value": "Automático",
+      "archived_label": "Notificaciones archivadas",
+      "archived_description": "Encuéntralas de nuevo y desarchívalas",
+      "archived_action": "Ver archivadas"
+    },
     "toast_failed": "Error al actualizar la configuración de notificaciones",
     "groups": {
       "assignments": {
@@ -1959,5 +1978,26 @@
       "retry_failed": "No se pudo transcribir esta grabación",
       "show_more": "Mostrar más"
     }
+  },
+  "private_projects": {
+    "title": "Proyectos privados",
+    "description": "Solo los miembros de un proyecto privado pueden abrirlo. Como propietario del espacio de trabajo puedes ver quién está en cada uno y añadirte cuando tengas que intervenir.",
+    "empty": "Este espacio de trabajo no tiene proyectos privados.",
+    "load_failed": "No se pudieron cargar los proyectos privados.",
+    "retry": "Reintentar",
+    "no_members": "Sin miembros",
+    "lead_name": "{{name}} (responsable)",
+    "more_members": "+{{count}} más",
+    "archived": "Archivado",
+    "member": "Eres miembro",
+    "open": "Abrir",
+    "join": "Unirme",
+    "join_title": "¿Unirte a «{{title}}»?",
+    "join_description": "Se te añadirá a la lista de miembros de este proyecto y verás sus tareas, comentarios y archivos adjuntos. Se avisará a sus miembros actuales.",
+    "join_description_empty": "Este proyecto no tiene miembros. Serás su único miembro y verás sus tareas, comentarios y archivos adjuntos.",
+    "join_confirm": "Unirme al proyecto",
+    "cancel": "Cancelar",
+    "toast_joined": "Te uniste a {{title}}",
+    "toast_failed": "No se pudo unir al proyecto."
   }
 }

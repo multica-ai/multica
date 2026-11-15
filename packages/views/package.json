@@ -70,6 +70,7 @@
     "./invitations": "./invitations/index.ts",
     "./onboarding": "./onboarding/index.ts",
     "./star-prompt": "./star-prompt/index.ts",
+    "./whats-new": "./whats-new/index.ts",
     "./platform": "./platform/index.ts",
     "./i18n": "./i18n/index.ts",
     "./attachments": "./attachments/index.ts",
