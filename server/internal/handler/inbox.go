@@ -39,6 +39,12 @@ type InboxItemResponse struct {
 	ActorType         *string         `json:"actor_type"`
 	ActorID           *string         `json:"actor_id"`
 	Details           json.RawMessage `json:"details"`
+	// When the issue comes back from a snooze (MUL-9333). In the list it is
+	// always past: the issue came back on its own at that time.
+	SnoozedUntil *string `json:"snoozed_until,omitempty"`
+	// When that snooze began; the issue's rows written after it arrived
+	// while it was away.
+	SnoozedAt *string `json:"snoozed_at,omitempty"`
 }
 
 func inboxToResponse(i db.InboxItem) InboxItemResponse {
@@ -58,6 +64,8 @@ func inboxToResponse(i db.InboxItem) InboxItemResponse {
 		ActorType:     textToPtr(i.ActorType),
 		ActorID:       uuidToPtr(i.ActorID),
 		Details:       json.RawMessage(i.Details),
+		SnoozedUntil:  timestampToPtr(i.SnoozedUntil),
+		SnoozedAt:     timestampToPtr(i.SnoozedAt),
 	}
 }
 
@@ -141,6 +149,8 @@ func inboxRowToResponse(r db.ListInboxItemsRow) InboxItemResponse {
 		ActorType:         textToPtr(r.ActorType),
 		ActorID:           uuidToPtr(r.ActorID),
 		Details:           json.RawMessage(r.Details),
+		SnoozedUntil:      timestampToPtr(r.SnoozedUntil),
+		SnoozedAt:         timestampToPtr(r.SnoozedAt),
 	}
 }
 

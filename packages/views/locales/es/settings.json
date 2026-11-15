@@ -432,6 +432,10 @@
         "label": "Archivar notificación",
         "description": "Archiva la notificación de la bandeja abierta, o restaúrala mientras lees el archivo."
       },
+      "snoozeInboxItem": {
+        "label": "Posponer notificación",
+        "description": "Pospone el issue abierto de la bandeja, o lo recupera ahora si ya está pospuesto."
+      },
       "send": {
         "label": "Enviar",
         "description": "También envía nuevas tareas."

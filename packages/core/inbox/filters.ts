@@ -7,6 +7,7 @@ import {
 } from "../issues/stores/filter-tree";
 import type { InboxItem, InboxItemType, IssuePriority, IssueStatus } from "../types";
 import { groupInboxRows, sortInboxNewestFirst, withCommentAnchor } from "./group";
+import { isInboxItemSnoozed } from "./snooze";
 
 /**
  * Notification kinds, grouped the way a reader thinks about them. Mirrored by
@@ -565,6 +566,8 @@ export function filterInboxItems(
   const tests = compile(filters, now);
   const out: InboxItem[] = [];
   for (const group of groupInboxRows(items)) {
+    // Snoozed since the list loaded; the server leaves the rest out.
+    if (group[0] && isInboxItemSnoozed(group[0], now.getTime())) continue;
     const row = group.find((item) => passes(tests.notification, item));
     if (!row || !passes(tests.issue, row)) continue;
     const key = row.issue_id ?? row.id;

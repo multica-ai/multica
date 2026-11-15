@@ -168,6 +168,7 @@
       "view_delete": "뷰 삭제",
       "new_issue_here": "이 프로젝트에 새 태스크",
       "inbox_actions": "인박스 작업",
+      "inbox_view_snoozed": "미뤄둔 항목 보기",
       "inbox_view_archived": "보관된 알림 보기",
       "inbox_empty": "알림 없음",
       "inbox_settings": "인박스 표시",
