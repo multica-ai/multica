@@ -60,6 +60,7 @@ export function DeleteProjectsDialog({
   const deleteProject = useDeleteProject();
   const [deleting, setDeleting] = useState(false);
   const previousContext = useRef(context);
+  const contextInvalidated = useRef(false);
   const deletedIds = useRef(new Set<string>());
 
   useEffect(() => {
@@ -70,11 +71,20 @@ export function DeleteProjectsDialog({
     ]);
     // Account for this batch's successful deletions even when Query notifies
     // React after a later deletion has failed and the retry dialog is idle.
-    if (contextKey(previousContext.current) !== contextKey(context) && !deleting) {
+    if (contextKey(previousContext.current) !== contextKey(context)) {
+      contextInvalidated.current = true;
+    }
+    // Remember changes while a request is pending, even if permissions or
+    // selection return to their previous values before the request settles.
+    if (contextInvalidated.current && !deleting) {
       onOpenChange(false);
+      contextInvalidated.current = false;
     }
     previousContext.current = context;
-    if (!open) deletedIds.current.clear();
+    if (!open) {
+      deletedIds.current.clear();
+      contextInvalidated.current = false;
+    }
   }, [context, deleting, onOpenChange, open]);
 
   const handleDelete = async () => {

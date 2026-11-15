@@ -8,7 +8,7 @@ import { WorkspaceSlugProvider } from "@multica/core/paths";
 import { setCurrentWorkspace } from "@multica/core/platform";
 import { bindWorkspaceSlugLookup, createQueryClient } from "@multica/core/query-client";
 import { projectKeys, projectListOptions, useProjectViewStore } from "@multica/core/projects";
-import { workspaceListOptions } from "@multica/core/workspace/queries";
+import { memberListOptions, workspaceListOptions } from "@multica/core/workspace/queries";
 import type { ListProjectsResponse, Project, ProjectStatus } from "@multica/core/types";
 import { TooltipProvider } from "@multica/ui/components/ui/tooltip";
 import { renderWithI18n } from "../../test/i18n";
@@ -300,3 +300,61 @@ it("discards an archive request whose autopilot lookup finishes after the select
   expect(screen.queryByRole("dialog")).toBeNull();
   expect(requests.filter((request) => request.method === "POST")).toHaveLength(0);
 });
+
+it.each([false, true])(
+  "dismisses failed batch deletion after permission loss while pending (restored=%s)",
+  async (restorePermission) => {
+    rows = rows.map((project) => ({ ...project, creator_id: "another-user" }));
+    const fetchMock = vi.mocked(fetch);
+    const originalFetch = fetchMock.getMockImplementation()!;
+    let role = "owner";
+    let finish!: (response: Response) => void;
+    const pending = new Promise<Response>((resolve) => { finish = resolve; });
+    fetchMock.mockImplementation((input, options) => {
+      const url = new URL(String(input));
+      if (options?.method === "DELETE") {
+        requests.push({ method: "DELETE", url });
+        return pending;
+      }
+      if (url.pathname.endsWith("/members")) {
+        return Promise.resolve(new Response(JSON.stringify([{
+          id: "fixture-member", workspace_id: "ws-acme", user_id: "fixture-user",
+          role, name: "Fixture", email: "fixture@example.invalid", created_at: timestamp,
+        }]), { headers: { "Content-Type": "application/json" } }));
+      }
+      return originalFetch(input, options);
+    });
+    renderWithI18n(tree());
+    await screen.findByText("Project 0");
+    await select("Project 0");
+    await userEvent.click(within(screen.getByRole("toolbar")).getByRole("button", { name: "Delete" }));
+    await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(requests.filter((request) => request.method === "DELETE")).toHaveLength(1));
+    role = "member";
+    await act(async () => {
+      await client.invalidateQueries({ queryKey: memberListOptions("ws-acme").queryKey });
+    });
+    await waitFor(() => {
+      const toolbar = screen.getByRole("toolbar", { hidden: true });
+      expect(within(toolbar).queryByRole("button", { name: "Delete", hidden: true })).toBeNull();
+    });
+    if (restorePermission) {
+      role = "owner";
+      await act(async () => {
+        await client.invalidateQueries({ queryKey: memberListOptions("ws-acme").queryKey });
+      });
+      await waitFor(() => {
+        expect(within(screen.getByRole("toolbar", { hidden: true })).getByRole("button", {
+          name: "Delete", hidden: true,
+        })).toBeInTheDocument();
+      });
+    }
+    await act(async () => {
+      finish(new Response(JSON.stringify({ error: "Permission revoked" }), {
+        status: 500, headers: { "Content-Type": "application/json" },
+      }));
+    });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(requests.filter((request) => request.method === "DELETE")).toHaveLength(1);
+  },
+);
