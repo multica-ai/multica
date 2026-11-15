@@ -592,4 +592,24 @@ printf 'n\n' | dev_env destroy orphan-902 > "$out" 2>&1 || fail "declining destr
 require_contains "$out" "Cancelled."
 [ -d "$MULTICA_DEV_HOME/envs/orphan-902" ] || fail "declined destroy removed the environment anyway"
 
+# ---------------------------------------------------------------------------
+# uutils mkdir (Ubuntu 26.04) reports success to a caller that lost the race
+# to create a directory. A mkdir that succeeds on the held allocation lock must
+# not hand it to a second holder, or two `up`s allocate the same slot.
+# ---------------------------------------------------------------------------
+(
+  # shellcheck disable=SC1090
+  source "$root_dir/scripts/dev-env.sh"
+  command mkdir -p "$LOCK_DIR"
+  printf '%s\n' "$PPID" > "$LOCK_DIR/pid"
+  mkdir() { command mkdir "$@" 2>/dev/null || [ -d "$LOCK_DIR" ]; }
+  sleep() { :; }
+  if (acquire_lock) > "$out" 2>&1; then
+    fail "a mkdir that succeeded on the held lock directory let a second holder in"
+  fi
+  require_contains "$out" "Timed out waiting for the allocation lock"
+  [ "$(cat "$LOCK_DIR/pid")" = "$PPID" ] || fail "the lock holder's pid was overwritten"
+  command rm -rf "$LOCK_DIR"
+)
+
 echo "✓ dev-env.sh registry behaviour verified"
