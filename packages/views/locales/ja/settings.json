@@ -721,6 +721,7 @@
     "save_failed": "プロパティを保存できませんでした",
     "limit_hint": "{{count}}/{{max}} 個の有効なプロパティ",
     "archived_badge": "アーカイブ済み",
+    "options_preview": "{{name}} のすべてのオプションを表示",
     "types": {
       "text": "テキスト",
       "number": "数値",
