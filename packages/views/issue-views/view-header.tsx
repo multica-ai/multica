@@ -129,6 +129,7 @@ export function IssueViewHeader({
   baseMenu,
   baseBadge,
   hideCreate = false,
+  afterTitle,
   trailing,
 }: {
   controller: IssueSurfaceController;
@@ -139,6 +140,8 @@ export function IssueViewHeader({
   baseBadge?: ReactNode;
   /** Drops the new-issue button, e.g. on an archived project. */
   hideCreate?: boolean;
+  /** Page-level navigation right after the title, e.g. the project's tabs. */
+  afterTitle?: ReactNode;
   /** Layout toggles at the far end, e.g. the project's properties panel. */
   trailing?: ReactNode;
 }) {
@@ -378,7 +381,7 @@ export function IssueViewHeader({
   return (
     <>
       <PageHeader className="@container/issue-header">
-        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-clip">
+        <div className="flex min-w-0 flex-1 items-center gap-1 self-stretch overflow-x-clip">
           {renaming && activeView ? (
             <span className="flex min-w-0 shrink-0 items-center gap-2">
               <Layers className="size-4 shrink-0 text-muted-foreground" />
@@ -503,6 +506,8 @@ export function IssueViewHeader({
               </DropdownMenuContent>
             </DropdownMenu>
           )}
+
+          {afterTitle}
 
           <IssueFilterMenu
             align="start"

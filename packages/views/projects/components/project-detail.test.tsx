@@ -10,6 +10,7 @@ import userEvent from "@testing-library/user-event";
 import type { Project } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
+import { useProjectTabStore } from "@multica/core/projects/tab-store";
 import { ProjectDetail } from "./project-detail";
 
 const mocks = vi.hoisted(() => ({
@@ -22,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   setProjectSubscription: vi.fn(),
   getShareableUrl: vi.fn((path: string) => `https://app.example${path}`),
   push: vi.fn(),
+  replace: vi.fn(),
   recordVisit: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
@@ -188,13 +190,16 @@ vi.mock("../../issues/surface/issue-surface", () => ({
 vi.mock("../../issue-views/view-header", () => ({
   IssueViewHeader: ({
     baseMenu,
+    afterTitle,
     trailing,
   }: {
     baseMenu?: React.ReactNode;
+    afterTitle?: React.ReactNode;
     trailing?: React.ReactNode;
   }) => (
-    <header>
+    <header data-testid="issue-view-header">
       {baseMenu}
+      {afterTitle}
       {trailing}
     </header>
   ),
@@ -245,14 +250,14 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-function renderProjectDetail() {
+function renderProjectDetail(search = "") {
   qc.setQueryData(["members"], [{ user_id: "user-1", name: "User One", role: mocks.role }]);
   const adapter: NavigationAdapter = {
     push: mocks.push,
-    replace: vi.fn(),
+    replace: mocks.replace,
     back: vi.fn(),
     pathname: "/test-workspace/projects/project-1",
-    searchParams: new URLSearchParams(),
+    searchParams: new URLSearchParams(search),
     hash: "",
     getShareableUrl: mocks.getShareableUrl,
   };
@@ -287,6 +292,8 @@ beforeEach(() => {
   } as unknown as ApiClient);
   mocks.getShareableUrl.mockClear();
   mocks.push.mockReset();
+  mocks.replace.mockReset();
+  useProjectTabStore.setState({ lastTab: {} });
   mocks.recordVisit.mockReset();
   mocks.toastSuccess.mockReset();
   mocks.toastError.mockReset();
@@ -296,6 +303,42 @@ afterEach(() => {
   onlineManager.setOnline(true);
   qc.clear();
   useModalStore.getState().close();
+});
+
+describe("ProjectDetail tabs", () => {
+  it("opens on Overview, with the title and description in the page and not the sidebar", () => {
+    renderProjectDetail();
+    expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: /Issues\s*3/ })).toBeInTheDocument();
+    expect(screen.queryByTestId("issue-view-header")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Description" })).toBeInTheDocument();
+    expect(within(screen.getByRole("complementary")).queryByText("Description")).not.toBeInTheDocument();
+  });
+
+  it("shows the issue views for ?tab=issues and remembers that choice", () => {
+    renderProjectDetail("tab=issues");
+    expect(screen.getByTestId("issue-view-header")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /Issues/ })).toHaveAttribute("aria-selected", "true");
+    expect(useProjectTabStore.getState().lastTab["project-1"]).toBe("issues");
+  });
+
+  it("switches tabs through the URL", async () => {
+    renderProjectDetail();
+    await userEvent.click(screen.getByRole("tab", { name: /Issues/ }));
+    expect(mocks.replace).toHaveBeenCalledWith("/test-workspace/projects/project-1?tab=issues");
+    expect(useProjectTabStore.getState().lastTab["project-1"]).toBe("issues");
+  });
+
+  it("reopens on the remembered tab unless the project has no issues", () => {
+    useProjectTabStore.setState({ lastTab: { "project-1": "issues" } });
+    const { unmount } = renderProjectDetail();
+    expect(screen.getByTestId("issue-view-header")).toBeInTheDocument();
+    unmount();
+
+    qc.setQueryData(projectKeys.detail("workspace-1", PROJECT.id), { ...PROJECT, issue_count: 0, done_count: 0 });
+    renderProjectDetail();
+    expect(screen.queryByTestId("issue-view-header")).not.toBeInTheDocument();
+  });
 });
 
 describe("ProjectDetail rename", () => {

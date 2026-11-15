@@ -82,6 +82,8 @@
     "copy_link": "링크 복사",
     "copy_title_as_link": "제목이 포함된 링크 복사",
     "delete_action": "프로젝트 삭제",
+    "tab_overview": "개요",
+    "tab_issues": "태스크",
     "section_properties": "속성",
     "section_progress": "진행률",
     "section_description": "설명",

@@ -82,6 +82,8 @@
     "copy_link": "Copier le lien",
     "copy_title_as_link": "Copier le lien avec le titre",
     "delete_action": "Supprimer le projet",
+    "tab_overview": "Aperçu",
+    "tab_issues": "Tâches",
     "section_properties": "Propriétés",
     "section_progress": "Avancement",
     "section_description": "Description",
