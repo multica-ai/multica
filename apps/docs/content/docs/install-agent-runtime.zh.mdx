@@ -47,6 +47,7 @@ Multica 当前会检测以下命令：
 | QwenPaw | `qwenpaw` | [QwenPaw](https://github.com/agentscope-ai/QwenPaw) |
 | Amp | `amp` | [Amp CLI](https://ampcode.com/docs/cli) |
 | Factory Droid | `droid` | [Factory Droid](https://docs.factory.com/droid-exec/overview) |
+| Tomcat | `tomcat` | [Tomcat CLI 发布页](https://github.com/teisun/tomcat-agent/releases/tag/cli-v0.1.97) |
 | Reasonix | `reasonix` | [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) |
 | TRAE CLI | `traecli` | [TRAE 官方站](https://www.trae.cn/) |
 | Dim | `dim` | [DimCode](https://dimagent.cn/docs/cli) |
@@ -75,6 +76,7 @@ Multica 当前会检测以下命令：
 | Grok | 0.2.89 |
 | Qwen Code | 0.20.0 |
 | Factory Droid | 1.8.0 |
+| Tomcat | 0.1.97 |
 | MiniMax Code | 0.1.2 |
 | Muse Code | 1.4.10 |
 | OpenCode | 1.1.54 |
@@ -95,6 +97,17 @@ Multica 当前会检测以下命令：
 Multica 使用 `amp --execute --stream-json --executor local`，通过标准输入传入提示词，仅使用已保存的线程 ID 继续会话。Amp 读取 `AGENTS.md`，从 `.agents/skills/` 发现项目技能。MCP 需在 Amp 中配置；暂不支持 Multica 托管 MCP、执行中追加消息、`max_turns`、orb 或远程 runner，执行时长使用任务超时限制。协议、模式和执行位置覆盖项会被过滤，额外提示词、子命令和未验证选项会在启动前报错。
 
 未安装、缺少 `AMP_API_KEY` 或启动异常会立即报错；认证失败时更新执行环境中的访问令牌。只有成功的终结 `result` 才会发布最终答复，正常退出或 assistant 的 `end_turn` 均不足以判定成功。收到终结结果后，Amp 有最多十秒完成清理；之后若由 Multica 终止进程，仍保留最终答复并记录警告，宽限期内观测到的原生非零退出仍判为失败。Amp 返回的权限拒绝信息会显示为执行记录中的警告；若无人值守任务中的已授权命令被拒绝，请检查执行机器上 Amp 设置中的 `amp.permissions`。取消和超时会终止所属本地进程树，并保留已观测的线程 ID。[Amp 后台子智能体](https://ampcode.com/docs/cli/streaming-json)可能在 CLI 退出后继续运行，本适配器无法远程取消它们。需要严格取消时避免异步子智能体，并通过保存的 Amp 线程检查剩余工作。
+
+</Accordion>
+<Accordion title="Tomcat" id="tomcat">
+
+从[官方发布页](https://github.com/teisun/tomcat-agent/releases/tag/cli-v0.1.97)安装本次适配的验收基线 **Tomcat CLI 0.1.97**，并用 `SHA256SUMS` 校验归档。按 [Tomcat 配置说明](https://github.com/teisun/tomcat-agent#readme)完成初始化和模型配置。凭据由 Tomcat 保存（`tomcat model key set`），不要写入 Multica 提示词或自定义参数。守护进程会拒绝旧版 CLI。升级后，在自己的终端重启 Tomcat 共享服务：CLI 的版本不代表已运行的服务具备同样的协议能力。
+
+创建智能体时选择 Tomcat 运行时。`MULTICA_TOMCAT_PATH` 覆盖可执行文件路径；智能体模型优先于 `MULTICA_TOMCAT_MODEL`。两者都留空时，新会话使用 Tomcat 默认模型，续接保留会话原模型。刷新模型列表只读取 `tomcat serve models`，不调用模型；列表为空时，先在 Tomcat 中配置凭据。思考档位来自模型目录，Default 会清除本会话覆盖。续接时按会话真实模型校验档位；若不支持，改回 Default 或选择兼容模型后重试。
+
+Multica 使用 `tomcat acp`，通过 `AGENTS.md` 注入任务说明，通过 `.agents/skills/` 注入 skill，并通过 ACP 传入智能体的 MCP 配置。模型和档位设置确认成功后才发送提示词。取消会关闭本任务的转发进程并等待清理，不会停止 Tomcat 共享服务。清理未确认时会报错，不会自动启动下一轮。本适配器不支持执行中追加消息或 `max_turns`。
+
+真实二进制验收使用 macOS x86_64 和本地模拟模型。Linux、Windows 尚未进行真实运行验证；CI 编译或模拟协议测试不等于在这些平台运行过 Tomcat。
 
 </Accordion>
 <Accordion title="Factory Droid" id="droid">
