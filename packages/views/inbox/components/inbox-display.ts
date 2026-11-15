@@ -1,3 +1,4 @@
+import type { WorkspacePaths } from "@multica/core/paths";
 import type { InboxItem } from "@multica/core/types";
 
 function singleLine(value: string | null | undefined): string {
@@ -89,4 +90,18 @@ export function resolveDetailItem(
   // the row it was on is gone. Only the second case falls forward.
   if (!detailKey || detailKey === selectedKey) return null;
   return selectedKey ? byKey(selectedKey) : null;
+}
+
+/**
+ * Where a notification row leads: its issue, at the comment or app request it
+ * is about when it names one. An issue-less notification opens on the Inbox
+ * page, which shows the detail of the row picked there.
+ */
+export function inboxRowHref(p: WorkspacePaths, item: InboxItem): string {
+  if (!item.issue_id) return `${p.inbox()}?${new URLSearchParams({ issue: item.id }).toString()}`;
+  const issueHref = p.issueDetail(item.issue_id);
+  const requestId = item.type.startsWith("app_") ? item.details?.request_id : undefined;
+  if (requestId) return `${issueHref}#app-request-${requestId}`;
+  const commentId = item.details?.comment_id;
+  return commentId ? `${issueHref}#comment-${commentId}` : issueHref;
 }

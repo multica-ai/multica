@@ -822,8 +822,27 @@
     "toast_profile_failed": "プロフィールを更新できませんでした"
   },
   "notifications": {
-    "title": "インボックス通知",
-    "description": "通知をオフにしても、タスク上で履歴を確認できます。",
+    "title": "インボックス",
+    "description": "「作業」サイドバーのインボックスに届くイベントを選びます。オフにしたイベントは通知を作らず、オンに戻しても見逃した通知は戻りません。",
+    "categories": {
+      "direct": "あなたに関するもの",
+      "issues": "購読中のタスク",
+      "projects": "購読中のプロジェクト",
+      "agents": "エージェント"
+    },
+    "leaving": {
+      "title": "インボックスから外れるとき",
+      "description": "既読にしてもインボックスからは消えません。",
+      "manual_label": "手動でアーカイブ",
+      "manual_description": "サイドバーの行、または通知の上部から",
+      "manual_value": "いつでも",
+      "done_label": "タスクが完了",
+      "done_description": "タスクが完了系のステータスになると、その通知はアーカイブされます。キャンセルではアーカイブされません。",
+      "done_value": "自動",
+      "archived_label": "アーカイブ済みの通知",
+      "archived_description": "ここから見つけてアーカイブを解除できます",
+      "archived_action": "アーカイブ済みを表示"
+    },
     "toast_failed": "通知設定を更新できませんでした",
     "groups": {
       "assignments": {

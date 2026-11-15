@@ -53,7 +53,7 @@ import {
   type BuiltinViewKey,
 } from "@multica/core/issue-views/sidebar-views";
 import { issueViewTarget } from "@multica/core/issue-views/view-target";
-import { isUnreadView } from "@multica/core/issue-views/unread-view";
+import { isFilteredBuiltinViewKey } from "@multica/core/issue-views/builtin-issue-views";
 import {
   isIssueViewModified,
   isIssueViewUndefined,
@@ -91,7 +91,7 @@ import type { IssueSurfaceController } from "../issues/surface/use-issue-surface
 import { useT } from "../i18n";
 import { useMyIssuesScope } from "../my-issues/use-my-issues-scope";
 import { DeleteViewDialog } from "./delete-view-dialog";
-import { UnreadViewIcon } from "./unread-view-icon";
+import { BUILTIN_VIEW_ICON, useBuiltinViewLabel } from "./builtin-views";
 import { useIssueViewActions } from "./use-view-actions";
 import { ViewNameInput } from "./view-name-input";
 
@@ -165,6 +165,7 @@ export function IssueViewHeader({
   const setAssigneeTypeForPage = useIssuesScopeStore((s) => s.setScope);
   const setAssigneeType = (next: IssuesScope) => setAssigneeTypeForPage(scopePage, next);
   const myScope = useMyIssuesScope();
+  const builtinLabel = useBuiltinViewLabel();
   const setMyScope = useStore(myIssuesViewStore, (s) => s.setScope);
 
   const storeApi = useViewStoreApi();
@@ -174,19 +175,20 @@ export function IssueViewHeader({
   const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
   const toggleAgentRunningFilter = useViewStore((s) => s.toggleAgentRunningFilter);
 
-  const builtinKey: BuiltinViewKey | null =
-    base.kind === "workspace" ? "all_issues" : base.kind === "my" ? (myScope === "agents" ? "my_agents" : "my_issues") : null;
+  const builtinKey: BuiltinViewKey | null = base.kind === "workspace" ? "all_issues" : null;
   const baseName =
     base.kind === "project"
       ? base.project.title
-      : t(($) => $.views.builtin[builtinKey!]);
+      : base.kind === "my"
+        ? myScope === "agents"
+          ? t(($) => $.views.builtin.my_agents)
+          : t(($) => $.views.builtin.my_issues)
+        : builtinLabel("all_issues");
   const baseIcon =
     base.kind === "project" ? (
       <ProjectIcon project={base.project} size="sm" />
-    ) : builtinKey === "my_agents" ? (
-      <Bot className="size-4" />
-    ) : builtinKey === "my_issues" ? (
-      <CircleUser className="size-4" />
+    ) : base.kind === "my" ? (
+      myScope === "agents" ? <Bot className="size-4" /> : <CircleUser className="size-4" />
     ) : (
       <ListTodo className="size-4" />
     );
@@ -209,10 +211,10 @@ export function IssueViewHeader({
     if (needsSetup) setSetupFilterOpen(true);
     else setFilterOpen(true);
   }, [activeView, editViewId, needsSetup, stopEdit]);
-  const unreadView = isUnreadView(activeView);
-  const activeViewName = unreadView ? t(($) => $.views.builtin.unread) : activeView?.name;
-  const starId = unreadView
-    ? builtinViewItemId("unread")
+  const activeBuiltin = isFilteredBuiltinViewKey(activeView?.id) ? activeView.id : null;
+  const activeViewName = activeBuiltin ? builtinLabel(activeBuiltin) : activeView?.name;
+  const starId = activeBuiltin
+    ? builtinViewItemId(activeBuiltin)
     : activeView
       ? savedViewItemId(activeView.id)
       : builtinKey
@@ -366,7 +368,7 @@ export function IssueViewHeader({
   const title = (
     <>
       <RefreshablePageIcon refreshing={controller.isRefreshing}>
-        {unreadView ? <UnreadViewIcon /> : activeView ? <Layers className="size-4" /> : baseIcon}
+        {activeBuiltin ? BUILTIN_VIEW_ICON[activeBuiltin] : activeView ? <Layers className="size-4" /> : baseIcon}
       </RefreshablePageIcon>
       <span className="min-w-0 truncate">{activeView ? activeViewName : baseName}</span>
       {!activeView && baseBadge}
@@ -478,7 +480,7 @@ export function IssueViewHeader({
                       <DropdownMenuItem
                         onClick={() =>
                           actions.copyLink(
-                            builtinKey === "my_agents"
+                            base.kind === "my" && myScope === "agents"
                               ? paths.myAgents()
                               : base.kind === "my"
                                 ? paths.myIssues()

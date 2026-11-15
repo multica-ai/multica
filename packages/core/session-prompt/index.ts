@@ -9,8 +9,9 @@ interface SessionPromptStore {
 }
 
 /**
- * The one interruption an app session allows, shared by the source survey and
- * the GitHub star prompt so a user who just dealt with one never meets the other.
+ * The one interruption an app session allows, shared by the source survey,
+ * the GitHub star prompt and the What's new deck so a user who just dealt with
+ * one never meets another.
  */
 export const useSessionPromptStore = create<SessionPromptStore>((set) => ({
   prompted: false,

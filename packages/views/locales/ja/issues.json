@@ -1816,7 +1816,9 @@
       "my_issues": "マイタスク",
       "my_agents": "マイエージェントの作業",
       "all_issues": "すべてのタスク",
-      "unread": "未読"
+      "my_work": "自分の作業",
+      "working": "実行中",
+      "subscribed": "購読中"
     },
     "untitled": "無題のビュー",
     "copy_name": "{{name}}（コピー）",
