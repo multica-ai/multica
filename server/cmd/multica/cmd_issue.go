@@ -714,6 +714,7 @@ func init() {
 
 	// issue delete
 	issueDeleteCmd.Flags().BoolP("yes", "y", false, "Skip the confirmation prompt")
+	issueDeleteCmd.Flags().Bool("dry-run", false, "List what would be deleted without deleting")
 	issueDeleteCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// issue reorder
