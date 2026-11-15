@@ -113,6 +113,10 @@ export class DeepgramStream implements VoiceStream {
     const audio = new AudioContext();
     this.audio = audio;
     if (audio.state === "suspended") void audio.resume().catch(() => {});
+    // Loaded while the permission prompt is up, so capture can start the
+    // moment the microphone opens.
+    const worklet = loadWorklet(audio);
+    worklet.catch(() => {});
     try {
       this.media = await openMicrophone(deviceId);
     } catch (err) {
@@ -130,14 +134,24 @@ export class DeepgramStream implements VoiceStream {
       () => starting.abort(new Error("the speech provider did not answer")),
       OPEN_TIMEOUT_MS,
     );
+    // Every step below gives up when starting is aborted, so start() settles
+    // (and the microphone is released) whatever step hangs.
+    const aborted = new Promise<never>((_, reject) => {
+      const fail = () =>
+        reject(starting.signal.reason instanceof Error ? starting.signal.reason : new Error("aborted"));
+      if (starting.signal.aborted) fail();
+      else starting.signal.addEventListener("abort", fail, { once: true });
+    });
+    aborted.catch(() => {});
+    const step = <T,>(work: Promise<T>) => Promise.race([work, aborted]);
     try {
-      await loadWorklet(audio);
+      await step(worklet);
       if (this.closed) return this.release();
       // Listen from now on: words spoken while the stream connects are kept
       // and sent as soon as it opens.
       this.capture(audio, this.media);
       // The token comes after the permission prompt, which can outlast it.
-      const session = await this.openSession(starting.signal);
+      const session = await step(this.openSession(starting.signal));
       if (this.closed) return this.release();
       if (session.provider !== "deepgram" || !session.url || !session.token) {
         throw new Error(`unsupported voice session: ${session.provider || "none"}`);
@@ -147,14 +161,13 @@ export class DeepgramStream implements VoiceStream {
       const socket = new WebSocket(url, ["bearer", session.token]);
       socket.binaryType = "arraybuffer";
       this.socket = socket;
-      await new Promise<void>((resolve, reject) => {
-        const fail = (err: unknown) => reject(err instanceof Error ? err : new Error(String(err)));
-        if (starting.signal.aborted) return fail(starting.signal.reason);
-        starting.signal.addEventListener("abort", () => fail(starting.signal.reason), { once: true });
-        socket.onopen = () => resolve();
-        socket.onerror = () => fail(new Error("the speech provider refused the stream"));
-        socket.onclose = () => fail(new Error("the speech provider closed the stream"));
-      });
+      await step(
+        new Promise<void>((resolve, reject) => {
+          socket.onopen = () => resolve();
+          socket.onerror = () => reject(new Error("the speech provider refused the stream"));
+          socket.onclose = () => reject(new Error("the speech provider closed the stream"));
+        }),
+      );
       if (this.closed) return this.release();
       socket.onmessage = (event) => this.receive(event.data);
       socket.onerror = null;
@@ -166,7 +179,7 @@ export class DeepgramStream implements VoiceStream {
       };
       for (const chunk of this.queued ?? []) socket.send(chunk);
       this.queued = null;
-      if (audio.state === "suspended") await audio.resume();
+      if (audio.state === "suspended") await step(audio.resume());
       if (this.closed) throw new Error("the stream ended while starting");
     } catch (err) {
       // Read before release(), which aborts `starting` itself.

@@ -302,4 +302,28 @@ describe("DeepgramStream", () => {
     expect(track.stop).toHaveBeenCalled();
     void started;
   });
+
+  it("loads the worklet while the permission prompt is up", async () => {
+    let grant!: (value: unknown) => void;
+    getUserMedia.mockReturnValue(new Promise((resolve) => (grant = resolve)));
+    const stream = new DeepgramStream(handlers(), vi.fn(), vi.fn(), vi.fn(async () => session));
+    const started = stream.start(null, { language: "en", hotwords: [] }).catch(() => {});
+    expect(FakeAudioContext.last!.audioWorklet.addModule).toHaveBeenCalledTimes(1);
+    stream.discard();
+    grant({ getTracks: () => [track] });
+    await started;
+  });
+
+  it("gives up on a start that hangs anywhere after the microphone, and releases it", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    class HangingWorklet extends FakeAudioContext {
+      override audioWorklet = { addModule: vi.fn(() => new Promise<void>(() => {})) };
+    }
+    vi.stubGlobal("AudioContext", HangingWorklet);
+    const stream = new DeepgramStream(handlers(), vi.fn(), vi.fn(), vi.fn(async () => session));
+    const outcome = stream.start(null, { language: "en", hotwords: [] }).then(() => "opened", (err: Error) => err.message);
+    await vi.advanceTimersByTimeAsync(10_000);
+    await expect(outcome).resolves.toMatch(/did not answer/);
+    expect(track.stop).toHaveBeenCalled();
+  });
 });
