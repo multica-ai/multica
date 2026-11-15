@@ -1810,7 +1810,14 @@ export const ProjectSchema = z.object({
   done_count: z.number().default(0),
   resource_count: z.number().default(0),
   workflow_id: z.string().nullable().default(null),
+  archived_at: z.string().nullable().default(null).catch(null),
+  archived_by_type: z.enum(["member", "agent"]).nullable().default(null).catch(null),
+  archived_by_id: z.string().nullable().default(null).catch(null),
 }).loose();
+
+export const ArchiveProjectResponseSchema = ProjectSchema.extend({
+  paused_autopilot_ids: z.array(z.string()).default([]).catch([]),
+});
 
 export const EMPTY_PROJECT: Project = {
   id: "", workspace_id: "", title: "", description: null, icon: null,

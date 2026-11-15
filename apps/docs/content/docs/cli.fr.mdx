@@ -416,6 +416,7 @@ Les tableaux ci-dessous couvrent toutes les commandes de premier niveau actuelle
 | | `cancel-task <task-id>` | Annuler une exécution en cours ou en file d'attente | `--issue` |
 | `project` | `list/get/create/update/delete` | Gérer les projets | `create` : `--title` (obligatoire), `--lead`, `--status`, `--icon`, `--start-date`, `--due-date`, `--repo` (répétable) |
 | | `status <id> <status>` | Changer le statut d'un projet | |
+| | `archive/restore <id>` | Archiver ou restaurer un projet. Un projet archivé est masqué de `list`, n'accepte plus de nouvelles tâches et met en pause les automatisations qui y créent des tâches | `list --archived` liste uniquement les projets archivés |
 | | `resource list/add/update/remove` | Gérer les ressources d'un projet | `--type`, `--url`, `--default-branch-hint`, `--ref`, `--local-path`, `--daemon-id`, `--execution-mode` (`in_place` / `worktree` pour un répertoire local) |
 | `label` | `list/get/create/update/delete` | Gérer les étiquettes de l'espace de travail | `list` : `--resource-type` (`issue` ou `skill`), `--full-id` ; `create` : `--name`, `--color`, `--resource-type` (`issue` ou `skill`), `--description` |
 | `property` | `list/get/create/update/archive/unarchive` | Gérer les propriétés personnalisées de l'espace de travail | `create` : `--name`, `--type` (`text`, `number`, `select`, `multi_select`, `date`, `checkbox`, `url`, `actor`, `multi_actor`), `--option` (répétable, types select uniquement) ; `list` : `--include-archived` ; le type ne peut plus être modifié après la création |

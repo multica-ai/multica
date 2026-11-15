@@ -2,6 +2,8 @@
 
 import { useCallback, useMemo, useState } from "react";
 import {
+  Archive,
+  ArchiveRestore,
   FolderKanban,
   LayoutGrid,
   Pin,
@@ -10,6 +12,7 @@ import {
 } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import {
+  isProjectArchived,
   projectListOptions,
   useUpdateProject,
   useProjectViewStore,
@@ -75,6 +78,7 @@ import { ProjectIcon } from "./project-icon";
 import { ProjectsIntro } from "./projects-intro";
 import { useT } from "../../i18n";
 import { DeleteProjectsDialog, ProjectRowActions } from "./project-row-actions";
+import { useArchiveProjects, useRestoreProjects } from "./project-archive";
 import { useFormatRelativeDate } from "./labels";
 import { ProjectStatusBadge, ProjectPriorityBadge } from "./project-badge";
 import { ProjectLeadPicker } from "./project-lead-picker";
@@ -248,12 +252,15 @@ function ProjectCard({
 // Header tools — scope menu, filter, display (view, sort, columns).
 
 // Scope splits the lifecycle in two: still being worked on, or closed. The
-// status filter narrows further within it.
-type ProjectScope = "all" | "active" | "closed";
-const PROJECT_SCOPES: ProjectScope[] = ["all", "active", "closed"];
+// status filter narrows further within it. Archived projects sit outside the
+// lifecycle scopes, in their own. (MUL-8861)
+type ProjectScope = "all" | "active" | "closed" | "archived";
+const PROJECT_SCOPES: ProjectScope[] = ["all", "active", "closed", "archived"];
 const CLOSED_STATUSES: ReadonlySet<ProjectStatus> = new Set(["completed", "cancelled"]);
 
 function inScope(project: Project, scope: ProjectScope): boolean {
+  if (isProjectArchived(project)) return scope === "archived";
+  if (scope === "archived") return false;
   if (scope === "all") return true;
   return CLOSED_STATUSES.has(project.status) === (scope === "closed");
 }
@@ -281,7 +288,8 @@ function countActiveFilters(f: ProjectListFilters): number {
 }
 
 // Batch toolbar — page-anchored (not viewport). Pin all selected (any
-// member) + Delete (only when every selected project is deletable).
+// member), Archive or Restore (any member), Delete (only when every selected
+// project is deletable).
 function ProjectBatchToolbar({
   rows,
   pinnedIds,
@@ -296,8 +304,11 @@ function ProjectBatchToolbar({
   const { t } = useT("projects");
   const createPin = useCreatePin();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const { requestArchive, dialog: archiveDialog } = useArchiveProjects();
+  const restore = useRestoreProjects();
 
   const anyUnpinned = rows.some((p) => !pinnedIds.has(p.id));
+  const allArchived = rows.length > 0 && rows.every(isProjectArchived);
 
   return (
     <>
@@ -319,6 +330,24 @@ function ProjectBatchToolbar({
             {t(($) => $.page.pin)}
           </Button>
         )}
+        {allArchived ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              for (const p of rows) restore(p);
+              onClear();
+            }}
+          >
+            <ArchiveRestore className="mr-1 size-3.5" />
+            {t(($) => $.page.restore)}
+          </Button>
+        ) : (
+          <Button variant="ghost" size="sm" onClick={() => requestArchive(rows, { onArchived: onClear })}>
+            <Archive className="mr-1 size-3.5" />
+            {t(($) => $.page.archive)}
+          </Button>
+        )}
         {canDelete && (
           <Button
             variant="ghost"
@@ -337,7 +366,9 @@ function ProjectBatchToolbar({
         open={confirmDelete}
         onOpenChange={setConfirmDelete}
         onDeleted={onClear}
+        onArchiveInstead={() => requestArchive(rows, { onArchived: onClear, immediate: true })}
       />
+      {archiveDialog}
     </>
   );
 }
@@ -406,10 +437,18 @@ export function ProjectsPage() {
   }, [projects]);
 
   const scopeCounts = useMemo<Record<ProjectScope, number>>(() => {
-    const counts = { all: projects.length, active: 0, closed: 0 };
-    for (const p of projects) counts[inScope(p, "closed") ? "closed" : "active"] += 1;
+    const counts = { all: 0, active: 0, closed: 0, archived: 0 };
+    for (const p of projects) {
+      if (isProjectArchived(p)) {
+        counts.archived += 1;
+        continue;
+      }
+      counts.all += 1;
+      counts[inScope(p, "closed") ? "closed" : "active"] += 1;
+    }
     return counts;
   }, [projects]);
+  const restore = useRestoreProjects();
 
   const visible = useMemo(() => {
     const filtered = projects.filter((p) => {
@@ -460,6 +499,7 @@ export function ProjectsPage() {
           <CollectionNameCell
             icon={<ProjectIcon project={project} size="sm" />}
             title={project.title}
+            muted={isProjectArchived(project)}
           />
         ),
       },
@@ -547,18 +587,38 @@ export function ProjectsPage() {
         className: "font-mono tabular-nums",
         cell: (project) => project.issue_count,
       },
-      {
-        key: "created",
-        header: t(($) => $.table.created),
-        width: 104,
-        sortKey: "created",
-        hideable: true,
-        cell: (project) => (
-          <span className="tabular-nums">{formatRelativeDate(project.created_at)}</span>
-        ),
-      },
+      scope === "archived"
+        ? {
+            // Archived scope: when it was archived, and the way back.
+            key: "archived",
+            header: t(($) => $.table.archived),
+            width: 160,
+            core: true,
+            interactive: true,
+            cell: (project) => (
+              <span className="flex w-full items-center justify-between gap-2">
+                <span className="tabular-nums">
+                  {project.archived_at ? formatRelativeDate(project.archived_at) : null}
+                </span>
+                <Button variant="outline" size="xs" onClick={() => restore(project)}>
+                  <ArchiveRestore />
+                  {t(($) => $.page.restore)}
+                </Button>
+              </span>
+            ),
+          }
+        : {
+            key: "created",
+            header: t(($) => $.table.created),
+            width: 104,
+            sortKey: "created",
+            hideable: true,
+            cell: (project) => (
+              <span className="tabular-nums">{formatRelativeDate(project.created_at)}</span>
+            ),
+          },
     ],
-    [t, formatRelativeDate],
+    [t, formatRelativeDate, scope, restore],
   );
 
   const sort: CollectionSort = {
@@ -577,7 +637,10 @@ export function ProjectsPage() {
     all: t(($) => $.page.scope_all),
     active: t(($) => $.page.scope_active),
     closed: t(($) => $.page.scope_closed),
+    archived: t(($) => $.page.scope_archived),
   };
+  const noMatchesTitle =
+    scope === "archived" && !hasActiveFilters ? t(($) => $.page.no_archived) : t(($) => $.page.no_matches);
 
   return (
     // relative: positioning anchor for the page-centered batch toolbar.
@@ -736,7 +799,7 @@ export function ProjectsPage() {
               selection={{ selectedIds, onChange: setSelectedIds }}
               empty={
                 <CollectionNoMatches
-                  title={t(($) => $.page.no_matches)}
+                  title={noMatchesTitle}
                   onReset={clearFilters}
                   hasFilters={hasActiveFilters}
                 />
@@ -746,7 +809,7 @@ export function ProjectsPage() {
             <CardsLoading />
           ) : visible.length === 0 ? (
             <CollectionNoMatches
-              title={t(($) => $.page.no_matches)}
+              title={noMatchesTitle}
               onReset={clearFilters}
               hasFilters={hasActiveFilters}
             />

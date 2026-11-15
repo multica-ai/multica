@@ -987,8 +987,12 @@ class ApiClient {
   // --- Projects ---
   async listProjects(opts?: {
     signal?: AbortSignal;
+    includeArchived?: boolean;
   }): Promise<ListProjectsResponse> {
-    const raw = await this.fetch<unknown>("/api/projects", {
+    const path = opts?.includeArchived
+      ? "/api/projects?include_archived=true"
+      : "/api/projects";
+    const raw = await this.fetch<unknown>(path, {
       signal: opts?.signal,
     });
     return parseWithFallback(

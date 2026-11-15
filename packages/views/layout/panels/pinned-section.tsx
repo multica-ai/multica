@@ -12,7 +12,7 @@ import {
 } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Folder, X } from "@multica/ui/icons";
+import { Archive, Folder, X } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { ShimmerText } from "@multica/ui/components/common/shimmer-text";
@@ -322,6 +322,7 @@ function PinRow({
   onUnpin: () => void;
   wsId: string;
 }) {
+  const { t: tProjects } = useT("projects");
   const isIssue = pin.item_type === "issue";
   const agents = useIssueAgentState(wsId, isIssue ? pin.item_id : "");
   const unread = useIssueUnread(wsId, isIssue ? pin.item_id : "");
@@ -381,6 +382,15 @@ function PinRow({
       label={project.title}
       active={active}
       labelSuffix={project.visibility === "private" && <PrivateProjectLock />}
+      trailing={
+        project.archived_at ? (
+          <Archive
+            role="img"
+            aria-label={tProjects(($) => $.archive.badge)}
+            className="size-3 shrink-0 text-muted-foreground"
+          />
+        ) : undefined
+      }
       iconNode={
         project.icon ? <ProjectIcon project={project} size="md" /> : <Folder className="size-4 shrink-0" />
       }

@@ -2286,6 +2286,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/", h.GetProject)
 					r.Put("/", h.UpdateProject)
 					r.Delete("/", h.DeleteProject)
+					r.Post("/archive", h.ArchiveProject)
+					r.Post("/restore", h.RestoreProject)
 					r.Post("/workflow", h.SetProjectWorkflow)
 					r.Get("/members", h.ListProjectMembers)
 					r.Post("/members", h.AddProjectMembers)

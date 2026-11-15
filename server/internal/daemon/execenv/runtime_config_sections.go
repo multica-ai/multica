@@ -522,6 +522,9 @@ func writeProjectContext(b *strings.Builder, ctx TaskContextForEnv) {
 	if ctx.ProjectTitle != "" {
 		fmt.Fprintf(b, "The active project for this task is **%s**.\n\n", ctx.ProjectTitle)
 	}
+	if ctx.ProjectArchived {
+		b.WriteString("This project is **archived**: existing issues stay readable and editable, but it accepts no new issues — the API returns 409 `project_archived` for `--project` writes into it. Finish the work at hand; do not restore the project unless the user asks.\n\n")
+	}
 	if desc := strings.TrimSpace(ctx.ProjectDescription); desc != "" {
 		b.WriteString("Project description — durable context the project owner set for work in this project:\n\n")
 		b.WriteString(desc)

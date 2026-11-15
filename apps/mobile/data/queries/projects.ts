@@ -30,8 +30,10 @@ export const projectKeys = {
 export const projectListOptions = (wsId: string | null) =>
   queryOptions({
     queryKey: projectKeys.list(wsId),
+    // Includes archived projects: the list doubles as the lookup map for an
+    // issue's project. Browse and picker screens filter them out themselves.
     queryFn: async ({ signal }) => {
-      const res = await api.listProjects({ signal });
+      const res = await api.listProjects({ signal, includeArchived: true });
       return res.projects;
     },
     enabled: !!wsId,

@@ -117,6 +117,7 @@ export function WorkPanel() {
     () => sidebarProjects(projects, projectSettings, projectOrder, userId),
     [projects, projectSettings, projectOrder, userId],
   );
+  const activeProjectCount = useMemo(() => projects.filter((project) => !project.archived_at).length, [projects]);
   const openProject = projects.find((project) => isPathWithin(pathname, p.projectDetail(project.id)));
   const shownProjects = useKeptActiveItem(PROJECTS_LIST, filteredProjects, openProject?.id ?? null, openProject);
   const plainRowsLit = !pins.isActivePinnedRoute;
@@ -191,7 +192,7 @@ export function WorkPanel() {
               userId={userId}
               pathname={pathname}
               projects={shownProjects}
-              totalProjects={projects.length}
+              totalProjects={activeProjectCount}
               plainRowsLit={plainRowsLit}
               activeIssueId={currentIssueId}
               litSource={litSource}
