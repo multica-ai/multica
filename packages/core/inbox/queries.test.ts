@@ -63,6 +63,22 @@ describe("deduplicateInboxItems", () => {
     });
   });
 
+  it("leaves an app request row on its own request, not an older comment", () => {
+    const merged = deduplicateInboxItems([
+      item({ id: "comment-notification", created_at: "2026-06-15T08:00:00Z", details: { comment_id: "comment-1" } }),
+      item({
+        id: "app-notification",
+        type: "app_action_requested",
+        created_at: "2026-06-15T08:01:00Z",
+        details: { request_id: "request-1" },
+      }),
+    ]);
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.id).toBe("app-notification");
+    expect(merged[0]?.details).toEqual({ request_id: "request-1" });
+  });
+
   it("preserves the newest row's own comment anchor", () => {
     const merged = deduplicateInboxItems([
       item({

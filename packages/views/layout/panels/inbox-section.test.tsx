@@ -175,6 +175,15 @@ describe("InboxSection", () => {
     expect(screen.getByRole("link", { name: /^Confirm deploy/ })).toHaveAttribute("href", "/acme/issues/issue-a#app-request-r-1");
   });
 
+  it("lands an app's request over an older comment notification on the same issue", () => {
+    renderSection([
+      item({ id: "app-n", issue_id: "issue-a", title: "Confirm deploy", type: "app_action_requested", details: { request_id: "r-1" }, created_at: "2026-11-10T09:00:00Z" }),
+      item({ id: "comment-n", issue_id: "issue-a", title: "Older comment", type: "new_comment", details: { comment_id: "c-1" }, created_at: "2026-11-10T08:00:00Z" }),
+    ]);
+
+    expect(screen.getByRole("link", { name: /^Confirm deploy/ })).toHaveAttribute("href", "/acme/issues/issue-a#app-request-r-1");
+  });
+
   it("asks the issue page to land again on every click, even on the issue already open", () => {
     renderSection([item({ id: "n1", issue_id: "issue-a", title: "Commented", details: { comment_id: "c-1" } })], "issue-a");
 

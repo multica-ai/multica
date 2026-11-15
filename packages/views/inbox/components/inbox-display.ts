@@ -100,8 +100,8 @@ export function resolveDetailItem(
 export function inboxRowHref(p: WorkspacePaths, item: InboxItem): string {
   if (!item.issue_id) return `${p.inbox()}?${new URLSearchParams({ issue: item.id }).toString()}`;
   const issueHref = p.issueDetail(item.issue_id);
-  const commentId = item.details?.comment_id;
-  if (commentId) return `${issueHref}#comment-${commentId}`;
   const requestId = item.type.startsWith("app_") ? item.details?.request_id : undefined;
-  return requestId ? `${issueHref}#app-request-${requestId}` : issueHref;
+  if (requestId) return `${issueHref}#app-request-${requestId}`;
+  const commentId = item.details?.comment_id;
+  return commentId ? `${issueHref}#comment-${commentId}` : issueHref;
 }
