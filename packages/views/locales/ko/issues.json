@@ -1823,7 +1823,8 @@
       "all_issues": "전체 태스크",
       "my_work": "내 작업",
       "working": "실행 중",
-      "subscribed": "구독 중"
+      "subscribed": "구독 중",
+      "snoozed": "미뤄둔 항목"
     },
     "untitled": "제목 없는 뷰",
     "copy_name": "{{name}} (사본)",

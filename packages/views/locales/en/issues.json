@@ -1900,7 +1900,8 @@
       "all_issues": "All issues",
       "my_work": "My work",
       "working": "Working",
-      "subscribed": "Subscribed"
+      "subscribed": "Subscribed",
+      "snoozed": "Snoozed"
     },
     "untitled": "Untitled view",
     "copy_name": "{{name}} (copy)",

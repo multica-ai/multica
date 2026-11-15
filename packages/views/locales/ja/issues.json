@@ -1823,7 +1823,8 @@
       "all_issues": "すべてのタスク",
       "my_work": "自分の作業",
       "working": "実行中",
-      "subscribed": "購読中"
+      "subscribed": "購読中",
+      "snoozed": "スヌーズ中"
     },
     "untitled": "無題のビュー",
     "copy_name": "{{name}}（コピー）",

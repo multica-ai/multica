@@ -432,6 +432,10 @@
         "label": "Archive notification",
         "description": "Archive the open inbox notification, or restore it while reading the archive."
       },
+      "snoozeInboxItem": {
+        "label": "Snooze notification",
+        "description": "Snooze the open inbox issue, or bring it back now if it is snoozed."
+      },
       "send": {
         "label": "Send",
         "description": "Also submits new issues."

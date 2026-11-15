@@ -5,6 +5,7 @@ import { IssuesPage } from "../issues/components/issues-page";
 import { MyIssuesPage } from "../my-issues/components/my-issues-page";
 
 const state = vi.hoisted(() => ({ refreshing: false, user: { id: "user-1" } as { id: string } | null }));
+vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
 vi.mock("@multica/core/auth", () => ({
   useAuthStore: (select: (s: typeof state) => unknown) => select(state),
 }));

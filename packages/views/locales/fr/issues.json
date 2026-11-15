@@ -1900,7 +1900,8 @@
       "all_issues": "Toutes les tâches",
       "my_work": "Mon travail",
       "working": "En cours d'exécution",
-      "subscribed": "Abonnements"
+      "subscribed": "Abonnements",
+      "snoozed": "Reportés"
     },
     "untitled": "Vue sans titre",
     "copy_name": "{{name}} (copie)",

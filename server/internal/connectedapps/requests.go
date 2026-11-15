@@ -482,7 +482,7 @@ func (s *Service) notify(ctx context.Context, req db.AppActionRequest, notifType
 		return
 	}
 	s.bus.Publish(events.Event{
-		Type: "inbox:new", WorkspaceID: util.UUIDToString(item.WorkspaceID), ActorType: "agent", ActorID: util.UUIDToString(req.AgentID),
+		Type: inbox.NewItemEventType(item), WorkspaceID: util.UUIDToString(item.WorkspaceID), ActorType: "agent", ActorID: util.UUIDToString(req.AgentID),
 		Payload: map[string]any{"item": map[string]any{
 			"id": util.UUIDToString(item.ID), "workspace_id": util.UUIDToString(item.WorkspaceID),
 			"recipient_type": item.RecipientType, "recipient_id": util.UUIDToString(item.RecipientID),

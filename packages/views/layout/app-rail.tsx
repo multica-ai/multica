@@ -24,6 +24,7 @@ import {
   useInboxUnreadCount,
 } from "@multica/core/inbox/queries";
 import { useMarkAllInboxRead } from "@multica/core/inbox/mutations";
+import { useInboxSnoozeWake } from "@multica/core/inbox/use-snooze-wake";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
 import { resolveRailOrder, useRailOrderStore } from "@multica/core/navigation";
 import {
@@ -75,6 +76,7 @@ function useRailBadges(): Partial<Record<RailSpaceId, RailBadge>> {
   const p = useWorkspacePaths();
   const { pathname } = useNavigation();
   const inboxUnread = useInboxUnreadCount(wsId);
+  useInboxSnoozeWake(wsId);
   const inboxBadge = useSidebarTreeStore((s) => s.inboxSettings.railBadge);
 
   const { data: chatSessions = [] } = useQuery({

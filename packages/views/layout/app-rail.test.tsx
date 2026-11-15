@@ -57,6 +57,7 @@ vi.mock("@multica/core/inbox/queries", async (importOriginal) => {
     useInboxUnreadCount: () => state.inboxUnread,
   };
 });
+vi.mock("@multica/core/inbox/use-snooze-wake", () => ({ useInboxSnoozeWake: () => {} }));
 vi.mock("@multica/core/chat/queries", () => ({
   chatSessionsOptions: (wsId: string) => ({
     queryKey: ["chat", wsId, "sessions"],

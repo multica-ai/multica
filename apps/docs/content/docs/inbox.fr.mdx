@@ -67,7 +67,7 @@ Cliquez sur une ligne pour ouvrir sa tâche au commentaire ou à la demande d'ap
 
 Une tâche ouverte depuis la boîte de réception affiche les actions de la boîte de réception dans son en-tête :
 
-- **Marquer comme lu** / **Marquer comme non lu**. Marquer comme non lu est l'action « j'ai regardé, mais je n'en ai pas fini » : la ligne redevient non lue et fait remonter le compteur, et elle reste non lue tant que la tâche est ouverte.
+- **Reporter** (`H`) retire la tâche de votre boîte de réception jusqu'à l'heure choisie et ouvre la suivante. Voir « Reporter une tâche » ci-dessous.
 - **Marquer comme terminé** passe la tâche en `done`, archive la notification et ouvre la suivante. La notification est archivée même si **Archiver les tâches que vous terminez** est désactivé. L'action est proposée tant que la tâche n'est ni terminée ni annulée.
 - **Archiver** (`E`) archive la notification et ouvre la suivante. L'archivage ne modifie ni ne supprime la tâche.
 
@@ -84,11 +84,25 @@ Le menu ⋯ de la section regroupe **Voir les archivées** et les actions group�
 
 **Voir les archivées** ouvre les notifications archivées. D'autres éléments se chargent au fil du défilement, et les filtres s'appliquent à l'ensemble des archives, y compris aux éléments pas encore chargés. Les notifications archivées conservent leur état de lecture : **Désarchiver** (ou `E`) en rétablit une exactement comme vous l'aviez laissée.
 
+## Reporter une tâche
+
+Reporter retire une tâche de votre boîte de réception jusqu'à l'heure choisie, puis la fait revenir en haut, non lue. Reportez depuis le bouton réveil dans l'en-tête de la tâche (ou avec `H`), depuis le bouton à côté d'Archiver au survol d'une ligne, ou depuis la carte de survol d'une ligne. Choisissez **1 heure**, **3 heures**, **1 jour**, **3 jours** ou **1 semaine**, ou **Choisir une date et une heure…** pour n'importe quel moment dans l'année. Un report d'un jour ou plus garde l'heure actuelle, sauf s'il est fait entre 22:00 et 6:00 : la tâche revient alors à 9:00. La confirmation permet d'annuler ; annuler un changement d'heure rétablit l'heure précédente.
+
+Tant qu'une tâche est reportée :
+
+- ses nouvelles notifications attendent avec elle et ne comptent pas dans le badge non lu. À son retour, la ligne indique **Report terminé** et le nombre de nouveautés arrivées entre-temps ;
+- elle revient plus tôt si quelqu'un vous mentionne nommément, si elle vous est assignée, si une exécution échoue, si une app demande votre action ou si toutes ses sous-tâches sont terminées. Les mentions `@all` et d'escouade ne la réveillent pas ;
+- **Tout marquer comme lu** et les actions d'archivage groupé l'ignorent. L'archiver met fin au report, tout comme terminer vous-même la tâche quand **Archiver les tâches que vous terminez** est activé ;
+- ouvrir la tâche depuis ailleurs ne la marque pas comme lue et ne met pas fin au report. Son en-tête indique quand elle revient ; ouvrez-le pour la faire revenir maintenant (`H`) ou changer l'heure.
+
+Le report est personnel : il ne change que votre boîte de réception. Tout ce que vous avez reporté se trouve dans la vue **Reportés** sous Vues, aussi accessible via **Voir les reportés** dans le menu de la boîte de réception.
+
 ## Quand une notification quitte la boîte de réception
 
 Lire une notification ne la retire pas. Une ligne quitte la boîte de réception uniquement :
 
 - quand vous l'archivez, depuis sa ligne, la carte de survol, l'en-tête de la tâche ou une action groupée ;
+- quand vous reportez sa tâche. C'est temporaire : la tâche revient à l'heure choisie, ou plus tôt si quelque chose a besoin de vous. Voir « Reporter une tâche » ci-dessus ;
 - quand vous passez vous-même sa tâche à n'importe quel statut des catégories `done` ou `closed`, tant que **Archiver les tâches que vous terminez** est activé (c'est le cas par défaut). Seules vos propres notifications sur cette tâche sont archivées, lues ou non. Quand quelqu'un d'autre ou un agent termine une tâche, ses notifications restent dans votre boîte de réception, pour que vous voyiez la nouvelle ;
 - quand c'est une notification **Exécution en échec** et que sa tâche passe à un statut qui la rend à une personne : `in_review`, un statut personnalisé de la catégorie `started`, ou n'importe quel statut des catégories `done` ou `closed`. Les notifications Exécution en échec de tout le monde sur cette tâche sont alors archivées, quelle que soit la personne qui a changé le statut, et indépendamment du réglage ci-dessus. `blocked` fait exception : il rend aussi la tâche, mais le travail reste bloqué, donc les échecs précédents méritent encore d'être lus.
 

@@ -426,6 +426,10 @@
         "label": "알림 보관",
         "description": "열린 인박스 알림을 보관합니다. 보관함을 보는 중에는 보관을 해제합니다."
       },
+      "snoozeInboxItem": {
+        "label": "알림 미루기",
+        "description": "인박스에서 연 태스크를 미룹니다. 이미 미뤘다면 지금 되돌립니다."
+      },
       "send": {
         "label": "보내기",
         "description": "새 태스크 생성에도 사용됩니다."
