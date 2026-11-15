@@ -63,6 +63,7 @@ WITH locked_issue AS MATERIALIZED (
     SET revision = revision + 1,
         last_activity_at = GREATEST(COALESCE(last_activity_at, updated_at), now())
     WHERE id IN (SELECT issue_id FROM inserted)
+      AND NOT $5::bool
     RETURNING revision
 )
 SELECT EXISTS(SELECT 1 FROM inserted) AS changed,
@@ -71,10 +72,11 @@ WHERE $1::bigint IS NULL OR EXISTS (SELECT 1 FROM locked_issue)
 `
 
 type AttachLabelToIssueParams struct {
-	ExpectedRevision pgtype.Int8 `json:"expected_revision"`
-	IssueID          pgtype.UUID `json:"issue_id"`
-	WorkspaceID      pgtype.UUID `json:"workspace_id"`
-	LabelID          pgtype.UUID `json:"label_id"`
+	ExpectedRevision  pgtype.Int8 `json:"expected_revision"`
+	IssueID           pgtype.UUID `json:"issue_id"`
+	WorkspaceID       pgtype.UUID `json:"workspace_id"`
+	LabelID           pgtype.UUID `json:"label_id"`
+	DeferRevisionBump bool        `json:"defer_revision_bump"`
 }
 
 type AttachLabelToIssueRow struct {
@@ -90,6 +92,7 @@ func (q *Queries) AttachLabelToIssue(ctx context.Context, arg AttachLabelToIssue
 		arg.IssueID,
 		arg.WorkspaceID,
 		arg.LabelID,
+		arg.DeferRevisionBump,
 	)
 	var i AttachLabelToIssueRow
 	err := row.Scan(&i.Changed, &i.IssueRevision)
@@ -328,6 +331,7 @@ WITH locked_issue AS MATERIALIZED (
     SET revision = revision + 1,
         last_activity_at = GREATEST(COALESCE(last_activity_at, updated_at), now())
     WHERE id IN (SELECT issue_id FROM deleted)
+      AND NOT $5::bool
     RETURNING revision
 )
 SELECT EXISTS(SELECT 1 FROM deleted) AS changed,
@@ -336,10 +340,11 @@ WHERE $1::bigint IS NULL OR EXISTS (SELECT 1 FROM locked_issue)
 `
 
 type DetachLabelFromIssueParams struct {
-	ExpectedRevision pgtype.Int8 `json:"expected_revision"`
-	IssueID          pgtype.UUID `json:"issue_id"`
-	WorkspaceID      pgtype.UUID `json:"workspace_id"`
-	LabelID          pgtype.UUID `json:"label_id"`
+	ExpectedRevision  pgtype.Int8 `json:"expected_revision"`
+	IssueID           pgtype.UUID `json:"issue_id"`
+	WorkspaceID       pgtype.UUID `json:"workspace_id"`
+	LabelID           pgtype.UUID `json:"label_id"`
+	DeferRevisionBump bool        `json:"defer_revision_bump"`
 }
 
 type DetachLabelFromIssueRow struct {
@@ -354,6 +359,7 @@ func (q *Queries) DetachLabelFromIssue(ctx context.Context, arg DetachLabelFromI
 		arg.IssueID,
 		arg.WorkspaceID,
 		arg.LabelID,
+		arg.DeferRevisionBump,
 	)
 	var i DetachLabelFromIssueRow
 	err := row.Scan(&i.Changed, &i.IssueRevision)

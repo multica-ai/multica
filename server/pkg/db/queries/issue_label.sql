@@ -128,6 +128,7 @@ WITH locked_issue AS MATERIALIZED (
     SET revision = revision + 1,
         last_activity_at = GREATEST(COALESCE(last_activity_at, updated_at), now())
     WHERE id IN (SELECT issue_id FROM inserted)
+      AND NOT sqlc.arg('defer_revision_bump')::bool
     RETURNING revision
 )
 SELECT EXISTS(SELECT 1 FROM inserted) AS changed,
@@ -153,6 +154,7 @@ WITH locked_issue AS MATERIALIZED (
     SET revision = revision + 1,
         last_activity_at = GREATEST(COALESCE(last_activity_at, updated_at), now())
     WHERE id IN (SELECT issue_id FROM deleted)
+      AND NOT sqlc.arg('defer_revision_bump')::bool
     RETURNING revision
 )
 SELECT EXISTS(SELECT 1 FROM deleted) AS changed,

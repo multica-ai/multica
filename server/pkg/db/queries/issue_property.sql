@@ -53,7 +53,7 @@ RETURNING *;
 -- and returns the issue row.
 UPDATE issue
 SET properties = jsonb_set(properties, ARRAY[sqlc.arg('key')::text], sqlc.arg('value')::jsonb, true),
-    revision = revision + CASE WHEN properties -> sqlc.arg('key')::text IS DISTINCT FROM sqlc.arg('value')::jsonb THEN 1 ELSE 0 END,
+    revision = revision + CASE WHEN NOT sqlc.arg('defer_revision_bump')::bool AND properties -> sqlc.arg('key')::text IS DISTINCT FROM sqlc.arg('value')::jsonb THEN 1 ELSE 0 END,
     last_activity_at = CASE
         WHEN properties -> sqlc.arg('key')::text IS DISTINCT FROM sqlc.arg('value')::jsonb
         THEN GREATEST(COALESCE(last_activity_at, updated_at), now())
@@ -67,7 +67,7 @@ RETURNING *;
 -- name: DeleteIssuePropertyValue :one
 UPDATE issue
 SET properties = properties - sqlc.arg('key')::text,
-    revision = revision + CASE WHEN properties ? sqlc.arg('key')::text THEN 1 ELSE 0 END,
+    revision = revision + CASE WHEN NOT sqlc.arg('defer_revision_bump')::bool AND properties ? sqlc.arg('key')::text THEN 1 ELSE 0 END,
     last_activity_at = CASE
         WHEN properties ? sqlc.arg('key')::text
         THEN GREATEST(COALESCE(last_activity_at, updated_at), now())

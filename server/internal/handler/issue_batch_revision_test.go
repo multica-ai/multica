@@ -106,3 +106,32 @@ func TestConditionalBatchSerializesWithPrimaryWriter(t *testing.T) {
 		t.Fatalf("revision=%d; want exactly one writer", revision)
 	}
 }
+
+func TestConditionalBatchCombinedMutationAdvancesRevisionOnce(t *testing.T) {
+	property := createTestProperty(t, map[string]any{"name": "conditional combined property", "type": "text"})
+	first := dbfx.Insert(t, "issue_label", testutil.Cols{"workspace_id": testWorkspaceID, "name": "old combined label", "color": "#aabbcc", "resource_type": "issue"})
+	second := dbfx.Insert(t, "issue_label", testutil.Cols{"workspace_id": testWorkspaceID, "name": "new combined label", "color": "#aabbcc", "resource_type": "issue"})
+	for _, fields := range []bool{false, true} {
+		t.Run(fmt.Sprint(fields), func(t *testing.T) {
+			id := dbfx.Issue(t, "combined revision once", testutil.Cols{"revision": 7})
+			dbfx.Exec(t, `INSERT INTO issue_to_label(issue_id,label_id) VALUES($1,$2)`, id, first)
+			t.Cleanup(func() { dbfx.Exec(t, `DELETE FROM issue_to_label WHERE issue_id=$1`, id) })
+			body := map[string]any{"issue_ids": []string{id}, "labels": map[string]any{"clear": true, "add": []string{second}}, "properties": map[string]any{"set": map[string]string{property.ID: "after"}}}
+			if fields {
+				body["updates"] = map[string]any{"priority": "high"}
+			}
+			req := newRequest(http.MethodPost, "/api/issues/conditional-batch-update", body)
+			req.URL.RawQuery = "expected_revision=7"
+			response := httptest.NewRecorder()
+			testHandler.BatchUpdateIssues(response, req)
+			if response.Code != 200 {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body)
+			}
+			var revision int64
+			dbfx.QueryRow(t, `SELECT revision FROM issue WHERE id=$1`, id).Scan(&revision)
+			if revision != 8 {
+				t.Fatalf("one conditional mutation advanced to %d, want 8; body=%s", revision, response.Body)
+			}
+		})
+	}
+}

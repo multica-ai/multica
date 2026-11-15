@@ -37,9 +37,9 @@ multica issue batch update <id> --clear-labels --add-label <label-id> --expected
 ```
 
 The scalar precondition rejects multiple issue arguments before any requests.
-The result row includes the final `issue_revision`. Combined batch operations
-can advance it more than once inside their single transaction; use the returned
-value rather than calculating the next revision. Select `--output json` to
+The result row includes the final `issue_revision`. A state-changing combined batch
+advances the revision once for its whole transaction; use the returned value
+before the next write. Select `--output json` to
 receive revisions; table output keeps its existing presentation.
 
 Omitting the flag keeps the existing request and output formats, including

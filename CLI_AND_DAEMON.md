@@ -762,7 +762,7 @@ comment revisions, and this option does not add conditional comment appends.
 protects an atomic label-set replacement or a combined field/property/label
 change. A scalar revision requires exactly one issue; multiple arguments fail
 before any requests. The result row returns its final `issue_revision`.
-Combined batch operations can advance the revision more than once within the
+A state-changing conditional batch advances the revision once for the whole
 transaction. Read that returned value before the next write. Use JSON output
 for returned revisions; table output preserves its existing presentation.
 All conditional write commands use protected routes that older servers reject,

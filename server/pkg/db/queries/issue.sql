@@ -808,3 +808,15 @@ WHERE t.id = sqlc.arg(origin_id)::uuid
   AND t.originator_source = 'direct_human'
   AND (sqlc.arg(origin_type)::text = 'quick_create'
        OR (sqlc.arg(origin_type)::text = 'agent_create' AND t.trigger_evidence_kind = 'chat'));
+
+-- name: AdvanceConditionalBatchRevision :one
+-- The caller holds the issue owner lock. Conditional combined mutations defer
+-- subresource increments and advance the issue exactly once before commit.
+UPDATE issue
+SET revision = revision + 1,
+    last_activity_at = GREATEST(COALESCE(last_activity_at, updated_at), now()),
+    updated_at = now()
+WHERE id = sqlc.arg('id')::uuid
+  AND workspace_id = sqlc.arg('workspace_id')::uuid
+  AND revision = sqlc.arg('expected_revision')::bigint
+RETURNING *;
