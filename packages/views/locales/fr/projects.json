@@ -9,13 +9,20 @@
     "view_comfortable": "Confortable",
     "no_search_results": "Aucun résultat ne correspond à votre recherche",
     "view_table": "Grille",
-    "view_cards": "Cartes",
+    "view_board": "Tableau",
     "row_menu": "Actions du projet",
     "rename": "Renommer",
     "pin": "Épingler à la barre latérale",
     "unpin": "Détacher",
     "delete": "Supprimer",
-    "no_matches": "Aucun projet correspondant"
+    "no_matches": "Aucun projet correspondant",
+    "scope_archived": "Projets archivés",
+    "archive": "Archiver",
+    "restore": "Restaurer",
+    "no_archived": "Aucun projet archivé",
+    "search": "Rechercher des projets",
+    "group_none": "Aucun regroupement",
+    "board_column_empty": "Aucun projet"
   },
   "table": {
     "name": "Nom",
@@ -23,8 +30,12 @@
     "status": "Statut",
     "progress": "Avancement",
     "lead": "Responsable",
+    "start_date": "Date de début",
+    "due_date": "Date d'échéance",
+    "last_activity": "Activité récente",
     "created": "Création",
-    "issues": "Tâches"
+    "issues": "Tâches",
+    "archived": "Archivé"
   },
   "status": {
     "planned": "Planifié",
@@ -86,7 +97,9 @@
     "no_issues_yet": "Aucune tâche pour l'instant",
     "toast_link_copied": "Lien copié",
     "toast_project_deleted": "Projet supprimé",
-    "toast_move_issue_failed": "Échec du déplacement de la tâche"
+    "toast_move_issue_failed": "Échec du déplacement de la tâche",
+    "archive_action": "Archiver le projet",
+    "restore_action": "Restaurer le projet"
   },
   "resources": {
     "section_header": "Ressources",
@@ -155,7 +168,9 @@
     "title": "Supprimer le projet",
     "description": "Le projet sera supprimé. Les tâches ne seront pas supprimées, mais elles seront détachées.",
     "confirm": "Supprimer",
-    "cancel": "Annuler"
+    "cancel": "Annuler",
+    "archive_instead": "Archiver plutôt",
+    "archive_hint": "L'archivage masque le projet mais conserve ses tâches, son historique et ses réglages. Vous pouvez le restaurer à tout moment."
   },
   "picker": {
     "no_project": "Aucun projet",
@@ -215,7 +230,8 @@
     "search": "Rechercher un nom ou un e-mail...",
     "no_members": "Aucun membre correspondant",
     "no_selected": "Aucun membre du projet",
-    "admin_notice": "Les owner et admin de l’espace de travail ont toujours accès.",
+    "members_only_notice": "Seules les personnes de cette liste ont accès. Les owner et admin de l’espace de travail doivent aussi y être ajoutés.",
+    "manager": "Gère l’accès",
     "you": "Vous",
     "remove": "Retirer {{name}}",
     "failed": "Impossible d’enregistrer les accès.",
@@ -224,5 +240,29 @@
     "publish_description": "Tous les membres pourront voir ce projet, ses tâches, commentaires et pièces jointes.",
     "done": "Terminé",
     "retry": "Réessayer"
+  },
+  "archive": {
+    "badge": "Archivé",
+    "dialog_title": "Archiver « {{name}} » ?",
+    "dialog_title_count_one": "Archiver {{count}} projet ?",
+    "dialog_title_count_other": "Archiver {{count}} projets ?",
+    "dialog_description": "Les projets archivés sont masqués des listes et sélecteurs de projets et n'acceptent plus de nouvelles tâches. Rien n'est supprimé.",
+    "dialog_open_issues_one": "{{count}} tâche ouverte reste telle quelle, toujours consultable et modifiable.",
+    "dialog_open_issues_other": "{{count}} tâches ouvertes restent telles quelles, toujours consultables et modifiables.",
+    "dialog_autopilots_one": "{{count}} automatisation active qui y crée des tâches sera mise en pause.",
+    "dialog_autopilots_other": "{{count}} automatisations actives qui y créent des tâches seront mises en pause.",
+    "dialog_restore_hint": "Vous pouvez le restaurer à tout moment depuis Projets archivés.",
+    "cancel": "Annuler",
+    "confirm": "Archiver",
+    "toast_archived": "« {{name}} » archivé",
+    "toast_archived_count_one": "{{count}} projet archivé",
+    "toast_archived_count_other": "{{count}} projets archivés",
+    "toast_paused_one": "{{count}} automatisation qui y crée des tâches a été mise en pause",
+    "toast_paused_other": "{{count}} automatisations qui y créent des tâches ont été mises en pause",
+    "undo": "Annuler",
+    "toast_restored": "« {{name}} » restauré",
+    "toast_completed": "« {{name}} » est terminé",
+    "notice": "Ce projet est archivé. Il n'apparaît plus dans les listes ni les sélecteurs de projets et n'accepte plus de nouvelles tâches ; ses tâches restent consultables et modifiables.",
+    "prop_label": "Archivé"
   }
 }

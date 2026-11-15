@@ -60,8 +60,9 @@ export default [
   },
   {
     // The dev toolbar only exists in development builds and speaks to the
-    // people building Multica, so its copy is not translated.
-    files: ["dev-toolbar/**/*.{ts,tsx}"],
+    // people building Multica, so its copy is not translated. Features declare
+    // their toolbar actions in a `dev-actions.ts` beside their own code.
+    files: ["dev-toolbar/**/*.{ts,tsx}", "**/dev-actions.ts"],
     rules: {
       "i18next/no-literal-string": "off",
       "no-restricted-syntax": ["error", NO_ROUND_CONTROLS, NO_FULL_PAGE_NAVIGATION],

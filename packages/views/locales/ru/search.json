@@ -6,6 +6,7 @@
   "breadcrumb_aria": "Текущее меню",
   "groups": {
     "pages": "Страницы",
+    "views": "Представления",
     "commands": "Команды",
     "members": "Участники",
     "agents": "Агенты",
@@ -131,7 +132,6 @@
     "unsubscribed": "Подписка отменена",
     "label_added": "Добавлена метка «{{name}}»",
     "label_removed": "Удалена метка «{{name}}»",
-    "label_failed": "Не удалось добавить метку «{{name}}» ко всем задачам",
     "update_failed": "Не удалось обновить",
     "assigned": "Задача {{identifier}} назначена: {{name}}"
   },

@@ -78,3 +78,54 @@ html[lang="zh-TW"] {
 :root[data-theme] [data-slot="button"][data-variant="default"]:not(:disabled):hover {
     background-color: color-mix(in oklab, var(--button-primary, var(--primary)) 90%, var(--foreground));
 }
+
+/* ── Backdrop and glass ─────────────────────────────────────────────────────
+ * A theme that sets --backdrop gets a layer under the whole window,
+ * #multica-backdrop, which AppearanceSync paints and keeps; it also marks
+ * <html> with data-backdrop while the mode in use has one. The frame and the
+ * page then turn to glass: their own colours at the glass opacity, mixed here
+ * on <html> from the theme's opaque values, with the backdrop blurred behind
+ * them. theme-check.ts measures contrast on the same mixes. */
+
+#multica-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    overflow: hidden;
+    pointer-events: none;
+    background-color: var(--backdrop-color, var(--app-shell));
+}
+
+#multica-backdrop > div {
+    position: absolute;
+    inset: calc(-2 * var(--frame-glass-blur, var(--glass-blur, 0px)));
+    filter: blur(var(--frame-glass-blur, var(--glass-blur, 0px)));
+}
+
+:root[data-backdrop] {
+    --backdrop-frame-fill: color-mix(in oklab, var(--app-shell) var(--frame-glass-opacity, var(--glass-opacity, 100%)), transparent);
+    --backdrop-page-fill: color-mix(in oklab, var(--page-canvas) var(--glass-opacity, 100%), transparent);
+    --backdrop-background-fill: color-mix(in oklab, var(--background) var(--glass-opacity, 100%), transparent);
+}
+
+:root[data-backdrop] [data-slot="sidebar-wrapper"] {
+    --app-shell: var(--backdrop-frame-fill);
+    --page-canvas: var(--backdrop-page-fill);
+    --background: var(--backdrop-background-fill);
+}
+
+/* The blur sits on a layer under the page's content rather than on the page,
+   so the page does not become the containing block of fixed descendants. */
+:root[data-backdrop] [data-mc="page"] {
+    isolation: isolate;
+}
+
+:root[data-backdrop] [data-mc="page"]::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    -webkit-backdrop-filter: blur(var(--glass-blur, 0px));
+    backdrop-filter: blur(var(--glass-blur, 0px));
+}

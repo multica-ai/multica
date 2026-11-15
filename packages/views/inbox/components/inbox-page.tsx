@@ -41,6 +41,7 @@ import {
   useArchiveAllReadInbox,
   useArchiveCompletedInbox,
   useRetrySourceContextQuickCreate,
+  type InboxUnsubscribeScope,
 } from "@multica/core/inbox/mutations";
 import {
   effectiveInboxFilters,
@@ -61,7 +62,7 @@ import { IssuePeekHost } from "../../issues/components/issue-peek";
 import { useIssueSurfaceActivity } from "../../issues/surface/activity";
 import { useViewStateWriter } from "../../platform";
 import { ErrorBoundary } from "@multica/ui/components/common/error-boundary";
-import { useNavigation, useReportNavigating } from "../../navigation";
+import { AppLink, useNavigation, useReportNavigating } from "../../navigation";
 import { toast } from "sonner";
 import {
   MoreHorizontal,
@@ -98,13 +99,14 @@ import { cn } from "@multica/ui/lib/utils";
 import { CollapsedNavTrigger, PAGE_GUTTER, PageHeader } from "../../layout/page-header";
 import { PanelHeader } from "../../layout/panel-nav";
 import { useListColumnCollapsed } from "../../layout/app-shell-context";
-import { InboxDeleteDialog } from "./inbox-delete-dialog";
 import { ListColumn } from "../../layout/list-column";
+import { InboxDeleteDialog } from "./inbox-delete-dialog";
 import { useTimeAgo } from "./inbox-list-item";
 import { InboxList } from "./inbox-list";
 import { InboxFilterMenu } from "./inbox-filter-menu";
 import { InboxFilterChipsBar } from "./inbox-filter-options";
 import { InboxContextMenuProvider } from "./inbox-context-menu";
+import { useInboxUnsubscribable, useUnsubscribeArchive } from "./use-unsubscribe-archive";
 import { ARCHIVED_VIEW_PARAM, type InboxView } from "./inbox-view";
 import { useTypeLabels } from "./inbox-detail-label";
 import {
@@ -250,13 +252,20 @@ export function InboxPage() {
   });
   const lookupItems = useMemo(() => deduplicateArchivedInboxItems(lookup.data?.items ?? []), [lookup.data]);
   const presenceItems = lookupMissed ? presence.data?.items ?? [] : [];
+  const isCompact = useIsCompact();
+  // On desktop the live list is the Work panel's Inbox section, which applies
+  // the filters itself. The page only opens the notification the URL names,
+  // as the issue page does for an issue notification, so a filter can never
+  // refuse to open a row the section offered.
+  const opensAnyLiveRow = !isCompact && !isArchivedView;
   const selectionItems = useMemo(() => {
+    if (opensAnyLiveRow) return items;
     if (!isArchivedView || selectedOnPage) return filteredItems;
     return deduplicateArchivedInboxItems([
       ...filteredItems,
       ...filterInboxItems(lookupItems, effectiveFilters, filterContext),
     ]);
-  }, [isArchivedView, selectedOnPage, filteredItems, lookupItems, effectiveFilters, filterContext]);
+  }, [opensAnyLiveRow, items, isArchivedView, selectedOnPage, filteredItems, lookupItems, effectiveFilters, filterContext]);
   const visibleItems = isArchivedView && pinnedKey ? selectionItems : filteredItems;
 
   // Inbox zero: the bleeding m rises once, at the moment the last notification
@@ -374,8 +383,10 @@ export function InboxPage() {
     setSelectedKey,
   ]);
 
-  const isCompact = useIsCompact();
   const listCollapsed = useListColumnCollapsed();
+  // Desktop shows the live Inbox in the Work panel; only the archive needs
+  // a list of its own on the page.
+  const archiveSplit = !isCompact && isArchivedView;
   const unreadCount = useInboxUnreadCount(wsId);
 
   const markReadMutation = useMarkInboxRead();
@@ -485,12 +496,26 @@ export function InboxPage() {
     // keeps the entry and does NOT re-jump.
     if (item.issue_id) {
       writeViewState(issueHighlightMementoKey(item.issue_id), undefined);
-      if (nextKey === selectedKey) {
-        setHighlightRequestToken((t) => t + 1);
-      }
+      if (nextKey === selectedKey) setHighlightRequestToken((t) => t + 1);
     }
     setSelectedKey(nextKey);
   };
+
+  // The comment a notification opens at is chosen once per opening or
+  // re-click. Opening reads the issue, which moves the row's anchor from the
+  // oldest unread comment to the newest; following it would land a second
+  // time, past the comments the reader came for. Taken from the selected row,
+  // not the deferred detail, which renders only after the read has landed.
+  const [landing, setLanding] = useState<{ key: string; token: number; commentId: string | undefined } | null>(null);
+  if (selected && (landing?.key !== selectedKey || landing.token !== highlightRequestToken)) {
+    setLanding({ key: selectedKey, token: highlightRequestToken, commentId: selected.details?.comment_id ?? undefined });
+  } else if (landing && !selectedKey && !detailKey) {
+    // Back on the list: opening the row again chooses afresh.
+    setLanding(null);
+  }
+  const detailItemKey = detailItem ? (detailItem.issue_id ?? detailItem.id) : null;
+  const landingCommentId =
+    landing?.key === detailItemKey ? landing.commentId : (detailItem?.details?.comment_id ?? undefined);
 
   const handleMarkRead = (id: string) => {
     // Reading it back explicitly cancels an earlier park on the same row.
@@ -524,6 +549,9 @@ export function InboxPage() {
   // from, so both have to move the selection off it first. `list` is whichever
   // list the row came from — the main one for archive, the archived one for
   // unarchive.
+  // The rows in the order the user sees them: on desktop the Work panel
+  // section's, which applies the same filters.
+  const listedItems = opensAnyLiveRow ? filteredItems : selectionItems;
   const advanceSelectionPast = (id: string, list: InboxItem[]) => {
     const idx = list.findIndex((i) => i.id === id);
     const target = idx >= 0 ? list[idx] : null;
@@ -538,7 +566,7 @@ export function InboxPage() {
 
   // Toasts live in these shared handlers so every archive surface confirms alike.
   const handleArchive = (id: string) => {
-    advanceSelectionPast(id, selectionItems);
+    advanceSelectionPast(id, listedItems);
     archiveMutation.mutate(id, {
       onSuccess: () => toast.success(t(($) => $.toasts.archived)),
       onError: (err) =>
@@ -551,7 +579,7 @@ export function InboxPage() {
   };
 
   const handleUnarchive = (id: string) => {
-    advanceSelectionPast(id, selectionItems);
+    advanceSelectionPast(id, listedItems);
     unarchiveMutation.mutate(id, {
       onSuccess: () => toast.success(t(($) => $.toasts.unarchived)),
       onError: (err) =>
@@ -561,6 +589,15 @@ export function InboxPage() {
             : t(($) => $.errors.unarchive_failed),
         ),
     });
+  };
+
+  const unsubscribable = useInboxUnsubscribable(wsId);
+  const unsubscribeArchive = useUnsubscribeArchive();
+  const handleUnsubscribeArchive = (id: string, scope: InboxUnsubscribeScope = "issue") => {
+    const item = listedItems.find((i) => i.id === id);
+    if (!item?.issue_id) return;
+    advanceSelectionPast(id, listedItems);
+    unsubscribeArchive({ id, issueId: item.issue_id }, scope);
   };
 
   // Keep the listener stable while using the latest selected-item action.
@@ -783,6 +820,8 @@ export function InboxPage() {
         onMarkUnread: handleMarkUnread,
         onAction: isArchivedView ? handleUnarchive : handleArchive,
         onDelete: (id) => setDeleteTarget(selectionItems.find((item) => item.id === id) ?? null),
+        onUnsubscribeArchive: handleUnsubscribeArchive,
+        canUnsubscribe: unsubscribable,
       }}
     >
       <InboxList
@@ -818,7 +857,7 @@ export function InboxPage() {
           view={view}
           onClose={() => setDeleteTarget(null)}
           onDeleted={(id) => {
-            advanceSelectionPast(id, selectionItems);
+            advanceSelectionPast(id, listedItems);
             toast.success(t(($) => $.toasts.deleted));
           }}
         />
@@ -902,7 +941,7 @@ export function InboxPage() {
           issueId={detailItem.issue_id}
           defaultSidebarOpen={false}
           layoutId="multica_inbox_issue_detail_layout"
-          highlightCommentId={detailItem.details?.comment_id ?? undefined}
+          highlightCommentId={landingCommentId}
           highlightRequestToken={highlightRequestToken}
           highlightAppRequestId={
             detailItem.type.startsWith("app_") ? (detailItem.details?.request_id ?? undefined) : undefined
@@ -910,10 +949,10 @@ export function InboxPage() {
           // The inbox reads the row it selected itself (see the auto-read
           // effect above), and must keep a row marked unread while it is open.
           readsInbox={false}
-          // The split layout already has a nav trigger in the list header.
-          // Explicit false suppresses the detail header's fallback trigger,
-          // which is the way back once the list column is collapsed.
-          leadingAction={compactBackAction ?? (listCollapsed ? undefined : false)}
+          // The archive's list header already has a nav trigger. Explicit
+          // false suppresses the detail header's fallback trigger, which is
+          // the way back once the list column is collapsed.
+          leadingAction={compactBackAction ?? (archiveSplit && !listCollapsed ? false : undefined)}
           onDelete={() => {
             // Issue deletion CASCADE-deletes the inbox item server-side, and the
             // issue:deleted WS event prunes it from the inbox cache. Just clear
@@ -924,6 +963,9 @@ export function InboxPage() {
           onDone={() => {
             handleArchive(detailItem.id);
           }}
+          onUnsubscribeArchive={
+            isArchivedView ? undefined : (scope) => handleUnsubscribeArchive(detailItem.id, scope)
+          }
         />
       </IssuePeekHost>
     </ErrorBoundary>
@@ -942,6 +984,10 @@ export function InboxPage() {
           item={detailItem}
           onOpenRecovery={showAutopilotQuotaRecoveryPrompt}
         />
+      ) : detailItem.type === "project_owner_joined" && detailItem.details?.joined_by ? (
+        <div className="mt-4 text-body leading-relaxed text-foreground">
+          {t(($) => $.detail.project_owner_joined_body, { name: detailItem.details.joined_by })}
+        </div>
       ) : detailItem.body ? (
         <div className="mt-4 whitespace-pre-wrap text-body leading-relaxed text-foreground">
           {detailItem.body}
@@ -962,6 +1008,16 @@ export function InboxPage() {
         </div>
       )}
       <div className="mt-4 flex gap-2">
+        {detailItem.type === "project_owner_joined" && detailItem.details?.project_id && (
+          <Button
+            size="sm"
+            variant="outline"
+            render={<AppLink href={wsPaths.projectDetail(detailItem.details.project_id)} />}
+            nativeButton={false}
+          >
+            {t(($) => $.detail.open_project)}
+          </Button>
+        )}
         {detailItem.type === "quick_create_failed" &&
           detailItem.details?.source_context_id &&
           detailItem.details?.task_id && (
@@ -1105,67 +1161,84 @@ export function InboxPage() {
     return <div className="flex flex-1 flex-col min-h-0">{listPanel}</div>;
   }
 
-  // -- Desktop layout: list column + detail ----------------------------------
+  // -- Desktop layout ----------------------------------------------------------
+  // The live list is the Inbox section of the Work panel beside this page, so
+  // the page shows only the detail. The archive keeps its own list column.
 
-  if (viewLoading) {
+  const emptyDetail = (
+    <>
+      {(!archiveSplit || listCollapsed) && (
+        <PageHeader>
+          <h1 className="text-body font-semibold">
+            {isArchivedView ? t(($) => $.list.archived_title) : t(($) => $.page.title)}
+          </h1>
+        </PageHeader>
+      )}
+      <div className="relative flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden text-muted-foreground">
+        {inboxZeroCount === 0 ? (
+          <MulticaBleedMark
+            key={inboxZeroRises ? "rise" : "rest"}
+            enterDelay={inboxZeroRises ? 0.2 : undefined}
+            className="pointer-events-none absolute -right-[14%] -bottom-[26%] w-[min(560px,58%)] text-muted"
+          />
+        ) : (
+          <Inbox className="mb-3 h-10 w-10 text-faint-foreground" />
+        )}
+        <p className="relative text-body">
+          {visibleItems.length > 0
+            ? t(($) => $.detail.select_prompt)
+            : isArchivedView
+              ? t(($) => $.list.archived_empty)
+              : t(($) => $.detail.empty)}
+        </p>
+      </div>
+    </>
+  );
+
+  if (archiveSplit) {
     return (
       <div className="flex min-h-0 flex-1">
         <ListColumn collapsed={listCollapsed} width="list">
-          <div className="flex h-12 shrink-0 items-center pl-5 pr-2.5">
-            <Skeleton className="h-5 w-16" />
-          </div>
-          <div className="flex-1 min-h-0 overflow-y-auto space-y-1 p-2">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-3 px-2 py-2.5">
-                <Skeleton className="h-7 w-7 shrink-0 rounded-full" />
-                <div className="flex-1 space-y-2">
-                  <Skeleton className="h-4 w-3/4" />
-                  <Skeleton className="h-3 w-1/2" />
-                </div>
+          {viewLoading ? (
+            <>
+              <div className="flex h-12 shrink-0 items-center pl-5 pr-2.5">
+                <Skeleton className="h-5 w-16" />
               </div>
-            ))}
-          </div>
+              <div className="flex-1 min-h-0 overflow-y-auto space-y-1 p-2">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <div key={i} className="flex items-center gap-3 px-2 py-2.5">
+                    <Skeleton className="h-7 w-7 shrink-0 rounded-full" />
+                    <div className="flex-1 space-y-2">
+                      <Skeleton className="h-4 w-3/4" />
+                      <Skeleton className="h-3 w-1/2" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            listPanel
+          )}
         </ListColumn>
-        <div className="min-w-0 flex-1 p-6">
-          <Skeleton className="h-6 w-48" />
-          <Skeleton className="mt-4 h-4 w-32" />
+        <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
+          {viewLoading ? null : (detailContent ?? emptyDetail)}
         </div>
       </div>
     );
   }
 
-  return (
-    <div className="flex min-h-0 flex-1">
-      <ListColumn collapsed={listCollapsed} width="list">{listPanel}</ListColumn>
-      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-        {detailContent ?? (
-          <>
-          {listCollapsed && (
-            <PageHeader>
-              <h1 className="text-body font-semibold">{t(($) => $.page.title)}</h1>
-            </PageHeader>
-          )}
-          <div className="relative flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden text-muted-foreground">
-            {inboxZeroCount === 0 ? (
-              <MulticaBleedMark
-                key={inboxZeroRises ? "rise" : "rest"}
-                enterDelay={inboxZeroRises ? 0.2 : undefined}
-                className="pointer-events-none absolute -right-[14%] -bottom-[26%] w-[min(560px,58%)] text-muted"
-              />
-            ) : (
-              <Inbox className="mb-3 h-10 w-10 text-faint-foreground" />
-            )}
-            <p className="relative text-body">
-              {visibleItems.length > 0
-                ? t(($) => $.detail.select_prompt)
-                : isArchivedView
-                  ? t(($) => $.list.archived_empty)
-                  : t(($) => $.detail.empty)}
-            </p>
-          </div>
-          </>
-        )}
+  if (viewLoading) {
+    return (
+      <div className="min-w-0 flex-1 p-6">
+        <Skeleton className="h-6 w-48" />
+        <Skeleton className="mt-4 h-4 w-32" />
       </div>
+    );
+  }
+
+  return (
+    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
+      {detailContent ?? emptyDetail}
     </div>
   );
 }

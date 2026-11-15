@@ -10,6 +10,9 @@ import {
   type CommandBarContext,
 } from "@multica/core/command-bar";
 import { inboxUnreadSummaryOptions } from "@multica/core/inbox/queries";
+import { useActiveIssueViewStore } from "@multica/core/issue-views/active-view-store";
+import { issueViewEverywhereOptions } from "@multica/core/issue-views/queries";
+import { projectListOptions } from "@multica/core/projects/queries";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { issueDetailOptions, issueTimelineOptions } from "@multica/core/issues/queries";
 import { WORKSPACE_PAGES } from "@multica/core/paths";
@@ -796,6 +799,89 @@ describe("SearchCommand", () => {
       fireEvent.click(await rowText("Acme Corp"));
 
       expect(mockPush).toHaveBeenCalledWith("/acme-hq/issues");
+    });
+  });
+
+  describe("views", () => {
+    const makeView = (id: string, name: string, over: Record<string, unknown> = {}) => ({
+      id,
+      workspace_id: "ws-test",
+      owner_id: ME,
+      name,
+      scope_type: "workspace",
+      scope_id: null,
+      visibility: "private",
+      query: {},
+      display: {},
+      ...over,
+    });
+
+    beforeEach(() => {
+      act(() => useActiveIssueViewStore.setState({ active: {} }));
+      seed(issueViewEverywhereOptions("ws-test"), [
+        makeView("view-bugs", "Open bugs"),
+        makeView("view-launch", "Launch blockers", { scope_type: "project", scope_id: "proj-1" }),
+      ]);
+      seed(projectListOptions("ws-test"), { projects: [{ id: "proj-1", title: "Website" }] });
+    });
+
+    const viewRows = () => within(screen.getByRole("group", { name: "Views" })).getAllByRole("option");
+
+    it("opens a saved view on its surface and makes it the active view", async () => {
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), "open bugs");
+      fireEvent.click(await rowText("Open bugs"));
+
+      expect(mockPush).toHaveBeenCalledWith("/ws-test/issues?view=view-bugs");
+      expect(useActiveIssueViewStore.getState().active).toEqual({ "ws-test:workspace": "view-bugs" });
+      expect(useSearchStore.getState().open).toBe(false);
+    });
+
+    it("names the project a project view opens in", async () => {
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), "launch");
+
+      await waitFor(() => expect(viewRows()[0]).toHaveTextContent("Launch blockersWebsite"));
+      fireEvent.click(viewRows()[0]!);
+      expect(mockPush).toHaveBeenCalledWith("/ws-test/projects/proj-1?view=view-launch");
+    });
+
+    it("opens a built-in view", async () => {
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), "working");
+      fireEvent.click(await rowText("Working"));
+
+      expect(mockPush).toHaveBeenCalledWith("/ws-test/issues?view=working");
+      expect(useActiveIssueViewStore.getState().active).toEqual({ "ws-test:workspace": "working" });
+    });
+
+    it('lists every view under the Views page for "views"', async () => {
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), "views");
+
+      await waitFor(() => expect(viewRows()).toHaveLength(7));
+      expect(renderedValues().indexOf("page:views")).toBeLessThan(renderedValues().indexOf("view:view-bugs"));
+    });
+
+    it("leaves this tab's active view alone when the view opens in a new tab", async () => {
+      const user = userEvent.setup();
+      const open = vi.spyOn(window, "open").mockReturnValue(null);
+      renderSearch();
+      await user.type(input(), "open bugs");
+      fireEvent.click(await rowText("Open bugs"), { metaKey: true });
+
+      expect(open).toHaveBeenCalledWith(
+        "https://app.multica//ws-test/issues?view=view-bugs",
+        "_blank",
+        "noopener,noreferrer",
+      );
+      expect(mockPush).not.toHaveBeenCalled();
+      expect(useActiveIssueViewStore.getState().active).toEqual({});
+      open.mockRestore();
     });
   });
 

@@ -21,7 +21,7 @@ import {
   seedIssueSurfaceViewState,
 } from "@multica/core/issues/stores/surface-view-store";
 import { useActiveIssueView } from "@multica/core/issue-views/use-active-view";
-import { UNREAD_VIEW_BASELINE, isUnreadView } from "@multica/core/issue-views/unread-view";
+import { filteredBuiltinBaseline } from "@multica/core/issue-views/builtin-issue-views";
 import {
   issueViewDefinitionFromState,
   issueViewSeedDefinition,
@@ -90,6 +90,7 @@ export function IssueSurface({
   modes,
   surfaceKey,
   createDefaults,
+  allowCreate = true,
   search,
   renderHeader,
   renderEmpty,
@@ -132,7 +133,7 @@ export function IssueSurface({
       : activeView && scope.type === "my"
         ? { ...scope, relation: myRelationForViewVariant(activeView.scope_variant) }
         : scope;
-  const viewBaseline = isUnreadView(activeView) ? UNREAD_VIEW_BASELINE : null;
+  const viewBaseline = filteredBuiltinBaseline(activeView);
   const store = useMemo(() => {
     // First-open seeding happens HERE, at store-creation time for this key:
     // no React component has subscribed to the new key's store yet, so the
@@ -142,7 +143,7 @@ export function IssueSurface({
       seedIssueSurfaceViewState(resolvedSurfaceKey, seedDefinition);
     }
     const viewStore = getIssueSurfaceViewStore(resolvedSurfaceKey);
-    if (viewBaseline?.unread) keepUnreadFilter(viewStore);
+    if (viewBaseline) keepFixedFilters(viewStore, viewBaseline);
     return viewStore;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- seed identity follows the key
   }, [resolvedSurfaceKey]);
@@ -150,9 +151,9 @@ export function IssueSurface({
   // a workspace switch reloads it from that workspace's preferences, which may
   // never have held the condition. Re-apply it whenever it goes missing.
   useEffect(() => {
-    if (!viewBaseline?.unread) return;
-    keepUnreadFilter(store);
-    return store.subscribe(() => keepUnreadFilter(store));
+    if (!viewBaseline) return;
+    keepFixedFilters(store, viewBaseline);
+    return store.subscribe(() => keepFixedFilters(store, viewBaseline));
   }, [store, viewBaseline]);
 
   // Every change of this key tears down and remounts the ENTIRE surface
@@ -186,6 +187,7 @@ export function IssueSurface({
           scope={effectiveScope}
           modes={modes}
           createDefaults={createDefaults}
+          allowCreate={allowCreate}
           search={search}
           renderHeader={renderHeader}
           renderEmpty={renderEmpty}
@@ -200,14 +202,37 @@ export function IssueSurface({
   );
 }
 
-function keepUnreadFilter(store: StoreApi<IssueViewState>) {
-  if (!store.getState().unreadFilter) store.setState({ unreadFilter: true });
+/**
+ * Holds a built-in view to its condition: exactly the relations and agent
+ * filter it is defined by. Other dimensions narrow it; these would widen it,
+ * since a dimension's values are ORed (Subscribed + Assigned is "subscribed
+ * or assigned").
+ */
+function keepFixedFilters(store: StoreApi<IssueViewState>, baseline: IssueViewBaseline) {
+  const state = store.getState();
+  const patch: Partial<IssueViewState> = {};
+  if (baseline.agentRunning && (!state.agentRunningFilter || state.agentIdleFilter)) {
+    Object.assign(patch, { agentRunningFilter: true, agentIdleFilter: false });
+  }
+  const relations = baseline.raw.relationFilters;
+  if (
+    relations.length > 0 &&
+    (relations.length !== state.relationFilters.length ||
+      relations.some((relation) => !state.relationFilters.includes(relation)))
+  ) {
+    patch.relationFilters = [...relations];
+  }
+  if (relations.length > 0 && state.negatedFilters.includes("relation")) {
+    patch.negatedFilters = state.negatedFilters.filter((dimension) => dimension !== "relation");
+  }
+  if (Object.keys(patch).length > 0) store.setState(patch);
 }
 
 function IssueSurfaceContent({
   scope,
   modes,
   createDefaults,
+  allowCreate = true,
   search,
   renderHeader,
   renderEmpty,
@@ -319,7 +344,7 @@ function IssueSurfaceContent({
               title={t(($) => $.detail.empty_issues_title)}
               description={t(($) => $.detail.empty_issues_hint)}
               actions={
-                <>
+                allowCreate && <>
                   <Button size="sm" onClick={() => controller.openCreateIssue()}>
                     <Plus aria-hidden="true" />
                     {t(($) => $.detail.empty_issues_new_button)}
@@ -351,7 +376,7 @@ function IssueSurfaceContent({
                 childProgressMap={controller.childProgressMap}
                 projectMap={controller.projectMap}
                 projectId={controller.projectId}
-                onCreateIssue={openCreateIssue}
+                onCreateIssue={allowCreate ? openCreateIssue : undefined}
                 statusPagination={controller.statusPagination}
                 groupBranches={controller.groupBranches}
               />
@@ -364,7 +389,7 @@ function IssueSurfaceContent({
                 projectMap={controller.projectMap}
                 projectId={controller.projectId}
                 onMoveIssue={controller.moveIssue}
-                onCreateIssue={openCreateIssue}
+                onCreateIssue={allowCreate ? openCreateIssue : undefined}
                 statusPagination={controller.statusPagination!}
               />
             )}
@@ -393,7 +418,7 @@ function IssueSurfaceContent({
                 childProgressMap={controller.childProgressMap}
                 projectMap={controller.projectMap}
                 projectId={controller.projectId}
-                onCreateIssue={openCreateIssue}
+                onCreateIssue={allowCreate ? openCreateIssue : undefined}
                 groupBranches={controller.groupBranches}
               />
             )}

@@ -203,6 +203,7 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 		startTime := time.Now()
 		var lastAssistantText string
 		var finalResultText string
+		var resultErrorText string
 		sawResult := false
 		resultIsError := false
 		sawBackgroundTask := false
@@ -225,7 +226,8 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 			_ = stdout.Close()
 		}()
 
-		scanner := newAgentStreamScanner(stdout)
+		countedStdout := &byteCountingReader{Reader: stdout}
+		scanner := newAgentStreamScanner(countedStdout)
 
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
@@ -271,6 +273,10 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 				sawResult = true
 				finalResultText = msg.ResultText
 				resultIsError = msg.IsError
+				resultErrorText = ""
+				if msg.IsError {
+					resultErrorText = codebuddyResultError(msg)
+				}
 				sessionID = msg.SessionID
 				if resultUsage := codebuddyResultUsage(msg, opts.Model); len(resultUsage) > 0 {
 					usage = resultUsage
@@ -337,11 +343,12 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 			exitErr,
 			sessionID,
 			streamTerminalState{
-				lastAssistantText: lastAssistantText,
-				finalResultText:   finalResultText,
-				sawResult:         sawResult,
-				resultIsError:     resultIsError,
-				scanErr:           scanErr,
+				lastAssistantText:   lastAssistantText,
+				finalResultText:     finalResultText,
+				sawResult:           sawResult,
+				resultIsError:       resultIsError,
+				scanErr:             scanErr,
+				terminalReasonError: resultErrorText,
 			},
 			completionGuardError,
 		)
@@ -360,7 +367,8 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 		if finalError != "" {
 			finalError = withAgentStderr(finalError, "codebuddy", stderrTail)
 		}
-		logStreamProtocolObservation(b.cfg.Logger, streamProtocolObservation{
+		// Context shutdown closes stdout itself; exclude that read error.
+		observation := streamProtocolObservation{
 			provider:                   "codebuddy",
 			cliVersion:                 b.cfg.CLIVersion,
 			model:                      opts.Model,
@@ -373,10 +381,14 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 			resultIsError:              resultIsError,
 			resultBytes:                len(finalResultText),
 			lastAssistantBytes:         len(lastAssistantText),
-			scannerError:               scanErr != nil,
+			scannerError:               scanErr != nil && runCtx.Err() == nil,
 			unreadableAssistantCount:   unreadableAssistantCount,
 			anthropicBaseURLConfigured: strings.TrimSpace(b.cfg.Env["ANTHROPIC_BASE_URL"]) != "",
-		})
+		}
+		logStreamProtocolObservation(b.cfg.Logger, observation)
+		if finalError != "" {
+			finalError = codebuddyFailureDiagnostic(finalError, observation, countedStdout.bytes, stderrBuf.TotalBytes())
+		}
 
 		b.cfg.Logger.Info("codebuddy finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
@@ -626,6 +638,8 @@ type codebuddySDKMessage struct {
 	// shipped @tencent-ai/codebuddy-code 2.150.0 protocol.
 	ResultText string                               `json:"result,omitempty"`
 	IsError    bool                                 `json:"is_error,omitempty"`
+	Errors     json.RawMessage                      `json:"errors,omitempty"`
+	ErrorsInfo json.RawMessage                      `json:"errors_info,omitempty"`
 	DurationMs float64                              `json:"duration_ms,omitempty"`
 	NumTurns   int                                  `json:"num_turns,omitempty"`
 	Usage      *codebuddyUsage                      `json:"usage,omitempty"`

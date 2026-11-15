@@ -110,11 +110,11 @@ func newHTTPError(method, path string, resp *http.Response) *HTTPError {
 		Path:       path,
 		StatusCode: resp.StatusCode,
 		Body:       strings.TrimSpace(string(data)),
-		TaskScoped: requestUsedTaskToken(resp),
+		TaskScoped: RequestUsedTaskToken(resp),
 	}
 }
 
-// requestUsedTaskToken reports whether the request that produced resp actually
+// RequestUsedTaskToken reports whether the request that produced resp actually
 // sent a task token.
 //
 // Reading the client's own Token field would be wrong twice over. DownloadFile
@@ -124,7 +124,7 @@ func newHTTPError(method, path string, resp *http.Response) *HTTPError {
 // across a cross-host redirect, so the request that was sent is not always the
 // one the caller built. resp.Request is the request that actually went out,
 // after redirects, which is the only thing this claim can honestly rest on.
-func requestUsedTaskToken(resp *http.Response) bool {
+func RequestUsedTaskToken(resp *http.Response) bool {
 	if resp == nil || resp.Request == nil {
 		return false
 	}

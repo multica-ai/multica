@@ -4,6 +4,7 @@
   "placeholder": "Busca o escribe lo que necesitas hacer...",
   "groups": {
     "pages": "Páginas",
+    "views": "Vistas",
     "commands": "Comandos",
     "members": "Miembros",
     "projects": "Proyectos",
@@ -43,7 +44,6 @@
     "unsubscribed": "Suscripción cancelada",
     "label_added": "Etiqueta {{name}} añadida",
     "label_removed": "Etiqueta {{name}} quitada",
-    "label_failed": "No se ha podido añadir la etiqueta {{name}} a todas las tareas",
     "update_failed": "La actualización falló",
     "assigned": "{{identifier}} asignada a {{name}}"
   },

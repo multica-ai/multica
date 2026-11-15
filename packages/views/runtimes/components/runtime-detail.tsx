@@ -167,6 +167,7 @@ export function RuntimeDetail({
   return (
     <>
       <ObjectPage
+        type="runtime"
         layoutId="multica_runtime_detail_layout"
         segments={[
           { href: paths.runtimes(), label: t(($) => $.page.title) },

@@ -161,6 +161,11 @@ var ErrParentIssueNotFound = errors.New("parent issue not found in this workspac
 // having to remember it. Callers translate this into 400.
 var ErrProjectNotFound = errors.New("project not found in this workspace")
 
+// ErrProjectArchived signals that the caller explicitly filed a new issue
+// into an archived project. Callers translate this into 409
+// project_archived; restoring the project lifts it.
+var ErrProjectArchived = errors.New("project is archived; restore it before adding issues")
+
 // ErrIssueLabelNotFound signals that one of the supplied LabelIDs does not
 // exist in the issue's workspace or is not an issue-scoped label. The whole
 // create is rejected so a new issue is never born with a partial or wrong
@@ -355,6 +360,7 @@ func (s *IssueService) createOnce(ctx context.Context, p IssueCreateParams, opts
 	// WorkspaceID — there is no path from this service to a row in a
 	// foreign workspace.
 	projectID := p.ProjectID
+	var parentProjectID pgtype.UUID
 	if p.ParentIssueID.Valid {
 		parent, err := qtx.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{
 			ID:          p.ParentIssueID,
@@ -366,16 +372,23 @@ func (s *IssueService) createOnce(ctx context.Context, p IssueCreateParams, opts
 		// Back-fill project from parent when the caller did not pin
 		// one explicitly. Matches the long-standing HTTP behavior: a
 		// sub-issue inherits its parent's project unless overridden.
+		parentProjectID = parent.ProjectID
 		if !projectID.Valid {
 			projectID = parent.ProjectID
 		}
 	}
 	if projectID.Valid {
-		if _, err := qtx.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{
+		project, err := qtx.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{
 			ID:          projectID,
 			WorkspaceID: p.WorkspaceID,
-		}); err != nil {
+		})
+		if err != nil {
 			return IssueCreateResult{}, ErrProjectNotFound
+		}
+		// A sub-issue staying in its parent's archived project continues work
+		// already there; only filing new work into it is refused.
+		if project.ArchivedAt.Valid && projectID != parentProjectID {
+			return IssueCreateResult{}, ErrProjectArchived
 		}
 	}
 

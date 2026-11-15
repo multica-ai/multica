@@ -111,7 +111,7 @@ export function QoderDetailPage() {
 
   if (connection.isPending || runtimesLoading) {
     return (
-      <ObjectPage layoutId={LAYOUT_ID} segments={segments} leaf={leaf}>
+      <ObjectPage type="runtime" layoutId={LAYOUT_ID} segments={segments} leaf={leaf}>
         <QoderBodySkeleton />
       </ObjectPage>
     );
@@ -119,7 +119,7 @@ export function QoderDetailPage() {
   const data = connection.data;
   if (connection.isError || data?.available !== true) {
     return (
-      <ObjectPage layoutId={LAYOUT_ID} segments={segments} leaf={leaf}>
+      <ObjectPage type="runtime" layoutId={LAYOUT_ID} segments={segments} leaf={leaf}>
         <CollectionPageState
           icon={AlertCircle}
           tone="destructive"
@@ -167,6 +167,7 @@ export function QoderDetailPage() {
 
   return (
     <ObjectPage
+      type="runtime"
       layoutId={LAYOUT_ID}
       segments={segments}
       leaf={leaf}

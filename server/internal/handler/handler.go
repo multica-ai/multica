@@ -246,8 +246,9 @@ type Handler struct {
 	LocalSkillListStore   LocalSkillListStore
 	LocalSkillImportStore LocalSkillImportStore
 	FeatureFlags          *featureflag.Service
-	// ThemeStore serves the community theme registry. Nil when the operator
-	// turned the store off: its routes return 404 and /api/config omits it.
+	// ThemeStore serves the community theme registry. Nil only when
+	// MULTICA_THEME_REGISTRY_URL is invalid: its routes return 404 and
+	// /api/config omits it.
 	ThemeStore *themestore.Store
 	// IssueStatusCatalog reads the workspace status catalog. Defaults to
 	// Queries; a test can substitute a counting wrapper to assert HOW MANY

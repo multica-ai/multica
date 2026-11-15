@@ -158,6 +158,39 @@ describe("inbox row context menu", () => {
     expect(onAction).toHaveBeenCalledWith("inbox-3");
   });
 
+  it("offers unsubscribe & archive on rows the page accepts", async () => {
+    const onUnsubscribeArchive = vi.fn();
+    const { row } = renderRow({
+      entry: item({ id: "inbox-4" }),
+      actions: { onUnsubscribeArchive, canUnsubscribe: () => true },
+    });
+
+    fireEvent.contextMenu(row);
+    fireEvent.click(await screen.findByText("Unsubscribe & archive"));
+
+    expect(onUnsubscribeArchive).toHaveBeenCalledWith("inbox-4");
+  });
+
+  it("omits unsubscribe & archive on the viewer's own issues", async () => {
+    const { row } = renderRow({
+      actions: { onUnsubscribeArchive: vi.fn(), canUnsubscribe: () => false },
+    });
+    fireEvent.contextMenu(row);
+    expect(await screen.findByText("Archive")).toBeInTheDocument();
+    expect(screen.queryByText("Unsubscribe & archive")).toBeNull();
+  });
+
+  it("omits unsubscribe & archive in the archived view", async () => {
+    const { row } = renderRow({
+      entry: item({ archived: true }),
+      view: "archived",
+      actions: { onUnsubscribeArchive: vi.fn(), canUnsubscribe: () => true },
+    });
+    fireEvent.contextMenu(row);
+    expect(await screen.findByText("Unarchive")).toBeInTheDocument();
+    expect(screen.queryByText("Unsubscribe & archive")).toBeNull();
+  });
+
   it("drops the read toggle in the archived view and offers unarchive", async () => {
     // Archived rows deliberately render as read and the unread count excludes
     // them, so a read toggle there would report success and change nothing.

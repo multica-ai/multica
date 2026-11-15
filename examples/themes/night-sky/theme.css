@@ -1,0 +1,23 @@
+/* The sliders in manifest.json set --glass-blur and --glass-opacity. The
+   frame stays clear (0%, no blur) so the sky reads sharply around the page. */
+
+.theme-light {
+  --backdrop: url(dawn.svg) center / cover no-repeat;
+  --backdrop-color: #d6d5e4;
+  --frame-glass-opacity: 0%;
+  --frame-glass-blur: 0px;
+  --page-canvas: oklch(0.99 0.006 250);
+  --rail-item-color: oklch(0.32 0.03 260);
+  --muted-foreground: oklch(0.45 0.03 270);
+  --faint-foreground: oklch(0.53 0.03 270);
+  --brand: oklch(0.52 0.19 262);
+}
+
+.theme-dark {
+  --backdrop: url(night.svg) center / cover no-repeat;
+  --backdrop-color: #1e1e4a;
+  --frame-glass-opacity: 0%;
+  --frame-glass-blur: 0px;
+  --page-canvas: oklch(0.17 0.02 275);
+  --rail-item-color: oklch(0.86 0.02 270);
+}

@@ -149,6 +149,27 @@ paper/
 [data-mc="content"] { max-width: var(--page-width); }
 ```
 
+## 背景與玻璃
+
+主題可以在應用程式後面放一張畫面——漸層、圖片或動畫 SVG——並讓框架和頁面變成覆蓋在它上面的玻璃。依模式設定：
+
+```css
+.theme-dark {
+  --backdrop: url(night.svg) center / cover no-repeat;
+  --backdrop-color: #1e1e4a;
+  --glass-opacity: 72%;
+  --glass-blur: 18px;
+  --frame-glass-opacity: 0%;
+  --frame-glass-blur: 0px;
+}
+```
+
+- `--backdrop` 是一個 CSS `background` 值，鋪在整個視窗下面，桌面應用程式和網頁版都會顯示。圖片必須放在主題資料夾裡；SVG 自帶的動畫會播放。
+- 設定背景時必須同時設定 `--backdrop-color`：載入期間顯示的純色，也是 `theme:check` 計算玻璃對比度時用的底色。
+- `--glass-opacity` 和 `--glass-blur` 決定頁面自身顏色蓋住背景的程度，以及背景在頁面後面的模糊程度。`--frame-glass-opacity` 和 `--frame-glass-blur` 對側欄、視窗工具列、分頁列和底列起同樣的作用。
+
+請用這些變數，而不是把 `--app-shell` 設成透明或給 `body` 設定 `background`：這樣切換背景時不會讓整個視窗閃爍。[`examples/themes/night-sky`](https://github.com/multica-ai/multica/tree/main/examples/themes/night-sky) 是一個完整範例。
+
 ## 選擇器
 
 選擇錨點、slot 和狀態鉤子，不要選類名或 DOM 結構，後者隨時會變。錨點、slot 和鉤子會保持到下一個 `apiVersion`。
@@ -178,7 +199,7 @@ paper/
 - 使用了非公開變數，除非它是選項 id，或者主題自己用 `var()` 讀取它；
 - 在 `.theme-light` 和 `.theme-dark` 以外的地方設定變數而沒有後代選擇器，主題選擇器就讀不出主題的顏色；
 - 在字型棧裡寫了通用字型族（`sans-serif`、`serif` …）或 `ui-*` 關鍵字，這會蓋掉使用者選的中文字型；
-- 任一模式下沒達到 WCAG AA 對比度：`--foreground` 和 `--muted-foreground` 在每個表面上需要 4.5:1，`--brand` 在閱讀表面上需要 4.5:1，主按鈕文字在按鈕上需要 4.5:1，`--faint-foreground` 需要 3:1。提示框文字在 `--tooltip` 上需要 4.5:1，按下狀態的顯示設定標籤，文字在其底色上需要 4.5:1。提示框始終使用深色模式的文字顏色，要修改請設定 `--tooltip-foreground`；按下的標籤預設用 `--input` 作底色，可以用 `--display-chip-pressed-background` 單獨設定。
+- 任一模式下沒達到 WCAG AA 對比度：`--foreground` 和 `--muted-foreground` 在每個表面上需要 4.5:1，`--brand` 在閱讀表面上需要 4.5:1，主按鈕文字在按鈕上需要 4.5:1，`--faint-foreground` 需要 3:1。提示框文字在 `--tooltip` 上需要 4.5:1，按下狀態的顯示設定標籤，文字在其底色上需要 4.5:1。提示框始終使用深色模式的文字顏色，要修改請設定 `--tooltip-foreground`；按下的標籤預設用 `--input` 作底色，可以用 `--display-chip-pressed-background` 單獨設定。 使用背景時，框架和頁面依覆蓋在 `--backdrop-color` 上的玻璃來計算。
 
 ## 檢查與預覽
 
@@ -195,6 +216,14 @@ pnpm theme:preview path/to/paper --out preview   # preview/light.png 和 preview
 `theme:preview` 渲染主題商店展示的截圖：任務列表旁邊開啟一個任務，用應用自己的樣式搭建，主題選項取預設值。
 
 開發過程中如果主題隱藏或弄亂了介面，在地址後加 `?theme=default` 開啟應用，或者載入後立刻按住 **Shift**；見[主題出問題時](/themes#主題出問題時)。
+
+檢查器也可以不安裝儲存庫，用稀疏複製和 Node 22.18 或更新版本直接執行。AI 代理內建的 Multica skill 裡也是這些指令：
+
+```bash
+git clone --depth 1 --filter=blob:none --sparse https://github.com/multica-ai/multica.git multica-themes
+git -C multica-themes sparse-checkout set docs scripts packages/core packages/ui
+node multica-themes/scripts/theme-check.mjs path/to/paper
+```
 
 ## 釋出到主題商店
 
