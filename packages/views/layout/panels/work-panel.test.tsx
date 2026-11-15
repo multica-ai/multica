@@ -323,6 +323,39 @@ describe("WorkPanel Inbox highlight", () => {
     );
     expect(inInbox()).toBeNull();
   });
+
+  it("lights an issue opened from a row's hover card in the Inbox", async () => {
+    renderPanel("/acme/my-issues", [], [], [], [inboxItem(ISSUE)]);
+    await within(await waitFor(inMyIssues)).findByRole("link", { name: ISSUE.title });
+    fireEvent.mouseEnter(within(inInbox()).getByRole("link", { name: INBOX_ROW_NAME }).parentElement!);
+    fireEvent.click(await screen.findByRole("link", { name: "Open" }, { timeout: 2000 }));
+
+    expect(within(inInbox()).getByRole("link", { name: INBOX_ROW_NAME })).toHaveAttribute("aria-current", "page");
+    expect(within(inMyIssues()).getByRole("link", { name: ISSUE.title })).not.toHaveAttribute("aria-current");
+  });
+
+  it("keeps the open row lit while newer notifications push it past the limit", async () => {
+    const others = Array.from({ length: 5 }, (_, i) => ({
+      ...OTHER,
+      id: `00000000-0000-4000-8000-00000000000${i}`,
+      title: `Other ${i}`,
+    }));
+    const notified = (issue: Issue, minute: number) => ({
+      ...inboxItem(issue),
+      created_at: `2026-11-10T08:0${minute}:00Z`,
+    });
+    const older = [notified(ISSUE, 0), ...others.slice(0, 4).map((issue, i) => notified(issue, i + 1))];
+    const qc = renderPanel("/acme/my-issues", [], [], [], older);
+    await within(await waitFor(inMyIssues)).findByRole("link", { name: ISSUE.title });
+    fireEvent.click(within(inInbox()).getByRole("link", { name: INBOX_ROW_NAME }));
+    act(() => {
+      qc.setQueryData(inboxListOptions("ws-1").queryKey, [...older, notified(others[4]!, 6)]);
+    });
+
+    await within(inInbox()).findByRole("link", { name: /^Other 4/ });
+    expect(within(inInbox()).getByRole("link", { name: INBOX_ROW_NAME })).toHaveAttribute("aria-current", "page");
+    expect(within(inMyIssues()).getByRole("link", { name: ISSUE.title })).not.toHaveAttribute("aria-current");
+  });
 });
 
 describe("WorkPanel issue highlight", () => {

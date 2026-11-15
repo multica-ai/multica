@@ -88,7 +88,13 @@ export function useInboxSectionRows(wsId: string | undefined, openKey: string | 
   const collapsed = useSidebarTreeStore((s) => s.inboxCollapsed);
   const [expandedWsId, setExpandedWsId] = useState<string | null>(null);
   const expanded = expandedWsId === (wsId ?? null);
-  const displayed = useMemo(() => (expanded ? rows : rows.slice(0, limit)), [expanded, rows, limit]);
+  // Newer notifications must not push the open row past the limit: the row
+  // would leave, and the open issue's highlight with it.
+  const displayed = useMemo(() => {
+    if (expanded) return rows;
+    const open = openKey ? rows.findIndex((item) => (item.issue_id ?? item.id) === openKey) : -1;
+    return open >= limit ? [...rows.slice(0, limit - 1), rows[open]!] : rows.slice(0, limit);
+  }, [expanded, rows, limit, openKey]);
   // A collapsed section shows no rows, so it lights none.
   const shownIssueIds = useMemo(
     () => new Set(collapsed ? [] : displayed.flatMap((item) => (item.issue_id ? [item.issue_id] : []))),
