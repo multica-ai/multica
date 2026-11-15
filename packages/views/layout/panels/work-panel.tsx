@@ -13,7 +13,8 @@ import { useSidebarKeptStore } from "@multica/core/issues/stores/sidebar-kept-st
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
 import { projectListOptions } from "@multica/core/projects/queries";
 import type { Project } from "@multica/core/types";
-import { useNavigation } from "../../navigation";
+import { resolveClickIntent, useHeldUntilArrival, useNavigation } from "../../navigation";
+import { useSidebarInboxIssue } from "../../inbox/components/use-sidebar-inbox-issue";
 import { IssueContextMenuProvider } from "../../issues/actions";
 import { useIssueViewActions } from "../../issue-views/use-view-actions";
 import { useT } from "../../i18n";
@@ -33,13 +34,6 @@ const PINS_LIST = "pins";
 interface ClickedIssue {
   segment: string;
   list: string | null;
-}
-
-/** The highlight records the open issue had before a click or the issue header moved on. */
-interface SettledIssue {
-  issueId: string | null;
-  clickedIssue: ClickedIssue | null;
-  inboxIssueId: string | null;
 }
 
 /**
@@ -80,7 +74,7 @@ export function KeptRowsRelease() {
 export function WorkPanel() {
   const { t } = useT("layout");
   const p = useWorkspacePaths();
-  const { pathname, searchParams } = useNavigation();
+  const { pathname, searchParams, openInNewTab } = useNavigation();
   const wsId = useCurrentWorkspace()?.id;
   const userId = useAuthStore((s) => s.user?.id);
   const viewActions = useIssueViewActions();
@@ -107,33 +101,21 @@ export function WorkPanel() {
   const [liveClickedIssue, setClickedIssue] = useState<ClickedIssue | null>(null);
   const isOpenIssue = (segment: string) =>
     !!currentIssueId && (segment === currentIssueId || segment === currentIssue?.identifier);
+  // Until the route reaches the issue a click names, the open issue keeps the
+  // records it had, or its highlight would fall through to another list, or
+  // All issues, for the length of the load.
+  const clicked = useHeldUntilArrival(
+    currentIssueId,
+    liveClickedIssue,
+    !!liveClickedIssue && !isOpenIssue(liveClickedIssue.segment),
+  );
   // An issue opened from the Inbox, by a row or by the issue header moving on
   // to the next notification, lights there while the section still shows it;
   // once archived, it falls back to the other lists.
-  const liveInboxIssueId = useInboxSelectionStore((s) => (wsId ? (s.sidebarIssueByWorkspace[wsId] ?? null) : null));
-  // A click, or the issue header moving on, names the next issue before the
-  // route reaches it, which on web waits for the next page to load. Until
-  // then the open issue keeps the record it had, or its highlight would fall
-  // through to another list, or All issues, for the length of the load.
-  const [settled, setSettled] = useState<SettledIssue>({
-    issueId: currentIssueId,
-    clickedIssue: liveClickedIssue,
-    inboxIssueId: liveInboxIssueId,
-  });
-  const movingOn =
-    settled.issueId === currentIssueId &&
-    ((liveClickedIssue !== settled.clickedIssue && !!liveClickedIssue && !isOpenIssue(liveClickedIssue.segment)) ||
-      (liveInboxIssueId !== settled.inboxIssueId && !!liveInboxIssueId && liveInboxIssueId !== currentIssueId));
-  if (
-    !movingOn &&
-    (settled.issueId !== currentIssueId ||
-      settled.clickedIssue !== liveClickedIssue ||
-      settled.inboxIssueId !== liveInboxIssueId)
-  ) {
-    setSettled({ issueId: currentIssueId, clickedIssue: liveClickedIssue, inboxIssueId: liveInboxIssueId });
-  }
-  const clickedIssue = movingOn ? settled.clickedIssue : liveClickedIssue;
-  const inboxIssueId = movingOn ? settled.inboxIssueId : liveInboxIssueId;
+  const inbox = useSidebarInboxIssue(wsId, currentIssueId, clicked.movingOn);
+  const movingOn = clicked.movingOn || inbox.movingOn;
+  const clickedIssue = clicked.value;
+  const inboxIssueId = inbox.value;
   const clickedList = clickedIssue && isOpenIssue(clickedIssue.segment) ? clickedIssue.list : undefined;
   // The notification open beside the section: an issue opened from it, or an
   // issue-less one on the Inbox page.
@@ -156,6 +138,9 @@ export function WorkPanel() {
   const rememberClickedIssue = (event: React.MouseEvent) => {
     const link = (event.target as HTMLElement).closest("a[href]");
     if (!link) return;
+    // A click that opens a tab or window, as AppLink resolves it, leaves this
+    // page and its records where they are.
+    if (resolveClickIntent(event) !== "push" || (event.shiftKey && !openInNewTab)) return;
     requestLocate(null);
     const path = new URL(link.getAttribute("href") ?? "", window.location.href).pathname;
     const segment = routeSegment(path, p.issues());

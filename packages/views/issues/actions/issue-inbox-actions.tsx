@@ -19,6 +19,7 @@ import { isImeComposing } from "@multica/core/utils";
 import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { inboxRowHref } from "../../inbox/components/inbox-display";
 import { useFilteredInboxRows } from "../../inbox/components/use-filtered-inbox-rows";
+import { useSidebarInboxIssue } from "../../inbox/components/use-sidebar-inbox-issue";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 
@@ -43,7 +44,7 @@ export function IssueInboxActions({
   const wsId = useWorkspaceId();
   const p = useWorkspacePaths();
   const { push } = useNavigation();
-  const fromInbox = useInboxSelectionStore((s) => s.sidebarIssueByWorkspace[wsId] === issueId);
+  const fromInbox = useSidebarInboxIssue(wsId, issueId).value === issueId;
   const rememberSidebarIssue = useInboxSelectionStore((s) => s.rememberSidebarIssue);
   const { rows } = useFilteredInboxRows(wsId, issueId, fromInbox);
   const index = fromInbox ? rows.findIndex((row) => row.issue_id === issueId) : -1;

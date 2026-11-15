@@ -409,6 +409,22 @@ describe("WorkPanel Inbox highlight while the next page loads", () => {
     expect(inboxRow(ISSUE)).not.toHaveAttribute("aria-current");
   });
 
+  it.each([{ metaKey: true }, { ctrlKey: true }, { metaKey: true, shiftKey: true }])(
+    "keeps the open issue's records when another notification opens in a new tab (%o)",
+    async (modifiers) => {
+      await openFromInbox([]);
+      fireEvent.click(inboxRow(OTHER), modifiers);
+
+      expect(inboxRow(ISSUE)).toHaveAttribute("aria-current", "page");
+      expect(useInboxSelectionStore.getState().sidebarIssueByWorkspace["ws-1"]).toBe(ISSUE.id);
+
+      // Nothing was left pending for a later page to settle.
+      fireEvent.click(screen.getByRole("button", { name: "Leave Work" }));
+      fireEvent.click(screen.getByRole("button", { name: "Return to issue" }));
+      expect(inboxRow(ISSUE)).toHaveAttribute("aria-current", "page");
+    },
+  );
+
   it("lights nothing else while the issue header moves on from an archived notification", async () => {
     const qc = await openFromInbox([]);
     act(() => {
