@@ -69,6 +69,7 @@ import {
   DropdownMenuItem,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { Popover, PopoverTrigger, PopoverContent } from "@multica/ui/components/ui/popover";
+import { KeyUpdatesSubscriptionBadge } from "./key-updates-subscription-badge";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@multica/ui/components/ui/command";
 import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar";
@@ -2416,7 +2417,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const {
     subscribers, isSubscribed, subscriptionReason, subscriptionKnown,
     togglePending, subtreePending,
-    toggleSubscribe: handleToggleSubscribe, toggleSubscriber,
+    toggleSubscribe: handleToggleSubscribe, toggleSubscriber, followAllActivity,
     unsubscribeFromSubtree: handleUnsubscribeSubtree,
   } = useIssueSubscribers(id, user?.id);
 
@@ -4085,6 +4086,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       {t(($) => $.detail.delegated_subscription_hint)}
                     </TooltipContent>
                   </Tooltip>
+                )}
+                {isSubscribed && (
+                  <KeyUpdatesSubscriptionBadge
+                    issue={issue}
+                    userId={user?.id}
+                    reason={subscriptionReason}
+                    pending={togglePending}
+                    onFollowAll={followAllActivity}
+                  />
                 )}
                 {/* Inherited from the project: say so, and that leaving
                     here only covers this issue, so Unsubscribe is not read as

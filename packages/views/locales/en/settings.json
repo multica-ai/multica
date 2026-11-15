@@ -839,6 +839,12 @@
       "projects": "Projects you subscribe to",
       "agents": "Agents"
     },
+    "others_issues": {
+      "label": "Other people's issues",
+      "description": "Issues assigned to someone else or their agent, that you only follow because you created, commented on or were mentioned in them. Key updates are @mentions, replies in threads you joined, and statuses that need a person, like in review, blocked or done.",
+      "key_updates": "Key updates only",
+      "all": "All activity"
+    },
     "leaving": {
       "title": "Leaving the Inbox",
       "description": "Reading a notification doesn't take it out of the Inbox.",

@@ -180,6 +180,25 @@ export function useIssueSubscribers(issueId: string, userId?: string) {
     if (userId) toggleSubscriber(userId, "member", isSubscribed);
   }, [userId, isSubscribed, toggleSubscriber]);
 
+  // An explicit subscribe while already subscribed: the server rewrites the
+  // reason to manual, which delivers every event on someone else's issue.
+  const followAllActivity = useCallback(() => {
+    if (!userId || toggleInFlight.current) return;
+    toggleInFlight.current = true;
+    toggleMutation.mutate(
+      { userId, userType: "member", subscribed: false },
+      {
+        onSuccess: () =>
+          toast.success(t(($) => $.detail.key_updates_follow_all_done)),
+        onError: () =>
+          toast.error(t(($) => $.detail.subscription_update_failed)),
+        onSettled: () => {
+          toggleInFlight.current = false;
+        },
+      },
+    );
+  }, [userId, toggleMutation, t]);
+
   // Subscription state is server-owned and the row simply does not change on
   // failure, so nothing on screen moves. Without an explicit message the user
   // reads a failed unsubscribe as a no-op button and tries again forever.
@@ -217,6 +236,7 @@ export function useIssueSubscribers(issueId: string, userId?: string) {
     subtreePending: subtreeMutation.isPending,
     toggleSubscribe,
     toggleSubscriber,
+    followAllActivity,
     unsubscribeFromSubtree,
   };
 }
