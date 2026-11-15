@@ -34,6 +34,11 @@ type claudeSupplementSession struct {
 	ended       bool
 	pending     []*claudeSupplementInput
 	initialized chan error
+
+	// The CLI's side of the hooks, which outlives ended: once registered,
+	// Claude asks for a reply on every later turn for as long as it runs.
+	hooksRegistered  bool
+	mainLoopHookSeen bool
 }
 
 type claudeSupplementInput struct {
@@ -83,11 +88,27 @@ func (s *claudeSupplementSession) handleResponse(raw json.RawMessage) {
 	var err error
 	if response.Subtype != "success" {
 		err = fmt.Errorf("claude supplement initialization rejected: %s", response.Error)
+	} else {
+		s.mu.Lock()
+		s.hooksRegistered = true
+		s.mu.Unlock()
 	}
 	select {
 	case s.initialized <- err:
 	default:
 	}
+}
+
+// hooksAwaitLaterTurn reports whether Claude will run another turn in this
+// process whose hooks need a reply. A result is not always Claude's last:
+// Claude stays alive while a background task runs and opens a turn when it
+// ends, and on --resume it answers an orphaned task notification with an empty
+// result before it reads the prompt. Hook replies travel over stdin, and Claude
+// cancels every tool call of a turn whose hooks cannot be answered.
+func (s *claudeSupplementSession) hooksAwaitLaterTurn(backgroundTasks int) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.hooksRegistered && (backgroundTasks > 0 || !s.mainLoopHookSeen)
 }
 
 func (s *claudeSupplementSession) ready() bool {
@@ -183,8 +204,12 @@ func (s *claudeSupplementSession) prepareHook(msg claudeSDKMessage) (func(io.Wri
 	// Hook registrations are inherited by subagents. Only the main loop may
 	// consume instructions addressed to this Multica task.
 	owned := slices.Contains(claudeSupplementEvents, req.Input.Event) && req.CallbackID == "multica-supplement-"+req.Input.Event
+	mainLoop := owned && req.Input.AgentID == "" && msg.ParentToolUseID == ""
+	if mainLoop {
+		s.mainLoopHookSeen = true
+	}
 	var delivered []*claudeSupplementInput
-	if owned && req.Input.AgentID == "" && msg.ParentToolUseID == "" && !s.ended && s.ctx.Err() == nil {
+	if mainLoop && !s.ended && s.ctx.Err() == nil {
 		s.started = true
 		var texts []string
 		for _, input := range s.pending {
