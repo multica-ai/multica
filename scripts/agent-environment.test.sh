@@ -129,6 +129,29 @@ wait "$second" || fail "stop desktop failed"
 [ "$(count "down web")" = 1 ] && [ "$(count "down desktop")" = 1 ] || fail "concurrent stops did not stop both components"
 [ "$(count destroy)" = 1 ] || fail "concurrent stops destroyed $(count destroy) times, want once"
 
+# ...even where mkdir is not exclusive. uutils mkdir (Ubuntu 26.04) can tell
+# two simultaneous callers that each created the same directory; this one
+# tells every caller so.
+new_repo concurrent-mkdir
+touch "$repo/registered"
+live_claim web
+live_claim desktop
+mkdir -p "$repo/bin"
+cat > "$repo/bin/mkdir" <<'EOF'
+#!/usr/bin/env bash
+args=()
+for arg in "$@"; do [ "$arg" = -p ] || args+=("$arg"); done
+exec "$REAL_MKDIR" -p "${args[@]}"
+EOF
+chmod +x "$repo/bin/mkdir"
+PATH="$repo/bin:$PATH" REAL_MKDIR="$(command -v mkdir)" bash "$repo/scripts/agent-environment.sh" stop web > /dev/null &
+first=$!
+PATH="$repo/bin:$PATH" REAL_MKDIR="$(command -v mkdir)" bash "$repo/scripts/agent-environment.sh" stop desktop > /dev/null &
+second=$!
+wait "$first" || fail "stop web failed with a non-exclusive mkdir"
+wait "$second" || fail "stop desktop failed with a non-exclusive mkdir"
+[ "$(count destroy)" = 1 ] || fail "with a non-exclusive mkdir, concurrent stops destroyed $(count destroy) times, want once"
+
 # 4. The daemon signals start after running stop. start's own cleanup then
 #    finds nothing left to do.
 new_repo signalled
@@ -199,20 +222,27 @@ new_repo stale-lock
 touch "$repo/registered"
 live_claim web
 live_claim desktop
-mkdir -p "$repo/.multica/agent-environments/lock.d" "$repo/bin"
-printf '%s\n' "$dead" > "$repo/.multica/agent-environments/lock.d/pid"
-cp "$repo/.multica/agent-environments/lock.d/pid" "$repo/stale-pid"
+mkdir -p "$repo/bin"
+printf '%s\n' "$dead" > "$repo/.multica/agent-environments/lock"
+cp "$repo/.multica/agent-environments/lock" "$repo/stale-pid"
 real_cat="$(command -v cat)"
 real_rm="$(command -v rm)"
 cat > "$repo/bin/cat" <<'EOF'
 #!/usr/bin/env bash
 set -eu
-if [ "$1" = "$RACE_REPO/.multica/agent-environments/lock.d/pid" ] && [ ! -f "$RACE_REPO/$RACE_COMPONENT.observed" ]; then
+if [ "$1" = "$RACE_REPO/.multica/agent-environments/lock" ] && [ ! -f "$RACE_REPO/$RACE_COMPONENT.observed" ]; then
   touch "$RACE_REPO/$RACE_COMPONENT.observed"
   for i in $(seq 1 300); do
     [ ! -f "$RACE_REPO/web.observed" ] || [ ! -f "$RACE_REPO/desktop.observed" ] || break
     sleep 0.01
   done
+  if [ "$RACE_COMPONENT" = desktop ]; then
+    for i in $(seq 1 300); do
+      [ ! -f "$RACE_REPO/web.down" ] || break
+      sleep 0.01
+    done
+    [ -f "$RACE_REPO/web.down" ] || { echo 'first stop never acquired its lock' >&2; exit 1; }
+  fi
   exec "$REAL_CAT" "$RACE_REPO/stale-pid"
 fi
 exec "$REAL_CAT" "$@"
@@ -220,21 +250,13 @@ EOF
 cat > "$repo/bin/rm" <<'EOF'
 #!/usr/bin/env bash
 set -eu
-if [ "$RACE_COMPONENT" = desktop ] && [ ! -f "$RACE_REPO/desktop.reaping" ]; then
-  case "$*" in
-    *agent-environments/lock.d*)
-      touch "$RACE_REPO/desktop.reaping"
-      for i in $(seq 1 300); do
-        [ ! -f "$RACE_REPO/web.down" ] || break
-        sleep 0.01
-      done
-      [ -f "$RACE_REPO/web.down" ] || { echo 'first stop never acquired its lock' >&2; exit 1; }
-      result=0
-      "$REAL_RM" "$@" || result=$?
-      touch "$RACE_REPO/desktop.reaped"
-      exit "$result" ;;
-  esac
-fi
+case "$RACE_COMPONENT:$*" in
+  desktop:*agent-environments/reap-*)
+    result=0
+    "$REAL_RM" "$@" || result=$?
+    touch "$RACE_REPO/desktop.reaped"
+    exit "$result" ;;
+esac
 exec "$REAL_RM" "$@"
 EOF
 chmod +x "$repo/bin/cat" "$repo/bin/rm"
@@ -265,12 +287,13 @@ wait "$first" || fail "first stale-lock stop failed"
 wait "$second" || fail "second stale-lock stop failed"
 [ "$(count destroy)" = 1 ] || fail "stale lock observations destroyed $(count destroy) times, want once"
 
-# The PID-specific format can also be reclaimed after a killed holder.
-new_repo stale-owner
+# A lock left by a killed holder is taken over, and its reap leaves nothing behind.
+new_repo stale-holder
 touch "$repo/registered"
-mkdir -p "$repo/.multica/agent-environments/lock.d"
-touch "$repo/.multica/agent-environments/lock.d/owner-$dead"
+mkdir -p "$repo/.multica/agent-environments"
+printf '%s\n' "$dead" > "$repo/.multica/agent-environments/lock"
 bash "$repo/scripts/agent-environment.sh" stop web > /dev/null
-[ "$(count destroy)" = 1 ] || fail "a dead PID-specific lock prevented cleanup"
+[ "$(count destroy)" = 1 ] || fail "a dead holder's lock prevented cleanup"
+[ -z "$(ls "$repo/.multica/agent-environments")" ] || fail "the lock or its reap claim outlived the stop"
 
 echo "✓ agent-environment.sh lifecycle verified"
