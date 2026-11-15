@@ -222,27 +222,20 @@ new_repo stale-lock
 touch "$repo/registered"
 live_claim web
 live_claim desktop
-mkdir -p "$repo/bin"
-printf '%s\n' "$dead" > "$repo/.multica/agent-environments/lock"
-cp "$repo/.multica/agent-environments/lock" "$repo/stale-pid"
+mkdir -p "$repo/.multica/agent-environments/lock.d" "$repo/bin"
+printf '%s\n' "$dead" > "$repo/.multica/agent-environments/lock.d/pid"
+cp "$repo/.multica/agent-environments/lock.d/pid" "$repo/stale-pid"
 real_cat="$(command -v cat)"
 real_rm="$(command -v rm)"
 cat > "$repo/bin/cat" <<'EOF'
 #!/usr/bin/env bash
 set -eu
-if [ "$1" = "$RACE_REPO/.multica/agent-environments/lock" ] && [ ! -f "$RACE_REPO/$RACE_COMPONENT.observed" ]; then
+if [ "$1" = "$RACE_REPO/.multica/agent-environments/lock.d/pid" ] && [ ! -f "$RACE_REPO/$RACE_COMPONENT.observed" ]; then
   touch "$RACE_REPO/$RACE_COMPONENT.observed"
   for i in $(seq 1 300); do
     [ ! -f "$RACE_REPO/web.observed" ] || [ ! -f "$RACE_REPO/desktop.observed" ] || break
     sleep 0.01
   done
-  if [ "$RACE_COMPONENT" = desktop ]; then
-    for i in $(seq 1 300); do
-      [ ! -f "$RACE_REPO/web.down" ] || break
-      sleep 0.01
-    done
-    [ -f "$RACE_REPO/web.down" ] || { echo 'first stop never acquired its lock' >&2; exit 1; }
-  fi
   exec "$REAL_CAT" "$RACE_REPO/stale-pid"
 fi
 exec "$REAL_CAT" "$@"
@@ -250,13 +243,21 @@ EOF
 cat > "$repo/bin/rm" <<'EOF'
 #!/usr/bin/env bash
 set -eu
-case "$RACE_COMPONENT:$*" in
-  desktop:*agent-environments/reap-*)
-    result=0
-    "$REAL_RM" "$@" || result=$?
-    touch "$RACE_REPO/desktop.reaped"
-    exit "$result" ;;
-esac
+if [ "$RACE_COMPONENT" = desktop ] && [ ! -f "$RACE_REPO/desktop.reaping" ]; then
+  case "$*" in
+    *agent-environments/lock.d*)
+      touch "$RACE_REPO/desktop.reaping"
+      for i in $(seq 1 300); do
+        [ ! -f "$RACE_REPO/web.down" ] || break
+        sleep 0.01
+      done
+      [ -f "$RACE_REPO/web.down" ] || { echo 'first stop never acquired its lock' >&2; exit 1; }
+      result=0
+      "$REAL_RM" "$@" || result=$?
+      touch "$RACE_REPO/desktop.reaped"
+      exit "$result" ;;
+  esac
+fi
 exec "$REAL_RM" "$@"
 EOF
 chmod +x "$repo/bin/cat" "$repo/bin/rm"
@@ -287,13 +288,39 @@ wait "$first" || fail "first stale-lock stop failed"
 wait "$second" || fail "second stale-lock stop failed"
 [ "$(count destroy)" = 1 ] || fail "stale lock observations destroyed $(count destroy) times, want once"
 
-# A lock left by a killed holder is taken over, and its reap leaves nothing behind.
-new_repo stale-holder
+# The PID-specific format can also be reclaimed after a killed holder.
+new_repo stale-owner
 touch "$repo/registered"
-mkdir -p "$repo/.multica/agent-environments"
-printf '%s\n' "$dead" > "$repo/.multica/agent-environments/lock"
+mkdir -p "$repo/.multica/agent-environments/lock.d"
+touch "$repo/.multica/agent-environments/lock.d/owner-$dead"
 bash "$repo/scripts/agent-environment.sh" stop web > /dev/null
-[ "$(count destroy)" = 1 ] || fail "a dead holder's lock prevented cleanup"
-[ -z "$(ls "$repo/.multica/agent-environments")" ] || fail "the lock or its reap claim outlived the stop"
+[ "$(count destroy)" = 1 ] || fail "a dead PID-specific lock prevented cleanup"
+
+# 10. A `start` from before the checkout was updated keeps running the script
+# it loaded, and its cleanup locks the way that version did: lock.d with only
+# its owner marker. A stop from the updated script waits for it.
+new_repo mixed-version
+touch "$repo/registered"
+lock_dir="$repo/.multica/agent-environments/lock.d"
+mkdir -p "$lock_dir"
+sleep 300 &
+old_holder=$!
+pids+=("$old_holder")
+touch "$lock_dir/owner-$old_holder"
+mv "$repo/scripts/dev-env.sh" "$repo/scripts/dev-env.original"
+cat > "$repo/scripts/dev-env.sh" <<'EOF'
+#!/usr/bin/env bash
+set -eu
+[ ! -e "$RACE_LOCK/owner-$RACE_HOLDER" ] || touch "$RACE_LOCK/../entered-while-held"
+exec bash "$(dirname "$0")/dev-env.original" "$@"
+EOF
+RACE_LOCK="$lock_dir" RACE_HOLDER="$old_holder" bash "$repo/scripts/agent-environment.sh" stop desktop > /dev/null &
+stopping=$!
+sleep 1
+[ ! -e "$repo/.multica/agent-environments/entered-while-held" ] || fail "a stop entered beside an earlier version's lock holder"
+rm "$lock_dir/owner-$old_holder" && rmdir "$lock_dir"
+stop_job "$old_holder"
+wait "$stopping" || fail "stop behind an earlier version's lock failed"
+[ "$(count "down desktop")" = 1 ] && [ "$(count destroy)" = 1 ] || fail "stop did not clean up once the earlier version released its lock"
 
 echo "✓ agent-environment.sh lifecycle verified"

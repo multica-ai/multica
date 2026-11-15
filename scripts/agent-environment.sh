@@ -35,7 +35,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEV_ENV="$REPO_ROOT/scripts/dev-env.sh"
 STATE_DIR="$REPO_ROOT/.multica/agent-environments"
-LOCK_FILE="$STATE_DIR/lock"
+LOCK_DIR="$STATE_DIR/lock.d"
 BORROWED="$STATE_DIR/borrowed"
 
 # One hour longer than the ttl in environments.toml: the daemon's stop runs
@@ -55,42 +55,46 @@ other_component() {
   esac
 }
 
-# A file holding the holder's pid, created with noclobber: bash opens it with
-# O_EXCL itself, so exactly one creator wins. flock is not on a stock macOS,
-# and mkdir is no lock either: uutils coreutils (Ubuntu 26.04) can report two
-# simultaneous mkdirs of one directory as both having created it.
-# A lock whose holder is gone is taken over, so a killed stop cannot wedge the next.
-acquire_lock() {
-  local holder waited=0
-  mkdir -p "$STATE_DIR"
-  while ! (set -C; printf '%s\n' "$$" > "$LOCK_FILE") 2>/dev/null; do
-    holder="$(cat "$LOCK_FILE" 2>/dev/null || true)"
-    if [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; then
-      reap_lock "$holder"
-    fi
-    waited=$((waited + 1))
-    [ "$waited" -lt 3000 ] || {
-      echo "Timed out waiting for $LOCK_FILE. If nothing else is running, remove it." >&2
-      exit 1
-    }
-    sleep 0.1
-  done
+# An atomic mkdir, as in dev-env.sh: flock is not on a stock macOS. A lock
+# whose holder is gone is taken over, so a killed stop cannot wedge the next.
+# mkdir's exit status alone does not decide the holder: uutils mkdir (Ubuntu
+# 26.04) can tell two simultaneous callers that each created the directory.
+# The holder is whoever then creates `held` in it, which bash's noclobber does
+# with O_EXCL. The directory stays the lock, so a stop and a `start` still
+# running an earlier version of this script keep excluding each other.
+try_lock() {
+  mkdir "$LOCK_DIR" 2>/dev/null && (set -C; : > "$LOCK_DIR/held") 2>/dev/null
 }
 
-# Several waiters can see the same dead holder. Its claim file is created as
-# exclusively as the lock, so one of them at a time reaps, and only a lock
-# that still names the dead holder is removed: one taken since is left alone.
-reap_lock() {
-  local dead="$1" claim="$STATE_DIR/reap-$1"
-  (set -C; : > "$claim") 2>/dev/null || return 0
-  if [ "$(cat "$LOCK_FILE" 2>/dev/null || true)" = "$dead" ] && ! kill -0 "$dead" 2>/dev/null; then
-    rm -f "$LOCK_FILE"
-  fi
-  rm -f "$claim"
+acquire_lock() {
+  local holder marker waited=0
+  mkdir -p "$STATE_DIR"
+  while ! try_lock; do
+    # Removing a PID-specific marker is the reaper's atomic claim. Only
+    # its winner may rmdir the old lock; another stale observer cannot
+    # remove a new holder's marker (or its directory).
+    for marker in "$LOCK_DIR"/owner-* "$LOCK_DIR/pid"; do
+      [ -f "$marker" ] || continue
+      case "$marker" in
+        */pid) holder="$(cat "$marker" 2>/dev/null || true)" ;;
+        *) holder="${marker##*/owner-}" ;;
+      esac
+      if [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null && rm "$marker" 2>/dev/null; then
+        rm -f "$LOCK_DIR/held"
+        rmdir "$LOCK_DIR" 2>/dev/null || true
+      fi
+    done
+    waited=$((waited + 1))
+    [ "$waited" -lt 3000 ] || { echo "Timed out waiting for $LOCK_DIR." >&2; exit 1; }
+    sleep 0.1
+  done
+  : > "$LOCK_DIR/owner-$$"
 }
 
 release_lock() {
-  rm "$LOCK_FILE"
+  rm "$LOCK_DIR/owner-$$" "$LOCK_DIR/held"
+  # Once held is gone the next holder may already have taken this directory.
+  rmdir "$LOCK_DIR" 2>/dev/null || true
 }
 
 claim_file() { printf '%s/%s.claim' "$STATE_DIR" "$1"; }
