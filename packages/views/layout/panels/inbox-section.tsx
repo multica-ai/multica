@@ -104,8 +104,8 @@ export function InboxSection({
       action={
         <>
           {showCount && <PanelCount value={unread} className="px-1 font-medium text-brand" />}
-          <InboxSectionActions className={SECTION_SETTINGS_REVEAL_CLASS} />
           <InboxSectionSettings className={SECTION_SETTINGS_REVEAL_CLASS} />
+          <InboxSectionActions className={SECTION_SETTINGS_REVEAL_CLASS} />
         </>
       }
     >
