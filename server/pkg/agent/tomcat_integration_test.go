@@ -91,6 +91,15 @@ func TestTomcatSharedServeWithHermesClient(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	writeTaskContext := func(work string) {
+		t.Helper()
+		write(filepath.Join(work, "AGENTS.md"), "fixture-project-instruction\n")
+		skillDir := filepath.Join(work, ".agents", "skills", "fixture-skill")
+		if err := os.MkdirAll(skillDir, 0700); err != nil {
+			t.Fatal(err)
+		}
+		write(filepath.Join(skillDir, "SKILL.md"), "---\nname: fixture-skill\ndescription: fixture-injected-skill-description\n---\nDisposable skill body.\n")
+	}
 	var requestCount atomic.Int64
 	catalogRequestModels := make(chan string, 8)
 	catalogRequestEfforts := make(chan any, 8)
@@ -228,12 +237,7 @@ func TestTomcatSharedServeWithHermesClient(t *testing.T) {
 	write(filepath.Join(home, ".tomcat", "mcp.json"), `{"mcpServers":{}}`)
 	write(filepath.Join(home, ".tomcat", "tomcat.config.toml"), fmt.Sprintf("[llm.thinking]\nlevel = \"medium\"\n[llm]\ndefault_model = \"mock\"\ntitle_model = \"mock\"\n[context]\ncompaction_model = \"mock\"\n[skills]\nenabled = true\n[workspace]\nworkspace_roots = [%s]\n", strconv.Quote(workspace)))
 	write(filepath.Join(home, ".tomcat", "models.toml"), fmt.Sprintf("[[models]]\nid = \"mock\"\napi = \"openai\"\nprovider = \"openai\"\nbase_url = %s\ncapabilities = { tools = true, vision = false, files = false, reasoning = false, web_search = false }\n\n[[models]]\nid = \"catalog-alias\"\nmodel_name = \"alias-wire\"\napi = \"openai\"\nprovider = \"openai\"\nbase_url = %s\nsupported_reasoning_levels = [\"low\", \"medium\", \"high\"]\ncapabilities = { tools = true, vision = false, files = false, reasoning = true, web_search = false }\n", strconv.Quote(server.URL), strconv.Quote(server.URL)))
-	write(filepath.Join(workspace, "AGENTS.md"), "fixture-project-instruction\n")
-	skillDir := filepath.Join(workspace, ".agents", "skills", "fixture-skill")
-	if err := os.MkdirAll(skillDir, 0700); err != nil {
-		t.Fatal(err)
-	}
-	write(filepath.Join(skillDir, "SKILL.md"), "---\nname: fixture-skill\ndescription: fixture-injected-skill-description\n---\nDisposable skill body.\n")
+	writeTaskContext(workspace)
 	run("model", "key", "set", "openai", "local-fixture-key")
 	t.Cleanup(func() {
 		stopCtx, stop := context.WithTimeout(context.Background(), 20*time.Second)
@@ -675,7 +679,7 @@ func TestTomcatSharedServeWithHermesClient(t *testing.T) {
 		if err := os.MkdirAll(work, 0700); err != nil {
 			t.Fatal(err)
 		}
-		write(filepath.Join(work, "AGENTS.md"), "fixture-project-instruction\n")
+		writeTaskContext(work)
 		environment := tomcatHostEnv(env)
 		backend, err := New("tomcat", Config{ExecutablePath: binary, Env: environment, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
 		if err != nil {
