@@ -58,7 +58,7 @@ export function IssueInboxActions({
   const { rows } = useFilteredInboxRows(wsId, issueId, fromInbox);
   const index = fromInbox ? rows.findIndex((row) => row.issue_id === issueId) : -1;
   const item = index >= 0 ? rows[index]! : null;
-  const archive = useArchiveInbox();
+  const { mutateAsync: archiveAsync } = useArchiveInbox();
   const { snooze, unsnooze } = useInboxSnooze();
   const { data: snoozedList } = useQuery(snoozedInboxOptions(wsId));
   const snoozed = item ? undefined : findSnoozedInboxIssue(snoozedList, issueId);
@@ -74,13 +74,15 @@ export function IssueInboxActions({
     push(inboxRowHref(p, next));
   };
 
+  // Toasts follow the request's promise: the next issue's page can replace
+  // this header first, and React Query drops per-call callbacks with it.
   const archiveItem = () => {
     if (!item) return;
     const next = rows[index + 1] ?? rows[index - 1] ?? null;
-    archive.mutate(item.id, {
-      onSuccess: () => toast.success(t(($) => $.toasts.archived)),
-      onError: failed(t(($) => $.errors.archive_failed)),
-    });
+    archiveAsync(item.id).then(
+      () => toast.success(t(($) => $.toasts.archived)),
+      failed(t(($) => $.errors.archive_failed)),
+    );
     openNext(next);
   };
 
@@ -97,7 +99,7 @@ export function IssueInboxActions({
     if (!item || !onMarkDone) return;
     const next = rows[index + 1] ?? rows[index - 1] ?? null;
     onMarkDone(() => {
-      archive.mutate(item.id, { onError: failed(t(($) => $.errors.archive_failed)) });
+      archiveAsync(item.id).catch(failed(t(($) => $.errors.archive_failed)));
       openNext(next);
     });
   };
