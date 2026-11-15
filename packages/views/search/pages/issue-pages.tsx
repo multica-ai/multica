@@ -320,35 +320,44 @@ export function IssueLabelsPage({ target, query }: { target: IssueTarget; query:
   });
   const attach = useAttachLabelToIssue();
   const detach = useDetachLabel(single?.id ?? "");
+  const writer = useIssueTargetWriter(target);
   const labelIdsOf = (issue: Issue) =>
     new Set((single && issue.id === single.id && singleLabels ? singleLabels : issue.labels ?? []).map((l) => l.id));
   const visible = filterByLabel(labels, query, (label) => label.name);
+  const countOf = (label: Label) => issues.filter((issue) => labelIdsOf(issue).has(label.id)).length;
 
+  // A row on every target is a checked toggle: selecting it removes the label.
   const toggle = (label: Label) => {
     palette.close();
-    const lacking = issues.filter((issue) => !labelIdsOf(issue).has(label.id));
-    if (lacking.length === 0 && single) {
-      // Every target already has it: on a single issue the row reads as a
-      // checked toggle, so selecting it removes the label.
-      detach.mutateAsync(label.id).then(
-        () => toast.success(t(($) => $.toast.label_removed, { name: label.name })),
-        (err: unknown) => toast.error(err instanceof Error ? err.message : String(err)),
+    const onAll = countOf(label) === issues.length;
+    if (!single) {
+      writer.applyLabels(
+        onAll ? { remove: [label.id] } : { add: [label.id] },
+        onAll
+          ? t(($) => $.toast.label_removed, { name: label.name })
+          : t(($) => $.toast.label_added, { name: label.name }),
       );
       return;
     }
-    void Promise.allSettled(
-      lacking.map((issue) => attach.mutateAsync({ issueId: issue.id, labelId: label.id })),
-    ).then((results) => {
-      const failed = results.filter((r) => r.status === "rejected").length;
-      if (failed > 0) toast.error(t(($) => $.toast.label_failed, { name: label.name }));
-      else toast.success(t(($) => $.toast.label_added, { name: label.name }));
-    });
+    const write = onAll
+      ? detach.mutateAsync(label.id)
+      : attach.mutateAsync({ issueId: single.id, labelId: label.id });
+    write.then(
+      () =>
+        toast.success(
+          onAll
+            ? t(($) => $.toast.label_removed, { name: label.name })
+            : t(($) => $.toast.label_added, { name: label.name }),
+        ),
+      (err: unknown) => toast.error(err instanceof Error ? err.message : String(err)),
+    );
   };
 
   return (
     <PaletteGroup heading={t(($) => $.pages.labels)}>
       {visible.map((label) => {
-        const onAll = issues.every((issue) => labelIdsOf(issue).has(label.id));
+        const n = countOf(label);
+        const onAll = n === issues.length;
         return (
           <CommandPrimitive.Item
             data-mc="palette-item"
@@ -365,7 +374,11 @@ export function IssueLabelsPage({ target, query }: { target: IssueTarget; query:
             <span className="min-w-0 flex-1 truncate">
               <HighlightText text={label.name} query={query} />
             </span>
-            {onAll && <RowCheck label={t(($) => $.pages.current)} />}
+            {onAll ? (
+              <RowCheck label={t(($) => $.pages.current)} />
+            ) : (
+              n > 0 && <RowHint>{`${n}/${issues.length}`}</RowHint>
+            )}
           </CommandPrimitive.Item>
         );
       })}
