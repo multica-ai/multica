@@ -984,6 +984,17 @@ The response includes `progress`: `scope` is every issue except cancelled ones,
 `completed` counts done issues, `started` issues are tracked but do not add to
 `percent`. The table output shows it as a PROGRESS column (`5/11 (45%)`).
 
+### Project Overview
+
+```bash
+multica project overview <id>                  # JSON by default
+multica project overview <id> --output table
+```
+
+Returns everything on the project's Overview tab in one read:
+`{"project": ..., "progress": ..., "resources": [...]}`. New Overview sections
+are added as new top-level keys.
+
 ### Project Progress
 
 ```bash
