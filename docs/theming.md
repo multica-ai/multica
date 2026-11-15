@@ -795,7 +795,7 @@ and dark differ, both defaults are given.
 | `--space-lg` | `1.5rem` | Spacing step: an object page's side padding, the issue page's top padding on phones. |
 | `--space-xl` | `2rem` | Spacing step: an object page's top padding, the issue page's padding. |
 | `--page-padding-x` | `var(--space-md, 1rem)` | Side padding of page headers, the toolbars under them and full-width lists. |
-| `--sidebar-panel-width` | `240px` | Starting width of the navigation panel, kept between 200px and 320px. Once the person drags its edge, their width wins. |
+| `--sidebar-panel-width` | `280px` | Starting width of the navigation panel, kept between 200px and 320px. Once the person drags its edge, their width wins. |
 | `--content-max-width` | `clamp(56rem, 70cqi, 70rem)` | Widest the reading column gets on an issue page and in chat. |
 | `--object-page-max-width` | `760px` | Widest the body of a project, agent, squad, runtime or other object page gets. |
 
