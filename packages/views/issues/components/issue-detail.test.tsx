@@ -134,7 +134,11 @@ vi.mock("@multica/core/paths", async () => {
 const settingsPush = vi.hoisted(() => vi.fn());
 
 // Mock navigation
-vi.mock("../../navigation", () => ({
+vi.mock("../../navigation", async () => ({
+  // Real hold hook (pure React) the header's Inbox actions read through.
+  ...(await vi.importActual<typeof import("../../navigation/use-held-until-arrival")>(
+    "../../navigation/use-held-until-arrival",
+  )),
   AppLink: ({ children, href, ...props }: any) => (
     <a href={href} {...props}>
       {children}

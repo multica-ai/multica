@@ -932,11 +932,9 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	return nil
 }
 
-// notifyAutopilotSubscribersOnCreate writes an inbox_item for each template
-// subscriber of an autopilot-created issue and broadcasts an inbox:new event
-// so the recipient's inbox updates in real time. Mirrors the inbox payload
-// shape from notification_listeners.go so the WS consumer sees the same fields
-// the listener-driven path produces. Failures are logged, not propagated:
+// notifyAutopilotSubscribersOnCreate delivers an inbox_item to each template
+// subscriber of an autopilot-created issue, so the recipient's inbox updates
+// in real time. Failures are logged, not propagated:
 // the issue and its subscriber rows are already committed, and an inbox-write
 // hiccup must not bubble up as a dispatch failure.
 func (s *AutopilotService) notifyAutopilotSubscribersOnCreate(
@@ -960,19 +958,22 @@ func (s *AutopilotService) notifyAutopilotSubscribersOnCreate(
 		if sub.UserType != "member" {
 			continue
 		}
-		item, inserted, err := inbox.CreateIfEligible(ctx, s.Queries, db.CreateInboxItemParams{
-			ID:            dbid.NewV7(),
-			WorkspaceID:   ap.WorkspaceID,
-			RecipientType: "member",
-			RecipientID:   sub.UserID,
-			Type:          "issue_subscribed",
-			Severity:      "info",
-			IssueID:       issue.ID,
-			Title:         issue.Title,
-			Body:          pgtype.Text{},
-			ActorType:     pgtype.Text{String: "agent", Valid: true},
-			ActorID:       leaderID,
-			Details:       details,
+		_, _, err := inbox.Deliver(ctx, s.Queries, s.Bus, inbox.Notification{
+			Params: db.CreateInboxItemParams{
+				ID:            dbid.NewV7(),
+				WorkspaceID:   ap.WorkspaceID,
+				RecipientType: "member",
+				RecipientID:   sub.UserID,
+				Type:          "issue_subscribed",
+				Severity:      "info",
+				IssueID:       issue.ID,
+				Title:         issue.Title,
+				Body:          pgtype.Text{},
+				ActorType:     pgtype.Text{String: "agent", Valid: true},
+				ActorID:       leaderID,
+				Details:       details,
+			},
+			IssueStatus: &issue.Status,
 		})
 		if err != nil {
 			slog.Error("autopilot subscriber inbox write failed",
@@ -981,37 +982,7 @@ func (s *AutopilotService) notifyAutopilotSubscribersOnCreate(
 				"recipient_id", util.UUIDToString(sub.UserID),
 				"error", err,
 			)
-			continue
 		}
-		if !inserted {
-			continue
-		}
-		s.Bus.Publish(events.Event{
-			Type:        protocol.EventInboxNew,
-			WorkspaceID: util.UUIDToString(ap.WorkspaceID),
-			ActorType:   "agent",
-			ActorID:     util.UUIDToString(leaderID),
-			Payload: map[string]any{
-				"item": map[string]any{
-					"id":             util.UUIDToString(item.ID),
-					"workspace_id":   util.UUIDToString(item.WorkspaceID),
-					"recipient_type": item.RecipientType,
-					"recipient_id":   util.UUIDToString(item.RecipientID),
-					"type":           item.Type,
-					"severity":       item.Severity,
-					"issue_id":       util.UUIDToPtr(item.IssueID),
-					"issue_status":   issue.Status,
-					"title":          item.Title,
-					"body":           util.TextToPtr(item.Body),
-					"read":           item.Read,
-					"archived":       item.Archived,
-					"created_at":     util.TimestampToString(item.CreatedAt),
-					"actor_type":     util.TextToPtr(item.ActorType),
-					"actor_id":       util.UUIDToPtr(item.ActorID),
-					"details":        json.RawMessage(item.Details),
-				},
-			},
-		})
 	}
 }
 

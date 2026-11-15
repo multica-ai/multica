@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { setApiInstance } from "@multica/core/api";
@@ -106,19 +106,22 @@ function setup({
     // The child list refetches on mount; the button acts directly once it is known.
     setApiInstance({ listChildIssues: async () => ({ issues: [] }) } as unknown as ApiClient);
   }
-  renderWithI18n(
+  const page = (id: string) => (
     <QueryClientProvider client={qc}>
       <NavigationProvider value={nav}>
-        <IssueInboxActions issueId={issueId} onMarkDone={onMarkDone} />
+        <IssueInboxActions issueId={id} onMarkDone={onMarkDone} />
       </NavigationProvider>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
-  return nav;
+  const { rerender } = renderWithI18n(page(issueId));
+  /** The route reaching another issue, which the same header then shows. */
+  const arrive = (id: string) => rerender(page(id));
+  return Object.assign(nav, { arrive });
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
-  useInboxSelectionStore.setState({ sidebarIssueByWorkspace: { ws: "issue-1" } });
+  useInboxSelectionStore.setState({ sidebarIssueByWorkspace: { ws: "issue-1" }, sidebarTabIssuesByWorkspace: {} });
   useInboxFilterStore.getState().clearFilters("ws");
 });
 afterEach(cleanup);
@@ -127,6 +130,37 @@ describe("IssueInboxActions", () => {
   it("stays out of an issue that was not opened from the Inbox", () => {
     useInboxSelectionStore.setState({ sidebarIssueByWorkspace: { ws: "issue-2" } });
     setup();
+    expect(screen.queryByRole("button", { name: "Archive" })).toBeNull();
+  });
+
+  it("stays on the open issue until the next notification's issue arrives", () => {
+    const nav = setup();
+    act(() => {
+      useInboxSelectionStore.getState().rememberSidebarIssue("ws", "issue-2");
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+    expect(state.archive).toHaveBeenLastCalledWith("n-1", expect.anything());
+
+    nav.arrive("issue-2");
+    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+    expect(state.archive).toHaveBeenLastCalledWith("n-2", expect.anything());
+  });
+
+  it("shows on an issue the Inbox opened in another tab", () => {
+    useInboxSelectionStore.setState({
+      sidebarIssueByWorkspace: { ws: "issue-1" },
+      sidebarTabIssuesByWorkspace: { ws: ["issue-2"] },
+    });
+    setup({ issueId: "issue-2" });
+    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+    expect(state.archive).toHaveBeenCalledWith("n-2", expect.anything());
+  });
+
+  it("leaves once the issue is opened from outside the Inbox", () => {
+    setup();
+    act(() => {
+      useInboxSelectionStore.getState().rememberSidebarIssue("ws", null);
+    });
     expect(screen.queryByRole("button", { name: "Archive" })).toBeNull();
   });
 
