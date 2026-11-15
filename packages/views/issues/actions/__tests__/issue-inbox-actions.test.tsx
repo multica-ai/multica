@@ -8,13 +8,16 @@ import type { ApiClient } from "@multica/core/api/client";
 import { useInboxFilterStore } from "@multica/core/inbox/filter-store";
 import { inboxListOptions, snoozedInboxOptions } from "@multica/core/inbox/queries";
 import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
-import type { InboxItem, SnoozedInboxIssue } from "@multica/core/types";
+import { childIssuesOptions, issueDetailOptions, issueSubscribersOptions } from "@multica/core/issues/queries";
+import { agentListOptions } from "@multica/core/workspace/queries";
+import type { InboxItem, Issue, SnoozedInboxIssue } from "@multica/core/types";
 import { renderWithI18n } from "../../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../../navigation";
 import { IssueInboxActions } from "../issue-inbox-actions";
 
 const state = vi.hoisted(() => ({
   archiveInbox: vi.fn(),
+  unsubscribeArchive: vi.fn(),
   snooze: vi.fn(() => Promise.resolve()),
   unsnooze: vi.fn(() => Promise.resolve()),
 }));
@@ -29,6 +32,8 @@ vi.mock("@multica/core/paths", async (importOriginal) => {
 // per-call callbacks when the next issue's page replaces the header.
 vi.mock("@multica/core/inbox/mutations", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/inbox/mutations")>()),
+  useUnsubscribeArchiveInbox: () => ({ mutate: state.unsubscribeArchive }),
+  undoUnsubscribeArchiveInbox: vi.fn(),
   useSnoozeInbox: () => ({ mutateAsync: state.snooze }),
   useUnsnoozeInbox: () => ({ mutateAsync: state.unsnooze }),
   cachedInboxSnoozedUntil: () => null,
@@ -68,11 +73,14 @@ function setup({
   issueId = "issue-1",
   onMarkDone,
   snoozed = [],
+  theirs = false,
 }: {
   rows?: InboxItem[];
   issueId?: string;
   onMarkDone?: (onSaved: () => void) => void;
   snoozed?: SnoozedInboxIssue[];
+  /** The viewer follows the issue, and someone else owns it. */
+  theirs?: boolean;
 } = {}) {
   const nav: NavigationAdapter = {
     push: vi.fn(),
@@ -89,6 +97,8 @@ function setup({
     listSnoozedInbox: async () => snoozed,
     getInboxUnreadSummary: async () => [],
     getAgentTaskSnapshot: async () => [],
+    // The child list refetches on mount; the unsubscribe button acts directly once it is known.
+    listChildIssues: async () => ({ issues: [] }),
   } as unknown as ApiClient);
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity }, mutations: { retry: false } },
@@ -96,6 +106,18 @@ function setup({
   qc.setQueryData(inboxListOptions("ws").queryKey, rows);
   qc.setQueryData(snoozedInboxOptions("ws").queryKey, snoozed);
   qc.setQueryData(agentTaskSnapshotOptions("ws").queryKey, []);
+  if (theirs) {
+    qc.setQueryData(issueDetailOptions("ws", issueId).queryKey, {
+      id: issueId,
+      assignee_type: "member",
+      assignee_id: "member-other",
+    } as Issue);
+    qc.setQueryData(agentListOptions("ws").queryKey, []);
+    qc.setQueryData(issueSubscribersOptions(issueId).queryKey, [
+      { issue_id: issueId, user_type: "member", user_id: "member-1", reason: "commenter", created_at: SNOOZED_AT },
+    ]);
+    qc.setQueryData(childIssuesOptions("ws", issueId).queryKey, []);
+  }
   const page = (id: string | null) => (
     <QueryClientProvider client={qc}>
       <NavigationProvider value={nav}>
@@ -291,5 +313,43 @@ describe("IssueInboxActions", () => {
     setup();
     fireEvent.keyDown(document, { key: "e", code: "KeyE" });
     await waitFor(() => expect(state.archiveInbox).toHaveBeenCalledWith("n-1"));
+  });
+
+  // Snooze, archive and unsubscribe share the header; each key does only its own.
+  async function setupTheirs() {
+    const nav = setup({ theirs: true });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Unsubscribe & archive" })).not.toHaveAttribute("aria-haspopup"),
+    );
+    return nav;
+  }
+
+  it("unsubscribes and moves on with Shift+E on someone else's issue", async () => {
+    const nav = await setupTheirs();
+    fireEvent.keyDown(document, { key: "E", code: "KeyE", shiftKey: true });
+    expect(state.unsubscribeArchive).toHaveBeenCalledWith({ id: "n-1", issueId: "issue-1", scope: "issue" });
+    await act(async () => {});
+    expect(state.archiveInbox).not.toHaveBeenCalled();
+    expect(nav.push).toHaveBeenCalledWith("/acme/issues/issue-2#comment-c-9");
+  });
+
+  it("still only archives with E there", async () => {
+    await setupTheirs();
+    fireEvent.keyDown(document, { key: "e", code: "KeyE" });
+    await waitFor(() => expect(state.archiveInbox).toHaveBeenCalledWith("n-1"));
+    expect(state.unsubscribeArchive).not.toHaveBeenCalled();
+  });
+
+  it("still only snoozes with H there", async () => {
+    await setupTheirs();
+    fireEvent.keyDown(document, { key: "h", code: "KeyH" });
+    expect(await screen.findByRole("menuitem", { name: /^1 hour/ })).toBeInTheDocument();
+    expect(state.unsubscribeArchive).not.toHaveBeenCalled();
+    expect(state.archiveInbox).not.toHaveBeenCalled();
+  });
+
+  it("offers no unsubscribe on an issue the viewer does not follow as a bystander", () => {
+    setup();
+    expect(screen.queryByRole("button", { name: "Unsubscribe & archive" })).toBeNull();
   });
 });

@@ -3,7 +3,8 @@
 import { type ReactNode, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { AlarmClock, Archive, BookCheck, CheckCheck, History, ListChecks, MoreHorizontal } from "@multica/ui/icons";
+import { AlarmClock, Archive, BellOff, BookCheck, CheckCheck, History, ListChecks, MoreHorizontal } from "@multica/ui/icons";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { cn } from "@multica/ui/lib/utils";
 import { useIsCompact } from "@multica/ui/hooks/use-mobile";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
@@ -51,6 +52,7 @@ import { useInboxSnooze } from "../../inbox/components/use-inbox-snooze";
 import { useBuiltinViewNavigation } from "../../issue-views/builtin-views";
 import { useFilteredInboxRows } from "../../inbox/components/use-filtered-inbox-rows";
 import { useTimeAgo } from "../../inbox/components/inbox-list-item";
+import { useInboxUnsubscribable, useUnsubscribeArchive } from "../../inbox/components/use-unsubscribe-archive";
 import { StatusIcon } from "../../issues/components";
 import { useStatusLabel } from "../../issues/utils/status-label";
 import {
@@ -146,6 +148,8 @@ export function InboxSection({
   const compact = useSidebarTreeStore((s) => s.inboxSettings.compact);
   const unread = useInboxUnreadCount(wsId);
   const archive = useArchiveInbox();
+  const unsubscribable = useInboxUnsubscribable(wsId);
+  const unsubscribeArchive = useUnsubscribeArchive();
   const { snooze } = useInboxSnooze();
   const { searchParams } = useNavigation();
   const isCompact = useIsCompact();
@@ -203,6 +207,11 @@ export function InboxSection({
               compact={compact}
               updatesWhileSnoozed={item.issue_id ? (updatesWhileSnoozed.get(item.issue_id) ?? 0) : 0}
               onArchive={() => archive.mutate(item.id)}
+              onUnsubscribe={
+                item.issue_id && unsubscribable(item)
+                  ? () => unsubscribeArchive({ id: item.id, issueId: item.issue_id! })
+                  : undefined
+              }
               onSnooze={(until) => snooze(item, until)}
             />
           ))}
@@ -350,6 +359,7 @@ function InboxRow({
   compact,
   updatesWhileSnoozed,
   onArchive,
+  onUnsubscribe,
   onSnooze,
 }: {
   item: InboxItem;
@@ -360,6 +370,8 @@ function InboxRow({
   /** Notifications that arrived while the issue was snoozed. */
   updatesWhileSnoozed: number;
   onArchive: () => void;
+  /** Unsubscribe & archive; only for issues that are not the viewer's own. */
+  onUnsubscribe?: () => void;
   onSnooze: (until: Date) => void;
 }) {
   const { t } = useT("inbox");
@@ -537,6 +549,7 @@ function InboxRow({
               land();
             }}
             onArchive={onArchive}
+            onUnsubscribe={onUnsubscribe}
             onSnooze={
               item.issue_id
                 ? () => {
@@ -649,6 +662,7 @@ function InboxRowCard({
   title,
   onOpen,
   onArchive,
+  onUnsubscribe,
   onSnooze,
 }: {
   item: InboxItem;
@@ -656,6 +670,7 @@ function InboxRowCard({
   title: string;
   onOpen: () => void;
   onArchive: () => void;
+  onUnsubscribe?: () => void;
   /** Opens the row's snooze menu; issue rows only. */
   onSnooze?: () => void;
 }) {
@@ -719,6 +734,15 @@ function InboxRowCard({
         <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={onArchive}>
           {tInbox(($) => $.context_menu.archive)}
         </Button>
+        {onUnsubscribe && (
+          <IconButton
+            label={tInbox(($) => $.context_menu.unsubscribe_archive)}
+            className="ml-auto text-muted-foreground"
+            onClick={onUnsubscribe}
+          >
+            <BellOff />
+          </IconButton>
+        )}
       </div>
     </div>
   );

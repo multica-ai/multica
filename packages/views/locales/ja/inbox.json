@@ -40,7 +40,8 @@
     "archive": "アーカイブ",
     "unarchive": "アーカイブ解除",
     "open_in_new_tab": "新しいタブで開く",
-    "delete": "削除"
+    "delete": "削除",
+    "unsubscribe_archive": "購読解除してアーカイブ"
   },
   "list": {
     "loading_selection": "通知を読み込み中…",
@@ -123,7 +124,11 @@
     "source_context_retry_started": "元のコンテキストで再試行を開始しました",
     "archived": "通知をアーカイブしました",
     "unarchived": "通知を元に戻しました",
-    "deleted": "通知を削除しました"
+    "deleted": "通知を削除しました",
+    "unsubscribed_archived": "購読を解除してアーカイブしました",
+    "unsubscribed_archived_subtree": "このタスクとサブタスクの購読を解除しました",
+    "unsubscribed_hint": "今後の更新はインボックスに届きません。@メンションは引き続き通知されます。",
+    "undo": "元に戻す"
   },
   "errors": {
     "archived_lookup_failed": "リンク先の通知を読み込めませんでした",
@@ -140,7 +145,9 @@
     "unarchive_failed": "アーカイブ解除に失敗しました",
     "archived_load_failed": "アーカイブ済み通知を読み込めませんでした",
     "filters_load_failed": "フィルターを読み込めませんでした",
-    "delete_failed": "通知を削除できませんでした。もう一度お試しください。"
+    "delete_failed": "通知を削除できませんでした。もう一度お試しください。",
+    "unsubscribe_archive_failed": "購読解除に失敗しました",
+    "undo_unsubscribe_failed": "元に戻せませんでした"
   },
   "delete_dialog": {
     "title": "通知を削除しますか？",
@@ -148,6 +155,12 @@
     "issue_description": "このビューにあるこのタスクの通知は完全に削除されます。タスクと実行記録は残ります。",
     "cancel": "キャンセル",
     "active_issue_description": "このタスクの受信トレイ内の通知は完全に削除されます。以前アーカイブした通知は残り、アーカイブに再表示されます。タスクと実行記録は残ります。"
+  },
+  "unsubscribe": {
+    "title": "購読を解除してアーカイブします。このタスクの更新は届かなくなりますが、@メンションは引き続き通知されます。",
+    "this_issue": "このタスクのみ",
+    "subtree_other": "このタスクと {{count}} 件のサブタスク",
+    "subtree_unknown": "このタスクとサブタスク"
   },
   "snooze": {
     "action": "スヌーズ",
