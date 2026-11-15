@@ -209,8 +209,8 @@ func (n *Notifier) processEvent(e events.Event) {
 	recipientIDStr, _ := item["recipient_id"].(string)
 	notifType, _ := item["type"].(string)
 	issueTitle, _ := item["title"].(string)
-	// inboxItemToResponse stores issue_id via util.UUIDToPtr — so the payload
-	// value is *string, not string. Accept both forms so a future serializer
+	// inbox.Deliver stores issue_id via util.UUIDToPtr, so the payload value
+	// is *string, not string. Accept both forms so a future serializer
 	// change to a plain string doesn't silently break deep links.
 	issueID := stringOrPtr(item["issue_id"])
 

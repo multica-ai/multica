@@ -98,7 +98,7 @@ func uuidString(u pgtype.UUID) string {
 }
 
 // strPtr returns a pointer to s. Used to construct payload shapes that match
-// production — inboxItemToResponse writes issue_id via util.UUIDToPtr, so the
+// production — inbox.Deliver writes issue_id via util.UUIDToPtr, so the
 // payload value at runtime is *string, not string.
 func strPtr(s string) *string { return &s }
 
@@ -239,6 +239,41 @@ func publishMemberInboxEvent(bus *events.Bus) {
 			},
 		},
 	})
+}
+
+// A row written while its issue is snoozed is announced as inbox:snoozed,
+// not inbox:new. Like the in-app banner, email stays quiet until the snooze
+// ends.
+func TestNotifier_IgnoresSnoozedRows(t *testing.T) {
+	bus := events.New()
+	sender := &fakeSender{}
+	q := &fakeQueries{
+		emails: map[string]string{
+			`"11111111-1111-1111-1111-111111111111"`: "alice@example.com",
+		},
+		workspaceSlug: "acme",
+	}
+	n := NewNotifier(q, sender, NotifierConfig{Renderer: NewRenderer("")})
+	n.Register(bus)
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventInboxSnoozed,
+		WorkspaceID: "22222222-2222-2222-2222-222222222222",
+		Payload: map[string]any{
+			"item": map[string]any{
+				"recipient_type": "member",
+				"recipient_id":   "11111111-1111-1111-1111-111111111111",
+				"type":           "mentioned",
+				"title":          "X",
+				"issue_id":       strPtr("33333333-3333-3333-3333-333333333333"),
+			},
+		},
+	})
+	n.WaitInflight()
+
+	if got := len(sender.Calls()); got != 0 {
+		t.Errorf("expected 0 sends for a snoozed row, got %d", got)
+	}
 }
 
 func TestNotifier_SkipsNonMemberRecipients(t *testing.T) {
