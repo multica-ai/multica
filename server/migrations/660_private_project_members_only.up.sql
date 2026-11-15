@@ -1,23 +1,17 @@
 -- MUL-9284: a private project is now visible to its member list only. A
--- workspace owner or admin no longer sees one through their role. Two
--- backfills keep existing private projects exactly as reachable as they were:
+-- workspace owner or admin no longer sees one through their role.
 --
--- 1. Everyone who could see a private project through their role becomes a
---    member of it. Nobody loses access the moment the role rule goes away,
---    and the member list now shows everyone who can see the project; the lead
---    removes whoever should not stay.
--- 2. A private project is managed by its lead, so it needs a human one. A
---    project with no lead, an agent lead, or a lead who is no longer a member
---    gets its creator, or failing that its longest-standing member.
+-- Member lists are left as they are. Whoever made a project private and its
+-- member lead were put on the list at that moment, so nobody has to be added
+-- for a project to stay reachable; an owner or admin who relied on their role
+-- stops seeing it, which is the point of the change.
+--
+-- A private project is managed by its lead, so it needs a human one. A
+-- project with no lead, an agent lead, or a lead who is no longer a member
+-- gets its creator, or failing that its longest-standing member. One with no
+-- member left keeps what it has until a workspace owner takes it over.
 --
 -- Data only and idempotent, so servers still on the old rule keep working.
-
-INSERT INTO project_member (workspace_id, project_id, user_id)
-SELECT p.workspace_id, p.id, m.user_id
-FROM project p
-JOIN member m ON m.workspace_id = p.workspace_id AND m.role IN ('owner', 'admin')
-WHERE p.visibility = 'private'
-ON CONFLICT (project_id, user_id) DO NOTHING;
 
 UPDATE project p
 SET lead_type = 'member', lead_id = pick.user_id, updated_at = now()

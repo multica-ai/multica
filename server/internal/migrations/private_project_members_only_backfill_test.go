@@ -10,9 +10,9 @@ import (
 )
 
 // TestPrivateProjectMembersOnlyBackfill pins what migration 660 does to the
-// private projects that exist when the role-based rule is removed: whoever saw
-// one through their role is now a member, and every one of them is led by a
-// human who is a member.
+// private projects that exist when the role-based rule is removed: member
+// lists stay exactly as they are, so an owner or admin who relied on their
+// role is not added, and every project that has a member is led by one.
 func TestPrivateProjectMembersOnlyBackfill(t *testing.T) {
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
@@ -58,6 +58,8 @@ func TestPrivateProjectMembersOnlyBackfill(t *testing.T) {
 		alreadyLed = "00000000-0000-0000-0000-0000000b0103"
 		// Its lead left the workspace and it has no member rows at all.
 		abandoned = "00000000-0000-0000-0000-0000000b0104"
+		// Led by an admin who saw it through their role and is not a member.
+		roleLed = "00000000-0000-0000-0000-0000000b0106"
 		// Visible to the workspace: must not be touched.
 		open = "00000000-0000-0000-0000-0000000b0105"
 	)
@@ -108,8 +110,9 @@ func TestPrivateProjectMembersOnlyBackfill(t *testing.T) {
 			($2, $6, 'agent',  $8,   'member', $9,  'private'),
 			($3, $6, 'member', $10,  'member', $7,  'private'),
 			($4, $6, 'member', $11,  'member', $11, 'private'),
-			($5, $6, NULL,     NULL, 'member', $7,  'workspace')
-	`, createdByMember, agentLed, alreadyLed, abandoned, open, ws, regular, agent, owner, veteran, departed); err != nil {
+			($5, $6, NULL,     NULL, 'member', $7,  'workspace'),
+			($12, $6, 'member', $13, 'member', $7,  'private')
+	`, createdByMember, agentLed, alreadyLed, abandoned, open, ws, regular, agent, owner, veteran, departed, roleLed, admin); err != nil {
 		t.Fatalf("seed projects: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `
@@ -119,8 +122,9 @@ func TestPrivateProjectMembersOnlyBackfill(t *testing.T) {
 			($1, $3, $5, now() - interval '2 days'),
 			($1, $3, $6, now() - interval '4 days'),
 			($1, $4, $5, now() - interval '4 days'),
-			($1, $4, $6, now() - interval '2 days')
-	`, ws, createdByMember, agentLed, alreadyLed, regular, veteran); err != nil {
+			($1, $4, $6, now() - interval '2 days'),
+			($1, $7, $5, now() - interval '1 day')
+	`, ws, createdByMember, agentLed, alreadyLed, regular, veteran, roleLed); err != nil {
 		t.Fatalf("seed project members: %v", err)
 	}
 
@@ -167,12 +171,15 @@ func TestPrivateProjectMembersOnlyBackfill(t *testing.T) {
 		wantLead    string
 	}{
 		// The creator leads, though the veteran joined the project earlier.
-		{"created by a member", createdByMember, []string{owner, admin, regular, veteran}, regular},
-		// The creator joins the list through the role backfill, and leads.
-		{"agent lead replaced", agentLed, []string{owner, admin, regular, veteran}, owner},
-		{"human lead kept", alreadyLed, []string{owner, admin, regular, veteran}, veteran},
-		// Nobody left but the roles: the owner outranks the admin.
-		{"abandoned", abandoned, []string{owner, admin}, owner},
+		{"created by a member", createdByMember, []string{regular, veteran}, regular},
+		// Its creator is the workspace owner, who is not on the list and is
+		// not put on it: the longest-standing member leads.
+		{"agent lead replaced", agentLed, []string{regular, veteran}, veteran},
+		{"human lead kept", alreadyLed, []string{regular, veteran}, veteran},
+		// Nobody to hand it to. It stays as it was until an owner takes it over.
+		{"abandoned", abandoned, nil, departed},
+		// The admin is not added, so the lead passes to a member.
+		{"lead outside the member list", roleLed, []string{regular}, regular},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -194,13 +201,13 @@ func TestPrivateProjectMembersOnlyBackfill(t *testing.T) {
 		}
 	})
 
-	t.Run("another workspace's owner is not added", func(t *testing.T) {
+	t.Run("no owner or admin is added to a member list", func(t *testing.T) {
 		var n int
-		if err := pool.QueryRow(ctx, `SELECT count(*) FROM project_member WHERE user_id = $1`, outsider).Scan(&n); err != nil {
-			t.Fatalf("count outsider rows: %v", err)
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM project_member WHERE user_id = ANY($1::uuid[])`, []string{owner, admin, outsider}).Scan(&n); err != nil {
+			t.Fatalf("count role-holder rows: %v", err)
 		}
 		if n != 0 {
-			t.Errorf("outsider has %d project memberships, want 0", n)
+			t.Errorf("owners and admins hold %d project memberships, want 0", n)
 		}
 	})
 

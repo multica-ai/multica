@@ -1,4 +1,3 @@
--- Nothing to undo. The up migration only added member rows and leads that
--- match who could already see each private project, and they are not told
--- apart from rows people added themselves. The role-based rule this replaced
--- still reads those projects correctly with the extra rows in place.
+-- Nothing to undo. The up migration only gave private projects a member of
+-- theirs as lead, and those leads are not told apart from ones people chose.
+-- The role-based rule this replaced reads those projects correctly as they are.
