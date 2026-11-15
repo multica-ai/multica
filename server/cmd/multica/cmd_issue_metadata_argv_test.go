@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"reflect"
@@ -13,6 +14,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/multica-ai/multica/server/internal/handler"
 )
 
 // Each child parses the production command tree with fresh Cobra flag state.
@@ -48,19 +52,19 @@ func TestIssueMetadataMutationKeyArgv(t *testing.T) {
 		{name: "prefix", key: "pipeline_status"},
 		{name: "punctuation", key: "_a.B-c9"},
 		{name: "maximum length", key: strings.Repeat("a", 64)},
-		{name: "fragment", key: "pipeline_status#draft", wantError: "--key must match"},
-		{name: "query", key: "pipeline_status?draft", wantError: "--key must match"},
-		{name: "slash", key: "pipeline_status/draft", wantError: "--key must match"},
-		{name: "percent", key: "pipeline_status%draft", wantError: "--key must match"},
-		{name: "encoded fragment", key: "pipeline_status%23draft", wantError: "--key must match"},
+		{name: "fragment", key: "pipeline_status#draft", wantError: "key must match"},
+		{name: "query", key: "pipeline_status?draft", wantError: "key must match"},
+		{name: "slash", key: "pipeline_status/draft", wantError: "key must match"},
+		{name: "percent", key: "pipeline_status%draft", wantError: "key must match"},
+		{name: "encoded fragment", key: "pipeline_status%23draft", wantError: "key must match"},
 		{name: "empty", key: "", wantError: "--key is required"},
-		{name: "too long", key: strings.Repeat("a", 65), wantError: "--key must match"},
-		{name: "leading digit", key: "9start", wantError: "--key must match"},
-		{name: "leading dot", key: ".start", wantError: "--key must match"},
-		{name: "leading hyphen", key: "-start", wantError: "--key must match"},
-		{name: "space", key: "has space", wantError: "--key must match"},
-		{name: "newline", key: "a\nb", wantError: "--key must match"},
-		{name: "non ASCII", key: "中文", wantError: "--key must match"},
+		{name: "too long", key: strings.Repeat("a", 65), wantError: "key must match"},
+		{name: "leading digit", key: "9start", wantError: "key must match"},
+		{name: "leading dot", key: ".start", wantError: "key must match"},
+		{name: "leading hyphen", key: "-start", wantError: "key must match"},
+		{name: "space", key: "has space", wantError: "key must match"},
+		{name: "newline", key: "a\nb", wantError: "key must match"},
+		{name: "non ASCII", key: "中文", wantError: "key must match"},
 	}
 	for _, operation := range []string{"set", "delete"} {
 		t.Run(operation, func(t *testing.T) {
@@ -70,10 +74,26 @@ func TestIssueMetadataMutationKeyArgv(t *testing.T) {
 					stored := map[string]any{"pipeline_status": "original", "untouched": true}
 					var mu sync.Mutex
 					var requests []string
+					var rejectionStatus int
+					router := chi.NewRouter()
+					// Invalid keys are rejected before the production handlers access a DB.
+					h := &handler.Handler{}
+					router.Put(metadataPath+"/{key}", h.SetIssueMetadataKey)
+					router.Delete(metadataPath+"/{key}", h.DeleteIssueMetadataKey)
 					server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 						mu.Lock()
 						defer mu.Unlock()
 						requests = append(requests, r.Method+" "+r.URL.RequestURI())
+						// Keep the prefix writable so a truncated URL would mutate stored data.
+						if tc.wantError != "" && r.URL.Path != metadataPath+"/pipeline_status" &&
+							(r.Method == http.MethodPut || r.Method == http.MethodDelete) {
+							recorder := httptest.NewRecorder()
+							router.ServeHTTP(recorder, r)
+							rejectionStatus = recorder.Code
+							w.WriteHeader(recorder.Code)
+							_, _ = w.Write(recorder.Body.Bytes())
+							return
+						}
 						switch {
 						case r.Method == http.MethodGet && r.URL.Path == "/api/issues/"+issueID:
 							_ = json.NewEncoder(w).Encode(map[string]any{"id": issueID})
@@ -111,12 +131,22 @@ func TestIssueMetadataMutationKeyArgv(t *testing.T) {
 					}
 					mu.Lock()
 					defer mu.Unlock()
+					method := http.MethodDelete
+					if operation == "set" {
+						method = http.MethodPut
+					}
+					wantRequests := []string{method + " " + metadataPath + "/" + url.PathEscape(tc.key)}
 					if tc.wantError != "" {
 						if runErr == nil || !strings.Contains(string(output), tc.wantError) {
 							t.Errorf("argv %q: error=%v output=%s, want %q", argv, runErr, output, tc.wantError)
 						}
-						if len(requests) != 0 {
-							t.Errorf("invalid key reached API: %v", requests)
+						if tc.key == "" {
+							wantRequests = nil
+						} else if rejectionStatus != http.StatusBadRequest {
+							t.Errorf("invalid key response status = %d, want 400", rejectionStatus)
+						}
+						if !reflect.DeepEqual(requests, wantRequests) {
+							t.Errorf("requests=%v, want %v", requests, wantRequests)
 						}
 						if !reflect.DeepEqual(stored, initial) {
 							t.Errorf("invalid key mutated metadata: %#v", stored)
@@ -127,17 +157,14 @@ func TestIssueMetadataMutationKeyArgv(t *testing.T) {
 						t.Fatalf("argv %q: %v\n%s", argv, runErr, output)
 					}
 					expected := initial
-					method := http.MethodDelete
 					if operation == "set" {
 						expected[tc.key] = "waiting"
-						method = http.MethodPut
 					} else {
 						delete(expected, tc.key)
 					}
 					if !reflect.DeepEqual(stored, expected) {
 						t.Errorf("metadata=%#v, want %#v", stored, expected)
 					}
-					wantRequests := []string{method + " " + metadataPath + "/" + tc.key}
 					if operation == "delete" {
 						wantRequests = append(wantRequests, "GET "+metadataPath)
 					}
