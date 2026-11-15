@@ -2,6 +2,8 @@ package handler
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"testing"
 
@@ -286,5 +288,45 @@ func TestPrivateProjectLeadHandedOverWhenLeadLeavesWorkspace(t *testing.T) {
 	}
 	if len(handed) != 3 || !handed[shared] || !handed[solo] || !handed[founded] {
 		t.Errorf("handed-over projects = %v, want the three private projects the leaver led", handed)
+	}
+}
+
+// A local search index built while owners and admins still saw every private
+// project holds those projects, and the rule change wrote no change row that
+// would remove them. Its cursor carries no access rules number, which is how
+// the server tells it to rebuild.
+func TestSearchIndexCopyFromRoleBasedAccessIsRebuilt(t *testing.T) {
+	f := newPrivateProjectFixture(t)
+	current := searchIndexManifest(t, testWorkspaceID).Cursor
+	issued, err := decodeSearchIndexCursor(current)
+	if err != nil {
+		t.Fatalf("decode manifest cursor: %v", err)
+	}
+	if issued.AccessRules != searchIndexAccessRules {
+		t.Fatalf("manifest cursor access rules = %d, want %d", issued.AccessRules, searchIndexAccessRules)
+	}
+	raw, _ := json.Marshal(map[string]any{"v": searchIndexCursorVersion, "s": issued.Since})
+	legacy := base64.RawURLEncoding.EncodeToString(raw)
+
+	changes := func(userID, cursor string) *testutil.Response {
+		req := asUser(searchIndexRequest(http.MethodPost, "/api/search-index/changes", testWorkspaceID, map[string]any{"cursor": cursor}), userID)
+		return testutil.Call(t, testHandler.ListSearchIndexChanges, req)
+	}
+
+	// The admin is not on the member list: whatever the old copy holds of the
+	// project has to go, and a copy built under the current rules is fine.
+	changes(f.outsideAdmin, legacy).Want(http.StatusGone)
+	changes(f.outsideAdmin, current).Want(http.StatusOK)
+
+	// Someone who sees every project has nothing to drop: the old cursor
+	// keeps working and comes back as a current one.
+	var resp SearchIndexChangesResponse
+	changes(f.insider, legacy).Want(http.StatusOK).JSON(&resp)
+	next, err := decodeSearchIndexCursor(resp.Cursor)
+	if err != nil {
+		t.Fatalf("decode returned cursor: %v", err)
+	}
+	if next.AccessRules != searchIndexAccessRules {
+		t.Errorf("returned cursor access rules = %d, want %d", next.AccessRules, searchIndexAccessRules)
 	}
 }
