@@ -7,10 +7,203 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"testing/iotest"
 	"time"
 )
+
+func TestDownloadFileInterruptedBodyIsClassified(t *testing.T) {
+	withLang(t, "en_US.UTF-8")
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Length", "71")
+		_, _ = io.WriteString(w, "payload")
+	}))
+	defer srv.Close()
+
+	client := NewAPIClient(srv.URL, "ws-1", "test-token")
+	data, err := client.DownloadFile(context.Background(), "/download")
+	if string(data) != "payload" || !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("lost partial body or underlying error: data=%q err=%v", data, err)
+	}
+	var netErr *NetworkError
+	if !errors.As(err, &netErr) || netErr.Op != "GET /download" {
+		t.Fatalf("expected download NetworkError, got %T: %v", err, err)
+	}
+	if got := ExitCodeFor(err); got != ExitNetwork {
+		t.Errorf("ExitCodeFor = %d, want %d", got, ExitNetwork)
+	}
+	if msg := FormatError(err, false); !strings.Contains(msg, "network connection") {
+		t.Errorf("FormatError = %q, want network guidance", msg)
+	}
+	if requests.Load() != 1 {
+		t.Errorf("download sent %d requests, want one", requests.Load())
+	}
+}
+
+type downloadRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f downloadRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func TestDownloadFileBodyReadErrors(t *testing.T) {
+	readerErr := errors.New("synthetic reader failure")
+	for _, tc := range []struct {
+		name     string
+		err      error
+		wantExit int
+	}{
+		{"canceled", context.Canceled, ExitNetwork},
+		{"deadline exceeded", context.DeadlineExceeded, ExitNetwork},
+		{"non-network reader error", readerErr, ExitGeneric},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := NewAPIClient("https://example.test", "", "")
+			client.HTTPClient.Transport = downloadRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     make(http.Header),
+					Body:       io.NopCloser(iotest.ErrReader(tc.err)),
+					Request:    req,
+				}, nil
+			})
+			_, err := client.DownloadFile(context.Background(), "/download")
+			if !errors.Is(err, tc.err) || ExitCodeFor(err) != tc.wantExit {
+				t.Fatalf("DownloadFile = %v (exit %d), want underlying %v (exit %d)", err, ExitCodeFor(err), tc.err, tc.wantExit)
+			}
+			var netErr *NetworkError
+			if got, want := errors.As(err, &netErr), tc.wantExit == ExitNetwork; got != want {
+				t.Errorf("NetworkError = %t, want %t", got, want)
+			}
+			if tc.err == readerErr && err != readerErr {
+				t.Errorf("non-network error changed: %v", err)
+			}
+		})
+	}
+}
+
+func TestDownloadFileBodyTimeoutIsClassified(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "payload")
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+	client := NewAPIClient(srv.URL, "", "")
+	client.HTTPClient = &http.Client{Timeout: 200 * time.Millisecond}
+	data, err := client.DownloadFile(context.Background(), "/download")
+	if string(data) != "payload" || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected timeout after reading partial body: data=%q err=%v", data, err)
+	}
+	if got := ExitCodeFor(err); got != ExitNetwork {
+		t.Errorf("ExitCodeFor = %d, want %d; err=%v", got, ExitNetwork, err)
+	}
+}
+
+func TestUploadResponseErrorsAreClassified(t *testing.T) {
+	withLang(t, "en_US.UTF-8")
+	helpers := []struct {
+		name string
+		call func(*APIClient) (string, string, error)
+	}{
+		{"issue", func(c *APIClient) (string, string, error) {
+			att, err := c.UploadIssueAttachment(context.Background(), []byte("file"), "file.txt", "issue-1")
+			return att.ID, att.URL, err
+		}},
+		{"chat", func(c *APIClient) (string, string, error) {
+			att, err := c.UploadChatAttachment(context.Background(), []byte("file"), "file.txt", "task-1")
+			return att.ID, att.URL, err
+		}},
+		{"avatar", func(c *APIClient) (string, string, error) {
+			return c.UploadFileWithURL(context.Background(), []byte("file"), "file.txt")
+		}},
+	}
+	cases := []struct {
+		name      string
+		status    int
+		body      string
+		truncated bool
+		wantExit  int
+	}{
+		{"success", http.StatusOK, `{"id":"att-1","url":"https://example.test/file"}`, false, 0},
+		{"interrupted body", http.StatusOK, `{"id":"att-1","url":"`, true, ExitNetwork},
+		{"empty body", http.StatusOK, "", false, ExitGeneric},
+		{"invalid JSON", http.StatusOK, `{"id": }`, false, ExitGeneric},
+		{"validation", http.StatusBadRequest, `{"error":"invalid upload"}`, false, ExitValidation},
+		{"authentication", http.StatusUnauthorized, `{"error":"unauthorized"}`, false, ExitAuth},
+	}
+	for _, h := range helpers {
+		for _, tc := range cases {
+			t.Run(h.name+"/"+tc.name, func(t *testing.T) {
+				var requests atomic.Int32
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					requests.Add(1)
+					if r.Method != http.MethodPost || r.URL.Path != "/api/upload-file" {
+						t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+					}
+					_, _ = io.Copy(io.Discard, r.Body)
+					w.Header().Set("Content-Type", "application/json")
+					if tc.truncated {
+						// End a real HTTP response before its advertised body is complete.
+						w.Header().Set("Content-Length", strconv.Itoa(len(tc.body)+64))
+					}
+					w.WriteHeader(tc.status)
+					_, _ = io.WriteString(w, tc.body)
+				}))
+				defer srv.Close()
+				client := NewAPIClient(srv.URL, "ws-1", "test-token")
+				id, url, err := h.call(client)
+				if requests.Load() != 1 {
+					t.Fatalf("upload sent %d requests, want one", requests.Load())
+				}
+				if got := ExitCodeFor(err); got != tc.wantExit {
+					t.Errorf("ExitCodeFor = %d, want %d; err=%v", got, tc.wantExit, err)
+				}
+				if tc.wantExit == 0 {
+					if err != nil || id != "att-1" || url != "https://example.test/file" {
+						t.Fatalf("upload result: id=%q url=%q err=%v", id, url, err)
+					}
+					return
+				}
+				if err == nil {
+					t.Fatal("expected an upload error")
+				}
+				var netErr *NetworkError
+				isNetwork := errors.As(err, &netErr)
+				if isNetwork != tc.truncated {
+					t.Errorf("NetworkError = %t, want %t; err=%v", isNetwork, tc.truncated, err)
+				}
+				if tc.truncated {
+					if !errors.Is(err, io.ErrUnexpectedEOF) {
+						t.Errorf("lost underlying unexpected EOF: %v", err)
+					}
+					if msg := FormatError(err, false); !strings.Contains(msg, "network connection") {
+						t.Errorf("FormatError = %q, want network guidance", msg)
+					}
+				} else if tc.status >= 400 {
+					var httpErr *HTTPError
+					if !errors.As(err, &httpErr) || httpErr.StatusCode != tc.status {
+						t.Errorf("HTTP error classification lost: %v", err)
+					}
+				} else if tc.body == "" {
+					if !errors.Is(err, io.EOF) || !strings.HasPrefix(err.Error(), "decode upload response: ") {
+						t.Errorf("plain EOF or existing context lost: %v", err)
+					}
+				} else {
+					var syntaxErr *json.SyntaxError
+					if !errors.As(err, &syntaxErr) || !strings.HasPrefix(err.Error(), "decode upload response: ") {
+						t.Errorf("JSON syntax error or existing context lost: %v", err)
+					}
+				}
+			})
+		}
+	}
+}
 
 // TestHelperStatusErrorsAreClassified is an integration test that drives the
 // real client helpers against a fake server and asserts the error they return

@@ -1,3 +1,5 @@
+import { READING_COLUMN } from "../../layout/reading-column";
+
 /**
  * Conversation-column geometry — ONE definition shared by every layer of the
  * chat body (message rows, status banners, composer) so their left and right
@@ -9,8 +11,8 @@
  *     <div className={CHAT_COLUMN}>   // the reading column itself
  *
  * Gutter OUTSIDE the cap makes the gutter a floor: it only bites while the
- * surface is narrower than the cap, and past that the column parks at
- * `max-w-4xl` and centers. The message list used to nest these the other way
+ * surface is narrower than the cap, and past that the column parks at its
+ * cap and centers. The message list used to nest these the other way
  * round (`mx-auto max-w-4xl px-5` on a single element), which capped its text at
  * 40px narrower than the composer card on any surface wider than ~936px — the
  * two edges visibly failed to line up.
@@ -22,9 +24,10 @@
  * gutter just because the window behind it is wide. Hosts therefore have to mark
  * the chat column `@container`; ChatPage, ChatWindow, and the agent builder do.
  * Without that ancestor the `@` variants simply never match and the column keeps
- * the base 20px, which is the old behavior rather than a broken layout.
+ * the base 20px, which is the old behavior rather than a broken layout. The
+ * column's own cap keys off the same container (see READING_COLUMN).
  */
 export const CHAT_GUTTER = "px-5 @2xl:px-8 @4xl:px-12";
 
 /** The reading column: centered, capped, full-width below the cap. */
-export const CHAT_COLUMN = "mx-auto w-full max-w-4xl";
+export const CHAT_COLUMN = READING_COLUMN;

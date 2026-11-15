@@ -9,7 +9,7 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from "react";
-import { WSClient } from "../api/ws-client";
+import { WSClient, type WSConnectionStatus } from "../api/ws-client";
 import type { WSEventType, StorageAdapter } from "../types";
 import type { ClientIdentity } from "../platform/types";
 import type { StoreApi, UseBoundStore } from "zustand";
@@ -20,14 +20,20 @@ import {
   subscribeToCurrentSlug,
 } from "../platform/workspace-storage";
 import { useLocalSearchIndexSync } from "../search-index/hooks";
+import { useGitHubConnectionStore } from "../github/connection-store";
 import { createLogger } from "../logger";
 import { useRealtimeSync, type RealtimeSyncStores } from "./use-realtime-sync";
 
 type EventHandler = (payload: unknown, actorId?: string, actorType?: string) => void;
 
+/** `offline` means no connection is wanted: signed out or outside a workspace. */
+export type WSStatus = WSConnectionStatus | "offline";
+
 interface WSContextValue {
   subscribe: (event: WSEventType, handler: EventHandler) => () => void;
   onReconnect: (callback: () => void) => () => void;
+  subscribeStatus: (listener: () => void) => () => void;
+  getStatus: () => WSStatus;
 }
 
 const WSContext = createContext<WSContextValue | null>(null);
@@ -70,6 +76,8 @@ export function WSProvider({
   );
   const wsId = useSyncExternalStore(subscribeToCurrentSlug, getCurrentWsId, () => null);
   const [wsClient, setWsClient] = useState<WSClient | null>(null);
+
+  useEffect(() => () => useGitHubConnectionStore.getState().reset(), [user?.id]);
 
   // Depend on identity primitives instead of the object reference so a parent
   // re-render that passes a new `{ platform, version, os }` literal does not
@@ -146,8 +154,23 @@ export function WSProvider({
     [wsClient],
   );
 
+  const subscribeStatus = useCallback(
+    (listener: () => void) => {
+      if (!wsClient) return () => {};
+      return wsClient.onStatusChange(listener);
+    },
+    [wsClient],
+  );
+
+  const getStatus = useCallback(
+    (): WSStatus => wsClient?.getStatus() ?? "offline",
+    [wsClient],
+  );
+
   return (
-    <WSContext.Provider value={{ subscribe, onReconnect: onReconnectCb }}>
+    <WSContext.Provider
+      value={{ subscribe, onReconnect: onReconnectCb, subscribeStatus, getStatus }}
+    >
       {children}
     </WSContext.Provider>
   );

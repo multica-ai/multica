@@ -10,9 +10,10 @@ import {
   MoreHorizontal,
   Newspaper,
   Users,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { toast } from "sonner";
 import { useAuthStore } from "@multica/core/auth";
+import { prefersReducedMotion } from "@multica/core/appearance";
 import {
   agentCompletedIssueCountOptions,
   needsSourceBackfill,
@@ -22,6 +23,7 @@ import {
   type Source,
 } from "@multica/core/onboarding";
 import { useCurrentWorkspace } from "@multica/core/paths";
+import { useSessionPromptStore } from "@multica/core/session-prompt";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Dialog,
@@ -54,39 +56,13 @@ const EMPTY_BACKFILL: Pick<
 };
 
 /**
- * Source-attribution prompt for onboarded users whose questionnaire
- * never recorded a source. The question is not asked during
- * onboarding at all — this prompt is its only collection point.
- * Rendered as a Dialog overlay on top of the workspace shell — the
- * user keeps their workspace context visible behind a dimmed backdrop.
+ * Collect missing acquisition attribution after onboarding has delivered value.
+ * User eligibility and workspace completion thresholds gate opening; latch the
+ * open decision so a successful write cannot interrupt the closing animation.
  *
- * Self-mounted: the caller drops `<SourceBackfillModal />` once inside
- * the dashboard layout. Two gates decide whether the dialog opens:
- *
- *   1. User-level: `needsSourceBackfill(user, dismissCount)` — no
- *      source recorded, never declined, dismiss cap not reached.
- *   2. Workspace-level: agents (or squads) have completed at least
- *      SOURCE_BACKFILL_MIN_AGENT_DONE_ISSUES issues here. Attribution
- *      is a zero-payoff ask for the user, so it waits until Multica
- *      has visibly delivered value. The count query only runs while
- *      gate 1 passes, so settled users never pay for it.
- *
- * Once the dialog opens we capture the open decision in a ref so
- * subsequent re-renders that flip the predicate to false (e.g. after
- * submit, before refreshMe round-trips) don't tear the dialog away
- * mid-animation.
- *
- * Three exit shapes:
- *   - Submit         → PATCH merged questionnaire, terminal.
- *   - Skip           → PATCH `source_skipped=true`, terminal (never
- *                       ask again).
- *   - Close X / ESC  → bump per-user dismiss counter; predicate
- *                       returns false on next mount once the cap is
- *                       reached.
- *
- * State persistence is intentional:
- *   - source / source_other: server (JSONB merged with prior answers).
- *   - dismissCount: per-user localStorage, view-layer only.
+ * Submit and explicit Skip persist terminal server answers. Dismissal only raises
+ * a per-user local counter. Merge questionnaire fields rather than replacing prior
+ * answers, and skip the completion-count query once user eligibility is settled.
  */
 export function SourceBackfillModal() {
   const user = useAuthStore((s) => s.user);
@@ -133,12 +109,9 @@ export function SourceBackfillModal() {
     // the modal floats in, so it doesn't feel like a hard block. Common
     // delight pattern — ~700ms is short enough that nobody starts an
     // interaction first but long enough that the workspace renders.
-    // Honour `prefers-reduced-motion: reduce`: those users have opted
-    // out of incidental animations, so open immediately.
-    const reducedMotion =
-      typeof window !== "undefined" &&
-      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
-    if (reducedMotion) {
+    // People who reduce motion have opted out of incidental animations,
+    // so open immediately.
+    if (prefersReducedMotion()) {
       openedForUserRef.current = user.id;
       setOpen(true);
       return;
@@ -150,6 +123,10 @@ export function SourceBackfillModal() {
     }, 700);
     return () => window.clearTimeout(timer);
   }, [user, shouldPrompt]);
+
+  useEffect(() => {
+    if (open) useSessionPromptStore.getState().markPrompted();
+  }, [open]);
 
   return (
     <Dialog

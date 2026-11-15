@@ -33,10 +33,11 @@ import type {
   Agent,
   Squad,
 } from "@multica/core/types";
-import { ListTodo } from "lucide-react";
+import { ListTodo } from "@multica/ui/icons";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { StatusIcon } from "../../issues/components/status-icon";
 import { ProjectIcon } from "../../projects/components/project-icon";
+import { ArchivedProjectTag } from "../../projects/components/project-archive";
 import { useT } from "../../i18n";
 import { Badge } from "@multica/ui/components/ui/badge";
 import {
@@ -66,9 +67,7 @@ import {
 import { isTriggerArmedAt } from "./suggestion-trigger-arming";
 import { blockedReasonLabel } from "../../issues/blocked-trigger-copy";
 
-// ---------------------------------------------------------------------------
 // Types
-// ---------------------------------------------------------------------------
 
 export interface MentionItem {
   id: string;
@@ -91,6 +90,8 @@ export interface MentionItem {
   icon?: string | null;
   /** Project status snapshot for recent/current project rendering */
   projectStatus?: ProjectStatus;
+  /** Archived projects stay mentionable; search ranks them last. */
+  projectArchived?: boolean;
   /** Present when the target should remain discoverable but cannot be selected. */
   disabledReason?: "agent_runtime_required";
 }
@@ -106,9 +107,7 @@ export interface MentionListRef {
   onKeyDown: (props: { event: KeyboardEvent }) => boolean;
 }
 
-// ---------------------------------------------------------------------------
 // Group items by section
-// ---------------------------------------------------------------------------
 
 interface MentionGroup {
   label: string;
@@ -150,9 +149,7 @@ function groupItems(items: MentionItem[], query: string): MentionGroup[] {
   return groups;
 }
 
-// ---------------------------------------------------------------------------
 // MentionList — the popup rendered inside the editor
-// ---------------------------------------------------------------------------
 
 const MAX_ITEMS = 20;
 const SERVER_ISSUE_SEARCH_LIMIT = 20;
@@ -316,6 +313,7 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
                   q,
                   limit: SERVER_CONTEXT_SEARCH_LIMIT,
                   include_closed: true,
+                  include_archived: true,
                   signal: controller.signal,
                 }),
               ]);
@@ -505,6 +503,8 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
     // variant only differs in width / max-height / chrome.
     return (
       <div
+        data-mc="editor-menu"
+        data-kind="mention"
         className={cn(
           "flex flex-col overflow-y-auto overscroll-contain border bg-popover py-1",
           // Height budget: clamp to whichever is smaller — the design max or the
@@ -531,9 +531,7 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
   },
 );
 
-// ---------------------------------------------------------------------------
 // MentionRow — single item in the list
-// ---------------------------------------------------------------------------
 
 function MentionRow({
   item,
@@ -617,6 +615,7 @@ function MentionRow({
             </span>
           )}
         </span>
+        {item.projectArchived && <ArchivedProjectTag />}
         {projectStatusCfg && (
           <span className={`${projectStatusCfg.dotColor} ml-auto size-1.5 shrink-0 rounded-full`} />
         )}
@@ -674,9 +673,7 @@ function MentionRow({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Suggestion config factory
-// ---------------------------------------------------------------------------
 
 function issueToMention(
   i: Pick<Issue, "id" | "identifier" | "title" | "status"> & Partial<Pick<Issue, "status_category">>,
@@ -691,7 +688,14 @@ function issueToMention(
   };
 }
 
-function projectToMention(p: { id: string; title: string; description?: string | null; icon?: string | null; status?: ProjectStatus }): MentionItem {
+function projectToMention(p: {
+  id: string;
+  title: string;
+  description?: string | null;
+  icon?: string | null;
+  status?: ProjectStatus;
+  archived_at?: string | null;
+}): MentionItem {
   return {
     id: p.id,
     label: p.title,
@@ -699,6 +703,7 @@ function projectToMention(p: { id: string; title: string; description?: string |
     description: p.description ?? undefined,
     icon: p.icon ?? null,
     projectStatus: p.status,
+    projectArchived: !!p.archived_at,
   };
 }
 

@@ -23,7 +23,7 @@ function storageKey(userId: string): string {
   return `${STORAGE_PREFIX}${userId}`;
 }
 
-function readCount(userId: string | null | undefined): number {
+export function readSourceBackfillDismissCount(userId: string | null | undefined): number {
   if (!userId) return 0;
   if (typeof window === "undefined") return 0;
   try {
@@ -66,7 +66,7 @@ export function useSourceBackfillDismissCount(
         off();
       };
     },
-    () => readCount(userId),
+    () => readSourceBackfillDismissCount(userId),
     () => 0,
   );
 
@@ -74,7 +74,7 @@ export function useSourceBackfillDismissCount(
     if (!userId) return;
     if (typeof window === "undefined") return;
     try {
-      const next = readCount(userId) + 1;
+      const next = readSourceBackfillDismissCount(userId) + 1;
       window.localStorage.setItem(storageKey(userId), String(next));
       notify();
     } catch {

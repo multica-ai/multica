@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, Cpu, Loader2, Plus, Check, Info } from "lucide-react";
+import { ChevronDown, Cpu, Loader2, Plus, Check, Info } from "@multica/ui/icons";
 import {
   refreshRuntimeModels,
   runtimeModelsOptions,
@@ -34,15 +34,21 @@ import { ModelSearchHeader } from "./model-search-header";
 // needs when their runtime could not enumerate anything (MUL-6606).
 export function ModelDropdown({
   runtimeId,
+  workspaceSlug,
   runtimeOnline,
   value,
   onChange,
+  onAutomaticChange = onChange,
   disabled,
 }: {
   runtimeId: string | null;
+  /** Target workspace when rendered before a workspace route is active. */
+  workspaceSlug?: string;
   runtimeOnline: boolean;
   value: string;
   onChange: (value: string) => void;
+  /** Automatic value cleanup, separate from explicit user selections. */
+  onAutomaticChange?: (value: string) => void;
   disabled?: boolean;
 }) {
   const { t } = useT("agents");
@@ -51,7 +57,7 @@ export function ModelDropdown({
   const [search, setSearch] = useState("");
 
   const modelsQuery = useQuery(
-    runtimeModelsOptions(runtimeOnline ? runtimeId : null),
+    runtimeModelsOptions(runtimeOnline ? runtimeId : null, workspaceSlug),
   );
 
   const supported = modelsQuery.data?.supported ?? true;
@@ -80,9 +86,9 @@ export function ModelDropdown({
   // persist a ghost configuration that never takes effect.
   useEffect(() => {
     if (!supported && value !== "") {
-      onChange("");
+      onAutomaticChange("");
     }
-  }, [supported, value, onChange]);
+  }, [supported, value, onAutomaticChange]);
 
   const filtered = useMemo(() => {
     if (!search.trim()) return grouped;
@@ -113,7 +119,7 @@ export function ModelDropdown({
 
   const refresh = () => {
     if (!runtimeId || !runtimeOnline) return;
-    void refreshRuntimeModels(queryClient, runtimeId).catch(() => {
+    void refreshRuntimeModels(queryClient, runtimeId, workspaceSlug).catch(() => {
       // React Query owns the error state rendered below. Swallow the returned
       // promise rejection so a failed manual refresh is not also unhandled.
     });
@@ -170,7 +176,7 @@ export function ModelDropdown({
                 two pickers sit side-by-side; inline-in-flex vs block-line-
                 box height calc would otherwise leave them ~1px misaligned. */}
             <div className="flex items-center gap-2">
-              <span className="truncate font-medium">{triggerLabel}</span>
+              <span className="min-w-0 truncate font-medium">{triggerLabel}</span>
             </div>
             {value && (
               <div className="truncate text-caption text-muted-foreground">
@@ -286,7 +292,7 @@ export function ModelDropdown({
                 className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-body text-primary transition-colors hover:bg-accent/50"
               >
                 <Plus className="h-4 w-4 shrink-0" />
-                <span className="truncate">
+                <span className="min-w-0 truncate">
                   {t(($) => $.pickers.model_custom_use, { value: trimmedSearch })}
                 </span>
               </button>

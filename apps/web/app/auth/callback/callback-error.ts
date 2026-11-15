@@ -3,6 +3,7 @@ import { ApiError, clientErrorMessage, errorCode } from "@multica/core/api";
 export type CallbackError =
   | {
       kind:
+        | "invalid_cli_callback"
         | "missing_code"
         | "access_denied"
         | "login_failed"

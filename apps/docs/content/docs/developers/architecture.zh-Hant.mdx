@@ -1,0 +1,131 @@
+---
+title: 專案架構
+description: 瞭解 Multica 的客戶端、Go 服務、執行守護程序和共享前端包如何協作。
+---
+
+Multica 由一個 Go backend、多種客戶端和執行在執行電腦上的守護程序組成。PostgreSQL 儲存協作資料；守護程序領取 task，並呼叫本機的 AI 程式設計工具。
+
+本頁聚焦實現，因此正文中的 **task** 指產品 **Run**（執行）背後的內部調度、API 和資料庫實體。介面與產品文件統一稱為 Run；`TaskService`、`task_id` 等標識為相容性保持不變。
+
+```text
+Web / Desktop / Mobile / CLI
+ │
+ HTTP + WebSocket
+ │
+ Go API ───────── PostgreSQL
+ │
+ daemon WebSocket
+ │
+ 本機守護程序 ─── AI 程式設計工具
+```
+
+面向產品使用者的解釋見 [Multica 的工作方式](/how-multica-works)。本頁關注程式碼如何分層。
+
+## 倉庫結構
+
+| 目錄 | 職責 | 主要技術 |
+| --- | --- | --- |
+| `server/` | API、認證、task 調度、整合、CLI 和守護程序 | Go、Chi、sqlc、gorilla/websocket |
+| `apps/web/` | 瀏覽器客戶端和 landing page | Next.js App Router |
+| `apps/desktop/` | 桌面客戶端和本機程序管理 | Electron、electron-vite |
+| `apps/mobile/` | 獨立的 iOS 客戶端 | Expo、React Native |
+| `apps/docs/` | 多語言文件站 | Next.js、Fumadocs |
+| `packages/core/` | API client、類型、查詢、mutation 和平臺無關業務邏輯 | TanStack Query、Zustand |
+| `packages/ui/` | 不包含業務邏輯的基礎 UI | shadcn、Base UI |
+| `packages/views/` | Web 與 Desktop 共用的業務頁面和元件 | React |
+| `packages/tsconfig/`、`packages/eslint-config/` | 共享工具配置 | TypeScript、ESLint |
+
+共享包直接匯出 `.ts` 和 `.tsx` 原始檔，由使用它們的應用編譯。依賴方向是 `views → core + ui`；`core` 和 `ui` 互不依賴。
+
+## Web 與 Desktop 的程式碼共享
+
+Web 和 Desktop 共用三層：
+
+1. `packages/core` 處理 API、快取、權限和平臺無關狀態；
+2. `packages/ui` 提供基礎元件；
+3. `packages/views` 組合業務頁面。
+
+路由、cookie 和 Electron IPC 等平臺能力留在應用層。共享頁面透過 `NavigationAdapter` 導航，不直接匯入 `next/*` 或 `react-router-dom`。
+
+例如，一項 Web 與 Desktop 都需要的任務功能通常會涉及：
+
+```text
+packages/core/issues/ 查詢、mutation、快取更新
+packages/views/issues/ 頁面和業務元件
+apps/web/platform/ Next.js 路由適配
+apps/desktop/.../platform/ Electron 路由適配
+```
+
+Mobile 不復用這些 React 頁面。它可以匯入 `@multica/core` 的類型和純函式，但擁有自己的 UI、query key、狀態、實時訂閱和發布流程。
+
+## 前端狀態
+
+服務端資料和客戶端狀態分開管理：
+
+- **TanStack Query** 儲存任務、AI 代理、成員、收件箱等服務端資料；
+- **Zustand** 儲存篩選條件、草稿、彈窗和佈局等客戶端狀態；
+- 當前工作區由路由決定，只在平臺層為請求、持久化命名空間和重連做必要映像；
+- React Context 只傳遞工作區 ID、導航適配器等平臺 plumbing。
+
+WebSocket 事件應更新或失效 TanStack Query cache，不能把服務端物件複製進 Zustand。建立、刪除或離開工作區這類會導航的 mutation，需要等待服務端確認後再清理本地狀態。
+
+API 返回值在 `packages/core/api/` 邊界透過 zod schema 解析。已安裝的 Desktop 可能連接更新的 backend，因此不能直接把網路 JSON 強制轉換成 TypeScript 類型。
+
+## Backend 分層
+
+主要入口位於 `server/cmd/`：
+
+| 入口 | 作用 |
+| --- | --- |
+| `server` | 啟動 HTTP API、WebSocket、調度器和整合 worker |
+| `multica` | CLI 與本機守護程序 |
+| `migrate` | 執行資料庫 migration |
+| `backfill_*` | 特定版本的資料回填工具 |
+
+請求通常按以下方向流動：
+
+```text
+router → middleware → handler → service → sqlc query → PostgreSQL
+```
+
+- `internal/middleware/` 處理認證、工作區和請求邊界；
+- `internal/handler/` 解析 HTTP 輸入並生成響應；
+- `internal/service/` 負責跨查詢的業務流程和事務；
+- `pkg/db/queries/` 儲存手寫 SQL；
+- `pkg/db/generated/` 由 sqlc 生成，不能直接編輯；
+- `internal/integrations/` 處理 GitHub、Slack、飛書等外部事件；
+- `internal/storage/` 處理本地或 S3 附件。
+
+PostgreSQL 是業務資料的權威來源。Redis 是可選元件，用於跨實例實時事件、快取或臨時協調；沒有配置時，單實例開發環境使用程序內實現。
+
+## 實時連接
+
+Multica 有兩條不同的 WebSocket 路徑：
+
+- `internal/realtime/` 把任務、評論、收件箱等變化推送給使用者客戶端；
+- `internal/daemonws/` 連接守護程序，用於喚醒執行時和執行 daemon RPC。
+
+WebSocket 負責降低延遲，資料庫仍然是最終狀態。客戶端重連後需要通過查詢重新校準；守護程序也保留輪詢路徑，避免一次斷線讓 queued task 永久停住。
+
+## 一次執行的程式碼路徑
+
+1. 使用者分配任務、提及 AI 代理，或由自動化觸發；
+2. `TaskService` 建立 queued task，並通知對應執行時；
+3. 守護程序通過 daemon API 領取 task；
+4. 服務端簽發綁定 task 和 AI 代理的臨時憑據；
+5. 守護程序準備本地目錄，呼叫 `pkg/agent` 中對應的 provider backend；
+6. 工具在本地執行，守護程序上傳進度、訊息和最終狀態；
+7. 服務端更新 task 與任務，並透過實時事件重新整理客戶端。
+
+provider 適配層統一了不同 AI 程式設計工具的啟動、流式事件、取消和用量資料，但本地目錄與會話仍由守護程序管理。
+
+## 多工作區邊界
+
+業務查詢必須限定 `workspace_id`，請求進入工作區路由前會檢查成員身份。`X-Workspace-ID` 選擇當前工作區，但不能替代權限檢查。
+
+任務的負責人是多態關係，可以指向成員、AI 代理或小隊。新增查詢、快取 key 或實時事件時，都要保留工作區與負責人類型，不能只按資源 ID 假設全局唯一上下文。
+
+## 接下來
+
+- [參與開發](/developers/contributing) — 本地環境、worktree 和測試位置。
+- [開發規範](/developers/conventions) — 命名、術語和中文文案的倉庫契約。

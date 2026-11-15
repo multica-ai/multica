@@ -3,8 +3,9 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { MoreHorizontal, Pause, Play, Unplug } from "lucide-react";
+import { MoreHorizontal, Pause, Play, Unplug } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import {
   AlertDialog,
@@ -43,6 +44,7 @@ import { GitHubMark } from "./github-mark";
 import { VCSConnectionRows } from "./code-vcs";
 import { HostMark, HostStatus } from "./code-host";
 import { RepositoriesSection } from "./repositories-section";
+import { useConnectGitHub } from "./use-connect-github";
 import { PRMergeStatusRow } from "./pr-merge-status-row";
 
 type GitHubSettingsKey =
@@ -80,7 +82,8 @@ export function CodeTab() {
 
   const flags = deriveGitHubSettings(workspace);
   const [savingKey, setSavingKey] = useState<GitHubSettingsKey | null>(null);
-  const [connecting, setConnecting] = useState(false);
+  const githubConnection = useConnectGitHub(wsId);
+  const { connecting, connect: handleConnect } = githubConnection;
   const [disconnectTarget, setDisconnectTarget] = useState<string | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
 
@@ -100,22 +103,6 @@ export function CodeTab() {
       toast.error(e instanceof Error ? e.message : t(($) => $.github.toast_failed));
     } finally {
       setSavingKey(null);
-    }
-  }
-
-  async function handleConnect() {
-    setConnecting(true);
-    try {
-      const resp = await api.getGitHubConnectURL(wsId);
-      if (!resp.configured || !resp.url) {
-        toast.error(t(($) => $.github.toast_not_configured));
-        return;
-      }
-      window.open(resp.url, "_blank", "noopener");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : t(($) => $.github.toast_open_failed));
-    } finally {
-      setConnecting(false);
     }
   }
 
@@ -220,10 +207,10 @@ export function CodeTab() {
                   <DropdownMenu>
                     <DropdownMenuTrigger
                       render={
-                        <Button
+                        <IconButton
                           variant="ghost"
                           size="icon-sm"
-                          aria-label={t(($) => $.code.github_actions)}
+                          label={t(($) => $.code.github_actions)}
                         />
                       }
                     >
@@ -261,7 +248,7 @@ export function CodeTab() {
         </SettingsCard>
       </SettingsSection>
 
-      <RepositoriesSection />
+      <RepositoriesSection connection={githubConnection} />
 
       <SettingsSection
         title={t(($) => $.code.pr_linking_title)}

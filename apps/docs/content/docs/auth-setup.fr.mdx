@@ -4,6 +4,7 @@ description: Configurez les codes de vérification par e-mail, la connexion avec
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
 
 Par défaut, Multica connecte les utilisateurs au moyen de codes de vérification envoyés par e-mail ; Google OAuth peut être ajouté en complément. Les utilisateurs existants peuvent toujours se reconnecter — les restrictions d'inscription décident uniquement si de nouveaux comptes peuvent être créés.
 
@@ -15,15 +16,28 @@ Les e-mails peuvent être envoyés via Resend ou SMTP. Lorsque les deux sont con
 
 ### Utiliser Resend
 
-1. Vérifiez un domaine d'envoi et créez une clé d'API sur [Resend](https://resend.com/).
-2. Définissez :
+<Steps>
+<Step>
 
-   ```dotenv
-   RESEND_API_KEY=re_xxxxxxxxxxxxxxxx
-   RESEND_FROM_EMAIL=noreply@example.com
-   ```
+Vérifiez un domaine d'envoi et créez une clé d'API sur [Resend](https://resend.com/).
 
-3. Redémarrez le service API.
+</Step>
+<Step>
+
+Définissez :
+
+```dotenv
+RESEND_API_KEY=re_xxxxxxxxxxxxxxxx
+RESEND_FROM_EMAIL=noreply@example.com
+```
+
+</Step>
+<Step>
+
+Redémarrez le service API.
+
+</Step>
+</Steps>
 
 `RESEND_FROM_EMAIL` doit appartenir à un domaine déjà vérifié dans Resend.
 
@@ -57,7 +71,7 @@ SMTP_EHLO_NAME=mail.example.com
 
 ### Comportement sans service d'e-mail
 
-Le serveur démarre quand même, mais les codes de vérification et les liens d'invitation sont uniquement écrits dans le journal ; aucun e-mail n'est envoyé. Cela convient au développement local, pas à la production.
+Le serveur démarre quand même, mais les codes de vérification et les liens d'invitation sont uniquement écrits dans le journal ; aucun e-mail n'est envoyé. Ce mode ne convient qu'au développement local.
 
 Le journal de démarrage indique si le mode actuel est `Resend API`, `SMTP relay` ou `DEV mode`.
 
@@ -78,22 +92,38 @@ N'activez pas de code fixe sur une instance accessible publiquement. La combinai
 
 ## Connexion avec Google
 
-1. Créez un client OAuth 2.0 dans la [Google Cloud Console](https://console.cloud.google.com/).
-2. Ajoutez l'URL de rappel du frontend Multica dans **Authorized redirect URIs** (« URI de redirection autorisés » dans la console en français) :
+<Steps>
+<Step>
 
-   ```text
-   https://multica.example.com/auth/callback
-   ```
+Créez un client OAuth 2.0 dans la [Google Cloud Console](https://console.cloud.google.com/).
 
-3. Définissez :
+</Step>
+<Step>
 
-   ```dotenv
-   GOOGLE_CLIENT_ID=xxxxx.apps.googleusercontent.com
-   GOOGLE_CLIENT_SECRET=GOCSPX-xxxxxxxxxxxxxxx
-   GOOGLE_REDIRECT_URI=https://multica.example.com/auth/callback
-   ```
+Ajoutez l'URL de rappel du frontend Multica dans **Authorized redirect URIs** (« URI de redirection autorisés » dans la console en français) :
 
-4. Redémarrez le service API.
+```text
+https://multica.example.com/auth/callback
+```
+
+</Step>
+<Step>
+
+Définissez :
+
+```dotenv
+GOOGLE_CLIENT_ID=xxxxx.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=GOCSPX-xxxxxxxxxxxxxxx
+GOOGLE_REDIRECT_URI=https://multica.example.com/auth/callback
+```
+
+</Step>
+<Step>
+
+Redémarrez le service API.
+
+</Step>
+</Steps>
 
 Les URL indiquées dans la Google Console et dans `GOOGLE_REDIRECT_URI` doivent correspondre exactement, y compris le protocole, le port et la barre oblique finale. Une fois la configuration terminée, la page de connexion affiche un bouton **Continuer avec Google** ; l'image du frontend n'a pas besoin d'être reconstruite.
 
@@ -144,7 +174,7 @@ La révocation d'une invitation ne supprime pas un compte déjà créé grâce �
 
 Les sessions sont glissantes. La durée de vie ci-dessous est une limite d'**inactivité**, et non un compte à rebours depuis la connexion : dès qu'il reste moins de la moitié de cette durée à une session, la requête suivante la réémet avec une durée de vie complète, si bien qu'un compte utilisé en continu n'est jamais déconnecté selon un calendrier fixe. Il n'y a pas de plafond absolu.
 
-Cette limite est asymétrique. Une session n'est réémise qu'une fois passée la moitié de sa durée de vie ; une session utilisée pour la dernière fois alors qu'il lui restait plus de la moitié de sa durée de vie n'est donc pas prolongée — la période d'inactivité toujours tolérée correspond à la moitié de la valeur ci-dessous, et non à sa totalité.
+Cette limite est asymétrique. Une session n'est réémise qu'une fois passée la moitié de sa durée de vie ; une session utilisée pour la dernière fois alors qu'il lui restait plus de la moitié de sa durée de vie n'est donc pas prolongée. La période d'inactivité garantie ne représente que la moitié de la valeur ci-dessous.
 
 Ajustez-la avec `AUTH_TOKEN_TTL`, qui accepte une durée Go ou un nombre entier positif de secondes :
 
@@ -154,7 +184,7 @@ AUTH_TOKEN_TTL=720h
 
 La valeur minimale est `60s` ; toute valeur plus courte est ramenée à ce minimum et un avertissement est journalisé au démarrage. En dessous, la cadence de renouvellement que le serveur en déduit passerait sous le plancher que les clients lui appliquent, et les clients vérifieraient le renouvellement moins souvent que la session ne peut survivre.
 
-Redémarrez le service API après l'avoir modifiée. La valeur s'applique aux sessions émises ou réémises ensuite — comme les sessions sont glissantes, une session existante adopte la nouvelle durée de vie lors de sa prochaine réémission.
+Redémarrez le service API après l'avoir modifiée. La valeur s'applique aux sessions émises ou réémises ensuite. Comme les sessions sont glissantes, une session existante adopte la nouvelle durée de vie lors de sa prochaine réémission.
 
 ## Étapes suivantes
 

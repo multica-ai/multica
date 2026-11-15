@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 
 vi.mock("../i18n", () => ({
   useT: () => ({
@@ -50,9 +50,9 @@ describe("AttachmentCard — chrome row", () => {
         onDownload={() => {}}
       />,
     );
-    expect(screen.queryByTitle("Preview")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Preview" })).toBeNull();
     // Download stays available — the underlying URL is still reachable.
-    expect(screen.getByTitle("Download")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Download" })).toBeTruthy();
   });
 
   it("shows the Eye button for an html source when an attachmentId is available", () => {
@@ -66,7 +66,7 @@ describe("AttachmentCard — chrome row", () => {
         onDownload={() => {}}
       />,
     );
-    expect(screen.getByTitle("Preview")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Preview" })).toBeTruthy();
   });
 
   it("shows the Eye button for a URL-only pdf source (modal renders pdfs directly from URL)", () => {
@@ -82,7 +82,7 @@ describe("AttachmentCard — chrome row", () => {
         onDownload={() => {}}
       />,
     );
-    expect(screen.getByTitle("Preview")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Preview" })).toBeTruthy();
   });
 });
 
@@ -99,7 +99,7 @@ describe("AttachmentCard — Eye / Download buttons", () => {
         onDownload={() => {}}
       />,
     );
-    fireEvent.mouseDown(screen.getByTitle("Preview"));
+    fireEvent.mouseDown(screen.getByRole("button", { name: "Preview" }));
     expect(onPreview).toHaveBeenCalled();
   });
 
@@ -115,7 +115,7 @@ describe("AttachmentCard — Eye / Download buttons", () => {
         onDownload={onDownload}
       />,
     );
-    fireEvent.mouseDown(screen.getByTitle("Download"));
+    fireEvent.mouseDown(screen.getByRole("button", { name: "Download" }));
     expect(onDownload).toHaveBeenCalled();
   });
 
@@ -131,8 +131,8 @@ describe("AttachmentCard — Eye / Download buttons", () => {
         onDownload={() => {}}
       />,
     );
-    expect(screen.queryByTitle("Preview")).toBeNull();
-    expect(screen.queryByTitle("Download")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Preview" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Download" })).toBeNull();
     // The mock `t()` returns the i18n template as-is; the production t-fn
     // interpolates {{filename}} → "report.html". Asserting the template
     // proves the uploading branch was selected without depending on the
@@ -214,5 +214,93 @@ describe("AttachmentFileCard — a file in a grid of cards (MUL-7649)", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Remove attachment" }));
     expect(onDelete).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe.each([
+  {
+    layout: "row",
+    activate: fireEvent.mouseDown,
+    attachment: (onDownload: () => void | Promise<unknown>) => (
+      <AttachmentCard
+        filename="bundle.zip"
+        href="https://example.test/bundle.zip"
+        onPreview={vi.fn()}
+        onDownload={onDownload}
+      />
+    ),
+  },
+  {
+    layout: "card",
+    activate: fireEvent.click,
+    attachment: (onDownload: () => void | Promise<unknown>) => (
+      <AttachmentFileCard
+        filename="bundle.zip"
+        canPreview={false}
+        canDownload
+        onPreview={vi.fn()}
+        onDownload={onDownload}
+      />
+    ),
+  },
+])("$layout download feedback", ({ attachment, activate }) => {
+  it("shows pending feedback and blocks repeat activation until completion", async () => {
+    const pending = Promise.withResolvers<void>();
+    const onDownload = vi.fn(() => pending.promise);
+    render(attachment(onDownload));
+    const button = screen.getByRole("button", { name: "Download" });
+
+    activate(button);
+
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("aria-busy", "true");
+    expect(button.querySelector(".animate-spin")).toBeInTheDocument();
+    activate(button);
+    expect(onDownload).toHaveBeenCalledOnce();
+
+    await act(async () => pending.resolve());
+
+    expect(button).toBeEnabled();
+    expect(button).toHaveAttribute("aria-busy", "false");
+    expect(button.querySelector(".animate-spin")).toBeNull();
+  });
+
+  it("keeps sibling attachments available while preparing a download", async () => {
+    const pending = Promise.withResolvers<void>();
+    const onOtherDownload = vi.fn();
+    render(<>{attachment(() => pending.promise)}{attachment(onOtherDownload)}</>);
+    const [button, other] = screen.getAllByRole("button", { name: "Download" });
+
+    activate(button!);
+    activate(other!);
+
+    expect(onOtherDownload).toHaveBeenCalledOnce();
+    await act(async () => pending.resolve());
+  });
+});
+
+describe("AttachmentFileCard — whole-card download", () => {
+  it("shares the download button's pending guard with the whole-card action", async () => {
+    const pending = Promise.withResolvers<void>();
+    const onDownload = vi.fn(() => pending.promise);
+    render(
+      <AttachmentFileCard
+        filename="bundle.zip"
+        canPreview={false}
+        canDownload
+        onPreview={vi.fn()}
+        onDownload={onDownload}
+      />,
+    );
+    const card = screen.getByRole("button", { name: "bundle.zip" });
+    const button = screen.getByRole("button", { name: "Download" });
+
+    fireEvent.click(card);
+
+    expect(card).toBeDisabled();
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(onDownload).toHaveBeenCalledOnce();
+    await act(async () => pending.resolve());
   });
 });

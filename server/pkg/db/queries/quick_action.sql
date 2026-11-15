@@ -40,13 +40,14 @@ RETURNING *;
 
 -- name: UpdateQuickAction :one
 -- COALESCE-on-narg partial update: an omitted field keeps its stored value.
--- assignee_type and assignee_id move together (the handler requires both), so
--- a type swap can never land with a mismatched id.
+-- The handler resolves the resulting assignee pair and writes both columns.
+-- A supplied type also permits clearing the UUID for a targetless action.
 UPDATE quick_action SET
     name = COALESCE(sqlc.narg('name'), name),
     description = COALESCE(sqlc.narg('description'), description),
     assignee_type = COALESCE(sqlc.narg('assignee_type'), assignee_type),
-    assignee_id = COALESCE(sqlc.narg('assignee_id'), assignee_id),
+    assignee_id = CASE WHEN sqlc.narg('assignee_type')::text IS NOT NULL
+        THEN sqlc.narg('assignee_id')::uuid ELSE assignee_id END,
     prompt = COALESCE(sqlc.narg('prompt'), prompt),
     visibility = COALESCE(sqlc.narg('visibility'), visibility),
     status = COALESCE(sqlc.narg('status'), status),

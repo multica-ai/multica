@@ -28,6 +28,8 @@ export interface IssueSearchParams {
   limit?: number;
   offset?: number;
   include_closed?: boolean;
+  /** Projects only: archived projects are left out unless asked for. */
+  include_archived?: boolean;
 }
 
 export type ProjectSearchParams = IssueSearchParams;
@@ -66,6 +68,7 @@ interface CommentEntry {
 interface ProjectEntry {
   id: string;
   status: string;
+  archived: boolean;
   title: string;
   description: string;
   updatedAt: number;
@@ -140,10 +143,10 @@ function isTerminal(issue: Pick<SearchIndexIssue, "status" | "status_category">)
   return category === "done" || category === "closed";
 }
 
-/** Server parseQueryNumber: "MUL-123" or a bare "123". */
+/** Server parseQueryNumber: "MUL-123", "V2-12", or a bare "123". */
 function parseQueryNumber(query: string): number | null {
   const q = query.trim();
-  const match = /^[a-z]+-(\d+)$/i.exec(q) ?? /^(\d+)$/.exec(q);
+  const match = /^[a-z][a-z0-9]*-(\d+)$/i.exec(q) ?? /^(\d+)$/.exec(q);
   if (!match) return null;
   const n = Number.parseInt(match[1]!, 10);
   return Number.isInteger(n) && n > 0 ? n : null;
@@ -209,6 +212,7 @@ export class SearchIndexEngine {
     const entry: ProjectEntry = {
       id: project.id,
       status: project.status,
+      archived: !!project.archived_at,
       title: project.title.toLowerCase(),
       description: description.toLowerCase(),
       updatedAt: timestampMicros(project.search_updated_at || project.updated_at),
@@ -394,6 +398,7 @@ export class SearchIndexEngine {
     const candidates: Candidate[] = [];
     for (const project of this.projects.values()) {
       if (!params.include_closed && (project.status === "completed" || project.status === "cancelled")) continue;
+      if (!params.include_archived && project.archived) continue;
       const { title, description } = project;
       const titlePhrase = title.includes(phrase);
       const titleAllTerms = multi && terms.every((term) => title.includes(term));
@@ -414,7 +419,8 @@ export class SearchIndexEngine {
 
       candidates.push({
         hit: { id: project.id, matchSource: titlePhrase || titleAllTerms ? "title" : "description" },
-        cancelledRank: project.status === "cancelled" && !titleExact ? 1 : 0,
+        // Mirrors the server: archived sinks below cancelled, exact titles excepted.
+        cancelledRank: titleExact ? 0 : project.archived ? 2 : project.status === "cancelled" ? 1 : 0,
         relevance,
         updatedAt: project.updatedAt,
       });

@@ -263,14 +263,13 @@ func TestQwenBackendFailureTimeoutAndCancellation(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, cancel := tc.ctx()
-			if tc.name == "cancel" {
-				go func() { time.Sleep(20 * time.Millisecond); cancel() }()
-			} else {
-				defer cancel()
-			}
+			defer cancel()
 			session, err := newFakeQwenBackend(t, tc.env).Execute(ctx, "task", tc.opts)
 			if err != nil {
 				t.Fatalf("Execute: %v", err)
+			}
+			if tc.name == "cancel" {
+				cancel()
 			}
 			_, result := awaitQwenResult(t, session)
 			if result.Status != tc.status || !strings.Contains(result.Error, tc.needle) || result.SessionID != tc.wantSession {

@@ -1,10 +1,9 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect } from "vitest";
 import { Editor, Extension } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { Markdown } from "@tiptap/markdown";
 import { Suggestion } from "@tiptap/suggestion";
 import { PluginKey, TextSelection } from "@tiptap/pm/state";
-import { EditorView } from "@tiptap/pm/view";
 import { createMarkdownPasteExtension } from "./markdown-paste";
 import {
   SuggestionTriggerArmingExtension,
@@ -96,15 +95,6 @@ function picker(editor: Editor, pluginKey: PluginKey = key) {
   const state = pluginKey.getState(editor.state);
   return { active: state?.active, query: state?.query };
 }
-
-beforeAll(() => {
-  // jsdom has no layout, so ProseMirror's post-dispatch scroll walks
-  // coordsAtPos into getClientRects() on nodes jsdom does not implement.
-  // Scrolling is irrelevant here; these tests read plugin state.
-  (EditorView.prototype as unknown as { scrollToSelection: () => void }).scrollToSelection =
-    () => {};
-  Element.prototype.scrollIntoView = () => {};
-});
 
 describe("suggestion trigger arming", () => {
   describe("text the user did not type never opens a picker", () => {

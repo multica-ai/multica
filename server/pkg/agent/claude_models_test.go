@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -161,6 +162,32 @@ func TestClaudeModelsFromInfos_CurrentCLI(t *testing.T) {
 	// Haiku advertises no effort support at all, so it must get no picker.
 	if haiku := models[3]; haiku.Thinking != nil {
 		t.Errorf("haiku advertises no effort support; Thinking should be nil, got %+v", haiku.Thinking)
+	}
+}
+
+func TestValidateThinkingLevel_ClaudeModelMissingFromLiveCatalog(t *testing.T) {
+	t.Parallel()
+	infos, err := parseClaudeModelCatalog(loadClaudeListModelsFixture(t, "2.1.258"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	models, unavailable := claudeModelsFromInfos(infos)
+	load := func() (Catalog, error) {
+		return Catalog{Models: models, Unavailable: unavailable}, nil
+	}
+	for _, level := range []string{"medium", "max"} {
+		ok, err := ValidateThinkingLevelWith(load, "claude", "claude-sonnet-4-6", level)
+		if ok || !errors.Is(err, errUnverifiedCatalog) {
+			t.Errorf("sonnet-4-6/%s = (%v, %v), want unknown capability so the saved effort passes through", level, ok, err)
+		}
+		ok, err = ValidateThinkingLevelWith(load, "claude", "claude-sonnet-5", level)
+		if !ok || err != nil {
+			t.Errorf("sonnet-5/%s = (%v, %v), want supported", level, ok, err)
+		}
+		ok, err = ValidateThinkingLevelWith(load, "claude", "claude-haiku-4-5-20251001", level)
+		if ok || err != nil {
+			t.Errorf("haiku-4-5/%s = (%v, %v), want rejected", level, ok, err)
+		}
 	}
 }
 

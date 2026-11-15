@@ -194,3 +194,41 @@ func containsAny(s string, subs ...string) bool {
 	}
 	return false
 }
+
+// A media failure is registered with the rest and lands under its reason — a
+// collector left out of Collectors() would count into a series /metrics never
+// shows.
+func TestMediaFailuresAreCountedPerReason(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := NewWecomMetrics()
+	for _, collector := range m.Collectors() {
+		if err := reg.Register(collector); err != nil {
+			t.Fatalf("register WeCom collector: %v", err)
+		}
+	}
+
+	m.RecordMediaFailure("unreadable")
+	m.RecordMediaFailure("unreadable")
+	m.RecordMediaFailure("blocked_address")
+
+	families, err := reg.Gather()
+	if err != nil {
+		t.Fatalf("gather WeCom metrics: %v", err)
+	}
+	got := map[string]float64{}
+	for _, family := range families {
+		if family.GetName() != "multica_wecom_media_failures_total" {
+			continue
+		}
+		for _, metric := range family.GetMetric() {
+			for _, label := range metric.GetLabel() {
+				if label.GetName() == "reason" {
+					got[label.GetValue()] = metric.GetCounter().GetValue()
+				}
+			}
+		}
+	}
+	if got["unreadable"] != 2 || got["blocked_address"] != 1 || len(got) != 2 {
+		t.Fatalf("media_failures_total by reason = %v, want unreadable=2 blocked_address=1", got)
+	}
+}

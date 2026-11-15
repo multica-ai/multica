@@ -1,6 +1,6 @@
 /**
- * Notification preferences subscreen. 6 inbox groups + system_notifications
- * toggle, each backed by an optimistic PATCH /api/notification-preferences.
+ * Notification preferences subscreen. Inbox groups and system delivery
+ * settings are backed by an optimistic PATCH /api/notification-preferences.
  *
  * Copy mirrors packages/views/settings/components/notifications-tab.tsx.
  * Group labels describe the same server-side semantics as web; divergent
@@ -21,7 +21,7 @@ import { useUpdateNotificationPreferences } from "@/data/mutations/notification-
 import { useT } from "@/lib/i18n";
 
 const INBOX_GROUPS: {
-  key: Exclude<NotificationGroupKey, "system_notifications">;
+  key: Exclude<NotificationGroupKey, "system_notifications" | "chat_replies">;
   labelKey: string;
   descriptionKey?: string;
 }[] = [
@@ -48,6 +48,11 @@ const INBOX_GROUPS: {
     key: "updates",
     labelKey: "groups.updates",
     descriptionKey: "groups.updates_description",
+  },
+  {
+    key: "new_issues",
+    labelKey: "groups.new_issues",
+    descriptionKey: "groups.new_issues_description",
   },
   {
     key: "agent_activity",
@@ -132,25 +137,34 @@ export default function NotificationsSettingsScreen() {
         })}
       </Section>
 
-      <Section
-        title={t("groups.system")}
-      >
+      <Section title={t("groups.system")}>
         <View className="flex-row items-center px-4 py-3 gap-3">
           <View className="flex-1">
             <Text className="text-base font-medium text-foreground">
               {t("groups.system_notifications")}
             </Text>
-            <Text className="text-xs text-muted-foreground mt-0.5">
-              {t("groups.system_description")}
-            </Text>
           </View>
           <Switch
             checked={systemEnabled}
-            onCheckedChange={(checked) =>
-              onToggle("system_notifications", checked)
-            }
+            onCheckedChange={(checked) => onToggle("system_notifications", checked)}
           />
         </View>
+        {systemEnabled && (
+          <>
+            <Separator />
+            <View className="flex-row items-center pl-8 pr-4 py-3 gap-3">
+              <View className="flex-1">
+                <Text className="text-base font-medium text-foreground">
+                  {t("groups.chat_replies")}
+                </Text>
+              </View>
+              <Switch
+                checked={preferences.chat_replies !== "muted"}
+                onCheckedChange={(checked) => onToggle("chat_replies", checked)}
+              />
+            </View>
+          </>
+        )}
       </Section>
     </ScrollView>
   );

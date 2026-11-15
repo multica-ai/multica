@@ -167,8 +167,8 @@ func TestWorktreeDeliveryMetadataRoundTripsThroughBothTerminalPaths(t *testing.T
 	post := func(t *testing.T, taskID, endpoint string, body map[string]any, call func(http.ResponseWriter, *http.Request)) {
 		t.Helper()
 		w := httptest.NewRecorder()
-		req := newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/"+endpoint,
-			body, testWorkspaceID, "legit-daemon")
+		req := newOwnerDaemonRequest("POST", "/api/daemon/tasks/"+taskID+"/"+endpoint,
+			body)
 		rctx := chi.NewRouteContext()
 		rctx.URLParams.Add("taskId", taskID)
 		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
@@ -279,8 +279,8 @@ func TestWorktreeDeliveryMetadataSurvivesEveryTerminalPath(t *testing.T) {
 	post := func(t *testing.T, taskID, endpoint string, body map[string]any, call func(http.ResponseWriter, *http.Request)) {
 		t.Helper()
 		w := httptest.NewRecorder()
-		req := newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/"+endpoint,
-			body, testWorkspaceID, "legit-daemon")
+		req := newOwnerDaemonRequest("POST", "/api/daemon/tasks/"+taskID+"/"+endpoint,
+			body)
 		rctx := chi.NewRouteContext()
 		rctx.URLParams.Add("taskId", taskID)
 		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))

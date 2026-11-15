@@ -1,9 +1,11 @@
 import type { InfiniteData, QueryClient } from "@tanstack/react-query";
 import type { ArchivedInboxPage } from "../types/inbox";
-import { EMPTY_INBOX_FILTERS, type InboxFilters } from "./filter-store";
-import { infiniteQueryOptions, queryOptions, useQuery } from "@tanstack/react-query";
+import { EMPTY_INBOX_FILTERS, archivedInboxQuery, type ArchivedInboxFilters } from "./filters";
+import { groupInboxItemsByIssue } from "./group";
+import { infiniteQueryOptions, keepPreviousData, queryOptions, useQuery } from "@tanstack/react-query";
 import { api } from "../api";
 import type { InboxItem, InboxWorkspaceUnread } from "../types";
+import { focusManager } from "@tanstack/react-query";
 
 export const inboxKeys = {
   all: (wsId: string) => ["inbox", wsId] as const,
@@ -36,34 +38,56 @@ export function archivedInboxListOptions(wsId: string) {
   });
 }
 
-function normalizedInboxFilters(filters: InboxFilters): InboxFilters {
-  return { statuses: [...filters.statuses].sort(), priorities: [...filters.priorities].sort(),
-    actors: [...filters.actors].sort(), unreadOnly: filters.unreadOnly };
+// Keyed by the request parameters themselves: an `agent` selection carried in
+// from the active inbox never changes the key, and the relative windows
+// (received, due date) re-key when the day turns.
+function normalizedInboxFilters(filters: ArchivedInboxFilters): Record<string, string> {
+  return archivedInboxQuery(filters);
 }
 
-export function archivedInboxPagesOptions(wsId: string, filters: InboxFilters) {
+// A filter change re-keys the archive. Keep the previous result while the new
+// one loads, so the page does not drop to its skeleton and unmount the open
+// filter menu. Only within the same workspace: another workspace's rows or
+// counts must never stand in.
+function isSameWorkspace(previousKey: readonly unknown[] | undefined, wsId: string) {
+  return previousKey?.[1] === wsId;
+}
+
+export function archivedInboxPagesOptions(wsId: string, filters: ArchivedInboxFilters) {
   return infiniteQueryOptions({
     queryKey: [...inboxKeys.pages(wsId), normalizedInboxFilters(filters)],
     initialPageParam: null as string | null,
     queryFn: ({ pageParam, signal }) => api.listArchivedInboxPage(filters, { cursor: pageParam, signal }),
     getNextPageParam: (page) => page.nextCursor ?? undefined,
+    placeholderData: (previousData, previousQuery) =>
+      isSameWorkspace(previousQuery?.queryKey, wsId) ? keepPreviousData(previousData) : undefined,
     retry: false,
   });
 }
 
-export function archivedInboxLookupOptions(wsId: string, groupId: string, filters: InboxFilters = EMPTY_INBOX_FILTERS) {
+export function archivedInboxLookupOptions(wsId: string, groupId: string, filters: ArchivedInboxFilters = EMPTY_INBOX_FILTERS) {
+  const prefix = inboxKeys.lookup(wsId);
   return queryOptions({
-    queryKey: [...inboxKeys.lookup(wsId), groupId, normalizedInboxFilters(filters)],
+    queryKey: [...prefix, groupId, normalizedInboxFilters(filters)],
     queryFn: ({ signal }) => api.listArchivedInboxPage(filters, { groupId, signal }),
     enabled: !!groupId,
     retry: false,
+    // A filter change re-asks for the same group. Its last answer stays up
+    // meanwhile, so the open row is judged by the new filters at once instead
+    // of the selection hanging on the request.
+    placeholderData: (previousData, previousQuery) =>
+      isSameWorkspace(previousQuery?.queryKey, wsId) && previousQuery?.queryKey[prefix.length] === groupId
+        ? previousData
+        : undefined,
   });
 }
 
-export function archivedInboxFacetsOptions(wsId: string, filters: InboxFilters) {
+export function archivedInboxFacetsOptions(wsId: string, filters: ArchivedInboxFilters) {
   return queryOptions({
     queryKey: [...inboxKeys.facets(wsId), normalizedInboxFilters(filters)],
     queryFn: ({ signal }) => api.getArchivedInboxFacets(filters, signal),
+    placeholderData: (previousData, previousQuery) =>
+      isSameWorkspace(previousQuery?.queryKey, wsId) ? keepPreviousData(previousData) : undefined,
     retry: false,
   });
 }
@@ -88,12 +112,38 @@ export function patchArchivedInboxCaches(qc: QueryClient, wsId: string, patch: (
  * Cross-workspace unread inbox summary. One cache entry shared across all
  * workspaces — the data is account-level, so switching workspaces does not
  * refetch it; only the derived "is this for another workspace" view changes.
+ *
+ * Visibility gating is the default, including for direct observers such as
+ * the search palette. `refetchOnWindowFocus` re-reads an invalidated summary
+ * once when the page is shown again; with `staleTime: Infinity` a page that
+ * missed no event is not stale and makes no request. The dock badge overrides
+ * `enabled` through `inboxUnreadSummaryEnabled` to stay live while hidden.
  */
 export function inboxUnreadSummaryOptions() {
   return queryOptions({
     queryKey: inboxKeys.unreadSummary(),
     queryFn: () => api.getInboxUnreadSummary(),
+    enabled: () => focusManager.isFocused(),
+    refetchOnWindowFocus: true,
   });
+}
+
+/**
+ * `enabled` for an observer of the unread summary: fetch only while the page
+ * is on screen. Every open tab is its own client and receives every inbox
+ * event, so each event cost one summary request per open tab, and each request
+ * recomputes the newest item per issue over the user's whole active inbox. A
+ * hidden tab renders nothing that reads the summary, and with no enabled
+ * observer left an invalidation marks the query without refetching it.
+ *
+ * `whileHidden` is for a reader that stays on screen while the page is hidden:
+ * the desktop dock badge of a minimized window.
+ */
+export function inboxUnreadSummaryEnabled(
+  wsId: string | null | undefined,
+  { whileHidden = false }: { whileHidden?: boolean } = {},
+) {
+  return () => !!wsId && (whileHidden || focusManager.isFocused());
 }
 
 /**
@@ -147,10 +197,13 @@ export function unreadCountForWorkspace(
  * endpoint applies the same newest-per-issue rule `deduplicateInboxItems`
  * applies client-side, so this number matches the list the user sees.
  */
-export function useInboxUnreadCount(wsId: string | null | undefined): number {
+export function useInboxUnreadCount(
+  wsId: string | null | undefined,
+  options?: { whileHidden?: boolean },
+): number {
   const { data } = useQuery({
     ...inboxUnreadSummaryOptions(),
-    enabled: !!wsId,
+    enabled: inboxUnreadSummaryEnabled(wsId, options),
     select: (summary: InboxWorkspaceUnread[]) =>
       unreadCountForWorkspace(summary, wsId),
   });
@@ -174,41 +227,4 @@ export function deduplicateInboxItems(items: InboxItem[]): InboxItem[] {
  */
 export function deduplicateArchivedInboxItems(items: InboxItem[]): InboxItem[] {
   return groupInboxItemsByIssue(items.filter((i) => i.archived));
-}
-
-function groupInboxItemsByIssue(items: InboxItem[]): InboxItem[] {
-  const groups = new Map<string, InboxItem[]>();
-  for (const item of items) {
-    const key = item.issue_id ?? item.id;
-    const group = groups.get(key) ?? [];
-    group.push(item);
-    groups.set(key, group);
-  }
-  const merged: InboxItem[] = [];
-  for (const group of groups.values()) {
-    group.sort(
-      (a, b) =>
-        new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-    );
-    const newest = group[0];
-    if (!newest) continue;
-
-    const commentId =
-      newest.details?.comment_id ??
-      group.find((item) => item.details?.comment_id)?.details?.comment_id;
-
-    if (commentId && newest.details?.comment_id !== commentId) {
-      merged.push({
-        ...newest,
-        details: { ...(newest.details ?? {}), comment_id: commentId },
-      });
-      continue;
-    }
-
-    merged.push(newest);
-  }
-  return merged.sort(
-    (a, b) =>
-      new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-  );
 }
