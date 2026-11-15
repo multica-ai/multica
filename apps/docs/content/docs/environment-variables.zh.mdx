@@ -204,6 +204,8 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | 插件 | `MULTICA_PLUGIN_API_URL` | 带版本的插件 Public API 完整 Base URL，例如 `https://plugin-api.example.com/v1`；未设置时使用 `MULTICA_PUBLIC_URL` + `/v1` |
 | 插件 | `MULTICA_PLUGIN_DIR` | 开发时用于发布本地插件包的可选绝对目录 |
 | 主题商店 | `MULTICA_THEME_REGISTRY_URL` | 改用其他仓库的 `index.json`，比如官方仓库的 fork；见 [主题与外观](/themes#自托管) |
+| 语音输入 | `DEEPGRAM_API_KEY` | 开启 Web 端的语音输入（桌面端在本机转写）。浏览器使用服务器为每次听写签发的 30 秒令牌把语音流式发送到 Deepgram，密钥不会离开服务器。令牌只用于打开流：已打开的流会一直持续到停止。未设置时，Web 端不显示麦克风 |
+| 语音输入 | `DEEPGRAM_STT_MODEL` | Web 语音输入的流式模型；默认 `flux-general-en`，说话人每说完一句就输入这一句 |
 
 不配置 `GITHUB_APP_ID` 和私钥时，PR 仍会正常关联、镜像，并在合并后改状态，但卡片上不显示 CI 与可合并状态，"从 GitHub 选择"仓库入口也会禁用。
 

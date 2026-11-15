@@ -204,6 +204,8 @@ The auth rate limits require `REDIS_URL`; without it, the startup log notes that
 | Plugins | `MULTICA_PLUGIN_API_URL` | Complete versioned Plugin Public API base URL, such as `https://plugin-api.example.com/v1`; falls back to `MULTICA_PUBLIC_URL` + `/v1` |
 | Plugins | `MULTICA_PLUGIN_DIR` | Optional absolute directory used to publish local plugin bundles during development |
 | Theme store | `MULTICA_THEME_REGISTRY_URL` | Another registry's `index.json`, such as a fork of the official one; see [Themes and appearance](/themes#self-hosting) |
+| Voice input | `DEEPGRAM_API_KEY` | Turns on voice input in the web app (Desktop transcribes on the device). The browser streams speech to Deepgram with a 30-second token the server mints per dictation; the key never leaves the server. The token only has to be used to open the stream: an open stream runs until it is stopped. Unset, the web app shows no mic |
+| Voice input | `DEEPGRAM_STT_MODEL` | Streaming model for web voice input; defaults to `flux-general-en`, which types each sentence when the speaker finishes it |
 
 Without `GITHUB_APP_ID` and the private key, PRs still link, mirror, and move issues on merge normally, but cards show no CI or mergeability status, and the "pick from GitHub" repository entry is disabled.
 

@@ -42,6 +42,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/seatcapacity"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/speech"
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/themestore"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -253,6 +254,10 @@ type Handler struct {
 	// MULTICA_THEME_REGISTRY_URL is invalid: its routes return 404 and
 	// /api/config omits it.
 	ThemeStore *themestore.Store
+	// Speech mints voice-input streaming sessions for the web app. Nil unless
+	// the operator configured a provider (DEEPGRAM_API_KEY): its route returns
+	// 404 and /api/config omits voice_transcription_enabled.
+	Speech speech.TokenIssuer
 	// IssueStatusCatalog reads the workspace status catalog. Defaults to
 	// Queries; a test can substitute a counting wrapper to assert HOW MANY
 	// catalog reads a request performs, which is the only property that

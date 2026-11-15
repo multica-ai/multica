@@ -204,6 +204,8 @@ reverse proxy 뒤에 배포한다면 실제 proxy 네트워크를 입력해야 �
 | Plugins | `MULTICA_PLUGIN_API_URL` | 버전을 포함한 Plugin Public API의 전체 Base URL(예: `https://plugin-api.example.com/v1`). 설정하지 않으면 `MULTICA_PUBLIC_URL` + `/v1` 사용 |
 | Plugins | `MULTICA_PLUGIN_DIR` | 개발 중 로컬 plugin bundle을 게시하는 선택적 절대 디렉터리 |
 | 테마 스토어 | `MULTICA_THEME_REGISTRY_URL` | 공식 레지스트리의 fork 등 다른 레지스트리의 `index.json`. [테마와 모양](/themes#셀프-호스팅)을 참고하세요 |
+| 음성 입력 | `DEEPGRAM_API_KEY` | 웹 앱의 음성 입력을 켭니다(Desktop은 기기에서 변환합니다). 브라우저는 서버가 받아쓰기마다 발급하는 30초 토큰으로 음성을 Deepgram에 스트리밍하며, 키는 서버를 벗어나지 않습니다. 토큰은 스트림을 열 때만 쓰이며, 열린 스트림은 멈출 때까지 계속됩니다. 설정하지 않으면 웹 앱에 마이크가 표시되지 않습니다 |
+| 음성 입력 | `DEEPGRAM_STT_MODEL` | 웹 음성 입력의 스트리밍 모델. 기본값은 `flux-general-en`으로, 화자가 문장을 마칠 때마다 그 문장을 입력합니다 |
 
 `GITHUB_APP_ID`와 private key를 설정하지 않아도 PR 연결, 미러링, merge 시 상태 변경은 정상적으로 작동합니다. 다만 카드에 CI와 merge 가능 상태가 표시되지 않고 "GitHub에서 선택" 저장소 메뉴도 비활성화됩니다.
 
