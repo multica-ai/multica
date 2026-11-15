@@ -138,6 +138,13 @@ describe("ProjectsSection", () => {
     expect(screen.getAllByRole("img", { name: "Visible to project members and workspace owners and admins" })).toHaveLength(1);
   });
 
+  it("leaves admins out of the lock label when the project hides from them", () => {
+    renderSection([{ ...project("p1", "Desktop"), visibility: "private", hide_from_admins: true }]);
+    const lock = screen.getByRole("img", { name: "Visible to project members and workspace owners" });
+    expect(lock.closest("a")).toHaveTextContent("Desktop");
+    expect(screen.queryByRole("img", { name: "Visible to project members and workspace owners and admins" })).toBeNull();
+  });
+
   it("expands a project in place, keeping its count", () => {
     renderSection();
     expect(screen.getAllByText("3")).toHaveLength(3);
