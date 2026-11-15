@@ -12,6 +12,9 @@ export const projectKeys = {
   // Under `all`, so the project events that already refresh the list refresh
   // the owner's overview too.
   privateOverview: (wsId: string) => [...projectKeys.all(wsId), "private-overview"] as const,
+  // Under detail so the issue mutations that invalidate projectKeys.all also
+  // refresh the trend and breakdown.
+  progress: (wsId: string, id: string) => [...projectKeys.detail(wsId, id), "progress"] as const,
 };
 
 // The cached list includes archived projects: it doubles as the id → project
@@ -30,6 +33,13 @@ export function projectDetailOptions(wsId: string, id: string) {
   return queryOptions({
     queryKey: projectKeys.detail(wsId, id),
     queryFn: () => api.getProject(id),
+  });
+}
+
+export function projectProgressOptions(wsId: string, id: string) {
+  return queryOptions({
+    queryKey: projectKeys.progress(wsId, id),
+    queryFn: () => api.getProjectProgress(id),
   });
 }
 

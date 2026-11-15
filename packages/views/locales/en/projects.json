@@ -102,7 +102,29 @@
     "toast_project_deleted": "Project deleted",
     "toast_move_issue_failed": "Failed to move issue",
     "archive_action": "Archive project",
-    "restore_action": "Restore project"
+    "restore_action": "Restore project",
+    "progress_panel": {
+      "summary_one": "{{completed}} of {{count}} issue done",
+      "summary_other": "{{completed}} of {{count}} issues done",
+      "legend_completed": "Done",
+      "legend_started": "In progress",
+      "legend_unstarted": "Not started",
+      "cancelled_note_one": "{{count}} cancelled issue isn't counted",
+      "cancelled_note_other": "{{count}} cancelled issues aren't counted",
+      "empty_hint": "Progress and the trend start once issues are added.",
+      "chart_label": "Weekly progress",
+      "chart_today": "Today",
+      "forecast_no_due": "At the recent pace, done by {{date}}",
+      "forecast_ahead_one": "At the recent pace, done by {{date}}, {{count}} day before the due date",
+      "forecast_ahead_other": "At the recent pace, done by {{date}}, {{count}} days before the due date",
+      "forecast_behind_one": "At the recent pace, done by {{date}}, {{count}} day after the due date",
+      "forecast_behind_other": "At the recent pace, done by {{date}}, {{count}} days after the due date",
+      "forecast_on_due": "At the recent pace, done by {{date}}, right on the due date",
+      "forecast_none": "Too few recent completions to forecast a finish date.",
+      "by_assignee": "By assignee",
+      "agent_tag": "Agent",
+      "unassigned": "Unassigned"
+    }
   },
   "resources": {
     "section_header": "Resources",

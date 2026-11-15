@@ -69,6 +69,7 @@ import type {
   IssueUnread,
   Label,
   Project,
+  ProjectProgressDetail,
   ListProjectsResponse,
   MemberWithUser,
   IssueProperty,
@@ -1796,6 +1797,16 @@ export const EMPTY_SEARCH_ISSUES_RESPONSE: SearchIssuesResponse = {
   issues: [],
 };
 
+const ProjectProgressSchema = z.object({
+  unit: z.literal("issues").catch("issues"),
+  scope: z.number().default(0),
+  completed: z.number().default(0),
+  started: z.number().default(0),
+  unstarted: z.number().default(0),
+  cancelled: z.number().default(0),
+  percent: z.number().default(0),
+}).loose();
+
 export const ProjectSchema = z.object({
   id: z.string(),
   workspace_id: z.string(),
@@ -1819,6 +1830,8 @@ export const ProjectSchema = z.object({
   last_activity_at: z.string().optional().catch(undefined),
   issue_count: z.number().default(0),
   done_count: z.number().default(0),
+  // Older servers omit it; consumers fall back to issue_count / done_count.
+  progress: ProjectProgressSchema.optional().catch(undefined),
   resource_count: z.number().default(0),
   workflow_id: z.string().nullable().default(null),
   archived_at: z.string().nullable().default(null).catch(null),
@@ -1841,6 +1854,34 @@ export const ListProjectsResponseSchema = z.object({
   projects: z.array(ProjectSchema).default([]),
   total: z.number().default(0),
 }).loose();
+
+export const ProjectProgressDetailSchema = z.object({
+  progress: ProjectProgressSchema,
+  by_assignee: z.array(z.object({
+    assignee_type: z.enum(["member", "agent", "squad"]).nullable().catch(null),
+    assignee_id: z.string().nullable().default(null),
+    scope: z.number().default(0),
+    completed: z.number().default(0),
+    started: z.number().default(0),
+  }).loose()).default([]),
+  history: z.array(z.object({
+    date: z.string(),
+    scope: z.number().default(0),
+    started: z.number().default(0),
+    completed: z.number().default(0),
+  }).loose()).default([]),
+  forecast: z.object({
+    completion_date: z.string(),
+    weekly_velocity: z.number(),
+  }).loose().nullable().default(null).catch(null),
+}).loose();
+
+export const EMPTY_PROJECT_PROGRESS_DETAIL: ProjectProgressDetail = {
+  progress: { unit: "issues", scope: 0, completed: 0, started: 0, unstarted: 0, cancelled: 0, percent: 0 },
+  by_assignee: [],
+  history: [],
+  forecast: null,
+};
 
 export const EMPTY_LIST_PROJECTS_RESPONSE: ListProjectsResponse = { projects: [], total: 0 };
 
