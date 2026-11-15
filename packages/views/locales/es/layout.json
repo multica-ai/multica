@@ -74,6 +74,12 @@
       "try": "Probar",
       "open": "Abrir",
       "learn_more": "Más información"
+    },
+    "deck": {
+      "tag": "Nuevo",
+      "next": "Siguiente",
+      "done": "Entendido",
+      "page": "Novedad {{current}} de {{total}}"
     }
   },
   "star_prompt": {

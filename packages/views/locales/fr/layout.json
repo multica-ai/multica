@@ -52,6 +52,12 @@
       "try": "Essayer",
       "open": "Ouvrir",
       "learn_more": "En savoir plus"
+    },
+    "deck": {
+      "tag": "Nouveau",
+      "next": "Suivant",
+      "done": "Compris",
+      "page": "Nouveauté {{current}} sur {{total}}"
     }
   },
   "star_prompt": {

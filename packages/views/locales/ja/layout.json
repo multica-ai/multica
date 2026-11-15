@@ -52,6 +52,12 @@
       "try": "試してみる",
       "open": "開く",
       "learn_more": "詳しく見る"
+    },
+    "deck": {
+      "tag": "新機能",
+      "next": "次へ",
+      "done": "了解",
+      "page": "{{total}} 件中 {{current}} 件目"
     }
   },
   "star_prompt": {
