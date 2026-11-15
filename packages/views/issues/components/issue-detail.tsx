@@ -3538,7 +3538,16 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 It self-hides when no agent is active. */}
             <IssueAgentHeaderChip issueId={id} onJumpToRun={jumpToRun} />
             <IssueWakeupHeaderChip issueId={id} onOpen={openWakeups} />
-            {!onDone && !isPeek && <IssueInboxActions issueId={id} />}
+            {!onDone && !isPeek && (
+              <IssueInboxActions
+                issueId={id}
+                onMarkDone={
+                  issueBehavesAsAny(issue, ["done", "closed"])
+                    ? undefined
+                    : (onSaved) => handleUpdateField({ status: "done" }, { onSuccess: onSaved })
+                }
+              />
+            )}
             {onDone && !issueBehavesAsAny(issue, ["done", "closed"]) && (
               <IconButton
                 label={t(($) => $.detail.mark_done_tooltip)}
