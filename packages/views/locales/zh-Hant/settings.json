@@ -430,6 +430,10 @@
         "label": "取消訂閱並歸檔",
         "description": "退訂當前通知所在的任務並歸檔它。僅在不屬於你或你的智能體的任務上可用。"
       },
+      "snoozeInboxItem": {
+        "label": "延後通知",
+        "description": "延後從收件箱開啟的任務；已延後時讓它現在回來。"
+      },
       "send": {
         "label": "傳送",
         "description": "也用於提交新任務。"

@@ -31,71 +31,18 @@ function item(overrides: Partial<InboxItem>): InboxItem {
   };
 }
 
+// The grouping and anchor rule itself is tested in packages/core/inbox/queries.test.ts.
 describe("deduplicateInboxItems", () => {
-  it("keeps the newest issue row while preserving an older comment anchor", () => {
-    const merged = deduplicateInboxItems([
-      item({
-        id: "comment-notification",
-        created_at: "2026-06-15T08:00:00Z",
-        details: { comment_id: "comment-1" },
-      }),
-      item({
-        id: "status-notification",
-        type: "status_changed",
-        created_at: "2026-06-15T08:01:00Z",
-        details: { from: "in_progress", to: "in_review" },
-      }),
+  it("anchors an app request row like any other row, since mobile renders no requests", () => {
+    const [row] = deduplicateInboxItems([
+      item({ id: "comment", created_at: "2026-06-15T08:00:00Z", details: { comment_id: "comment-1" } }),
+      item({ id: "app", type: "app_action_requested", created_at: "2026-06-15T08:02:00Z", details: { request_id: "request-1" } }),
     ]);
-
-    expect(merged).toHaveLength(1);
-    expect(merged[0]).toMatchObject({
-      id: "status-notification",
-      type: "status_changed",
-      details: {
-        from: "in_progress",
-        to: "in_review",
-        comment_id: "comment-1",
-      },
-    });
+    expect(row?.id).toBe("app");
+    expect(getInboxNavigationTarget(row!, "acme", "tap")?.params).toMatchObject({ id: "issue-1", highlight: "comment-1" });
   });
 
-  it("anchors at the oldest unread comment, or the newest once all are read", () => {
-    const unread = deduplicateInboxItems([
-      item({ id: "older", created_at: "2026-06-15T08:00:00Z", details: { comment_id: "comment-1" } }),
-      item({ id: "newer", created_at: "2026-06-15T08:02:00Z", details: { comment_id: "comment-2" } }),
-    ]);
-    expect(unread[0]?.details?.comment_id).toBe("comment-1");
-
-    const read = deduplicateInboxItems([
-      item({ id: "older", read: true, created_at: "2026-06-15T08:00:00Z", details: { comment_id: "comment-1" } }),
-      item({ id: "newer", read: true, created_at: "2026-06-15T08:02:00Z", details: { comment_id: "comment-2" } }),
-    ]);
-    expect(read[0]?.details?.comment_id).toBe("comment-2");
-  });
-
-  it("anchors an unread failed run at the run, and no unread entry at nothing", () => {
-    const failed = deduplicateInboxItems([
-      item({ id: "read", read: true, created_at: "2026-06-15T08:00:00Z", details: { comment_id: "comment-1" } }),
-      item({ id: "failed", type: "task_failed", created_at: "2026-06-15T08:02:00Z", details: { task_id: "task-1" } }),
-    ]);
-    expect(failed[0]?.details?.comment_id).toBe("task-1");
-
-    const status = deduplicateInboxItems([
-      item({ id: "read", read: true, created_at: "2026-06-15T08:00:00Z", details: { comment_id: "comment-1" } }),
-      item({ id: "status", type: "status_changed", created_at: "2026-06-15T08:02:00Z", details: { to: "in_review" } }),
-    ]);
-    expect(status[0]?.details?.comment_id).toBeUndefined();
-  });
-
-  it("lets an unread reply lead over an earlier unread reaction", () => {
-    const merged = deduplicateInboxItems([
-      item({ id: "reaction", type: "reaction_added", created_at: "2026-06-15T08:00:00Z", details: { comment_id: "old-comment" } }),
-      item({ id: "reply", created_at: "2026-06-15T08:02:00Z", details: { comment_id: "comment-2" } }),
-    ]);
-    expect(merged[0]?.details?.comment_id).toBe("comment-2");
-  });
-
-  it("gives an unread app request no target, since mobile renders no requests", () => {
+  it("gives an app request row no target when nothing unread has an entry", () => {
     const [row] = deduplicateInboxItems([
       item({ id: "comment", read: true, created_at: "2026-06-15T08:00:00Z", details: { comment_id: "comment-1" } }),
       item({ id: "app", type: "app_action_requested", created_at: "2026-06-15T08:02:00Z", details: { request_id: "request-1" } }),

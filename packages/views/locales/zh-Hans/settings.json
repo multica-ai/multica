@@ -430,6 +430,10 @@
         "label": "取消订阅并归档",
         "description": "退订当前通知所在的任务并归档它。仅在不属于你或你的智能体的任务上可用。"
       },
+      "snoozeInboxItem": {
+        "label": "延后通知",
+        "description": "延后从收件箱打开的任务；已延后时让它现在回来。"
+      },
       "send": {
         "label": "发送",
         "description": "也用于提交新任务。"

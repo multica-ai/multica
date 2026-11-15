@@ -9,8 +9,9 @@ import {
 import { useInboxFilterStore } from "@multica/core/inbox/filter-store";
 import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
-import type { Agent, AgentTask, InboxItem } from "@multica/core/types";
+import type { Agent, AgentTask, InboxItem, SnoozedInboxIssue } from "@multica/core/types";
 import { agentListOptions } from "@multica/core/workspace/queries";
+import { snoozedInboxOptions } from "@multica/core/inbox/queries";
 import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 import { InboxSection, useInboxSectionRows } from "./inbox-section";
@@ -26,6 +27,8 @@ const state = vi.hoisted(() => ({
   archiveCompleted: vi.fn(),
   markRead: vi.fn(),
   markUnread: vi.fn(),
+  snooze: vi.fn(() => Promise.resolve()),
+  unsnooze: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock("@multica/core/paths", async (importOriginal) => {
@@ -46,6 +49,9 @@ vi.mock("@multica/core/inbox/mutations", () => ({
   useMarkInboxUnread: () => ({ mutate: state.markUnread }),
   useUnsubscribeArchiveInbox: () => ({ mutate: state.unsubscribeArchive }),
   undoUnsubscribeArchiveInbox: vi.fn(),
+  useSnoozeInbox: () => ({ mutateAsync: state.snooze }),
+  useUnsnoozeInbox: () => ({ mutateAsync: state.unsnooze }),
+  cachedInboxSnoozedUntil: () => null,
 }));
 vi.mock("@multica/core/hooks", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/hooks")>()),
@@ -111,10 +117,12 @@ function renderSection(
   activeIssueId: string | null = null,
   url = "/acme/issues",
   tasks: Partial<AgentTask>[] = [],
+  snoozed: SnoozedInboxIssue[] = [],
   agents: Pick<Agent, "id" | "owner_id">[] = [],
 ) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   client.setQueryData(["inbox", "ws-1", "list"], items);
+  client.setQueryData(snoozedInboxOptions("ws-1").queryKey, snoozed);
   client.setQueryData(agentListOptions("ws-1").queryKey, agents as Agent[]);
   client.setQueryData(agentTaskSnapshotOptions("ws-1").queryKey, tasks as AgentTask[]);
   const nav = adapter(url);
@@ -341,6 +349,7 @@ describe("InboxSection", () => {
       null,
       "/acme/issues",
       [],
+      [],
       [{ id: "agent-x", owner_id: "someone" }, { id: "agent-mine", owner_id: "member-1" }],
     );
     const label = "Unsubscribe & archive";
@@ -481,6 +490,44 @@ describe("InboxSection", () => {
     expect(state.archiveCompleted).toHaveBeenCalledTimes(1);
     fireEvent.click(within(await open()).getByRole("menuitem", { name: "Archive all" }));
     expect(state.archiveAll).toHaveBeenCalledTimes(1);
+  });
+
+  it("says a row is back from a snooze, with what arrived meanwhile, until it is read", () => {
+    const snooze = { snoozed_until: "2026-11-12T09:00:00Z", snoozed_at: "2026-11-10T09:00:00Z" };
+    const items = [
+      item({ id: "n3", issue_id: "issue-a", created_at: "2026-11-11T10:00:00Z", ...snooze }),
+      item({ id: "n2", issue_id: "issue-a", created_at: "2026-11-11T08:00:00Z", ...snooze }),
+      item({ id: "n1", issue_id: "issue-a", created_at: "2026-11-10T08:00:00Z", ...snooze }),
+      item({ id: "n4", issue_id: "issue-b", title: "Newer", created_at: "2026-11-11T12:00:00Z" }),
+    ];
+    const { unmount } = renderSection(items);
+    // Back at 09:00 on the 12th, so it sorts above the newer notification.
+    expect(rows()[0]).toHaveTextContent("Snooze ended · 2 updates while snoozed");
+    expect(rows()[1]).toHaveTextContent("Newer");
+    unmount();
+
+    renderSection(items.map((row) => ({ ...row, read: true })));
+    expect(rows()[0]).not.toHaveTextContent("Snooze ended");
+  });
+
+  it("snoozes a row from its hover button", async () => {
+    renderSection([item({ id: "n1", issue_id: "issue-a" })]);
+    fireEvent.click(screen.getByRole("button", { name: "Snooze" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /^1 day/ }));
+    expect(state.snooze).toHaveBeenCalledWith({ id: "n1", until: expect.any(Date) });
+  });
+
+  it("opens the snoozed list from the section header, with its count", async () => {
+    const until = "2099-01-01T09:00:00Z";
+    const { nav } = renderSection([item({ id: "n1", issue_id: "issue-a" })], null, "/acme/issues", [], [
+      { issue_id: "issue-z", item_id: "z1", snoozed_until: until, snoozed_at: "2026-11-10T09:00:00Z", updates: 0 },
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Inbox actions" }));
+    const entry = within(await screen.findByRole("menu")).getByRole("menuitem", { name: /View snoozed/ });
+    expect(entry).toHaveTextContent("1");
+    fireEvent.click(entry);
+    expect(nav.push).toHaveBeenCalledWith("/acme/issues?view=snoozed");
   });
 
   it("opens the archive from the section header", async () => {

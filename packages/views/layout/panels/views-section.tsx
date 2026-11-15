@@ -21,6 +21,7 @@ import type { IssueTableFacetsRequest } from "@multica/core/types";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { issueTableFacetsOptions, sidebarIssuesOptions } from "@multica/core/issues/queries";
 import { workspaceWorkingAgentsOptions } from "@multica/core/agents";
+import { snoozedInboxOptions } from "@multica/core/inbox/queries";
 import {
   SIDEBAR_FIRST_PAGE,
   builtinSidebarRequest,
@@ -354,16 +355,24 @@ function BuiltinViewRow({
     enabled: builtin === "working",
     select: workingIssueIds,
   });
+  // Snoozed lists, and counts, the issues the viewer snoozed in the Inbox.
+  const snoozed = useQuery({
+    ...snoozedInboxOptions(wsId),
+    enabled: builtin === "snoozed",
+    select: snoozedIssueIds,
+  });
+  const ids = builtin === "working" ? working : builtin === "snoozed" ? snoozed : null;
   const dependency = filterDependencyState(true, [
     statusCatalogSource(statusCatalog),
-    ...(builtin === "working" ? [working] : []),
+    ...(ids ? [ids] : []),
   ]);
   const request = dependency.unresolved
     ? undefined
-    : builtinSidebarRequest(builtin, issueSettings, statusCatalog.statuses, working.data);
+    : builtinSidebarRequest(builtin, issueSettings, statusCatalog.statuses, ids?.data);
   const prefetch = usePrefetch(wsId, source, request);
-  const listedCount = useListedCount(wsId, request, showCount && builtin !== "working");
-  const count = !showCount ? 0 : builtin === "working" ? (working.data?.length ?? 0) : listedCount;
+  // Working and Snoozed count their own id sets; the rest count what they list.
+  const listedCount = useListedCount(wsId, request, showCount && !ids);
+  const count = !showCount ? 0 : ids ? (ids.data?.length ?? 0) : listedCount;
 
   return (
     <>
@@ -423,6 +432,10 @@ function BuiltinViewRow({
       )}
     </>
   );
+}
+
+function snoozedIssueIds(entries: readonly { issue_id: string }[]): string[] {
+  return entries.map((entry) => entry.issue_id).sort();
 }
 
 function workingIssueIds(agents: readonly { issue_ids: readonly string[] }[]): string[] {

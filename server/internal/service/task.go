@@ -6892,7 +6892,7 @@ func (s *TaskService) exhaustDelegatedFailureRecovery(ctx context.Context, targe
 	}
 	if inboxCreated && s.Bus != nil {
 		s.Bus.Publish(events.Event{
-			Type:        protocol.EventInboxNew,
+			Type:        inbox.NewItemEventType(exhaustedInbox),
 			WorkspaceID: util.UUIDToString(target.issue.WorkspaceID),
 			ActorType:   "system",
 			ActorID:     "",
@@ -8473,7 +8473,7 @@ func (s *TaskService) publishQuickCreateInbox(item db.InboxItem, workspaceID, ag
 		"issue_status":   issueStatus,
 	}
 	s.Bus.Publish(events.Event{
-		Type:        protocol.EventInboxNew,
+		Type:        inbox.NewItemEventType(item),
 		WorkspaceID: workspaceID,
 		ActorType:   "agent",
 		ActorID:     agentID,

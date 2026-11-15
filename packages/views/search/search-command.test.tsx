@@ -863,7 +863,7 @@ describe("SearchCommand", () => {
       renderSearch();
       await user.type(input(), "views");
 
-      await waitFor(() => expect(viewRows()).toHaveLength(6));
+      await waitFor(() => expect(viewRows()).toHaveLength(7));
       expect(renderedValues().indexOf("page:views")).toBeLessThan(renderedValues().indexOf("view:view-bugs"));
     });
 

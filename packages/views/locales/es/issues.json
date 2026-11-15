@@ -1895,7 +1895,8 @@
       "all_issues": "Todas las tareas",
       "my_work": "Mi trabajo",
       "working": "En ejecución",
-      "subscribed": "Suscritas"
+      "subscribed": "Suscritas",
+      "snoozed": "Pospuestos"
     },
     "untitled": "Vista sin título",
     "copy_name": "{{name}} (copia)",

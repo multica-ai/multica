@@ -91,6 +91,25 @@ export interface InboxItem {
   archived: boolean;
   created_at: string;
   details: Record<string, string> | null;
+  /**
+   * When the issue came back from a snooze. A listed row only carries a time
+   * that has passed: a snoozed issue is left out of the list until then.
+   * Absent on servers that predate snooze.
+   */
+  snoozed_until?: string | null;
+  /** When that snooze began. */
+  snoozed_at?: string | null;
+}
+
+/** One snoozed issue in the viewer's inbox (`GET /api/inbox/snoozed`). */
+export interface SnoozedInboxIssue {
+  issue_id: string;
+  /** The issue's newest notification: the id the snooze endpoints take. */
+  item_id: string;
+  snoozed_until: string;
+  snoozed_at: string;
+  /** Notifications that arrived on the issue while it was snoozed. */
+  updates: number;
 }
 
 

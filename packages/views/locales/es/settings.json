@@ -436,6 +436,10 @@
         "label": "Darse de baja y archivar",
         "description": "Date de baja de la tarea de la notificación abierta y archívala. Disponible en tareas que no son tuyas ni de tus agentes."
       },
+      "snoozeInboxItem": {
+        "label": "Posponer notificación",
+        "description": "Pospone el issue abierto de la bandeja, o lo recupera ahora si ya está pospuesto."
+      },
       "send": {
         "label": "Enviar",
         "description": "También envía nuevas tareas."

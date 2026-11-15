@@ -61,7 +61,7 @@ Click a row to open its issue at the comment or app request the notification is 
 
 An issue opened from the inbox carries the inbox's actions in its header:
 
-- **Mark as read** / **Mark as unread**. Mark as unread is the "I looked, but I'm not done with this" action: the row goes back to unread and raises the count again, and it stays unread while you keep the issue open.
+- **Snooze** (`H`) takes the issue out of your inbox until a time you pick, and opens the next one. See [Snooze an issue](#snooze-an-issue) below.
 - **Mark as done** sets the issue to `done`, archives the notification, and opens the next one. It archives the notification even when **Archive issues you complete** is off. It's offered while the issue isn't done or cancelled yet.
 - **Archive** (`E`) archives the notification and opens the next one. Archiving doesn't modify or delete the issue.
 - **Unsubscribe & archive** (`⇧E`) is offered on issues that aren't yours: not assigned to you or to an agent you own. It unsubscribes you from the issue, archives the notification and opens the next one. Ordinary updates stop reaching your inbox, while @mentions still do. On an issue with sub-issues you choose between this issue only and this issue with all its sub-issues. For this issue only, the confirmation offers **Undo**, which restores the subscription as it was. Leaving the sub-issues as well can't be undone there; subscribe again on the issue page instead. The same action is on the hover card and in a row's right-click menu.
@@ -79,11 +79,25 @@ The section's ⋯ menu holds **View archived** and the bulk actions:
 
 **View archived** opens the archived notifications. More records load as you scroll, and filters apply to the entire archive, including records that have not loaded yet. Archived notifications keep their read state, so **Unarchive** (or `E`) brings one back exactly as you left it.
 
+## Snooze an issue
+
+Snooze takes an issue out of your inbox until a time you pick, then brings it back on top, unread. Snooze from the alarm-clock button in the issue header (or press `H`), from the button beside Archive when you hover a row, or from a row's hover card. Pick **1 hour**, **3 hours**, **1 day**, **3 days** or **1 week**, or **Pick a date and time…** for any time within a year. A day or more keeps the current time of day, except that one chosen between 22:00 and 6:00 comes back at 9:00. The confirmation lets you undo; undoing a change of time puts back the previous one.
+
+While an issue is snoozed:
+
+- new notifications on it wait with it and don't count toward the unread badge. When it comes back, the row says **Snooze ended** and how many updates arrived meanwhile;
+- it comes back early when someone mentions you by name, it is assigned to you, a run fails, an app asks for your action, or all its sub-issues finish. `@all` and squad mentions don't wake it;
+- **Mark all as read** and the archive-all actions leave it alone. Archiving it ends the snooze, and so does completing the issue yourself while **Archive issues you complete** is on;
+- opening the issue from anywhere else doesn't read it or end the snooze. Its header shows when it comes back; open that to bring it back now (`H`) or change the time.
+
+Snooze is personal: it only changes your own inbox. Everything you've snoozed is in the **Snoozed** view under Views, also reachable from **View snoozed** in the inbox menu.
+
 ## When a notification leaves the inbox
 
 Reading a notification doesn't remove it. A row leaves the inbox only when:
 
 - you archive it, from its row, the hover card, the issue header, or a bulk action;
+- you snooze its issue. This one is temporary: the issue comes back at the time you picked, or earlier when something needs you. See [Snooze an issue](#snooze-an-issue);
 - you move its issue to any status in the `done` or `closed` category yourself, while **Archive issues you complete** is on (it is by default). Only your own notifications on that issue are archived, read or not. When someone else or an agent completes an issue, its notifications stay in your inbox, so you still see the news;
 - it's a **Run failed** notification and its issue moves to a status that hands it back to a person: `in_review`, a custom status in the `started` category, or any status in the `done` or `closed` category. This archives everyone's Run failed notifications on the issue, whoever moved it, and doesn't depend on the setting above. `blocked` is the exception: it hands the issue over too, but the work is still stuck, so the earlier failures are still worth reading.
 

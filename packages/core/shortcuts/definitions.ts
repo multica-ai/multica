@@ -15,6 +15,7 @@ export type ShortcutActionId =
   | "findInIssue"
   | "archiveInboxItem"
   | "unsubscribeArchiveInboxItem"
+  | "snoozeInboxItem"
   | "send"
   | "voiceInput"
   | "goBack"
@@ -116,6 +117,12 @@ export const SHORTCUT_ACTIONS: readonly ShortcutActionDefinition[] = [
     id: "unsubscribeArchiveInboxItem",
     category: "general",
     defaultShortcut: createShortcutChord("E", { shift: true }),
+    allowInEditable: false,
+  },
+  {
+    id: "snoozeInboxItem",
+    category: "general",
+    defaultShortcut: createShortcutChord("H"),
     allowInEditable: false,
   },
   { id: "send", category: "general", defaultShortcut: primary("Enter"), allowInEditable: true },

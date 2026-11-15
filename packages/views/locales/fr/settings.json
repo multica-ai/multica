@@ -436,6 +436,10 @@
         "label": "Se désabonner et archiver",
         "description": "Se désabonner de la tâche de la notification ouverte et l'archiver. Disponible sur les tâches qui ne sont ni à vous ni à vos agents."
       },
+      "snoozeInboxItem": {
+        "label": "Reporter la notification",
+        "description": "Reporte la tâche ouverte depuis la boîte de réception, ou la fait revenir si elle est reportée."
+      },
       "send": {
         "label": "Envoyer",
         "description": "Permet aussi de créer des tâches."
