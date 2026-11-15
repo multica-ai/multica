@@ -1,19 +1,21 @@
 ## Limited schedule migration rename
 
-`615_autopilot_schedule_limit` replaces `600_autopilot_schedule_limit` from
-earlier revisions of this PR. Migration versions are full basenames, not
-numeric prefixes. The unrelated `600_wecom_install_session` remains unchanged.
+`660_autopilot_schedule_limit` replaces `600_autopilot_schedule_limit` and
+`615_autopilot_schedule_limit` from earlier revisions of this PR. Migration
+versions are full basenames. The existing `600_wecom_install_session` and
+`615_attachment_image_dimensions` keep their own versions and schema changes.
 
 Upgrades from main, where the old schedule migration was never applied, need
 no intervention. Existing triggers start with an unlimited limit and zero
 accepted executions; historical runs are retained, without recounting them.
 
-A database that already recorded `600_autopilot_schedule_limit` is outside the
-automatic upgrade path. The new migration stops with an explicit error before
-changing the table. Renaming the file alone would otherwise attempt to add the
-same columns again. No automatic migration-history rewrite or counter reset is
-performed. Deployment application status must be checked by its operator; it
-cannot be inferred from the PR or the migration number.
+A database that already recorded either earlier schedule version needs its
+migration history reconciled by its operator. The runner checks for both
+versions under the migration lock before executing any DDL in either direction.
+The new up migration also checks this history before adding columns when run
+directly. Renaming the file alone would otherwise attempt to add the same
+columns again. Execution counts and migration history are preserved on this
+error path. Deployment application status must be checked by its operator.
 
 For such a deployment, stop writers and back up both the database and its
 migration history before proceeding. Keep the original binary and migration

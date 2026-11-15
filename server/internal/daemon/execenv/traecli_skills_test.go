@@ -76,7 +76,7 @@ func TestTraecliBriefOmitsSkillsWithoutVisibleEntries(t *testing.T) {
 	t.Parallel()
 	for _, skills := range [][]SkillContextForEnv{
 		nil,
-		{{Name: "multica-platform", Content: "---\nname: multica-platform\ndisable-model-invocation: true\n---\n\nHidden body."}},
+		{{Name: "multica-platform", BuiltinName: "multica-platform", Content: "---\nname: multica-platform\ndisable-model-invocation: true\n---\n\nHidden body."}},
 	} {
 		brief := buildMetaSkillContent("traecli", TaskContextForEnv{AgentSkills: skills})
 		if strings.Contains(brief, "## Skills") || strings.Contains(brief, ".traecli/skills/") {

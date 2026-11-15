@@ -1,13 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useId, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useStore } from "zustand";
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { CSS } from "@dnd-kit/utilities";
-import { Bot, CircleUser, Copy, EyeOff, Layers, Link2, ListTodo, MoreHorizontal, Pencil, Plus, Trash2 } from "@multica/ui/icons";
+import { Copy, EyeOff, Filter, Layers, Link2, MoreHorizontal, Pencil, Plus, Trash2 } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import {
@@ -18,8 +17,9 @@ import {
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import type { IssueView } from "@multica/core/api/schemas";
-import { isMyAgentsSearch, useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { sidebarIssuesOptions } from "@multica/core/issues/queries";
+import { workspaceWorkingAgentsOptions } from "@multica/core/agents";
 import {
   SIDEBAR_FIRST_PAGE,
   builtinSidebarRequest,
@@ -36,11 +36,6 @@ import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useSidebarProjectPrefs } from "@multica/core/issues/sidebar-project-prefs";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
 import {
-  myIssuesRelationFromScope,
-  myIssuesScopeFor,
-  myIssuesViewStore,
-} from "@multica/core/issues/stores/my-issues-view-store";
-import {
   issueViewContainerKey,
   useActiveIssueViewStore,
 } from "@multica/core/issue-views/active-view-store";
@@ -54,22 +49,20 @@ import {
   type SidebarViewItem,
 } from "@multica/core/issue-views/sidebar-views";
 import { issueViewTarget } from "@multica/core/issue-views/view-target";
-import { UNREAD_VIEW, UNREAD_VIEW_ID } from "@multica/core/issue-views/unread-view";
-import { useIssueViewActions, type IssueViewActions } from "../../issue-views/use-view-actions";
+import type { IssueViewActions } from "../../issue-views/use-view-actions";
 import { DeleteViewDialog } from "../../issue-views/delete-view-dialog";
 import { ViewNameInput } from "../../issue-views/view-name-input";
-import { UnreadViewIcon } from "../../issue-views/unread-view-icon";
-import { useBuiltinViewNavigation } from "../../issue-views/builtin-views";
-import { useNavigation } from "../../navigation";
+import { BUILTIN_VIEW_ICON, useBuiltinViewLabel, useBuiltinViewNavigation } from "../../issue-views/builtin-views";
+import { shouldOpenRowMenu, useRowMenu } from "../../common/point-menu";
 import { useT } from "../../i18n";
-import { PANEL_ROW_CLASS, PanelCount, PanelLink, PanelList, PanelSection, isPathWithin, panelRowStateClass } from "../panel-nav";
+import { PANEL_ROW_CLASS, PanelCount, PanelLink, PanelList, PanelSection, isPathWithin, panelRowAnchor, panelRowStateClass } from "../panel-nav";
+import { useDragClickGuard } from "../use-drag-click-guard";
+import { SECTION_SETTINGS_REVEAL_CLASS, ViewsSectionSettings } from "./sidebar-settings";
 import { SidebarIssueList, TREE_ROW_BUTTON_CLASS, TreeRow } from "./sidebar-tree";
 
 const DRAG_MODIFIERS = [restrictToVerticalAxis, restrictToFirstScrollableAncestor];
 const EMPTY_VIEWS: IssueView[] = [];
 const WORKSPACE_SCOPE = { scope_type: "workspace" } as const;
-const MY_SCOPE = { scope_type: "my" } as const;
-const NO_SEARCH = new URLSearchParams();
 const ROW_MENU_CLASS = cn(
   TREE_ROW_BUTTON_CLASS,
   "text-muted-foreground opacity-0 group-hover/row:opacity-100 data-[popup-open]:opacity-100 [@media(pointer:coarse)]:opacity-100",
@@ -79,9 +72,17 @@ interface ViewsSectionProps {
   wsId: string;
   pathname: string;
   plainRowsLit: boolean;
-  /** An expanded tree row lists the current issue, so "All issues" stays unlit. */
-  issueLitInTree: boolean;
+  /** No other row marks the open issue and it has no project, so "All issues" lights for it. */
+  issueInAllIssues: boolean;
   activeIssueId: string | null;
+  /** The one list that lights the open issue. */
+  litSource: string | null;
+  actions: IssueViewActions;
+}
+
+/** The sidebar source of a starred view's issue list. */
+export function sidebarViewItemSource(item: SidebarViewItem): string {
+  return item.kind === "view" ? viewSidebarSource(item.view.id) : builtinSidebarSource(item.key);
 }
 
 /**
@@ -92,21 +93,25 @@ export function ViewsSection({
   wsId,
   pathname,
   plainRowsLit,
-  issueLitInTree,
+  issueInAllIssues,
   activeIssueId,
+  litSource,
+  actions,
 }: ViewsSectionProps) {
   const { t } = useT("layout");
   const p = useWorkspacePaths();
-  const actions = useIssueViewActions();
   const { items, reorder } = actions.sidebar;
   const { data: allViews = EMPTY_VIEWS } = useQuery(issueViewEverywhereOptions(wsId));
   const [deleteTarget, setDeleteTarget] = useState<IssueView | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   const collapsed = useSidebarTreeStore((s) => s.viewsCollapsed);
   const setCollapsed = useSidebarTreeStore((s) => s.setViewsCollapsed);
+  const showCount = useSidebarTreeStore((s) => s.viewsShowCount);
+  const { arm: armClickGuard, release: releaseClickGuard } = useDragClickGuard();
 
   const onDragEnd = useCallback(
     ({ active, over }: DragEndEvent) => {
+      releaseClickGuard();
       if (!over || active.id === over.id) return;
       const ids = items.map((item) => item.id);
       const from = ids.indexOf(String(active.id));
@@ -114,7 +119,7 @@ export function ViewsSection({
       if (from === -1 || to === -1) return;
       reorder(arrayMove(ids, from, to));
     },
-    [items, reorder],
+    [items, releaseClickGuard, reorder],
   );
 
   return (
@@ -123,27 +128,37 @@ export function ViewsSection({
       collapsed={collapsed}
       onCollapsedChange={setCollapsed}
       action={
-        <IconButton
-          label={t(($) => $.panels.work.new_view)}
-          size="icon-xs"
-          className="text-muted-foreground"
-          onClick={() => {
-            // The new view lands in this list, so it has to be open. It is
-            // named in the page header, next to where its filters are set.
-            setCollapsed(false);
-            actions.create({
-              scope: WORKSPACE_SCOPE,
-              scopeVariant: null,
-              definition: issueViewSeedDefinition({ query: {}, display: {} }),
-              renameIn: "header",
-            });
-          }}
-        >
-          <Plus />
-        </IconButton>
+        <>
+          <ViewsSectionSettings sidebar={actions.sidebar} className={SECTION_SETTINGS_REVEAL_CLASS} />
+          <IconButton
+            label={t(($) => $.panels.work.new_view)}
+            size="icon-xs"
+            className="text-muted-foreground"
+            onClick={() => {
+              // The new view lands in this list, so it has to be open. It is
+              // named in the page header, next to where its filters are set.
+              setCollapsed(false);
+              actions.create({
+                scope: WORKSPACE_SCOPE,
+                scopeVariant: null,
+                definition: issueViewSeedDefinition({ query: {}, display: {} }),
+                renameIn: "header",
+              });
+            }}
+          >
+            <Plus />
+          </IconButton>
+        </>
       }
     >
-      <DndContext sensors={sensors} collisionDetection={closestCenter} modifiers={DRAG_MODIFIERS} onDragEnd={onDragEnd}>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        modifiers={DRAG_MODIFIERS}
+        onDragStart={armClickGuard}
+        onDragEnd={onDragEnd}
+        onDragCancel={releaseClickGuard}
+      >
         <SortableContext items={items.map((item) => item.id)} strategy={verticalListSortingStrategy}>
           <PanelList>
             {items.map((item) => (
@@ -155,18 +170,9 @@ export function ViewsSection({
                       item={item}
                       pathname={pathname}
                       plainRowsLit={plainRowsLit}
-                      activeIssueId={activeIssueId}
+                      activeIssueId={litSource === sidebarViewItemSource(item) ? activeIssueId : null}
                       actions={actions}
                       onDelete={setDeleteTarget}
-                      drag={drag}
-                    />
-                  ) : item.key === "unread" ? (
-                    <UnreadViewRow
-                      wsId={wsId}
-                      pathname={pathname}
-                      plainRowsLit={plainRowsLit}
-                      activeIssueId={activeIssueId}
-                      actions={actions}
                       drag={drag}
                     />
                   ) : (
@@ -175,8 +181,8 @@ export function ViewsSection({
                       builtin={item.key}
                       pathname={pathname}
                       plainRowsLit={plainRowsLit}
-                      issueLitInTree={issueLitInTree}
-                      activeIssueId={activeIssueId}
+                      issueInAllIssues={issueInAllIssues}
+                      activeIssueId={litSource === sidebarViewItemSource(item) ? activeIssueId : null}
                       actions={actions}
                       drag={drag}
                     />
@@ -193,7 +199,7 @@ export function ViewsSection({
           icon={<span className="size-4" aria-hidden />}
           label={t(($) => $.panels.work.all_views)}
           active={pathname === p.views()}
-          trailing={<PanelCount value={allViews.length + BUILTIN_VIEW_KEYS.length} />}
+          trailing={showCount && <PanelCount value={allViews.length + BUILTIN_VIEW_KEYS.length} />}
           className="text-caption"
         />
       </PanelList>
@@ -216,16 +222,10 @@ function usePrefetch(wsId: string, source: string, request: SidebarIssuesRequest
 interface DragBindings {
   rowRef: (node: HTMLElement | null) => void;
   listeners: ReturnType<typeof useSortable>["listeners"];
-  /** True right after a drag, so the release does not also navigate. */
-  consumeDrag: () => boolean;
 }
 
 function SortableViewRow({ id, children }: { id: string; children: (drag: DragBindings) => React.ReactNode }) {
   const { listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id });
-  const wasDragged = useRef(false);
-  useEffect(() => {
-    if (isDragging) wasDragged.current = true;
-  }, [isDragging]);
   return (
     <li
       ref={setNodeRef}
@@ -237,32 +237,26 @@ function SortableViewRow({ id, children }: { id: string; children: (drag: DragBi
       {children({
         rowRef: setActivatorNodeRef,
         listeners,
-        consumeDrag: () => {
-          if (!wasDragged.current) return false;
-          wasDragged.current = false;
-          return true;
-        },
       })}
     </li>
   );
 }
 
 /** "…" on hover, and the same menu on right-click. */
+/** A view row's ⋯ menu. A right-click on the row opens it at the cursor. */
 function RowMenu({
   label,
-  open,
-  onOpenChange,
+  state,
   className,
   children,
 }: {
   label: string;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+  state: ReturnType<typeof useRowMenu>;
   className?: string;
   children: React.ReactNode;
 }) {
   return (
-    <DropdownMenu open={open} onOpenChange={onOpenChange}>
+    <DropdownMenu open={state.menu.open} onOpenChange={state.onOpenChange}>
       <DropdownMenuTrigger
         render={
           <button
@@ -275,36 +269,33 @@ function RowMenu({
       >
         <MoreHorizontal className="size-3.5" />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" side="right" className="w-auto min-w-48">
+      <DropdownMenuContent
+        align="start"
+        side={state.menu.point ? "bottom" : "right"}
+        anchor={state.anchor}
+        className="w-auto min-w-48"
+      >
         {children}
       </DropdownMenuContent>
     </DropdownMenu>
   );
 }
 
-type ScopeBuiltinViewKey = Exclude<BuiltinViewKey, "unread">;
-
-const BUILTIN_ICON: Record<ScopeBuiltinViewKey, React.ReactNode> = {
-  my_issues: <CircleUser className="size-4 shrink-0" />,
-  my_agents: <Bot className="size-4 shrink-0" />,
-  all_issues: <ListTodo className="size-4 shrink-0" />,
-};
-
 function BuiltinViewRow({
   wsId,
   builtin,
   pathname,
   plainRowsLit,
-  issueLitInTree,
+  issueInAllIssues,
   activeIssueId,
   actions,
   drag,
 }: {
   wsId: string;
-  builtin: ScopeBuiltinViewKey;
+  builtin: BuiltinViewKey;
   pathname: string;
   plainRowsLit: boolean;
-  issueLitInTree: boolean;
+  issueInAllIssues: boolean;
   activeIssueId: string | null;
   actions: IssueViewActions;
   drag: DragBindings;
@@ -313,41 +304,42 @@ function BuiltinViewRow({
   const p = useWorkspacePaths();
   const listId = useId();
   const linkRef = useRef<HTMLAnchorElement>(null);
-  const [menuOpen, setMenuOpen] = useState(false);
+  const rowMenu = useRowMenu();
   const builtinNav = useBuiltinViewNavigation();
-  const { searchParams } = useNavigation();
-  const myScope = useStore(myIssuesViewStore, (s) => myIssuesScopeFor(NO_SEARCH, s.scope));
   const workspaceKey = issueViewContainerKey(wsId, WORKSPACE_SCOPE);
-  const myKey = issueViewContainerKey(wsId, MY_SCOPE);
   const activeWorkspaceView = useActiveIssueViewStore((s) => s.active[workspaceKey] ?? null);
-  const activeMyView = useActiveIssueViewStore((s) => s.active[myKey] ?? null);
+  const showCount = useSidebarTreeStore((s) => s.viewsShowCount);
 
-  const onMyIssues = pathname === p.myIssues();
   const href = builtinNav.hrefFor(builtin);
-  const label =
-    builtin === "my_issues"
-      ? t(($) => $.nav.my_issues)
-      : builtin === "my_agents"
-        ? t(($) => $.panels.work.my_agents)
-        : t(($) => $.panels.work.all_issues);
+  const label = useBuiltinViewLabel()(builtin);
   const active =
     plainRowsLit &&
     (builtin === "all_issues"
       ? pathname === p.issues()
         ? activeWorkspaceView === null
-        : !issueLitInTree && isPathWithin(pathname, p.issues())
-      : onMyIssues && activeMyView === null && (builtin === "my_agents") === isMyAgentsSearch(searchParams));
+        : issueInAllIssues && isPathWithin(pathname, p.issues())
+      : pathname === p.issues() && activeWorkspaceView === builtin);
 
   const source = builtinSidebarSource(builtin);
   const expanded = useSidebarTreeStore((s) => s.expanded.includes(source));
   const setExpanded = useSidebarTreeStore((s) => s.setExpanded);
   const statusCatalog = useIssueStatuses(wsId);
   const { issueSettings } = useSidebarProjectPrefs(wsId);
-  const catalogDependency = filterDependencyState(true, [statusCatalogSource(statusCatalog)]);
-  const request = catalogDependency.unresolved
+  // Working lists, and counts, the issues agents are running on right now.
+  const working = useQuery({
+    ...workspaceWorkingAgentsOptions(wsId, "issue"),
+    enabled: builtin === "working",
+    select: workingIssueIds,
+  });
+  const dependency = filterDependencyState(true, [
+    statusCatalogSource(statusCatalog),
+    ...(builtin === "working" ? [working] : []),
+  ]);
+  const request = dependency.unresolved
     ? undefined
-    : builtinSidebarRequest(builtin, myIssuesRelationFromScope(myScope), issueSettings, statusCatalog.statuses);
+    : builtinSidebarRequest(builtin, issueSettings, statusCatalog.statuses, working.data);
   const prefetch = usePrefetch(wsId, source, request);
+  const count = builtin === "working" && showCount ? (working.data?.length ?? 0) : 0;
 
   return (
     <>
@@ -357,7 +349,7 @@ function BuiltinViewRow({
         {...drag.listeners}
         href={href}
         label={label}
-        icon={BUILTIN_ICON[builtin]}
+        icon={BUILTIN_VIEW_ICON[builtin]}
         active={active}
         expanded={expanded}
         onExpandedChange={(next) => setExpanded(source, next)}
@@ -365,129 +357,27 @@ function BuiltinViewRow({
         toggleLabel={t(($) => $.panels.work.project_issues, { name: label })}
         onPrefetch={prefetch}
         onContextMenu={(event) => {
-          event.preventDefault();
-          setMenuOpen(true);
-        }}
-        onNavigate={(event) => {
-          if (drag.consumeDrag()) event.preventDefault();
+          if (shouldOpenRowMenu(event)) rowMenu.openAtPointer(event);
         }}
         onNavigateInPlace={() => builtinNav.prepare(builtin)}
-        trailing={
-          <RowMenu label={t(($) => $.panels.work.view_actions, { name: label })} open={menuOpen} onOpenChange={setMenuOpen}>
-            <DropdownMenuItem onClick={() => actions.copyLink(href)}>
-              <Link2 className="size-3.5" />
-              {t(($) => $.panels.work.view_copy_link)}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => actions.sidebar.unstar(builtinViewItemId(builtin))}>
-              <EyeOff className="size-3.5" />
-              {t(($) => $.panels.work.view_remove)}
-            </DropdownMenuItem>
-          </RowMenu>
-        }
-      />
-      {expanded && (
-        <SidebarIssueList
-          id={listId}
-          wsId={wsId}
-          source={source}
-          params={request}
-          paramsError={catalogDependency.error}
-          onRetry={catalogDependency.retry}
-          activeIssueId={activeIssueId}
-          onCollapse={() => {
-            setExpanded(source, false);
-            linkRef.current?.focus();
-          }}
-        />
-      )}
-    </>
-  );
-}
-
-/**
- * The built-in Unread view, once the user stars it. The row stays when
- * nothing is unread; only the count goes.
- */
-function UnreadViewRow({
-  wsId,
-  pathname,
-  plainRowsLit,
-  activeIssueId,
-  actions,
-  drag,
-}: {
-  wsId: string;
-  pathname: string;
-  plainRowsLit: boolean;
-  activeIssueId: string | null;
-  actions: IssueViewActions;
-  drag: DragBindings;
-}) {
-  const { t } = useT("layout");
-  const p = useWorkspacePaths();
-  const listId = useId();
-  const linkRef = useRef<HTMLAnchorElement>(null);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const target = issueViewTarget(wsId, UNREAD_VIEW, p);
-  const open = useActiveIssueViewStore(
-    (s) => pathname === target.path && s.active[target.containerKey] === UNREAD_VIEW_ID,
-  );
-  const setActive = useActiveIssueViewStore((s) => s.setActive);
-  const source = viewSidebarSource(UNREAD_VIEW_ID);
-  const expanded = useSidebarTreeStore((s) => s.expanded.includes(source));
-  const setExpanded = useSidebarTreeStore((s) => s.setExpanded);
-  const unread = useIssueUnreadIds(wsId);
-  const unreadDependency = filterDependencyState(true, [unread]);
-  const count = unread.data?.length ?? 0;
-  const request = unreadDependency.unresolved
-    ? undefined
-    : viewSidebarRequest(UNREAD_VIEW, todayDateOnly(), unread.data);
-  const prefetch = usePrefetch(wsId, source, request);
-  const label = t(($) => $.panels.work.unread);
-
-  return (
-    <>
-      <TreeRow
-        ref={linkRef}
-        rowRef={drag.rowRef}
-        {...drag.listeners}
-        href={target.href}
-        label={label}
-        icon={<UnreadViewIcon />}
-        active={plainRowsLit && open}
-        expanded={expanded}
-        onExpandedChange={(next) => setExpanded(source, next)}
-        listId={listId}
-        toggleLabel={t(($) => $.panels.work.project_issues, { name: label })}
-        onPrefetch={prefetch}
-        onContextMenu={(event) => {
-          event.preventDefault();
-          setMenuOpen(true);
-        }}
-        onNavigate={(event) => {
-          if (drag.consumeDrag()) event.preventDefault();
-        }}
-        onNavigateInPlace={() => setActive(target.containerKey, UNREAD_VIEW_ID)}
         trailing={
           // The menu button takes the count's place, so the row never reflows.
           <span className="relative flex h-5 min-w-5 items-center justify-end">
             <PanelCount
               value={count}
-              className="font-medium text-brand transition-opacity group-focus-within/row:opacity-0 group-hover/row:opacity-0 group-has-[[data-popup-open]]/row:opacity-0 [@media(pointer:coarse)]:opacity-0"
+              className="transition-opacity group-focus-within/row:opacity-0 group-hover/row:opacity-0 group-has-[[data-popup-open]]/row:opacity-0 [@media(pointer:coarse)]:opacity-0"
             />
             <RowMenu
               label={t(($) => $.panels.work.view_actions, { name: label })}
-              open={menuOpen}
-              onOpenChange={setMenuOpen}
+              state={rowMenu}
               className="absolute right-0"
             >
-              <DropdownMenuItem onClick={() => actions.copyLink(target.href)}>
+              <DropdownMenuItem onClick={() => actions.copyLink(href)}>
                 <Link2 className="size-3.5" />
                 {t(($) => $.panels.work.view_copy_link)}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => actions.sidebar.unstar(builtinViewItemId("unread"))}>
+              <DropdownMenuItem onClick={() => actions.sidebar.unstar(builtinViewItemId(builtin))}>
                 <EyeOff className="size-3.5" />
                 {t(($) => $.panels.work.view_remove)}
               </DropdownMenuItem>
@@ -501,8 +391,8 @@ function UnreadViewRow({
           wsId={wsId}
           source={source}
           params={request}
-          paramsError={unreadDependency.error}
-          onRetry={unreadDependency.retry}
+          paramsError={dependency.error}
+          onRetry={dependency.retry}
           activeIssueId={activeIssueId}
           onCollapse={() => {
             setExpanded(source, false);
@@ -512,6 +402,10 @@ function UnreadViewRow({
       )}
     </>
   );
+}
+
+function workingIssueIds(agents: readonly { issue_ids: readonly string[] }[]): string[] {
+  return [...new Set(agents.flatMap((agent) => agent.issue_ids))].sort();
 }
 
 function SavedViewRow({
@@ -538,7 +432,7 @@ function SavedViewRow({
   const { view } = item;
   const listId = useId();
   const linkRef = useRef<HTMLAnchorElement>(null);
-  const [menuOpen, setMenuOpen] = useState(false);
+  const rowMenu = useRowMenu();
   const target = issueViewTarget(wsId, view, p);
   const active = useActiveIssueViewStore(
     (s) => plainRowsLit && pathname === target.path && s.active[target.containerKey] === view.id,
@@ -563,7 +457,7 @@ function SavedViewRow({
 
   if (renaming) {
     return (
-      <div className={cn(PANEL_ROW_CLASS, panelRowStateClass(active), "py-1")}>
+      <div {...panelRowAnchor(active)} className={cn(PANEL_ROW_CLASS, panelRowStateClass(active), "py-1")}>
         <Layers className="size-4 shrink-0" />
         <ViewNameInput
           initial={view.name}
@@ -591,20 +485,22 @@ function SavedViewRow({
         toggleLabel={t(($) => $.panels.work.project_issues, { name: view.name })}
         onPrefetch={prefetch}
         onContextMenu={(event) => {
-          event.preventDefault();
-          setMenuOpen(true);
-        }}
-        onNavigate={(event) => {
-          if (drag.consumeDrag()) event.preventDefault();
+          if (shouldOpenRowMenu(event)) rowMenu.openAtPointer(event);
         }}
         onNavigateInPlace={() => setActive(target.containerKey, view.id)}
         trailing={
-          <RowMenu label={t(($) => $.panels.work.view_actions, { name: view.name })} open={menuOpen} onOpenChange={setMenuOpen}>
+          <RowMenu label={t(($) => $.panels.work.view_actions, { name: view.name })} state={rowMenu}>
             {canManage && (
-              <DropdownMenuItem onClick={() => startRename(view.id, "sidebar")}>
-                <Pencil className="size-3.5" />
-                {t(($) => $.panels.work.view_rename)}
-              </DropdownMenuItem>
+              <>
+                <DropdownMenuItem onClick={() => actions.edit(view)}>
+                  <Filter className="size-3.5" />
+                  {t(($) => $.panels.work.view_edit)}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => startRename(view.id, "sidebar")}>
+                  <Pencil className="size-3.5" />
+                  {t(($) => $.panels.work.view_rename)}
+                </DropdownMenuItem>
+              </>
             )}
             <DropdownMenuItem onClick={() => actions.duplicate(view, "sidebar")}>
               <Copy className="size-3.5" />

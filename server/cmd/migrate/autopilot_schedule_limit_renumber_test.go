@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"math/rand/v2"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -12,10 +15,9 @@ import (
 )
 
 func TestAutopilotScheduleLimitRenumber(t *testing.T) {
-	const version = "615_autopilot_schedule_limit"
-	const legacyVersion = "600_autopilot_schedule_limit"
-	for _, legacy := range []bool{false, true} {
-		t.Run(fmt.Sprintf("legacy_applied_%t", legacy), func(t *testing.T) {
+	const version = "660_autopilot_schedule_limit"
+	for _, legacyVersion := range []string{"", "600_autopilot_schedule_limit", "615_autopilot_schedule_limit"} {
+		t.Run("legacy_"+legacyVersion, func(t *testing.T) {
 			admin := openTestPool(t)
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
@@ -36,7 +38,7 @@ func TestAutopilotScheduleLimitRenumber(t *testing.T) {
 				t.Fatal(err)
 			}
 			files := realMigrationFiles(t, []string{version}, "up")
-			if legacy {
+			if legacyVersion != "" {
 				// The old migration's schema, with a finite schedule already exhausted.
 				if _, err := pool.Exec(ctx, `ALTER TABLE autopilot_trigger
 					ADD COLUMN execution_limit integer,
@@ -50,18 +52,39 @@ func TestAutopilotScheduleLimitRenumber(t *testing.T) {
 				if _, err := pool.Exec(ctx, "INSERT INTO schema_migrations (version) VALUES ($1)", legacyVersion); err != nil {
 					t.Fatal(err)
 				}
+				if _, err := pool.Exec(ctx, `CREATE TABLE attachment (width integer, height integer);
+					INSERT INTO attachment VALUES (640, 480);
+					INSERT INTO schema_migrations (version) VALUES ('600_wecom_install_session'), ('615_attachment_image_dimensions')`); err != nil {
+					t.Fatal(err)
+				}
+				// A pending earlier migration must not execute before the historical
+				// schedule conflict is reported, including during rollback.
+				probe := filepath.Join(t.TempDir(), "614_schedule_rename_probe.up.sql")
+				if err := os.WriteFile(probe, []byte("CREATE TABLE schedule_rename_probe (id integer)"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				files = append([]string{probe}, files...)
 			}
 			opts := runOptions{
 				Direction: "up", Files: files, SchemaMigrationsTable: schema + ".schema_migrations",
 				AdvisoryLockKey: int64(rand.Uint64()&0x7fffffffffffffff) | 1,
 				Hooks:           hooksForDirection("up"),
 			}
-			if legacy {
+			if legacyVersion != "" {
 				for range 2 {
 					err := runMigrations(ctx, pool, opts)
 					if err == nil || !strings.Contains(err.Error(), "refusing to reapply the renamed migration") {
 						t.Fatalf("expected explicit legacy upgrade stop, got %v", err)
 					}
+				}
+				down := opts
+				down.Direction, down.Files = "down", realMigrationFiles(t, []string{version}, "down")
+				if err := runMigrations(ctx, pool, down); err == nil || !strings.Contains(err.Error(), "refusing to reapply the renamed migration") {
+					t.Fatalf("expected explicit legacy rollback stop, got %v", err)
+				}
+				var probeExists bool
+				if err := pool.QueryRow(ctx, "SELECT to_regclass('schedule_rename_probe') IS NOT NULL").Scan(&probeExists); err != nil || probeExists {
+					t.Fatalf("legacy guard ran after DDL: probe exists=%t, %v", probeExists, err)
 				}
 				var limit, count int64
 				if err := pool.QueryRow(ctx, "SELECT execution_limit, execution_count FROM autopilot_trigger WHERE kind='schedule'").Scan(&limit, &count); err != nil || limit != 3 || count != 3 {
@@ -73,8 +96,17 @@ func TestAutopilotScheduleLimitRenumber(t *testing.T) {
 					t.Fatal(err)
 				}
 				versions, err = pgx.CollectRows(rows, pgx.RowTo[string])
-				if err != nil || len(versions) != 1 || versions[0] != legacyVersion {
+				expected := []string{legacyVersion, "600_wecom_install_session", "615_attachment_image_dimensions"}
+				slices.Sort(expected)
+				if err != nil || !slices.Equal(versions, expected) {
 					t.Fatalf("legacy history changed: %v, %v", versions, err)
+				}
+				var triggers, attachments int
+				if err := pool.QueryRow(ctx, "SELECT count(*) FROM autopilot_trigger").Scan(&triggers); err != nil || triggers != 2 {
+					t.Fatalf("legacy trigger rows changed: %d, %v", triggers, err)
+				}
+				if err := pool.QueryRow(ctx, "SELECT count(*) FROM attachment WHERE width=640 AND height=480").Scan(&attachments); err != nil || attachments != 1 {
+					t.Fatalf("attachment dimensions changed: %d, %v", attachments, err)
 				}
 				return
 			}

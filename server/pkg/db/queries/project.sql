@@ -3,7 +3,28 @@ SELECT * FROM project
 WHERE workspace_id = $1
   AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
   AND (sqlc.narg('priority')::text IS NULL OR priority = sqlc.narg('priority'))
+  AND (sqlc.arg('include_archived')::boolean OR archived_at IS NULL)
 ORDER BY created_at DESC;
+
+-- name: ArchiveProject :one
+-- Guarded on archived_at IS NULL so a repeated archive keeps the first
+-- actor and time; no row means it was already archived (or is gone).
+UPDATE project SET
+    archived_at = now(),
+    archived_by_type = sqlc.narg('archived_by_type'),
+    archived_by_id = sqlc.narg('archived_by_id'),
+    updated_at = now()
+WHERE id = $1 AND workspace_id = $2 AND archived_at IS NULL
+RETURNING *;
+
+-- name: RestoreProject :one
+UPDATE project SET
+    archived_at = NULL,
+    archived_by_type = NULL,
+    archived_by_id = NULL,
+    updated_at = now()
+WHERE id = $1 AND workspace_id = $2 AND archived_at IS NOT NULL
+RETURNING *;
 
 -- name: GetProjectInWorkspace :one
 SELECT * FROM project
@@ -26,9 +47,10 @@ FOR UPDATE;
 -- name: CreateProject :one
 INSERT INTO project (
     workspace_id, title, description, icon, status,
-    lead_type, lead_id, priority, start_date, due_date, workflow_id
+    lead_type, lead_id, priority, start_date, due_date, workflow_id,
+    creator_type, creator_id
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
 ) RETURNING *;
 
 -- name: UpdateProject :one
@@ -57,7 +79,8 @@ WHERE project_id = $1;
 -- name: GetProjectIssueStats :many
 SELECT project_id,
        count(*)::bigint AS total_count,
-       count(*) FILTER (WHERE status = ANY(sqlc.arg('terminal_status_keys')::text[]))::bigint AS done_count
+       count(*) FILTER (WHERE status = ANY(sqlc.arg('terminal_status_keys')::text[]))::bigint AS done_count,
+       max(GREATEST(updated_at, last_activity_at))::timestamptz AS last_issue_activity_at
 FROM issue
 WHERE workspace_id = sqlc.arg('workspace_id')::uuid
   AND project_id = ANY(sqlc.arg('project_ids')::uuid[])

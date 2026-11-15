@@ -123,6 +123,19 @@ WHERE status = 'active'
   AND assignee_id = @squad_id
 RETURNING *;
 
+-- name: PauseAutopilotsByArchivedProject :many
+-- An archived project accepts no new issues, so an automation filing into it
+-- would fail every run. Pause it, keeping the configuration; restoring the
+-- project leaves it paused for an explicit resume.
+UPDATE autopilot
+SET status = 'paused',
+    pause_reason = 'project_archived',
+    updated_at = now()
+WHERE status = 'active'
+  AND workspace_id = @workspace_id
+  AND project_id = @project_id
+RETURNING *;
+
 -- name: UpdateAutopilotLastRunAt :exec
 UPDATE autopilot SET last_run_at = now(), updated_at = now()
 WHERE id = $1;

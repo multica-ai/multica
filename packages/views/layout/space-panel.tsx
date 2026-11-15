@@ -1,13 +1,13 @@
 "use client";
 
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import type { AppSpaceId } from "@multica/core/paths";
 import { cn } from "@multica/ui/lib/utils";
 import { useSidebar } from "@multica/ui/components/ui/sidebar";
 import { useAppShell } from "./app-shell-context";
 import { PanelResizeHandle } from "./panel-resize-handle";
 import { AutopilotsPanel } from "./panels/autopilots-panel";
-import { ChatPeek, InboxPeek } from "./panels/list-space-peeks";
+import { ChatPeek } from "./panels/list-space-peeks";
 import { LIST_COLUMN_WIDTH_CLASS, NAV_COLUMN_MOTION_CLASS, NAV_PEEK_CLASS } from "./rail-styles";
 import { TeamPanel } from "./panels/team-panel";
 import { KeptRowsRelease, WorkPanel } from "./panels/work-panel";
@@ -18,10 +18,9 @@ const PANELS: Partial<Record<AppSpaceId, () => React.ReactNode>> = {
   autopilots: AutopilotsPanel,
 };
 
-// Inbox and Chat keep their lists in their pages, so from another space they
-// preview through a standalone copy of the list, at the list width.
+// Chat keeps its list in its page, so from another space it previews through
+// a standalone copy of the list, at the list width.
 const LIST_PEEKS: Partial<Record<AppSpaceId, () => React.ReactNode>> = {
-  inbox: InboxPeek,
   chat: ChatPeek,
 };
 const PEEKS: Partial<Record<AppSpaceId, () => React.ReactNode>> = {
@@ -38,7 +37,7 @@ export function SpacePanelContent({ space }: { space: AppSpaceId | null }) {
 /**
  * The space panel inside the content card: a column on the card's leading
  * edge, separated from the page by one hairline. Spaces without a shell
- * panel (Inbox, Chat, Settings) render their own `ListColumn` instead, so
+ * panel (Chat, Settings) render their own `ListColumn` instead, so
  * nothing mounts for them. While collapsed, hovering a rail space previews
  * its panel over the page.
  */
@@ -46,6 +45,12 @@ export function SpacePanel() {
   const shell = useAppShell();
   const { open, isCompact } = useSidebar();
   const panelRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    // Public state hook for themes (docs/theming.md).
+    const root = document.documentElement;
+    root.classList.toggle("is-sidebar-collapsed", !open);
+    return () => root.classList.remove("is-sidebar-collapsed");
+  }, [open]);
   if (!shell) return null;
   if (isCompact) return <KeptRowsRelease />;
 
@@ -63,6 +68,7 @@ export function SpacePanel() {
           key={space}
           ref={panelRef}
           data-slot="space-panel"
+          data-mc="sidebar"
           data-state={open ? "expanded" : "collapsed"}
           inert={!open}
           className={cn(

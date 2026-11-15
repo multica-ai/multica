@@ -51,6 +51,8 @@ function ActorAvatar({
   return (
     <div
       data-slot="avatar"
+      data-mc="avatar"
+      data-type={isSystem ? "system" : isAgent ? "agent" : isSquad ? "squad" : "member"}
       className={cn(
         "inline-flex shrink-0 items-center justify-center font-medium overflow-hidden",
         (!avatarUrl || emoji || imgError) && "bg-muted text-muted-foreground",
@@ -78,7 +80,7 @@ function ActorAvatar({
           onError={() => setImgError(true)}
         />
       ) : isSystem ? (
-        // `size` only sets the edge thickness; the slot decides the rendered size.
+        // `size` only picks the optical size; the slot decides the rendered size.
         <MulticaIcon shape="circle" size={AVATAR_SIZE_PX[size]} style={{ width: "100%", height: "100%" }} />
       ) : isAgent ? (
         <Bot style={{ width: scaled(0.55), height: scaled(0.55) }} />

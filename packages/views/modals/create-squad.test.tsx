@@ -113,31 +113,9 @@ vi.mock("../agents/components/char-counter", () => ({
   ),
 }));
 
-// Render Popover/PopoverContent inline so the picker rows are queryable
-// without simulating a Base UI portal — we still drive the open prop via
-// PopoverTrigger clicks but the content is always in the DOM.
-vi.mock("@multica/ui/components/ui/popover", () => ({
-  Popover: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  PopoverTrigger: ({
-    children,
-    className,
-    onClick,
-    render,
-  }: {
-    children?: ReactNode;
-    className?: string;
-    onClick?: () => void;
-    render?: ReactNode;
-  }) => {
-    // Base UI's `render` prop replaces the trigger with the provided element.
-    // The mock just renders it as-is so its children stay queryable in tests.
-    if (render !== undefined) return <>{render}</>;
-    return (
-      <button type="button" className={className} onClick={onClick}>
-        {children}
-      </button>
-    );
-  },
+// Keep picker rows inline while exercising the real Base UI trigger semantics.
+vi.mock("@multica/ui/components/ui/popover", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/ui/components/ui/popover")>()),
   PopoverContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }));
 
@@ -293,6 +271,37 @@ describe("CreateSquadModal", () => {
     vi.clearAllMocks();
     mocks.agents = [otherAgent, myAgent, myAgent2];
     mocks.members = [wsMember];
+  });
+
+  it("supports the non-native members trigger without button warnings", () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      renderModal();
+      expect(
+        consoleError.mock.calls.filter((args) =>
+          args.some((arg) => String(arg).includes("expected a native <button>")),
+        ),
+      ).toEqual([]);
+      const trigger = screen.getByRole("combobox");
+      expect(trigger.tagName).toBe("DIV");
+      expect(trigger.getAttribute("aria-expanded")).toBe("false");
+
+      fireEvent.keyDown(trigger, { key: "Enter", code: "Enter" });
+      expect(trigger.getAttribute("aria-expanded")).toBe("true");
+      fireEvent.keyDown(trigger, { key: " ", code: "Space" });
+      fireEvent.keyUp(trigger, { key: " ", code: "Space" });
+      expect(trigger.getAttribute("aria-expanded")).toBe("false");
+
+      fireEvent.click(trigger);
+      expect(trigger.getAttribute("aria-expanded")).toBe("true");
+      fireEvent.click(lastMatch("MineAgentTwo"));
+      const expandedBeforeRemoval = trigger.getAttribute("aria-expanded");
+      fireEvent.click(screen.getByRole("button", { name: "Remove MineAgentTwo" }));
+      expect(screen.queryByRole("button", { name: "Remove MineAgentTwo" })).toBeNull();
+      expect(trigger.getAttribute("aria-expanded")).toBe(expandedBeforeRemoval);
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   it("binds the name and description inputs in the identity row", () => {

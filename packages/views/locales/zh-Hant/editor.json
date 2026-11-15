@@ -53,6 +53,8 @@
     "zoom_actual": "實際大小"
   },
   "attachment": {
+    "install_theme": "安裝主題",
+    "install_theme_failed": "無法讀取附件，請稍後再試。",
     "download_failed": "下載連結獲取失敗，請稍後重試。",
     "preview": "預覽",
     "preview_loading": "載入預覽中…",
@@ -178,5 +180,49 @@
     "clear_filter": "清除篩選",
     "no_matches": "沒有匹配的行",
     "close": "關閉"
+  },
+  "voice": {
+    "dictate": "語音輸入",
+    "hold_to_talk": "按住說話",
+    "tap_or_hold": "語音輸入（點按，或按住說話）",
+    "cancel": "取消",
+    "insert": "插入",
+    "send": "傳送",
+    "retry": "重試",
+    "dismiss": "關閉",
+    "requesting": "正在等待麥克風…",
+    "transcribing": "正在轉寫…",
+    "release_to_insert": "放開插入",
+    "recording": "錄音中",
+    "errors": {
+      "permission_denied": "麥克風權限被封鎖。請在瀏覽器或系統設定中允許後重試。",
+      "no_microphone": "找不到麥克風。連接後重試。",
+      "microphone_failed": "無法啟動麥克風。",
+      "no_speech": "沒有聽到說話聲。靠近麥克風再試一次。",
+      "unavailable": "這台電腦無法在本機轉寫語音。",
+      "transcription_failed": "轉寫失敗。錄音已保留，可以重試。"
+    },
+    "models": {
+      "more_languages": "其他 {{more}} 種語言",
+      "in_use": "使用中",
+      "recommended": "推薦",
+      "most_accurate": "最準確",
+      "fastest": "最快",
+      "by": "來自 {{author}}",
+      "license": "授權條款",
+      "downloading": "正在下載，{{percent}}%",
+      "failed": "下載失敗。重試會從中斷處繼續。",
+      "download": "下載",
+      "retry": "重試",
+      "cancel": "取消",
+      "use": "使用",
+      "delete": "刪除 {{name}}"
+    },
+    "setup": {
+      "title": "設定語音輸入",
+      "description": "語音在這台電腦上轉寫，錄音不會離開本機。先下載一個語音模型即可開始。",
+      "later": "稍後再說",
+      "start": "開始口述"
+    }
   }
 }

@@ -814,31 +814,6 @@ func (c *APIClient) DownloadFile(ctx context.Context, downloadURL string) ([]byt
 	}
 
 	const maxDownloadSize = 100 << 20 // 100 MB
-	return io.ReadAll(io.LimitReader(resp.Body, maxDownloadSize))
-}
-
-// HealthCheck hits the /health endpoint and returns the response body.
-func (c *APIClient) HealthCheck(ctx context.Context) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/health", nil)
-	if err != nil {
-		return "", err
-	}
-	resp, err := c.HTTPClient.Do(req)
-	err = wrapTransport(req, err)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-	if resp.StatusCode >= 400 {
-		return "", &HTTPError{
-			Method:     http.MethodGet,
-			Path:       "/health",
-			StatusCode: resp.StatusCode,
-			Body:       strings.TrimSpace(string(data)),
-			TaskScoped: requestUsedTaskToken(resp),
-		}
-	}
-	return strings.TrimSpace(string(data)), nil
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxDownloadSize))
+	return data, wrapBodyRead(req, err)
 }

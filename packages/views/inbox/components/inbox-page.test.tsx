@@ -4,6 +4,8 @@ import { toast } from "sonner";
 import { ApiError } from "@multica/core/api";
 import type { AgentTask, InboxItem } from "@multica/core/types";
 import { useInboxFilterStore } from "@multica/core/inbox/filter-store";
+import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
+import { useCommandBarContextStore } from "@multica/core/command-bar";
 import { InboxPage } from "./inbox-page";
 
 vi.mock("sonner", () => ({
@@ -123,7 +125,7 @@ const issueDetailProps = vi.hoisted(
 vi.mock("../../issues/components/issue-detail", () => ({
   IssueDetail: (props: Record<string, unknown>) => {
     issueDetailProps.push(props);
-    return null;
+    return <div data-testid="issue-detail">{String(props.issueId)}</div>;
   },
   issueHighlightMementoKey: (issueId: string) => `highlight:${issueId}`,
 }));
@@ -140,9 +142,9 @@ vi.mock("../../navigation", () => ({
 
 // Drive the layout from a viewport width so a test can name the device it
 // cares about instead of a boolean, and the two breakpoints stay in one place.
-// Phone-width by default — one column keeps most assertions simple. Tests
-// about actioning a row WHILE it is open need the two-panel desktop layout,
-// since a single column swaps the list out for the detail on selection.
+// Phone-width by default: only there does the page keep its own list. From
+// the compact breakpoint up it shows the detail of the notification picked in
+// the Work panel, so desktop tests open one through the URL.
 const PHONE = 390;
 // iPhone Duo's inner screen: 669px wide held upright, 951px held sideways.
 const FOLD_INNER_PORTRAIT = 669;
@@ -183,6 +185,11 @@ vi.mock("./inbox-filter-menu", () => ({
   InboxFilterMenu: () => <button type="button">Filter inbox</button>,
 }));
 vi.mock("./inbox-list-item", () => ({ useTimeAgo: () => vi.fn() }));
+vi.mock("./inbox-filter-options", () => ({
+  InboxFilterChipsBar: ({ filters }: { filters: { types: string[]; agent: string | null } }) => (
+    <div data-testid="filter-chips" data-types={filters.types.join(",")} data-agent={filters.agent ?? ""} />
+  ),
+}));
 
 // Capture the row actions the page hands the context menu, so the read/unread
 // handlers can be driven without standing up Base UI's menu.
@@ -245,6 +252,7 @@ function item(overrides: Partial<InboxItem> = {}): InboxItem {
 }
 
 function reset() {
+  useInboxSelectionStore.setState({ lastResolvedKeyByWorkspace: {} });
   listData.active = [];
   listData.archived = [];
   listData.lookup = undefined;
@@ -272,10 +280,41 @@ function reset() {
   useInboxFilterStore.setState({ filtersByWorkspace: {} });
 }
 
+function inboxCommands() {
+  const entry = useCommandBarContextStore.getState().entries.find((e) => e.context.kind === "inbox");
+  if (entry?.context.kind !== "inbox") throw new Error("the Inbox registered no command bar context");
+  return entry.context;
+}
+
 describe("InboxPage", () => {
-  it.each([false, true])("enabling idle hides an already busy row with unread pin=%s", (unreadOnly) => {
+  it("opens a notification the Work panel offered despite a type filter", () => {
     reset();
     layout.width = DESKTOP;
+    searchParams = new URLSearchParams("issue=quick-failed");
+    listData.active = [item({ id: "quick-failed", issue_id: null, type: "quick_create_failed", title: "Review quick-create failure" })];
+    useInboxFilterStore.getState().toggleFilterValue("workspace-1", "type", "mentions");
+    render(<InboxPage />);
+    expect(replace).not.toHaveBeenCalledWith("/acme/inbox");
+    expect(screen.getByText("Review quick-create failure")).toBeInTheDocument();
+  });
+
+  it("replays the comment landing when re-clicking an open archived row", () => {
+    reset();
+    layout.width = DESKTOP;
+    searchParams = new URLSearchParams("view=archived");
+    listData.archived = [item({ archived: true, details: { comment_id: "comment-1" } })];
+    render(<InboxPage />);
+    fireEvent.click(screen.getByTestId("row"));
+    const firstToken = issueDetailProps.at(-1)?.highlightRequestToken;
+    fireEvent.click(screen.getByTestId("row"));
+    expect(issueDetailProps.at(-1)?.highlightRequestToken).not.toBe(firstToken);
+  });
+
+  // Only the phone's page lists notifications; on desktop the Work panel does.
+  it.each([false, true])("enabling idle closes an already busy notification with unread pin=%s", (unreadOnly) => {
+    reset();
+    layout.width = PHONE;
+    searchParams = new URLSearchParams("issue=busy-issue");
     listData.active = [item({ id: "busy-row", issue_id: "busy-issue", read: !unreadOnly })];
     listData.tasks = [{ id: "task-a", agent_id: "agent-1", issue_id: "busy-issue", status: "running" }] as AgentTask[];
     if (unreadOnly) useInboxFilterStore.getState().toggleUnreadOnly("workspace-1");
@@ -283,56 +322,72 @@ describe("InboxPage", () => {
       listData.active = listData.active.map((current) => ({ ...current, read: true }));
     });
     const { rerender } = render(<InboxPage />);
-    fireEvent.click(screen.getByTestId("row"));
     rerender(<InboxPage />);
-    expect(screen.getByTestId("row")).toHaveTextContent("busy-row");
+    expect(screen.getByTestId("issue-detail")).toHaveTextContent("busy-issue");
 
-    act(() => useInboxFilterStore.getState().toggleIdleOnly("workspace-1"));
+    act(() => useInboxFilterStore.getState().setAgent("workspace-1", "idle"));
 
-    expect(screen.queryByTestId("row")).toBeNull();
+    expect(screen.queryByTestId("issue-detail")).toBeNull();
+    expect(replace).toHaveBeenLastCalledWith("/acme/inbox");
   });
 
-  it("enabling unread hides a read row pinned by idle", () => {
+  it("enabling unread closes a read notification pinned by idle", () => {
     reset();
-    layout.width = DESKTOP;
+    layout.width = PHONE;
+    searchParams = new URLSearchParams("issue=idle-issue");
     listData.active = [item({ id: "read-row", issue_id: "idle-issue", read: true })];
-    useInboxFilterStore.getState().toggleIdleOnly("workspace-1");
+    useInboxFilterStore.getState().setAgent("workspace-1", "idle");
     render(<InboxPage />);
-    fireEvent.click(screen.getByTestId("row"));
+    expect(screen.getByTestId("issue-detail")).toHaveTextContent("idle-issue");
 
     act(() => useInboxFilterStore.getState().toggleUnreadOnly("workspace-1"));
 
-    expect(screen.queryByTestId("row")).toBeNull();
+    expect(screen.queryByTestId("issue-detail")).toBeNull();
   });
 
   it("re-enabling idle evaluates current activity after disabling it", () => {
     reset();
-    layout.width = DESKTOP;
+    layout.width = PHONE;
+    searchParams = new URLSearchParams("issue=issue-a");
     listData.active = [item({ id: "was-idle", issue_id: "issue-a", read: true })];
-    useInboxFilterStore.getState().toggleIdleOnly("workspace-1");
+    useInboxFilterStore.getState().setAgent("workspace-1", "idle");
     const { rerender } = render(<InboxPage />);
-    fireEvent.click(screen.getByTestId("row"));
-    act(() => useInboxFilterStore.getState().toggleIdleOnly("workspace-1"));
+    act(() => useInboxFilterStore.getState().setAgent("workspace-1", "idle"));
     listData.tasks = [{ id: "task-a", agent_id: "agent-1", issue_id: "issue-a", status: "running" }] as AgentTask[];
     rerender(<InboxPage />);
-    expect(screen.getByTestId("row")).toHaveTextContent("was-idle");
+    expect(screen.getByTestId("issue-detail")).toHaveTextContent("issue-a");
 
-    act(() => useInboxFilterStore.getState().toggleIdleOnly("workspace-1"));
+    act(() => useInboxFilterStore.getState().setAgent("workspace-1", "idle"));
 
-    expect(screen.queryByTestId("row")).toBeNull();
+    expect(screen.queryByTestId("issue-detail")).toBeNull();
   });
 
-  // Inbox rows need more room than the nav's labels, so the list is sized by
-  // the list width rather than the space panel's.
-  it("sizes the desktop list with the list column width", () => {
+  // The Work panel's Inbox section is the list from the compact breakpoint up.
+  it("shows no list of its own on desktop, only a prompt until a notification is picked", () => {
     reset();
     layout.width = DESKTOP;
+    listData.active = [item({ id: "inbox-a", issue_id: "issue-a" })];
 
     const { container } = render(<InboxPage />);
 
-    expect(container.querySelector("[data-slot='list-column']")).toHaveClass(
-      "w-[min(var(--list-column-width),40vw)]",
-    );
+    expect(screen.queryByTestId("list")).toBeNull();
+    expect(container.querySelector("[data-slot='list-column']")).toBeNull();
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Inbox");
+    expect(screen.queryByTestId("issue-detail")).toBeNull();
+  });
+
+  // The live Inbox lives in the Work panel; the archive has nowhere else to list.
+  it("lists the archive in its own column on desktop", () => {
+    reset();
+    layout.width = DESKTOP;
+    searchParams = new URLSearchParams("view=archived");
+    listData.archived = [item({ id: "archived-1", archived: true })];
+
+    const { container } = render(<InboxPage />);
+
+    expect(container.querySelector("[data-slot='list-column']")).not.toBeNull();
+    expect(screen.getByTestId("list").dataset.view).toBe("archived");
+    expect(screen.getByTestId("row").textContent).toBe("archived-1");
   });
 
   it("keeps the title unread count static", () => {
@@ -412,6 +467,38 @@ describe("InboxPage", () => {
     expect(screen.getByTestId("row")).toHaveTextContent("from-alice");
   });
 
+  it("matches a type on any notification of an issue and shows the newest match", () => {
+    reset();
+    listData.active = [
+      item({ id: "newest-comment", issue_id: "issue-1", type: "new_comment", created_at: "2026-06-15T09:00:00Z" }),
+      item({ id: "older-mention", issue_id: "issue-1", type: "mentioned", created_at: "2026-06-15T08:00:00Z" }),
+      item({ id: "other-comment", issue_id: "issue-2", type: "new_comment" }),
+    ];
+    useInboxFilterStore.getState().toggleFilterValue("workspace-1", "type", "mention");
+
+    render(<InboxPage />);
+
+    expect(screen.getAllByTestId("row")).toHaveLength(1);
+    expect(screen.getByTestId("row")).toHaveTextContent("older-mention");
+    expect(screen.getByTestId("filter-chips").dataset.types).toBe("mention");
+  });
+
+  it("keeps a type filtered out with is not", () => {
+    reset();
+    listData.active = [
+      item({ id: "mention", issue_id: "issue-1", type: "mentioned" }),
+      item({ id: "comment", issue_id: "issue-2", type: "new_comment" }),
+    ];
+    const filters = useInboxFilterStore.getState();
+    filters.toggleFilterValue("workspace-1", "type", "mention");
+    filters.setFilterNegated("workspace-1", "type", true);
+
+    render(<InboxPage />);
+
+    expect(screen.getAllByTestId("row")).toHaveLength(1);
+    expect(screen.getByTestId("row")).toHaveTextContent("comment");
+  });
+
   it("hides issues an agent is running or queued on while the idle filter is on", () => {
     reset();
     listData.active = [
@@ -425,7 +512,7 @@ describe("InboxPage", () => {
       { id: "task-2", agent_id: "agent-1", issue_id: "issue-2", status: "queued" },
       { id: "task-3", agent_id: "agent-1", issue_id: "issue-3", status: "completed" },
     ] as AgentTask[];
-    useInboxFilterStore.getState().toggleIdleOnly("workspace-1");
+    useInboxFilterStore.getState().setAgent("workspace-1", "idle");
 
     render(<InboxPage />);
 
@@ -501,10 +588,9 @@ describe("InboxPage", () => {
     expect(queryCalls.find((q) => q.queryKey.includes("lookup"))?.enabled).toBe(true);
   });
 
-  describe.each([PHONE, DESKTOP])("archive deep links at width %s", (width) => {
+  describe("archive deep links", () => {
     function setupLookup() {
       reset();
-      layout.width = width;
       searchParams = new URLSearchParams("view=archived&issue=old-issue");
       listData.archived = [item({ id: "recent", issue_id: "recent-issue", archived: true })];
       listData.lookup = [];
@@ -566,8 +652,6 @@ describe("InboxPage", () => {
 
   it("switches between the inbox and the archive from the title menu", async () => {
     reset();
-    layout.width = DESKTOP;
-    searchParams = new URLSearchParams("issue=issue-1");
     listData.active = [item({ id: "active-1", issue_id: "issue-1" })];
     const { container } = render(<InboxPage />);
 
@@ -603,11 +687,12 @@ describe("InboxPage", () => {
     listData.tasks = [
       { id: "task-1", agent_id: "agent-1", issue_id: "issue-1", status: "running" },
     ] as AgentTask[];
-    useInboxFilterStore.getState().toggleIdleOnly("workspace-1");
+    useInboxFilterStore.getState().setAgent("workspace-1", "idle");
 
     render(<InboxPage />);
 
     expect(screen.getByTestId("row")).toHaveTextContent("archived-busy");
+    expect(screen.getByTestId("filter-chips").dataset.agent).toBe("");
   });
 
   it("keeps the archive open when it is empty", () => {
@@ -619,33 +704,16 @@ describe("InboxPage", () => {
     expect(screen.getByTestId("list").dataset.view).toBe("archived");
   });
 
-  it("replays the comment highlight when the already-open row is clicked again", () => {
-    // Re-clicking the open notification is an explicit "take me back to that
-    // comment". It doesn't remount the detail (same issue key), so the page
-    // signals the replay through the bumped token; a selection change keeps
-    // the token still — its remount replays the landing by itself.
-    reset();
-    layout.width = DESKTOP;
-    listData.active = [item({ details: { comment_id: "comment-1" } })];
-
-    render(<InboxPage />);
-    fireEvent.click(screen.getByTestId("row"));
-    expect(issueDetailProps.at(-1)?.highlightRequestToken).toBe(0);
-
-    fireEvent.click(screen.getByTestId("row"));
-    expect(issueDetailProps.at(-1)?.highlightRequestToken).toBe(1);
-  });
-
   it("keeps its own detail pane from reading the inbox, so a row marked unread stays unread", () => {
     // The detail reads an issue's notifications when it is opened anywhere
     // else (MUL-8588). Here the page reads the row it selected itself, and a
     // row the reader marks unread while it is open must not be read again.
     reset();
     layout.width = DESKTOP;
+    searchParams = new URLSearchParams("issue=issue-1");
     listData.active = [item()];
 
     render(<InboxPage />);
-    fireEvent.click(screen.getByTestId("row"));
     expect(issueDetailProps.at(-1)).toMatchObject({ readsInbox: false });
   });
 
@@ -794,6 +862,7 @@ describe("InboxPage", () => {
     // looked like it only made the notification disappear.
     reset();
     layout.width = DESKTOP;
+    searchParams = new URLSearchParams("issue=issue-a");
     listData.active = [
       item({ id: "inbox-a", issue_id: "issue-a", read: false }),
     ];
@@ -805,10 +874,10 @@ describe("InboxPage", () => {
     });
 
     const { rerender } = render(<InboxPage />);
-    fireEvent.click(screen.getByTestId("row"));
     rerender(<InboxPage />);
 
-    expect(screen.getByTestId("row")).toHaveTextContent("inbox-a");
+    expect(markReadMutate).toHaveBeenCalledWith("inbox-a", expect.anything());
+    expect(screen.getByTestId("issue-detail")).toHaveTextContent("issue-a");
     expect(replace).not.toHaveBeenCalledWith("/acme/inbox");
   });
 
@@ -817,25 +886,21 @@ describe("InboxPage", () => {
     // idle filter on, that would drop the row the user is working in.
     reset();
     layout.width = DESKTOP;
+    searchParams = new URLSearchParams("issue=issue-a");
     listData.active = [
       item({ id: "inbox-a", issue_id: "issue-a", read: true }),
       item({ id: "inbox-b", issue_id: "issue-b", read: true }),
     ];
-    useInboxFilterStore.getState().toggleIdleOnly("workspace-1");
+    useInboxFilterStore.getState().setAgent("workspace-1", "idle");
 
     const { rerender } = render(<InboxPage />);
-    fireEvent.click(screen.getAllByTestId("row")[0]!);
     rerender(<InboxPage />);
     listData.tasks = [
       { id: "task-a", agent_id: "agent-1", issue_id: "issue-a", status: "queued" },
-      { id: "task-b", agent_id: "agent-1", issue_id: "issue-b", status: "running" },
     ] as AgentTask[];
     rerender(<InboxPage />);
 
-    // The open row stays; another row that turned busy is still filtered.
-    expect(screen.getAllByTestId("row").map((row) => row.textContent)).toEqual([
-      "inbox-a",
-    ]);
+    expect(screen.getByTestId("issue-detail")).toHaveTextContent("issue-a");
     expect(replace).not.toHaveBeenCalledWith("/acme/inbox");
   });
 
@@ -845,15 +910,15 @@ describe("InboxPage", () => {
     // no-op.
     reset();
     layout.width = DESKTOP;
+    searchParams = new URLSearchParams("issue=issue-a");
     listData.active = [
       item({ id: "inbox-a", issue_id: "issue-a", read: false }),
     ];
 
     const { rerender } = render(<InboxPage />);
-    fireEvent.click(screen.getByTestId("row"));
     markReadMutate.mockClear();
 
-    act(() => rowActions?.onMarkUnread("inbox-a"));
+    act(() => inboxCommands().markUnread("inbox-a"));
     rerender(<InboxPage />);
 
     expect(markUnreadMutate).toHaveBeenCalledWith("inbox-a", expect.anything());
@@ -865,19 +930,20 @@ describe("InboxPage", () => {
     // later is a fresh open and must behave like any other.
     reset();
     layout.width = DESKTOP;
+    searchParams = new URLSearchParams("issue=issue-a");
     listData.active = [
       item({ id: "inbox-a", issue_id: "issue-a", read: false }),
       item({ id: "inbox-b", issue_id: "issue-b", read: false }),
     ];
 
-    render(<InboxPage />);
-    const [rowA, rowB] = screen.getAllByTestId("row");
-    fireEvent.click(rowA!);
-    act(() => rowActions?.onMarkUnread("inbox-a"));
+    const { rerender } = render(<InboxPage />);
+    act(() => inboxCommands().markUnread("inbox-a"));
 
-    fireEvent.click(rowB!);
+    searchParams = new URLSearchParams("issue=issue-b");
+    rerender(<InboxPage />);
     markReadMutate.mockClear();
-    fireEvent.click(rowA!);
+    searchParams = new URLSearchParams("issue=issue-a");
+    rerender(<InboxPage />);
 
     expect(markReadMutate).toHaveBeenCalledWith("inbox-a", expect.anything());
   });
@@ -897,32 +963,33 @@ describe("InboxPage", () => {
     expect(screen.queryByTestId("list")).toBeNull();
   });
 
-  it.each([TABLET, FOLD_INNER_LANDSCAPE])("keeps both panes at %spx", (width) => {
-    // 768px is the first width that keeps the two-pane layout. The nav
-    // auto-collapses there instead (see the sidebar), so the list has to stay
-    // on screen next to an open item — on a foldable's inner screen held
-    // sideways as much as on a tablet.
+  it.each([TABLET, FOLD_INNER_LANDSCAPE])("hands the list to the Work panel at %spx", (width) => {
+    // 768px is the first width with the Work panel beside the page, so the
+    // page shows the notification picked there and keeps no list of its own.
     reset();
     layout.width = width;
+    searchParams = new URLSearchParams("issue=issue-a");
     listData.active = [item({ id: "inbox-a", issue_id: "issue-a" })];
 
     render(<InboxPage />);
-    fireEvent.click(screen.getByTestId("row"));
 
-    expect(screen.queryByTestId("list")).not.toBeNull();
+    expect(screen.queryByTestId("list")).toBeNull();
+    expect(screen.getByTestId("issue-detail")).toHaveTextContent("issue-a");
   });
 
+  // Phone width, where the page's own list carries the row actions.
   function renderWithActiveItem() {
     reset();
-    layout.width = DESKTOP;
     listData.active = [item({ id: "inbox-a", issue_id: "issue-a" })];
     return render(<InboxPage />);
   }
 
   function renderWithOpenItem() {
-    const view = renderWithActiveItem();
-    fireEvent.click(screen.getByTestId("row"));
-    return view;
+    reset();
+    layout.width = DESKTOP;
+    searchParams = new URLSearchParams("issue=issue-a");
+    listData.active = [item({ id: "inbox-a", issue_id: "issue-a" })];
+    return render(<InboxPage />);
   }
 
   describe("archive shortcut", () => {
@@ -946,13 +1013,12 @@ describe("InboxPage", () => {
     it("restores the open notification while reading the archive", () => {
       reset();
       layout.width = DESKTOP;
-      searchParams = new URLSearchParams("view=archived");
+      searchParams = new URLSearchParams("view=archived&issue=issue-9");
       listData.archived = [
         item({ id: "archived-1", issue_id: "issue-9", archived: true }),
       ];
 
       render(<InboxPage />);
-      fireEvent.click(screen.getByTestId("row"));
       pressArchiveKey();
 
       expect(unarchiveMutate).toHaveBeenCalledWith("archived-1", expect.anything());
@@ -962,13 +1028,13 @@ describe("InboxPage", () => {
     it("leaves the selection on the next notification", () => {
       reset();
       layout.width = DESKTOP;
+      searchParams = new URLSearchParams("issue=issue-a");
       listData.active = [
         item({ id: "inbox-a", issue_id: "issue-a" }),
         item({ id: "inbox-b", issue_id: "issue-b" }),
       ];
 
       render(<InboxPage />);
-      fireEvent.click(screen.getAllByTestId("row")[0]!);
       replace.mockClear();
       pressArchiveKey();
 
@@ -1090,7 +1156,6 @@ describe("InboxPage", () => {
 
     it("confirms a restore", () => {
       reset();
-      layout.width = DESKTOP;
       searchParams = new URLSearchParams("view=archived");
       listData.archived = [
         item({ id: "archived-1", issue_id: "issue-9", archived: true }),

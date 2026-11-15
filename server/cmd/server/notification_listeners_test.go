@@ -958,7 +958,8 @@ func TestNotification_ParentBubble_StatusChanged(t *testing.T) {
 				ID:          subID,
 				WorkspaceID: testWorkspaceID,
 				Title:       "sub-issue status bubble",
-				Status:      "done",
+				// Not done: a done issue's notifications are archived at once.
+				Status:      "in_review",
 				Priority:    "medium",
 				CreatorType: "member",
 				CreatorID:   testUserID,
@@ -1247,6 +1248,103 @@ func TestNotification_StatusChange_ArchivesStaleTaskFailed(t *testing.T) {
 	}
 	if !seenRecipients[testUserID] || !seenRecipients[subID] {
 		t.Fatalf("expected batch-archived events for both creator and sub, got %v", seenRecipients)
+	}
+}
+
+// countActiveInboxForIssue counts a recipient's unarchived rows on an issue.
+func countActiveInboxForIssue(t *testing.T, recipientID, issueID string) int {
+	t.Helper()
+	var n int
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT count(*) FROM inbox_item
+		WHERE recipient_type = 'member' AND recipient_id = $1 AND issue_id = $2 AND archived = false
+	`, recipientID, issueID).Scan(&n); err != nil {
+		t.Fatalf("countActiveInboxForIssue: %v", err)
+	}
+	return n
+}
+
+// TestNotification_StatusChange_DoneArchivesIssueInbox verifies that moving an
+// issue to Done archives every notification on it for every recipient, read
+// or unread, including the status_changed row the transition itself writes.
+func TestNotification_StatusChange_DoneArchivesIssueInbox(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	subEmail := "notif-done-archive-sub@multica.ai"
+	subID := createNotificationMember(t, subEmail)
+	t.Cleanup(func() { cleanupTestUser(t, subEmail) })
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+	addTestSubscriber(t, issueID, "member", testUserID, "creator")
+	addTestSubscriber(t, issueID, "member", subID, "assignee")
+
+	for _, row := range []struct {
+		recipient string
+		read      bool
+	}{{testUserID, false}, {testUserID, true}, {subID, false}} {
+		if _, err := testPool.Exec(context.Background(), `
+			INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, details, read)
+			VALUES ($1, 'member', $2, 'new_comment', 'info', $3, 'done archive test', '{}', $4)
+		`, testWorkspaceID, row.recipient, issueID, row.read); err != nil {
+			t.Fatalf("seed notification: %v", err)
+		}
+	}
+
+	var batchArchived []events.Event
+	bus.Subscribe(protocol.EventInboxBatchArchived, func(e events.Event) {
+		batchArchived = append(batchArchived, e)
+	})
+
+	publishStatusChange(bus, issueID, "done", "in_review")
+
+	for _, recipient := range []string{testUserID, subID} {
+		if active := countActiveInboxForIssue(t, recipient, issueID); active != 0 {
+			t.Fatalf("recipient %s: expected no active inbox rows on a done issue, got %d", recipient, active)
+		}
+	}
+	seen := map[string]bool{}
+	for _, e := range batchArchived {
+		payload, _ := e.Payload.(map[string]any)
+		if payload["issue_id"] != issueID {
+			continue
+		}
+		recipientID, _ := payload["recipient_id"].(string)
+		seen[recipientID] = true
+	}
+	if !seen[testUserID] || !seen[subID] {
+		t.Fatalf("expected inbox:batch-archived for both recipients, got %v", seen)
+	}
+}
+
+// TestNotification_StatusChange_CancelledKeepsIssueInbox verifies that only a
+// done status clears the inbox; a cancelled issue keeps its notifications.
+func TestNotification_StatusChange_CancelledKeepsIssueInbox(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+	addTestSubscriber(t, issueID, "member", testUserID, "creator")
+
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, details)
+		VALUES ($1, 'member', $2, 'new_comment', 'info', $3, 'cancelled keep test', '{}')
+	`, testWorkspaceID, testUserID, issueID); err != nil {
+		t.Fatalf("seed notification: %v", err)
+	}
+
+	publishStatusChange(bus, issueID, "cancelled", "in_progress")
+
+	if active := countActiveInboxForIssue(t, testUserID, issueID); active != 1 {
+		t.Fatalf("expected the notification to stay on a cancelled issue, got %d active", active)
 	}
 }
 

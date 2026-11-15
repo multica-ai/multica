@@ -602,7 +602,7 @@ func main() {
 			channelLeaseRedis = newNamedRedisClient(opts, "channel-lease")
 		}
 	}
-	registerListeners(bus, broadcaster)
+	registerListeners(bus, broadcaster, newPrivateProjectAudience(db.New(pool)))
 
 	analyticsClient := analytics.NewFromEnv()
 	defer analyticsClient.Close()
@@ -615,6 +615,7 @@ func main() {
 	registerSubscriberListeners(bus, pool)
 	registerActivityListeners(bus, queries)
 	registerNotificationListeners(bus, queries)
+	registerChatReplyNotifications(bus, broadcaster, &membershipChecker{queries: queries})
 	registerIssueUnreadListeners(bus, queries)
 
 	metricsConfig := obsmetrics.ConfigFromEnv()
@@ -765,6 +766,10 @@ func main() {
 	// Source-context cleanup is object-store work, so it gets its own goroutine
 	// instead of a slot in the runtime sweep tick.
 	go runSourceContextSweeper(sweepCtx, taskSvc)
+	go runEnvironmentLogSweeper(sweepCtx, queries)
+	if h.ConnectedApps != nil {
+		go h.ConnectedApps.RunSweeper(sweepCtx)
+	}
 	go heartbeatScheduler.Run(sweepCtx)
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
 	if autopilotSvc.QuotaEnabled() {

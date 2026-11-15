@@ -28,10 +28,25 @@ func inboxWorkspaceHandler(handler http.HandlerFunc) http.HandlerFunc {
 func TestListInboxProjectsCurrentIssueStatusAndPriority(t *testing.T) {
 	workspaceID := dbfx.Workspace(t, "Inbox filter projections", "inbox-filter-"+uuid.NewString())
 	dbfx.Member(t, workspaceID, testUserID, "owner")
+	projectID := dbfx.Project(t, "Projected project", testutil.Cols{"workspace_id": workspaceID})
+	labelID := dbfx.Insert(t, "issue_label", testutil.Cols{"workspace_id": workspaceID, "name": "bug", "color": "#f00", "resource_type": "issue"})
 	issueID := dbfx.Issue(t, "Filtered issue", testutil.Cols{
-		"workspace_id": workspaceID,
-		"status":       "in_review",
-		"priority":     "high",
+		"workspace_id":  workspaceID,
+		"status":        "in_review",
+		"priority":      "high",
+		"project_id":    projectID,
+		"assignee_type": "member",
+		"assignee_id":   testUserID,
+		"due_date":      "2026-03-11",
+	})
+	dbfx.Exec(t, `INSERT INTO issue_to_label (issue_id, label_id) VALUES ($1, $2)`, issueID, labelID)
+	dbfx.Insert(t, "inbox_item", testutil.Cols{
+		"workspace_id":   workspaceID,
+		"recipient_type": "member",
+		"recipient_id":   testUserID,
+		"type":           "system",
+		"severity":       "info",
+		"title":          "Issue-less",
 	})
 	dbfx.Insert(t, "inbox_item", testutil.Cols{
 		"workspace_id":   workspaceID,
@@ -49,8 +64,21 @@ func TestListInboxProjectsCurrentIssueStatusAndPriority(t *testing.T) {
 		Want(http.StatusOK).
 		JSON(&items)
 
-	if len(items) != 1 {
-		t.Fatalf("inbox items = %d, want 1: %+v", len(items), items)
+	if len(items) != 2 {
+		t.Fatalf("inbox items = %d, want 2: %+v", len(items), items)
+	}
+	if items[1].IssueID != nil {
+		items[0], items[1] = items[1], items[0]
+	}
+	if items[1].IssueLabelIDs == nil || len(items[1].IssueLabelIDs) != 0 {
+		t.Errorf("issue-less issue_label_ids = %v, want an empty list", items[1].IssueLabelIDs)
+	}
+	if got := items[0]; got.IssueProjectID == nil || *got.IssueProjectID != projectID ||
+		got.IssueAssigneeType == nil || *got.IssueAssigneeType != "member" ||
+		got.IssueAssigneeID == nil || *got.IssueAssigneeID != testUserID ||
+		got.IssueDueDate == nil || *got.IssueDueDate != "2026-03-11" ||
+		len(got.IssueLabelIDs) != 1 || got.IssueLabelIDs[0] != labelID {
+		t.Errorf("issue projection = %+v", got)
 	}
 	if items[0].IssueStatus == nil || *items[0].IssueStatus != "in_review" {
 		t.Errorf("issue_status = %v, want in_review", items[0].IssueStatus)

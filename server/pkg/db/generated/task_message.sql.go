@@ -358,3 +358,38 @@ func (q *Queries) ListTaskProgressSince(ctx context.Context, arg ListTaskProgres
 	}
 	return items, nil
 }
+
+const listTaskReplyFragments = `-- name: ListTaskReplyFragments :many
+SELECT type, COALESCE(CASE WHEN type = 'text' THEN content END, '')::text AS content
+FROM task_message
+WHERE task_id = $1 AND type IN ('text', 'tool_use', 'error')
+ORDER BY seq ASC
+`
+
+type ListTaskReplyFragmentsRow struct {
+	Type    string `json:"type"`
+	Content string `json:"content"`
+}
+
+// Rebuild a Telegram placeholder without its progress when another replica
+// handles cancellation. Only prose leaves this query; tool/error rows mark
+// paragraph boundaries without loading arguments, results, or reasoning.
+func (q *Queries) ListTaskReplyFragments(ctx context.Context, taskID pgtype.UUID) ([]ListTaskReplyFragmentsRow, error) {
+	rows, err := q.db.Query(ctx, listTaskReplyFragments, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTaskReplyFragmentsRow{}
+	for rows.Next() {
+		var i ListTaskReplyFragmentsRow
+		if err := rows.Scan(&i.Type, &i.Content); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

@@ -9,10 +9,8 @@ import { useT } from "../i18n";
 import { useAgentCommandGroup, useAutopilotCommandGroup, useChatCommandGroup, useInboxCommandGroup, useProjectCommandGroup } from "./commands/context-commands";
 import { useGlobalCommands } from "./commands/global-commands";
 import { useIssueCommandGroup } from "./commands/issue-commands";
-import { detectInstruction, type NamedActor } from "./delegate/detect-instruction";
-import { useDelegateAttachments, useDelegateCandidates, type DelegateAttachments } from "./delegate/use-delegate";
 import { parseScope, scoreRow, scoreText, type SearchScope } from "./matching";
-import type { DelegateActor, IssueTarget, PaletteCommand, PaletteCommandGroup } from "./types";
+import type { IssueTarget, PaletteCommand, PaletteCommandGroup } from "./types";
 import type { AgentEntry } from "./use-actor-directory";
 import { useObjectSearch, type ObjectHits, type Scored } from "./use-object-search";
 import { useRecentItems, type RecentItem } from "./use-recent-items";
@@ -62,11 +60,15 @@ export type BestMatch =
   | { type: "member"; member: ObjectHits["members"][number]["item"]; score: number }
   | { type: "project"; project: SearchProjectResult; score: number };
 
-export interface DelegateModel {
+/**
+ * What the trailing "Hand to agent" row opens quick create with: the input as
+ * typed, plus the page's project and open issue (as parent).
+ */
+export interface HandToAgentSeed {
   prompt: string;
-  actor: DelegateActor;
-  agentEntry: AgentEntry | null;
-  attachments: DelegateAttachments;
+  project_id?: string;
+  parent_issue_id?: string;
+  parent_issue_identifier?: string;
 }
 
 export interface RootModel {
@@ -85,11 +87,9 @@ export interface RootModel {
   bestMatch: BestMatch | null;
   recent: RecentItem[];
   newCommands: PaletteCommand[];
-  delegate: DelegateModel | null;
+  handToAgent: HandToAgentSeed | null;
   /** The issue or selection that best-match actions such as "Assign … to" act on. */
   primaryIssueTarget: IssueTarget | null;
-  /** Context a delegated issue is created with. */
-  attachments: DelegateAttachments;
   hasResults: boolean;
 }
 
@@ -114,7 +114,7 @@ function maxScore(entries: readonly { score: number }[]) {
 export function useRootModel(
   rawQuery: string,
   contexts: readonly CommandBarContext[],
-  options: { active: boolean; dismissedDelegateFor: string | null },
+  options: { active: boolean },
 ): RootModel {
   const { t: tNav } = useT("layout");
   const { scope, text } = parseScope(rawQuery);
@@ -126,6 +126,7 @@ export function useRootModel(
     contexts.find((c): c is Extract<CommandBarContext, { kind: K }> => c.kind === kind) ?? null;
   const issueContext = find("issue");
   const issuesContext = find("issues");
+  const projectContext = find("project");
   const singleTarget = useMemo<IssueTarget | null>(
     () => (issueContext ? { kind: "single", issue: issueContext.issue } : null),
     [issueContext],
@@ -140,7 +141,7 @@ export function useRootModel(
 
   const singleGroup = useIssueCommandGroup(singleTarget, issueContext?.onDeletedFallbackPath);
   const batchGroup = useIssueCommandGroup(batchTarget);
-  const projectGroup = useProjectCommandGroup(find("project"));
+  const projectGroup = useProjectCommandGroup(projectContext);
   const agentGroup = useAgentCommandGroup(find("agent"));
   const autopilotGroup = useAutopilotCommandGroup(find("autopilot"));
   const inboxGroup = useInboxCommandGroup(find("inbox"));
@@ -151,8 +152,6 @@ export function useRootModel(
   const server = useServerSearch(searching, { projects: scope === "all" });
   const objects = useObjectSearch(scope === "issues" || scope === "commands" ? "" : q, active);
   const recent = useRecentItems(active && !rawQuery.trim());
-  const delegateCandidates = useDelegateCandidates(active);
-  const attachments = useDelegateAttachments(contexts);
 
   const navPages = useMemo<NavPage[]>(
     () =>
@@ -210,7 +209,7 @@ export function useRootModel(
         .sort((a, b) => b.score - a.score);
     }
 
-    const { results, isLoading, stale } = server;
+    const { results, stale } = server;
     // The partition describes these rows, so it keys off the query they
     // answer — not what the user has typed since.
     const partitioned = partitionAggregatedSearchResults({
@@ -272,31 +271,15 @@ export function useRootModel(
       commands.length > 0 ||
       contextGroups.length > 0;
 
-    let delegate: DelegateModel | null = null;
-    if (q && scope === "all" && options.dismissedDelegateFor !== rawQuery) {
-      const named: NamedActor[] = delegateCandidates.actors.map((actor) => ({
-        type: actor.type,
-        id: actor.id,
-        name: actor.name,
-      }));
-      const detected = detectInstruction(text, named, {
-        hasResults: objectCount > 0 || results.issues.length > 0 || results.projects.length > 0,
-        resultsSettled: !isLoading && !stale,
-      });
-      const actor = detected?.actor
-        ? (delegateCandidates.actors.find((a) => a.type === detected.actor!.type && a.id === detected.actor!.id) ?? null)
-        : delegateCandidates.fallback;
-      if (detected && actor) {
-        delegate = {
-          prompt: text,
-          actor,
-          agentEntry:
-            actor.type === "agent"
-              ? (delegateCandidates.agentEntries.find((entry) => entry.agent.id === actor.id) ?? null)
-              : null,
-          attachments,
-        };
-      }
+    let handToAgent: HandToAgentSeed | null = null;
+    if (q && scope === "all") {
+      const issue = issueContext?.issue ?? null;
+      const projectId = projectContext?.project.id ?? issue?.project_id ?? null;
+      handToAgent = {
+        prompt: text,
+        ...(projectId ? { project_id: projectId } : {}),
+        ...(issue ? { parent_issue_id: issue.id, parent_issue_identifier: issue.identifier } : {}),
+      };
     }
 
     const primaryIssueTarget =
@@ -319,28 +302,25 @@ export function useRootModel(
       bestMatch,
       recent,
       newCommands: globalCommands.filter((command) => command.primary),
-      delegate,
+      handToAgent,
       primaryIssueTarget,
-      attachments,
       hasResults,
     };
   }, [
     agentGroup,
-    attachments,
     autopilotGroup,
     batchGroup,
     batchTarget,
     chatGroup,
     contexts,
-    delegateCandidates,
     globalCommands,
     inboxGroup,
+    issueContext,
     navPages,
     objects,
-    options.dismissedDelegateFor,
+    projectContext,
     projectGroup,
     q,
-    rawQuery,
     recent,
     scope,
     server,

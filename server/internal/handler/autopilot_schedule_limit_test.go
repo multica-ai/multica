@@ -74,6 +74,82 @@ func TestAutopilotScheduleLimitCreate(t *testing.T) {
 	}
 }
 
+func TestAutopilotScheduleLimitNeverFiringCron(t *testing.T) {
+	ap, _, _ := finiteScheduleFixture(t, "run_only", nil)
+	req := withURLParam(newRequest("POST", "/api/autopilots/x/triggers", map[string]any{
+		"kind": "schedule", "cron_expression": "0 0 30 2 *", "execution_limit": 1,
+	}), "id", uuidToString(ap.ID))
+	created := testutil.Call(t, testHandler.CreateAutopilotTrigger, req).Want(http.StatusCreated).Map()
+	if created["next_run_at"] != nil || created["execution_limit"] != float64(1) {
+		t.Fatalf("never-firing finite schedule: %#v", created)
+	}
+	triggerID := created["id"].(string)
+	dbfx.Exec(t, `UPDATE autopilot_trigger SET execution_count=1 WHERE id=$1`, triggerID)
+	for _, limit := range []any{2, nil} {
+		req := withURLParams(newRequest("PATCH", "/api/autopilots/x/triggers/y", map[string]any{
+			"execution_limit": limit,
+		}), "id", uuidToString(ap.ID), "triggerId", triggerID)
+		updated := testutil.Call(t, testHandler.UpdateAutopilotTrigger, req).Want(http.StatusOK).Map()
+		if updated["next_run_at"] != nil || updated["execution_count"] != float64(1) || updated["exhausted"] != false {
+			t.Fatalf("limit edit fabricated a next occurrence or reset usage: %#v", updated)
+		}
+	}
+}
+
+func TestAutopilotScheduleLimitProjectArchive(t *testing.T) {
+	ctx := context.Background()
+	for _, mode := range []string{"run_only", "create_issue"} {
+		t.Run(mode, func(t *testing.T) {
+			ap, trig, svc := finiteScheduleFixture(t, mode, 2)
+			project := createProjectPermissionTestProject(t, "finite schedule archive")
+			dbfx.Exec(t, `UPDATE autopilot SET project_id=$2 WHERE id=$1`, ap.ID, project.ID)
+			ap.ProjectID = parseUUID(project.ID)
+			planned := time.Now().UTC().Truncate(time.Second)
+			accepted, err := svc.DispatchAutopilotForPlan(ctx, ap, trig.ID, "schedule", nil, planned)
+			if err != nil || accepted == nil || (!accepted.TaskID.Valid && !accepted.IssueID.Valid) || scheduleCount(t, trig) != 1 {
+				t.Fatalf("first finite occurrence: %#v %v", accepted, err)
+			}
+			dbfx.Exec(t, `UPDATE autopilot_run SET status='completed',completed_at=now(),created_at=now()-interval '2 minute' WHERE id=$1`, accepted.ID)
+			if accepted.IssueID.Valid {
+				dbfx.Exec(t, `UPDATE issue SET status='done' WHERE id=$1`, accepted.IssueID)
+			}
+			if w := archiveProjectForTest(t, testUserID, project.ID); w.Code != http.StatusOK {
+				t.Fatalf("archive: %d %s", w.Code, w.Body.String())
+			}
+			// A scheduler can retain the active snapshot from before the archive.
+			skipped, err := svc.DispatchAutopilotForPlan(ctx, ap, trig.ID, "schedule", nil, planned.Add(time.Minute))
+			if err != nil || skipped == nil || skipped.Status != "skipped" || scheduleCount(t, trig) != 1 {
+				t.Fatalf("archive consumed an occurrence: %#v %v", skipped, err)
+			}
+			resume := func(want int) {
+				t.Helper()
+				req := withURLParam(newRequest("PATCH", "/api/autopilots/x", map[string]any{"status": "active"}), "id", uuidToString(ap.ID))
+				testutil.Call(t, testHandler.UpdateAutopilot, req).Want(want)
+				if scheduleCount(t, trig) != 1 {
+					t.Fatal("resume changed accepted occurrence count")
+				}
+			}
+			resume(http.StatusConflict)
+			if w := restoreProjectForTest(t, testUserID, project.ID); w.Code != http.StatusOK {
+				t.Fatalf("restore: %d %s", w.Code, w.Body.String())
+			}
+			row, err := svc.Queries.GetAutopilot(ctx, ap.ID)
+			if err != nil || row.Status != "paused" || scheduleCount(t, trig) != 1 {
+				t.Fatalf("restore resumed automation or reset usage: %#v %v", row, err)
+			}
+			resume(http.StatusOK)
+			last, err := svc.DispatchAutopilotForPlan(ctx, ap, trig.ID, "schedule", nil, planned.Add(2*time.Minute))
+			if err != nil || last == nil || (!last.TaskID.Valid && !last.IssueID.Valid) || scheduleCount(t, trig) != 2 {
+				t.Fatalf("remaining slot after restore: %#v %v", last, err)
+			}
+			beyond, err := svc.DispatchAutopilotForPlan(ctx, ap, trig.ID, "schedule", nil, planned.Add(3*time.Minute))
+			if err != nil || beyond == nil || beyond.Status != "skipped" || scheduleCount(t, trig) != 2 {
+				t.Fatalf("restoration replayed lifetime quota: %#v %v", beyond, err)
+			}
+		})
+	}
+}
+
 func TestAutopilotScheduleLimitValidationAndPatch(t *testing.T) {
 	ap, trig, _ := finiteScheduleFixture(t, "run_only", 5)
 	path := "/api/autopilots/x/triggers/y"
@@ -558,11 +634,11 @@ func TestAutopilotScheduleLimitMigrationRoundTrip(t *testing.T) {
 	if _, err := tx.Exec(ctx, `CREATE TEMP TABLE autopilot_trigger (kind text NOT NULL); INSERT INTO autopilot_trigger VALUES ('schedule'),('webhook')`); err != nil {
 		t.Fatal(err)
 	}
-	up, err := os.ReadFile("../../migrations/615_autopilot_schedule_limit.up.sql")
+	up, err := os.ReadFile("../../migrations/660_autopilot_schedule_limit.up.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
-	down, err := os.ReadFile("../../migrations/615_autopilot_schedule_limit.down.sql")
+	down, err := os.ReadFile("../../migrations/660_autopilot_schedule_limit.down.sql")
 	if err != nil {
 		t.Fatal(err)
 	}

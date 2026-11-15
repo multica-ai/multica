@@ -140,6 +140,31 @@ var pgBigmOperatorClass = extensionOperatorClass{
 // they are still pending: a fresh self-hosted install, which is exactly where an
 // interrupted build would otherwise leave a permanently unusable index.
 var concurrentIndexCleanups = map[string]string{
+	"654_chat_submission_receipt_key":                           "uq_chat_submission_receipt_key",
+	"655_chat_submission_receipt_workspace":                     "idx_chat_submission_receipt_workspace",
+	"651_task_context_receipt_issue_idx":                        "idx_task_context_receipt_issue",
+	"650_task_context_receipt_workspace_idx":                    "idx_task_context_receipt_workspace",
+	"648_project_subscriber_user_idx":                           "idx_project_subscriber_workspace_user",
+	"645_issue_member_creator_index":                            "idx_issue_workspace_member_creator",
+	"644_issue_requester_index":                                 "idx_issue_workspace_requester",
+	"642_issue_environment_config_issue_idx":                    "idx_issue_environment_config_issue",
+	"641_issue_environment_command_logs_idx":                    "idx_issue_environment_command_logs",
+	"640_issue_environment_command_issue_idx":                   "idx_issue_environment_command_issue",
+	"639_issue_environment_command_pending_idx":                 "idx_issue_environment_command_pending",
+	"635_issue_environment_issue_idx":                           "idx_issue_environment_issue",
+	"634_issue_environment_task_key_idx":                        "uq_issue_environment_task_key",
+	"632_project_member_user_idx":                               "idx_project_member_workspace_user",
+	"628_app_action_request_chat_idx":                           "idx_app_action_request_chat",
+	"627_app_tool_call_issue_idx":                               "idx_app_tool_call_issue",
+	"626_app_action_request_task_idx":                           "idx_app_action_request_task",
+	"625_app_tool_call_workspace_idx":                           "idx_app_tool_call_workspace",
+	"624_app_action_request_pending_idx":                        "idx_app_action_request_pending",
+	"623_app_action_request_issue_idx":                          "idx_app_action_request_issue",
+	"622_app_action_rule_scope_idx":                             "idx_app_action_rule_scope",
+	"621_agent_app_workspace_toolkit_idx":                       "idx_agent_app_workspace_toolkit",
+	"620_agent_app_agent_toolkit_idx":                           "idx_agent_app_agent_toolkit",
+	"619_workspace_composio_connection_status_idx":              "idx_workspace_composio_connection_status",
+	"618_workspace_composio_connection_account_idx":             "idx_workspace_composio_connection_account",
 	"613_skill_version_index":                                   "idx_skill_version_skill_version",
 	"606_agent_task_queue_runtime_active_index":                 "idx_agent_task_queue_runtime_active",
 	"604_wecom_install_session_begin_rate_idx":                  "idx_wecom_install_session_begin_rate",
@@ -980,6 +1005,17 @@ func runMigrations(ctx context.Context, pool *pgxpool.Pool, opts runOptions) err
 		}
 	}()
 
+	// Detect renamed schedule history before any DDL, including migrations
+	// earlier than 660. Replaying or rolling back it would lose lifetime counts.
+	for _, file := range opts.Files {
+		if migrations.ExtractVersion(file) == "660_autopilot_schedule_limit" {
+			if err := checkScheduleLimitMigrationHistory(ctx, conn, tableIdent); err != nil {
+				return err
+			}
+			break
+		}
+	}
+
 	// Create migrations tracking table.
 	if _, err := conn.Exec(ctx, fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS %s (
@@ -1064,6 +1100,26 @@ func runMigrations(ctx context.Context, pool *pgxpool.Pool, opts runOptions) err
 	}
 
 	return nil
+}
+
+func checkScheduleLimitMigrationHistory(ctx context.Context, conn *pgxpool.Conn, tableIdent string) error {
+	var present bool
+	if err := conn.QueryRow(ctx, "SELECT to_regclass($1) IS NOT NULL", tableIdent).Scan(&present); err != nil {
+		return fmt.Errorf("check schedule migration history table: %w", err)
+	}
+	if !present {
+		return nil
+	}
+	var version string
+	err := conn.QueryRow(ctx, "SELECT version FROM "+tableIdent+" WHERE version = ANY($1::text[]) ORDER BY version LIMIT 1",
+		[]string{"600_autopilot_schedule_limit", "615_autopilot_schedule_limit"}).Scan(&version)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("check schedule migration history: %w", err)
+	}
+	return fmt.Errorf("%s is already applied; refusing to reapply the renamed migration: see server/migrations/README.md, Limited schedule migration rename; preserve execution counts before upgrading", version)
 }
 
 // quoteQualifiedIdentifier safely quotes either an unqualified table

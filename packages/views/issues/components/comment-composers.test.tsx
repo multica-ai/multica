@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type ReactNode, type Ref } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type ComponentProps, type ReactNode, type Ref } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
@@ -241,6 +241,12 @@ function renderCommentInput(onSubmit = vi.fn().mockResolvedValue(true)) {
   return { ...view, onSubmit };
 }
 
+function DraftReplyInput(props: ComponentProps<typeof ReplyInput>) {
+  const parentId = useCommentDraftStore((s) =>
+    (props.draftKey ? s.drafts[props.draftKey]?.replyTarget?.commentId : undefined) ?? props.parentId);
+  return <ReplyInput {...props} parentId={parentId} />;
+}
+
 function renderReplyInput({
   onSubmit = vi.fn().mockResolvedValue("reply-new"),
   onAccepted,
@@ -253,7 +259,7 @@ function renderReplyInput({
   draftKey?: `reply:${string}:${string}`;
 } = {}) {
   const view = renderWithProviders(
-    <ReplyInput
+    <DraftReplyInput
       issueId="issue-1"
       parentId="comment-1"
       avatarType="member"
@@ -427,11 +433,32 @@ describe("comment composers", () => {
     activateComposer("reply-composer-shell");
     expect(screen.getByPlaceholderText("Leave a reply...")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Attach file" })).toBeInTheDocument();
+    expect(container.querySelectorAll("button")).toHaveLength(1);
+    act(() => screen.getByTestId("editor").focus());
+    expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument();
     expect(container.querySelectorAll("button")).toHaveLength(2);
 
     const shell = screen.getByTestId("drop-zone");
     expect(shell.className).not.toMatch(/max-h-/);
     expect(shell.className).not.toContain("h-[60vh]");
+  });
+
+  it("makes room for recipients a pending annotation previews while the reply is empty", async () => {
+    apiListTasksByIssue.mockResolvedValue([]);
+    apiPreviewCommentTriggers.mockResolvedValue({
+      agents: [{ id: "agent-1", name: "Lambda", source: "thread_parent", reason: "" }],
+    });
+    const pending = { id: "a", sourceCommentId: "comment-1", sourceActorName: "Lambda", quote: "Selected text",
+      note: "Please revise", start: 0, prefix: "", suffix: "" };
+    renderWithProviders(
+      <ReplyInput issueId="issue-1" parentId="comment-1" avatarType="member" avatarId="user-1"
+        onSubmit={vi.fn()} draftKey="reply:issue-1:comment-1"
+        annotationComposer={{ pending, render: () => null }} />,
+    );
+
+    expect(screen.getByTestId("reply-composer-shell")).toBeInTheDocument();
+    await screen.findByRole("button", { name: /Lambda trigger/ }, { timeout: 5000 });
+    expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument();
   });
 
   it("keeps main comment submission wired after removing expand", async () => {
@@ -1320,7 +1347,9 @@ describe.each(["reply", "description"])("annotations in %s drafts", (source) => 
     useCommentDraftStore.getState().addAnnotation(draftKey, { ...annotation, note: "" });
     const onSubmit = vi.fn().mockResolvedValue(false);
     renderAnnotatedComposer(onSubmit);
-    expect(isSendBlocked(screen.getByRole("button", { name: "Send" }) as HTMLButtonElement)).toBe(true);
+    // Nothing to send: the comment box keeps a blocked send, a reply rests as one line.
+    if (source === "description") expect(isSendBlocked(screen.getByRole("button", { name: "Send" }) as HTMLButtonElement)).toBe(true);
+    else expect(screen.queryByRole("button", { name: "Send" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /1 annotation/ })).not.toBeInTheDocument();
     act(() => { useCommentDraftStore.getState().addAnnotation(draftKey, { ...annotation, note: "New note" }); });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));

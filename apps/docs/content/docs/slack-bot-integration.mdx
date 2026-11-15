@@ -111,11 +111,11 @@ The Bot connects out to Slack over Socket Mode, so no public Request URL or OAut
 ### Connect it to an agent [#3-connect-it-to-an-agent]
 
 1. In Multica, open **Agents** and select the agent to connect to Slack.
-2. Go to **Integrations** and click **Connect Slack**.
+2. Go to **Messaging**, click **Add messaging channel**, then choose **Slack**.
 3. Paste the Bot token and the App-level token.
 4. Click **Connect**.
 
-Multica verifies that the two tokens come from the same app. Once connected, the page shows **Connected to Slack**.
+Multica verifies that the two tokens come from the same app. Once connected, the page shows **Connected**.
 
 <Callout type="warning">
 Both tokens are stored encrypted on the Multica server. Tokens are credentials: don't put them in issues, comments, or code repositories. An app already connected to another agent or workspace can't be reused directly; disconnect the original connection first.
@@ -143,6 +143,10 @@ Open the Bot from **Apps** in the Slack sidebar and message it directly. No @-me
 Run `/invite @your-bot` to add the Bot to the channel first, then send `@your-bot your request`. Each thread forms its own session; for follow-ups, keep @-mentioning the Bot in the original thread.
 
 The Bot only responds to channel messages that explicitly @-mention it. When it runs, it reads the thread's recent context within the scopes its permissions allow.
+
+Agents can use `multica chat thread [<thread_id>] --output json` to read a thread in the current channel. The JSON includes the Slack `channel_id` when available, plus optional `channel_name` and `permalink` fields. An explicit thread ID selects that thread's source, while each task's prompt identifies its own triggering message or thread. A DM without a thread has no `thread_id`; its history response omits the permalink when there is no specific message to link.
+
+Channel names require the corresponding Slack conversation read permission, which the default manifest does not request. Permalinks come from Slack and may be unavailable if access is denied, a message was deleted, or Slack times out or rate limits the request. Missing metadata is omitted without preventing history reads or task execution; no additional permissions or reinstall are required.
 
 ### Send files
 
@@ -176,7 +180,7 @@ In a channel or thread, send `@Multica /clear [message]` in the target thread so
 
 ## Manage connections
 
-Open **Settings → Messaging → Slack** to view all connected Slack Bots. Workspace owners and admins can disconnect them.
+Open **Settings → Messaging** to see connected agents grouped by platform. Select an agent to open its **Messaging** section. Workspace owners and admins can disconnect the Bot from its management menu there.
 
 After disconnecting, the Socket Mode connection stops and the Bot no longer receives new messages. Existing conversations and audit records are not deleted.
 

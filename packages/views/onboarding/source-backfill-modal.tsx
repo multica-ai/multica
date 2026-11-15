@@ -13,6 +13,7 @@ import {
 } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { useAuthStore } from "@multica/core/auth";
+import { prefersReducedMotion } from "@multica/core/appearance";
 import {
   agentCompletedIssueCountOptions,
   needsSourceBackfill,
@@ -22,6 +23,7 @@ import {
   type Source,
 } from "@multica/core/onboarding";
 import { useCurrentWorkspace } from "@multica/core/paths";
+import { useSessionPromptStore } from "@multica/core/session-prompt";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Dialog,
@@ -107,12 +109,9 @@ export function SourceBackfillModal() {
     // the modal floats in, so it doesn't feel like a hard block. Common
     // delight pattern — ~700ms is short enough that nobody starts an
     // interaction first but long enough that the workspace renders.
-    // Honour `prefers-reduced-motion: reduce`: those users have opted
-    // out of incidental animations, so open immediately.
-    const reducedMotion =
-      typeof window !== "undefined" &&
-      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
-    if (reducedMotion) {
+    // People who reduce motion have opted out of incidental animations,
+    // so open immediately.
+    if (prefersReducedMotion()) {
       openedForUserRef.current = user.id;
       setOpen(true);
       return;
@@ -124,6 +123,10 @@ export function SourceBackfillModal() {
     }, 700);
     return () => window.clearTimeout(timer);
   }, [user, shouldPrompt]);
+
+  useEffect(() => {
+    if (open) useSessionPromptStore.getState().markPrompted();
+  }, [open]);
 
   return (
     <Dialog

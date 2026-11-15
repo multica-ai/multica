@@ -140,6 +140,8 @@ You also need at least one AI agent CLI installed:
 - Trae CLI (`traecli` on PATH)
 - [Grok Build CLI](https://docs.x.ai/) (`grok` on PATH)
 - Qwen Code (`qwen` on PATH)
+- [Amp](https://ampcode.com/docs/cli) (`amp` on PATH on macOS, Linux or Windows through WSL; set an Amp access token in `AMP_API_KEY` on the daemon machine)
+- [Factory Droid](https://docs.factory.com/droid-exec/overview) (native `droid` 1.8.0+ on PATH; sign in or set `FACTORY_API_KEY` on the daemon machine; Linux requires glibc)
 - [QwenPaw](https://github.com/agentscope-ai/QwenPaw) (`qwenpaw` on PATH; pick its model in QwenPaw's own configuration)
 - [MiniMax Code CLI](https://www.npmjs.com/package/@minimax-ai/code) (`mcode` 0.1.2+ on PATH). Install a supported Node.js release (`>=22.19 <23` or `>=24 <27`), run `npm install --global @minimax-ai/code@latest`, then `mcode login`.
 - [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh` on PATH with the Multica runtime profile installed; set `DEEPSEEK_API_KEY`)

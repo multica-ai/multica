@@ -16,19 +16,33 @@
     "status": "Status",
     "priority": "Priority",
     "from": "From",
-    "unread_only": "Unread only",
-    "no_agents_working": "No agents working",
     "notification_count_one": "{{count}} notification",
     "notification_count_other": "{{count}} notifications",
     "clear": "Clear filters",
-    "empty": "No notifications match your filters"
+    "empty": "No notifications match your filters",
+    "section_notification": "Notification",
+    "section_issue": "Issue",
+    "type": "Type",
+    "received": "Received",
+    "type_mention": "Mentions",
+    "type_comment": "Comments & reactions",
+    "type_assign": "Assignments & subscriptions",
+    "type_review": "Review requests",
+    "type_change": "Issue changes",
+    "type_run": "Agent runs",
+    "type_system": "System",
+    "received_today": "Today",
+    "received_last_7_days": "Last 7 days",
+    "received_last_30_days": "Last 30 days",
+    "agent_idle": "Idle"
   },
   "context_menu": {
     "mark_read": "Mark as read",
     "mark_unread": "Mark as unread",
     "archive": "Archive",
     "unarchive": "Unarchive",
-    "open_in_new_tab": "Open in new tab"
+    "open_in_new_tab": "Open in new tab",
+    "delete": "Delete"
   },
   "list": {
     "loading_selection": "Loading notification…",
@@ -63,6 +77,7 @@
   "types": {
     "issue_assigned": "Assigned",
     "issue_subscribed": "Subscribed",
+    "issue_created": "New issue",
     "unassigned": "Unassigned",
     "assignee_changed": "Assignee changed",
     "status_changed": "Status changed",
@@ -82,7 +97,11 @@
     "quick_create_unconfirmed": "Create with agent unconfirmed",
     "autopilot_paused": "Autopilot paused",
     "children_done": "Sub-issues finished",
-    "autopilot_quota_exceeded": "Autopilot run limit reached"
+    "autopilot_quota_exceeded": "Autopilot run limit reached",
+    "app_action_requested": "Needs your confirmation",
+    "app_action_reminder": "Confirmation expiring soon",
+    "app_connect_requested": "Connect an app",
+    "app_action_result": "App action result"
   },
   "labels": {
     "set_status_to": "Set status to",
@@ -102,7 +121,8 @@
   "toasts": {
     "source_context_retry_started": "Retry started with the original context",
     "archived": "Notification archived",
-    "unarchived": "Notification restored"
+    "unarchived": "Notification restored",
+    "deleted": "Notification deleted"
   },
   "errors": {
     "archived_lookup_failed": "Failed to load the linked notification",
@@ -118,6 +138,14 @@
     "archive_completed_failed": "Failed to archive completed",
     "unarchive_failed": "Failed to unarchive",
     "archived_load_failed": "Failed to load archived notifications",
-    "filters_load_failed": "Could not load filters"
+    "filters_load_failed": "Could not load filters",
+    "delete_failed": "Failed to delete notification. Try again."
+  },
+  "delete_dialog": {
+    "title": "Delete notification?",
+    "description": "This permanently deletes this notification. Related issues and runs are kept.",
+    "issue_description": "This permanently deletes the notifications for this issue in this view. The issue and its runs are kept.",
+    "cancel": "Cancel",
+    "active_issue_description": "This permanently deletes the active notifications for this issue. Previously archived notifications remain and will be visible again in Archived. The issue and its runs are kept."
   }
 }

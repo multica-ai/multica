@@ -46,6 +46,7 @@
   "type": {
     "assigned": "已分配",
     "subscribed": "已訂閱",
+    "issue_created": "新任務",
     "unassigned": "已取消分配",
     "reassigned": "重新分配",
     "status_changed": "狀態已更改",
@@ -75,7 +76,11 @@
     "reacted_with": "回應了 {{emoji}}",
     "created_with_agent": "由 AI 代理建立：{{identifier}}",
     "failed_with_detail": "失敗：{{detail}}",
-    "run_limit_blocked": "已達到上限，本次執行被阻止"
+    "run_limit_blocked": "已達到上限，本次執行被阻止",
+    "app_action_requested": "等待你確認",
+    "app_action_reminder": "確認即將過期",
+    "app_connect_requested": "請連線應用",
+    "app_action_result": "應用操作結果"
   },
   "body": {
     "autopilot_title_limit": "自動化 \"{{title}}\" 未啟動，因為該工作區已達到當前週期 {{limit}} 次執行的上限。額度將在 {{resetAt}} 重置。",

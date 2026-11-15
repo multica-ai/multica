@@ -10,8 +10,7 @@ import {
 import { useActorName } from "@multica/core/workspace/hooks";
 import { cn } from "@multica/ui/lib/utils";
 import { BorderBeam } from "@multica/ui/components/common/border-beam";
-import { api } from "@multica/core/api";
-import { issueKeys } from "@multica/core/issues/queries";
+import { issueTasksOptions } from "@multica/core/issues/queries";
 import type { AgentTask } from "@multica/core/types";
 import { TranscriptButton } from "../../common/task-transcript";
 import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
@@ -54,12 +53,7 @@ export const IssueAgentHeaderChip = memo(function IssueAgentHeaderChip({
 }: IssueAgentHeaderChipProps) {
   const { t } = useT("issues");
   // Same query options as ExecutionLogSection so both observe one cache entry.
-  const { data: tasks = [] } = useQuery({
-    queryKey: issueKeys.tasks(issueId),
-    queryFn: () => api.listTasksByIssue(issueId),
-    staleTime: 30_000,
-    refetchOnWindowFocus: true,
-  });
+  const { data: tasks = [] } = useQuery(issueTasksOptions(issueId));
 
   const { running, queued } = useMemo(() => {
     const running: AgentTask[] = [];
