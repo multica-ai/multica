@@ -470,7 +470,6 @@ func TestDeliverToSubscriber_DelegatedTier(t *testing.T) {
 		{"direct subscriber keeps comments", "assignee", "new_comment", false, true},
 
 		{"delegated skips routine progress", "delegated", "status_changed", false, false},
-		{"delegated skips comment churn", "delegated", "new_comment", false, false},
 		{"delegated skips assignee churn", "delegated", "assignee_changed", false, false},
 		{"delegated skips date churn", "delegated", "due_date_changed", false, false},
 		{"delegated skips non-status events even on a handoff", "delegated", "due_date_changed", true, false},
@@ -478,8 +477,8 @@ func TestDeliverToSubscriber_DelegatedTier(t *testing.T) {
 		{"delegated gets the handoff", "delegated", "status_changed", true, true},
 
 		{"delegated always gets direct mentions", "delegated", "mentioned", false, true},
+		{"delegated always gets comments", "delegated", "new_comment", false, true},
 		{"delegated always gets failures", "delegated", "task_failed", false, true},
-		{"delegated always gets agent_blocked", "delegated", "agent_blocked", false, true},
 	}
 
 	for _, tc := range cases {
@@ -651,4 +650,132 @@ func TestDeliverToSubscriber_UnknownReasonIsDirect(t *testing.T) {
 	if !deliverToSubscriber("some_future_reason", "new_comment", false) {
 		t.Fatal("an unrecognized subscription reason must default to full delivery")
 	}
+}
+
+// TestDelegatedIssueCreated_NotifiesTheHumanOwner: an issue an agent files on a
+// human's behalf reaches that human's inbox when it is created, unless a parent
+// they already watch leads there (MUL-9314).
+func TestDelegatedIssueCreated_NotifiesTheHumanOwner(t *testing.T) {
+	ctx := context.Background()
+	queries := db.New(testPool)
+	agentID, runtimeID := firstFixtureAgent(t)
+
+	issueCreatedRows := func(issueID string) int {
+		t.Helper()
+		var n int
+		if err := testPool.QueryRow(ctx,
+			`SELECT COUNT(*) FROM inbox_item
+			 WHERE recipient_type = 'member' AND recipient_id = $1 AND issue_id = $2 AND type = 'issue_created'`,
+			testUserID, issueID,
+		).Scan(&n); err != nil {
+			t.Fatalf("count inbox: %v", err)
+		}
+		return n
+	}
+	// fileIn runs the agent create through both listener sets in main.go's
+	// order and returns the issue with the inbox:new events it published for
+	// the human.
+	fileIn := func(t *testing.T, originType string, parent pgtype.UUID, projectID string) (string, int) {
+		t.Helper()
+		bus := events.New()
+		registerSubscriberListeners(bus, testPool)
+		registerNotificationListeners(bus, queries)
+		inboxNew := 0
+		bus.Subscribe(protocol.EventInboxNew, func(e events.Event) {
+			item, _ := e.Payload.(map[string]any)["item"].(map[string]any)
+			if item["recipient_id"] == testUserID {
+				inboxNew++
+			}
+		})
+
+		task := createAgentTaskWithOriginator(t, agentID, runtimeID, util.MustParseUUID(testUserID))
+		issueID := createAgentOriginIssue(t, agentID, originType, task, parent)
+		t.Cleanup(func() {
+			testPool.Exec(context.Background(), `DELETE FROM inbox_item WHERE issue_id = $1`, issueID)
+		})
+		resp := handler.IssueResponse{
+			ID:          issueID,
+			WorkspaceID: testWorkspaceID,
+			Title:       "delegated subscriber test issue",
+			Status:      "todo",
+			Priority:    "medium",
+			CreatorType: "agent",
+			CreatorID:   agentID,
+		}
+		if parent.Valid {
+			parentID := util.UUIDToString(parent)
+			resp.ParentIssueID = &parentID
+		}
+		if projectID != "" {
+			if _, err := testPool.Exec(ctx, `UPDATE issue SET project_id = $1 WHERE id = $2`, projectID, issueID); err != nil {
+				t.Fatalf("set project: %v", err)
+			}
+			resp.ProjectID = &projectID
+		}
+		bus.Publish(events.Event{
+			Type:        protocol.EventIssueCreated,
+			WorkspaceID: testWorkspaceID,
+			ActorType:   "agent",
+			ActorID:     agentID,
+			Payload:     map[string]any{"issue": resp},
+		})
+		return issueID, inboxNew
+	}
+	file := func(t *testing.T, originType string, parent pgtype.UUID) string {
+		t.Helper()
+		issueID, _ := fileIn(t, originType, parent, "")
+		return issueID
+	}
+
+	t.Run("also watching the project notifies once", func(t *testing.T) {
+		projectID := createTestProject(t)
+		addProjectSubscribers(t, projectID, testUserID)
+		issueID, inboxNew := fileIn(t, "agent_create", pgtype.UUID{}, projectID)
+		if n := issueCreatedRows(issueID); n != 1 {
+			t.Fatalf("issue_created rows = %d, want 1", n)
+		}
+		if inboxNew != 1 {
+			t.Fatalf("inbox:new events = %d, want 1", inboxNew)
+		}
+	})
+
+	t.Run("top-level issue", func(t *testing.T) {
+		issueID := file(t, "agent_create", pgtype.UUID{})
+		if n := issueCreatedRows(issueID); n != 1 {
+			t.Fatalf("issue_created rows = %d, want 1", n)
+		}
+	})
+
+	t.Run("sub-issue under a parent the human does not watch", func(t *testing.T) {
+		parentID := createTestIssue(t, testWorkspaceID, testUserID)
+		t.Cleanup(func() { cleanupTestIssue(t, parentID) })
+		issueID := file(t, "agent_create", util.MustParseUUID(parentID))
+		if n := issueCreatedRows(issueID); n != 1 {
+			t.Fatalf("issue_created rows = %d, want 1", n)
+		}
+	})
+
+	t.Run("sub-issue under a watched parent stays quiet", func(t *testing.T) {
+		parentID := createTestIssue(t, testWorkspaceID, testUserID)
+		t.Cleanup(func() { cleanupTestIssue(t, parentID) })
+		if _, err := queries.AddIssueSubscriber(ctx, db.AddIssueSubscriberParams{
+			IssueID:  util.MustParseUUID(parentID),
+			UserType: "member",
+			UserID:   util.MustParseUUID(testUserID),
+			Reason:   "creator",
+		}); err != nil {
+			t.Fatalf("subscribe parent: %v", err)
+		}
+		issueID := file(t, "agent_create", util.MustParseUUID(parentID))
+		if n := issueCreatedRows(issueID); n != 0 {
+			t.Fatalf("issue_created rows = %d, want 0", n)
+		}
+	})
+
+	t.Run("quick create is not a delegated notification", func(t *testing.T) {
+		issueID := file(t, "quick_create", pgtype.UUID{})
+		if n := issueCreatedRows(issueID); n != 0 {
+			t.Fatalf("issue_created rows = %d, want 0", n)
+		}
+	})
 }

@@ -202,7 +202,7 @@ func TestReview8545PostgresRetryDoesNotAdoptUnrelatedTurn(t *testing.T) {
 	o, _, c, e := review8545Setup(t, bot)
 	o.handleTaskMessage(telegramPartialEvent(e.TaskID, "first request"))
 	o.handleTaskFailed(events.Event{TaskID: e.TaskID, Payload: map[string]any{"retry_pending": true}})
-	c.advance(editInterval + time.Millisecond)
+	c.advance(privateEditInterval + time.Millisecond)
 	// Different ordinary task on the same binding; no retry relationship.
 	otherID := util.UUIDToString(review8545ID())
 	o.handleTaskMessage(telegramPartialEvent(otherID, "unrelated second request"))
@@ -214,11 +214,11 @@ func TestReview8545PostgresOldAttemptCannotReopenAfterAdoption(t *testing.T) {
 	o, _, c, e := review8545Setup(t, bot)
 	o.handleTaskMessage(telegramPartialEvent(e.TaskID, "first attempt"))
 	o.handleTaskFailed(events.Event{TaskID: e.TaskID, Payload: map[string]any{"retry_pending": true}})
-	c.advance(editInterval + time.Millisecond)
+	c.advance(privateEditInterval + time.Millisecond)
 	retryTask := util.UUIDToString(review8545ID())
 	seedRetryChain(t, e.TaskID, retryTask)
 	o.handleTaskMessage(telegramPartialEvent(retryTask, "retry attempt"))
-	c.advance(editInterval + time.Millisecond)
+	c.advance(privateEditInterval + time.Millisecond)
 	o.handleTaskMessage(telegramPartialEvent(e.TaskID, "late old attempt"))
 	review8545MessageCount(t, bot, 1)
 }
@@ -310,7 +310,7 @@ func TestReview8545PostgresStaleStreamCannotOverwriteSettledAnswer(t *testing.T)
 	bot := &auditBot{}
 	a, base, c, e := review8545Setup(t, bot)
 	a.handleTaskMessage(telegramPartialEvent(e.TaskID, chatDoneContent(e.Payload)))
-	c.advance(editInterval + time.Millisecond)
+	c.advance(privateEditInterval + time.Millisecond)
 	q := &review8545PauseStreamRead{review8545Queries: base, entered: make(chan struct{}), release: make(chan struct{})}
 	q.pause.Store(true)
 	a.q = q
@@ -398,9 +398,9 @@ func TestReview8545PostgresSupersededAttemptCannotRewriteReply(t *testing.T) {
 	seedRetryChain(t, e.TaskID, retryTask)
 
 	o.handleTaskMessage(telegramPartialEvent(e.TaskID, "first attempt"))
-	c.advance(editInterval + time.Millisecond)
+	c.advance(privateEditInterval + time.Millisecond)
 	o.handleTaskMessage(telegramPartialEvent(retryTask, "retry attempt"))
-	c.advance(editInterval + time.Millisecond)
+	c.advance(privateEditInterval + time.Millisecond)
 	o.handleTaskMessage(telegramPartialEvent(e.TaskID, " stale tail from the old attempt"))
 
 	review8545MessageCount(t, bot, 1)
@@ -428,7 +428,7 @@ func TestReview8545PostgresSettledElsewhereReleasesLocalState(t *testing.T) {
 	if held != 1 {
 		t.Fatalf("setup expected one local stream, found %d", held)
 	}
-	c.advance(editInterval + time.Millisecond)
+	c.advance(privateEditInterval + time.Millisecond)
 	a.handleTaskMessage(telegramPartialEvent(e.TaskID, " late tail"))
 
 	a.mu.Lock()

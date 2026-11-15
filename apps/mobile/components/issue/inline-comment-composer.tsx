@@ -47,7 +47,7 @@ export function InlineCommentComposer({ issueId }: { issueId: string }) {
         throw err;
       }
     },
-    [createComment, replyTarget?.commentId],
+    [createComment, replyTarget],
   );
 
   return (

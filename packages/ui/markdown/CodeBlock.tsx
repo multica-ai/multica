@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { codeToHtml, bundledLanguages, type BundledLanguage } from 'shiki'
-import { Copy, Check } from "lucide-react"
+import { Copy, Check } from "@multica/ui/icons"
 import { useTranslation } from "react-i18next"
 import { Button } from "@multica/ui/components/ui/button"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip"

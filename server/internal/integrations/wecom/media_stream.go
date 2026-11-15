@@ -24,9 +24,9 @@ package wecom
 // final block is read — unknowable at the moment the upload must start. A
 // file on disk has already answered the question: its size IS the length.
 //
-// Files are created 0600 and removed on every path. They hold decrypted
-// attachment content, so their permissions are part of the feature rather
-// than housekeeping.
+// Files are private to the process user and removed on every path. They hold
+// decrypted attachment content, so their permissions are part of the feature
+// rather than housekeeping.
 
 import (
 	"crypto/aes"
@@ -43,9 +43,11 @@ import (
 // is holding.
 const mediaStreamChunk = 256 << 10
 
+var errMediaTempFile = errors.New("wecom: media temp file")
+
 // decryptToFile reads ciphertext from src, decrypts it into a new temp file,
 // and returns the file positioned at its start along with the plaintext
-// length. The caller closes and removes it.
+// length. The caller closes it; the OS also reclaims it on process exit.
 //
 // CBC needs the tail before the head can be trusted — the pad is on the last
 // block — so the final block is held back until the source is exhausted and
@@ -62,21 +64,9 @@ func decryptToFile(aesKey string, src io.Reader, dir string) (f *os.File, size i
 	// The IV is the first 16 bytes of the key, as WeCom's own libraries do.
 	mode := cipher.NewCBCDecrypter(block, key[:aes.BlockSize])
 
-	out, err := os.CreateTemp(dir, "wecom-media-*.bin")
+	out, err := createMediaTempFile(dir)
 	if err != nil {
-		return nil, 0, fmt.Errorf("wecom: media temp file: %w", err)
-	}
-	// Unlink now: the file stays readable through the handle and disappears
-	// the moment the process lets go of it, including on a crash. Nothing
-	// with decrypted attachment content is left behind for anyone to find.
-	if err := os.Remove(out.Name()); err != nil {
-		out.Close()
-		return nil, 0, fmt.Errorf("wecom: media temp file: %w", err)
-	}
-	if err := out.Chmod(0o600); err != nil && !errors.Is(err, os.ErrNotExist) {
-		// Best effort: the file is already unlinked, so this is belt as well
-		// as braces.
-		_ = err
+		return nil, 0, fmt.Errorf("%w: %w", errMediaTempFile, err)
 	}
 	defer func() {
 		if err != nil {

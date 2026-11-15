@@ -35,6 +35,23 @@ func exactArgs(n int) cobra.PositionalArgs {
 	}
 }
 
+// minimumArgs returns a cobra.PositionalArgs that requires at least n args
+// and prints help on failure, so users see usage context with the error.
+func minimumArgs(n int) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if len(args) < n {
+			if n == 1 {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Error: accepts at least 1 arg, received %d\n\n", len(args))
+			} else {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Error: accepts at least %d args, received %d\n\n", n, len(args))
+			}
+			cmd.Help()
+			return errSilent
+		}
+		return nil
+	}
+}
+
 // initHelp configures the root command to use gh-style help output.
 func initHelp(root *cobra.Command) {
 	root.SetHelpTemplate(rootHelpTemplate)

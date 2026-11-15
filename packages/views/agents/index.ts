@@ -1,7 +1,7 @@
 export { AgentsPage, AgentDetailPage } from "./components";
 export {
-  ChooseCreateMethodPage,
+  ChooseRuntimePage,
+  AgentCreatedPage,
   ManualCreateAgentPage,
-  AiCreateAgentPage,
   AiBuilderSessionPage,
 } from "./create";

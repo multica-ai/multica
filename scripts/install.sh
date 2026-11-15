@@ -223,22 +223,30 @@ get_selfhost_ref() {
 
 checkout_server_ref() {
   local ref="$1"
+  local expected="" head=""
 
+  # Fetch and checkout are best-effort: a missing remote or a shallow clone
+  # should not abort here. The comparison below is what decides success.
   if [ "$ref" = "main" ]; then
     git fetch origin main --depth 1 2>/dev/null || true
     git checkout --force main 2>/dev/null || true
     git reset --hard origin/main 2>/dev/null || true
-    return
+    expected=$(git rev-parse --verify --quiet 'origin/main^{commit}' 2>/dev/null || true)
+  else
+    git fetch origin --tags --force 2>/dev/null || true
+    if git rev-parse --verify --quiet "refs/tags/$ref" >/dev/null; then
+      git checkout --force "$ref" 2>/dev/null || git checkout --force "tags/$ref" 2>/dev/null || true
+    else
+      git fetch origin "$ref" --depth 1 2>/dev/null || true
+      git checkout --force "$ref" 2>/dev/null || true
+    fi
+    expected=$(git rev-parse --verify --quiet "${ref}^{commit}" 2>/dev/null || true)
   fi
 
-  git fetch origin --tags --force 2>/dev/null || true
-  if git rev-parse --verify --quiet "refs/tags/$ref" >/dev/null; then
-    git checkout --force "$ref" 2>/dev/null || git checkout --force "tags/$ref" 2>/dev/null || true
-    return
+  head=$(git rev-parse --verify --quiet HEAD 2>/dev/null || true)
+  if [ -z "$expected" ] || [ "$expected" != "$head" ]; then
+    return 1
   fi
-
-  git fetch origin "$ref" --depth 1 2>/dev/null || true
-  git checkout --force "$ref" 2>/dev/null || true
 }
 
 pull_official_selfhost_images() {
@@ -274,11 +282,19 @@ install_cli() {
     local latest_ver
     latest_ver=$(get_latest_version)
 
+    if [ -z "$latest_ver" ]; then
+      # An empty lookup (offline, 500, no redirect) used to fall into the
+      # "versions are equal" branch below and print "up to date". The installed
+      # CLI still works, so keep it — but say what actually happened.
+      warn "Could not determine the latest Multica CLI release; keeping the installed $current_ver. Check your network connection and re-run the installer to upgrade."
+      return 0
+    fi
+
     # Normalize: strip leading 'v' for comparison
     local current_cmp="${current_ver#v}"
     local latest_cmp="${latest_ver#v}"
 
-    if [ -z "$latest_ver" ] || [ "$current_cmp" = "$latest_cmp" ]; then
+    if [ "$current_cmp" = "$latest_cmp" ]; then
       ok "Multica CLI is up to date ($current_ver)"
       return 0
     fi
@@ -357,7 +373,9 @@ setup_server() {
     cd "$INSTALL_DIR"
   fi
 
-  checkout_server_ref "$server_ref"
+  if ! checkout_server_ref "$server_ref"; then
+    fail "Could not check out $server_ref at $INSTALL_DIR. Check your network connection and re-run the installer."
+  fi
 
   ok "Repository ready at $INSTALL_DIR ($server_ref)"
 

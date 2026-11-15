@@ -4,7 +4,7 @@ These rules apply only to `apps/mobile/`, in addition to the [root instructions]
 
 ## Sharing and Dependencies
 
-- Mobile owns its UI, state, hooks, providers, API client, QueryClient, i18n, and build/release workflow. Import core types with `import type`; runtime imports are limited to pure utilities and platform-independent schemas. Do not import web/desktop stores, hooks, Query factories, or WS updaters.
+- Mobile owns its UI, state, hooks, providers, API client, QueryClient, i18n, and build/release workflow. Import core types with `import type`; runtime imports are limited to pure utilities and platform-independent schemas. Do not import web/desktop stores, hooks, Query factories, or WS updaters. Import runtime values through the pure module's own subpath (e.g. `@multica/core/agents/derive-presence`); `eslint.config.js` rejects value imports from core barrels other than `types` and `markdown`, because the rest also load hooks, queries, stores, or React context. Add the narrow subpath to `packages/core/package.json` exports when it is missing.
 - Use `package.json` and the lockfile for current versions. Mobile pins Expo/React Native dependencies rather than taking the root React catalog.
 - Add SDK-aligned native packages with `pnpm exec expo install <package>` from this directory. Check compatibility before adding other dependencies; do not pick versions from memory.
 - Follow [README.md](README.md) for setup, simulator/device builds, and environment variants. Keep iOS scripts routed through `scripts/ios-run.sh`, which prebuilds before running iOS so config plugins are reapplied. Preserve the caller's `APP_ENV`; avoid clean prebuilds in the normal edit loop.
@@ -34,6 +34,8 @@ These rules apply only to `apps/mobile/`, in addition to the [root instructions]
 - Keep mobile tokens local; do not import web/desktop CSS. Read [docs/markdown-rendering-adr.md](docs/markdown-rendering-adr.md) before changing the Markdown renderer or its native styling.
 
 ### Sheets and navigation
+
+- Import navigation hooks, theme providers, and theme values from `expo-router`. Its bundled navigation context is separate from `@react-navigation/*`; direct imports from those packages are lint errors.
 
 | Content | Container |
 | --- | --- |

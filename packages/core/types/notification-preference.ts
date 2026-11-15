@@ -2,10 +2,14 @@ export type NotificationGroupKey =
   | "assignments"
   | "status_changes"
   | "comments"
+  | "chat_replies"
   | "mentions"
+  | "reactions"
   | "updates"
+  | "new_issues"
   | "agent_activity"
-  | "system_notifications";
+  | "system_notifications"
+  | "auto_archive_completed";
 
 export type NotificationGroupValue = "all" | "muted";
 

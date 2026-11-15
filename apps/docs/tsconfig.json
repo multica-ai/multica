@@ -19,7 +19,7 @@
     "sourceMap": true,
     "noUncheckedIndexedAccess": true,
     "resolveJsonModule": true,
-    "jsx": "preserve",
+    "jsx": "react-jsx",
     "plugins": [
       {
         "name": "next"

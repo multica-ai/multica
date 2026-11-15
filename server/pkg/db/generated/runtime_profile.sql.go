@@ -211,17 +211,12 @@ WITH blockers AS (
         CASE
             WHEN a.system_key IS NULL OR btrim(a.system_key) = '' THEN 'user'
             WHEN btrim(a.system_key) = 'mika' THEN 'mika'
-            -- starts_with, not LIKE: '_' is a single-character wildcard in
-            -- LIKE, so 'agent_builder:%' also matches 'agent-builder:x' and
-            -- 'agentXbuilder:x'. Those would be classified here as carriers
-            -- and by the Go side as other_system, and the refusal would send
-            -- the user to an Agent Builder session that does not exist.
-            WHEN starts_with(btrim(a.system_key), 'agent_builder:') THEN 'agent_builder'
             ELSE 'other_system'
         END AS blocker_class
     FROM agent a
     JOIN agent_runtime ar ON ar.id = a.runtime_id
-    WHERE ar.profile_id = $1 AND ar.workspace_id = $2 AND a.archived_at IS NULL
+    WHERE ar.profile_id = $1 AND ar.workspace_id = $2
+      AND a.archived_at IS NULL AND a.kind = 'user'
 )
 SELECT
     id,
@@ -236,7 +231,6 @@ SELECT
     count(*) OVER () AS total_count,
     count(*) FILTER (WHERE blocker_class = 'user') OVER () AS user_count,
     count(*) FILTER (WHERE blocker_class = 'mika') OVER () AS mika_count,
-    count(*) FILTER (WHERE blocker_class = 'agent_builder') OVER () AS agent_builder_count,
     count(*) FILTER (WHERE blocker_class = 'other_system') OVER () AS other_system_count
 FROM blockers
 ORDER BY runtime_name ASC, name ASC
@@ -262,7 +256,6 @@ type ListActiveAgentsByProfileRow struct {
 	TotalCount        int64       `json:"total_count"`
 	UserCount         int64       `json:"user_count"`
 	MikaCount         int64       `json:"mika_count"`
-	AgentBuilderCount int64       `json:"agent_builder_count"`
 	OtherSystemCount  int64       `json:"other_system_count"`
 }
 
@@ -276,14 +269,18 @@ type ListActiveAgentsByProfileRow struct {
 // the user was trying to clean up, and a bare count gives them no way to tell
 // (GH #8456). Carrying the runtime is what lets the message say which machine.
 //
-// Deliberately not filtered by kind: it defines when deletion is refused, and
-// narrowing it to user agents here would let a profile with a bound builder
-// carrier through, whereupon TeardownRuntime would hard-delete that carrier.
+// User agents only (kind = 'user'), the same set ListActiveAgentsByRuntime
+// guards the single-runtime delete with. System agents are the hidden Agent
+// Builder carriers: runtime-local infrastructure that TeardownRuntime deletes
+// together with their sessions, drafts and pending restores. Counting them here
+// made a profile undeletable whenever an AI agent-creation flow had ever run on
+// one of its runtimes, because a carrier outlives its session (archiving the
+// session after the agent is created leaves the carrier active) and the session
+// is then hidden from every surface that could release it (GH #9762).
 //
 // system_key rides along because it, not kind, decides what the user can
 // actually do about a blocker. Mika is kind='user' with system_key='mika' and
-// can be neither archived nor moved; a builder carrier is kind='system' and is
-// released by its Builder session, not from the agent list.
+// can be moved but not archived.
 //
 // Bounded on purpose. The caller only needs to know that blockers exist, name a
 // few, and report how many there are — it never needs every row. This runs
@@ -326,7 +323,6 @@ func (q *Queries) ListActiveAgentsByProfile(ctx context.Context, arg ListActiveA
 			&i.TotalCount,
 			&i.UserCount,
 			&i.MikaCount,
-			&i.AgentBuilderCount,
 			&i.OtherSystemCount,
 		); err != nil {
 			return nil, err

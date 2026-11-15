@@ -1,4 +1,7 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
+import { StoredAgentDraftSchema } from "../api/schemas";
 import type { AgentDraft } from "./draft";
 import {
   fromStoredAgentDraft,
@@ -7,6 +10,7 @@ import {
 } from "./stored-draft";
 
 const draft = (): AgentDraft => ({
+  qoderAgentId: "agent_qca",
   name: "Release manager",
   description: "Ships carefully",
   instructions: "# Role\nShip.",
@@ -52,6 +56,27 @@ describe("stored agent draft", () => {
       "msg-9",
     );
     expect(toStoredAgentDraft(draft(), null).applied_message_id).toBeNull();
+  });
+
+  it("stores dismissed notices separately from the applied draft", () => {
+    const stored = toStoredAgentDraft(draft(), "applied", "dismissed");
+    expect(StoredAgentDraftSchema.parse(stored)).toMatchObject({
+      applied_message_id: "applied",
+      dismissed_message_id: "dismissed",
+    });
+    expect(fromStoredAgentDraft(stored, "runtime-1")).toEqual(draft());
+    expect(storedAgentDraftsEqual(stored, toStoredAgentDraft(draft(), "applied"))).toBe(false);
+  });
+
+  it("accepts older drafts and ignores malformed dismissal markers", () => {
+    const stored = toStoredAgentDraft(draft(), "applied");
+    expect(stored).not.toHaveProperty("dismissed_message_id");
+    expect(StoredAgentDraftSchema.parse(stored).dismissed_message_id).toBeUndefined();
+    expect(StoredAgentDraftSchema.parse({ ...stored, dismissed_message_id: 42 })).toMatchObject({
+      name: stored.name,
+      applied_message_id: "applied",
+      dismissed_message_id: null,
+    });
   });
 
   // Autosave compares on the stored form: a Set rebuilt with the same members

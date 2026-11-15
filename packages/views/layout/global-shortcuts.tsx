@@ -11,19 +11,21 @@ import {
   type ShortcutActionId,
 } from "@multica/core/shortcuts";
 import { useChatStore } from "@multica/core/chat";
-import { openCreateIssueWithPreference } from "@multica/core/issues/stores";
+import { useSearchStore } from "@multica/core/command-bar";
 import { useModalStore } from "@multica/core/modals";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { isImeComposing } from "@multica/core/utils";
 import { isFloatingChatRouteSuppressed } from "../chat/floating-chat-visibility";
+import { useAppShell } from "./app-shell-context";
+import { openCreateIssueForPath } from "./global-actions";
 import { useNavigation } from "../navigation";
-import { useSearchStore } from "../search/search-store";
 
 const GLOBAL_ACTIONS: readonly ShortcutActionId[] = [
   "openSearch",
   "createIssue",
   "toggleSidebar",
   "toggleChat",
+  "newChat",
   "goBack",
   "goForward",
   "goInbox",
@@ -47,6 +49,7 @@ export function shouldIgnoreGlobalShortcutEvent(event: KeyboardEvent): boolean {
 /** Executes configurable product-level shortcuts inside the dashboard shell. */
 export function GlobalShortcuts() {
   const { toggleSidebar } = useSidebar();
+  const toggleNav = useAppShell()?.toggleNav ?? toggleSidebar;
   const navigation = useNavigation();
   const workspacePaths = useWorkspacePaths();
 
@@ -76,7 +79,7 @@ export function GlobalShortcuts() {
     // An unavailable overlay must not claim the chord either — returning false
     // from the finder leaves the keypress its outside-the-app meaning instead of
     // swallowing it for an action that would visibly do nothing.
-    const canToggleFloatingChat = () =>
+    const canUseFloatingChat = () =>
       useChatStore.getState().floatingChatEnabled &&
       !isFloatingChatRouteSuppressed(navigation.pathname, chatPath);
 
@@ -91,7 +94,9 @@ export function GlobalShortcuts() {
         if (!action.allowInEditable && isEditableShortcutTarget(event.target)) {
           return false;
         }
-        if (candidate === "toggleChat" && !canToggleFloatingChat()) return false;
+        if ((candidate === "toggleChat" || candidate === "newChat") && !canUseFloatingChat()) {
+          return false;
+        }
         return shortcutMatchesEvent(getShortcut(candidate), event);
       });
       if (!actionId) return;
@@ -105,8 +110,15 @@ export function GlobalShortcuts() {
         useChatStore.getState().toggle();
         return;
       }
+      if (actionId === "newChat") {
+        // Like pressing Ask Multica: a second press closes the new chat it opened.
+        const chat = useChatStore.getState();
+        if (chat.isOpen && chat.activeSessionId === null) chat.setOpen(false);
+        else chat.startNewChat();
+        return;
+      }
       if (actionId === "toggleSidebar") {
-        toggleSidebar();
+        toggleNav();
         return;
       }
       if (actionId === "goBack") {
@@ -121,13 +133,7 @@ export function GlobalShortcuts() {
       }
       if (actionId === "createIssue") {
         if (useModalStore.getState().modal) return;
-        const projectMatch = navigation.pathname.match(
-          /^\/[^/]+\/projects\/([^/]+)$/,
-        );
-        const data = projectMatch
-          ? { project_id: projectMatch[1] }
-          : undefined;
-        openCreateIssueWithPreference(data);
+        openCreateIssueForPath(navigation.pathname);
         return;
       }
 
@@ -139,7 +145,7 @@ export function GlobalShortcuts() {
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [navigation, overrides, toggleSidebar, workspacePaths]);
+  }, [navigation, overrides, toggleNav, workspacePaths]);
 
   return null;
 }

@@ -8,6 +8,7 @@ import {
   issueViewContainerKey,
   useActiveIssueViewStore,
 } from "./active-view-store";
+import { filteredBuiltinView } from "./builtin-issue-views";
 
 const EMPTY_VIEWS: IssueView[] = [];
 
@@ -32,9 +33,9 @@ export function useActiveIssueView(
     enabled: !!scope && !!wsId,
   });
   const views = listQuery.data ?? EMPTY_VIEWS;
-  const activeView = activeViewId
-    ? (views.find((v) => v.id === activeViewId) ?? null)
-    : null;
+  const builtinView = scope?.scope_type === "workspace" ? filteredBuiltinView(activeViewId) : null;
+  const activeView =
+    builtinView ?? (activeViewId ? (views.find((v) => v.id === activeViewId) ?? null) : null);
   // "Missing" must never fire off a STALE list: right after a create the
   // active id is set before the invalidated list lands, and treating that
   // gap as "view deleted" bounces the surface back to the default tab.

@@ -23,22 +23,29 @@ func TestResolveAgentExecutablePath_PreservesDispatchShimName(t *testing.T) {
 		t.Skip("creating symlinks requires elevated privileges on Windows")
 	}
 
-	for _, shimName := range []string{"volta-shim", "vp"} {
-		t.Run(shimName, func(t *testing.T) {
+	for _, tt := range []struct {
+		shimName string
+		command  string
+	}{
+		{shimName: "volta-shim", command: "claude"},
+		{shimName: "vp", command: "claude"},
+		{shimName: "mise", command: "codex"},
+	} {
+		t.Run(tt.shimName, func(t *testing.T) {
 			managerDir := t.TempDir()
-			manager := filepath.Join(managerDir, shimName)
-			if err := os.WriteFile(manager, []byte("#!/bin/sh\nprintf '%s\\n' \"${0##*/}\"\n"), 0o755); err != nil {
+			manager := filepath.Join(managerDir, tt.shimName)
+			if err := os.WriteFile(manager, []byte("#!/bin/sh\nprintf '%s\\n' \"${0##*/}\" \"$1\" \"$PWD\"\n"), 0o755); err != nil {
 				t.Fatalf("write dispatcher: %v", err)
 			}
 
 			binDir := t.TempDir()
-			entrypoint := filepath.Join(binDir, "claude")
+			entrypoint := filepath.Join(binDir, tt.command)
 			if err := os.Symlink(manager, entrypoint); err != nil {
 				t.Fatalf("symlink dispatcher: %v", err)
 			}
 			t.Setenv("PATH", binDir)
 
-			got, err := resolveAgentExecutablePath("claude")
+			got, err := resolveAgentExecutablePath(tt.command)
 			if err != nil {
 				t.Fatalf("resolveAgentExecutablePath: %v", err)
 			}
@@ -46,16 +53,29 @@ func TestResolveAgentExecutablePath_PreservesDispatchShimName(t *testing.T) {
 			if err != nil {
 				t.Fatalf("resolve bin directory: %v", err)
 			}
-			want := filepath.Join(realBinDir, "claude")
+			want := filepath.Join(realBinDir, tt.command)
 			if got != want {
 				t.Fatalf("resolved path = %q, want command-preserving entrypoint %q", got, want)
 			}
-			output, err := exec.Command(got, "--version").CombinedOutput()
+			workDir, err := filepath.EvalSymlinks(t.TempDir())
 			if err != nil {
-				t.Fatalf("run resolved entrypoint: %v: %s", err, output)
+				t.Fatalf("resolve task workdir: %v", err)
 			}
-			if got := strings.TrimSpace(string(output)); got != "claude" {
-				t.Fatalf("dispatcher observed command name %q, want claude", got)
+			args := []string{"--version"}
+			if tt.command == "codex" {
+				args = append(args, "app-server")
+			}
+			for _, arg := range args {
+				cmd := exec.Command(got, arg)
+				cmd.Dir = workDir
+				output, err := cmd.CombinedOutput()
+				if err != nil {
+					t.Fatalf("run resolved entrypoint with %s: %v: %s", arg, err, output)
+				}
+				wantOutput := tt.command + "\n" + arg + "\n" + workDir + "\n"
+				if string(output) != wantOutput {
+					t.Fatalf("dispatcher invocation = %q, want %q", output, wantOutput)
+				}
 			}
 		})
 	}
@@ -106,45 +126,9 @@ func TestPatternsFromEnv_DefaultsWhenUnset(t *testing.T) {
 	}
 }
 
-// A localhost server URL is not the official cloud host, so this exercises the
-// self-host branch of defaultGCCompletedTaskTTL: retention stays unbounded until
-// an operator opts in, and a daemon upgrade never starts deleting on its own.
-func TestLoadConfig_CompletedTaskTTLDefaultsDisabledOnSelfHostAndReadsEnv(t *testing.T) {
-	stageFakeAgent(t)
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("SHELL", filepath.Join(t.TempDir(), "missing-shell"))
-	t.Setenv("MULTICA_GC_COMPLETED_TASK_TTL", "")
-
-	overrides := Overrides{
-		ServerURL:      "http://localhost:0",
-		WorkspacesRoot: t.TempDir(),
-	}
-	cfg, err := LoadConfig(overrides)
-	if err != nil {
-		t.Fatalf("LoadConfig with default completed-task TTL: %v", err)
-	}
-	if cfg.GCCompletedTaskTTL != 0 {
-		t.Fatalf("GCCompletedTaskTTL = %s, want disabled", cfg.GCCompletedTaskTTL)
-	}
-
-	t.Setenv("MULTICA_GC_COMPLETED_TASK_TTL", "36h")
-	cfg, err = LoadConfig(overrides)
-	if err != nil {
-		t.Fatalf("LoadConfig with completed-task TTL: %v", err)
-	}
-	if cfg.GCCompletedTaskTTL != 36*time.Hour {
-		t.Fatalf("GCCompletedTaskTTL = %s, want 36h", cfg.GCCompletedTaskTTL)
-	}
-
-	t.Setenv("MULTICA_GC_COMPLETED_TASK_TTL", "not-a-duration")
-	if _, err := LoadConfig(overrides); err == nil || !strings.Contains(err.Error(), "MULTICA_GC_COMPLETED_TASK_TTL") {
-		t.Fatalf("LoadConfig invalid completed-task TTL error = %v, want named validation error", err)
-	}
-}
-
 func TestLoadConfig_WSClaimPollIntervalPrecedence(t *testing.T) {
 	stageFakeAgent(t)
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	t.Setenv("SHELL", filepath.Join(t.TempDir(), "missing-shell"))
 	t.Setenv("MULTICA_DAEMON_WS_CLAIM_POLL_INTERVAL", "")
 	base := Overrides{ServerURL: "http://localhost:0", WorkspacesRoot: t.TempDir()}
@@ -182,66 +166,57 @@ func TestLoadConfig_WSClaimPollIntervalPrecedence(t *testing.T) {
 	}
 }
 
-func TestLoadConfig_CompletedTaskTTLDefaultsBoundedOnOfficialCloud(t *testing.T) {
+// The completed-task retention bound is on by default for every server, not
+// just Multica Cloud: a self-hosted or team-hosted daemon whose issues sit open
+// fills its disk just as fast. The env var still overrides in both directions.
+func TestLoadConfig_CompletedTaskTTLDefaultsBoundedOnEveryServer(t *testing.T) {
 	stageFakeAgent(t)
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	t.Setenv("SHELL", filepath.Join(t.TempDir(), "missing-shell"))
-	t.Setenv("MULTICA_GC_COMPLETED_TASK_TTL", "")
 
-	overrides := Overrides{
-		ServerURL:      "https://" + officialCloudHost,
-		WorkspacesRoot: t.TempDir(),
-	}
-	cfg, err := LoadConfig(overrides)
-	if err != nil {
-		t.Fatalf("LoadConfig on official cloud: %v", err)
-	}
-	if cfg.GCCompletedTaskTTL != 14*24*time.Hour {
-		t.Fatalf("GCCompletedTaskTTL = %s, want 14d on official cloud", cfg.GCCompletedTaskTTL)
-	}
+	for _, serverURL := range []string{
+		"https://" + officialCloudHost,
+		"https://api-staging.multica.ai",
+		"https://multica.example.com",
+		"http://localhost:0",
+	} {
+		t.Run(serverURL, func(t *testing.T) {
+			overrides := Overrides{
+				ServerURL:      serverURL,
+				WorkspacesRoot: t.TempDir(),
+			}
 
-	// An explicit 0 has to win on cloud too — otherwise the only way back to the
-	// previous retention behavior would be downgrading the daemon.
-	t.Setenv("MULTICA_GC_COMPLETED_TASK_TTL", "0")
-	cfg, err = LoadConfig(overrides)
-	if err != nil {
-		t.Fatalf("LoadConfig with cloud opt-out: %v", err)
-	}
-	if cfg.GCCompletedTaskTTL != 0 {
-		t.Fatalf("GCCompletedTaskTTL = %s, want an explicit 0 to disable the cloud default", cfg.GCCompletedTaskTTL)
-	}
+			t.Setenv("MULTICA_GC_COMPLETED_TASK_TTL", "")
+			cfg, err := LoadConfig(overrides)
+			if err != nil {
+				t.Fatalf("LoadConfig with default completed-task TTL: %v", err)
+			}
+			if cfg.GCCompletedTaskTTL != 14*24*time.Hour {
+				t.Fatalf("GCCompletedTaskTTL = %s, want 14d", cfg.GCCompletedTaskTTL)
+			}
 
-	t.Setenv("MULTICA_GC_COMPLETED_TASK_TTL", "36h")
-	cfg, err = LoadConfig(overrides)
-	if err != nil {
-		t.Fatalf("LoadConfig with cloud override: %v", err)
-	}
-	if cfg.GCCompletedTaskTTL != 36*time.Hour {
-		t.Fatalf("GCCompletedTaskTTL = %s, want the env override to win on cloud", cfg.GCCompletedTaskTTL)
-	}
-}
+			// An explicit 0 restores keep-until-terminal retention.
+			t.Setenv("MULTICA_GC_COMPLETED_TASK_TTL", "0")
+			cfg, err = LoadConfig(overrides)
+			if err != nil {
+				t.Fatalf("LoadConfig with completed-task TTL opt-out: %v", err)
+			}
+			if cfg.GCCompletedTaskTTL != 0 {
+				t.Fatalf("GCCompletedTaskTTL = %s, want an explicit 0 to disable the default", cfg.GCCompletedTaskTTL)
+			}
 
-func TestDefaultGCCompletedTaskTTLOnlyBoundsOfficialCloudHost(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		name      string
-		serverURL string
-		want      time.Duration
-	}{
-		{"official cloud", "https://api.multica.ai", DefaultGCCompletedTaskTTLCloud},
-		{"official cloud with port and path", "https://API.Multica.AI:443/api", DefaultGCCompletedTaskTTLCloud},
-		// Staging and previews inherit the self-host value for the same reason
-		// officialCloudHost excludes them from the auto-update default.
-		{"staging", "https://api-staging.multica.ai", DefaultGCCompletedTaskTTLSelfHost},
-		{"self-host", "https://multica.example.com", DefaultGCCompletedTaskTTLSelfHost},
-		{"localhost", "http://localhost:8080", DefaultGCCompletedTaskTTLSelfHost},
-		{"unparseable", "://nope", DefaultGCCompletedTaskTTLSelfHost},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			if got := defaultGCCompletedTaskTTL(tc.serverURL); got != tc.want {
-				t.Fatalf("defaultGCCompletedTaskTTL(%q) = %s, want %s", tc.serverURL, got, tc.want)
+			t.Setenv("MULTICA_GC_COMPLETED_TASK_TTL", "36h")
+			cfg, err = LoadConfig(overrides)
+			if err != nil {
+				t.Fatalf("LoadConfig with completed-task TTL override: %v", err)
+			}
+			if cfg.GCCompletedTaskTTL != 36*time.Hour {
+				t.Fatalf("GCCompletedTaskTTL = %s, want 36h", cfg.GCCompletedTaskTTL)
+			}
+
+			t.Setenv("MULTICA_GC_COMPLETED_TASK_TTL", "not-a-duration")
+			if _, err := LoadConfig(overrides); err == nil || !strings.Contains(err.Error(), "MULTICA_GC_COMPLETED_TASK_TTL") {
+				t.Fatalf("LoadConfig invalid completed-task TTL error = %v, want named validation error", err)
 			}
 		})
 	}
@@ -518,7 +493,7 @@ func TestLoadConfig_SkipsMulticaHooksShadowingAgentBinaries(t *testing.T) {
 	}
 
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	hooksDir := filepath.Join(home, ".multica", "hooks")
 	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
 		t.Fatalf("create hooks dir: %v", err)
@@ -578,7 +553,7 @@ func TestLoadConfig_SkipsMulticaHooksFromLoginShellFallback(t *testing.T) {
 	}
 
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	hooksDir := filepath.Join(home, ".multica", "hooks")
 	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
 		t.Fatalf("create hooks dir: %v", err)
@@ -1435,35 +1410,137 @@ func TestLoadConfig_UsesChatGPTAppBundleCodexPath(t *testing.T) {
 	}
 }
 
+// Regression for #8941: ChatGPT.app 26.924+ ships the CLI at
+// Resources/codex-cli/bin/codex. Discovery must use that path when the older
+// flat Resources/codex file is absent.
+func TestLoadConfig_UsesNestedChatGPTCodexCLIPath(t *testing.T) {
+	pathDir := t.TempDir()
+	nested := filepath.Join(pathDir, "ChatGPT.app", "Contents", "Resources", "codex-cli", "bin", "codex")
+	if err := os.MkdirAll(filepath.Dir(nested), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(nested, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake CLI: %v", err)
+	}
+
+	oldBundlePaths := codexDesktopAppBundlePaths
+	codexDesktopAppBundlePaths = func() []string { return []string{nested} }
+	t.Cleanup(func() { codexDesktopAppBundlePaths = oldBundlePaths })
+
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("SHELL", filepath.Join(t.TempDir(), "fish"))
+	t.Setenv("MULTICA_DAEMON_ID", "11111111-1111-1111-1111-111111111111")
+	pinNonCodexAgentsToMissingPaths(t)
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:0",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	got, ok := cfg.Agents["codex"]
+	if !ok {
+		t.Fatalf("expected codex agent from nested ChatGPT.app path, got %#v", cfg.Agents)
+	}
+	if got.Path != nested {
+		t.Fatalf("codex path = %q, want nested path %q", got.Path, nested)
+	}
+}
+
+// A bundled CLI that exists but cannot be spawned must stay unregistered:
+// registering it would advertise a healthy runtime whose every task fails.
+func TestProbeAgentCLIsIgnoresNonExecutableCodexBundle(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the Codex Desktop app bundle fallback is macOS-only")
+	}
+
+	pathDir := t.TempDir()
+	nested := filepath.Join(pathDir, "ChatGPT.app", "Contents", "Resources", "codex-cli", "bin", "codex")
+	if err := os.MkdirAll(filepath.Dir(nested), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(nested, []byte("#!/bin/sh\nexit 0\n"), 0o644); err != nil {
+		t.Fatalf("write non-executable fake CLI: %v", err)
+	}
+
+	oldBundlePaths := codexDesktopAppBundlePaths
+	codexDesktopAppBundlePaths = func() []string { return []string{nested} }
+	t.Cleanup(func() { codexDesktopAppBundlePaths = oldBundlePaths })
+
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("SHELL", filepath.Join(t.TempDir(), "fish"))
+	pinNonCodexAgentsToMissingPaths(t)
+
+	if _, found := probeAgentCLIs()["codex"]; found {
+		t.Fatal("codex was registered from a non-executable app bundle path")
+	}
+}
+
+// When both the nested CLI and the older flat binary exist, the nested path
+// is the current ChatGPT.app layout and must win.
+func TestLoadConfig_PrefersNestedChatGPTCodexCLIPath(t *testing.T) {
+	pathDir := t.TempDir()
+	nested := filepath.Join(pathDir, "ChatGPT.app", "Contents", "Resources", "codex-cli", "bin", "codex")
+	flat := filepath.Join(pathDir, "ChatGPT.app", "Contents", "Resources", "codex")
+	for _, p := range []string{nested, flat} {
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(p, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatalf("write fake CLI: %v", err)
+		}
+	}
+
+	oldBundlePaths := codexDesktopAppBundlePaths
+	codexDesktopAppBundlePaths = func() []string { return []string{nested, flat} }
+	t.Cleanup(func() { codexDesktopAppBundlePaths = oldBundlePaths })
+
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("SHELL", filepath.Join(t.TempDir(), "fish"))
+	t.Setenv("MULTICA_DAEMON_ID", "11111111-1111-1111-1111-111111111111")
+	pinNonCodexAgentsToMissingPaths(t)
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:0",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	got, ok := cfg.Agents["codex"]
+	if !ok {
+		t.Fatalf("expected codex agent, got %#v", cfg.Agents)
+	}
+	if got.Path != nested {
+		t.Fatalf("codex path = %q, want nested path %q", got.Path, nested)
+	}
+}
+
 func TestCodexDesktopAppBundlePaths_IncludesChatGPTAndLegacy(t *testing.T) {
 	paths := codexDesktopAppBundlePaths()
-	var hasChatGPT, hasLegacy bool
-	for _, p := range paths {
-		if strings.Contains(p, "ChatGPT.app") && strings.HasSuffix(filepath.ToSlash(p), "Contents/Resources/codex") {
-			hasChatGPT = true
-		}
-		if strings.Contains(p, "Codex.app") && strings.HasSuffix(filepath.ToSlash(p), "Contents/Resources/codex") {
-			hasLegacy = true
-		}
-	}
-	if !hasChatGPT {
-		t.Fatalf("codexDesktopAppBundlePaths missing ChatGPT.app entry: %#v", paths)
-	}
-	if !hasLegacy {
-		t.Fatalf("codexDesktopAppBundlePaths missing legacy Codex.app entry: %#v", paths)
-	}
-	// New path must be preferred (listed before legacy).
-	chatgptIdx, legacyIdx := -1, -1
+	const (
+		nestedSuffix = "ChatGPT.app/Contents/Resources/codex-cli/bin/codex"
+		flatSuffix   = "ChatGPT.app/Contents/Resources/codex"
+		legacySuffix = "Codex.app/Contents/Resources/codex"
+	)
+	nestedIdx, flatIdx, legacyIdx := -1, -1, -1
 	for i, p := range paths {
-		if chatgptIdx < 0 && strings.Contains(p, "ChatGPT.app") {
-			chatgptIdx = i
-		}
-		if legacyIdx < 0 && strings.Contains(p, "Codex.app") {
+		slash := filepath.ToSlash(p)
+		switch {
+		case nestedIdx < 0 && strings.HasSuffix(slash, nestedSuffix):
+			nestedIdx = i
+		case flatIdx < 0 && strings.HasSuffix(slash, flatSuffix):
+			flatIdx = i
+		case legacyIdx < 0 && strings.HasSuffix(slash, legacySuffix):
 			legacyIdx = i
 		}
 	}
-	if chatgptIdx < 0 || legacyIdx < 0 || chatgptIdx > legacyIdx {
-		t.Fatalf("expected ChatGPT.app before Codex.app, got indices chat=%d legacy=%d paths=%#v", chatgptIdx, legacyIdx, paths)
+	if nestedIdx < 0 || flatIdx < 0 || legacyIdx < 0 {
+		t.Fatalf("codexDesktopAppBundlePaths missing nested, flat, or legacy entry: %#v", paths)
+	}
+	if nestedIdx > flatIdx || flatIdx > legacyIdx {
+		t.Fatalf("expected nested ChatGPT path before flat ChatGPT path before Codex.app, got nested=%d flat=%d legacy=%d paths=%#v", nestedIdx, flatIdx, legacyIdx, paths)
 	}
 }
 
@@ -1528,18 +1605,6 @@ func pinNonCodexAgentsToMissingPaths(t *testing.T) {
 // =============================================================================
 // CLI config Backends.OpenClaw overrides (issue #3875)
 // =============================================================================
-
-// writeCLIConfigForProfile is a minimal helper for the override tests:
-// stages a HOME, writes a config.json under the given profile (empty profile
-// = default), and returns the resolved path so tests can assert against it.
-func writeCLIConfigForProfile(t *testing.T, profile string, cfg cli.CLIConfig) {
-	t.Helper()
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	if err := cli.SaveCLIConfigForProfile(cfg, profile); err != nil {
-		t.Fatalf("write cli config: %v", err)
-	}
-}
 
 // TestApplyOpenclawOverride_DoesNothingWhenNil verifies the early-return
 // path. A daemon started with no override should not Setenv anything; the
@@ -1680,7 +1745,7 @@ func TestLoadConfig_AppliesBackendOverridesFromConfigFile(t *testing.T) {
 	// Drop a CLI config under the user's HOME (already pointed at TempDir
 	// by stageFakeAgent's t.Setenv chain — but reassert here for clarity).
 	homeForCLIConfig := t.TempDir()
-	t.Setenv("HOME", homeForCLIConfig)
+	redirectTestHome(t, homeForCLIConfig)
 	cfg := cli.CLIConfig{
 		ServerURL: "http://localhost:8080",
 		Backends: &cli.BackendOverrides{
@@ -1722,7 +1787,7 @@ func TestLoadConfig_BackendOverrides_BackwardCompat_NoConfigFile(t *testing.T) {
 	stageFakeAgent(t)
 
 	// Point HOME at an empty dir — no config.json present.
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	os.Unsetenv("MULTICA_OPENCLAW_PATH")
 	os.Unsetenv("OPENCLAW_STATE_DIR")
 	t.Cleanup(func() {
@@ -1751,7 +1816,7 @@ func TestLoadConfig_BackendOverrides_BackwardCompat_NoConfigFile(t *testing.T) {
 func TestLoadConfig_BackendOverrides_MalformedConfigFileNonFatal(t *testing.T) {
 	stageFakeAgent(t)
 	homeDir := t.TempDir()
-	t.Setenv("HOME", homeDir)
+	redirectTestHome(t, homeDir)
 
 	// Write malformed JSON.
 	cfgDir := filepath.Join(homeDir, ".multica")

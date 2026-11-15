@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS idx_project_subscriber_workspace_user;

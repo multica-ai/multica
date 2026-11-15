@@ -82,7 +82,7 @@ func claimRun(t *testing.T, taskID string, rendersJoined bool) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := newDaemonTokenRequest("POST", "/claim", nil, testWorkspaceID, "joined-wakeups-test")
+	req := newOwnerDaemonRequest("POST", "/claim", nil)
 	if rendersJoined {
 		req.Header.Set("X-Client-Capabilities", protocol.DaemonCapabilityJoinedWakeupsV1)
 	}

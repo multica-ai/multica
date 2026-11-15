@@ -1,6 +1,6 @@
 import { expect, test, type Page, type Response } from "@playwright/test";
 import { TestApiClient } from "./fixtures";
-import { createTestApi, loginAsDefault, openWorkspaceMenu } from "./helpers";
+import { createTestApi, loginAsDefault, openAccountMenu } from "./helpers";
 
 // Web search answers from the local search index once it has synced
 // (MUL-7754): results match server search, follow writes made elsewhere, and
@@ -102,7 +102,7 @@ test.describe("Local search index", () => {
     await synced;
     await expect.poll(() => searchIndexDatabases(page)).toHaveLength(1);
 
-    await openWorkspaceMenu(page);
+    await openAccountMenu(page);
     await page.getByRole("menuitem", { name: "Log out" }).click();
     await page.waitForURL("**/login", { timeout: 10_000, waitUntil: "domcontentloaded" });
 

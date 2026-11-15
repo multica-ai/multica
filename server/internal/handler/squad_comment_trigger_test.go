@@ -50,11 +50,6 @@ func shouldEnqueueSquadLeaderOnCommentForTest(ctx context.Context, issue db.Issu
 	return triggersContainIssueAssigneeSquadLeader(triggers)
 }
 
-func shouldEnqueueSquadLeaderOnReplyForTest(ctx context.Context, issue db.Issue, content string, parent *db.Comment, authorType, authorID string) bool {
-	triggers, _ := testHandler.computeCommentAgentTriggers(ctx, issue, content, parent, authorType, authorID, commentTriggerComputeOptions{})
-	return triggersContainIssueAssigneeSquadLeader(triggers)
-}
-
 func triggersContainIssueAssigneeSquadLeader(triggers []commentAgentTrigger) bool {
 	for _, trigger := range triggers {
 		if trigger.Source == commentTriggerSourceIssueAssignee && trigger.Squad != nil {

@@ -22,8 +22,8 @@ const (
 )
 
 // PlatformSkillName is the built-in skill carrying Multica's platform
-// contracts — issues, mentions, agents, squads, autopilots, projects, runtimes
-// and skill import — behind one routing SKILL.md. Every agent receives it.
+// contracts — issues, mentions, agents, squads, autopilots, projects, runtimes,
+// local environments and skill import — behind one routing SKILL.md. Every agent receives it.
 //
 // The daemon's runtime brief names the same skill from its own constant: the
 // daemon runs on the user's machine and must not import this package, so the
@@ -51,13 +51,9 @@ var builtinSkillSystemKey = map[string]string{
 // intentionally leaves to skills.
 //
 // Layout: builtin_skills/<name>/SKILL.md plus optional supporting files. The
-// <name> directory carries a "multica-" prefix: that is the platform
-// namespace, and the brief names built-ins by their bare name on the
-// assumption that no workspace skill shares one. Nothing server-side reserves
-// the prefix today, so a user could author a skill that sanitizes to the same
-// slug and take the bare directory. That is accepted, not handled — when it
-// becomes real, the fix is to reject the prefix at skill create/import rather
-// than to make every pointer defensive.
+// <name> directory carries a "multica-" prefix. The daemon preserves built-in
+// identity separately from allocated directory names so brief pointers still
+// resolve when a user skill occupies the same name.
 // legacyRedirects asks for redirect stubs under the names this server has
 // stopped shipping. The runtime brief is assembled by the daemon, not the
 // server, so a backend deploy cannot rewrite an installed daemon's copy of it:

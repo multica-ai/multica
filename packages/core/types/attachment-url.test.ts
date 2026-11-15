@@ -1,12 +1,34 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import {
   attachmentDownloadPath,
   attachmentIdFromDownloadURL,
+  attachmentIdFromLocalUploadURL,
+  attachmentIdFromStorageURL,
   contentReferencesAttachment,
   stripChannelMediaMarkers,
 } from "./attachment-url";
 
 const ID = "11111111-2222-3333-4444-555555555555";
+const LOCAL_URL = `/uploads/workspaces/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/${ID}.png`;
+
+describe("legacy local attachment URLs", () => {
+  it.each([LOCAL_URL, `${LOCAL_URL}?exp=1&sig=old#image`, `https://old.example${LOCAL_URL}`])(
+    "extracts the attachment identity from %s",
+    (url) => expect(attachmentIdFromLocalUploadURL(url)).toBe(ID),
+  );
+
+  it.each(["/uploads/users/user/avatar.png", `${LOCAL_URL}.meta.json`, "/uploads/workspaces/ws/file.png", `//other.example${LOCAL_URL}`])(
+    "does not treat %s as an attachment",
+    (url) => expect(attachmentIdFromLocalUploadURL(url)).toBeUndefined(),
+  );
+
+  it("deduplicates historical body references after the response URL changes", () => {
+    expect(contentReferencesAttachment(`![image](${LOCAL_URL})`, {
+      id: ID, url: attachmentDownloadPath(ID),
+    })).toBe(true);
+  });
+});
 
 describe("attachmentDownloadPath", () => {
   it("returns the stable per-attachment download path", () => {
@@ -153,5 +175,34 @@ describe("contentReferencesAttachment", () => {
     // `md.includes(a.url)` check would have returned false here.
     expect(md.includes(att.url)).toBe(false);
     expect(contentReferencesAttachment(md, att)).toBe(true);
+  });
+});
+
+describe("attachmentIdFromStorageURL", () => {
+  const WS = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+  const CDN = "static.multica.ai";
+
+  it("extracts the attachment id from a workspace object on the CDN", () => {
+    expect(attachmentIdFromStorageURL(`https://${CDN}/workspaces/${WS}/${ID}.jpg`, CDN)).toBe(ID);
+  });
+
+  it("accepts an object without an extension and ignores query strings", () => {
+    expect(attachmentIdFromStorageURL(`https://${CDN}/workspaces/${WS}/${ID}?x=1`, CDN)).toBe(ID);
+  });
+
+  it("ignores URLs on another host", () => {
+    expect(
+      attachmentIdFromStorageURL(`https://example.com/workspaces/${WS}/${ID}.jpg`, CDN),
+    ).toBeUndefined();
+  });
+
+  it("ignores non-workspace paths and an unset CDN domain", () => {
+    expect(
+      attachmentIdFromStorageURL(`https://${CDN}/users/${WS}/${ID}.jpg`, CDN),
+    ).toBeUndefined();
+    expect(
+      attachmentIdFromStorageURL(`https://${CDN}/workspaces/${WS}/${ID}.jpg`, ""),
+    ).toBeUndefined();
+    expect(attachmentIdFromStorageURL(`/workspaces/${WS}/${ID}.jpg`, CDN)).toBeUndefined();
   });
 });

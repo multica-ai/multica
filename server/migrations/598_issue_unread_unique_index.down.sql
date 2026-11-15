@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS issue_unread_workspace_user_issue_uidx;

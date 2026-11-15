@@ -1,13 +1,19 @@
 import ReactDOM from "react-dom/client";
+import { installUserTimingCap } from "@multica/core/diagnostics";
 import App from "./App";
 import { AppCrashBoundary } from "./components/app-crash-boundary";
+import { launchWorkspaceSlug } from "./platform/workspace-windows";
+import { useTabStore } from "./stores/tab-store";
 // Inter variable font covers all weights (100-900) in a single file.
 // CJK is handled by system font fallback (see globals.css --font-sans chain).
 // Keep font stack in sync with apps/web/app/layout.tsx.
+// The opsz files carry the optical-size axis on top of weight, so headings get
+// Inter Display's cut while body text keeps the text cut — web loads the same
+// axis via next/font `axes: ["opsz"]`.
 // The italic axis ships as a separate file — without it the ~20 semantic italic
 // labels and every markdown <em>/blockquote render as synthesized oblique.
-import "@fontsource-variable/inter";
-import "@fontsource-variable/inter/wght-italic.css";
+import "@fontsource-variable/inter/opsz.css";
+import "@fontsource-variable/inter/opsz-italic.css";
 // Editorial serif — matches web's next/font Source_Serif_4. Loaded app-wide so
 // onboarding headings and any future editorial surface can use `font-serif`
 // (see tokens.css @theme inline). Variable font = one file covers all weights.
@@ -22,6 +28,9 @@ import "@fontsource-variable/source-serif-4/wght-italic.css";
 // markdown (600 -> 700). One variable file covers 100-900 and closes the whole
 // class instead of chasing weights one at a time.
 import "@fontsource-variable/geist-mono";
+// Optional code font from the Appearance settings; the browser only loads the
+// face once something renders with it.
+import "@fontsource-variable/jetbrains-mono";
 import "./globals.css";
 
 // react-grab: dev-only element inspector. Hold ⌘C (Mac) / Ctrl+C and click any
@@ -37,6 +46,15 @@ if (import.meta.env.DEV && import.meta.env.VITE_REACT_GRAB) {
   grab.crossOrigin = "anonymous";
   document.head.appendChild(grab);
 }
+
+// React's development build never clears its render measures; see
+// installUserTimingCap.
+if (import.meta.env.DEV) installUserTimingCap();
+
+// A window opened for a workspace starts on it rather than on whichever
+// workspace was last active in any window.
+const launchSlug = launchWorkspaceSlug();
+if (launchSlug) useTabStore.getState().switchWorkspace(launchSlug);
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <AppCrashBoundary>

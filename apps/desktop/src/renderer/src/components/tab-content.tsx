@@ -10,6 +10,7 @@ import {
   registerActiveHostElement,
   registerCoordinatorQueryClient,
 } from "@/platform/tab-coordinator";
+import { initIssueViewTabs } from "@/platform/issue-view-tabs";
 
 /**
  * Renders the active tab session through THE single app router
@@ -39,6 +40,7 @@ export function TabContent() {
   // is idempotent.
   useState(() => {
     initTabCoordinator();
+    initIssueViewTabs();
     return true;
   });
 
