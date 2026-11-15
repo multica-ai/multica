@@ -642,6 +642,7 @@ function JumpToLatestButton({
       variant="outline"
       size="sm"
       onClick={onClick}
+      data-jump-to-latest=""
       className="absolute bottom-full left-1/2 mb-6 -translate-x-1/2 bg-background shadow-md dark:bg-background dark:hover:bg-muted"
     >
       {hasNew ? (
@@ -2687,6 +2688,28 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
     insert: (text) => descEditorRef.current?.insertText(text) ?? false,
     scope: id,
   });
+  // The description's voice stack sticks to the bottom of the scroll area
+  // while a long description runs past it. The pinned comment box is there
+  // too, with "Jump to latest" floating above it, so the stack sticks above
+  // both. Measured only while the stack shows.
+  const descVoiceShowing = descVoice.showStrip || descVoice.showHud;
+  const [pinnedComposerHeight, setPinnedComposerHeight] = useState(0);
+  useEffect(() => {
+    const el = composerRef.current;
+    if (!stickyComposer || !descVoiceShowing || !el) {
+      setPinnedComposerHeight(0);
+      return;
+    }
+    const measure = () => {
+      const box = el.getBoundingClientRect();
+      const jump = el.querySelector<HTMLElement>("[data-jump-to-latest]")?.getBoundingClientRect();
+      setPinnedComposerHeight(Math.round(box.bottom - Math.min(box.top, jump?.top ?? box.top)));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [stickyComposer, descVoiceShowing, jumpToLatest.visible]);
   const descriptionEditingRef = useRef(false);
   const descriptionSaveInFlightRef = useRef(false);
   const descriptionSaveIssueIdRef = useRef(id);
@@ -3975,8 +3998,6 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
             }}
           >
             {descriptionAnnotations.popup}
-            {/* Above the whole description, so a sentence in progress never covers the text it joins. */}
-            <VoiceHud voice={descVoice} />
             <div data-comment-content={descriptionSourceId}>
               <ContentEditor
                 ref={descEditorRef}
@@ -4043,6 +4064,10 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
                 </>
               )}
             </div>
+            {/* Under the description's bottom row, never over its text; it sticks to the
+                bottom of the page, above the pinned comment box, while a long
+                description runs past it. */}
+            <VoiceHud voice={descVoice} placement="below" stickAbove={pinnedComposerHeight} />
             {descDragOver && <FileDropOverlay />}
           </div>
 

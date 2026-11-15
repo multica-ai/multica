@@ -309,17 +309,38 @@ export function VoiceStrip({ voice }: { voice: ComposerVoice }) {
 }
 
 /**
- * What floats above the composer that receives the text: the push-to-talk
- * pill while a hold records, and a stream's sentence in progress. The pill is
- * always dark ink, like a system indicator, so it reads over any page. The
- * composer root must be `relative`.
+ * The push-to-talk pill while a hold records, and a stream's sentence in
+ * progress. The pill is always dark ink, like a system indicator, so it reads
+ * over any page.
+ *
+ * `placement="above"` floats it above the composer; the composer root must be
+ * `relative`. `placement="below"` is for a composer that can be taller than
+ * the page, such as an issue's description: it sits in the flow under the
+ * composer's bottom row and sticks to the bottom of the scroll area while the
+ * composer runs past it. DO NOT float it above such a composer: its top edge
+ * can be scrolled out of view, and the pill and the words go with it.
  */
-export function VoiceHud({ voice }: { voice: ComposerVoice }) {
+export function VoiceHud({
+  voice,
+  placement = "above",
+  stickAbove = 0,
+}: {
+  voice: ComposerVoice;
+  placement?: "above" | "below";
+  /** For `below`: the height in px of anything pinned to the bottom of the scroll area, to stick above it. */
+  stickAbove?: number;
+}) {
   const interim = useVoiceInterim();
   const showInterim = interim !== "" && (voice.showStrip || voice.showHud);
   if (!voice.showHud && !showInterim) return null;
   return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-full z-30 mb-2 flex flex-col items-center gap-2">
+    <div
+      className={cn(
+        "pointer-events-none z-30 flex flex-col items-center gap-2",
+        placement === "above" ? "absolute inset-x-0 bottom-full mb-2" : "sticky mt-2",
+      )}
+      style={placement === "below" ? { bottom: `calc(${stickAbove}px + 0.75rem)` } : undefined}
+    >
       {voice.showHud && <HudPill voice={voice} />}
       {showInterim && <Interim text={interim} />}
     </div>

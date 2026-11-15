@@ -258,7 +258,7 @@ describe("DeepgramStream", () => {
     await vi.advanceTimersByTimeAsync(9_999);
     expect(FakeSocket.last).not.toBeNull();
     await vi.advanceTimersByTimeAsync(1);
-    await expect(outcome).resolves.toMatch(/did not answer/);
+    await expect(outcome).resolves.toMatch(/did not start in time/);
     expect(track.stop).toHaveBeenCalled();
   });
 
@@ -306,12 +306,17 @@ describe("DeepgramStream", () => {
   it("loads the worklet while the permission prompt is up", async () => {
     let grant!: (value: unknown) => void;
     getUserMedia.mockReturnValue(new Promise((resolve) => (grant = resolve)));
-    const stream = new DeepgramStream(handlers(), vi.fn(), vi.fn(), vi.fn(async () => session));
+    const openSession = vi.fn(async () => session);
+    const stream = new DeepgramStream(handlers(), vi.fn(), vi.fn(), openSession);
     const started = stream.start(null, { language: "en", hotwords: [] }).catch(() => {});
     expect(FakeAudioContext.last!.audioWorklet.addModule).toHaveBeenCalledTimes(1);
     stream.discard();
     grant({ getTracks: () => [track] });
     await started;
+    // A microphone granted after the stream was discarded is released at once,
+    // and no session is opened for it.
+    expect(track.stop).toHaveBeenCalled();
+    expect(openSession).not.toHaveBeenCalled();
   });
 
   it("gives up on a start that hangs anywhere after the microphone, and releases it", async () => {
@@ -323,7 +328,7 @@ describe("DeepgramStream", () => {
     const stream = new DeepgramStream(handlers(), vi.fn(), vi.fn(), vi.fn(async () => session));
     const outcome = stream.start(null, { language: "en", hotwords: [] }).then(() => "opened", (err: Error) => err.message);
     await vi.advanceTimersByTimeAsync(10_000);
-    await expect(outcome).resolves.toMatch(/did not answer/);
+    await expect(outcome).resolves.toMatch(/did not start in time/);
     expect(track.stop).toHaveBeenCalled();
   });
 });

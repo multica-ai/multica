@@ -126,12 +126,12 @@ export class DeepgramStream implements VoiceStream {
     if (this.closed) return this.release();
     this.handlers.onMicrophone?.();
 
-    // The rest is network (the token, then the socket): one deadline covers
-    // it, and discarding the stream cancels it.
+    // The rest (the worklet, resuming the audio context, the token, then the
+    // socket) runs under one deadline, and discarding the stream cancels it.
     const starting = new AbortController();
     this.starting = starting;
     const deadline = setTimeout(
-      () => starting.abort(new Error("the speech provider did not answer")),
+      () => starting.abort(new Error("voice input did not start in time")),
       OPEN_TIMEOUT_MS,
     );
     // Every step below gives up when starting is aborted, so start() settles

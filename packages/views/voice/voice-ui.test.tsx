@@ -116,6 +116,18 @@ describe("a stream's sentence in progress", () => {
     expect(container.querySelector("[data-voice-interim]")).toBeNull();
   });
 
+  it("sits under a tall composer's bottom row and sticks to the bottom of the scroll area", async () => {
+    await recording();
+    act(() => handlers!.onInterim("Assign the issue"));
+    const { container } = renderWithI18n(<VoiceHud voice={voice(getVoiceState())} placement="below" stickAbove={80} />);
+    const stack = container.querySelector("[data-voice-interim]")?.parentElement;
+    expect(stack).toHaveClass("sticky");
+    // Above whatever else is pinned to the bottom (the sticky comment box), not under it.
+    expect(stack).toHaveStyle({ bottom: "calc(80px + 0.75rem)" });
+    expect(stack).not.toHaveClass("absolute");
+    expect(stack).not.toHaveClass("bottom-full");
+  });
+
   it("stays in view while the stream finishes", async () => {
     await recording();
     act(() => handlers!.onInterim("Ship it"));
