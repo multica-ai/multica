@@ -1986,7 +1986,7 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 
 	var result map[string]any
 	if len(body) > 0 {
-		if err := client.PutJSON(ctx, "/api/issues/"+issueRef.ID, body, &result); err != nil {
+		if err := client.PutJSON(ctx, issueMutationPath(issueRef.ID, "", expectedRevision), body, &result); err != nil {
 			if len(attachmentIDs) > 0 {
 				return fmt.Errorf("update issue (uploaded IDs: %v): %w", attachmentIDs, err)
 			}
@@ -2089,7 +2089,7 @@ func runIssueAssign(cmd *cobra.Command, args []string) error {
 	}
 
 	var result map[string]any
-	if err := client.PutJSON(ctx, "/api/issues/"+issueRef.ID, body, &result); err != nil {
+	if err := client.PutJSON(ctx, issueMutationPath(issueRef.ID, "", expectedRevision), body, &result); err != nil {
 		return issueMutationError(cmd, "assign issue", err)
 	}
 
@@ -2151,7 +2151,7 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 		body["expected_revision"] = expectedRevision
 	}
 	var result map[string]any
-	if err := client.PutJSON(ctx, "/api/issues/"+issueRef.ID, body, &result); err != nil {
+	if err := client.PutJSON(ctx, issueMutationPath(issueRef.ID, "", expectedRevision), body, &result); err != nil {
 		return issueMutationError(cmd, "update status", err)
 	}
 
@@ -2390,7 +2390,7 @@ func runIssueReorder(cmd *cobra.Command, args []string) error {
 		body["expected_revision"] = expectedRevision
 	}
 	var result map[string]any
-	if err := client.PutJSON(ctx, "/api/issues/"+url.PathEscape(issueRef.ID), body, &result); err != nil {
+	if err := client.PutJSON(ctx, issueMutationPath(issueRef.ID, "", expectedRevision), body, &result); err != nil {
 		return issueMutationError(cmd, "reorder issue", err)
 	}
 	fmt.Fprintf(os.Stderr, "Issue %s reordered.\n", issueDisplayKey(result))

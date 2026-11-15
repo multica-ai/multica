@@ -749,12 +749,24 @@ and exits nonzero. Re-read and reconcile before retrying; the CLI does not retry
 stale writes automatically.
 
 Omitting the flag preserves existing request/output and no-op behavior.
-Conditional metadata/property/label commands require an updated server with the
+All conditional write commands require an updated server with the
 conditional mutation routes; older servers reject them without an unconditional
 fallback. `issue update` rejects combining the precondition with `--attachment`
 or `--pr-auto-complete`, whose separate mutations cannot share its atomic write.
 Description text supplied through a file remains supported. Comment edits use
 comment revisions, and this option does not add conditional comment appends.
+
+### Conditional combined issue changes
+
+`multica issue batch update <id> --clear-labels --add-label <label-id> --expected-revision 7 --output json`
+protects an atomic label-set replacement or a combined field/property/label
+change. A scalar revision requires exactly one issue; multiple arguments fail
+before any requests. The result row returns its final `issue_revision`.
+Combined batch operations can advance the revision more than once within the
+transaction. Read that returned value before the next write. Use JSON output
+for returned revisions; table output preserves its existing presentation.
+All conditional write commands use protected routes that older servers reject,
+without retrying an unconditional mutation.
 
 ### Delete Issue
 

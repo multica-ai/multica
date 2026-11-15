@@ -1,10 +1,14 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/jackc/pgx/v5"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/testutil"
@@ -125,5 +129,54 @@ func TestIssueRevisionSerializesMetadataAndFieldWriters(t *testing.T) {
 	}
 	if outcomes["title"] == 200 && (title != "Changed title" || state != "before") {
 		t.Errorf("losing metadata write leaked: title=%q state=%q", title, state)
+	}
+}
+
+type advanceBeforeMetadataRead struct {
+	db.DBTX
+	advance func()
+}
+
+func (d advanceBeforeMetadataRead) QueryRow(ctx context.Context, query string, args ...any) pgx.Row {
+	if strings.Contains(query, "-- name: GetIssueMetadataInWorkspace") {
+		d.advance()
+	}
+	return d.DBTX.QueryRow(ctx, query, args...)
+}
+
+func TestConditionalMetadataDoesNotMistakeLaterRevisionForNoop(t *testing.T) {
+	for _, method := range []string{http.MethodPut, http.MethodDelete} {
+		t.Run(method, func(t *testing.T) {
+			id := dbfx.Issue(t, "future revision metadata", testutil.Cols{"revision": 7, "metadata": testutil.Raw(`'{"state":"before"}'::jsonb`)})
+			h := *testHandler
+			h.Queries = db.New(advanceBeforeMetadataRead{DBTX: testPool, advance: func() { dbfx.Exec(t, `UPDATE issue SET revision=8 WHERE id=$1`, id) }})
+			req := mutationRequest(method, id, "state", map[string]any{"value": "after"})
+			req.URL.RawQuery = "expected_revision=8"
+			response := httptest.NewRecorder()
+			if method == http.MethodPut {
+				h.SetIssueMetadataKey(response, req)
+			} else {
+				h.DeleteIssueMetadataKey(response, req)
+			}
+			if response.Code != 409 {
+				t.Fatalf("unperformed mutation reported success: status=%d body=%s", response.Code, response.Body)
+			}
+		})
+	}
+}
+
+func TestConditionalMetadataConflictPrecedesKeyCapacity(t *testing.T) {
+	metadata := map[string]string{}
+	for i := range maxIssueMetadataKeys {
+		metadata[fmt.Sprintf("key%d", i)] = "x"
+	}
+	raw, _ := json.Marshal(metadata)
+	id := dbfx.Issue(t, "full stale metadata", testutil.Cols{"revision": 8, "metadata": testutil.Raw("'" + string(raw) + "'::jsonb")})
+	req := mutationRequest(http.MethodPut, id, "new_key", map[string]any{"value": "after"})
+	req.URL.RawQuery = "expected_revision=7"
+	response := httptest.NewRecorder()
+	testHandler.SetIssueMetadataKey(response, req)
+	if response.Code != 409 {
+		t.Fatalf("status=%d body=%s; want structured stale conflict", response.Code, response.Body)
 	}
 }

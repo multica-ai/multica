@@ -4028,6 +4028,15 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	queryRevision, ok := parseIssueExpectedRevision(w, r)
+	if !ok {
+		return
+	}
+	if queryRevision.Valid && (req.ExpectedRevision == nil || *req.ExpectedRevision != queryRevision.Int64) {
+		writeError(w, http.StatusBadRequest, "expected_revision in query and body must match")
+		return
+	}
+
 	// Track which fields were explicitly present in JSON (even if null)
 	var rawFields map[string]json.RawMessage
 	json.Unmarshal(bodyBytes, &rawFields)
@@ -4826,6 +4835,15 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	expectedRevision, ok := parseIssueExpectedRevision(w, r)
+	if !ok {
+		return
+	}
+	if expectedRevision.Valid && len(req.IssueIDs) != 1 {
+		writeError(w, http.StatusBadRequest, "expected_revision requires exactly one issue")
+		return
+	}
+
 	userID, ok := requireUserID(w, r)
 	if !ok {
 		return
@@ -4979,6 +4997,11 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			skip(issueID, "", "not_found", "issue not found in this workspace")
 			continue
 		}
+		if expectedRevision.Valid && prevIssue.Revision != expectedRevision.Int64 {
+			writeRevisionConflict(w, "issue", prevIssue.ID, expectedRevision.Int64, prevIssue.Revision)
+			return
+		}
+
 		identifier := identifierOf(prevIssue)
 		issueID = uuidToString(prevIssue.ID)
 
@@ -4993,6 +5016,8 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			ProjectID:     prevIssue.ProjectID,
 			Stage:         prevIssue.Stage,
 		}
+
+		params.ExpectedRevision = expectedRevision
 
 		if req.Updates.Title != nil {
 			params.Title = pgtype.Text{String: *req.Updates.Title, Valid: true}
@@ -5176,7 +5201,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			issue, err = h.updateIssueWithStatusGuard(writeCtx, wsUUID, issueStatusGuard, params)
 		default:
 			var fieldParams *db.UpdateIssueParams
-			if hasFieldUpdate {
+			if hasFieldUpdate || expectedRevision.Valid {
 				fieldParams = &params
 			} else {
 				issueStatusGuard = ""
@@ -5186,6 +5211,11 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			issue, labelsChanged, propertiesChanged = written.issue, written.labelsChanged, written.propertiesChanged
 		}
 		if err != nil {
+			if expectedRevision.Valid && errors.Is(err, pgx.ErrNoRows) {
+				h.writeCurrentIssueRevisionConflict(w, r, prevIssue, expectedRevision.Int64)
+				return
+			}
+
 			// The archive race is a property of the batch's shared target
 			// status, not of one issue, so every remaining item would fail the
 			// same way. Abort with 409 instead of reporting a partial update.
@@ -5286,7 +5316,11 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		if issue.Revision == prevIssue.Revision {
 			outcome = batchOutcomeUnchanged
 		}
-		results = append(results, batchIssueResult{IssueID: issueID, Identifier: identifier, Outcome: outcome})
+		result := batchIssueResult{IssueID: issueID, Identifier: identifier, Outcome: outcome}
+		if expectedRevision.Valid {
+			result.IssueRevision = issue.Revision
+		}
+		results = append(results, result)
 		updated++
 	}
 

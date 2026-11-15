@@ -189,3 +189,50 @@ func TestIssueDeleteDryRunSendsDryRunWithoutPrompt(t *testing.T) {
 		t.Fatalf("posts = %#v, want one batch-delete with dry_run", s.posts)
 	}
 }
+
+func TestConditionalBatchUsesProtectedRouteAndReturnsRevision(t *testing.T) {
+	cmd := newIssueBatchUpdateTestCmd()
+	if err := cmd.Flags().Set(expectedRevisionFlag, "7"); err != nil {
+		t.Fatal(err)
+	}
+	_ = cmd.Flags().Set("priority", "high")
+	_ = cmd.Flags().Set("output", "json")
+	writes := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/config" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"issue_batch_ops_supported": true})
+			return
+		}
+		if r.Method == http.MethodPost {
+			writes++
+			if r.URL.Path != "/api/issues/conditional-batch-update" || r.URL.Query().Get("expected_revision") != "7" {
+				t.Errorf("unprotected batch: %s", r.URL)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"updated": 1, "results": []map[string]any{{"issue_id": testIssueUUID, "outcome": "updated", "issue_revision": 8}}})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	out, err := captureStdout(t, func() error { return runIssueBatchUpdate(cmd, []string{testIssueUUID}) })
+	if err != nil || writes != 1 || !strings.Contains(out, `"issue_revision": 8`) {
+		t.Fatalf("err=%v writes=%d output=%s", err, writes, out)
+	}
+}
+
+func TestConditionalBatchRejectsManyIssuesBeforeRequests(t *testing.T) {
+	cmd := newIssueBatchUpdateTestCmd()
+	if err := cmd.Flags().Set(expectedRevisionFlag, "7"); err != nil {
+		t.Fatal(err)
+	}
+	_ = cmd.Flags().Set("priority", "high")
+	requests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { requests++; http.Error(w, "unexpected request", 500) }))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	err := runIssueBatchUpdate(cmd, []string{testIssueUUID, "44444444-4444-4444-4444-444444444444"})
+	if err == nil || requests != 0 {
+		t.Fatalf("err=%v requests=%d", err, requests)
+	}
+}

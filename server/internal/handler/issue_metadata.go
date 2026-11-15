@@ -182,17 +182,21 @@ func (h *Handler) SetIssueMetadataKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	expectedRevision, ok := parseIssueExpectedRevision(w, r)
+	if !ok {
+		return
+	}
+	if expectedRevision.Valid {
+		h.mutateConditionalIssueMetadata(w, r, issue, userID, key, req.Value, expectedRevision.Int64)
+		return
+	}
+
 	// Enforce the key-count cap in the handler. The DB only guards size,
 	// and a clear 4xx for "too many keys" beats a CHECK violation that
 	// happens to fire on the size cap once enough keys accumulate.
 	existing := parseIssueMetadata(issue.Metadata)
 	if _, present := existing[key]; !present && len(existing) >= maxIssueMetadataKeys {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("metadata cannot exceed %d keys", maxIssueMetadataKeys))
-		return
-	}
-
-	expectedRevision, ok := parseIssueExpectedRevision(w, r)
-	if !ok {
 		return
 	}
 
@@ -280,6 +284,10 @@ func (h *Handler) DeleteIssueMetadataKey(w http.ResponseWriter, r *http.Request)
 
 	expectedRevision, ok := parseIssueExpectedRevision(w, r)
 	if !ok {
+		return
+	}
+	if expectedRevision.Valid {
+		h.mutateConditionalIssueMetadata(w, r, issue, userID, key, nil, expectedRevision.Int64)
 		return
 	}
 

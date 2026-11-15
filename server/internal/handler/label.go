@@ -463,13 +463,22 @@ func (h *Handler) AttachLabel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var conditionalLabels []db.IssueLabel
+	var readErr error
 	attached, err := wakeupWrite(h, r, func(q *db.Queries) (db.AttachLabelToIssueRow, error) {
-		return q.AttachLabelToIssue(r.Context(), db.AttachLabelToIssueParams{
+		result, err := q.AttachLabelToIssue(r.Context(), db.AttachLabelToIssueParams{
 			IssueID:          issue.ID,
 			LabelID:          labelID,
 			WorkspaceID:      issue.WorkspaceID,
 			ExpectedRevision: expectedRevision,
 		})
+		if err != nil {
+			return result, err
+		}
+		if expectedRevision.Valid {
+			conditionalLabels, readErr = q.ListLabelsByIssue(r.Context(), db.ListLabelsByIssueParams{IssueID: issue.ID, WorkspaceID: issue.WorkspaceID})
+		}
+		return result, nil
 	})
 	if err != nil {
 		if expectedRevision.Valid && errors.Is(err, pgx.ErrNoRows) {
@@ -485,7 +494,10 @@ func (h *Handler) AttachLabel(w http.ResponseWriter, r *http.Request) {
 	// committed — return success without a labels body (clients refetch via
 	// query invalidation) and skip the broadcast so we don't overwrite every
 	// subscriber's optimistic state with an incorrect empty list.
-	labels, ok2 := h.listLabelsForIssueSafe(r, issue.ID, issue.WorkspaceID)
+	labels, ok2 := conditionalLabels, readErr == nil
+	if !expectedRevision.Valid {
+		labels, ok2 = h.listLabelsForIssueSafe(r, issue.ID, issue.WorkspaceID)
+	}
 	if !ok2 {
 		payload := map[string]any{}
 		if expectedRevision.Valid {
@@ -553,13 +565,22 @@ func (h *Handler) DetachLabel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var conditionalLabels []db.IssueLabel
+	var readErr error
 	detached, err := wakeupWrite(h, r, func(q *db.Queries) (db.DetachLabelFromIssueRow, error) {
-		return q.DetachLabelFromIssue(r.Context(), db.DetachLabelFromIssueParams{
+		result, err := q.DetachLabelFromIssue(r.Context(), db.DetachLabelFromIssueParams{
 			IssueID:          issue.ID,
 			LabelID:          labelUUID,
 			WorkspaceID:      issue.WorkspaceID,
 			ExpectedRevision: expectedRevision,
 		})
+		if err != nil {
+			return result, err
+		}
+		if expectedRevision.Valid {
+			conditionalLabels, readErr = q.ListLabelsByIssue(r.Context(), db.ListLabelsByIssueParams{IssueID: issue.ID, WorkspaceID: issue.WorkspaceID})
+		}
+		return result, nil
 	})
 	if err != nil {
 		if expectedRevision.Valid && errors.Is(err, pgx.ErrNoRows) {
@@ -571,7 +592,10 @@ func (h *Handler) DetachLabel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	labels, ok2 := h.listLabelsForIssueSafe(r, issue.ID, issue.WorkspaceID)
+	labels, ok2 := conditionalLabels, readErr == nil
+	if !expectedRevision.Valid {
+		labels, ok2 = h.listLabelsForIssueSafe(r, issue.ID, issue.WorkspaceID)
+	}
 	if !ok2 {
 		payload := map[string]any{}
 		if expectedRevision.Valid {

@@ -29,9 +29,22 @@ stdout with `expected_revision` and `actual_revision`, then exits nonzero.
 Re-read the issue and reconcile the intended change before retrying. Never
 blindly replace the expected revision with the latest number.
 
+For an atomic replacement of a label set, or a combined field/property/label
+change, use `issue batch update` with exactly one issue and its revision:
+
+```bash
+multica issue batch update <id> --clear-labels --add-label <label-id> --expected-revision 7 --output json
+```
+
+The scalar precondition rejects multiple issue arguments before any requests.
+The result row includes the final `issue_revision`. Combined batch operations
+can advance it more than once inside their single transaction; use the returned
+value rather than calculating the next revision. Select `--output json` to
+receive revisions; table output keeps its existing presentation.
+
 Omitting the flag keeps the existing request and output formats, including
-unconditional no-op behavior. Conditional metadata/property/label writes require
-a server with conditional mutation routes. Older servers reject those routes;
+unconditional no-op behavior. All conditional writes require a server with
+conditional mutation routes. Older servers reject those routes;
 the CLI never retries an unconditional write instead.
 
 `issue update` rejects `--expected-revision` combined with `--attachment` or

@@ -131,8 +131,11 @@ func TestIssueReorderRevisionPrecondition(t *testing.T) {
 					writeReorderColumnPage(w, r, column)
 					return
 				}
-				if r.URL.Path == "/api/issues/"+testIssueUUID {
+				if r.URL.Path == "/api/issues/"+testIssueUUID || r.URL.Path == "/api/issues/"+testIssueUUID+"/conditional" {
 					if r.Method == http.MethodPut {
+						if r.URL.Path != "/api/issues/"+testIssueUUID+"/conditional" {
+							t.Errorf("unprotected reorder path: %s", r.URL.Path)
+						}
 						if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 							t.Error(err)
 						}
@@ -314,6 +317,58 @@ func TestIssuePropertyAndLabelConditionalCLI(t *testing.T) {
 			}
 			if writes != 1 || reads != wantReads {
 				t.Fatalf("writes=%d reads=%d, want 1 and %d", writes, reads, wantReads)
+			}
+		})
+	}
+}
+
+func TestPrimaryConditionalWritesFailClosedOnOldServer(t *testing.T) {
+	for _, name := range []string{"update", "status", "assign", "reorder"} {
+		t.Run(name, func(t *testing.T) {
+			var cmd *cobra.Command
+			args := []string{testIssueUUID}
+			var run func(*cobra.Command, []string) error
+			switch name {
+			case "update":
+				cmd = newIssueUpdateTestCmd()
+				_ = cmd.Flags().Set("title", "after")
+				run = runIssueUpdate
+			case "status":
+				cmd = newIssueStatusTestCmd()
+				args = append(args, "todo")
+				run = runIssueStatus
+			case "assign":
+				cmd = newIssueAssignTestCmd()
+				_ = cmd.Flags().Set("unassign", "true")
+				run = runIssueAssign
+			case "reorder":
+				cmd = newIssueReorderTestCmd()
+				_ = cmd.Flags().Set("top", "true")
+				run = runIssueReorder
+			}
+			_ = cmd.Flags().Set(expectedRevisionFlag, "7")
+			mutations, protected := 0, 0
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodPut {
+					if r.URL.Path == "/api/issues/"+testIssueUUID+"/conditional" {
+						protected++
+						http.NotFound(w, r)
+						return
+					}
+					mutations++
+				}
+				target := mkIssue(testIssueUUID, "MUL-1", "todo", 5)
+				if r.URL.Path == "/api/issues" {
+					writeReorderColumnPage(w, r, []any{target})
+					return
+				}
+				_ = json.NewEncoder(w).Encode(target)
+			}))
+			defer srv.Close()
+			setCLITestServerEnv(t, srv.URL)
+			_, err := captureStdout(t, func() error { return run(cmd, args) })
+			if err == nil || mutations != 0 || protected != 1 {
+				t.Fatalf("err=%v unconditional=%d protected=%d", err, mutations, protected)
 			}
 		})
 	}

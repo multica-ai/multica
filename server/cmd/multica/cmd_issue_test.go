@@ -6158,12 +6158,22 @@ func TestRunIssueCommentDeleteKeepsReplies(t *testing.T) {
 func captureUpdateBody(t *testing.T, revision int64, body *map[string]any) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPut || r.URL.Path != "/api/issues/"+testIssueUUID {
+		if r.Method != http.MethodPut || (r.URL.Path != "/api/issues/"+testIssueUUID && r.URL.Path != "/api/issues/"+testIssueUUID+"/conditional") {
 			http.NotFound(w, r)
 			return
 		}
 		if err := json.NewDecoder(r.Body).Decode(body); err != nil {
 			t.Errorf("decode body: %v", err)
+		}
+		expectedPath := "/api/issues/" + testIssueUUID
+		if revision, ok := (*body)["expected_revision"]; ok {
+			expectedPath += "/conditional"
+			if r.URL.Query().Get("expected_revision") != fmt.Sprint(revision) {
+				t.Errorf("missing conditional query: %s", r.URL)
+			}
+		}
+		if r.URL.Path != expectedPath {
+			t.Errorf("path=%s want %s", r.URL.Path, expectedPath)
 		}
 		json.NewEncoder(w).Encode(map[string]any{
 			"id":         testIssueUUID,

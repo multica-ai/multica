@@ -154,3 +154,55 @@ func TestIssueRevisionSerializesConcurrentLabelWriters(t *testing.T) {
 		t.Errorf("revision=%d labels=%d, want 8 and 1", revision, count)
 	}
 }
+
+type mutateBeforeLabelRead struct {
+	db.DBTX
+	mutate func()
+}
+
+func (d mutateBeforeLabelRead) Query(ctx context.Context, query string, args ...any) (pgx.Rows, error) {
+	if strings.Contains(query, "-- name: ListLabelsByIssue") {
+		d.mutate()
+	}
+	return d.DBTX.Query(ctx, query, args...)
+}
+
+func TestConditionalLabelSnapshotMatchesMutationRevision(t *testing.T) {
+	for _, method := range []string{http.MethodPost, http.MethodDelete} {
+		t.Run(method, func(t *testing.T) {
+			labelID := dbfx.Insert(t, "issue_label", testutil.Cols{"workspace_id": testWorkspaceID, "name": "snapshot label", "color": "#aabbcc", "resource_type": "issue"})
+			id := dbfx.Issue(t, "label snapshot", testutil.Cols{"revision": 7})
+			t.Cleanup(func() { dbfx.Exec(t, `DELETE FROM issue_to_label WHERE issue_id=$1`, id) })
+			if method == http.MethodDelete {
+				dbfx.Exec(t, `INSERT INTO issue_to_label(issue_id,label_id) VALUES($1,$2)`, id, labelID)
+			}
+			h := *testHandler
+			h.Queries = db.New(mutateBeforeLabelRead{DBTX: testPool, mutate: func() {
+				if method == http.MethodPost {
+					dbfx.Exec(t, `DELETE FROM issue_to_label WHERE issue_id=$1`, id)
+				} else {
+					dbfx.Exec(t, `INSERT INTO issue_to_label(issue_id,label_id) VALUES($1,$2)`, id, labelID)
+				}
+				dbfx.Exec(t, `UPDATE issue SET revision=9 WHERE id=$1`, id)
+			}})
+			req := testutil.WithURLParams(newRequest(method, "/api/issues/"+id+"/labels", map[string]any{"label_id": labelID}), "id", id, "labelId", labelID)
+			req.URL.RawQuery = "expected_revision=7"
+			response := httptest.NewRecorder()
+			if method == http.MethodPost {
+				h.AttachLabel(response, req)
+			} else {
+				h.DetachLabel(response, req)
+			}
+			var result struct {
+				Labels   []LabelResponse `json:"labels"`
+				Revision int64           `json:"issue_revision"`
+			}
+			if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			if response.Code != 200 || result.Revision != 8 || (len(result.Labels) == 1) != (method == http.MethodPost) {
+				t.Fatalf("inconsistent mutation snapshot: status=%d body=%s", response.Code, response.Body)
+			}
+		})
+	}
+}

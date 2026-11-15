@@ -2147,6 +2147,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/quick-create", h.QuickCreateIssue)
 				r.Post("/preview-trigger", h.PreviewIssueTrigger)
 				r.Post("/batch-update", h.BatchUpdateIssues)
+				r.With(handler.RequireIssueExpectedRevision).Post("/conditional-batch-update", h.BatchUpdateIssues)
 				r.Post("/batch-delete", h.BatchDeleteIssues)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetIssue)
@@ -2200,6 +2201,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/properties/{propertyId}", h.DeleteIssueProperty)
 					r.Route("/conditional", func(r chi.Router) {
 						r.Use(handler.RequireIssueExpectedRevision)
+						r.Put("/", h.UpdateIssue)
 						r.Post("/labels", h.AttachLabel)
 						r.Delete("/labels/{labelId}", h.DetachLabel)
 						r.Put("/metadata/{key}", h.SetIssueMetadataKey)

@@ -47,11 +47,12 @@ const (
 )
 
 type batchIssueResult struct {
-	IssueID    string `json:"issue_id"`
-	Identifier string `json:"identifier,omitempty"`
-	Outcome    string `json:"outcome"`
-	Code       string `json:"code,omitempty"`
-	Message    string `json:"message,omitempty"`
+	IssueRevision int64  `json:"issue_revision,omitempty"`
+	IssueID       string `json:"issue_id"`
+	Identifier    string `json:"identifier,omitempty"`
+	Outcome       string `json:"outcome"`
+	Code          string `json:"code,omitempty"`
+	Message       string `json:"message,omitempty"`
 }
 
 // batchSkipError ends one issue's write with a reason the caller can act on,

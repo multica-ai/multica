@@ -74,3 +74,16 @@ func TestConditionalPrimaryIssueNoopKeepsRevision(t *testing.T) {
 		})
 	}
 }
+
+func TestConditionalPrimaryRequiresMatchingBodyRevision(t *testing.T) {
+	for _, body := range []map[string]any{{"title": "after"}, {"title": "after", "expected_revision": 7}} {
+		id := dbfx.Issue(t, "conditional body guard", testutil.Cols{"revision": 7})
+		req := testutil.WithURLParams(newRequest(http.MethodPut, "/api/issues/"+id+"/conditional", body), "id", id)
+		req.URL.RawQuery = "expected_revision=8"
+		response := httptest.NewRecorder()
+		testHandler.UpdateIssue(response, req)
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("status=%d body=%s; query and body preconditions must agree", response.Code, response.Body)
+		}
+	}
+}
