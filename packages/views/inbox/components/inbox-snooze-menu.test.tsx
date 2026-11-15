@@ -15,15 +15,20 @@ async function findDay(date: Date): Promise<HTMLElement> {
   );
 }
 
-function Harness() {
-  const [open, setOpen] = useState(true);
+function Harness({ initialOpen = true }: { initialOpen?: boolean }) {
+  const [open, setOpen] = useState(initialOpen);
   return (
-    <InboxSnoozeMenu
-      open={open}
-      onOpenChange={setOpen}
-      onSnooze={onSnooze}
-      trigger={<button type="button">Snooze</button>}
-    />
+    <>
+      <button type="button" onClick={() => setOpen(true)}>
+        Open from outside
+      </button>
+      <InboxSnoozeMenu
+        open={open}
+        onOpenChange={setOpen}
+        onSnooze={onSnooze}
+        trigger={<button type="button">Snooze</button>}
+      />
+    </>
   );
 }
 
@@ -79,6 +84,24 @@ describe("InboxSnoozeMenu", () => {
     renderWithI18n(<Harness />);
     fireEvent.click(await screen.findByRole("menuitem", { name: /Pick a date and time/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Back" }));
+    expect(await screen.findByRole("menuitem", { name: /^1 hour/ })).toBeInTheDocument();
+  });
+
+  it("reads the clock when the parent opens it, as H and the hover card do", async () => {
+    renderWithI18n(<Harness initialOpen={false} />);
+    vi.setSystemTime(new Date(2026, 10, 16, 16, 20));
+    fireEvent.click(screen.getByText("Open from outside"));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /^1 hour/ }));
+    expect(onSnooze).toHaveBeenCalledWith(new Date(2026, 10, 16, 17, 20));
+  });
+
+  it("opens on the durations again after closing from the picker", async () => {
+    renderWithI18n(<Harness />);
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Pick a date and time/ }));
+    await screen.findByText("Pick a date and time");
+    fireEvent.keyDown(screen.getByRole("button", { name: "Back" }), { key: "Escape" });
+    await vi.waitUntil(() => !screen.queryByText("Pick a date and time"));
+    fireEvent.click(screen.getByText("Open from outside"));
     expect(await screen.findByRole("menuitem", { name: /^1 hour/ })).toBeInTheDocument();
   });
 });

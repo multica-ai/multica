@@ -73,20 +73,20 @@ export function InboxSnoozeMenu({
   const locale = useLocale();
   const presetLabel = useSnoozePresetLabel();
   const [picking, setPicking] = useState(false);
-  // Read when the menu opens, so the times it lists are the ones it snoozes to.
+  // Read whenever the menu opens, from its trigger or from the parent (`H`, a
+  // hover card), so the times it lists are the ones it snoozes to.
   const [now, setNow] = useState(() => new Date());
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) {
+      setNow(new Date());
+      setPicking(false);
+    }
+  }
 
   return (
-    <DropdownMenu
-      open={open}
-      onOpenChange={(next) => {
-        if (next) {
-          setNow(new Date());
-          setPicking(false);
-        }
-        onOpenChange(next);
-      }}
-    >
+    <DropdownMenu open={open} onOpenChange={onOpenChange}>
       <DropdownMenuTrigger render={trigger} />
       <DropdownMenuContent side={side} align={align} className={picking ? "w-auto" : "w-64"}>
         {picking ? (
