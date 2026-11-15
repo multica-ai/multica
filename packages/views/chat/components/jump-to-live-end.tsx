@@ -10,13 +10,18 @@ import { useT } from "../../i18n";
 
 // "Jump to latest" for the chat list (MUL-8951).
 //
-// The button shows once the reader is more than a screen above the live end.
-// A jump only has to reach the live end: arriving within its edge zone
+// The button shows once the reader is more than a screen above the live end,
+// and stays until they are back within half a screen of it, so it does not
+// flicker at the threshold. A jump only has to reach the live end: arriving
+// within its edge zone
 // re-engages the stick-to-bottom follow, which keeps the list pinned from
 // there as the reply streams on.
 
 /** Most frames a jump keeps re-aiming at the last row while Virtuoso measures it. */
 export const JUMP_MAX_FRAMES = 30;
+
+/** How close to the live end, in screens, hides the button once shown. */
+const RETURN_WITHIN_SCREENS = 0.5;
 
 export interface JumpToLiveEnd {
   visible: boolean;
@@ -53,9 +58,12 @@ export function useJumpToLiveEnd(
       return;
     }
     let frame = 0;
+    let shown = false;
     const measure = () => {
       frame = 0;
-      setVisible(distanceFromBottom(scrollEl) > scrollEl.clientHeight);
+      const threshold = shown ? scrollEl.clientHeight * RETURN_WITHIN_SCREENS : scrollEl.clientHeight;
+      shown = distanceFromBottom(scrollEl) > threshold;
+      setVisible(shown);
     };
     const schedule = () => {
       if (frame === 0) frame = requestAnimationFrame(measure);
