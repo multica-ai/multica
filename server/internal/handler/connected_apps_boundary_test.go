@@ -21,15 +21,7 @@ import (
 func (f *appsFixture) submitSend(t *testing.T) AppRequestResponse {
 	t.Helper()
 	f.putAgentApps(t, testUserID, []map[string]string{{"toolkit_slug": "gmail", "account_scope": "personal", "level": "confirm_writes"}})
-	_, response, isErr := f.gateway(t, f.token(t), "apps_run_tool", map[string]any{"tool": "GMAIL_SEND_EMAIL", "arguments": map[string]any{"to": "x@example.com"}})
-	if isErr || !strings.HasPrefix(response, "submitted") {
-		t.Fatalf("submit: %s", response)
-	}
-	requests := f.listRequests(t, testUserID)
-	if len(requests) != 1 {
-		t.Fatalf("requests: %d", len(requests))
-	}
-	return requests[0]
+	return f.legacyRequest(t, "personal", "gmail", "GMAIL_SEND_EMAIL", "send", map[string]any{"to": "x@example.com"}, "")
 }
 
 func (f *appsFixture) requestStatus(t *testing.T, id string) string {
@@ -248,17 +240,8 @@ func TestConnectedApps_ArchiveViaUpdateObeysDeleteRule(t *testing.T) {
 func TestConnectedApps_ApprovalWithEditedArchiveObeysDeleteRule(t *testing.T) {
 	f := newAppsFixture(t)
 	f.withNotionDeleteBlocked(t, "confirm_writes")
-	_, response, isErr := f.gateway(t, f.token(t), "apps_run_tool", map[string]any{
-		"tool": notionUpdatePage, "arguments": map[string]any{"page_id": "p1", "properties": map[string]any{"title": "Q3"}},
-	})
-	if isErr || !strings.HasPrefix(response, "submitted") {
-		t.Fatalf("submit: %s", response)
-	}
-	requests := f.listRequests(t, testUserID)
-	if len(requests) != 1 {
-		t.Fatalf("requests: %d", len(requests))
-	}
-	id := requests[0].ID
+	request := f.legacyRequest(t, "personal", "notion", notionUpdatePage, "write", map[string]any{"page_id": "p1", "properties": map[string]any{"title": "Q3"}}, "")
+	id := request.ID
 	w := httptest.NewRecorder()
 	f.h.ApproveAppRequest(w, withURLParam(appsReqAs(t, testUserID, http.MethodPost, "/api/app-requests/"+id+"/approve", map[string]any{
 		"arguments": map[string]any{"page_id": "p1", "archived": true},
@@ -282,10 +265,7 @@ func TestConnectedApps_PendingVisibleAfterHistoricalRequests(t *testing.T) {
 	`, testWorkspaceID, f.taskID, f.agentID, f.issueID, testUserID); err != nil {
 		t.Fatal(err)
 	}
-	_, response, isErr := f.gateway(t, f.token(t), "apps_run_tool", map[string]any{"tool": "GMAIL_SEND_EMAIL", "arguments": map[string]any{"to": "x@example.com"}})
-	if isErr || !strings.HasPrefix(response, "submitted") {
-		t.Fatalf("submit: %s", response)
-	}
+	f.legacyRequest(t, "personal", "gmail", "GMAIL_SEND_EMAIL", "send", map[string]any{"to": "x@example.com"}, "")
 
 	type page struct {
 		Requests   []AppRequestResponse `json:"requests"`

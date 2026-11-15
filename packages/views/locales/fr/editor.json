@@ -53,6 +53,8 @@
     "zoom_actual": "Taille réelle"
   },
   "attachment": {
+    "install_theme": "Installer le thème",
+    "install_theme_failed": "Impossible de lire la pièce jointe. Réessayez dans un instant.",
     "download_failed": "Impossible d'obtenir un lien de téléchargement. Réessayez dans un instant.",
     "preview": "Aperçu",
     "preview_loading": "Chargement de l'aperçu…",
@@ -182,5 +184,49 @@
     "clear_filter": "Effacer le filtre",
     "no_matches": "Aucune ligne correspondante",
     "close": "Fermer"
+  },
+  "voice": {
+    "dictate": "Dicter",
+    "hold_to_talk": "Maintenir pour parler",
+    "tap_or_hold": "Dicter (appuyez, ou maintenez pour parler)",
+    "cancel": "Annuler",
+    "insert": "Insérer",
+    "send": "Envoyer",
+    "retry": "Réessayer",
+    "dismiss": "Fermer",
+    "requesting": "En attente du micro…",
+    "transcribing": "Transcription…",
+    "release_to_insert": "Relâchez pour insérer",
+    "recording": "Enregistrement",
+    "errors": {
+      "permission_denied": "L’accès au micro est bloqué. Autorisez-le dans le navigateur ou les réglages système, puis réessayez.",
+      "no_microphone": "Aucun micro trouvé. Branchez-en un, puis réessayez.",
+      "microphone_failed": "Impossible de démarrer le micro.",
+      "no_speech": "Aucune parole détectée. Réessayez un peu plus près du micro.",
+      "unavailable": "La saisie vocale ne peut pas transcrire sur cet ordinateur.",
+      "transcription_failed": "La transcription a échoué. L’enregistrement est conservé, vous pouvez réessayer."
+    },
+    "models": {
+      "more_languages": "{{more}} autres",
+      "in_use": "Utilisé",
+      "recommended": "Recommandé",
+      "most_accurate": "Le plus précis",
+      "fastest": "Le plus rapide",
+      "by": "Par {{author}}",
+      "license": "Licence",
+      "downloading": "Téléchargement, {{percent}} %",
+      "failed": "Le téléchargement a échoué. Réessayez pour reprendre là où il s’est arrêté.",
+      "download": "Télécharger",
+      "retry": "Réessayer",
+      "cancel": "Annuler",
+      "use": "Utiliser",
+      "delete": "Supprimer {{name}}"
+    },
+    "setup": {
+      "title": "Configurer la saisie vocale",
+      "description": "La voix est transcrite sur cet ordinateur : les enregistrements ne le quittent jamais. Téléchargez un modèle vocal une fois pour commencer.",
+      "later": "Plus tard",
+      "start": "Commencer à dicter"
+    }
   }
 }

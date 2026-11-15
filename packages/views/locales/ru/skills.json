@@ -111,9 +111,7 @@
     "section_labels": "Метки",
     "filter_search_placeholder": "Фильтр...",
     "no_labels": "Пока нет меток",
-    "no_results": "Ничего не найдено",
-    "manage_labels": "Управление метками...",
-    "manage_labels_title": "Метки навыков"
+    "no_results": "Ничего не найдено"
   },
   "detail": {
     "read_only": "Только для чтения",
@@ -276,15 +274,9 @@
     }
   },
   "create": {
-    "back": "Назад",
-    "back_aria": "Назад к выбору способа",
     "close": "Закрыть",
     "close_aria": "Закрыть",
     "method": {
-      "chooser": {
-        "title": "Новый навык",
-        "desc": "Выберите способ добавления навыка в это рабочее пространство."
-      },
       "manual": {
         "title": "Создать вручную",
         "desc": "Начать с пустого SKILL.md."

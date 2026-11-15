@@ -46,6 +46,7 @@ type WecomInstallationResponse struct {
 	WorkspaceID     string `json:"workspace_id"`
 	AgentID         string `json:"agent_id"`
 	BotID           string `json:"bot_id"`
+	BotName         string `json:"bot_name,omitempty"`
 	InstallerUserID string `json:"installer_user_id"`
 	Status          string `json:"status"`
 }
@@ -56,6 +57,7 @@ func wecomInstallationToResponse(inst wecom.Installation) WecomInstallationRespo
 		WorkspaceID:     uuidToString(inst.WorkspaceID),
 		AgentID:         uuidToString(inst.AgentID),
 		BotID:           inst.BotID,
+		BotName:         inst.BotDisplayName,
 		InstallerUserID: uuidToString(inst.InstallerUserID),
 		Status:          string(inst.Status),
 	}

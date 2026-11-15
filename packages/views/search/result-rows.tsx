@@ -65,6 +65,8 @@ export function ProjectResultRow({
 
   return (
     <CommandPrimitive.Item
+      data-mc="palette-item"
+      data-type="project"
       value={`project:${project.id}`}
       disabled={disabled}
       onSelect={onSelect}
@@ -116,6 +118,8 @@ export function IssueResultRow({
     "matched_comment_snippet" in issue ? issue.matched_comment_snippet : undefined;
   return (
     <CommandPrimitive.Item
+      data-mc="palette-item"
+      data-type="issue"
       value={value ?? issue.id}
       disabled={disabled}
       onSelect={onSelect}
@@ -206,7 +210,14 @@ export function ActorRow({
   showStatusDot?: boolean;
 }) {
   return (
-    <CommandPrimitive.Item value={value} disabled={disabled} onSelect={onSelect} className={ROW_CLASS}>
+    <CommandPrimitive.Item
+      data-mc="palette-item"
+      data-type={actorType}
+      value={value}
+      disabled={disabled}
+      onSelect={onSelect}
+      className={ROW_CLASS}
+    >
       <ActorAvatar
         actorType={actorType}
         actorId={actorId}
@@ -246,7 +257,14 @@ export function ObjectRow({
   disabled?: boolean;
 }) {
   return (
-    <CommandPrimitive.Item value={value} disabled={disabled} onSelect={onSelect} className={ROW_CLASS}>
+    <CommandPrimitive.Item
+      data-mc="palette-item"
+      data-type="object"
+      value={value}
+      disabled={disabled}
+      onSelect={onSelect}
+      className={ROW_CLASS}
+    >
       {icon}
       <span className="min-w-0 shrink truncate">
         <HighlightText text={title} query={query} />

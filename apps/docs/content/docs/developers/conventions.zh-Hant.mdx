@@ -28,7 +28,7 @@ monorepo 的包邊界是硬約束：
 
 | 包 | 可依賴 | 不能依賴 |
 | --- | --- | --- |
-| `packages/core` | 僅平臺無關基礎庫 | `react-dom`、`next/*`、UI 庫、`process.env`、直接使用 `localStorage`（持久化走 `StorageAdapter`） |
+| `packages/core` | 僅平臺無關基礎庫 | `react-dom`、`next/*`、UI 庫、`process.env`、直接使用 `localStorage` 或 `sessionStorage`（持久化走 `StorageAdapter`；僅 `analytics/exception-dedupe.ts` 和 `appearance/safe-mode.ts` 使用分頁級的 `sessionStorage`） |
 | `packages/ui` | 無業務依賴 | `@multica/core`、業務邏輯 |
 | `packages/views` | `core/`、`ui/` | `next/*`、`react-router-dom`、store 定義 |
 | `apps/web/platform/` | `next/*` | 其他 app |

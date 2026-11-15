@@ -45,24 +45,26 @@ func TestDecide(t *testing.T) {
 		// Defaults under the most permissive level.
 		{"notion", LevelWrite, ClassRead, "", PolicyAllow},
 		{"notion", LevelWrite, ClassWrite, "", PolicyAllow},
-		{"notion", LevelWrite, ClassSend, "", PolicyConfirm},
-		{"notion", LevelWrite, ClassDelete, "", PolicyConfirm},
-		{"notion", LevelWrite, ClassShare, "", PolicyBlock},
-		// The default level confirms every write.
-		{"notion", LevelConfirmWrites, ClassWrite, "", PolicyConfirm},
+		{"notion", LevelWrite, ClassSend, "", PolicyAllow},
+		{"notion", LevelWrite, ClassDelete, "", PolicyAllow},
+		{"notion", LevelWrite, ClassShare, "", PolicyAllow},
+		// Saved confirmation levels run directly.
+		{"notion", LevelConfirmWrites, ClassWrite, "", PolicyAllow},
 		{"notion", LevelConfirmWrites, ClassRead, "", PolicyAllow},
 		// Read-only agents never write, whatever the rule says.
 		{"notion", LevelRead, ClassWrite, PolicyAllow, PolicyBlock},
+		{"notion", LevelRead, ClassWrite, PolicyConfirm, PolicyBlock},
 		{"notion", LevelRead, ClassRead, "", PolicyAllow},
 		// A rule loosens or tightens the account; the level still caps it.
 		{"gmail", LevelWrite, ClassSend, PolicyAllow, PolicyAllow},
-		{"gmail", LevelConfirmWrites, ClassSend, PolicyAllow, PolicyConfirm},
+		{"gmail", LevelConfirmWrites, ClassSend, PolicyAllow, PolicyAllow},
+		{"gmail", LevelConfirmWrites, ClassSend, PolicyBlock, PolicyBlock},
 		{"gmail", LevelWrite, ClassRead, PolicyBlock, PolicyBlock},
-		// Curated defaults: Stripe is read-only unless a rule opens it.
-		{"stripe", LevelWrite, ClassWrite, "", PolicyBlock},
-		{"stripe", LevelWrite, ClassWrite, PolicyConfirm, PolicyConfirm},
+		// Curated apps share the same allow-by-default policy.
+		{"stripe", LevelWrite, ClassWrite, "", PolicyAllow},
+		{"stripe", LevelWrite, ClassWrite, PolicyConfirm, PolicyAllow},
 		// An unknown rule value falls back to the default.
-		{"notion", LevelWrite, ClassShare, "bogus", PolicyBlock},
+		{"notion", LevelWrite, ClassShare, "bogus", PolicyAllow},
 	}
 	for _, c := range cases {
 		if got := Decide(c.toolkit, c.level, c.class, c.rule); got != c.want {
@@ -97,12 +99,23 @@ func TestTaskToken(t *testing.T) {
 }
 
 func TestDefaultLevel(t *testing.T) {
-	if got := DefaultLevel("private"); got != LevelWrite {
-		t.Fatalf("private agent default = %q, want %q", got, LevelWrite)
+	for _, mode := range []string{"private", "public_to", ""} {
+		if got := DefaultLevel(mode); got != LevelWrite {
+			t.Fatalf("%q agent default = %q, want %q", mode, got, LevelWrite)
+		}
 	}
-	for _, mode := range []string{"public_to", ""} {
-		if got := DefaultLevel(mode); got != LevelConfirmWrites {
-			t.Fatalf("%q agent default = %q, want %q", mode, got, LevelConfirmWrites)
+}
+
+func TestDefaultPolicyAllowsEveryAction(t *testing.T) {
+	for _, app := range append(CuratedSlugs(), "custom_app") {
+		for _, class := range Classes {
+			for _, level := range []string{LevelWrite, LevelConfirmWrites} {
+				for _, rule := range []string{"", PolicyConfirm} {
+					if got := Decide(app, level, class, rule); got != PolicyAllow {
+						t.Errorf("Decide(%q, %q, %q, %q) = %q, want allow", app, level, class, rule, got)
+					}
+				}
+			}
 		}
 	}
 }
@@ -123,8 +136,8 @@ func TestClassifyOutwardWrites(t *testing.T) {
 			t.Errorf("Classify(%s) = %s, want %s", tc.tool, got, tc.want)
 		}
 	}
-	if got := Decide("slack", LevelWrite, Classify("slack", "SLACK_SET_ADMIN_USER", nil), ""); got != PolicyBlock {
-		t.Errorf("SLACK_SET_ADMIN_USER at write level = %s, want block", got)
+	if got := Decide("slack", LevelWrite, Classify("slack", "SLACK_SET_ADMIN_USER", nil), ""); got != PolicyAllow {
+		t.Errorf("SLACK_SET_ADMIN_USER at write level = %s, want allow", got)
 	}
 }
 

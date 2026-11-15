@@ -151,6 +151,34 @@ while `has_more` is true, pass `next_cursor` to `--cursor`. Views and their
 "me" conditions resolve against the runtime owner, so a member's private view
 is only visible when that member owns the runtime.
 
+When asked to set up or change a view, write it yourself instead of
+describing the settings for the user to click through. A view written here is
+the same view the app saves: it appears in the owner's sidebar and stays
+editable in the app.
+
+```bash
+multica view create --name "Open bugs" --label Bug --status done,cancelled --negate status --view-mode list
+multica view update "Open bugs" --priority urgent,high --visibility workspace
+multica view duplicate "Open bugs" --name "Urgent bugs" --priority urgent
+multica view delete "Urgent bugs"
+```
+
+- Filter flags take names (status, label, project, member, agent) and resolve
+  them before writing; `--property` takes the `issue list --property` forms,
+  `--negate <filter>` makes a filter "is not". Layout flags (`--view-mode`,
+  `--grouping`, `--sort`, ...) are in `multica view create --help`.
+- `--scope` (`workspace` default, `my`, or a project via `--project <name>`)
+  is fixed at creation. Views start private and owned by the runtime owner.
+- `update` changes only what its flags name; a list flag replaces that
+  filter and `--status ""` clears it. A view using the app's advanced
+  condition tree refuses filter flags: pass `--clear-filters`, or
+  `--definition-file` with JSON edited from `view get`.
+- `--dry-run` prints the request unsaved. After saving, check the result with
+  `view issues`. "Changed since it was read" saved nothing: re-run; a stale
+  `view get` export is refused too, so export again and redo the edits. A
+  permission refusal means the runtime owner neither owns the view nor is an
+  admin: report it rather than duplicating the view to work around it.
+
 ## Custom properties: typed workflow state
 
 Workspaces may define custom issue properties (Severity, Environment, QA
@@ -371,6 +399,11 @@ Where content goes decides how it shows:
   a file card that opens in the viewer, **HTML included**: an uploaded
   `report.html` is a deliverable to open, not an inline chart. Use it for
   something the reader keeps or downloads.
+- **An attached image at a specific spot** — reference the attached path in
+  the body, e.g. `![Option A](./a.png)` with `--attachment ./a.png` in the same
+  call. The CLI rewrites that link to the uploaded file before posting, so the
+  image shows right there instead of at the end. Code spans and blocks are left
+  alone.
 
 For HTML that follows light / dark mode, style it with `var(--background)`,
 `var(--foreground)`, `var(--muted)`, `var(--muted-foreground)`, `var(--border)`,

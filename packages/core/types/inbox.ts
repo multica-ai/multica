@@ -5,6 +5,8 @@ export type InboxSeverity = "action_required" | "attention" | "info";
 export type InboxItemType =
   | "issue_assigned"
   | "issue_subscribed"
+  // A new issue in a project the recipient subscribes to.
+  | "issue_created"
   | "unassigned"
   | "assignee_changed"
   | "status_changed"

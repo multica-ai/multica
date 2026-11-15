@@ -26,43 +26,29 @@ const STATUSES = [
 describe("projectSidebarRequest", () => {
   it("leaves out finished statuses and sorts by update time by default", () => {
     expect(projectSidebarRequest("p1", DEFAULT_SIDEBAR_ISSUE_SETTINGS, STATUSES, "u1")).toEqual({
-      project_id: "p1",
-      statuses: ["backlog", "todo", "in_progress", "merged"],
-      sort_by: "updated_at",
-      sort_direction: "desc",
-    });
-  });
-
-  it("maps the assignee and sub-issue settings onto server filters", () => {
-    const settings: SidebarIssueSettings = {
-      ...DEFAULT_SIDEBAR_ISSUE_SETTINGS,
-      hiddenStatuses: [],
-      assignee: "my_agents",
-      showSubIssues: false,
-    };
-    expect(projectSidebarRequest("p1", settings, STATUSES, "u1")).toEqual({
-      project_id: "p1",
-      involves_user_id: "u1",
-      top_level_only: true,
-      sort_by: "updated_at",
-      sort_direction: "desc",
-    });
-  });
-
-  it("lists me and my agents through the table query, which can OR the two", () => {
-    const settings: SidebarIssueSettings = { ...DEFAULT_SIDEBAR_ISSUE_SETTINGS, assignee: "me_and_my_agents" };
-    expect(projectSidebarRequest("p1", settings, STATUSES, "u1")).toEqual({
       table: {
         scope: { kind: "project", project_id: "p1" },
-        filters: {
-          statuses: ["backlog", "todo", "in_progress", "merged"],
-          relations: ["assigned", "my_agents"],
-          include_sub_issues: true,
-        },
+        filters: { statuses: ["backlog", "todo", "in_progress", "merged"], include_sub_issues: true },
         sort: { field: "updated_at", direction: "desc" },
       },
     });
+  });
+
+  it("maps every assignee setting onto table relations", () => {
+    const relations = (assignee: SidebarIssueSettings["assignee"]) =>
+      projectSidebarRequest("p1", { ...DEFAULT_SIDEBAR_ISSUE_SETTINGS, assignee }, STATUSES, "u1")?.table.filters
+        .relations;
+    expect(relations("anyone")).toBeUndefined();
+    expect(relations("me")).toEqual(["assigned"]);
+    expect(relations("my_agents")).toEqual(["my_agents"]);
+    expect(relations("me_and_my_agents")).toEqual(["assigned", "my_agents"]);
+    const settings: SidebarIssueSettings = { ...DEFAULT_SIDEBAR_ISSUE_SETTINGS, assignee: "me" };
     expect(projectSidebarRequest("p1", settings, STATUSES, undefined)).toBeNull();
+  });
+
+  it("maps the sub-issue setting", () => {
+    const settings: SidebarIssueSettings = { ...DEFAULT_SIDEBAR_ISSUE_SETTINGS, hiddenStatuses: [], showSubIssues: false };
+    expect(projectSidebarRequest("p1", settings, STATUSES, "u1")?.table.filters).toEqual({ include_sub_issues: false });
   });
 
   it("lists nothing when every status is hidden", () => {
@@ -115,6 +101,7 @@ describe("viewSidebarRequest", () => {
       }),
     ).toMatchObject({ advanced: { match: "any", children: [{ field: "priorities", values: ["urgent"] }] } });
     expect(filters({ agentRunningFilter: true })).toMatchObject({ working_only: true });
+    expect(filters({ agentIdleFilter: true })).toMatchObject({ idle_only: true });
     expect(filters({ unreadFilter: true })).toMatchObject({ unread_issue_ids: [] });
     expect(
       viewSidebarRequest({ ...workspace, query: { unreadFilter: true } }, TODAY, ["b", "a"])?.table.filters,
@@ -172,17 +159,13 @@ describe("builtinSidebarRequest", () => {
     expect(request("my_agents", "assigned")?.scope).toEqual({ kind: "my", relation: "involved" });
   });
 
-  it("maps the assignee setting and lists nothing when every status is hidden", () => {
-    const mine = { ...DEFAULT_SIDEBAR_ISSUE_SETTINGS, hiddenStatuses: [], assignee: "my_agents" as const };
-    expect(builtinSidebarRequest("all_issues", "assigned", mine, STATUSES)?.table.filters).toEqual({
-      relations: ["my_agents"],
-      include_sub_issues: true,
-    });
-    const both = { ...mine, assignee: "me_and_my_agents" as const };
-    expect(builtinSidebarRequest("all_issues", "assigned", both, STATUSES)?.table.filters).toEqual({
-      relations: ["assigned", "my_agents"],
-      include_sub_issues: true,
-    });
+  it("ignores the project-only assignee setting and lists nothing when every status is hidden", () => {
+    for (const assignee of ["me", "my_agents", "me_and_my_agents"] as const) {
+      const settings = { ...DEFAULT_SIDEBAR_ISSUE_SETTINGS, hiddenStatuses: [], assignee };
+      expect(builtinSidebarRequest("my_agents", "assigned", settings, STATUSES)?.table.filters).toEqual({
+        include_sub_issues: true,
+      });
+    }
     const none = { ...DEFAULT_SIDEBAR_ISSUE_SETTINGS, hiddenStatuses: STATUSES.map((s) => s.key) };
     expect(builtinSidebarRequest("all_issues", "assigned", none, STATUSES)).toBeNull();
   });

@@ -79,6 +79,7 @@ vi.mock("@multica/views/platform", () => ({
 // Each workspace-scoped component gets a marker so the assertions can tell
 // which of them the shell decided to mount.
 vi.mock("@multica/views/layout", () => ({
+  AppBottomBar: () => <div data-testid="app-bottom-bar" />,
   AppRail: () => <div data-testid="app-rail" />,
   AppShellProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
   CompactNavSheet: () => null,
@@ -164,6 +165,7 @@ describe("DesktopShell workspace gating", () => {
     const { queryByRole, queryByTestId } = renderShell();
 
     expect(queryByTestId("app-rail")).not.toBeNull();
+    expect(queryByTestId("app-bottom-bar")).not.toBeNull();
     expect(queryByTestId("space-panel")).not.toBeNull();
     expect(queryByTestId("search-command")).not.toBeNull();
     expect(queryByTestId("title-bar-new-issue")).not.toBeNull();
@@ -201,6 +203,7 @@ describe("DesktopShell workspace gating", () => {
     const { queryByTestId } = renderShell();
 
     expect(queryByTestId("app-rail")).toBeNull();
+    expect(queryByTestId("app-bottom-bar")).toBeNull();
     expect(queryByTestId("space-panel")).toBeNull();
     expect(queryByTestId("search-command")).toBeNull();
     expect(queryByTestId("title-bar-new-issue")).toBeNull();

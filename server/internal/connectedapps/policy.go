@@ -12,14 +12,6 @@ func ValidPolicy(policy string) bool {
 	return policy == PolicyAllow || policy == PolicyConfirm || policy == PolicyBlock
 }
 
-var defaultPolicies = map[string]string{
-	ClassRead:   PolicyAllow,
-	ClassWrite:  PolicyAllow,
-	ClassSend:   PolicyConfirm,
-	ClassDelete: PolicyConfirm,
-	ClassShare:  PolicyBlock,
-}
-
 func strictness(policy string) int {
 	switch policy {
 	case PolicyAllow:
@@ -39,18 +31,13 @@ func Stricter(a, b string) string {
 	return b
 }
 
-// DefaultPolicy is the policy an account uses for class when it has no rule:
-// the curated app's default, else the workspace default.
-func DefaultPolicy(toolkitSlug, class string) string {
-	if app, ok := Curated(toolkitSlug); ok {
-		if p, ok := app.Defaults[class]; ok {
-			return p
-		}
+// DefaultPolicy allows every supported action class unless an account rule
+// or the agent's read-only level restricts it.
+func DefaultPolicy(_ string, class string) string {
+	if ValidClass(class) {
+		return PolicyAllow
 	}
-	if p, ok := defaultPolicies[class]; ok {
-		return p
-	}
-	return PolicyConfirm
+	return PolicyBlock
 }
 
 // levelCap is the loosest policy an agent level permits for class.
@@ -61,21 +48,25 @@ func levelCap(level, class string) string {
 	switch level {
 	case LevelRead:
 		return PolicyBlock
-	case LevelWrite:
+	case LevelWrite, LevelConfirmWrites:
 		return PolicyAllow
 	default:
-		return PolicyConfirm
+		return PolicyBlock
 	}
 }
 
 // Decide returns the policy for one call. rule is the account's rule for the
 // class ("" when unset). The account's rule (or default) and the agent's level
 // both apply; the stricter one wins, so an agent setting can only tighten what
-// the account owner allows and never loosen it.
+// the account owner allows and never loosen it. Saved confirmation settings
+// allow calls directly now that per-call approval has been removed.
 func Decide(toolkitSlug, level, class, rule string) string {
 	account := rule
 	if !ValidPolicy(account) {
 		account = DefaultPolicy(toolkitSlug, class)
+	}
+	if account == PolicyConfirm {
+		account = PolicyAllow
 	}
 	return Stricter(account, levelCap(level, class))
 }

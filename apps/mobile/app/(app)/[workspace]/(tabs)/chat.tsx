@@ -49,6 +49,7 @@ import {
   hideQueuedChatMessages,
   removePendingChatTask,
 } from "@multica/core/chat/pending";
+import { refetchChatSessionsAfterCommit } from "@multica/core/chat/session-list";
 import { canAssignAgentToIssue } from "@multica/core/permissions/rules";
 import { api } from "@/data/api";
 import { useAuthStore } from "@/data/auth-store";
@@ -264,16 +265,17 @@ export default function ChatTab() {
   const sessionPromiseRef = useRef<Promise<string | null> | null>(null);
 
   const ensureSession = useCallback(
-    async (titleSeed: string): Promise<string | null> => {
+    async (): Promise<string | null> => {
       if (activeSessionId) return activeSessionId;
       if (!currentAgent) return null;
       if (sessionPromiseRef.current) return sessionPromiseRef.current;
 
       const promise = (async () => {
         try {
+          // Untitled on purpose: the server derives the title from the first
+          // message it accepts, the same rule for every client and channel.
           const session = await createSession.mutateAsync({
             agent_id: currentAgent.id,
-            title: titleSeed.slice(0, 50),
           });
           return session.id;
         } finally {
@@ -314,7 +316,7 @@ export default function ChatTab() {
       const isNewSession = !activeSessionId;
       let sessionId: string | null;
       try {
-        sessionId = await ensureSession(content);
+        sessionId = await ensureSession();
       } catch (err) {
         // Session create runs the same invoke gate as a send, so a permission
         // change refuses here too — and this is the only layer that sees the
@@ -387,6 +389,10 @@ export default function ChatTab() {
           queued: result.queued,
         });
         qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
+        // This send just committed the new session's server-derived title.
+        if (isNewSession) {
+          void refetchChatSessionsAfterCommit(qc, chatKeys.sessions(wsId));
+        }
         if (options.clearDraft !== false) {
           clearDraft(sessionId);
         }
@@ -406,6 +412,7 @@ export default function ChatTab() {
       }
     },
     [
+      wsId,
       activeSessionId,
       currentAgent,
       accessRevoked,

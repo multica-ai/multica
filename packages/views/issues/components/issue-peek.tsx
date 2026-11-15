@@ -1,7 +1,8 @@
 "use client";
 
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
-import { AnimatePresence, motion, useIsPresent, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion, useIsPresent } from "motion/react";
+import { useReducedMotion } from "@multica/core/appearance";
 import { ChevronDown, ChevronUp, Maximize2, X } from "@multica/ui/icons";
 import { Button, buttonVariants } from "@multica/ui/components/ui/button";
 import {
@@ -141,7 +142,7 @@ const IssuePeekPanel = memo(function IssuePeekPanel({ issueId }: { issueId: stri
   // False while the exit animation plays: the closing panel no longer takes
   // clicks or keys, so the board is usable the moment the peek is dismissed.
   const isPresent = useIsPresent();
-  const reduceMotion = useReducedMotion() ?? false;
+  const reduceMotion = useReducedMotion();
 
   return (
     <motion.aside
@@ -150,7 +151,7 @@ const IssuePeekPanel = memo(function IssuePeekPanel({ issueId }: { issueId: stri
       data-issue-peek=""
       className={cn(
         "absolute right-2 top-2 z-30 flex w-[min(var(--issue-peek-width),calc(100%-1rem))] flex-col overflow-hidden",
-        "rounded-xl bg-background shadow-[var(--floating-shadow)] ring-1 ring-surface-border",
+        "rounded-xl bg-background shadow-[var(--floating-shadow)] ring-1 ring-floating-border",
         // Stops above the chat launcher, which owns the dashboard's
         // bottom-right corner — the panel's composer would sit under it.
         "above-chat-launcher",
@@ -216,7 +217,7 @@ function IssuePeekFollow({
 }) {
   const actions = useIssuePeekActions()!;
   const position = useIssuePeekPosition();
-  const reduceMotion = useReducedMotion() ?? false;
+  const reduceMotion = useReducedMotion();
 
   // Read through a ref so the listener is bound once, not on every step.
   const positionRef = useRef(position);

@@ -53,6 +53,8 @@
     "zoom_actual": "Actual size"
   },
   "attachment": {
+    "install_theme": "Install theme",
+    "install_theme_failed": "Couldn't read the attachment. Try again in a moment.",
     "download_failed": "Couldn't fetch a download link. Try again in a moment.",
     "preview": "Preview",
     "preview_loading": "Loading preview…",
@@ -182,5 +184,49 @@
     "clear_filter": "Clear filter",
     "no_matches": "No matching rows",
     "close": "Close"
+  },
+  "voice": {
+    "dictate": "Dictate",
+    "hold_to_talk": "Hold to talk",
+    "tap_or_hold": "Dictate (tap, or hold to talk)",
+    "cancel": "Cancel",
+    "insert": "Insert",
+    "send": "Send",
+    "retry": "Retry",
+    "dismiss": "Dismiss",
+    "requesting": "Waiting for the microphone…",
+    "transcribing": "Transcribing…",
+    "release_to_insert": "Release to insert",
+    "recording": "Recording",
+    "errors": {
+      "permission_denied": "Microphone access is blocked. Allow it in your browser or system settings, then retry.",
+      "no_microphone": "No microphone found. Connect one, then retry.",
+      "microphone_failed": "Couldn't start the microphone.",
+      "no_speech": "Didn't catch any speech. Try again a little closer to the mic.",
+      "unavailable": "Voice input can't transcribe on this computer.",
+      "transcription_failed": "Transcription failed. Your recording is kept, so you can retry."
+    },
+    "models": {
+      "more_languages": "{{more}} more",
+      "in_use": "In use",
+      "recommended": "Recommended",
+      "most_accurate": "Most accurate",
+      "fastest": "Fastest",
+      "by": "By {{author}}",
+      "license": "License",
+      "downloading": "Downloading, {{percent}}%",
+      "failed": "Download failed. Retry to pick up where it stopped.",
+      "download": "Download",
+      "retry": "Retry",
+      "cancel": "Cancel",
+      "use": "Use",
+      "delete": "Delete {{name}}"
+    },
+    "setup": {
+      "title": "Set up voice input",
+      "description": "Speech is transcribed on this computer, so recordings never leave it. Download a speech model once to start.",
+      "later": "Not now",
+      "start": "Start dictating"
+    }
   }
 }

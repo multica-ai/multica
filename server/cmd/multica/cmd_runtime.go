@@ -403,14 +403,20 @@ func runRuntimeUpdate(cmd *cobra.Command, args []string) error {
 		status := strVal(update, "status")
 		if status == "completed" || status == "failed" || status == "timeout" {
 			output, _ := cmd.Flags().GetString("output")
+			if status != "completed" {
+				// main prints the returned error, so printing the same sentence here
+				// would show the failure twice. JSON stays on stdout for scripts.
+				if output == "json" {
+					if err := cli.PrintJSON(os.Stdout, update); err != nil {
+						return err
+					}
+				}
+				return fmt.Errorf("runtime update %s: %s", status, strVal(update, "error"))
+			}
 			if output == "json" {
 				return cli.PrintJSON(os.Stdout, update)
 			}
-			if status == "completed" {
-				fmt.Printf("Update completed: %s\n", strVal(update, "output"))
-			} else {
-				fmt.Printf("Update %s: %s\n", status, strVal(update, "error"))
-			}
+			fmt.Printf("Update completed: %s\n", strVal(update, "output"))
 			return nil
 		}
 	}

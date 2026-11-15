@@ -1155,10 +1155,13 @@ describe("project gantt cache invalidation", () => {
 // only the lists it can reorder or move the issue across.
 describe("sidebar issue lists", () => {
   const PROJECT_ID = "project-1";
-  const params = { project_id: PROJECT_ID, sort_by: "updated_at", sort_direction: "desc" } as const;
-  const ownKey = issueKeys.sidebar(WS_ID, `project:${PROJECT_ID}`, params, 5);
-  const otherKey = issueKeys.sidebar(WS_ID, "project:project-9", { project_id: "project-9" }, 5);
-  const viewKey = issueKeys.sidebar(WS_ID, "view:view-1", {}, 5);
+  const sort = { field: "updated_at", direction: "desc" } as const;
+  const projectRequest = (projectId: string) => ({
+    table: { scope: { kind: "project", project_id: projectId }, filters: {}, sort },
+  }) as const;
+  const ownKey = issueKeys.sidebar(WS_ID, `project:${PROJECT_ID}`, projectRequest(PROJECT_ID), 5);
+  const otherKey = issueKeys.sidebar(WS_ID, "project:project-9", projectRequest("project-9"), 5);
+  const viewKey = issueKeys.sidebar(WS_ID, "view:view-1", { table: { scope: { kind: "workspace" }, filters: {}, sort } }, 5);
   const builtinKey = issueKeys.sidebar(
     WS_ID,
     "builtin:all_issues",

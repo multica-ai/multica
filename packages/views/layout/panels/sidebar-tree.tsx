@@ -17,7 +17,7 @@ import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-st
 import { issueUnreadTarget, useIssueUnread } from "@multica/core/issues/unread";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
-import type { AgentTask, Issue, IssueUnread, ListIssuesParams } from "@multica/core/types";
+import type { AgentTask, Issue, IssueUnread } from "@multica/core/types";
 import { AppLink } from "../../navigation";
 import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
 import { StatusIcon } from "../../issues/components/status-icon";
@@ -28,7 +28,7 @@ import { selectIssueTasks } from "../../issues/surface/activity";
 import { useStatusLabel } from "../../issues/utils/status-label";
 import { DeferredPopup } from "../../common/deferred-popup";
 import { useT, useTimeAgo } from "../../i18n";
-import { PANEL_ROW_CLASS, panelRowStateClass } from "../panel-nav";
+import { PANEL_ROW_CLASS, panelRowAnchor, panelRowStateClass } from "../panel-nav";
 
 /** A working agent's issue title: dimmer at rest and a wider highlight than
  *  the default shimmer, so the sweep reads at sidebar size. */
@@ -99,6 +99,7 @@ export const TreeRow = forwardRef<HTMLAnchorElement, TreeRowProps>(function Tree
   return (
     <div
       {...rowProps}
+      {...panelRowAnchor(active)}
       ref={rowRef}
       data-located={located && !active ? "" : undefined}
       className={cn(
@@ -175,7 +176,9 @@ export function issueRowMenuOpenClass(active: boolean) {
   return active ? undefined : "data-popup-open:bg-surface-hover data-popup-open:text-foreground";
 }
 
-const EMPTY_PARAMS: ListIssuesParams = {};
+const EMPTY_PARAMS: SidebarIssuesRequest = {
+  table: { scope: { kind: "workspace" }, filters: {}, sort: { field: "position", direction: "asc" } },
+};
 const EMPTY_ISSUES: Issue[] = [];
 
 /**
@@ -528,6 +531,7 @@ const SidebarIssueRow = memo(function SidebarIssueRow({
   return (
     <IssueActionsContextMenu issue={issue}>
       <div
+        {...panelRowAnchor(active)}
         ref={rowRef}
         className={cn(TREE_CHILD_ROW_CLASS, panelRowStateClass(active), issueRowMenuOpenClass(active), "relative")}
       >

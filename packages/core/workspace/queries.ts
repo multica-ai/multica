@@ -13,6 +13,8 @@ export const workspaceKeys = {
   agent: (wsId: string, agentId: string) =>
     ["workspaces", wsId, "agents", "detail", agentId] as const,
   squads: (wsId: string) => ["workspaces", wsId, "squads"] as const,
+  /** Under `squads` so membership changes refetch it. */
+  involvedSquads: (wsId: string) => ["workspaces", wsId, "squads", "involved"] as const,
   // Per-squad member status. Lives under the workspace key tree so
   // workspace switches naturally drop the cache, and so a broad
   // `["workspaces", wsId, "squads"]` invalidation covers it.
@@ -101,6 +103,18 @@ export function squadListOptions(wsId: string) {
   return queryOptions<Squad[]>({
     queryKey: workspaceKeys.squads(wsId),
     queryFn: () => api.listSquads(),
+    enabled: !!wsId,
+  });
+}
+
+/**
+ * The squads behind the viewer's "my agents" relation, for evaluating it on
+ * rows the client filters itself.
+ */
+export function involvedSquadIdsOptions(wsId: string) {
+  return queryOptions({
+    queryKey: workspaceKeys.involvedSquads(wsId),
+    queryFn: () => api.listInvolvedSquadIds(),
     enabled: !!wsId,
   });
 }

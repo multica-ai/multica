@@ -45,6 +45,8 @@ Multica 当前会检测以下命令：
 | Qoder CN CLI | `qoderclicn` | [Qoder CN CLI 快速开始](https://help.aliyun.com/zh/lingma/qodercli-cn/user-guide/qoder-cli-cn-get-started-quickly) |
 | Qwen Code | `qwen` | [Qwen Code](https://github.com/QwenLM/qwen-code) |
 | QwenPaw | `qwenpaw` | [QwenPaw](https://github.com/agentscope-ai/QwenPaw) |
+| Amp | `amp` | [Amp CLI](https://ampcode.com/docs/cli) |
+| Factory Droid | `droid` | [Factory Droid](https://docs.factory.com/droid-exec/overview) |
 | Reasonix | `reasonix` | [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) |
 | TRAE CLI | `traecli` | [TRAE 官方站](https://www.trae.cn/) |
 | Dim | `dim` | [DimCode](https://dimagent.cn/docs/cli) |
@@ -72,14 +74,44 @@ Multica 当前会检测以下命令：
 | Copilot | 1.0.0 |
 | Grok | 0.2.89 |
 | Qwen Code | 0.20.0 |
+| Factory Droid | 1.8.0 |
 | MiniMax Code | 0.1.2 |
+| Muse Code | 1.4.10 |
 | OpenCode | 1.1.54 |
 | Dim | 0.3.10 |
+| Devin CLI | 3000.3.22 |
 | ZeroClaw | 0.8.0 |
+| ZCode | 0.16.0 |
 
 以下工具除了登录，还要额外配置：
 
 <Accordions type="multiple">
+<Accordion title="Amp" id="amp">
+
+在守护进程所在机器按[官方说明](https://ampcode.com/docs/cli)安装最新版 Amp CLI。Amp 支持 macOS、Linux 和 Windows 下的 WSL；Windows 用户需在 WSL 中运行守护进程。按官方非交互执行说明，在守护进程或智能体环境中设置访问令牌 `AMP_API_KEY`。本适配器不支持交互登录，仅保存登录会话不足以启动任务；不要把凭据写入提示词或自定义参数。
+
+发现运行时后，创建智能体时选择 Amp，再指派任务。`MULTICA_AMP_PATH` 可覆盖可执行文件路径。模型字段留空沿用 Amp 默认值，也可填写 `high` 等 Amp **模式**；`MULTICA_AMP_MODEL` 设置守护进程默认模式，底层模型由 Amp 管理。`MULTICA_AMP_ARGS` 和智能体自定义参数支持 `--settings-file`、`--features`、`--fast`、`--plugin-ready-timeout <秒数>`、`--timings`、`--visibility`、`--label` 和 `--no-archive-after-execute`。
+
+Multica 使用 `amp --execute --stream-json --executor local`，通过标准输入传入提示词，仅使用已保存的线程 ID 继续会话。Amp 读取 `AGENTS.md`，从 `.agents/skills/` 发现项目技能。MCP 需在 Amp 中配置；暂不支持 Multica 托管 MCP、执行中追加消息、`max_turns`、orb 或远程 runner，执行时长使用任务超时限制。协议、模式和执行位置覆盖项会被过滤，额外提示词、子命令和未验证选项会在启动前报错。
+
+未安装、缺少 `AMP_API_KEY` 或启动异常会立即报错；认证失败时更新执行环境中的访问令牌。只有成功的终结 `result` 才会发布最终答复，正常退出或 assistant 的 `end_turn` 均不足以判定成功。收到终结结果后，Amp 有最多十秒完成清理；之后若由 Multica 终止进程，仍保留最终答复并记录警告，宽限期内观测到的原生非零退出仍判为失败。Amp 返回的权限拒绝信息会显示为执行记录中的警告；若无人值守任务中的已授权命令被拒绝，请检查执行机器上 Amp 设置中的 `amp.permissions`。取消和超时会终止所属本地进程树，并保留已观测的线程 ID。[Amp 后台子智能体](https://ampcode.com/docs/cli/streaming-json)可能在 CLI 退出后继续运行，本适配器无法远程取消它们。需要严格取消时避免异步子智能体，并通过保存的 Amp 线程检查剩余工作。
+
+</Accordion>
+<Accordion title="Factory Droid" id="droid">
+
+按[官方说明](https://docs.factory.com/droid-exec/overview)安装原生 Droid CLI，版本需为 1.8.0 或更新。支持 macOS、Windows 和使用 glibc 的 Linux，不支持 Alpine。运行 `droid` 登录，或在守护进程环境、智能体的自定义环境中设置 `FACTORY_API_KEY`，不要把凭据写进提示词或自定义参数。
+
+守护进程发现 `droid` 后，创建智能体时选择 Droid 运行时，再指派一个任务。执行过程显示文本和工具输出，完成后回传最终结果。模型默认沿用 Droid 配置，也可在 Multica 手动填写模型 ID。守护进程支持 `MULTICA_DROID_PATH`、`MULTICA_DROID_MODEL`、`MULTICA_DROID_ARGS`；推理强度可通过自定义参数 `--reasoning-effort high` 设置。
+
+任务使用 `droid exec --output-format stream-json --auto high`，读取 `AGENTS.md`，从 `.factory/skills/` 发现 skill。后续执行会在同一工作目录传入会话 ID。若继续会话失败，且 Droid 尚未确认会话或调用工具，Multica 可尝试一次新会话；认证和网络错误会保留原会话，不会重试。
+
+自定义参数还支持 Droid 的工具过滤、规划模式配置、`--settings`、会话标签和 `--disable-builtin-skills`。MCP、hooks、plugins、自定义 Droid 和 BYOK 模型需在 Droid 中配置，Multica 不管理这些配置。暂不支持 Mission 编排、执行中追加消息或 `max_turns`；执行时长使用任务超时限制。自定义参数中的协议、工作目录、模型、会话和 Mission 覆盖项会被过滤；未知选项和额外的位置提示词会在启动前报错。使用的 `stream-json` 输出仍受支持，不涉及已弃用的 `stream-json` 输入模式。
+
+使用 `--auto high` 时，Droid 的命令策略仍可能拒绝执行；失败前已完成的文件修改会保留。指派无人值守任务前，可按[官方权限规则文档](https://docs.factory.com/autonomy-and-safety/permission-rules)检查执行机器上的策略。
+
+未发现运行时时，在守护进程所在机器安装 Droid，或用 `MULTICA_DROID_PATH` 指向原生可执行文件。认证失败时重新登录或更新执行环境中的 API key。权限、服务和协议错误会显示为失败；取消和超时会终止所属进程树并回传对应状态。没有完成事件的正常退出也会判为失败，中间说明文字不会作为最终结果发布。
+
+</Accordion>
 <Accordion title="CodeArts" id="codearts">
 
 用 `codearts run --model provider/model "只回复 OK"` 验证非交互模式，只验证 TUI 不够。当前 CodeArts CLI 可能允许自定义 provider 在 TUI 中工作，但 `run`、`models` 和 `serve` 仍要求配置 [`CODEARTS_CLI_AK` / `CODEARTS_CLI_SK`](https://support.huaweicloud.com/usermanual-cli/codeartsagent_cli_0026.html)。Multica 可以从 `~/.codeartsdoer/codearts_cli.json` 或 `.jsonc` 发现自定义模型，但每次运行都使用 `codearts run`，因此仍遵循该命令的授权要求。
@@ -211,4 +243,4 @@ multica daemon restart
 - [守护进程与运行时](/daemon-runtimes) — 了解在线状态、并发和自定义运行时。
 - [AI 编程工具对照](/providers) — 比较各工具在 Multica 中的能力。
 
-ZCode Desktop 的 macOS 应用包可被自动发现；请同时安装 Node.js，并在桌面端启用可用的 API 连接。模型与思考强度由 ZCode 原生目录提供。详见[运行时对照](/providers#zcode)。
+ZCode Desktop 的 macOS 应用包可被自动发现，需要同时安装 Node.js。Linux 下，守护进程通过 PATH 中的 `zcode` 或 `/opt/ZCode/zcode` 自动发现 ZCode Desktop，在后台运行内置 CLI，不打开桌面窗口，无需额外安装 Node.js 或手动配置环境变量。请在桌面端启用可用的 API 连接。模型与思考强度由 ZCode 原生目录提供。详见[运行时对照](/providers#zcode)。

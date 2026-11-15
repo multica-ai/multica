@@ -145,11 +145,11 @@ Each run gets a directory under the workspaces root (default `~/multica_workspac
 | Autopilot (Run Only), quick create | On the next cleanup after the run ends |
 | No owner found (missing metadata, or the server no longer has the record) | After 72 hours without changes to the directory |
 
-While the issue is still open, 12 hours after a run completes only regenerable content is removed: `node_modules`, `.next`, and `.turbo` directories, plus the cache the daemon prepares for Codex. Everything else stays. A daemon connected to Multica Cloud also removes the whole directory 14 days after the run completes, whether or not the issue is closed; self-hosted daemons do not do this by default.
+While the issue is still open, 12 hours after a run completes only regenerable content is removed: `node_modules`, `.next`, and `.turbo` directories, plus these exact paths under `codex-home`: `.sandbox-bin`, `.tmp/plugins`, `.tmp/marketplaces`, and `cache/remote_plugin_catalog`. Other files, including SQLite databases and their WAL files, stay. Managed issue-run directories are also removed 14 days after completion by default, whether or not the issue is closed.
 
-For an unarchived chat in a work directory managed by Multica, the daemon applies the same regenerable content cleanup 12 hours after its last run ends by default. After a successful cleanup, the daemon skips repeat scans for that run. A later completed run becomes eligible again after the same delay. When a chat runs directly in a project's local directory, this cleanup is limited to the daemon's `codex-home/.sandbox-bin` cache in the run's record directory.
+For an unarchived chat in a work directory managed by Multica, the daemon applies the same regenerable content cleanup 12 hours after its last run ends by default. After a successful cleanup, the daemon skips repeat scans for that run. A later completed run becomes eligible again after the same delay. For chats in a project's local directory, only the exact Codex cache paths above are cleaned.
 
-A run on a project's local directory works in your own directory, which the daemon never touches. The record directory Multica creates for that run (logs and so on) is kept too; only regenerable caches inside it are cleaned.
+A run on a project's local directory works in your own directory, which the daemon never touches. Its record directory keeps daemon logs and `output/`. After `MULTICA_GC_COMPLETED_TASK_TTL` (14 days by default), the daemon removes its entire `codex-home` if session history is stored outside the record directory. Homes with task-local session history are retained. Set the variable to `0` to disable home expiry. A later run rebuilds the home and reconnects the conversation store; that store still follows its own session retention policy below.
 
 ### Shared repository cache
 

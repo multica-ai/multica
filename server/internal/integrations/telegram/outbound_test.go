@@ -490,7 +490,7 @@ func TestOutboundCapacityPruningPreservesActiveBackoff(t *testing.T) {
 	protected.mu.Lock()
 	protected.setBackoffTill(current.Add(time.Hour))
 	protected.mu.Unlock()
-	current = current.Add(editInterval)
+	current = current.Add(privateEditInterval)
 
 	o.mu.Lock()
 	for chatID := int64(maxChatSchedules + 1); chatID <= maxChatSchedules+20; chatID++ {
@@ -520,9 +520,9 @@ func TestOutboundCapacityEvictionPreservesRecentChatCooldown(t *testing.T) {
 		backoffFor time.Duration
 		wantRoom   bool
 	}{
-		{name: "cooldown without retry after", idleFor: editInterval - time.Millisecond},
-		{name: "retry after shorter than cooldown", idleFor: time.Second, backoffFor: time.Second},
-		{name: "cooldown elapsed", idleFor: editInterval, backoffFor: time.Second, wantRoom: true},
+		{name: "cooldown without retry after", idleFor: privateEditInterval - time.Millisecond},
+		{name: "retry after shorter than cooldown", idleFor: privateEditInterval / 2, backoffFor: privateEditInterval / 4},
+		{name: "cooldown elapsed", idleFor: privateEditInterval, backoffFor: time.Second, wantRoom: true},
 	}
 
 	for _, tt := range tests {
@@ -573,7 +573,7 @@ func TestOutboundManyActiveBackoffsKeepTotalScheduleCacheBounded(t *testing.T) {
 		o.mu.Lock()
 		o.releaseChatLocked(schedule, chatID)
 		o.mu.Unlock()
-		current = current.Add(editInterval)
+		current = current.Add(privateEditInterval)
 	}
 	o.mu.Lock()
 	got := len(o.chats)
@@ -604,7 +604,7 @@ func TestOutboundCompressedChatInheritsBotFallback(t *testing.T) {
 		o.mu.Lock()
 		o.releaseChatLocked(schedule, chatID)
 		o.mu.Unlock()
-		current = current.Add(editInterval)
+		current = current.Add(privateEditInterval)
 	}
 	o.mu.Lock()
 	newSchedule := o.retainChatLocked("bot-a", maxChatSchedules+1)

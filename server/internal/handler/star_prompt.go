@@ -27,10 +27,6 @@ func (h *Handler) ClaimStarPromptShowing(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	if h.cfg.DisableStarPrompt {
-		writeError(w, http.StatusConflict, "star prompt is disabled")
-		return
-	}
 	now := time.Now()
 	user, err := h.Queries.ClaimStarPromptShowing(r.Context(), db.ClaimStarPromptShowingParams{
 		ID:            parseUUID(userID),

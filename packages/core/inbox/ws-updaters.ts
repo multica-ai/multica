@@ -169,6 +169,37 @@ export async function onInboxIssueDeleted(
   ]);
 }
 
+// The delete mutations' own inbox cleanup. The deleting client cannot count
+// on its `issue:deleted` echo arriving (a proxied deployment can drop the
+// socket silently), and the inbox list it loaded before the delete keeps rows
+// whose issue no longer exists — clicking one routes to a 404. Mirrors
+// `onInboxIssueDeleted`'s DB-cascade prune for a batch, plus the mutation
+// write discipline the update mutations already follow: a list response that
+// was on the wire before the delete lands on top of the prune and
+// resurrects the rows, so the lists are cancelled first and owed a re-read
+// when that interrupted a request (see `cancelInboxLists`).
+export async function onInboxIssuesDeleted(
+  qc: QueryClient,
+  wsId: string,
+  issueIds: string[],
+) {
+  if (issueIds.length === 0) return;
+  const interrupted = cancelInboxLists(qc, wsId);
+  const deleted = new Set(issueIds);
+  patchInboxLists(qc, wsId, (items) => {
+    const next = items.filter((i) => i.issue_id === null || !deleted.has(i.issue_id));
+    return next.length === items.length ? items : next;
+  });
+  const refreshes: Promise<unknown>[] = [
+    onInboxSummaryInvalidate(qc),
+    refreshInboxQuery(qc, inboxKeys.pages(wsId)),
+    refreshInboxQuery(qc, inboxKeys.lookup(wsId)),
+    refreshInboxQuery(qc, inboxKeys.facets(wsId)),
+  ];
+  if (interrupted) refreshes.push(onInboxInvalidate(qc, wsId));
+  await Promise.all(refreshes);
+}
+
 // An issue field the archive filters and counts on changed. Loaded rows are
 // patched in place, but which groups match and the facet counts are decided
 // by the server: an issue that newly matches a filter would never appear, and

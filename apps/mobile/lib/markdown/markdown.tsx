@@ -129,9 +129,9 @@ export function Markdown({
   );
 
   const segments = useMemo(() => {
-    const processed = preprocessMobileMarkdown(content);
+    const processed = preprocessMobileMarkdown(content, attachments);
     return splitMarkdown(processed);
-  }, [content]);
+  }, [content, attachments]);
 
   const onLinkPress = useCallback(
     ({ url }: { url: string }) => {

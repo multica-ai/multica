@@ -34,6 +34,7 @@
   },
   "commands": {
     "current_theme_aria": "Current theme",
+    "current_mode_aria": "Current mode",
     "new_issue": "New issue",
     "new_project": "New project",
     "new_autopilot": "New autopilot",
@@ -106,7 +107,6 @@
     "project": "Project",
     "parent": "Parent issue",
     "quick_actions": "Quick actions",
-    "theme": "Theme",
     "project_status": "Project status",
     "no_project": "No project",
     "current": "Current"
@@ -136,14 +136,8 @@
     "type_to_find_people": "Type to find people and agents"
   },
   "delegate": {
-    "heading": "Hand to agent",
-    "create_and_assign": "New issue and assign to {{name}}",
-    "squad": "Squad",
-    "context_aria": "Created with",
-    "parent": "Under {{identifier}}",
-    "pick_crumb": "Choose",
-    "pick_another": "Hand to another agent or squad...",
-    "detected": "Instruction"
+    "row": "Hand to agent: “{{prompt}}”",
+    "hint": "Quick create"
   },
   "best": {
     "assign": "Assign {{subject}} to {{name}}",
@@ -162,8 +156,6 @@
     "navigate": "Navigate",
     "select": "Select",
     "open_in_new_tab": "Open in new tab",
-    "delegate": "Create and hand to {{name}}",
-    "search_instead": "Search as keywords",
     "back": "Back",
     "prefix_commands": "Commands",
     "prefix_issues": "Issues",

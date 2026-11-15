@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useId, useMemo, useRef, useSyncExternalStore } from "react";
+import { useCallback, useId, useMemo, useRef, useSyncExternalStore, type MouseEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
@@ -9,6 +9,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { Folder, Plus } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { IconButton } from "@multica/ui/components/common/icon-button";
+import { DropdownMenuItem } from "@multica/ui/components/ui/dropdown-menu";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { issueKeys, sidebarIssuesOptions } from "@multica/core/issues/queries";
 import { filterDependencyState, statusCatalogSource } from "@multica/core/issues/surface/filter-dependency";
@@ -36,6 +37,9 @@ import {
   panelRowStateClass,
 } from "../panel-nav";
 import { ProjectIcon } from "../../projects/components/project-icon";
+import { ProjectMenu } from "../../projects/components/project-row-actions";
+import { shouldOpenRowMenu, useRowMenu } from "../../common/point-menu";
+import { CollectionRowContext } from "../collection-list/row-context";
 import { useDragClickGuard } from "../use-drag-click-guard";
 import { ProjectsSectionSettings } from "./sidebar-settings";
 import { SidebarIssueList, TreeRow } from "./sidebar-tree";
@@ -280,6 +284,13 @@ function ProjectTreeItem({
   const prefetch = usePrefetch(wsId, source, params);
 
   const { listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: project.id });
+  // Right-click opens the projects page's row menu at the cursor. It mounts on
+  // the first right-click, so idle rows hold no menu or its queries.
+  const rowMenu = useRowMenu();
+  const rowMenuContext = useMemo(
+    () => ({ menu: rowMenu.menu, setMenu: rowMenu.setMenu }),
+    [rowMenu.menu, rowMenu.setMenu],
+  );
 
   return (
     <li
@@ -306,6 +317,9 @@ function ProjectTreeItem({
         listId={listId}
         toggleLabel={t(($) => $.panels.work.project_issues, { name: project.title })}
         onPrefetch={prefetch}
+        onContextMenu={(event: MouseEvent) => {
+          if (shouldOpenRowMenu(event)) rowMenu.openAtPointer(event);
+        }}
         trailing={
           // The button takes the count's place on hover, so the row never reflows.
           <span className="relative flex h-5 min-w-5 items-center justify-end">
@@ -327,6 +341,20 @@ function ProjectTreeItem({
           </span>
         }
       />
+      {rowMenu.menu.point && (
+        <CollectionRowContext.Provider value={rowMenuContext}>
+          <ProjectMenu
+            project={project}
+            triggerHidden
+            leading={
+              <DropdownMenuItem onClick={() => openCreateIssueWithPreference({ project_id: project.id })}>
+                <Plus />
+                {t(($) => $.panels.work.new_issue_here)}
+              </DropdownMenuItem>
+            }
+          />
+        </CollectionRowContext.Provider>
+      )}
       {expanded && (
         <SidebarIssueList
           id={listId}

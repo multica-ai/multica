@@ -53,6 +53,8 @@
     "zoom_actual": "実際のサイズ"
   },
   "attachment": {
+    "install_theme": "テーマをインストール",
+    "install_theme_failed": "添付ファイルを読み込めませんでした。しばらくしてからもう一度お試しください。",
     "download_failed": "ダウンロードリンクを取得できませんでした。しばらくしてからもう一度お試しください。",
     "preview": "プレビュー",
     "preview_loading": "プレビューを読み込み中…",
@@ -178,5 +180,49 @@
     "clear_filter": "絞り込みを解除",
     "no_matches": "一致する行がありません",
     "close": "閉じる"
+  },
+  "voice": {
+    "dictate": "音声入力",
+    "hold_to_talk": "押している間だけ話す",
+    "tap_or_hold": "音声入力（タップ、または長押しで話す）",
+    "cancel": "キャンセル",
+    "insert": "挿入",
+    "send": "送信",
+    "retry": "再試行",
+    "dismiss": "閉じる",
+    "requesting": "マイクを待っています…",
+    "transcribing": "文字起こし中…",
+    "release_to_insert": "離すと挿入",
+    "recording": "録音中",
+    "errors": {
+      "permission_denied": "マイクへのアクセスがブロックされています。ブラウザまたはシステム設定で許可してから再試行してください。",
+      "no_microphone": "マイクが見つかりません。接続してから再試行してください。",
+      "microphone_failed": "マイクを起動できませんでした。",
+      "no_speech": "音声を聞き取れませんでした。マイクに近づいてもう一度お試しください。",
+      "unavailable": "このコンピューターでは音声を文字起こしできません。",
+      "transcription_failed": "文字起こしに失敗しました。録音は保持されているので再試行できます。"
+    },
+    "models": {
+      "more_languages": "ほか {{more}} 言語",
+      "in_use": "使用中",
+      "recommended": "おすすめ",
+      "most_accurate": "高精度",
+      "fastest": "高速",
+      "by": "提供: {{author}}",
+      "license": "ライセンス",
+      "downloading": "ダウンロード中 {{percent}}%",
+      "failed": "ダウンロードに失敗しました。再試行すると中断したところから再開します。",
+      "download": "ダウンロード",
+      "retry": "再試行",
+      "cancel": "キャンセル",
+      "use": "使用する",
+      "delete": "{{name}} を削除"
+    },
+    "setup": {
+      "title": "音声入力を設定",
+      "description": "音声はこのコンピューター上で文字起こしされ、録音が外部に送られることはありません。まず音声モデルを一度ダウンロードしてください。",
+      "later": "後で",
+      "start": "音声入力を開始"
+    }
   }
 }

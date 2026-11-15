@@ -221,6 +221,16 @@ issue inside a workflow needs none of them.
 - Whole workflow: `multica workflow create|update --steps-file <json>`
   replaces all steps; `multica workflow delete` is refused for Default and for
   a workflow a project still uses.
+- Status catalog: a step's `new_status` may carry `icon` (`dotted`, `circle`,
+  `half`, `three_quarters`, `check`, `slash`, `cross`; empty keeps the category
+  default), so a definition applied in a fresh workspace renders the glyph its
+  author declared. The field applies only when the status is created — a
+  status that already exists by name is reused unchanged. Repair an existing
+  catalog row, including on a workspace that synced before the field was
+  declared, with `multica issue-status update <key-or-name> --icon <value>`
+  (`--icon ""` resets it), and read the catalog with `multica issue-status
+  list`. These commands edit the workspace catalog, not a workflow, and need
+  workspace owner/admin.
 - Switching: `multica project workflow set <project-id> <workflow|default>`.
   Run it with `--dry-run` first. Issues on statuses the target lacks need
   `--map old=new`; a missing mapping fails with

@@ -1056,7 +1056,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
   const segments = [{ href: wsPaths.autopilots(), label: tLayout(($) => $.panels.autopilots.list) }];
 
   const shell = (leaf: ReactNode, children: ReactNode) => (
-    <ObjectPage layoutId={LAYOUT_ID} segments={segments} leaf={leaf}>
+    <ObjectPage type="autopilot" layoutId={LAYOUT_ID} segments={segments} leaf={leaf}>
       {children}
     </ObjectPage>
   );
@@ -1134,6 +1134,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
 
   return (
     <ObjectPage
+      type="autopilot"
       layoutId={LAYOUT_ID}
       segments={segments}
       leaf={<span className="min-w-0 truncate">{autopilot.title}</span>}

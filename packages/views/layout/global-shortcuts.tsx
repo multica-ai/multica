@@ -25,6 +25,7 @@ const GLOBAL_ACTIONS: readonly ShortcutActionId[] = [
   "createIssue",
   "toggleSidebar",
   "toggleChat",
+  "newChat",
   "goBack",
   "goForward",
   "goInbox",
@@ -78,7 +79,7 @@ export function GlobalShortcuts() {
     // An unavailable overlay must not claim the chord either — returning false
     // from the finder leaves the keypress its outside-the-app meaning instead of
     // swallowing it for an action that would visibly do nothing.
-    const canToggleFloatingChat = () =>
+    const canUseFloatingChat = () =>
       useChatStore.getState().floatingChatEnabled &&
       !isFloatingChatRouteSuppressed(navigation.pathname, chatPath);
 
@@ -93,7 +94,9 @@ export function GlobalShortcuts() {
         if (!action.allowInEditable && isEditableShortcutTarget(event.target)) {
           return false;
         }
-        if (candidate === "toggleChat" && !canToggleFloatingChat()) return false;
+        if ((candidate === "toggleChat" || candidate === "newChat") && !canUseFloatingChat()) {
+          return false;
+        }
         return shortcutMatchesEvent(getShortcut(candidate), event);
       });
       if (!actionId) return;
@@ -105,6 +108,13 @@ export function GlobalShortcuts() {
       }
       if (actionId === "toggleChat") {
         useChatStore.getState().toggle();
+        return;
+      }
+      if (actionId === "newChat") {
+        // Like pressing Ask Multica: a second press closes the new chat it opened.
+        const chat = useChatStore.getState();
+        if (chat.isOpen && chat.activeSessionId === null) chat.setOpen(false);
+        else chat.startNewChat();
         return;
       }
       if (actionId === "toggleSidebar") {
