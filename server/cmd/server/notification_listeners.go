@@ -45,10 +45,16 @@ var parentBubbleNotifTypes = map[string]bool{
 
 // delegatedAlwaysNotifTypes are the events a DELEGATED subscriber (reason=
 // 'delegated' — an agent created this issue on their behalf, MUL-5483) receives
-// unconditionally: they are either addressed at the human directly, or they are
-// exceptions that stall the work until a human looks.
+// unconditionally: they are addressed at the human directly, carry the agent's
+// result, or are exceptions that stall the work until a human looks.
+//
+// new_comment is here because an agent posts its result as a comment: muting
+// status changes must not leave the human with no signal that the work they
+// started was answered (MUL-9314). The inbox keeps one row per issue, so a
+// comment lands on the row a handoff would light anyway.
 var delegatedAlwaysNotifTypes = map[string]bool{
 	"mentioned":     true,
+	"new_comment":   true,
 	"task_failed":   true,
 	"agent_blocked": true,
 }
