@@ -369,8 +369,9 @@ func resolveProjectID(ctx context.Context, client *cli.APIClient, input string) 
 	return resolveIDByPrefix(ctx, client, "project", input, fetchProjectCandidates)
 }
 
-// resolveProjectIDForNewWork resolves --project on writes that file new work
-// into a project (issue create/update, autopilot create/update). A prefix that
+// resolveProjectIDForNewWork resolves --project on creates that file new work
+// into a project (issue create, autopilot create). Updates use
+// resolveProjectID: the server alone knows whether the project changes. A prefix that
 // only matches an archived project is refused here with the restore command,
 // instead of round-tripping to the server's 409 project_archived.
 func resolveProjectIDForNewWork(ctx context.Context, client *cli.APIClient, input string) (resolvedID, error) {

@@ -492,7 +492,9 @@ func runAutopilotUpdate(cmd *cobra.Command, args []string) error {
 		if v == "" {
 			body["project_id"] = nil
 		} else {
-			projectRef, err := resolveProjectIDForNewWork(ctx, client, v)
+			// Keeping a paused autopilot on its archived project is allowed;
+			// the server refuses a switch into one or a resume.
+			projectRef, err := resolveProjectID(ctx, client, v)
 			if err != nil {
 				return fmt.Errorf("resolve project: %w", err)
 			}

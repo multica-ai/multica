@@ -1865,7 +1865,9 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		if v == "" {
 			body["project_id"] = nil
 		} else {
-			project, err := resolveProjectIDForNewWork(ctx, client, v)
+			// Naming the issue's current archived project is an ordinary edit;
+			// the server refuses only a move into one (409 project_archived).
+			project, err := resolveProjectID(ctx, client, v)
 			if err != nil {
 				return fmt.Errorf("resolve project: %w", err)
 			}
