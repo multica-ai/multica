@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Minus, Plus } from "lucide-react";
+import { Minus, Plus } from "@multica/ui/icons";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { cn } from "@multica/ui/lib/utils";
 import {
   laneSegmentPosition,
@@ -10,6 +11,7 @@ import {
   type TraceLanes,
   type ToolKindTotals,
 } from "./build-steps";
+import { DeferredTooltip } from "../deferred-tooltip";
 import { useT } from "../../i18n";
 
 /**
@@ -90,17 +92,21 @@ function LaneTrack({
   return (
     <div className="relative h-[15px] rounded-sm bg-muted/55">
       {segments.map((segment) => (
-        <button
+        <DeferredTooltip
           key={`${segment.kind}:${segment.startMs}`}
-          type="button"
-          aria-label={`${label} ${formatLaneTotal(segment.durationMs)}`}
-          title={`${label} · ${formatLaneTotal(segment.durationMs)}`}
-          onClick={() => onSeek(segment.startMs)}
-          className={cn(
-            "absolute inset-y-0 rounded-[3px] transition-opacity hover:opacity-80",
-            SEGMENT_TONE[segment.kind],
-          )}
-          style={laneSegmentPosition(segment, totalMs)}
+          content={`${label} · ${formatLaneTotal(segment.durationMs)}`}
+          trigger={
+            <button
+              type="button"
+              aria-label={`${label} ${formatLaneTotal(segment.durationMs)}`}
+              onClick={() => onSeek(segment.startMs)}
+              className={cn(
+                "absolute inset-y-0 rounded-[3px] transition-opacity hover:opacity-80",
+                SEGMENT_TONE[segment.kind],
+              )}
+              style={laneSegmentPosition(segment, totalMs)}
+            />
+          }
         />
       ))}
     </div>
@@ -261,27 +267,31 @@ export function RunTimeline({
           zoom > 1 ? "opacity-100" : "opacity-0 focus-within:opacity-100 group-hover/timeline:opacity-100",
         )}
       >
-        <button
-          type="button"
-          disabled={!canZoomOut}
-          onClick={() => setZoomAround(ZOOM_STEPS[zoomIndex - 1] ?? 1)}
-          aria-label={t(($) => $.transcript.timeline_zoom_out)}
-          className="flex h-5 w-5 items-center justify-center rounded-xs text-muted-foreground transition-colors hover:bg-accent disabled:opacity-40"
-        >
-          <Minus className="h-3 w-3" />
-        </button>
+        <TooltipHint label={t(($) => $.transcript.timeline_zoom_out)}>
+          <button
+            type="button"
+            disabled={!canZoomOut}
+            onClick={() => setZoomAround(ZOOM_STEPS[zoomIndex - 1] ?? 1)}
+            aria-label={t(($) => $.transcript.timeline_zoom_out)}
+            className="flex h-5 w-5 items-center justify-center rounded-xs text-muted-foreground transition-colors hover:bg-accent disabled:opacity-40"
+          >
+            <Minus className="h-3 w-3" />
+          </button>
+        </TooltipHint>
         <span className="min-w-[2rem] text-center text-micro tabular-nums text-muted-foreground">
           {zoom}×
         </span>
-        <button
-          type="button"
-          disabled={!canZoomIn}
-          onClick={() => setZoomAround(ZOOM_STEPS[zoomIndex + 1] ?? zoom)}
-          aria-label={t(($) => $.transcript.timeline_zoom_in)}
-          className="flex h-5 w-5 items-center justify-center rounded-xs text-muted-foreground transition-colors hover:bg-accent disabled:opacity-40"
-        >
-          <Plus className="h-3 w-3" />
-        </button>
+        <TooltipHint label={t(($) => $.transcript.timeline_zoom_in)}>
+          <button
+            type="button"
+            disabled={!canZoomIn}
+            onClick={() => setZoomAround(ZOOM_STEPS[zoomIndex + 1] ?? zoom)}
+            aria-label={t(($) => $.transcript.timeline_zoom_in)}
+            className="flex h-5 w-5 items-center justify-center rounded-xs text-muted-foreground transition-colors hover:bg-accent disabled:opacity-40"
+          >
+            <Plus className="h-3 w-3" />
+          </button>
+        </TooltipHint>
       </div>
     </div>
   );

@@ -1,6 +1,11 @@
 import React from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, screen, waitFor, within } from "@testing-library/react";
+import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { setApiInstance } from "@multica/core/api";
+import type { ApiClient } from "@multica/core/api/client";
+import { projectKeys } from "@multica/core/projects/queries";
+import { useModalStore } from "@multica/core/modals";
 import userEvent from "@testing-library/user-event";
 import type { Project } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
@@ -11,53 +16,38 @@ const mocks = vi.hoisted(() => ({
   role: "admin",
   copyText: vi.fn(),
   deleteProject: vi.fn(),
+  getProject: vi.fn(),
+  getProjectSubscription: vi.fn(),
+  setProjectSubscription: vi.fn(),
   getShareableUrl: vi.fn((path: string) => `https://app.example${path}`),
   push: vi.fn(),
   recordVisit: vi.fn(),
   toastSuccess: vi.fn(),
+  toastError: vi.fn(),
 }));
 
 vi.mock("@multica/ui/lib/clipboard", () => ({
   copyText: mocks.copyText,
 }));
 
-vi.mock("@tanstack/react-query", () => ({
-  useQuery: (options: { queryKey?: readonly unknown[] }) => {
-    switch (options.queryKey?.[0]) {
-      case "project-detail":
-        return { data: PROJECT, isLoading: false };
-      case "members":
-        return {
-          data: [{ user_id: "user-1", name: "User One", role: mocks.role }],
-          isLoading: false,
-        };
-      case "agents":
-      case "pins":
-        return { data: [], isLoading: false };
-      default:
-        return { data: undefined, isLoading: false };
-    }
-  },
+vi.mock("../../workflows/project-workflow-sheet", () => ({
+  ProjectWorkflowMenuItem: () => null,
+  ProjectWorkflowSheet: () => null,
 }));
-
-vi.mock("@multica/core/projects/queries", () => ({
-  projectDetailOptions: () => ({ queryKey: ["project-detail"] }),
-}));
-
-vi.mock("@multica/core/projects/mutations", () => ({
-  useUpdateProject: () => ({ mutate: vi.fn() }),
-  useDeleteProject: () => ({ mutate: mocks.deleteProject }),
-}));
+vi.mock("../../workflows/project-workflow-row", () => ({ ProjectWorkflowControl: () => null }));
 
 vi.mock("@multica/core/pins", () => ({
-  pinListOptions: () => ({ queryKey: ["pins"] }),
+  pinListOptions: () => ({ queryKey: ["pins"], queryFn: async () => [] }),
   useCreatePin: () => ({ mutate: vi.fn() }),
   useDeletePin: () => ({ mutate: vi.fn() }),
 }));
 
 vi.mock("@multica/core/workspace/queries", () => ({
-  memberListOptions: () => ({ queryKey: ["members"] }),
-  agentListOptions: () => ({ queryKey: ["agents"] }),
+  memberListOptions: () => ({
+    queryKey: ["members"],
+    queryFn: async () => [{ user_id: "user-1", name: "User One", role: mocks.role }],
+  }),
+  agentListOptions: () => ({ queryKey: ["agents"], queryFn: async () => [] }),
 }));
 
 vi.mock("@multica/core/hooks", () => ({
@@ -86,7 +76,7 @@ vi.mock("@multica/core/workspace/hooks", () => ({
 }));
 
 vi.mock("sonner", () => ({
-  toast: { success: mocks.toastSuccess },
+  toast: { success: mocks.toastSuccess, error: mocks.toastError },
 }));
 
 vi.mock("react-resizable-panels", () => ({
@@ -130,23 +120,17 @@ vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
   DropdownMenuItem: ({
     children,
     onClick,
+    disabled,
   }: {
     children: React.ReactNode;
     onClick?: () => void;
+    disabled?: boolean;
   }) => (
-    <button type="button" onClick={onClick}>
+    <button type="button" onClick={onClick} disabled={disabled}>
       {children}
     </button>
   ),
   DropdownMenuSeparator: () => <hr />,
-}));
-
-vi.mock("@multica/ui/components/ui/popover", () => ({
-  Popover: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  PopoverTrigger: ({ render }: { render: React.ReactNode }) => <>{render}</>,
-  PopoverContent: ({ children }: { children: React.ReactNode }) => (
-    <div>{children}</div>
-  ),
 }));
 
 vi.mock("@multica/ui/components/ui/tooltip", () => ({
@@ -161,45 +145,6 @@ vi.mock("@multica/ui/components/ui/sheet", () => ({
   Sheet: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SheetContent: ({ children }: { children: React.ReactNode }) => (
     <div>{children}</div>
-  ),
-}));
-
-vi.mock("@multica/ui/components/ui/alert-dialog", () => ({
-  AlertDialog: ({
-    open,
-    children,
-  }: {
-    open: boolean;
-    children: React.ReactNode;
-  }) => (open ? <div role="alertdialog">{children}</div> : null),
-  AlertDialogContent: ({ children }: { children: React.ReactNode }) => (
-    <div>{children}</div>
-  ),
-  AlertDialogHeader: ({ children }: { children: React.ReactNode }) => (
-    <div>{children}</div>
-  ),
-  AlertDialogTitle: ({ children }: { children: React.ReactNode }) => (
-    <h2>{children}</h2>
-  ),
-  AlertDialogDescription: ({ children }: { children: React.ReactNode }) => (
-    <p>{children}</p>
-  ),
-  AlertDialogFooter: ({ children }: { children: React.ReactNode }) => (
-    <div>{children}</div>
-  ),
-  AlertDialogCancel: ({ children }: { children: React.ReactNode }) => (
-    <button type="button">{children}</button>
-  ),
-  AlertDialogAction: ({
-    children,
-    onClick,
-  }: {
-    children: React.ReactNode;
-    onClick?: () => void;
-  }) => (
-    <button type="button" onClick={onClick}>
-      {children}
-    </button>
   ),
 }));
 
@@ -231,12 +176,25 @@ vi.mock("./project-due-date-picker", () => ({
 }));
 
 vi.mock("../../issues/surface/issue-surface", () => ({
-  IssueSurface: () => null,
+  IssueSurface: ({
+    renderHeader,
+  }: {
+    renderHeader?: (ctx: { controller: unknown }) => React.ReactNode;
+  }) => <>{renderHeader?.({ controller: {} })}</>,
 }));
 
-vi.mock("../../layout/breadcrumb-header", () => ({
-  BreadcrumbHeader: ({ actions }: { actions: React.ReactNode }) => (
-    <header>{actions}</header>
+vi.mock("../../issue-views/view-header", () => ({
+  IssueViewHeader: ({
+    baseMenu,
+    trailing,
+  }: {
+    baseMenu?: React.ReactNode;
+    trailing?: React.ReactNode;
+  }) => (
+    <header>
+      {baseMenu}
+      {trailing}
+    </header>
   ),
 }));
 
@@ -275,7 +233,18 @@ const PROJECT: Project = {
   resource_count: 0,
 };
 
+let qc: QueryClient;
+let pending: ReturnType<typeof deferred>;
+
+function deferred() {
+  let resolve!: () => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<void>((res, rej) => { resolve = res; reject = rej; });
+  return { promise, resolve, reject };
+}
+
 function renderProjectDetail() {
+  qc.setQueryData(["members"], [{ user_id: "user-1", name: "User One", role: mocks.role }]);
   const adapter: NavigationAdapter = {
     push: mocks.push,
     replace: vi.fn(),
@@ -286,21 +255,77 @@ function renderProjectDetail() {
     getShareableUrl: mocks.getShareableUrl,
   };
 
-  renderWithI18n(
-    <NavigationProvider value={adapter}>
-      <ProjectDetail projectId={PROJECT.id} />
-    </NavigationProvider>,
+  return renderWithI18n(
+    <QueryClientProvider client={qc}>
+      <NavigationProvider value={adapter}>
+        <ProjectDetail projectId={PROJECT.id} />
+      </NavigationProvider>
+    </QueryClientProvider>,
   );
 }
 
 beforeEach(() => {
   mocks.role = "admin";
+  qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+  qc.setQueryData(projectKeys.detail("workspace-1", PROJECT.id), PROJECT);
+  qc.setQueryData(["agents"], []);
+  qc.setQueryData(["pins"], []);
+  pending = deferred();
   mocks.copyText.mockReset().mockResolvedValue(true);
-  mocks.deleteProject.mockReset();
+  mocks.deleteProject.mockReset().mockReturnValue(pending.promise);
+  mocks.getProject.mockReset().mockResolvedValue(PROJECT);
+  mocks.getProjectSubscription.mockReset().mockResolvedValue(false);
+  mocks.setProjectSubscription.mockReset().mockImplementation(async (_id: string, subscribed: boolean) => subscribed);
+  setApiInstance({
+    deleteProject: mocks.deleteProject,
+    getProject: mocks.getProject,
+    getProjectSubscription: mocks.getProjectSubscription,
+    setProjectSubscription: mocks.setProjectSubscription,
+  } as unknown as ApiClient);
   mocks.getShareableUrl.mockClear();
   mocks.push.mockReset();
   mocks.recordVisit.mockReset();
   mocks.toastSuccess.mockReset();
+  mocks.toastError.mockReset();
+});
+
+afterEach(() => {
+  onlineManager.setOnline(true);
+  qc.clear();
+  useModalStore.getState().close();
+});
+
+describe("ProjectDetail rename", () => {
+  it("opens the rename dialog with the current name from the header menu", async () => {
+    const user = userEvent.setup();
+    renderProjectDetail();
+
+    await user.click(screen.getByRole("button", { name: "Rename project" }));
+
+    expect(useModalStore.getState()).toMatchObject({
+      modal: "project-rename",
+      data: { projectId: "project-1", title: "Launch Plan" },
+    });
+  });
+});
+
+describe("ProjectDetail lead permissions", () => {
+  it("does not let ordinary members change the lead of a private project", async () => {
+    mocks.role = "member";
+    qc.setQueryData(projectKeys.detail("workspace-1", PROJECT.id), { ...PROJECT, visibility: "private" });
+    renderProjectDetail();
+    expect(screen.getByRole("button", { name: "No lead" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "No lead" }));
+    expect(screen.queryByPlaceholderText("Assign lead...")).not.toBeInTheDocument();
+  });
+
+  it("keeps the lead of a workspace project editable for ordinary members", async () => {
+    mocks.role = "member";
+    renderProjectDetail();
+    expect(screen.getByRole("button", { name: "No lead" })).toBeEnabled();
+    await userEvent.click(screen.getByRole("button", { name: "No lead" }));
+    expect(screen.getByPlaceholderText("Assign lead...")).toBeInTheDocument();
+  });
 });
 
 describe("ProjectDetail sharing", () => {
@@ -319,7 +344,57 @@ describe("ProjectDetail sharing", () => {
   });
 });
 
+describe("ProjectDetail subscription", () => {
+  it("subscribes to every issue in the project and can unsubscribe again", async () => {
+    const user = userEvent.setup();
+    renderProjectDetail();
+
+    await user.click(await screen.findByRole("button", { name: "Subscribe to all issues" }));
+    expect(mocks.setProjectSubscription).toHaveBeenCalledWith("project-1", true);
+    expect(mocks.toastSuccess).toHaveBeenCalled();
+
+    await user.click(await screen.findByRole("button", { name: "Unsubscribe from project" }));
+    expect(mocks.setProjectSubscription).toHaveBeenLastCalledWith("project-1", false);
+    expect(await screen.findByRole("button", { name: "Subscribe to all issues" })).toBeInTheDocument();
+  });
+
+  it("keeps the current state and reports a failed update", async () => {
+    mocks.setProjectSubscription.mockRejectedValueOnce(new Error("boom"));
+    const user = userEvent.setup();
+    renderProjectDetail();
+
+    await user.click(await screen.findByRole("button", { name: "Subscribe to all issues" }));
+    await waitFor(() => expect(mocks.toastError).toHaveBeenCalled());
+    expect(screen.getByRole("button", { name: "Subscribe to all issues" })).toBeInTheDocument();
+  });
+});
+
 describe("ProjectDetail project deletion", () => {
+  it("allows cancelling an offline detail deletion without executing it on reconnect", async () => {
+    onlineManager.setOnline(false);
+    renderProjectDetail();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Delete project" }));
+    await user.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith(
+      "You're offline. Reconnect and try deleting again.",
+    ));
+    expect(mocks.deleteProject).not.toHaveBeenCalled();
+    expect(qc.getQueryData(projectKeys.detail("workspace-1", PROJECT.id))).toEqual(PROJECT);
+    const dialog = screen.getByRole("alertdialog");
+    expect(within(dialog).getByRole("button", { name: "Delete" })).toBeEnabled();
+    const cancel = within(dialog).getByRole("button", { name: "Cancel" });
+    expect(cancel).toBeEnabled();
+    await user.click(cancel);
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    await act(async () => {
+      onlineManager.setOnline(true);
+      await qc.resumePausedMutations();
+    });
+    expect(mocks.deleteProject).not.toHaveBeenCalled();
+    expect(mocks.push).not.toHaveBeenCalled();
+  });
+
   it("requires confirmation and navigates only after deletion succeeds", async () => {
     const user = userEvent.setup();
     renderProjectDetail();
@@ -331,22 +406,62 @@ describe("ProjectDetail project deletion", () => {
 
     await user.click(screen.getByRole("button", { name: "Delete" }));
 
-    expect(mocks.deleteProject).toHaveBeenCalledWith(
-      PROJECT.id,
-      expect.objectContaining({ onSuccess: expect.any(Function) }),
-    );
+    await waitFor(() => expect(mocks.deleteProject).toHaveBeenCalledWith(PROJECT.id));
     expect(mocks.push).not.toHaveBeenCalled();
-
-    const options = mocks.deleteProject.mock.calls[0]?.[1] as {
-      onSuccess: () => void;
-    };
-    options.onSuccess();
-
-    expect(mocks.toastSuccess).toHaveBeenCalledWith("Project deleted");
+    const dialog = screen.getByRole("alertdialog");
+    const confirm = within(dialog).getByRole("button", { name: "Delete" });
+    expect(confirm).toBeDisabled();
+    expect(confirm).toHaveAttribute("aria-busy", "true");
+    expect(confirm.querySelector("svg")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeDisabled();
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+    await user.click(confirm);
+    expect(mocks.deleteProject).toHaveBeenCalledOnce();
+    await act(async () => pending.resolve());
+    await waitFor(() => expect(mocks.toastSuccess).toHaveBeenCalledWith("Project deleted"));
     expect(mocks.push).toHaveBeenCalledWith("/test-workspace/projects");
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(mocks.getProject).not.toHaveBeenCalled();
+    expect(screen.queryByText("Project not found")).not.toBeInTheDocument();
   });
 
-  it("does not offer project deletion to regular members", () => {
+  it.each([
+    ["403", new Error("Forbidden")],
+    ["network error", new TypeError("Failed to fetch")],
+  ])("reports %s, retains the detail and allows retry", async (_label, error) => {
+    renderProjectDetail();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Delete project" }));
+    await user.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(mocks.deleteProject).toHaveBeenCalledOnce());
+    await act(async () => pending.reject(error));
+    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith(error.message));
+    const confirm = within(screen.getByRole("alertdialog")).getByRole("button", { name: "Delete" });
+    expect(confirm).toBeEnabled();
+    expect(qc.getQueryData(projectKeys.detail("workspace-1", PROJECT.id))).toEqual(PROJECT);
+    expect(mocks.push).not.toHaveBeenCalled();
+    expect(mocks.getProject).not.toHaveBeenCalled();
+    mocks.deleteProject.mockResolvedValue(undefined);
+    await user.click(confirm);
+    await waitFor(() => expect(mocks.push).toHaveBeenCalledWith("/test-workspace/projects"));
+    expect(mocks.deleteProject).toHaveBeenCalledTimes(2);
+  });
+
+  it("offers deletion to the project creator", () => {
+    mocks.role = "member";
+    PROJECT.creator_type = "member";
+    PROJECT.creator_id = "user-1";
+    try {
+      renderProjectDetail();
+      expect(screen.getByRole("button", { name: "Delete project" })).toBeInTheDocument();
+    } finally {
+      delete PROJECT.creator_type;
+      delete PROJECT.creator_id;
+    }
+  });
+
+  it("does not offer project deletion to regular members with an unknown creator", () => {
     mocks.role = "member";
 
     renderProjectDetail();

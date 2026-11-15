@@ -51,11 +51,11 @@ func chooseCopilotInvocation(execName, lookedUp string, args []string, logger *s
 //     is re-tokenised — the same defect already documented for cursor-agent
 //     in buildCursorArgs (#5649).
 //
-// Copilot has no stdin prompt channel (the escape hatch cursor-agent offers),
-// so the prompt must stay on the command line and the launchers have to go.
-// Spawning copilot.exe directly leaves exactly one hop, Go -> native binary,
-// and Go's syscall.EscapeArg is the exact inverse of the CRT parsing the
-// binary uses.
+// The task prompt itself now rides stdin (see buildCopilotArgs, #9362), but
+// model ids, session ids and custom_args still travel on argv, so the native
+// binary stays preferred. Spawning copilot.exe directly leaves exactly one
+// hop, Go -> native binary, and Go's syscall.EscapeArg is the exact inverse of
+// the CRT parsing the binary uses.
 //
 // Layout when installed via `npm install -g @github/copilot` (verified
 // against @github/copilot 1.0.77):

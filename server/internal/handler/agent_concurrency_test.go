@@ -159,3 +159,53 @@ func TestUpdateAgent_MaxConcurrentTasksBoundsAndOmission(t *testing.T) {
 		}
 	})
 }
+
+// Raising an agent's cap can make its queued work claimable right away, so the
+// update must nudge the agent's runtime like a runtime cap change does,
+// instead of leaving the queue to the daemon's next poll (#10455). Updates
+// that leave the cap alone send nothing.
+func TestUpdateAgent_MaxConcurrentTasksChangeWakesRuntime(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	agentID := createHandlerTestAgent(t, "concurrency-wakeup", nil)
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE agent SET max_concurrent_tasks = 2 WHERE id = $1`, agentID,
+	); err != nil {
+		t.Fatalf("setup: set cap: %v", err)
+	}
+
+	recorder := &terminalWakeupRecorder{}
+	previous := testHandler.TaskService.Wakeup
+	testHandler.TaskService.Wakeup = recorder
+	t.Cleanup(func() { testHandler.TaskService.Wakeup = previous })
+
+	update := func(body map[string]any) {
+		t.Helper()
+		w := httptest.NewRecorder()
+		testHandler.UpdateAgent(w, withURLParam(
+			newRequest(http.MethodPut, "/api/agents/"+agentID, body), "id", agentID))
+		if w.Code != http.StatusOK {
+			t.Fatalf("UpdateAgent(%v): expected 200, got %d: %s", body, w.Code, w.Body.String())
+		}
+	}
+
+	update(map[string]any{"max_concurrent_tasks": 4})
+	if got := len(recorder.calls); got != 1 {
+		t.Fatalf("raising the cap: expected 1 runtime wakeup, got %d", got)
+	}
+	if recorder.calls[0].runtimeID != handlerTestRuntimeID(t) {
+		t.Fatalf("wakeup runtime = %q, want the agent's runtime %q", recorder.calls[0].runtimeID, handlerTestRuntimeID(t))
+	}
+	if recorder.calls[0].taskID != "" {
+		t.Fatalf("a capacity wakeup names no task, got %q", recorder.calls[0].taskID)
+	}
+
+	recorder.calls = nil
+	update(map[string]any{"max_concurrent_tasks": 4})
+	update(map[string]any{"description": "unrelated edit"})
+	if got := len(recorder.calls); got != 0 {
+		t.Fatalf("updates that leave the cap unchanged: expected no wakeup, got %d", got)
+	}
+}

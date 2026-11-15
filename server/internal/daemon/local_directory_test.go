@@ -422,8 +422,9 @@ func TestLocalPathLockerSerializes(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		rel, err := locker.Acquire(context.Background(), path, "task-2", func(holder string) {
-			waitCalls.Add(1)
+			// Store before Add: the main goroutine polls waitCalls, then reads sawHolder.
 			sawHolder.Store(holder)
+			waitCalls.Add(1)
 		})
 		if err != nil {
 			done <- err

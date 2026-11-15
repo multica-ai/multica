@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import type { QuickAction } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { QuickActionsSection } from "./quick-actions-section";
@@ -18,13 +18,20 @@ import { QuickActionsSection } from "./quick-actions-section";
 
 const runMock = vi.fn();
 let listData: QuickAction[] = [];
+let loading = false;
+let queryError = false;
+let workspaceId = "ws-1";
+const refetch = vi.fn();
 
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: () => ({ data: listData, isLoading: false }),
+  useQuery: () => ({ data: listData, isLoading: loading, isError: queryError, refetch }),
 }));
 
+const settingsPush = vi.hoisted(() => vi.fn());
+vi.mock("../../navigation", () => ({ useNavigation: () => ({ push: settingsPush }) }));
 vi.mock("@multica/core/paths", () => ({
-  useCurrentWorkspace: () => ({ id: "ws-1" }),
+  useWorkspacePaths: () => ({ settings: () => "/acme/settings" }),
+  useCurrentWorkspace: () => workspaceId ? ({ id: workspaceId }) : null,
 }));
 
 vi.mock("@multica/core/quick-actions", () => ({
@@ -85,21 +92,56 @@ function outcome(status: string) {
 describe("QuickActionsSection", () => {
   beforeEach(() => {
     runMock.mockReset();
+    loading = false;
+    queryError = false;
+    workspaceId = "ws-1";
+    refetch.mockReset();
     toastCalls.length = 0;
     reasonCode = undefined;
     listData = [action()];
   });
 
-  it("renders nothing when the workspace has no actions", () => {
+  it("hides during loading and outside a workspace", () => {
+    loading = true;
+    const view = renderWithI18n(<QuickActionsSection issueId="i-1" />);
+    expect(screen.queryByText("Quick Actions")).not.toBeInTheDocument();
+    loading = false;
+    workspaceId = "";
+    view.rerender(<QuickActionsSection issueId="i-1" />);
+    expect(screen.queryByText("Quick Actions")).not.toBeInTheDocument();
+  });
+
+  it("retries a failed catalog query and removes recovery after success", () => {
     listData = [];
-    const { container } = renderWithI18n(<QuickActionsSection issueId="i-1" />);
-    expect(container).toBeEmptyDOMElement();
+    queryError = true;
+    const view = renderWithI18n(<QuickActionsSection issueId="i-1" />);
+    fireEvent.click(screen.getByRole("button", { name: "Could not load. Retry" }));
+    expect(refetch).toHaveBeenCalledOnce();
+    queryError = false;
+    listData = [action()];
+    view.rerender(<QuickActionsSection issueId="i-1" />);
+    expect(screen.queryByRole("button", { name: "Could not load. Retry" })).not.toBeInTheDocument();
+    expect(screen.getByText("Code Review")).toBeVisible();
+  });
+
+  it("keeps the header free of create and settings buttons", () => {
+    renderWithI18n(<QuickActionsSection issueId="i-1" />);
+    expect(screen.getByRole("button", { name: "Quick Actions 1" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "New quick action" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Quick Actions options" })).not.toBeInTheDocument();
+  });
+
+  it("renders nothing before the workspace has any actions", () => {
+    listData = [];
+    renderWithI18n(<QuickActionsSection issueId="i-1" />);
+    expect(screen.queryByText("Quick Actions")).not.toBeInTheDocument();
   });
 
   it("hides archived actions even if the server returned them", () => {
     listData = [action({ status: "archived" })];
-    const { container } = renderWithI18n(<QuickActionsSection issueId="i-1" />);
-    expect(container).toBeEmptyDOMElement();
+    renderWithI18n(<QuickActionsSection issueId="i-1" />);
+    expect(screen.queryByText("Quick Actions")).not.toBeInTheDocument();
+    expect(screen.queryByText("Code Review")).not.toBeInTheDocument();
   });
 
   it("runs immediately on click when the action takes no input", async () => {
@@ -187,7 +229,7 @@ describe("QuickActionsSection", () => {
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
   });
 
-  it("collapses everything past the sidebar limit behind More", () => {
+  it("shows more actions from a text row below the list instead of a header icon", () => {
     listData = [
       action({ id: "a", name: "One" }),
       action({ id: "b", name: "Two" }),
@@ -195,13 +237,25 @@ describe("QuickActionsSection", () => {
       action({ id: "d", name: "Four" }),
       action({ id: "e", name: "Five" }),
       action({ id: "f", name: "Six" }),
+      action({ id: "archived", name: "Archived", status: "archived" }),
     ];
     renderWithI18n(<QuickActionsSection issueId="i-1" />);
 
+    expect(screen.getByRole("button", { name: /Quick actions 6/i })).toBeVisible();
+    expect(screen.queryByText("Archived")).not.toBeInTheDocument();
     expect(screen.getByText("Five")).toBeInTheDocument();
     expect(screen.queryByText("Six")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByText(/Show 1 more/i));
+    const disclosure = screen.getByRole("button", { name: /Quick actions 6/i });
+    const more = screen.getByRole("button", { name: "Show 1 more" });
+    expect(more).toHaveTextContent("Show 1 more");
+    expect(within(disclosure.parentElement!).queryByRole("button", { name: "Show 1 more" })).not.toBeInTheDocument();
+    expect(more.compareDocumentPosition(screen.getByText("Five")) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+    fireEvent.click(more);
     expect(screen.getByText("Six")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Show 1 more" })).not.toBeInTheDocument();
+    fireEvent.click(disclosure);
+    expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("button", { name: /Quick actions 6/i })).toBeVisible();
   });
 });

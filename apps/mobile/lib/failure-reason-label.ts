@@ -37,6 +37,7 @@ export const REASONS = new Set([
   "environment_prepare_failed",
   "invalid_task_identity",
   "runtime_access_denied",
+  "runtime_access_revoked",
 
   // Agent process side — provider.
   "agent_error.provider_auth_or_access",

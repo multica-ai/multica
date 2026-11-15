@@ -12,6 +12,12 @@ type ConnectedApp struct {
 	ServerName  string `json:"server_name"`
 	ToolkitSlug string `json:"toolkit_slug"`
 	ToolkitName string `json:"toolkit_name,omitempty"`
+	// AccountScope, Level and AccountStatus describe apps served by the Multica
+	// gateway: whose account a call acts as, what the agent may do, and whether
+	// that account is connected yet ("connected" / "not_connected").
+	AccountScope  string `json:"account_scope,omitempty"`
+	Level         string `json:"level,omitempty"`
+	AccountStatus string `json:"account_status,omitempty"`
 }
 
 // MCPOverlayResult carries both the secret-bearing MCP config overlay and the

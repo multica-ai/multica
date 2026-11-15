@@ -4,6 +4,8 @@ description: "@-mention an agent in an issue comment, or keep replying, to have 
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { MentionDemo } from "@/components/demos/mention-demo";
+import { SteerDemo } from "@/components/demos/steer-demo";
 
 @-mention an agent in a comment when you want it to look at a new piece of information, answer a question, or help the current assignee. The comment becomes the starting point for the run; the issue's assignee and status stay unchanged.
 
@@ -27,9 +29,9 @@ After you pick an agent or squad in the comment editor, a trigger preview appear
 - whether each target comes from a direct @-mention, the issue assignee, or a squad leader;
 - whether a target is unavailable, or you lack permission to run it.
 
-Unticking an agent skips this one trigger only — you don't need to delete its name from the comment, and the agent's Access is not changed.
+Unticking an agent skips this one trigger only. You don't need to delete its name from the comment, and the agent's Access is not changed.
 
-![Trigger preview before sending: lists the agents that will start working once the comment is sent](/images/docs/mention-trigger-preview.webp)
+<MentionDemo />
 
 Once the comment is posted, an online runtime usually claims the run right away; if the runtime is offline, the run waits in the queue.
 
@@ -45,15 +47,37 @@ When a comment explicitly @-mentions other targets (including members), the assi
 
 Replies stay with the target agent even while its runtime is offline or busy. Multica does not automatically start the issue assignee after a timeout. To involve another agent, explicitly @-mention it.
 
+## Steer a running agent
+
+When an agent is halfway through and heading the wrong way, you don't have to stop it and start over. Write the correction in the comment box and send it: the message joins its current run, the agent reads it once the current step ends, and it carries on with the original task in the new direction.
+
+<SteerDemo />
+
+While the recipient is running, a label under the comment box says how the message will be delivered. Click it to change that:
+
+| Option | What happens |
+|---|---|
+| Add to current run | Read after the current step; the agent keeps working on the original task. |
+| Start after this run | Doesn't interrupt the current run; handled in a new run once it ends. |
+| Stop and start over | Stops the current run now and starts over from this message. |
+| Won't start this time | Posts the comment without triggering this agent. |
+
+After you send, the comment shows "Waiting for … to read it", which changes to "Read by …" once the agent has read it. The step list in the execution log also marks the step where it was read. If delivery fails, you can retry or send it as a new run instead.
+
+- Only text can join a running run. A message with attachments is handled after the run ends.
+- Steering needs support from the agent's AI coding tool. Without it, **Add to current run** isn't offered.
+- Set the default in **Settings → Preferences** under **When replying to a running agent**. You can still change it for any message before sending.
+- In chat, **Steer** on a queued message works differently: it stops the current reply first; see [Chat](/chat#send-messages-while-a-reply-is-in-progress).
+
 ## Coalescing consecutive comments
 
-When the same agent already has a waiting run on the issue, new consecutive comments merge into the pending run; if the agent is already running, later comments wait for the current run to finish and merge into a single follow-up run. You can keep adding information without waiting for the agent to reply.
+When the same agent already has a waiting run on the issue, new comments merge into that pending run and are handled together when it starts. If the agent is already running, each comment is handled the way you chose in the comment box; see the previous section. You can keep adding information without waiting for the agent to reply.
 
 When one comment @-mentions several different agents, each agent gets its own run; multiple mentions resolving to the same agent keep only one.
 
 ## Comments that don't trigger agents
 
-Two ways:
+There are two ways:
 
 - Start the comment with `/note`: it's posted as a note between members and triggers no agent.
 - Use `@all`: it notifies every workspace member and switches off this comment's automatic trigger for the assignee.
@@ -70,7 +94,7 @@ An @-mention cannot bypass an agent's Access. When you lack permission to run th
 
 ## Agents mentioning each other
 
-Agents can @-mention other agents in their replies. When A @-mentions B and B @-mentions A back, the system merges duplicate runs at the same moment, but it does not decide when the collaboration should end — write the stop condition into the agent instructions.
+Agents can @-mention other agents in their replies. When A @-mentions B and B @-mentions A back, the system merges duplicate runs at the same moment, but it does not decide whether the collaboration should end. Write when to stop into the agent instructions.
 
 ## Next steps
 

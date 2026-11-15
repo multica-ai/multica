@@ -11,6 +11,7 @@ out
 build
 bin
 dist-electron
+storybook-static
 *.tsbuildinfo
 # ...except electron-builder's source resources dir, which holds tracked
 # config files (entitlements, icons) — not build output.
@@ -54,7 +55,8 @@ apps/web/test-results/
 # context (agent workspace)
 .context
 .agent_context/
-.multica/
+.multica/*
+!.multica/environments.toml
 
 # local settings
 .claude/

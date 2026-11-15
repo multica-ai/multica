@@ -85,4 +85,59 @@ describe("DynamicBlock", () => {
     renderBlock();
     expect(screen.queryByRole("button", { name: "Fullscreen" })).toBeNull();
   });
+
+  // Regression: a reported bodyHeight must decide the collapse in the same
+  // render it arrives. The clamp used to come from a measure-after-paint
+  // observer, so a tall document painted unclamped for a frame and then
+  // folded back — the height shock virtualized timelines render as flicker.
+  it("decides the collapse from a reported bodyHeight in the same render", () => {
+    const { container } = render(
+      <DynamicBlock
+        kind="html"
+        title="Latency"
+        source="<p>chart</p>"
+        bodyHeight={3000}
+        preview={({ collapsed }) => (
+          <div data-testid="content" style={{ height: collapsed ? 480 : 3000 }}>
+            chart
+          </div>
+        )}
+      />,
+    );
+
+    const body = container.querySelector<HTMLElement>("[data-collapsed]");
+    expect(body).not.toBeNull();
+    expect(body!.style.maxHeight).toBe("480px");
+    // The preview laid out at the clamp, not at the full height.
+    expect(screen.getByTestId("content").style.height).toBe("480px");
+  });
+
+  // Regression: enlarging must not lift the inline clamp. The enlarged dialog
+  // is fixed-position and fills itself, but the in-place footprint has to keep
+  // holding the clamp — dropping the clip for the enlargement re-expanded the
+  // timeline for as long as the dialog was open, the same height shock this
+  // frame exists to prevent.
+  it("keeps the inline clamp while fullscreen", () => {
+    const { container } = render(
+      <DynamicBlock
+        kind="html"
+        title="Latency"
+        source="<p>chart</p>"
+        fullscreen
+        bodyHeight={3000}
+        preview={({ collapsed }) => (
+          <div data-testid="content" style={{ height: collapsed ? 480 : 3000 }}>
+            chart
+          </div>
+        )}
+      />,
+    );
+
+    const body = container.querySelector<HTMLElement>("[data-collapsed]");
+    expect(body).not.toBeNull();
+    expect(body!.style.maxHeight).toBe("480px");
+    // The in-place footprint stays at the clamp, never at the full height.
+    expect(screen.getByTestId("content").style.height).toBe("480px");
+    expect(screen.getByRole("button", { name: "Show all" })).toBeTruthy();
+  });
 });

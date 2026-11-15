@@ -14,11 +14,12 @@ import {
   Server,
   Trash2,
   X,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { truncateWithEllipsis } from "@multica/core/utils";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { Button } from "@multica/ui/components/ui/button";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import {
   Dialog,
   DialogContent,
@@ -245,7 +246,7 @@ export function DaemonPanel({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="flex h-[85vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl"
+        className="flex h-[85%] flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl"
         showCloseButton={false}
       >
         {/* Header */}
@@ -257,14 +258,16 @@ export function DaemonPanel({
             </DialogTitle>
             <ContextBadge status={status} runtimeCount={runtimeCount} />
           </div>
-          <button
-            type="button"
-            onClick={() => onOpenChange(false)}
-            aria-label={t(($) => $.desktop.daemon.close)}
-            className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <X className="size-4" />
-          </button>
+          <TooltipHint label={t(($) => $.desktop.daemon.close)} side="bottom">
+            <button
+              type="button"
+              onClick={() => onOpenChange(false)}
+              aria-label={t(($) => $.desktop.daemon.close)}
+              className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <X className="size-4" />
+            </button>
+          </TooltipHint>
         </div>
 
         {/* Toolbar */}

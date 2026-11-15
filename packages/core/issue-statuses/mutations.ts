@@ -11,33 +11,11 @@ import type {
 } from "../types";
 
 /**
- * Catalog mutations (MUL-6243).
- *
- * No mutation invalidates the catalog on success. The refresh is the
- * `issue_status:changed` realtime event, which reaches the writing tab as well
- * as every other one, so a catalog edit costs each client exactly ONE catalog
- * read. Invalidating here too would make the admin who did the writing the
- * only client that reads it twice. (MUL-6458)
- *
- * That refetch is what CONVERGES the cache, and it is ordered correctly by
- * construction: the event is published after the write commits, so the refetch
- * it triggers can only read post-commit state.
- *
- * Which is why no mutation writes its RESPONSE BODY into the cache. A response
- * is authoritative for the row as of that write, not as of now — and the two
- * channels are independent, so a slow response can land after a refetch that
- * already picked up someone else's later write and quietly roll the catalog
- * back to a state nothing will correct. Every local write below is instead
- * something that stays true no matter what else has landed in between:
- *
- * - an optimistic field patch (rename, recolor, reorder),
- * - an insert of a row nobody else can have seen yet (create),
- * - a monotonic flag (archive — there is no unarchive endpoint, and the server
- *   refuses to edit an archived row, so setting it can never be stale).
- *
- * On FAILURE the invalidate stays, and it is not symmetry for its own sake: a
- * 409 usually means this client's catalog is the stale thing — someone else
- * took the name, or archived the row that was being dragged.
+ * Catalog edits converge through the post-commit issue_status:changed event.
+ * Avoid a duplicate success invalidation or writing a response snapshot that can
+ * arrive after a newer refetch. Local patches must remain valid across that race:
+ * optimistic fields, newly created rows, or monotonic archive flags.
+ * Invalidate failures because a conflict may reveal stale local catalog state.
  */
 
 function useCatalogCache() {

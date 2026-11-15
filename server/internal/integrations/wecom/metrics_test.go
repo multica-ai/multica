@@ -44,14 +44,15 @@ func (m *countingMetrics) get(k string) int {
 	return m.counts[k]
 }
 
-func (m *countingMetrics) RecordConnectFailure()       { m.bump("connect_failure") }
-func (m *countingMetrics) RecordAuthFailure()          { m.bump("auth_failure") }
-func (m *countingMetrics) RecordCallbackQueued()       { m.bump("callback_queued") }
-func (m *countingMetrics) RecordCallbackQueueBlocked() { m.bump("callback_blocked") }
-func (m *countingMetrics) RecordStreamOpened()         { m.bump("stream_opened") }
-func (m *countingMetrics) RecordStreamFinished()       { m.bump("stream_finished") }
-func (m *countingMetrics) RecordStreamFellBack()       { m.bump("stream_fell_back") }
-func (m *countingMetrics) RecordOutboundDelivered()    { m.bump("outbound_delivered") }
+func (m *countingMetrics) RecordConnectFailure()            { m.bump("connect_failure") }
+func (m *countingMetrics) RecordAuthFailure()               { m.bump("auth_failure") }
+func (m *countingMetrics) RecordCallbackQueued()            { m.bump("callback_queued") }
+func (m *countingMetrics) RecordCallbackQueueBlocked()      { m.bump("callback_blocked") }
+func (m *countingMetrics) RecordStreamOpened()              { m.bump("stream_opened") }
+func (m *countingMetrics) RecordStreamFinished()            { m.bump("stream_finished") }
+func (m *countingMetrics) RecordStreamFellBack()            { m.bump("stream_fell_back") }
+func (m *countingMetrics) RecordMediaFailure(reason string) { m.bump("media_failure:" + reason) }
+func (m *countingMetrics) RecordOutboundDelivered()         { m.bump("outbound_delivered") }
 func (m *countingMetrics) RecordOutboundDropped(reason string) {
 	m.bump("outbound_dropped")
 	m.bump("outbound_dropped:" + reason)

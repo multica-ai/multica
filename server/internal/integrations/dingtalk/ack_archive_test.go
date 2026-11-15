@@ -21,7 +21,7 @@ func TestOutboundArchiveClearsPendingReceiptsOnlyForItsAgent(t *testing.T) {
 	sid := sessionUUID(92)
 	add := func(inst engine.ResolvedInstallation, name string, input byte, session byte) {
 		n.client.rememberReplySource(inst.ID, sessionUUID(input), sessionUUID(session), groupReactionMessage(name))
-		n.OnIngested(context.Background(), inst, groupReactionMessage(name), sessionUUID(session))
+		n.OnIngested(context.Background(), inst, groupReactionMessage(name), sessionUUID(session), sessionUUID(session))
 	}
 	add(inst, "pending", 1, 92)
 	add(inst, "another-session", 2, 93)
@@ -35,7 +35,7 @@ func TestOutboundArchiveClearsPendingReceiptsOnlyForItsAgent(t *testing.T) {
 	bus.Publish(e)
 	// A repeated hook for an archived input stays retired, even after restore.
 	bus.Publish(events.Event{Type: protocol.EventAgentRestored, Payload: e.Payload})
-	n.OnIngested(context.Background(), inst, groupReactionMessage("pending"), sid)
+	n.OnIngested(context.Background(), inst, groupReactionMessage("pending"), sid, sid)
 	add(inst, "after-restore", 4, 92)
 	want := []string{"add:pending:" + emotionAcknowledged, "add:another-session:" + emotionAcknowledged, "add:other-agent:" + emotionAcknowledged}
 	if !slices.Equal((*actions)[:3], want) {
@@ -72,7 +72,10 @@ func TestOutboundArchiveRecallsAddThatFinishesAfterArchive(t *testing.T) {
 		mu.Unlock()
 		return nil
 	}
-	go func() { defer close(done); n.OnIngested(context.Background(), inst, msg, sessionUUID(92)) }()
+	go func() {
+		defer close(done)
+		n.OnIngested(context.Background(), inst, msg, sessionUUID(92), sessionUUID(92))
+	}()
 	select {
 	case <-started:
 	case <-time.After(time.Second):
@@ -95,7 +98,7 @@ func TestOutboundArchiveRecallsAddThatFinishesAfterArchive(t *testing.T) {
 func TestOutboundArchiveIgnoresInvalidPayload(t *testing.T) {
 	for _, payload := range []any{nil, make(chan int), map[string]any{"agent": "wrong type"}, map[string]any{"agent": map[string]any{"id": "not-a-uuid"}}} {
 		n, actions := newTestAckWithMessageIDs(time.Now)
-		n.OnIngested(context.Background(), engine.ResolvedInstallation{AgentID: sessionUUID(80)}, groupReactionMessage("pending"), sessionUUID(92))
+		n.OnIngested(context.Background(), engine.ResolvedInstallation{AgentID: sessionUUID(80)}, groupReactionMessage("pending"), sessionUUID(92), sessionUUID(92))
 		NewOutbound(nil, nil, n.client, n, nil).handleAgentArchived(events.Event{Payload: payload})
 		if !slices.Equal(*actions, []string{"add:pending:" + emotionAcknowledged}) {
 			t.Fatalf("invalid archive cleared receipt: %v", *actions)
@@ -106,7 +109,7 @@ func TestOutboundArchiveIgnoresInvalidPayload(t *testing.T) {
 func TestOutboundArchiveWithoutNotifierOrAgentIsNoOp(t *testing.T) {
 	NewOutbound(nil, nil, nil, nil, nil).handleAgentArchived(events.Event{})
 	n, actions := newTestAckWithMessageIDs(time.Now)
-	n.OnIngested(context.Background(), engine.ResolvedInstallation{}, groupReactionMessage("pending"), sessionUUID(92))
+	n.OnIngested(context.Background(), engine.ResolvedInstallation{}, groupReactionMessage("pending"), sessionUUID(92), sessionUUID(92))
 	n.onAgentArchived(context.Background(), engine.ResolvedInstallation{}.AgentID)
 	if !slices.Equal(*actions, []string{"add:pending:" + emotionAcknowledged}) {
 		t.Fatalf("missing archive owner cleared receipt: %v", *actions)

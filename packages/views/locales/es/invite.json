@@ -1,0 +1,35 @@
+{
+  "header": {
+    "back": "Volver",
+    "log_out": "Cerrar sesión"
+  },
+  "list": {
+    "title": "Has sido invitado",
+    "subtitle": "Al unirte, entrarás en ese espacio de trabajo. Las demás invitaciones seguirán pendientes.",
+    "workspace_fallback": "Espacio de trabajo",
+    "inviter_fallback": "Alguien",
+    "invited_admin": "{{inviter}} te invitó como administrador",
+    "invited_member": "{{inviter}} te invitó como miembro",
+    "accept": "Unirse",
+    "joining": "Uniéndose...",
+    "decline": "Rechazar",
+    "declining": "Rechazando...",
+    "skip": "Omitir y configurar mi propio espacio de trabajo"
+  },
+  "empty": {
+    "title": "Sin invitaciones pendientes",
+    "hint": "Continúa para configurar tu propio espacio de trabajo.",
+    "continue": "Continuar a la configuración",
+    "go_to_dashboard": "Ir al panel"
+  },
+  "linked": {
+    "not_found": "Es posible que esta invitación haya caducado, se haya revocado o no pertenezca a tu cuenta.",
+    "accepted": "Esta invitación ya se ha aceptado.",
+    "declined": "Esta invitación ya se ha rechazado.",
+    "expired": "Esta invitación ha caducado."
+  },
+  "errors": {
+    "accept_failed": "No se ha podido aceptar la invitación",
+    "decline_failed": "No se ha podido rechazar la invitación"
+  }
+}

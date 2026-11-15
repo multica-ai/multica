@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Loader2, RotateCcw } from "lucide-react";
+import { Loader2, RotateCcw } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { api, dispatchReasonCode } from "@multica/core/api";
 import type { AgentTask } from "@multica/core/types";

@@ -212,7 +212,7 @@ describe("SourceBackfillModal", () => {
     await waitFor(() => {
       expect(mockListIssues).toHaveBeenCalledWith({
         workspace_id: "ws-1",
-        statuses: ["done"],
+        status_categories: ["done"],
         assignee_types: ["agent", "squad"],
         limit: 1,
       });
