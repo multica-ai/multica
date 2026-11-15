@@ -6,7 +6,7 @@
  * the title a user sees in the mobile inbox MUST match what they see on
  * web for the same item. When the web version changes, sync this file.
  */
-import type { InboxItem } from "@multica/core/types";
+import type { InboxItem, TimelineEntry } from "@multica/core/types";
 import { i18n } from "@/lib/i18n/singleton";
 
 function formatResetAt(value: string | undefined): string {
@@ -136,6 +136,25 @@ export function getInboxNavigationTarget(
 }
 
 /**
+ * The timeline row a deep-link `highlight` lands on. A failed run's
+ * notification names its task; mobile renders no run rows, so the run shows
+ * only as the failure notice it posted, and the link lands there. A run
+ * that posted nothing leaves the id unmatched, so nothing is highlighted.
+ */
+export function resolveTimelineHighlight(
+  entries: readonly TimelineEntry[],
+  highlight: string,
+): string {
+  if (entries.some((entry) => entry.id === highlight)) return highlight;
+  const posted = entries.filter(
+    (entry) => entry.type === "comment" && entry.source_task_id === highlight,
+  );
+  return (
+    posted.find((entry) => entry.comment_type === "system") ?? posted.at(-1)
+  )?.id ?? highlight;
+}
+
+/**
  * Deduplicate inbox items by issue_id (Linear-style: one entry per issue).
  *
  * Mirrors packages/core/inbox/queries.ts deduplicateInboxItems. **MUST stay
@@ -153,7 +172,8 @@ export function getInboxNavigationTarget(
  *      at, as web's `withCommentAnchor` does: unread, the oldest unread
  *      comment or failed run, a reaction only when nothing else unread has
  *      one, and none when no unread notification has an entry; read, the
- *      newest notification's entry. An app request row keeps its own target.
+ *      newest notification's entry. Mobile renders no app requests, so
+ *      unlike web an app request row gets no target of its own.
  *   5. Sort the result newest-first.
  */
 export function deduplicateInboxItems(items: InboxItem[]): InboxItem[] {
@@ -174,10 +194,6 @@ export function deduplicateInboxItems(items: InboxItem[]): InboxItem[] {
     const newest = group[0];
     if (!newest) continue;
 
-    if (newest.type.startsWith("app_") && newest.details?.request_id) {
-      merged.push(newest);
-      continue;
-    }
     const target = (item: InboxItem) =>
       item.details?.comment_id ||
       (item.type === "task_failed" ? item.details?.task_id : undefined) ||

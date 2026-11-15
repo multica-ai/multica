@@ -39,6 +39,7 @@ import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
 import { useT } from "@/lib/i18n";
 import { useCommentSelectStore } from "@/data/comment-select-store";
+import { resolveTimelineHighlight } from "@/lib/inbox-display";
 
 interface Props {
   issue: Issue;
@@ -155,10 +156,12 @@ export function TimelineList({
     if (lastStampRef.current === stamp) return;
     lastStampRef.current = stamp;
 
-    setHighlightedId(highlightCommentId);
+    setHighlightedId(resolveTimelineHighlight(entries ?? [], highlightCommentId));
 
     const fade = setTimeout(() => setHighlightedId(null), HIGHLIGHT_HOLD_MS);
     return () => clearTimeout(fade);
+    // `entries` is read once per stamp, when the rows first exist.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [highlightCommentId, highlightNonce, data.length]);
 
   // ── New-comment-while-reading chip ────────────────────────────────────

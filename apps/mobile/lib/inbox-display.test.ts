@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { InboxItem } from "@multica/core/types";
+import type { InboxItem, TimelineEntry } from "@multica/core/types";
 import {
   deduplicateInboxItems,
   getAutopilotQuotaBody,
   getInboxDisplayTitle,
   getInboxNavigationTarget,
   getInboxNoticeBody,
+  resolveTimelineHighlight,
 } from "./inbox-display";
 
 function item(overrides: Partial<InboxItem>): InboxItem {
@@ -94,12 +95,42 @@ describe("deduplicateInboxItems", () => {
     expect(merged[0]?.details?.comment_id).toBe("comment-2");
   });
 
-  it("keeps an app request row on its own request", () => {
-    const merged = deduplicateInboxItems([
-      item({ id: "comment", created_at: "2026-06-15T08:00:00Z", details: { comment_id: "comment-1" } }),
+  it("gives an unread app request no target, since mobile renders no requests", () => {
+    const [row] = deduplicateInboxItems([
+      item({ id: "comment", read: true, created_at: "2026-06-15T08:00:00Z", details: { comment_id: "comment-1" } }),
       item({ id: "app", type: "app_action_requested", created_at: "2026-06-15T08:02:00Z", details: { request_id: "request-1" } }),
     ]);
-    expect(merged[0]?.details).toEqual({ request_id: "request-1" });
+    expect(getInboxNavigationTarget(row!, "acme", "tap")?.params).toMatchObject({ id: "issue-1", highlight: undefined });
+  });
+
+  it("navigates a failed run's notification with its task id", () => {
+    const [row] = deduplicateInboxItems([
+      item({ id: "failed", type: "task_failed", created_at: "2026-06-15T08:02:00Z", details: { task_id: "task-1" } }),
+    ]);
+    expect(getInboxNavigationTarget(row!, "acme", "tap")?.params).toMatchObject({ highlight: "task-1" });
+  });
+});
+
+describe("resolveTimelineHighlight", () => {
+  const comment = (overrides: Partial<TimelineEntry>): TimelineEntry => ({
+    type: "comment", id: "comment-1", actor_type: "member", actor_id: "user-1", content: "",
+    parent_id: null, created_at: "2026-06-15T08:00:00Z", updated_at: "2026-06-15T08:00:00Z", ...overrides,
+  });
+
+  it("keeps an id the timeline has", () => {
+    expect(resolveTimelineHighlight([comment({ id: "comment-1" })], "comment-1")).toBe("comment-1");
+  });
+
+  it("lands a task id on the failure notice its run posted", () => {
+    const entries = [
+      comment({ id: "agent-reply", actor_type: "agent", source_task_id: "task-1", comment_type: "comment" }),
+      comment({ id: "notice", actor_type: "agent", source_task_id: "task-1", comment_type: "system" }),
+    ];
+    expect(resolveTimelineHighlight(entries, "task-1")).toBe("notice");
+  });
+
+  it("leaves a task id with nothing posted unmatched", () => {
+    expect(resolveTimelineHighlight([comment({ id: "comment-1" })], "task-1")).toBe("task-1");
   });
 });
 
