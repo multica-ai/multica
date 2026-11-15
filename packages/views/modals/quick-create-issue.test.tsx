@@ -1085,6 +1085,14 @@ describe("AgentCreatePanel", () => {
     expect(screen.getByTestId("project-picker")).toHaveTextContent("Project proj-1");
   });
 
+  it("opens without a project when asked for none, over an unfinished draft's project", () => {
+    mockIssueDraftStore.draft.shared.projectId = "proj-1";
+
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn(), data: { project_id: null } });
+
+    expect(screen.queryByText("Project proj-1")).toBeNull();
+  });
+
   // When the modal was opened from "Add sub issue" on an existing issue,
   // the manual panel transfers parent_issue_id through the `data` payload
   // on switch-to-agent. The agent panel must forward that UUID to the

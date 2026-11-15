@@ -246,7 +246,7 @@ describe("ProjectsSection", () => {
     renderSection();
     openCreateIssue.mockClear();
     fireEvent.click(screen.getByRole("button", { name: "New issue without a project" }));
-    expect(openCreateIssue).toHaveBeenCalledWith();
+    expect(openCreateIssue).toHaveBeenCalledWith({ project_id: null });
   });
 
   it("lists No project first, and saves where it is dragged", async () => {

@@ -351,7 +351,8 @@ function NoProjectTreeItem({
               size="icon-xs"
               className="absolute -right-2 z-10 text-muted-foreground opacity-0 transition-opacity group-focus-within/row:opacity-100 group-hover/row:opacity-100 focus-visible:opacity-100 [@media(pointer:coarse)]:opacity-100"
               onPointerDown={(event) => event.stopPropagation()}
-              onClick={() => openCreateIssueWithPreference()}
+              // Explicit: an unfinished draft's project must not fill in.
+              onClick={() => openCreateIssueWithPreference({ project_id: null })}
             >
               <Plus />
             </IconButton>
