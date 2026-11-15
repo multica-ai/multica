@@ -251,3 +251,95 @@ func TestWorkspaceFlagPinsResolvedSlugAcrossPathAndHeader(t *testing.T) {
 		t.Fatalf("workspace list requests = %d, want one per invocation", lists)
 	}
 }
+
+func workspaceFlagRootForTest(serverURL string) *cobra.Command {
+	root := &cobra.Command{Use: "multica", SilenceUsage: true, SilenceErrors: true}
+	root.PersistentFlags().String("workspace", "", "")
+	root.PersistentFlags().String("workspace-id", "", "")
+	root.PersistentFlags().String("server-url", serverURL, "")
+	_ = root.PersistentFlags().Set("server-url", serverURL)
+	root.PersistentFlags().String("profile", "", "")
+	return root
+}
+
+func TestWorkspaceUpdateRejectsPositionalWithWorkspaceFlag(t *testing.T) {
+	for _, target := range []string{bureauWorkspaceID, "bureau"} {
+		t.Run(target, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			clearDaemonContextEnv(t)
+			t.Setenv("MULTICA_TOKEN", "test-token")
+			requests := 0
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				if r.URL.Path == "/api/workspaces" {
+					_ = json.NewEncoder(w).Encode([]map[string]any{{"id": digLabWorkspaceID, "slug": "bureau"}})
+					return
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{"id": bureauWorkspaceID})
+			}))
+			defer srv.Close()
+			root := workspaceFlagRootForTest(srv.URL)
+			workspace := &cobra.Command{Use: "workspace"}
+			update := &cobra.Command{Use: "update", RunE: runWorkspaceUpdate}
+			update.Flags().String("name", "", "")
+			update.Flags().String("output", "json", "")
+			workspace.AddCommand(update)
+			root.AddCommand(workspace)
+			root.SetArgs([]string{"workspace", "update", target, "--workspace", "bureau", "--name", "must-not-write"})
+			err := root.Execute()
+			if err == nil || !strings.Contains(err.Error(), "--workspace") {
+				t.Errorf("conflicting workspace targets error = %v", err)
+			}
+			if requests != 0 {
+				t.Errorf("requests = %d, want rejection before any lookup or write", requests)
+			}
+		})
+	}
+}
+
+func TestWorkspaceFlagKeepsTaskAuthorityWithoutIdentityMarkers(t *testing.T) {
+	for _, mode := range []string{"token", "config-root", "token-without-workspace"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			clearDaemonContextEnv(t)
+			t.Setenv("MULTICA_TOKEN", "mat_test_token")
+			t.Setenv("MULTICA_WORKSPACE_ID", digLabWorkspaceID)
+			if err := cli.SaveCLIConfig(cli.CLIConfig{WorkspaceID: bureauWorkspaceID}); err != nil {
+				t.Fatal(err)
+			}
+			if mode == "config-root" {
+				t.Setenv(cli.TaskConfigRootEnv, t.TempDir())
+				t.Setenv("MULTICA_TOKEN", "test-token")
+			}
+			if mode == "token-without-workspace" {
+				t.Setenv("MULTICA_WORKSPACE_ID", "")
+			}
+			requests := 0
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				if r.URL.Path != "/api/workspaces/"+digLabWorkspaceID || r.Header.Get("X-Workspace-ID") != digLabWorkspaceID {
+					t.Errorf("task request escaped its workspace: %s header=%q", r.URL.Path, r.Header.Get("X-Workspace-ID"))
+					http.Error(w, "unexpected task request", http.StatusForbidden)
+					return
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{"id": digLabWorkspaceID, "repos": []any{}})
+			}))
+			defer srv.Close()
+			root := workspaceFlagRootForTest(srv.URL)
+			repo := &cobra.Command{Use: "repo"}
+			list := &cobra.Command{Use: "list", RunE: runRepoList}
+			list.Flags().String("output", "json", "")
+			repo.AddCommand(list)
+			root.AddCommand(repo)
+			root.SetArgs([]string{"repo", "list", "--workspace", "bureau"})
+			err := root.Execute()
+			if mode == "token-without-workspace" {
+				if err == nil || requests != 0 {
+					t.Fatalf("missing task workspace: error=%v requests=%d, want failure without profile fallback", err, requests)
+				}
+			} else if err != nil || requests != 1 {
+				t.Fatalf("bound task command: error=%v requests=%d, want one scoped request", err, requests)
+			}
+		})
+	}
+}

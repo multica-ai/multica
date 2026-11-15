@@ -509,7 +509,12 @@ func resolveWorkspaceID(cmd *cobra.Command) string {
 // workspace URL paths and client headers cannot resolve it differently.
 // Daemon tasks retain their existing task-scoped workspace resolution.
 func resolveTargetWorkspaceID(cmd *cobra.Command) (string, error) {
-	if !inDaemonManagedExecutionContext() && cmd.Flags().Changed("workspace") {
+	if inDaemonManagedExecutionContext() ||
+		strings.TrimSpace(os.Getenv(cli.TaskConfigRootEnv)) != "" ||
+		strings.HasPrefix(strings.TrimSpace(os.Getenv("MULTICA_TOKEN")), "mat_") {
+		return cli.FlagOrEnv(cmd, "workspace-id", "MULTICA_WORKSPACE_ID", ""), nil
+	}
+	if cmd.Flags().Changed("workspace") {
 		target := strings.TrimSpace(cmd.Flag("workspace").Value.String())
 		if target == "" {
 			return "", fmt.Errorf("--workspace cannot be empty; pass a workspace id, slug, or id prefix")

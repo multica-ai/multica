@@ -96,6 +96,8 @@ multica issue list --workspace my-team
 
 `--workspace` accepte un UUID complet, un slug ou un préfixe UUID non ambigu d’au moins quatre caractères hexadécimaux. L’ordre de priorité est `--workspace`, `--workspace-id`, `MULTICA_WORKSPACE_ID`, puis l’espace par défaut du profil. Les exécutions d’agents gérées par le daemon conservent l’espace lié à leur tâche ; cette option ne le remplace pas.
 
+Pour les commandes qui acceptent un espace de travail comme argument positionnel, utilisez soit cet argument, soit `--workspace`. Leur combinaison est refusée avant toute recherche ou écriture.
+
 Inviter des membres :
 
 ```bash

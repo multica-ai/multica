@@ -96,6 +96,8 @@ multica issue list --workspace my-team
 
 `--workspace` 接受完整 UUID、slug，或至少 4 个十六进制字符且没有歧义的 UUID 前缀。优先级依次为 `--workspace`、`--workspace-id`、`MULTICA_WORKSPACE_ID`、profile 默认值。守护进程管理的智能体运行仍使用其绑定的工作区，这个 flag 不会覆盖它。
 
+对于接受工作区位置参数的命令，请在该参数和 `--workspace` 之间二选一。同时指定两者会在查询或写入之前报错。
+
 邀请成员：
 
 ```bash

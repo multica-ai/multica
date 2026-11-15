@@ -96,6 +96,8 @@ multica issue list --workspace my-team
 
 `--workspace` accepts a full UUID, a slug, or an unambiguous UUID prefix of at least four hexadecimal characters. Resolution priority is `--workspace`, `--workspace-id`, `MULTICA_WORKSPACE_ID`, then the profile default. Daemon-managed agent runs keep their task-bound workspace; this flag does not override it.
 
+For commands with a positional workspace argument, pass either that argument or `--workspace`. Combining both is rejected before any lookup or write.
+
 Invite members:
 
 ```bash

@@ -469,6 +469,9 @@ func runWorkspaceSwitch(cmd *cobra.Command, args []string) error {
 // round trip; access control is enforced by the downstream endpoint.
 func resolveWorkspaceArg(cmd *cobra.Command, args []string) (string, error) {
 	if len(args) > 0 {
+		if cmd.Flags().Changed("workspace") {
+			return "", fmt.Errorf("pass either a workspace argument or --workspace, not both")
+		}
 		trimmed := strings.TrimSpace(args[0])
 		if uuidRegexp.MatchString(trimmed) {
 			return trimmed, nil

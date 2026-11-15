@@ -96,6 +96,8 @@ multica issue list --workspace my-team
 
 `--workspace`는 전체 UUID, slug 또는 4자 이상의 16진수로 구성된 고유한 UUID 접두사를 받습니다. 우선순위는 `--workspace`, `--workspace-id`, `MULTICA_WORKSPACE_ID`, 프로필 기본값 순입니다. daemon이 관리하는 에이전트 실행은 작업에 연결된 워크스페이스를 유지하며, 이 flag로 변경할 수 없습니다.
 
+워크스페이스를 위치 인자로 받는 명령에서는 해당 인자와 `--workspace` 중 하나만 사용하세요. 둘 다 지정하면 조회나 쓰기 전에 오류가 발생합니다.
+
 멤버 초대:
 
 ```bash
