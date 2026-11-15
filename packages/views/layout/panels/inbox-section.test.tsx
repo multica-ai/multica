@@ -456,7 +456,7 @@ describe("InboxSection", () => {
   it("snoozes a row from its hover button", async () => {
     renderSection([item({ id: "n1", issue_id: "issue-a" })]);
     fireEvent.click(screen.getByRole("button", { name: "Snooze" }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: /Tomorrow morning/ }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /^1 day/ }));
     expect(state.snooze).toHaveBeenCalledWith({ id: "n1", until: expect.any(Date) }, expect.anything());
   });
 

@@ -120,7 +120,7 @@ describe("IssueInboxActions", () => {
   it("snoozes and moves on to the next notification", async () => {
     const nav = setup();
     fireEvent.keyDown(document, { key: "h", code: "KeyH" });
-    fireEvent.click(await screen.findByRole("menuitem", { name: /In 1 hour/ }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /^1 hour/ }));
     expect(state.snooze).toHaveBeenCalledWith(
       { id: "n-1", until: expect.any(Date) },
       expect.anything(),
