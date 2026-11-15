@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useState, type ReactNode, type SyntheticEvent } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -19,13 +19,14 @@ import { Calendar } from "@multica/ui/icons";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspacePaths } from "@multica/core/paths";
-import type { Project } from "@multica/core/types";
+import type { Project, UpdateProjectRequest } from "@multica/core/types";
 import { AppLink } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { PriorityIcon } from "../../issues/components/priority-icon";
 import { PAGE_GUTTER } from "../../layout/page-header";
 import { useT } from "../../i18n";
+import { ProjectStatusBadge, ProjectPriorityBadge } from "./project-badge";
 import { ProjectIcon } from "./project-icon";
+import { ProjectLeadPicker } from "./project-lead-picker";
 import { ProjectRowActions } from "./project-row-actions";
 import { ProjectDate, projectDueState } from "./project-date";
 
@@ -53,18 +54,21 @@ const collisionDetection: CollisionDetection = (args) => {
 /**
  * Projects as columns of one field (status, priority or lead). Dropping a card
  * on another column sets that field; within a column cards follow the page's
- * sort, so there is no manual order to keep.
+ * sort, so there is no manual order to keep. Status, priority and lead can also
+ * be set from the card itself, for values with no column on screen.
  */
 export function ProjectBoard({
   columns,
   pinnedIds,
   mayDelete,
   onMove,
+  onUpdate,
 }: {
   columns: readonly ProjectBoardColumn[];
   pinnedIds: ReadonlySet<string>;
   mayDelete: (project: Project) => boolean;
   onMove: (project: Project, columnKey: string) => void;
+  onUpdate: (project: Project, data: UpdateProjectRequest) => void;
 }) {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -103,6 +107,7 @@ export function ProjectBoard({
                 columnKey={column.key}
                 pinned={pinnedIds.has(project.id)}
                 canDelete={mayDelete(project)}
+                onUpdate={(data) => onUpdate(project, data)}
               />
             ))}
           </ProjectBoardColumnView>
@@ -114,7 +119,7 @@ export function ProjectBoard({
             style={{ width: CARD_WIDTH }}
             className="rotate-1 cursor-grabbing opacity-90 shadow-lg shadow-black/10"
           >
-            <ProjectBoardCardContent project={active} />
+            <ProjectBoardCardContent project={active} onUpdate={() => {}} />
           </div>
         ) : null}
       </DragOverlay>
@@ -136,7 +141,7 @@ function ProjectBoardColumnView({
 
   return (
     <section
-      data-mc="project-board-column"
+      data-mc="board-column"
       aria-label={column.label}
       style={{ width: COLUMN_WIDTH }}
       className="flex min-h-0 shrink-0 flex-col rounded-board-column bg-board-column p-2"
@@ -174,11 +179,13 @@ function ProjectBoardCard({
   columnKey,
   pinned,
   canDelete,
+  onUpdate,
 }: {
   project: Project;
   columnKey: string;
   pinned: boolean;
   canDelete: boolean;
+  onUpdate: (data: UpdateProjectRequest) => void;
 }) {
   const paths = useWorkspacePaths();
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
@@ -199,7 +206,7 @@ function ProjectBoardCard({
         newTabTitle={project.title}
         className={cn("block", isDragging && "pointer-events-none")}
       >
-        <ProjectBoardCardContent project={project} />
+        <ProjectBoardCardContent project={project} onUpdate={onUpdate} />
       </AppLink>
       <div
         className="absolute top-2 right-2"
@@ -211,7 +218,35 @@ function ProjectBoardCard({
   );
 }
 
-function ProjectBoardCardContent({ project }: { project: Project }) {
+/**
+ * Keeps a picker inside the card link from following the link or starting a
+ * drag. Menus open on press, so only the click's default is cancelled.
+ */
+function CardControl({ children, className }: { children: ReactNode; className?: string }) {
+  const stop = (event: SyntheticEvent) => event.stopPropagation();
+  return (
+    <div
+      className={className}
+      onPointerDown={stop}
+      onMouseDown={stop}
+      onClick={(event) => {
+        event.stopPropagation();
+        event.preventDefault();
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function ProjectBoardCardContent({
+  project,
+  onUpdate,
+}: {
+  project: Project;
+  onUpdate: (data: UpdateProjectRequest) => void;
+}) {
+  const { t } = useT("projects");
   const pct =
     project.issue_count > 0 ? Math.round((project.done_count / project.issue_count) * 100) : 0;
 
@@ -226,11 +261,39 @@ function ProjectBoardCardContent({ project }: { project: Project }) {
           <div className="h-full rounded-full bg-emerald-500" style={{ width: `${pct}%` }} />
         </div>
       ) : null}
-      <div className="flex min-w-0 items-center gap-2 text-caption text-muted-foreground">
-        <PriorityIcon priority={project.priority} />
-        {project.lead_type && project.lead_id ? (
-          <ActorAvatar actorType={project.lead_type} actorId={project.lead_id} size="sm" />
-        ) : null}
+      <div className="flex min-w-0 items-center gap-1.5 text-caption text-muted-foreground">
+        <CardControl className="flex shrink-0">
+          <ProjectStatusBadge project={project} handleUpdate={onUpdate} align="start" />
+        </CardControl>
+        <CardControl className="flex shrink-0">
+          <ProjectPriorityBadge
+            project={project}
+            handleUpdate={onUpdate}
+            align="start"
+            iconOnly
+            triggerClassName="px-1"
+          />
+        </CardControl>
+        <CardControl className="flex shrink-0">
+          <ProjectLeadPicker
+            project={project}
+            handleUpdate={onUpdate}
+            renderTrigger={(leadName) => (
+              <button
+                type="button"
+                aria-label={leadName ?? t(($) => $.lead.no_lead)}
+                title={leadName ?? t(($) => $.lead.no_lead)}
+                className="flex rounded-md transition-colors hover:bg-accent/60"
+              >
+                {project.lead_type && project.lead_id ? (
+                  <ActorAvatar actorType={project.lead_type} actorId={project.lead_id} size="sm" />
+                ) : (
+                  <span className="inline-flex h-[18px] w-[18px] rounded-full border border-dashed border-muted-foreground/30" />
+                )}
+              </button>
+            )}
+          />
+        </CardControl>
         {project.issue_count > 0 ? (
           <span className="tabular-nums">
             {project.done_count}/{project.issue_count}

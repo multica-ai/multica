@@ -953,6 +953,7 @@ export function ProjectsPage() {
               pinnedIds={pinnedProjectIds}
               mayDelete={mayDelete}
               onMove={moveToGroup}
+              onUpdate={(project, data) => updateProject.mutate({ id: project.id, ...data })}
             />
           )}
 

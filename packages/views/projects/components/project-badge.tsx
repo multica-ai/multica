@@ -56,20 +56,26 @@ export function ProjectStatusBadge({ project, handleUpdate, triggerClassName, al
   );
 }
 
-export function ProjectPriorityBadge({ project, handleUpdate, triggerClassName, align = "end" }: { project: Project; handleUpdate: (data: UpdateProjectRequest) => void; triggerClassName?: string; align?: "start" | "end" | "center" }) {
+export function ProjectPriorityBadge({ project, handleUpdate, triggerClassName, align = "end", iconOnly = false }: { project: Project; handleUpdate: (data: UpdateProjectRequest) => void; triggerClassName?: string; align?: "start" | "end" | "center"; iconOnly?: boolean }) {
   const priorityLabels = useProjectPriorityLabels();
   const priorityCfg = PROJECT_PRIORITY_CONFIG[project.priority];
+  const label = priorityLabels[project.priority];
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
         render={
-          <button type="button" className={cn(
-            "inline-flex items-center gap-1 rounded-xs px-1.5 py-0.5 text-caption font-medium hover:bg-accent/60 transition-colors cursor-pointer",
-            triggerClassName
-          )}>
+          <button
+            type="button"
+            aria-label={iconOnly ? label : undefined}
+            title={iconOnly ? label : undefined}
+            className={cn(
+              "inline-flex items-center gap-1 rounded-xs px-1.5 py-0.5 text-caption font-medium hover:bg-accent/60 transition-colors cursor-pointer",
+              triggerClassName
+            )}
+          >
             <PriorityIcon priority={project.priority} />
-            <span className={cn("text-caption", priorityCfg.color)}>{priorityLabels[project.priority]}</span>
+            {iconOnly ? null : <span className={cn("text-caption", priorityCfg.color)}>{label}</span>}
           </button>
         }
       />

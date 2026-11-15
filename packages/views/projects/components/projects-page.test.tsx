@@ -634,6 +634,33 @@ describe("ProjectsPage grouping and board", () => {
     expect(within(columns[1]!).getByText(PLANNED.title)).toBeInTheDocument();
   });
 
+  it("sets status, priority and lead from a board card without opening the project", async () => {
+    mocks.projectViewState.layout = "board";
+    const user = userEvent.setup();
+    const push = vi.fn();
+    renderProjects(makeAdapter({ push }));
+    // Menus render inline in this file, so each card holds its pickers' options.
+    const card = within(screen.getByRole("link", { name: /Launch Plan/ }));
+    expect(card.getAllByRole("button", { name: "In Progress" }).length).toBeGreaterThan(0);
+    expect(card.getAllByRole("button", { name: "High" })[0]).toHaveAttribute("title", "High");
+
+    await user.click(card.getByRole("button", { name: "Paused" }));
+    expect(mocks.updateProject).toHaveBeenLastCalledWith({ id: "project-1", status: "paused" });
+
+    await user.click(card.getByRole("button", { name: "Urgent" }));
+    expect(mocks.updateProject).toHaveBeenLastCalledWith({ id: "project-1", priority: "urgent" });
+
+    // A lead nobody has yet has no column to drop on.
+    await user.click(card.getByRole("button", { name: "User One" }));
+    expect(mocks.updateProject).toHaveBeenLastCalledWith({
+      id: "project-1",
+      lead_type: "member",
+      lead_id: "user-1",
+    });
+
+    expect(push).not.toHaveBeenCalled();
+  });
+
   it("links each board card to its project", () => {
     mocks.projectViewState.layout = "board";
     renderProjects();
