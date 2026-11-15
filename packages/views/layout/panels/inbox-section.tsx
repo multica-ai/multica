@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Archive, BookCheck, CheckCheck, History, ListChecks, MoreHorizontal } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
+import { useIsCompact } from "@multica/ui/hooks/use-mobile";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { Button, buttonVariants } from "@multica/ui/components/ui/button";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@multica/ui/components/ui/hover-card";
@@ -42,7 +43,15 @@ import { InboxDetailLabel, useTypeLabels } from "../../inbox/components/inbox-de
 import { useTimeAgo } from "../../inbox/components/inbox-list-item";
 import { StatusIcon } from "../../issues/components";
 import { useStatusLabel } from "../../issues/utils/status-label";
-import { PANEL_ROW_CLASS, PanelCount, PanelList, PanelSection, panelRowAnchor, panelRowStateClass } from "../panel-nav";
+import {
+  PANEL_ROW_CLASS,
+  PanelCount,
+  PanelLink,
+  PanelList,
+  PanelSection,
+  panelRowAnchor,
+  panelRowStateClass,
+} from "../panel-nav";
 import { InboxSectionSettings, SECTION_SETTINGS_REVEAL_CLASS } from "./sidebar-settings";
 import { ISSUE_ROW_LINK_CLASS, TREE_ROW_BUTTON_CLASS } from "./sidebar-tree";
 
@@ -115,6 +124,7 @@ export function InboxSection({
   const unread = useInboxUnreadCount(wsId);
   const archive = useArchiveInbox();
   const { searchParams } = useNavigation();
+  const isCompact = useIsCompact();
   const { rows: all, displayed, expanded, limit, setExpanded } = rows;
   // The notification the Inbox page has open, keyed as it groups rows.
   const openKey = pathname === p.inbox() ? searchParams.get("issue") : null;
@@ -164,6 +174,20 @@ export function InboxSection({
             ? t(($) => $.sidebar.show_fewer_pins)
             : t(($) => $.sidebar.show_more_pins, { count: all.length - limit })}
         </button>
+      )}
+      {/* The sidebar sits behind a drawer on a phone, so the full list keeps its page there. */}
+      {isCompact && (
+        <PanelList>
+          <PanelLink
+            href={p.inbox()}
+            icon={<span className="size-4" aria-hidden />}
+            label={t(($) => $.panels.work.inbox_all)}
+            active={
+              pathname === p.inbox() && !openKey && searchParams.get("view") !== ARCHIVED_VIEW_PARAM
+            }
+            className="text-caption"
+          />
+        </PanelList>
       )}
     </PanelSection>
   );

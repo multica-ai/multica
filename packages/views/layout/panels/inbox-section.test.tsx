@@ -13,6 +13,7 @@ import { InboxSection, useInboxSectionRows } from "./inbox-section";
 
 const state = vi.hoisted(() => ({
   unread: 0,
+  compact: false,
   archive: vi.fn(),
   markAllRead: vi.fn(),
   archiveAll: vi.fn(),
@@ -43,6 +44,10 @@ vi.mock("@multica/core/workspace/hooks", () => ({
   useActorName: () => ({ getActorName: () => "Leo Park" }),
 }));
 vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => null }));
+vi.mock("@multica/ui/hooks/use-mobile", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/ui/hooks/use-mobile")>()),
+  useIsCompact: () => state.compact,
+}));
 vi.mock("@multica/ui/components/common/tooltip-hint", () => ({
   TooltipHint: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
@@ -105,6 +110,7 @@ const rows = () => Array.from(document.querySelectorAll<HTMLElement>("[data-inbo
 
 beforeEach(() => {
   state.unread = 0;
+  state.compact = false;
   for (const spy of [
     state.archive,
     state.markAllRead,
@@ -225,7 +231,7 @@ describe("InboxSection", () => {
     expect(rows()).toHaveLength(0);
   });
 
-  it("is the whole list: no link out to another one, and a plain line when empty", () => {
+  it("is the whole list on a wide screen: no link out to another one, and a plain line when empty", () => {
     const { unmount } = renderSection([item({ id: "n1", issue_id: "issue-a", title: "Only one" })]);
     expect(screen.queryByRole("link", { name: "All notifications" })).toBeNull();
     expect(screen.getAllByRole("link").map((link) => link.getAttribute("href"))).toEqual(["/acme/issues/issue-a"]);
@@ -235,6 +241,16 @@ describe("InboxSection", () => {
     expect(rows()).toHaveLength(0);
     expect(screen.getByText("No notifications")).not.toHaveAttribute("href");
     expect(screen.queryByRole("link")).toBeNull();
+  });
+
+  it("links to the full list on a phone, where the sidebar sits behind a drawer", () => {
+    state.compact = true;
+    const { unmount } = renderSection([item({ id: "n1", issue_id: "issue-a" })]);
+    expect(screen.getByRole("link", { name: "All notifications" })).toHaveAttribute("href", "/acme/inbox");
+    unmount();
+
+    renderSection([], null, "/acme/inbox");
+    expect(screen.getByRole("link", { name: "All notifications" })).toHaveAttribute("aria-current", "page");
   });
 
   it("lights the row the Inbox page has open", () => {
