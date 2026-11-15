@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { Nodes } from "mdast";
