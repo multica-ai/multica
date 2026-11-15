@@ -1,13 +1,14 @@
 "use client";
 
 import { useCallback } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { useWorkspaceId } from "@multica/core/hooks";
 import { isOwnIssue } from "@multica/core/issues/ownership";
 import type { InboxItem } from "@multica/core/types";
 import { agentListOptions } from "@multica/core/workspace/queries";
 import {
-  useUndoUnsubscribeArchiveInbox,
+  undoUnsubscribeArchiveInbox,
   useUnsubscribeArchiveInbox,
   type InboxUnsubscribeScope,
 } from "@multica/core/inbox/mutations";
@@ -46,39 +47,44 @@ export interface UnsubscribeArchiveTarget {
 /**
  * "Unsubscribe & archive" with the confirmation every surface shares. Undo is
  * offered for a single issue only: a subtree opt-out tombstones every
- * descendant, and subscribing to the root again would not bring those back.
+ * descendant, and one issue's undo would not bring those back.
+ *
+ * The toasts hang off the mutation itself, not the `mutate` call: every
+ * surface moves on to the next notification straight away, which unmounts the
+ * caller before the request settles.
  */
 export function useUnsubscribeArchive() {
   const { t } = useT("inbox");
-  const { mutate } = useUnsubscribeArchiveInbox();
-  const { mutate: undo } = useUndoUnsubscribeArchiveInbox();
-  return useCallback(
-    (target: UnsubscribeArchiveTarget, scope: InboxUnsubscribeScope = "issue") => {
-      const failed = (fallback: string) => (err: unknown) =>
-        toast.error(err instanceof Error && err.message ? err.message : fallback);
-      mutate(
-        { ...target, scope },
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  const failed = (fallback: string) => (err: unknown) =>
+    toast.error(err instanceof Error && err.message ? err.message : fallback);
+  const { mutate } = useUnsubscribeArchiveInbox({
+    onSuccess: ({ id, issueId, scope }) =>
+      toast.success(
+        scope === "subtree"
+          ? t(($) => $.toasts.unsubscribed_archived_subtree)
+          : t(($) => $.toasts.unsubscribed_archived),
         {
-          onSuccess: () =>
-            toast.success(
-              scope === "subtree"
-                ? t(($) => $.toasts.unsubscribed_archived_subtree)
-                : t(($) => $.toasts.unsubscribed_archived),
-              {
-                description: t(($) => $.toasts.unsubscribed_hint),
-                action:
-                  scope === "issue"
-                    ? {
-                        label: t(($) => $.toasts.undo),
-                        onClick: () => undo(target, { onError: failed(t(($) => $.errors.undo_unsubscribe_failed)) }),
-                      }
-                    : undefined,
-              },
-            ),
-          onError: failed(t(($) => $.errors.unsubscribe_archive_failed)),
+          description: t(($) => $.toasts.unsubscribed_hint),
+          action:
+            scope === "issue"
+              ? {
+                  label: t(($) => $.toasts.undo),
+                  onClick: () => {
+                    undoUnsubscribeArchiveInbox(qc, wsId, { id, issueId }).catch(
+                      failed(t(($) => $.errors.undo_unsubscribe_failed)),
+                    );
+                  },
+                }
+              : undefined,
         },
-      );
-    },
-    [mutate, undo, t],
+      ),
+    onError: failed(t(($) => $.errors.unsubscribe_archive_failed)),
+  });
+  return useCallback(
+    (target: UnsubscribeArchiveTarget, scope: InboxUnsubscribeScope = "issue") =>
+      mutate({ ...target, scope }),
+    [mutate],
   );
 }

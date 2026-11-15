@@ -129,7 +129,7 @@
     "deleted": "Notification supprimée",
     "unsubscribed_archived": "Désabonné et archivé",
     "unsubscribed_archived_subtree": "Désabonné de cette tâche et de ses sous-tâches",
-    "unsubscribed_hint": "Sa nouvelle activité n'arrivera plus dans votre boîte de réception",
+    "unsubscribed_hint": "Ses mises à jour n'arriveront plus dans votre boîte de réception. Les @mentions, si.",
     "undo": "Annuler"
   },
   "errors": {
@@ -159,7 +159,7 @@
     "active_issue_description": "Les notifications actives de cette tâche seront supprimées définitivement. Les notifications précédemment archivées seront conservées et réapparaîtront dans les archives. La tâche et ses exécutions seront conservées."
   },
   "unsubscribe": {
-    "title": "Se désabonner et archiver. Vous ne serez plus notifié pour cette tâche.",
+    "title": "Se désabonner et archiver. Ses mises à jour ne vous parviendront plus ; les @mentions, si.",
     "this_issue": "Cette tâche uniquement",
     "subtree_one": "Cette tâche et sa {{count}} sous-tâche",
     "subtree_other": "Cette tâche et ses {{count}} sous-tâches",

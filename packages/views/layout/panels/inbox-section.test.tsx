@@ -45,7 +45,7 @@ vi.mock("@multica/core/inbox/mutations", () => ({
   useMarkInboxRead: () => ({ mutate: state.markRead }),
   useMarkInboxUnread: () => ({ mutate: state.markUnread }),
   useUnsubscribeArchiveInbox: () => ({ mutate: state.unsubscribeArchive }),
-  useUndoUnsubscribeArchiveInbox: () => ({ mutate: vi.fn() }),
+  undoUnsubscribeArchiveInbox: vi.fn(),
 }));
 vi.mock("@multica/core/hooks", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/hooks")>()),
@@ -353,10 +353,7 @@ describe("InboxSection", () => {
     fireEvent.mouseEnter(rows()[0]!.firstElementChild!);
     const theirs = await screen.findByText("Their comment", { selector: "[data-inbox-card] p" }, { timeout: 2000 });
     fireEvent.click(within(theirs.closest<HTMLElement>("[data-inbox-card]")!).getByRole("button", { name: label }));
-    expect(state.unsubscribeArchive).toHaveBeenCalledWith(
-      { id: "n1", issueId: "issue-a", scope: "issue" },
-      expect.anything(),
-    );
+    expect(state.unsubscribeArchive).toHaveBeenCalledWith({ id: "n1", issueId: "issue-a", scope: "issue" });
   });
 
   it("closes the card when the row is pressed, and keeps a pending hover from reopening it", async () => {

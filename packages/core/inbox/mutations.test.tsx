@@ -15,7 +15,7 @@ import {
   useMarkInboxUnread,
   useMarkIssueInboxRead,
   useUnarchiveInbox,
-  useUndoUnsubscribeArchiveInbox,
+  undoUnsubscribeArchiveInbox,
   useUnsubscribeArchiveInbox,
 } from "./mutations";
 import { inboxKeys, useInboxUnreadCount } from "./queries";
@@ -583,6 +583,33 @@ describe("useUnsubscribeArchiveInbox", () => {
     expect(qc.getQueryState(issueKeys.subscribers("issue-1"))?.isInvalidated).toBe(true);
   });
 
+  it("reports the result through its own callbacks after the caller unmounts", async () => {
+    for (const fail of [false, true]) {
+      let settle!: () => void;
+      let reject!: (e: Error) => void;
+      const request = new Promise<void>((res, rej) => { settle = res; reject = rej; });
+      const qc = createQueryClient();
+      setApiInstance({
+        listInbox: vi.fn(() => new Promise(() => {})),
+        listSubscribedIssueIds: vi.fn(async () => []),
+        unsubscribeFromIssue: vi.fn(() => request),
+        archiveInbox: vi.fn(async () => ({}) as never),
+      } as unknown as ApiClient);
+      const onSuccess = vi.fn();
+      const onError = vi.fn();
+      const { result, unmount } = renderHook(
+        () => useUnsubscribeArchiveInbox({ onSuccess, onError }),
+        { wrapper: createWrapper(qc) },
+      );
+      act(() => result.current.mutate({ id: "a", issueId: "issue-1", scope: "issue" }));
+      unmount();
+      await act(async () => { if (fail) reject(new Error("nope")); else settle(); });
+      await waitFor(() => expect((fail ? onError : onSuccess)).toHaveBeenCalledOnce());
+      expect(fail ? onSuccess : onError).not.toHaveBeenCalled();
+      qc.clear();
+    }
+  });
+
   it("does not archive when the unsubscribe fails, and puts the rows back", async () => {
     const archiveInbox = vi.fn(async () => ({}) as never);
     const { qc, result } = setup({
@@ -596,17 +623,20 @@ describe("useUnsubscribeArchiveInbox", () => {
   });
 });
 
-describe("useUndoUnsubscribeArchiveInbox", () => {
-  it("subscribes again, then restores the item", async () => {
+describe("undoUnsubscribeArchiveInbox", () => {
+  it("restores the subscription as it was, never by subscribing again, then the item", async () => {
     const calls: string[] = [];
     const qc = createQueryClient();
+    const subscribeToIssue = vi.fn(async () => {});
     setApiInstance({
-      subscribeToIssue: vi.fn(async (id: string) => { calls.push(`subscribe:${id}`); }),
+      subscribeToIssue,
+      undoUnsubscribeFromIssue: vi.fn(async (id: string) => { calls.push(`undo:${id}`); }),
       unarchiveInbox: vi.fn(async (id: string) => { calls.push(`unarchive:${id}`); return {} as never; }),
+      listInbox: vi.fn(() => new Promise(() => {})),
+      listSubscribedIssueIds: vi.fn(async () => []),
     } as unknown as ApiClient);
-    const { result } = renderHook(() => useUndoUnsubscribeArchiveInbox(), { wrapper: createWrapper(qc) });
-    act(() => result.current.mutate({ id: "a", issueId: "issue-1" }));
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(calls).toEqual(["subscribe:issue-1", "unarchive:a"]);
+    await undoUnsubscribeArchiveInbox(qc, WORKSPACE_ID, { id: "a", issueId: "issue-1" });
+    expect(calls).toEqual(["undo:issue-1", "unarchive:a"]);
+    expect(subscribeToIssue).not.toHaveBeenCalled();
   });
 });

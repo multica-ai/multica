@@ -239,11 +239,28 @@ function refreshAfterSubscriptionWrite(qc: QueryClient, wsId: string) {
  * whose issue keeps notifying would read as the action having worked. The row
  * leaves the list optimistically, like a plain archive.
  */
-export function useUnsubscribeArchiveInbox() {
+export interface UnsubscribeArchiveVariables {
+  id: string;
+  issueId: string;
+  scope: InboxUnsubscribeScope;
+}
+
+/**
+ * The callbacks are the mutation's own, not `mutate`'s: the surfaces that fire
+ * this move on to the next notification at once, and per-call callbacks die
+ * with the component that made the call, taking the confirmation and its Undo
+ * (or the error) with them.
+ */
+export interface UnsubscribeArchiveCallbacks {
+  onSuccess?: (variables: UnsubscribeArchiveVariables) => void;
+  onError?: (error: Error, variables: UnsubscribeArchiveVariables) => void;
+}
+
+export function useUnsubscribeArchiveInbox(callbacks: UnsubscribeArchiveCallbacks = {}) {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   return useMutation({
-    mutationFn: async ({ id, issueId, scope }: { id: string; issueId: string; scope: InboxUnsubscribeScope }) => {
+    mutationFn: async ({ id, issueId, scope }: UnsubscribeArchiveVariables) => {
       if (scope === "subtree") await api.unsubscribeFromIssueSubtree(issueId);
       else await api.unsubscribeFromIssue(issueId);
       await api.archiveInbox(id);
@@ -256,27 +273,35 @@ export function useUnsubscribeArchiveInbox() {
       );
       return { prev };
     },
-    onError: (_err, _vars, ctx) => {
+    onSuccess: (_data, vars) => callbacks.onSuccess?.(vars),
+    onError: (err, vars, ctx) => {
       if (ctx?.prev) qc.setQueryData(inboxKeys.list(wsId), ctx.prev);
+      callbacks.onError?.(err, vars);
     },
     onSettled: () => refreshAfterSubscriptionWrite(qc, wsId),
   });
 }
 
 /**
- * Undo for `useUnsubscribeArchiveInbox` with scope "issue": subscribe again
- * (which clears the opt-out) and restore the item to the inbox.
+ * Undo for `useUnsubscribeArchiveInbox` with scope "issue": restore the
+ * subscription as it was, then the item. A plain function rather than a hook,
+ * because it runs from a toast that outlives the page that showed it.
+ *
+ * Restoring is not subscribing again: that would rewrite a commenter, delegated
+ * or project-inherited subscription to manual, and the issue would start
+ * delivering more than it did before the user left it.
  */
-export function useUndoUnsubscribeArchiveInbox() {
-  const qc = useQueryClient();
-  const wsId = useWorkspaceId();
-  return useMutation({
-    mutationFn: async ({ id, issueId }: { id: string; issueId: string }) => {
-      await api.subscribeToIssue(issueId);
-      await api.unarchiveInbox(id);
-    },
-    onSettled: () => refreshAfterSubscriptionWrite(qc, wsId),
-  });
+export async function undoUnsubscribeArchiveInbox(
+  qc: QueryClient,
+  wsId: string,
+  { id, issueId }: { id: string; issueId: string },
+): Promise<void> {
+  try {
+    await api.undoUnsubscribeFromIssue(issueId);
+    await api.unarchiveInbox(id);
+  } finally {
+    refreshAfterSubscriptionWrite(qc, wsId);
+  }
 }
 
 export function useMarkAllInboxRead() {

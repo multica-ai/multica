@@ -129,7 +129,7 @@
     "deleted": "Notificación eliminada",
     "unsubscribed_archived": "Baja y archivo hechos",
     "unsubscribed_archived_subtree": "Te diste de baja de esta tarea y sus subtareas",
-    "unsubscribed_hint": "Su nueva actividad no llegará a tu bandeja",
+    "unsubscribed_hint": "Sus actualizaciones no llegarán a tu bandeja. Las @menciones sí.",
     "undo": "Deshacer"
   },
   "errors": {
@@ -159,7 +159,7 @@
     "active_issue_description": "Las notificaciones activas de esta tarea se eliminarán permanentemente. Las notificaciones archivadas anteriormente se conservarán y volverán a aparecer en Archivadas. La tarea y sus ejecuciones se conservarán."
   },
   "unsubscribe": {
-    "title": "Darse de baja y archivar. No volverás a recibir avisos de esta tarea.",
+    "title": "Darse de baja y archivar. Dejarás de recibir sus actualizaciones; las @menciones te seguirán llegando.",
     "this_issue": "Solo esta tarea",
     "subtree_one": "Esta tarea y su {{count}} subtarea",
     "subtree_other": "Esta tarea y sus {{count}} subtareas",

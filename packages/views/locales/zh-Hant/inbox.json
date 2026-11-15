@@ -127,7 +127,7 @@
     "deleted": "通知已刪除",
     "unsubscribed_archived": "已取消訂閱並歸檔",
     "unsubscribed_archived_subtree": "已取消訂閱此任務及其子任務",
-    "unsubscribed_hint": "之後的動態不會再進收件箱",
+    "unsubscribed_hint": "之後的一般動態不會再進收件匣，@你時仍會通知",
     "undo": "復原"
   },
   "errors": {
@@ -157,7 +157,7 @@
     "active_issue_description": "此任務在收件箱中的通知將被永久刪除。先前歸檔的通知會保留，並重新顯示在已歸檔檢視中。任務和執行記錄不受影響。"
   },
   "unsubscribe": {
-    "title": "取消訂閱並歸檔，之後不再收到它的通知",
+    "title": "取消訂閱並歸檔：不再收到它的訂閱通知，@你時仍會通知",
     "this_issue": "僅此任務",
     "subtree_other": "此任務及其 {{count}} 個子任務",
     "subtree_unknown": "此任務及其子任務"

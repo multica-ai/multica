@@ -129,7 +129,7 @@
     "deleted": "Notification deleted",
     "unsubscribed_archived": "Unsubscribed and archived",
     "unsubscribed_archived_subtree": "Unsubscribed from this issue and its sub-issues",
-    "unsubscribed_hint": "New activity on it won't reach your inbox",
+    "unsubscribed_hint": "Its updates won't reach your inbox. @mentions still will.",
     "undo": "Undo"
   },
   "errors": {
@@ -159,7 +159,7 @@
     "active_issue_description": "This permanently deletes the active notifications for this issue. Previously archived notifications remain and will be visible again in Archived. The issue and its runs are kept."
   },
   "unsubscribe": {
-    "title": "Unsubscribe and archive. You won't be notified about it again.",
+    "title": "Unsubscribe and archive. Its updates stop reaching you; an @mention still does.",
     "this_issue": "This issue only",
     "subtree_one": "This issue and its {{count}} sub-issue",
     "subtree_other": "This issue and its {{count}} sub-issues",
