@@ -737,6 +737,7 @@
     "save_failed": "Не удалось сохранить свойство",
     "limit_hint": "{{count}}/{{max}} активных свойств",
     "archived_badge": "В архиве",
+    "options_preview": "Показать все варианты для {{name}}",
     "types": {
       "text": "Текст",
       "number": "Число",

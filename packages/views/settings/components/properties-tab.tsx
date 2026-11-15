@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Archive,
@@ -320,42 +320,82 @@ export function PropertiesTab() {
 const WIDE_OPTION_CHIPS = 6;
 const NARROW_OPTION_CHIPS = 3;
 
+function OptionChip({
+  option,
+  className,
+  children,
+}: {
+  option: IssuePropertyOption;
+  className?: string;
+  children?: ReactNode;
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full border border-surface-border px-2 py-0.5 text-caption text-foreground",
+        className,
+      )}
+    >
+      <span
+        className="size-2 shrink-0 rounded-full"
+        style={{ backgroundColor: paletteColor(option.color) }}
+      />
+      {children ?? option.name}
+    </span>
+  );
+}
+
 /**
  * The Options column. When the catalog is narrow the chips take their own
- * line under the rest of the metadata, show fewer, and shrink instead of
- * wrapping, so a select with many options still fits in three lines.
+ * line under the rest of the metadata, show fewer, and truncate instead of
+ * wrapping, so a select with many options still fits in three lines. The cell
+ * opens a read-only list of every option, so what the row hides or cuts off
+ * stays reachable by touch and keyboard for members without the edit menu.
  */
 function PropertyOptionChips({ property }: { property: IssueProperty }) {
+  const { t } = useT("settings");
   if (!typeHasOptions(property.type)) {
     return <span className="hidden text-caption @3xl/catalog:block">—</span>;
   }
   const options = property.config.options ?? [];
+  if (options.length === 0) return <div />;
   const narrowRest = options.length - NARROW_OPTION_CHIPS;
   const wideRest = options.length - WIDE_OPTION_CHIPS;
   return (
-    <div className="order-last flex min-w-0 basis-full items-center gap-1 overflow-hidden @3xl/catalog:order-none @3xl/catalog:flex-wrap @3xl/catalog:overflow-visible">
-      {options.slice(0, WIDE_OPTION_CHIPS).map((option, index) => (
-        <span
-          key={option.id}
-          className={cn(
-            "inline-flex min-w-0 items-center gap-1.5 rounded-full border border-surface-border px-2 py-0.5 text-caption text-foreground",
-            index >= NARROW_OPTION_CHIPS && "hidden @3xl/catalog:inline-flex",
-          )}
-        >
-          <span
-            className="size-2 shrink-0 rounded-full"
-            style={{ backgroundColor: paletteColor(option.color) }}
-          />
-          <span className="truncate">{option.name}</span>
-        </span>
-      ))}
-      {narrowRest > 0 && (
-        <span className="shrink-0 text-caption @3xl/catalog:hidden">+{narrowRest}</span>
-      )}
-      {wideRest > 0 && (
-        <span className="hidden text-caption @3xl/catalog:inline">+{wideRest}</span>
-      )}
-    </div>
+    <Popover>
+      <PopoverTrigger
+        aria-label={t(($) => $.properties.options_preview, { name: property.name })}
+        className="order-last flex min-w-0 basis-full cursor-pointer items-center gap-1 overflow-hidden rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring @3xl/catalog:order-none @3xl/catalog:flex-wrap @3xl/catalog:overflow-visible"
+      >
+        {options.slice(0, WIDE_OPTION_CHIPS).map((option, index) => (
+          <OptionChip
+            key={option.id}
+            option={option}
+            className={cn(
+              "min-w-0 @3xl/catalog:min-w-auto",
+              index >= NARROW_OPTION_CHIPS && "hidden @3xl/catalog:inline-flex",
+            )}
+          >
+            <span className="truncate @3xl/catalog:overflow-visible @3xl/catalog:whitespace-normal">
+              {option.name}
+            </span>
+          </OptionChip>
+        ))}
+        {narrowRest > 0 && (
+          <span className="shrink-0 text-caption @3xl/catalog:hidden">+{narrowRest}</span>
+        )}
+        {wideRest > 0 && (
+          <span className="hidden text-caption @3xl/catalog:inline">+{wideRest}</span>
+        )}
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-auto max-w-72 p-2">
+        <div className="flex flex-wrap gap-1">
+          {options.map((option) => (
+            <OptionChip key={option.id} option={option} />
+          ))}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 

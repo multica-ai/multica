@@ -722,6 +722,7 @@
     "save_failed": "Couldn't save property",
     "limit_hint": "{{count}}/{{max}} active properties",
     "archived_badge": "Archived",
+    "options_preview": "Show all options for {{name}}",
     "types": {
       "text": "Text",
       "number": "Number",
