@@ -1995,29 +1995,47 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     return map;
   }, [timelineView.threadReplies]);
 
-  // Thread root of a deep-link target. A run that left no comment is addressed
-  // by its task id and sits in a slot inside the thread it answers, so it
-  // unfolds and scrolls with that thread exactly like a reply does.
-  const highlightRootId = useMemo(() => {
+  // The anchor a deep-link target renders under. A failed run's notification
+  // names its task, but a run that left a reply (its failure notice included)
+  // renders under the reply's id, in a thread slot and at the top level alike.
+  const highlightTargetId = useMemo(() => {
     if (!highlightCommentId) return undefined;
-    const replyRoot = replyToRoot.get(highlightCommentId);
+    const topLevel = items.find((it) => it.kind === "run" && it.run.task.id === highlightCommentId);
+    if (topLevel) return topLevel.id;
+    for (const runs of commentRuns.values()) {
+      const run = runs.find((candidate) => candidate.task.id === highlightCommentId);
+      if (!run) continue;
+      const reply = run.hasReply && run.commentId
+        ? displayTimeline.find((entry) => entry.id === run.commentId)
+        : undefined;
+      return reply && !isDeletedComment(reply) ? reply.id : run.task.id;
+    }
+    return highlightCommentId;
+  }, [highlightCommentId, items, commentRuns, displayTimeline]);
+
+  // Thread root of a deep-link target. A run sits in a slot inside the thread
+  // it answers, so it unfolds and scrolls with that thread exactly like a
+  // reply does.
+  const highlightRootId = useMemo(() => {
+    if (!highlightTargetId) return undefined;
+    const replyRoot = replyToRoot.get(highlightTargetId);
     if (replyRoot) return replyRoot;
     for (const [rootId, runs] of commentRuns) {
       if (runs.some((run) => run.task.id === highlightCommentId)) return rootId;
     }
     return undefined;
-  }, [highlightCommentId, replyToRoot, commentRuns]);
+  }, [highlightTargetId, highlightCommentId, replyToRoot, commentRuns]);
 
   // Deep-link target index in the flat items array. For root comments this is
   // a direct findIndex hit; for replies and threaded runs we look up the
   // enclosing root.
   const targetIdx = useMemo(() => {
-    if (!highlightCommentId) return -1;
-    const direct = items.findIndex((it) => it.id === highlightCommentId);
+    if (!highlightTargetId) return -1;
+    const direct = items.findIndex((it) => it.id === highlightTargetId);
     if (direct >= 0) return direct;
     if (!highlightRootId) return -1;
     return items.findIndex((it) => it.id === highlightRootId);
-  }, [items, highlightCommentId, highlightRootId]);
+  }, [items, highlightTargetId, highlightRootId]);
 
   // One entry per comment thread (folded resolved bars included), activity
   // groups skipped. Derived from the same flat `items` array Virtuoso renders
@@ -2561,7 +2579,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       return;
     }
 
-    const rootId = highlightRootId ?? highlightCommentId;
+    const targetId = highlightTargetId ?? highlightCommentId;
+    const rootId = highlightRootId ?? targetId;
     const collapse = useCommentCollapseStore.getState();
     if (collapse.isCollapsed(id, rootId)) collapse.toggle(id, rootId);
     if (rootId) {
@@ -2578,7 +2597,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           rootItem.entry,
           timelineView.threadReplies.get(rootId) ?? EMPTY_REPLIES,
         );
-        if (resolution.kind === "reply" && resolution.resolutionId !== highlightCommentId) {
+        if (resolution.kind === "reply" && resolution.resolutionId !== targetId) {
           toggleResolvedExpand(rootId, true);
           return;
         }
@@ -2589,9 +2608,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     // carries has no anchor to scroll to and no row to flash. Land on the
     // comment above where it was; the id itself stays this landing's identity
     // for the guards and the memento below.
-    const threadRootId = rootId ?? highlightCommentId;
+    const threadRootId = rootId ?? targetId;
     const landingId = commentLandingTarget(
-      highlightCommentId,
+      targetId,
       threadRootId,
       timelineView.threadReplies.get(threadRootId) ?? EMPTY_REPLIES,
     );
@@ -2634,7 +2653,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         interruptedLandingRef.current = highlightCommentId;
       }
     };
-  }, [highlightCommentId, highlightRequestToken, activeDeliverableJump, id, writeViewState, items, targetIdx, scrollContainerEl, highlightRootId, expandedResolved, timelineView, toggleResolvedExpand, isFlatTimeline, measuredTimelineId, timelineLoading, commentTasksLoading, flashJumpTarget]);
+  }, [highlightCommentId, highlightTargetId, highlightRequestToken, activeDeliverableJump, id, writeViewState, items, targetIdx, scrollContainerEl, highlightRootId, expandedResolved, timelineView, toggleResolvedExpand, isFlatTimeline, measuredTimelineId, timelineLoading, commentTasksLoading, flashJumpTarget]);
 
   const descEditorRef = useRef<ContentEditorRef>(null);
   const descriptionEditingRef = useRef(false);
