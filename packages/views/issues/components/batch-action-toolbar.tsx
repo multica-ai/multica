@@ -22,11 +22,12 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useQuery } from "@tanstack/react-query";
 import { useIssueDeletion } from "@multica/core/issues/use-issue-deletion";
-import type {
-  BatchIssueLabelOps,
-  BatchIssuePropertyOps,
-  Issue,
-  UpdateIssueRequest,
+import {
+  isListPropertyType,
+  type BatchIssueLabelOps,
+  type BatchIssuePropertyOps,
+  type Issue,
+  type UpdateIssueRequest,
 } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { commonIssueFields } from "@multica/core/issues/batch";
@@ -448,13 +449,19 @@ export function BatchActionToolbar({
               key={editor.property.id}
               property={editor.property}
               value={sharedPropertyValue(selectedIssues, editor.property.id)}
-              onChange={(value) =>
-                void handleProperties(
+              onChange={(value) => {
+                const save = handleProperties(
                   value === undefined
                     ? { unset: [editor.property.id] }
                     : { set: { [editor.property.id]: value } },
-                )
-              }
+                );
+                // List editors hold their draft and lock input until the write
+                // settles, and show a rejection beside the draft.
+                if (!isListPropertyType(editor.property.type)) return;
+                return save.then((applied) => {
+                  if (!applied) throw new Error(t(($) => $.batch.update_failed));
+                });
+              }}
               open
               onOpenChange={closeEditor}
               triggerRender={editorAnchor}
