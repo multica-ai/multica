@@ -52,11 +52,13 @@ var parentBubbleNotifTypes = map[string]bool{
 // status changes must not leave the human with no signal that the work they
 // started was answered (MUL-9314). The inbox keeps one row per issue, so a
 // comment lands on the row a handoff would light anyway.
+//
+// An agent that cannot proceed reaches the human as a blocked status change,
+// which the handoff rule in deliverToSubscriber already delivers.
 var delegatedAlwaysNotifTypes = map[string]bool{
-	"mentioned":     true,
-	"new_comment":   true,
-	"task_failed":   true,
-	"agent_blocked": true,
+	"mentioned":   true,
+	"new_comment": true,
+	"task_failed": true,
 }
 
 // issueStatusIsHandoff reports whether ARRIVING on this status hands the issue
@@ -142,8 +144,10 @@ func deliverToSubscriber(reason, notifType string, statusIsHandoff bool) bool {
 	return statusIsHandoff
 }
 
-// notifTypeToGroup maps each InboxItemType to a user-configurable preference
-// group. Types not in this map are always delivered (not configurable).
+// notifTypeToGroup maps each inbox type the issue listeners write to a
+// user-configurable preference group. Types not in this map are always
+// delivered (not configurable). app_action_result also belongs to
+// agent_activity; connectedapps checks that group itself.
 var notifTypeToGroup = map[string]string{
 	"issue_assigned":     "assignments",
 	"unassigned":         "assignments",
@@ -151,13 +155,11 @@ var notifTypeToGroup = map[string]string{
 	"status_changed":     "status_changes",
 	"new_comment":        "comments",
 	"mentioned":          "mentions",
+	"reaction_added":     "reactions",
 	"priority_changed":   "updates",
 	"start_date_changed": "updates",
 	"due_date_changed":   "updates",
-	"task_completed":     "agent_activity",
 	"task_failed":        "agent_activity",
-	"agent_blocked":      "agent_activity",
-	"agent_completed":    "agent_activity",
 	"issue_created":      "new_issues",
 }
 
@@ -738,7 +740,8 @@ func notifyDelegatedIssueCreated(
 
 // notifyMentionedMembers creates inbox items for each @mentioned member,
 // excluding the actor and any IDs in the skip set. When an @all mention is
-// present, all workspace members are notified (excluding agents).
+// present, all workspace members are notified (excluding agents). Returns the
+// members that received a row.
 func notifyMentionedMembers(
 	bus *events.Bus,
 	queries *db.Queries,
@@ -748,9 +751,11 @@ func notifyMentionedMembers(
 	issueTitle string,
 	issueStatus string,
 	title string,
+	body string,
 	skip map[string]bool,
 	details []byte,
-) {
+) map[string]bool {
+	notified := map[string]bool{}
 	// Collect the set of member IDs to notify.
 	recipientIDs := map[string]bool{}
 
@@ -832,6 +837,7 @@ func notifyMentionedMembers(
 			Severity:      "info",
 			IssueID:       parseUUID(issueID),
 			Title:         title,
+			Body:          util.StrToText(body),
 			ActorType:     util.StrToText(e.ActorType),
 			ActorID:       optionalUUID(e.ActorID),
 			Details:       details,
@@ -843,6 +849,7 @@ func notifyMentionedMembers(
 		if !inserted {
 			continue
 		}
+		notified[id] = true
 		resp := inboxItemToResponse(item)
 		resp["issue_status"] = issueStatus
 		bus.Publish(events.Event{
@@ -853,11 +860,11 @@ func notifyMentionedMembers(
 			Payload:     map[string]any{"item": resp},
 		})
 	}
+	return notified
 }
 
 // registerNotificationListeners wires up event bus listeners that create inbox
-// notifications using the subscriber table. This replaces the old hardcoded
-// notification logic from inbox_listeners.go.
+// notifications using the subscriber table.
 //
 // NOTE: uses context.Background() because the event bus dispatches synchronously
 // within the HTTP request goroutine. Adding per-handler timeouts is a bus-level
@@ -896,7 +903,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		if issue.Description != nil && *issue.Description != "" {
 			mentions := parseMentions(*issue.Description)
 			notifyMentionedMembers(bus, queries, e, mentions, issue.ID, issue.Title, issue.Status,
-				issue.Title, skip, emptyDetails)
+				issue.Title, "", skip, emptyDetails)
 		}
 
 		notifyDelegatedIssueCreated(ctx, queries, bus, issue, e, skip)
@@ -1106,7 +1113,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 				}
 				skip := map[string]bool{e.ActorID: true}
 				notifyMentionedMembers(bus, queries, e, added, issue.ID, issue.Title, issue.Status,
-					issue.Title, skip, emptyDetails)
+					issue.Title, "", skip, emptyDetails)
 			}
 		}
 	})
@@ -1159,18 +1166,20 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			})
 		}
 
+		// Mentions first: a member who gets a `mentioned` row for this comment
+		// does not also get its `new_comment`, so one comment is one
+		// notification. A member who muted mentions still gets the comment.
+		mentioned := map[string]bool{}
+		if mentions := parseMentions(commentContent); len(mentions) > 0 {
+			skip := map[string]bool{e.ActorID: true}
+			mentioned = notifyMentionedMembers(bus, queries, e, mentions, issueID, issueTitle, issueStatus,
+				issueTitle, commentContent, skip, commentDetails)
+		}
+
 		notifySubscribers(ctx, queries, bus, issueID, issueStatus, e.WorkspaceID, e,
-			nil, "new_comment", "info",
+			mentioned, "new_comment", "info",
 			issueTitle, commentContent,
 			commentDetails)
-
-		// Notify @mentions in comment content.
-		mentions := parseMentions(commentContent)
-		if len(mentions) > 0 {
-			skip := map[string]bool{e.ActorID: true}
-			notifyMentionedMembers(bus, queries, e, mentions, issueID, issueTitle, issueStatus,
-				issueTitle, skip, commentDetails)
-		}
 	})
 
 	// issue_reaction:added — notify the issue creator

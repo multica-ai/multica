@@ -10,6 +10,7 @@ const NOTIFICATION_GROUP_KEYS: readonly NotificationGroupKey[] = [
   "comments",
   "chat_replies",
   "mentions",
+  "reactions",
   "updates",
   "new_issues",
   "agent_activity",

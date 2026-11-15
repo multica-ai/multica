@@ -861,6 +861,10 @@
         "label": "멘션",
         "description": "누군가 나를 @멘션할 때(@all, @squad 포함)"
       },
+      "reactions": {
+        "label": "반응",
+        "description": "내가 만든 태스크나 내가 쓴 댓글에 누군가 반응할 때"
+      },
       "updates": {
         "label": "우선순위 및 마감일",
         "description": "팔로우 중인 태스크의 우선순위나 마감일이 바뀔 때"
@@ -871,7 +875,7 @@
       },
       "agent_activity": {
         "label": "에이전트 활동",
-        "description": "에이전트 실행이 실패할 때"
+        "description": "에이전트 실행이 실패하거나, 에이전트가 요청한 앱 작업이 차단되거나 만료될 때"
       },
       "chat_replies": {
         "label": "채팅 답변 포함"

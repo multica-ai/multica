@@ -3187,16 +3187,6 @@ export class ApiClient {
     });
   }
 
-  // Archived notifications, backing the inbox's "Archived" sub-view. Capped
-  // server-side (no pagination in v1). Schema-guarded so a contract drift
-  // renders an empty archive instead of taking the inbox down with it.
-  async listArchivedInbox(): Promise<InboxItem[]> {
-    const raw = await this.fetch<unknown>("/api/inbox/archived");
-    return parseWithFallback(raw, InboxItemListSchema, EMPTY_INBOX_ITEMS, {
-      endpoint: "GET /api/inbox/archived",
-    });
-  }
-
   private archivedInboxParams(filters: ArchivedInboxFilters): URLSearchParams {
     return new URLSearchParams(archivedInboxQuery(filters));
   }
@@ -3227,16 +3217,6 @@ export class ApiClient {
 
   async unarchiveInbox(id: string): Promise<InboxItem> {
     return this.fetch(`/api/inbox/${id}/unarchive`, { method: "POST" });
-  }
-
-  // Raw unread ROW count — not the number any badge shows. The inbox renders
-  // one row per issue, so a single issue with three unread notifications
-  // counts once there and three times here. `getInboxUnreadSummary` is the
-  // deduplicated, per-workspace count the UI is built on (see
-  // `useInboxUnreadCount`); reach for this one only when raw rows are what
-  // you actually mean.
-  async getUnreadInboxCount(): Promise<{ count: number }> {
-    return this.fetch("/api/inbox/unread-count");
   }
 
   // Cross-workspace unread summary: one entry per workspace the user belongs

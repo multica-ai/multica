@@ -870,6 +870,10 @@
         "label": "Mentions",
         "description": "Quand quelqu'un vous @mentionne, y compris via @all et @squad"
       },
+      "reactions": {
+        "label": "Réactions",
+        "description": "Quand quelqu'un réagit à une tâche que vous avez créée ou à un commentaire que vous avez écrit"
+      },
       "updates": {
         "label": "Priorité et date d'échéance",
         "description": "Quand la priorité ou la date d'échéance change sur les tâches que vous suivez"
@@ -880,7 +884,7 @@
       },
       "agent_activity": {
         "label": "Activité des agents",
-        "description": "Lorsqu'une exécution d'agent échoue"
+        "description": "Lorsqu'une exécution d'agent échoue, ou qu'une action d'app demandée par un agent est bloquée ou expire"
       },
       "chat_replies": {
         "label": "Inclure les réponses du chat"

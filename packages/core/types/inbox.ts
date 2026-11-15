@@ -15,12 +15,14 @@ export type InboxItemType =
   | "due_date_changed"
   | "new_comment"
   | "mentioned"
+  | "task_failed"
+  | "reaction_added"
+  // No longer written, but older servers wrote them and those rows remain;
+  // keep their labels and filter groups so history still reads and filters.
   | "review_requested"
   | "task_completed"
-  | "task_failed"
   | "agent_blocked"
   | "agent_completed"
-  | "reaction_added"
   | "quick_create_done"
   | "quick_create_failed"
   // Quick create whose outcome could not be verified. Distinct from

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/events"
@@ -381,6 +382,139 @@ func TestNotification_StatusChanged_Muted(t *testing.T) {
 	}
 	if items := inboxItemsForRecipient(t, queries, normalID); len(items) != 1 {
 		t.Fatalf("expected normal subscriber to receive 1 item, got %d", len(items))
+	}
+}
+
+// TestNotification_ReactionAdded_Muted verifies that reactions="muted" stops
+// the reaction_added row an issue creator would otherwise get.
+func TestNotification_ReactionAdded_Muted(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	for _, tc := range []struct {
+		name  string
+		prefs string
+		want  int
+	}{
+		{"reactions muted", `{"reactions":"muted"}`, 0},
+		{"comments muted", `{"comments":"muted"}`, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			email := "notif-reaction-" + strings.ReplaceAll(tc.name, " ", "-") + "@multica.ai"
+			creatorID := createNotificationMember(t, email)
+			t.Cleanup(func() { cleanupTestUser(t, email) })
+
+			issueID := createTestIssue(t, testWorkspaceID, creatorID)
+			t.Cleanup(func() {
+				cleanupInboxForIssue(t, issueID)
+				cleanupTestIssue(t, issueID)
+			})
+
+			if _, err := testPool.Exec(context.Background(), `
+				INSERT INTO notification_preference (workspace_id, user_id, preferences)
+				VALUES ($1, $2, $3::jsonb)
+			`, testWorkspaceID, creatorID, tc.prefs); err != nil {
+				t.Fatalf("seed notification preference: %v", err)
+			}
+
+			bus.Publish(events.Event{
+				Type:        protocol.EventIssueReactionAdded,
+				WorkspaceID: testWorkspaceID,
+				ActorType:   "member",
+				ActorID:     testUserID,
+				Payload: map[string]any{
+					"reaction":     handler.IssueReactionResponse{Emoji: "👍"},
+					"creator_type": "member",
+					"creator_id":   creatorID,
+					"issue_id":     issueID,
+					"issue_title":  "reaction mute test issue",
+					"issue_status": "todo",
+				},
+			})
+
+			if items := inboxItemsForRecipient(t, queries, creatorID); len(items) != tc.want {
+				t.Fatalf("expected %d inbox items for creator, got %d", tc.want, len(items))
+			}
+		})
+	}
+}
+
+// TestNotification_CommentMentionIsOneNotification verifies that a subscriber
+// @mentioned in a comment gets one `mentioned` row carrying the comment, not a
+// `new_comment` row as well, while a subscriber who muted mentions still gets
+// the comment.
+func TestNotification_CommentMentionIsOneNotification(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	mentionedEmail := "notif-comment-mentioned@multica.ai"
+	mentionedID := createNotificationMember(t, mentionedEmail)
+	t.Cleanup(func() { cleanupTestUser(t, mentionedEmail) })
+
+	mutedEmail := "notif-comment-mentions-muted@multica.ai"
+	mutedID := createNotificationMember(t, mutedEmail)
+	t.Cleanup(func() { cleanupTestUser(t, mutedEmail) })
+
+	otherEmail := "notif-comment-other@multica.ai"
+	otherID := createNotificationMember(t, otherEmail)
+	t.Cleanup(func() { cleanupTestUser(t, otherEmail) })
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO notification_preference (workspace_id, user_id, preferences)
+		VALUES ($1, $2, '{"mentions":"muted"}'::jsonb)
+	`, testWorkspaceID, mutedID); err != nil {
+		t.Fatalf("seed muted notification preference: %v", err)
+	}
+
+	addTestSubscriber(t, issueID, "member", mentionedID, "commenter")
+	addTestSubscriber(t, issueID, "member", mutedID, "commenter")
+	addTestSubscriber(t, issueID, "member", otherID, "commenter")
+
+	content := "[@A](mention://member/" + mentionedID + ") [@B](mention://member/" + mutedID + ") please look"
+	bus.Publish(events.Event{
+		Type:        protocol.EventCommentCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"comment": handler.CommentResponse{
+				ID:         "00000000-0000-0000-0000-000000000000",
+				IssueID:    issueID,
+				AuthorType: "member",
+				AuthorID:   testUserID,
+				Content:    content,
+				Type:       "comment",
+			},
+			"issue_title":  "comment mention test issue",
+			"issue_status": "todo",
+		},
+	})
+
+	for _, tc := range []struct {
+		name        string
+		recipientID string
+		wantType    string
+	}{
+		{"mentioned subscriber", mentionedID, "mentioned"},
+		{"subscriber who muted mentions", mutedID, "new_comment"},
+		{"subscriber not mentioned", otherID, "new_comment"},
+	} {
+		items := inboxItemsForRecipient(t, queries, tc.recipientID)
+		if len(items) != 1 {
+			t.Fatalf("%s: expected 1 inbox item, got %d", tc.name, len(items))
+		}
+		if items[0].Type != tc.wantType {
+			t.Fatalf("%s: expected type %q, got %q", tc.name, tc.wantType, items[0].Type)
+		}
+		if items[0].Body.String != content {
+			t.Fatalf("%s: expected the comment as body, got %q", tc.name, items[0].Body.String)
+		}
 	}
 }
 

@@ -51,6 +51,7 @@ describe("Inbox notification settings", () => {
       "About you",
       "Assignments",
       "Mentions",
+      "Reactions",
       "Issues you subscribe to",
       "Status changes",
       "Comments",
