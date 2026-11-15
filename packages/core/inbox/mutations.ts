@@ -4,7 +4,7 @@ import { api } from "../api";
 import { inboxKeys, mapArchivedInboxCache, patchArchivedInboxCaches, type ArchivedInboxCache } from "./queries";
 import { onInboxInvalidate, onInboxSummaryInvalidate } from "./ws-updaters";
 import { useWorkspaceId } from "../hooks";
-import type { InboxItem } from "../types";
+import type { InboxItem, SnoozedInboxIssue } from "../types";
 
 /**
  * Refresh workspace inbox lists and the account-level unread summary after a
@@ -274,6 +274,102 @@ export function useArchiveCompletedInbox() {
   const wsId = useWorkspaceId();
   return useMutation({
     mutationFn: () => api.archiveCompletedInbox(),
+    onSettled: () => {
+      refreshInboxAfterWrite(qc, wsId);
+    },
+  });
+}
+
+export interface SnoozeInboxInput {
+  /** Any notification on the issue; the snooze covers the whole issue. */
+  id: string;
+  until: Date;
+}
+
+/**
+ * Snooze an issue in the inbox until a time (MUL-9333). Optimistic: the
+ * issue's rows carry the time at once, which takes the issue out of the list
+ * (`deduplicateInboxItems`), and the Snoozed view gains or moves the entry.
+ */
+export function useSnoozeInbox() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ id, until }: SnoozeInboxInput) => api.snoozeInbox(id, until.toISOString()),
+    onMutate: async ({ id, until }) => {
+      await qc.cancelQueries({ queryKey: inboxKeys.all(wsId) });
+      const prev = qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId));
+      const prevSnoozed = qc.getQueryData<SnoozedInboxIssue[]>(inboxKeys.snoozed(wsId));
+      const snoozedUntil = until.toISOString();
+      const issueId =
+        cachedInboxIssueId(qc, wsId, id) ?? prevSnoozed?.find((entry) => entry.item_id === id)?.issue_id ?? null;
+      if (issueId) {
+        qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), (old) =>
+          old?.map((item) => (item.issue_id === issueId && !item.archived ? { ...item, snoozed_until: snoozedUntil } : item)),
+        );
+        qc.setQueryData<SnoozedInboxIssue[]>(inboxKeys.snoozed(wsId), (old) => {
+          if (!old) return old;
+          const existing = old.find((entry) => entry.issue_id === issueId);
+          const entry: SnoozedInboxIssue = existing
+            ? { ...existing, snoozed_until: snoozedUntil }
+            : { issue_id: issueId, item_id: id, snoozed_until: snoozedUntil, snoozed_at: new Date().toISOString(), updates: 0 };
+          return [...old.filter((other) => other.issue_id !== issueId), entry].sort(
+            (a, b) => new Date(a.snoozed_until).getTime() - new Date(b.snoozed_until).getTime(),
+          );
+        });
+      }
+      return { prev, prevSnoozed };
+    },
+    onError: (_err, _input, ctx) => {
+      if (ctx?.prev) qc.setQueryData(inboxKeys.list(wsId), ctx.prev);
+      if (ctx?.prevSnoozed) qc.setQueryData(inboxKeys.snoozed(wsId), ctx.prevSnoozed);
+    },
+    onSettled: () => {
+      refreshInboxAfterWrite(qc, wsId);
+    },
+  });
+}
+
+export interface UnsnoozeInboxInput {
+  id: string;
+  /** Restore the issue as read, for undoing a snooze on an issue that was read. */
+  read?: boolean;
+}
+
+/**
+ * End a snooze now: the issue is back in the inbox. Optimistic on the
+ * Snoozed view and on rows still in the list cache (an undo right after
+ * snoozing); the rest of the list follows the server.
+ */
+export function useUnsnoozeInbox() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ id, read }: UnsnoozeInboxInput) => api.unsnoozeInbox(id, { read }),
+    onMutate: async ({ id, read }) => {
+      await qc.cancelQueries({ queryKey: inboxKeys.all(wsId) });
+      const prev = qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId));
+      const prevSnoozed = qc.getQueryData<SnoozedInboxIssue[]>(inboxKeys.snoozed(wsId));
+      const issueId =
+        prevSnoozed?.find((entry) => entry.item_id === id)?.issue_id ?? cachedInboxIssueId(qc, wsId, id);
+      if (issueId) {
+        qc.setQueryData<SnoozedInboxIssue[]>(inboxKeys.snoozed(wsId), (old) =>
+          old?.filter((entry) => entry.issue_id !== issueId),
+        );
+        qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), (old) =>
+          old?.map((item) =>
+            item.issue_id === issueId && !item.archived
+              ? { ...item, snoozed_until: null, ...(read !== undefined ? { read } : {}) }
+              : item,
+          ),
+        );
+      }
+      return { prev, prevSnoozed };
+    },
+    onError: (_err, _input, ctx) => {
+      if (ctx?.prev) qc.setQueryData(inboxKeys.list(wsId), ctx.prev);
+      if (ctx?.prevSnoozed) qc.setQueryData(inboxKeys.snoozed(wsId), ctx.prevSnoozed);
+    },
     onSettled: () => {
       refreshInboxAfterWrite(qc, wsId);
     },

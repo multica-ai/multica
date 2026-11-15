@@ -1,4 +1,5 @@
 import type { InboxItem } from "../types";
+import { inboxRowTime } from "./snooze";
 
 function byNewest(a: InboxItem, b: InboxItem): number {
   return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
@@ -34,13 +35,19 @@ export function withCommentAnchor(row: InboxItem, group: readonly InboxItem[]): 
   return { ...row, details: { ...(row.details ?? {}), comment_id: commentId } };
 }
 
-/** One row per issue: its newest notification. Newest group first. */
+/**
+ * One row per issue: its newest notification. Newest group first, where an
+ * issue back from a snooze counts from when it came back.
+ */
 export function groupInboxItemsByIssue(items: readonly InboxItem[]): InboxItem[] {
+  const now = Date.now();
   return groupInboxRows(items)
     .flatMap((group) => (group[0] ? [withCommentAnchor(group[0], group)] : []))
-    .sort(byNewest);
+    .sort((a, b) => inboxRowTime(b, now) - inboxRowTime(a, now));
 }
 
+/** Newest first, where an issue back from a snooze counts from when it came back. */
 export function sortInboxNewestFirst(items: InboxItem[]): InboxItem[] {
-  return items.sort(byNewest);
+  const now = Date.now();
+  return items.sort((a, b) => inboxRowTime(b, now) - inboxRowTime(a, now));
 }

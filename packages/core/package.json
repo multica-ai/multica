@@ -73,6 +73,8 @@
     "./inbox/filter-store": "./inbox/filter-store.ts",
     "./inbox/selection-store": "./inbox/selection-store.ts",
     "./inbox/ws-updaters": "./inbox/ws-updaters.ts",
+    "./inbox/snooze": "./inbox/snooze.ts",
+    "./inbox/use-snooze-wake": "./inbox/use-snooze-wake.ts",
     "./notification-preferences": "./notification-preferences/index.ts",
     "./notification-preferences/queries": "./notification-preferences/queries.ts",
     "./notification-preferences/mutations": "./notification-preferences/mutations.ts",
