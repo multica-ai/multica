@@ -51,7 +51,7 @@ type ProjectResponse struct {
 	// Default workflow. (MUL-7420)
 	WorkflowID *string `json:"workflow_id"`
 	// Visibility is "workspace" (every member) or "private" (project members
-	// plus workspace owners/admins). (MUL-8472)
+	// only, whatever their workspace role). (MUL-8472, MUL-9284)
 	Visibility string `json:"visibility"`
 	// ArchivedAt is non-null while the project is archived: hidden from
 	// default lists and pickers, closed to new issues, otherwise intact.
