@@ -47,6 +47,15 @@ const (
 	searchIndexCursorMaxBytes = 256 << 10
 	searchIndexCursorVersion  = 1
 	searchIndexStatementLimit = 15 * time.Second
+	// searchIndexAccessRules numbers the rules that decide which projects a
+	// caller may see, and goes up whenever they get stricter. Such a change
+	// writes no search_index_change row, so a copy built before it keeps
+	// content its holder may no longer read; a cursor carries the number it
+	// was issued under so that copy can be told to rebuild.
+	//
+	//	1: a private project is visible to its member list only. Before this,
+	//	   workspace owners and admins saw every private project (MUL-9284).
+	searchIndexAccessRules = 1
 )
 
 // searchIndexBootstrapSlots bounds the manifest and snapshot reads one API
@@ -111,18 +120,22 @@ func validPGSnapshotText(s string) bool {
 // searchIndexCursor is opaque to clients. Since is the snapshot whose changes
 // the client already holds. Target and the After* keyset are set only while a
 // catch-up spans several pages; once it completes, Target becomes the next
-// Since.
+// Since. AccessRules is the searchIndexAccessRules the cursor was issued
+// under; it is an optional field rather than a new Version so that a server
+// from before it existed still accepts the cursor.
 type searchIndexCursor struct {
-	Version   int    `json:"v"`
-	Since     string `json:"s"`
-	Target    string `json:"t,omitempty"`
-	AfterXid  string `json:"x,omitempty"`
-	AfterType string `json:"e,omitempty"`
-	AfterID   string `json:"i,omitempty"`
+	Version     int    `json:"v"`
+	Since       string `json:"s"`
+	Target      string `json:"t,omitempty"`
+	AfterXid    string `json:"x,omitempty"`
+	AfterType   string `json:"e,omitempty"`
+	AfterID     string `json:"i,omitempty"`
+	AccessRules int    `json:"a,omitempty"`
 }
 
 func encodeSearchIndexCursor(c searchIndexCursor) string {
 	c.Version = searchIndexCursorVersion
+	c.AccessRules = searchIndexAccessRules
 	raw, _ := json.Marshal(c)
 	return base64.RawURLEncoding.EncodeToString(raw)
 }
@@ -437,7 +450,8 @@ func (h *Handler) GetSearchIndexSnapshot(w http.ResponseWriter, r *http.Request)
 // ListSearchIndexChanges returns the entities written after the cursor's
 // snapshot: live rows as upserts, missing rows (and comment tombstones) as
 // deletions. Returns 410 when retention pruning may have dropped a change the
-// cursor has not seen; the client must then rebuild its copy.
+// cursor has not seen, or when the copy predates the current access rules and
+// the caller cannot see every project; the client must then rebuild its copy.
 func (h *Handler) ListSearchIndexChanges(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	wsUUID, ok := parseUUIDOrBadRequest(w, h.resolveWorkspaceID(r), "workspace_id")
@@ -550,6 +564,14 @@ func (h *Handler) ListSearchIndexChanges(w http.ResponseWriter, r *http.Request)
 	// a client that synced them before losing access drops its copy.
 	hidden, ok := h.requestHiddenProjects(w, r, uuidToString(wsUUID))
 	if !ok {
+		return
+	}
+	if cur.AccessRules != searchIndexAccessRules && !hidden.Empty() {
+		// The copy was built under other access rules and may hold a project
+		// this caller cannot see any more; only a rebuild drops it. A caller
+		// who sees every project has nothing to drop and just gets a current
+		// cursor back.
+		writeError(w, http.StatusGone, "search index access rules changed; rebuild the local index")
 		return
 	}
 	if !hidden.Empty() {

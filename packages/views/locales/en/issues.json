@@ -1893,7 +1893,10 @@
       "my_issues": "My Issues",
       "my_agents": "My agents' work",
       "all_issues": "All issues",
-      "unread": "Unread"
+      "my_work": "My work",
+      "working": "Working",
+      "subscribed": "Subscribed",
+      "snoozed": "Snoozed"
     },
     "untitled": "Untitled view",
     "copy_name": "{{name}} (copy)",

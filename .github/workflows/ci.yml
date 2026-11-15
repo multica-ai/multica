@@ -23,6 +23,7 @@ jobs:
       pull-requests: read
     outputs:
       frontend: ${{ steps.decide.outputs.frontend }}
+      docs: ${{ steps.decide.outputs.docs }}
       backend: ${{ steps.decide.outputs.backend }}
       sqlc: ${{ steps.decide.outputs.sqlc }}
       runtime: ${{ steps.decide.outputs.runtime }}
@@ -257,9 +258,37 @@ jobs:
       - name: Test views shard ${{ matrix.index }}/${{ matrix.total }}
         run: pnpm exec turbo test --filter='@multica/views' -- --shard=${{ matrix.index }}/${{ matrix.total }}
 
+  # The jobs above exclude docs because a per-PR `next build` of the docs site
+  # was too heavy (#1279). Its Vitest suite is not: it guards content such as
+  # unrendered CJK bold and finishes in seconds. It gets its own scope so a
+  # content-only PR runs it and an unrelated PR pays nothing, and installs only
+  # the docs package so the job stays far off the frontend critical path.
+  docs-test:
+    needs: changes
+    if: ${{ needs.changes.outputs.docs == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install docs dependencies
+        run: pnpm install --frozen-lockfile --filter @multica/docs
+
+      - name: Test docs
+        run: pnpm --filter @multica/docs test
+
   # Preserve the aggregate check names while validating intentional skips.
   frontend:
-    needs: [changes, frontend-build, frontend-test, frontend-views-test, frontend-quality]
+    needs: [changes, frontend-build, frontend-test, frontend-views-test, frontend-quality, docs-test]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
@@ -267,7 +296,7 @@ jobs:
       - name: Check frontend job results
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
-          JOB_SCOPES: '{"frontend-build":"frontend","frontend-test":"frontend","frontend-views-test":"frontend","frontend-quality":"quality_only"}'
+          JOB_SCOPES: '{"frontend-build":"frontend","frontend-test":"frontend","frontend-views-test":"frontend","frontend-quality":"quality_only","docs-test":"docs"}'
         run: node scripts/ci-scope.mjs gate
 
   # The Go caches are handled explicitly here rather than through setup-go's

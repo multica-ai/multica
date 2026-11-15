@@ -59,6 +59,7 @@ import type {
   UpdateRuntimeProfileRequest,
   InboxItem,
   InboxWorkspaceUnread,
+  SnoozedInboxIssue,
   IssueSubscriber,
   IssueUnread,
   Comment,
@@ -122,6 +123,7 @@ import type {
   UpdateProjectRequest,
   ListProjectsResponse,
   ListProjectMembersResponse,
+  ListPrivateProjectsResponse,
   ProjectResource,
   CreateProjectResourceRequest,
   UpdateProjectResourceRequest,
@@ -386,6 +388,7 @@ import {
   ProjectSchema,
   ArchiveProjectResponseSchema,
   ListProjectMembersResponseSchema,
+  ListPrivateProjectsResponseSchema,
   ProjectSubscriptionSchema,
   ListProjectsResponseSchema,
   EMPTY_PROJECT,
@@ -483,9 +486,11 @@ import {
   IssueInboxReadSchema,
   InboxDeleteSchema,
   InboxItemListSchema,
+  SnoozedInboxListSchema,
   ArchivedInboxPageSchema,
   ArchivedInboxFacetsSchema,
   EMPTY_INBOX_ITEMS,
+  EMPTY_SNOOZED_INBOX,
   NotificationPreferenceResponseSchema,
   EMPTY_NOTIFICATION_PREFERENCE_RESPONSE,
   LabelSchema,
@@ -3187,16 +3192,6 @@ export class ApiClient {
     });
   }
 
-  // Archived notifications, backing the inbox's "Archived" sub-view. Capped
-  // server-side (no pagination in v1). Schema-guarded so a contract drift
-  // renders an empty archive instead of taking the inbox down with it.
-  async listArchivedInbox(): Promise<InboxItem[]> {
-    const raw = await this.fetch<unknown>("/api/inbox/archived");
-    return parseWithFallback(raw, InboxItemListSchema, EMPTY_INBOX_ITEMS, {
-      endpoint: "GET /api/inbox/archived",
-    });
-  }
-
   private archivedInboxParams(filters: ArchivedInboxFilters): URLSearchParams {
     return new URLSearchParams(archivedInboxQuery(filters));
   }
@@ -3229,14 +3224,24 @@ export class ApiClient {
     return this.fetch(`/api/inbox/${id}/unarchive`, { method: "POST" });
   }
 
-  // Raw unread ROW count — not the number any badge shows. The inbox renders
-  // one row per issue, so a single issue with three unread notifications
-  // counts once there and three times here. `getInboxUnreadSummary` is the
-  // deduplicated, per-workspace count the UI is built on (see
-  // `useInboxUnreadCount`); reach for this one only when raw rows are what
-  // you actually mean.
-  async getUnreadInboxCount(): Promise<{ count: number }> {
-    return this.fetch("/api/inbox/unread-count");
+  // The viewer's snoozed issues, soonest back first (MUL-9333).
+  async listSnoozedInbox(): Promise<SnoozedInboxIssue[]> {
+    const raw = await this.fetch<unknown>("/api/inbox/snoozed");
+    return parseWithFallback(raw, SnoozedInboxListSchema, EMPTY_SNOOZED_INBOX, {
+      endpoint: "GET /api/inbox/snoozed",
+    });
+  }
+
+  // Snooze the item's issue until `until` (an ISO time). Snoozing a snoozed
+  // issue changes its time.
+  async snoozeInbox(id: string, until: string): Promise<{ issue_id: string; snoozed_until: string }> {
+    return this.fetch(`/api/inbox/${id}/snooze`, { method: "POST", body: JSON.stringify({ until }) });
+  }
+
+  // End the snooze on the item's issue. `read` restores it as read: undoing a
+  // snooze puts back the state it had.
+  async unsnoozeInbox(id: string, options: { read?: boolean } = {}): Promise<{ issue_id: string }> {
+    return this.fetch(`/api/inbox/${id}/unsnooze`, { method: "POST", body: JSON.stringify({ read: options.read ?? false }) });
   }
 
   // Cross-workspace unread summary: one entry per workspace the user belongs
@@ -4487,7 +4492,7 @@ export class ApiClient {
 
   async getProjectMembers(id: string): Promise<ListProjectMembersResponse> {
     const raw = await this.fetch<unknown>(`/api/projects/${id}/members`);
-    return parseWithFallback(raw, ListProjectMembersResponseSchema, { members: [], total: 0 }, {
+    return parseWithFallback(raw, ListProjectMembersResponseSchema, { members: [], total: 0, manager_id: null }, {
       endpoint: "GET /api/projects/:id/members",
     });
   }
@@ -4515,13 +4520,27 @@ export class ApiClient {
     const raw = await this.fetch<unknown>(`/api/projects/${id}/members`, {
       method: "POST", body: JSON.stringify({ user_ids: userIds }),
     });
-    return parseWithFallback(raw, ListProjectMembersResponseSchema, { members: [], total: 0 }, {
+    return parseWithFallback(raw, ListProjectMembersResponseSchema, { members: [], total: 0, manager_id: null }, {
       endpoint: "POST /api/projects/:id/members",
     });
   }
 
   async removeProjectMember(id: string, userId: string): Promise<void> {
     await this.fetch(`/api/projects/${id}/members/${userId}`, { method: "DELETE" });
+  }
+
+  // Workspace owners only: every private project with its member list, so an
+  // owner who is not in one can still find it and add themselves.
+  async listPrivateProjectsForOwner(): Promise<ListPrivateProjectsResponse> {
+    const raw = await this.fetch<unknown>("/api/projects/private");
+    return parseWithFallback(raw, ListPrivateProjectsResponseSchema, { projects: [], total: 0 }, {
+      endpoint: "GET /api/projects/private",
+    });
+  }
+
+  async joinPrivateProject(id: string): Promise<Project> {
+    const raw = await this.fetch<unknown>(`/api/projects/${id}/join`, { method: "POST" });
+    return parseWithFallback(raw, ProjectSchema, EMPTY_PROJECT, { endpoint: "POST /api/projects/:id/join" });
   }
 
   // Project resources

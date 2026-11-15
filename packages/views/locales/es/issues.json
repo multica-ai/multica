@@ -1893,7 +1893,10 @@
       "my_issues": "Mis tareas",
       "my_agents": "Trabajo de mis agentes",
       "all_issues": "Todas las tareas",
-      "unread": "Sin leer"
+      "my_work": "Mi trabajo",
+      "working": "En ejecución",
+      "subscribed": "Suscritas",
+      "snoozed": "Pospuestos"
     },
     "untitled": "Vista sin título",
     "copy_name": "{{name}} (copia)",

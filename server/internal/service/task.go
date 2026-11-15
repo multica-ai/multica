@@ -5662,6 +5662,7 @@ func ResumeUnsafeFailure(failureReason, errorText string) bool {
 	if resumeUnsafeFailureReason(failureReason) {
 		return true
 	}
+	errorText = taskfailure.WithoutCodebuddyProtocolSummary(errorText)
 	lower := strings.ToLower(errorText)
 	if strings.Contains(lower, "400") && strings.Contains(lower, "invalid_request_error") {
 		return true
@@ -6891,7 +6892,7 @@ func (s *TaskService) exhaustDelegatedFailureRecovery(ctx context.Context, targe
 	}
 	if inboxCreated && s.Bus != nil {
 		s.Bus.Publish(events.Event{
-			Type:        protocol.EventInboxNew,
+			Type:        inbox.NewItemEventType(exhaustedInbox),
 			WorkspaceID: util.UUIDToString(target.issue.WorkspaceID),
 			ActorType:   "system",
 			ActorID:     "",
@@ -8472,7 +8473,7 @@ func (s *TaskService) publishQuickCreateInbox(item db.InboxItem, workspaceID, ag
 		"issue_status":   issueStatus,
 	}
 	s.Bus.Publish(events.Event{
-		Type:        protocol.EventInboxNew,
+		Type:        inbox.NewItemEventType(item),
 		WorkspaceID: workspaceID,
 		ActorType:   "agent",
 		ActorID:     agentID,
