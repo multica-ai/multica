@@ -70,6 +70,7 @@ import { resolveClickIntent, useAppOrigin } from "../navigation";
 import { openLink, isMentionHref } from "./utils/link-handler";
 import { EditorBubbleMenu } from "./bubble-menu";
 import { posFromAnchor, type TextAnchor } from "./text-anchor";
+import { insertDictation } from "./utils/insert-dictation";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
 import { AttachmentDownloadProvider } from "./attachment-download-context";
 import "katex/dist/katex.min.css";
@@ -125,6 +126,7 @@ function isInNodeViewChrome(target: HTMLElement): boolean {
 // Types
 
 interface ContentEditorBaseProps {
+  ariaLabel?: string;
   /**
    * `baseMarkdown` is the last authoritative controlled value this editor
    * actually adopted before producing `markdown`. A dirty-editor realtime
@@ -136,6 +138,8 @@ interface ContentEditorBaseProps {
   className?: string;
   debounceMs?: number;
   onSubmit?: () => void;
+  /** Fixed annotation keys: Enter saves, Shift+Enter breaks, Mod+Enter submits. */
+  onEnter?: () => void;
   onBlur?: () => void;
   /**
    * Upload transport. `uploadId` is minted by the editor when it inserts the
@@ -301,6 +305,15 @@ interface ContentEditorRef {
    */
   insertMarkdownAtEnd: (markdown: string) => boolean;
   /**
+   * Insert plain text where the user would type next — the caret, or the end
+   * of the document when the editor has not been focused since it mounted —
+   * with a space before it when two words of a spaced language would touch.
+   * Fires the normal `onUpdate` pipeline. For voice input, whose text arrives
+   * after focus has moved to the mic button. Returns false while the Tiptap
+   * instance is not up.
+   */
+  insertText: (text: string) => boolean;
+  /**
    * Draw a placeholder for an upload this document is not showing yet, and
    * report whether it landed.
    *
@@ -363,12 +376,14 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
   function ContentEditor(
     {
       defaultValue,
+      ariaLabel,
       value,
       onUpdate,
       placeholder: placeholderText = "",
       className,
       debounceMs = 300,
       onSubmit,
+      onEnter,
       onBlur,
       onUploadFile,
       pasteAsFileThreshold,
@@ -397,6 +412,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     const pendingBaseRef = useRef<string | null>(null);
     const onUpdateRef = useRef(onUpdate);
     const onSubmitRef = useRef(onSubmit);
+    const onEnterRef = useRef(onEnter);
     const onBlurRef = useRef(onBlur);
     const onReadyRef = useRef(onReady);
     const onUploadingChangeRef = useRef(onUploadingChange);
@@ -507,6 +523,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     // Keep refs in sync without recreating editor
     onUpdateRef.current = onUpdate;
     onSubmitRef.current = onSubmit;
+    onEnterRef.current = onEnter;
     onBlurRef.current = onBlur;
     onReadyRef.current = onReady;
     onUploadingChangeRef.current = onUploadingChange;
@@ -562,6 +579,9 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     // auto-focusing a brand-new conversation) would hit a null editor and no-op.
     // Latch the intent here and honor it in `onCreate` once the editor exists.
     const focusOnReadyRef = useRef(false);
+    // Whether the user has placed a caret in this instance; until then the
+    // selection is the parser's default at the start of the document.
+    const caretPlacedRef = useRef(false);
     // Large markdown is parsed in chunks to dodge marked's O(n²) tokenizer (see
     // parseMarkdownChunked). Small docs stay on the single-parse fast path.
     const mountChunked = initialContent.length > MARKDOWN_CHUNK_THRESHOLD;
@@ -609,6 +629,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         placeholder: () => placeholderRef.current,
         queryClient,
         onSubmitRef,
+        onEnterRef,
         onUploadFileRef,
         pasteAsFileThresholdRef,
         disableMentions,
@@ -644,6 +665,9 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
           lastEmittedRef.current = md;
           onUpdateRef.current?.(md, base);
         }, debounceMs);
+      },
+      onFocus: () => {
+        caretPlacedRef.current = true;
       },
       onBlur: () => {
         onBlurRef.current?.();
@@ -689,6 +713,8 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         },
         attributes: {
           class: cn("flex-1 rich-text-editor text-body outline-none", className),
+          "data-mc": "content",
+          ...(ariaLabel ? { role: "textbox", "aria-label": ariaLabel, "aria-multiline": "true" } : {}),
         },
       },
     });
@@ -972,6 +998,11 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         });
         return true;
       },
+      insertText: (text: string) => {
+        if (!editor || editor.isDestroyed) return false;
+        insertDictation(editor, text, caretPlacedRef.current);
+        return true;
+      },
       flushPendingUpdate: () => {
         // No armed timer = nothing typed since the last emit. The editor is
         // already clean, so the host has nothing to re-route.
@@ -1016,7 +1047,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       <AttachmentDownloadProvider attachments={providerAttachments}>
         <div
           ref={wrapperRef}
-          className="relative flex flex-1 min-h-full flex-col"
+          className="relative flex min-w-0 flex-1 min-h-full flex-col"
           onMouseDown={handleContainerMouseDown}
         >
           <EditorContent className="flex flex-1 flex-col" editor={editor} />

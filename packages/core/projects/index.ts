@@ -1,13 +1,31 @@
 export { canDeleteProject } from "./deletion-permissions";
-export { projectKeys, projectListOptions, projectDetailOptions } from "./queries";
-export { useCreateProject, useUpdateProject, useDeleteProject, ProjectDeletionOfflineError } from "./mutations";
+export { projectLastActivityAt } from "./activity";
+export {
+  PROJECTS_PAGE_SCOPE,
+  projectsPagePrefsFromDoc,
+  useProjectsPagePrefsSync,
+  type ProjectsPagePrefs,
+} from "./page-prefs";
+export { projectKeys, projectListOptions, projectDetailOptions, projectSubscriptionOptions } from "./queries";
+export {
+  useCreateProject,
+  useUpdateProject,
+  useDeleteProject,
+  useArchiveProject,
+  useRestoreProject,
+  useSetProjectSubscription,
+  ProjectDeletionOfflineError,
+} from "./mutations";
+export { isProjectArchived, selectableProjects } from "./archive";
 export { useProjectDraftStore } from "./draft-store";
 export {
   useProjectViewStore,
   PROJECT_SORT_DEFAULT_DIRECTION,
   PROJECT_DEFAULT_HIDDEN_COLUMNS,
   EMPTY_PROJECT_FILTERS,
-  type ProjectViewMode,
+  boardGroupBy,
+  type ProjectLayout,
+  type ProjectGroupBy,
   type ProjectSortField,
   type ProjectSortDirection,
   type ProjectColumnKey,

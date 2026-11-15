@@ -32,6 +32,7 @@ export function openExternal(
   // same-tab option keeps Checkout/Portal reliable on web while Electron still
   // hands the URL to the system browser above.
   if (options?.webTarget === "same-tab") {
+    // eslint-disable-next-line no-restricted-syntax -- web-only branch; Desktop returned through desktopAPI above
     window.location.assign(url);
     return;
   }

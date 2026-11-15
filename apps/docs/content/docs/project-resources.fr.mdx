@@ -16,7 +16,7 @@ Deux types de ressources sont pris en charge aujourd'hui :
 | Ressource | Idéal pour | Où ont lieu les exécutions |
 |---|---|---|
 | **Dépôt GitHub** | Du code partagé par l'équipe, avec des checkouts gérés par le runtime | Un répertoire de travail géré par le runtime |
-| **Répertoire local** | Un checkout existant, un très gros dépôt, ou lorsque vous voulez inspecter directement les modifications locales | Le répertoire d'origine, sur un ordinateur précis |
+| **Répertoire local** | Un checkout existant, un très gros dépôt, ou lorsque vous voulez inspecter directement les modifications locales | Le dossier d'origine ou un worktree isolé, sur un ordinateur précis |
 
 ## Comment les ressources entrent dans une exécution
 
@@ -24,11 +24,11 @@ Lorsqu'un agent traite une tâche du projet, Multica ajoute le nom du projet, sa
 
 La liste des dépôts rattachés à l'espace de travail est toujours incluse dans le contexte de l'exécution. Les dépôts rattachés au projet précisent en plus le code et la ref par défaut qu'utilise cet ensemble de travail.
 
-Un répertoire local ne s'applique qu'au daemon auquel il est lié. Lorsque le daemon chargé d'une exécution dispose d'un répertoire local correspondant, l'agent travaille directement dans ce répertoire ; les autres ordinateurs continuent d'utiliser les dépôts GitHub du projet ou les dépôts de l'espace de travail.
+Un répertoire local ne s'applique qu'au daemon auquel il est lié. Lorsque le daemon chargé d'une exécution dispose d'un répertoire local correspondant, l'agent utilise le répertoire d'origine en mode `in_place`, ou un worktree isolé de celui-ci en mode `worktree` ; les autres ordinateurs continuent d'utiliser les dépôts du projet ou de l'espace de travail.
 
 ## Ajouter un dépôt GitHub
 
-Ouvrez le projet et choisissez « Ajouter une ressource » sous **Ressources**. Sélectionnez un dépôt déjà rattaché à l'espace de travail, ou collez une URL Git. Les dépôts de l'espace de travail se gèrent dans **Paramètres → Code** ; une fois GitHub connecté, la même page propose **Choisir depuis GitHub** pour importer les dépôts auxquels la GitHub App a accès.
+Ouvrez le projet et cliquez sur **Ajouter un dépôt** dans **Ressources → Dépôts**. Recherchez un dépôt rattaché à l'espace de travail ou collez une URL Git. Les dépôts de l'espace de travail se gèrent dans **Paramètres → Code** ; une fois GitHub connecté, la même page propose **Choisir depuis GitHub** pour importer les dépôts auxquels la GitHub App a accès.
 
 Les dépôts ne se limitent pas à GitHub : toute URL Git accessible par le runtime fonctionne comme ressource de dépôt. Une instance Multica auto-hébergée peut aussi connecter des instances Forgejo, Gitea ou GitLab auto-hébergées dans **Paramètres → Code** ; voir [Fournisseurs Git auto-hébergés](/vcs-integration).
 
@@ -54,17 +54,17 @@ Assurez-vous que le daemon local de l'application de bureau est en ligne.
 </Step>
 <Step>
 
-Ouvrez les **Ressources** du projet, ou l'onglet **Répertoire local** de la boîte de dialogue de création de projet. Le même choix y est disponible avant même que le projet existe.
+Pour un projet existant, ouvrez **Ressources → Dossiers locaux** et suivez les étapes ci-dessous. Lors de la création d'un projet, utilisez plutôt l'onglet **Dossier local** ; le dossier et son mode sont enregistrés avec le projet.
 
 </Step>
 <Step>
 
-Choisissez « Ajouter un répertoire local », puis sélectionnez le dossier à utiliser.
+Sous votre ordinateur, cliquez sur **Choisir un dossier...**, puis sélectionnez le dossier à utiliser.
 
 </Step>
 <Step>
 
-Choisissez comment les exécutions doivent l'utiliser : **Direct** ou **Parallèle**, voir [Comment les exécutions partagent le répertoire](#comment-les-exécutions-partagent-le-répertoire). L'application de bureau présélectionne **Parallèle** lorsque le dossier est un dépôt git que le runtime de cette machine peut isoler, et **Direct** sinon. Modifiez ce choix sur place, ou plus tard depuis **Ressources** avec le crayon à côté du répertoire.
+Choisissez **Modifier directement** ou **Exécuter en parallèle**, décrits dans [Comment les exécutions partagent le répertoire](#comment-les-exécutions-partagent-le-répertoire), puis cliquez sur **Ajouter le dossier**. L'application de bureau présélectionne **Exécuter en parallèle** si le dossier est un dépôt git que le runtime de cette machine peut isoler, et **Modifier directement** sinon. Pour changer ce choix ensuite, cliquez sur l'étiquette du mode du dossier dans **Ressources** : le nouveau mode est enregistré dès sa sélection.
 
 </Step>
 </Steps>
@@ -83,7 +83,7 @@ En mode `in_place` (par défaut), un répertoire local n'est pas un environnemen
 
 ## Comment les exécutions partagent le répertoire
 
-Un répertoire local dispose de deux modes d'exécution, définis par ressource avec `execution_mode`. L'application de bureau les nomme **Direct** et **Parallèle** ; l'API, le CLI et le reste de cette page utilisent les identifiants.
+Un répertoire local dispose de deux modes d'exécution, définis par ressource avec `execution_mode`. L'application de bureau les nomme **Modifier directement** et **Exécuter en parallèle** lors de l'ajout d'un dossier, puis **Direct** et **Parallèle** sur l'étiquette du mode du dossier ; l'API, le CLI et le reste de cette page utilisent les identifiants.
 
 <LocalDirModeDemo />
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { Archive, ArchiveRestore, Check, CircleDot, ExternalLink } from "@multica/ui/icons";
+import { Archive, ArchiveRestore, BellOff, Check, CircleDot, ExternalLink, Trash2 } from "@multica/ui/icons";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import type { InboxItem } from "@multica/core/types";
 import type { RowActionItem } from "../../common/row-actions-menu";
@@ -17,6 +17,13 @@ export interface InboxRowActions {
    * reversal-of-the-current-view the row's inline button performs.
    */
   onAction: (id: string) => void;
+  onDelete: (id: string) => void;
+  /**
+   * Unsubscribe & archive, offered in the main list on rows `canUnsubscribe`
+   * accepts (issues that are not the viewer's own).
+   */
+  onUnsubscribeArchive?: (id: string) => void;
+  canUnsubscribe?: (item: InboxItem) => boolean;
 }
 
 /**
@@ -97,6 +104,26 @@ export function useInboxItemActions(
         <Archive className="h-4 w-4" />
       ),
       onSelect: () => actions.onAction(item.id),
+    },
+    ...(!isArchivedView && actions.onUnsubscribeArchive && actions.canUnsubscribe?.(item)
+      ? [
+          {
+            key: "unsubscribe-archive",
+            label: t(($) => $.context_menu.unsubscribe_archive),
+            icon: <BellOff className="h-4 w-4" />,
+            onSelect: () => actions.onUnsubscribeArchive?.(item.id),
+          },
+        ]
+      : []),
+  ]);
+
+  groups.push([
+    {
+      key: "delete",
+      label: t(($) => $.context_menu.delete),
+      icon: <Trash2 className="h-4 w-4" />,
+      danger: true,
+      onSelect: () => actions.onDelete(item.id),
     },
   ]);
 

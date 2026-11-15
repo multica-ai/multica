@@ -23,22 +23,29 @@ func TestResolveAgentExecutablePath_PreservesDispatchShimName(t *testing.T) {
 		t.Skip("creating symlinks requires elevated privileges on Windows")
 	}
 
-	for _, shimName := range []string{"volta-shim", "vp"} {
-		t.Run(shimName, func(t *testing.T) {
+	for _, tt := range []struct {
+		shimName string
+		command  string
+	}{
+		{shimName: "volta-shim", command: "claude"},
+		{shimName: "vp", command: "claude"},
+		{shimName: "mise", command: "codex"},
+	} {
+		t.Run(tt.shimName, func(t *testing.T) {
 			managerDir := t.TempDir()
-			manager := filepath.Join(managerDir, shimName)
-			if err := os.WriteFile(manager, []byte("#!/bin/sh\nprintf '%s\\n' \"${0##*/}\"\n"), 0o755); err != nil {
+			manager := filepath.Join(managerDir, tt.shimName)
+			if err := os.WriteFile(manager, []byte("#!/bin/sh\nprintf '%s\\n' \"${0##*/}\" \"$1\" \"$PWD\"\n"), 0o755); err != nil {
 				t.Fatalf("write dispatcher: %v", err)
 			}
 
 			binDir := t.TempDir()
-			entrypoint := filepath.Join(binDir, "claude")
+			entrypoint := filepath.Join(binDir, tt.command)
 			if err := os.Symlink(manager, entrypoint); err != nil {
 				t.Fatalf("symlink dispatcher: %v", err)
 			}
 			t.Setenv("PATH", binDir)
 
-			got, err := resolveAgentExecutablePath("claude")
+			got, err := resolveAgentExecutablePath(tt.command)
 			if err != nil {
 				t.Fatalf("resolveAgentExecutablePath: %v", err)
 			}
@@ -46,16 +53,29 @@ func TestResolveAgentExecutablePath_PreservesDispatchShimName(t *testing.T) {
 			if err != nil {
 				t.Fatalf("resolve bin directory: %v", err)
 			}
-			want := filepath.Join(realBinDir, "claude")
+			want := filepath.Join(realBinDir, tt.command)
 			if got != want {
 				t.Fatalf("resolved path = %q, want command-preserving entrypoint %q", got, want)
 			}
-			output, err := exec.Command(got, "--version").CombinedOutput()
+			workDir, err := filepath.EvalSymlinks(t.TempDir())
 			if err != nil {
-				t.Fatalf("run resolved entrypoint: %v: %s", err, output)
+				t.Fatalf("resolve task workdir: %v", err)
 			}
-			if got := strings.TrimSpace(string(output)); got != "claude" {
-				t.Fatalf("dispatcher observed command name %q, want claude", got)
+			args := []string{"--version"}
+			if tt.command == "codex" {
+				args = append(args, "app-server")
+			}
+			for _, arg := range args {
+				cmd := exec.Command(got, arg)
+				cmd.Dir = workDir
+				output, err := cmd.CombinedOutput()
+				if err != nil {
+					t.Fatalf("run resolved entrypoint with %s: %v: %s", arg, err, output)
+				}
+				wantOutput := tt.command + "\n" + arg + "\n" + workDir + "\n"
+				if string(output) != wantOutput {
+					t.Fatalf("dispatcher invocation = %q, want %q", output, wantOutput)
+				}
 			}
 		})
 	}
@@ -106,42 +126,6 @@ func TestPatternsFromEnv_DefaultsWhenUnset(t *testing.T) {
 	}
 }
 
-// A localhost server URL is not the official cloud host, so this exercises the
-// self-host branch of defaultGCCompletedTaskTTL: retention stays unbounded until
-// an operator opts in, and a daemon upgrade never starts deleting on its own.
-func TestLoadConfig_CompletedTaskTTLDefaultsDisabledOnSelfHostAndReadsEnv(t *testing.T) {
-	stageFakeAgent(t)
-	redirectTestHome(t, t.TempDir())
-	t.Setenv("SHELL", filepath.Join(t.TempDir(), "missing-shell"))
-	t.Setenv("MULTICA_GC_COMPLETED_TASK_TTL", "")
-
-	overrides := Overrides{
-		ServerURL:      "http://localhost:0",
-		WorkspacesRoot: t.TempDir(),
-	}
-	cfg, err := LoadConfig(overrides)
-	if err != nil {
-		t.Fatalf("LoadConfig with default completed-task TTL: %v", err)
-	}
-	if cfg.GCCompletedTaskTTL != 0 {
-		t.Fatalf("GCCompletedTaskTTL = %s, want disabled", cfg.GCCompletedTaskTTL)
-	}
-
-	t.Setenv("MULTICA_GC_COMPLETED_TASK_TTL", "36h")
-	cfg, err = LoadConfig(overrides)
-	if err != nil {
-		t.Fatalf("LoadConfig with completed-task TTL: %v", err)
-	}
-	if cfg.GCCompletedTaskTTL != 36*time.Hour {
-		t.Fatalf("GCCompletedTaskTTL = %s, want 36h", cfg.GCCompletedTaskTTL)
-	}
-
-	t.Setenv("MULTICA_GC_COMPLETED_TASK_TTL", "not-a-duration")
-	if _, err := LoadConfig(overrides); err == nil || !strings.Contains(err.Error(), "MULTICA_GC_COMPLETED_TASK_TTL") {
-		t.Fatalf("LoadConfig invalid completed-task TTL error = %v, want named validation error", err)
-	}
-}
-
 func TestLoadConfig_WSClaimPollIntervalPrecedence(t *testing.T) {
 	stageFakeAgent(t)
 	redirectTestHome(t, t.TempDir())
@@ -182,66 +166,57 @@ func TestLoadConfig_WSClaimPollIntervalPrecedence(t *testing.T) {
 	}
 }
 
-func TestLoadConfig_CompletedTaskTTLDefaultsBoundedOnOfficialCloud(t *testing.T) {
+// The completed-task retention bound is on by default for every server, not
+// just Multica Cloud: a self-hosted or team-hosted daemon whose issues sit open
+// fills its disk just as fast. The env var still overrides in both directions.
+func TestLoadConfig_CompletedTaskTTLDefaultsBoundedOnEveryServer(t *testing.T) {
 	stageFakeAgent(t)
 	redirectTestHome(t, t.TempDir())
 	t.Setenv("SHELL", filepath.Join(t.TempDir(), "missing-shell"))
-	t.Setenv("MULTICA_GC_COMPLETED_TASK_TTL", "")
 
-	overrides := Overrides{
-		ServerURL:      "https://" + officialCloudHost,
-		WorkspacesRoot: t.TempDir(),
-	}
-	cfg, err := LoadConfig(overrides)
-	if err != nil {
-		t.Fatalf("LoadConfig on official cloud: %v", err)
-	}
-	if cfg.GCCompletedTaskTTL != 14*24*time.Hour {
-		t.Fatalf("GCCompletedTaskTTL = %s, want 14d on official cloud", cfg.GCCompletedTaskTTL)
-	}
+	for _, serverURL := range []string{
+		"https://" + officialCloudHost,
+		"https://api-staging.multica.ai",
+		"https://multica.example.com",
+		"http://localhost:0",
+	} {
+		t.Run(serverURL, func(t *testing.T) {
+			overrides := Overrides{
+				ServerURL:      serverURL,
+				WorkspacesRoot: t.TempDir(),
+			}
 
-	// An explicit 0 has to win on cloud too — otherwise the only way back to the
-	// previous retention behavior would be downgrading the daemon.
-	t.Setenv("MULTICA_GC_COMPLETED_TASK_TTL", "0")
-	cfg, err = LoadConfig(overrides)
-	if err != nil {
-		t.Fatalf("LoadConfig with cloud opt-out: %v", err)
-	}
-	if cfg.GCCompletedTaskTTL != 0 {
-		t.Fatalf("GCCompletedTaskTTL = %s, want an explicit 0 to disable the cloud default", cfg.GCCompletedTaskTTL)
-	}
+			t.Setenv("MULTICA_GC_COMPLETED_TASK_TTL", "")
+			cfg, err := LoadConfig(overrides)
+			if err != nil {
+				t.Fatalf("LoadConfig with default completed-task TTL: %v", err)
+			}
+			if cfg.GCCompletedTaskTTL != 14*24*time.Hour {
+				t.Fatalf("GCCompletedTaskTTL = %s, want 14d", cfg.GCCompletedTaskTTL)
+			}
 
-	t.Setenv("MULTICA_GC_COMPLETED_TASK_TTL", "36h")
-	cfg, err = LoadConfig(overrides)
-	if err != nil {
-		t.Fatalf("LoadConfig with cloud override: %v", err)
-	}
-	if cfg.GCCompletedTaskTTL != 36*time.Hour {
-		t.Fatalf("GCCompletedTaskTTL = %s, want the env override to win on cloud", cfg.GCCompletedTaskTTL)
-	}
-}
+			// An explicit 0 restores keep-until-terminal retention.
+			t.Setenv("MULTICA_GC_COMPLETED_TASK_TTL", "0")
+			cfg, err = LoadConfig(overrides)
+			if err != nil {
+				t.Fatalf("LoadConfig with completed-task TTL opt-out: %v", err)
+			}
+			if cfg.GCCompletedTaskTTL != 0 {
+				t.Fatalf("GCCompletedTaskTTL = %s, want an explicit 0 to disable the default", cfg.GCCompletedTaskTTL)
+			}
 
-func TestDefaultGCCompletedTaskTTLOnlyBoundsOfficialCloudHost(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		name      string
-		serverURL string
-		want      time.Duration
-	}{
-		{"official cloud", "https://api.multica.ai", DefaultGCCompletedTaskTTLCloud},
-		{"official cloud with port and path", "https://API.Multica.AI:443/api", DefaultGCCompletedTaskTTLCloud},
-		// Staging and previews inherit the self-host value for the same reason
-		// officialCloudHost excludes them from the auto-update default.
-		{"staging", "https://api-staging.multica.ai", DefaultGCCompletedTaskTTLSelfHost},
-		{"self-host", "https://multica.example.com", DefaultGCCompletedTaskTTLSelfHost},
-		{"localhost", "http://localhost:8080", DefaultGCCompletedTaskTTLSelfHost},
-		{"unparseable", "://nope", DefaultGCCompletedTaskTTLSelfHost},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			if got := defaultGCCompletedTaskTTL(tc.serverURL); got != tc.want {
-				t.Fatalf("defaultGCCompletedTaskTTL(%q) = %s, want %s", tc.serverURL, got, tc.want)
+			t.Setenv("MULTICA_GC_COMPLETED_TASK_TTL", "36h")
+			cfg, err = LoadConfig(overrides)
+			if err != nil {
+				t.Fatalf("LoadConfig with completed-task TTL override: %v", err)
+			}
+			if cfg.GCCompletedTaskTTL != 36*time.Hour {
+				t.Fatalf("GCCompletedTaskTTL = %s, want 36h", cfg.GCCompletedTaskTTL)
+			}
+
+			t.Setenv("MULTICA_GC_COMPLETED_TASK_TTL", "not-a-duration")
+			if _, err := LoadConfig(overrides); err == nil || !strings.Contains(err.Error(), "MULTICA_GC_COMPLETED_TASK_TTL") {
+				t.Fatalf("LoadConfig invalid completed-task TTL error = %v, want named validation error", err)
 			}
 		})
 	}
@@ -1630,18 +1605,6 @@ func pinNonCodexAgentsToMissingPaths(t *testing.T) {
 // =============================================================================
 // CLI config Backends.OpenClaw overrides (issue #3875)
 // =============================================================================
-
-// writeCLIConfigForProfile is a minimal helper for the override tests:
-// stages a HOME, writes a config.json under the given profile (empty profile
-// = default), and returns the resolved path so tests can assert against it.
-func writeCLIConfigForProfile(t *testing.T, profile string, cfg cli.CLIConfig) {
-	t.Helper()
-	tmp := t.TempDir()
-	redirectTestHome(t, tmp)
-	if err := cli.SaveCLIConfigForProfile(cfg, profile); err != nil {
-		t.Fatalf("write cli config: %v", err)
-	}
-}
 
 // TestApplyOpenclawOverride_DoesNothingWhenNil verifies the early-return
 // path. A daemon started with no override should not Setenv anything; the

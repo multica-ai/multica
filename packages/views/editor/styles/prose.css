@@ -53,27 +53,42 @@
    display cut, which is tighter than the text cut. Weight stops at 600 so h1
    sits on the same weight as the issue title above it. */
 .rich-text-editor h1 {
-  font-size: var(--text-display-sm);
-  font-weight: 600;
+  font-family: var(--h1-font, var(--font-content));
+  font-size: var(--h1-size, var(--text-display-sm));
+  font-weight: var(--h1-weight, 600);
+  font-style: var(--h1-style, normal);
+  font-variant: var(--h1-variant, normal);
+  letter-spacing: var(--h1-letter-spacing, normal);
+  color: var(--h1-color, currentColor);
   margin-top: 1.5rem;
   margin-bottom: 0.5rem;
-  line-height: 1.3;
+  line-height: var(--h1-line-height, 1.3);
 }
 
 .rich-text-editor h2 {
-  font-size: var(--text-title);
-  font-weight: 600;
+  font-family: var(--h2-font, var(--font-content));
+  font-size: var(--h2-size, var(--text-title));
+  font-weight: var(--h2-weight, 600);
+  font-style: var(--h2-style, normal);
+  font-variant: var(--h2-variant, normal);
+  letter-spacing: var(--h2-letter-spacing, normal);
+  color: var(--h2-color, currentColor);
   margin-top: 1.5rem;
   margin-bottom: 0.5rem;
-  line-height: 1.35;
+  line-height: var(--h2-line-height, 1.35);
 }
 
 .rich-text-editor h3 {
-  font-size: var(--text-body-lg);
-  font-weight: 600;
+  font-family: var(--h3-font, var(--font-content));
+  font-size: var(--h3-size, var(--text-body-lg));
+  font-weight: var(--h3-weight, 600);
+  font-style: var(--h3-style, normal);
+  font-variant: var(--h3-variant, normal);
+  letter-spacing: var(--h3-letter-spacing, normal);
+  color: var(--h3-color, currentColor);
   margin-top: 1rem;
   margin-bottom: 0.5rem;
-  line-height: 1.4;
+  line-height: var(--h3-line-height, 1.4);
 }
 
 /* h4–h6: Markdown allows six levels and both renderers now emit all of them
@@ -82,35 +97,49 @@
    steps the scale still has — body (14) bold, label (13), caption (12) muted —
    so a deep heading stays legible without competing with h1–h3. */
 .rich-text-editor h4 {
-  font-size: var(--text-body);
-  font-weight: 600;
+  font-family: var(--h4-font, var(--font-content));
+  font-size: var(--h4-size, var(--text-body));
+  font-weight: var(--h4-weight, 600);
+  font-style: var(--h4-style, normal);
+  font-variant: var(--h4-variant, normal);
+  letter-spacing: var(--h4-letter-spacing, normal);
+  color: var(--h4-color, currentColor);
   margin-top: 1rem;
   margin-bottom: 0.5rem;
-  line-height: 1.45;
+  line-height: var(--h4-line-height, 1.45);
 }
 
 .rich-text-editor h5 {
-  font-size: var(--text-label);
-  font-weight: 600;
+  font-family: var(--h5-font, var(--font-content));
+  font-size: var(--h5-size, var(--text-label));
+  font-weight: var(--h5-weight, 600);
+  font-style: var(--h5-style, normal);
+  font-variant: var(--h5-variant, normal);
+  letter-spacing: var(--h5-letter-spacing, normal);
+  color: var(--h5-color, currentColor);
   margin-top: 1rem;
   margin-bottom: 0.5rem;
-  line-height: 1.5;
+  line-height: var(--h5-line-height, 1.5);
 }
 
 .rich-text-editor h6 {
-  font-size: var(--text-caption);
-  font-weight: 600;
-  color: var(--muted-foreground);
+  font-family: var(--h6-font, var(--font-content));
+  font-size: var(--h6-size, var(--text-caption));
+  font-weight: var(--h6-weight, 600);
+  font-style: var(--h6-style, normal);
+  font-variant: var(--h6-variant, normal);
+  letter-spacing: var(--h6-letter-spacing, normal);
+  color: var(--h6-color, var(--muted-foreground));
   margin-top: 1rem;
   margin-bottom: 0.5rem;
-  line-height: 1.5;
+  line-height: var(--h6-line-height, 1.5);
 }
 
 /* Paragraphs */
 .rich-text-editor p {
-  margin-top: 0.625rem;
-  margin-bottom: 0.625rem;
-  line-height: 1.625;
+  margin-top: var(--paragraph-spacing, 0.625rem);
+  margin-bottom: var(--paragraph-spacing, 0.625rem);
+  line-height: var(--content-leading, 1.625);
 }
 
 /* First child should not have top margin */
@@ -126,24 +155,24 @@
 /* Lists */
 .rich-text-editor ul {
   list-style-type: disc;
-  padding-inline-start: 1.25rem;
+  padding-inline-start: var(--list-indent, 1.25rem);
   padding-inline-end: 0.5rem;
   margin: 0.5rem 0;
 }
 
 .rich-text-editor ol {
   list-style-type: decimal;
-  padding-inline-start: 1.5rem;
+  padding-inline-start: var(--list-indent-ordered, 1.5rem);
   margin: 0.5rem 0;
 }
 
 .rich-text-editor li {
-  margin: 0.25rem 0;
-  line-height: 1.625;
+  margin: var(--list-item-spacing, 0.25rem) 0;
+  line-height: var(--content-leading, 1.625);
 }
 
 .rich-text-editor li + li {
-  margin-top: 0.25rem;
+  margin-top: var(--list-item-spacing, 0.25rem);
 }
 
 /* Han, kana and Hangul fill the whole em square and carry no ascender or
@@ -152,11 +181,11 @@
    language people write their issues and comments in. Table cells are listed
    so editable cells (text in a <p>) and readonly cells (bare text) stay equal. */
 .rich-text-editor :is(p, li, th, td):is(:lang(zh), :lang(ja), :lang(ko)) {
-  line-height: 1.75;
+  line-height: var(--content-leading-cjk, 1.75);
 }
 
 .rich-text-editor li::marker {
-  color: var(--muted-foreground);
+  color: var(--list-marker-color, var(--muted-foreground));
 }
 
 /* Remove paragraph margins inside list items (Tiptap wraps li content in <p>) */
@@ -235,9 +264,9 @@
 
 /* Shared: checkbox appearance. */
 .rich-text-editor input[type="checkbox"] {
-  width: 0.95rem;
-  height: 0.95rem;
-  accent-color: var(--brand);
+  width: var(--checkbox-size, 0.95rem);
+  height: var(--checkbox-size, 0.95rem);
+  accent-color: var(--checkbox-color, var(--brand));
   cursor: pointer;
 }
 
@@ -277,7 +306,7 @@
 /* Completed editor item: muted text (no strikethrough), matching Linear. The
    NodeView keeps `data-checked` on the <li> (but not data-type). */
 .rich-text-editor ul[data-type="taskList"] > li[data-checked="true"] > div {
-  color: var(--muted-foreground);
+  color: var(--checklist-done-color, var(--muted-foreground));
 }
 
 /* --- Readonly (remark-gfm) --- */
@@ -308,7 +337,7 @@
    reset keeps a completed parent from bleeding its muted color into the
    (independently evaluated) nested items below it. */
 .rich-text-editor li.task-list-item:has(> input:checked) {
-  color: var(--muted-foreground);
+  color: var(--checklist-done-color, var(--muted-foreground));
 }
 
 .rich-text-editor li.task-list-item:has(> input:checked) .contains-task-list {
@@ -319,8 +348,8 @@
 .rich-text-editor .tableWrapper {
   overflow-x: auto;
   margin: 1rem 0;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border: var(--table-border-width, 1px) solid var(--table-border-color, var(--border));
+  border-radius: var(--table-radius, var(--radius));
 }
 
 .rich-text-editor table {
@@ -342,11 +371,11 @@
    <tbody>, so the tr:has(> th) arm covers the editable table. */
 .rich-text-editor thead,
 .rich-text-editor tr:has(> th) {
-  background: color-mix(in srgb, var(--muted) 50%, transparent);
+  background: var(--table-header-background, color-mix(in srgb, var(--muted) 50%, transparent));
 }
 
 .rich-text-editor tbody tr {
-  border-top: 1px solid var(--border);
+  border-top: var(--table-border-width, 1px) solid var(--table-border-color, var(--border));
 }
 
 /* Tiptap tables have no <thead>, so their header row is tbody's first row —
@@ -357,7 +386,7 @@
 }
 
 .rich-text-editor tr:hover td {
-  background: color-mix(in srgb, var(--muted) 30%, transparent);
+  background: var(--table-row-hover-background, color-mix(in srgb, var(--muted) 30%, transparent));
   transition: background 0.15s;
 }
 
@@ -365,7 +394,7 @@
 .rich-text-editor td {
   text-align: left;
   vertical-align: top;
-  padding: 0.5rem 0.75rem;
+  padding: var(--table-cell-padding, 0.5rem 0.75rem);
   /* Chinese text may break between any two characters, so a column of it
      reports a one-character minimum and gets squeezed to that whenever
      another column wants the space. */
@@ -375,14 +404,14 @@
      (which carries 1.625); the readonly render keeps bare text in the cell,
      which otherwise inherits the host's text-body line-height (~1.43) and
      makes every readonly cell 2.5px shorter per line. */
-  line-height: 1.625;
+  line-height: var(--content-leading, 1.625);
 }
 
 /* The header label sets its column's minimum width rather than wrapping. */
 .rich-text-editor th {
   font-size: var(--text-label);
-  font-weight: 500;
-  color: var(--muted-foreground);
+  font-weight: var(--table-header-weight, 500);
+  color: var(--table-header-color, var(--muted-foreground));
   white-space: nowrap;
 }
 
@@ -508,11 +537,13 @@
 
 /* Blockquotes */
 .rich-text-editor blockquote {
-  border-left: 3px solid color-mix(in srgb, var(--muted-foreground) 30%, transparent);
-  padding-left: 0.75rem;
+  border-left: var(--blockquote-border-width, 3px) solid
+    var(--blockquote-border-color, color-mix(in srgb, var(--muted-foreground) 30%, transparent));
+  padding-left: var(--blockquote-padding, 0.75rem);
   margin: 0.625rem 0;
-  color: var(--muted-foreground);
-  font-style: italic;
+  color: var(--blockquote-color, var(--muted-foreground));
+  background: var(--blockquote-background, transparent);
+  font-style: var(--blockquote-style, italic);
 }
 
 .rich-text-editor blockquote p {
@@ -537,21 +568,21 @@
 /* Horizontal rules */
 .rich-text-editor hr {
   border: none;
-  border-top: 1px solid var(--border);
+  border-top: var(--hr-thickness, 1px) solid var(--hr-color, var(--border));
   margin: 1rem 0;
 }
 
 /* Links */
 .rich-text-editor a {
-  color: var(--brand);
-  text-decoration: underline;
-  text-decoration-color: color-mix(in srgb, var(--brand) 40%, transparent);
-  text-underline-offset: 2px;
+  color: var(--link-color, var(--brand));
+  text-decoration-line: var(--link-decoration, underline);
+  text-decoration-color: var(--link-decoration-color, color-mix(in srgb, var(--brand) 40%, transparent));
+  text-underline-offset: var(--link-underline-offset, 2px);
   cursor: pointer;
 }
 
 .rich-text-editor a:hover {
-  text-decoration-color: var(--brand);
+  text-decoration-color: var(--link-decoration-color-hover, var(--brand));
 }
 
 /* Mention chips — inline cards that sit within text flow. The chip already
@@ -571,8 +602,8 @@
 
 /* Mentions */
 .rich-text-editor .mention {
-  color: var(--primary);
-  font-weight: 600;
+  color: var(--mention-color, var(--primary));
+  font-weight: var(--mention-weight, 600);
   text-decoration: none;
   margin: 0 0.125rem;
 }
@@ -587,17 +618,19 @@
 
 /* Strong / emphasis */
 .rich-text-editor strong {
-  font-weight: 600;
+  font-weight: var(--bold-weight, 600);
+  color: var(--bold-color, currentColor);
 }
 
 .rich-text-editor em {
   font-style: italic;
+  color: var(--italic-color, currentColor);
 }
 
 .rich-text-editor s,
 .rich-text-editor del {
   text-decoration: line-through;
-  color: var(--muted-foreground);
+  color: var(--strikethrough-color, var(--muted-foreground));
 }
 
 /* Text highlight (`==text==` → <mark>). Single yellow tint that stays legible
@@ -605,9 +638,9 @@
    color so highlighted links/code remain readable. box-decoration-break clones
    the background across wrapped lines (same approach as inline code above). */
 .rich-text-editor mark {
-  background-color: color-mix(in srgb, #facc15 45%, transparent);
+  background-color: var(--highlight-background, color-mix(in srgb, #facc15 45%, transparent));
   color: inherit;
-  border-radius: 0.2em;
+  border-radius: var(--highlight-radius, 0.2em);
   padding: 0 0.15em;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;

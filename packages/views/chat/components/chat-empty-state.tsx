@@ -1,11 +1,9 @@
 "use client";
 
-import { Settings2 } from "@multica/ui/icons";
 import { selectConversationStarters } from "@multica/core/agents";
 import type { Agent } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useT } from "../../i18n";
-import { AppLink } from "../../navigation";
 import {
   ConversationStarterList,
   useFallbackConversationStarters,
@@ -16,19 +14,10 @@ export function EmptyState({
   agent,
   hasSessions = true,
   onPickPrompt,
-  customizeHref = null,
 }: {
   agent: Agent | null;
   hasSessions?: boolean;
   onPickPrompt: (prompt: string) => void;
-  /**
-   * Where "customize" sends this viewer, or `null` to hide the affordance.
-   * The container resolves it: only someone who may edit THIS agent on a
-   * backend that persists conversation starters gets a link. Keeping it a prop
-   * leaves this component presentational — and keeps the link out of the DOM
-   * entirely for readers, rather than rendering a disabled tease.
-   */
-  customizeHref?: string | null;
 }) {
   const { t } = useT("chat");
   const description = agent?.description?.trim();
@@ -69,17 +58,6 @@ export function EmptyState({
           aria-label={t(($) => $.conversation_starters.aria_label)}
         >
           <ConversationStarterList starters={starters} onPick={onPickPrompt} />
-          {customizeHref ? (
-            <div className="flex justify-center pt-1">
-              <AppLink
-                href={customizeHref}
-                className="inline-flex items-center gap-1.5 text-caption text-muted-foreground transition-colors hover:text-foreground"
-              >
-                <Settings2 className="size-3.5" aria-hidden="true" />
-                {t(($) => $.conversation_starters.customize)}
-              </AppLink>
-            </div>
-          ) : null}
         </div>
       ) : null}
     </div>

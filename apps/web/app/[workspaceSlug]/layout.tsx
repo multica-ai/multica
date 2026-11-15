@@ -78,7 +78,7 @@ export default function WorkspaceLayout({
 
   const loadingIndicator = (
     <div className="flex h-svh items-center justify-center">
-      <MulticaIcon mode="launch" size={40} />
+      <MulticaIcon mode="think" size={40} />
     </div>
   );
 

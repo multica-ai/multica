@@ -70,7 +70,7 @@ describe("AvatarCropDialog encoding", () => {
       expect(screen.getByRole("button", { name })).toBeDisabled();
     }
     expect(screen.queryByRole("button", { name: "Close" })).not.toBeInTheDocument();
-    expect(screen.getByRole("slider")).toBeDisabled();
+    expect(screen.getByRole("slider", { name: "Zoom" })).toBeDisabled();
     expect(apply).toHaveAttribute("aria-busy", "true");
     expect(screen.queryByText("Uploading…")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));

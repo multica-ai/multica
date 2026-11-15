@@ -1,9 +1,10 @@
 # Contributing Guide
 
-This guide documents the local development workflow for contributors working on the Multica codebase.
+This guide documents issue and pull request requirements and the local development workflow for contributors working on the Multica codebase.
 
 It covers:
 
+- issue templates, pull request requirements, and review evidence
 - first-time setup
 - environments: starting, inspecting, stopping and deleting them
 - day-to-day development in the main checkout
@@ -27,6 +28,193 @@ other work — you agree to condition 2 of the [Multica License](LICENSE):
   as deemed necessary.
 
 See the [LICENSE](LICENSE) file for the full terms.
+
+## Opening an Issue
+
+Choose the form that fits your report:
+
+- **[Feature request](.github/ISSUE_TEMPLATE/feature_request.yml):** Explain the
+  **Problem** and **Goal**. A high-level **Proposal**, **Alternatives**, and
+  **Screenshots** are optional; you can raise a problem without designing its
+  solution.
+- **[Bug report](.github/ISSUE_TEMPLATE/bug_report.yml):** Describe the
+  **Problem**, **Expected behavior**, and **Steps to reproduce**. For intermittent
+  bugs, explain what you tried and how often it happens. Screenshots, logs, and
+  environment details are optional supporting information.
+
+Select the affected area so we can route the report. Bug reports also ask for
+the deployment type. Screenshots are optional for issues; the mandatory
+screenshot rule below applies to PRs that change UI or interactions.
+
+## Pull Request Requirements
+
+Use the [PR template](.github/PULL_REQUEST_TEMPLATE.md) with these five sections:
+
+1. **Problem:** Describe the concrete problem, who is affected, and why it matters.
+2. **Goal:** State the intended outcome of the change.
+3. **Proposal:** Explain the high-level design and why it achieves the goal.
+   Make it understandable to a reader without much project background. Keep
+   implementation details to a minimum.
+4. **Alternatives (optional):** When useful, briefly describe other approaches
+   and why you did not choose them.
+5. **Screenshots:** For UI or interaction changes, attach screenshots or a
+   screen recording from the running app showing the affected screens and
+   states. Before/after comparisons are strongly preferred; for a new screen,
+   show the after state. If there is no UI or interaction impact, write "N/A"
+   and explain why.
+
+End the description with `Closes #<issue>` when the PR resolves an issue.
+
+**UI or interaction PRs without screenshots or a recording are rejected by
+default.** Reviewers should request changes or close the PR until one is
+provided. PRs
+missing the problem, goal, or high-level proposal are also not ready for review.
+
+### Screenshots and Recordings
+
+Store PR evidence as [GitHub attachments](https://docs.github.com/en/github-cli/github-cli/attaching-files-with-github-cli).
+Their URLs do not depend on a temporary Git branch and have no preset expiry;
+GitHub does not promise permanent archival. Keep visual-test reference images
+with their tests, and use CI artifacts for temporary debugging reports. Actions
+artifacts expire, so they are unsuitable as the only copy of PR evidence.
+
+From the repository root, upload files to an existing PR with Node.js 22+ and
+[GitHub CLI 2.103.2+](https://github.com/cli/cli/releases/tag/v2.103.2):
+
+```bash
+scripts/pr-shots --repo multica-ai/multica 123 ./before.png ./after.png ./demo.mp4
+```
+
+By default, the script appends attachments at the end of the PR description
+(after any closing issue reference), preserves its existing content, and prints
+the resulting attachment Markdown to stdout. A PR URL can replace the number;
+`--repo` is optional when `gh` can identify the repository. Diagnostics
+go to stderr. Files are identified by SHA-256 in hidden comments next to the
+attachments in the PR body, so retries and renamed files reuse uploaded content
+across checkouts. Keep those comments if you want that retry behavior. Changed
+file content produces a new attachment.
+
+The attachments are already in the PR description; do not paste another copy
+of the stdout Markdown into it. To place an attachment under Screenshots, move
+its entire block from the end of the description: the hidden hash comment,
+blank lines, and image Markdown or video URL together.
+
+Uploads run one file at a time and stop at the first failure. Already confirmed
+files remain saved; stderr identifies the failed and unattempted files. The
+script reads back the PR even when `gh` exits nonzero, because a write may have
+succeeded. Re-run the same command to reuse confirmed attachments and upload
+the missing ones. Run one uploader per PR at a time and avoid editing the
+description during an upload; GitHub body edits are not conditional writes.
+
+To migrate an existing screenshot while keeping its caption and position, use
+`--replace` with exactly one image file. The old URL must occur in a standalone
+Markdown image, such as `![Original caption](https://example.com/old.png)`:
+
+```bash
+scripts/pr-shots --repo multica-ai/multica \
+  --replace https://example.com/old.png 123 ./after.png
+```
+
+Verify the new attachments render and remain accessible to the PR's reviewers
+before deleting old storage. Check other PRs and repository references before
+removing a shared evidence branch. Preserve old links for any failed migration.
+
+You can also use the native CLI directly, including during PR creation:
+
+```bash
+gh pr create --body-file ./pr.md --attach ./before.png --attach ./after.png
+gh pr edit 123 --attach ./demo.mp4
+```
+
+In `pr.md`, write `![Before](./before.png)` and `![After](./after.png)` where
+the images should appear. For video, put `![](./demo.mp4)` in its own paragraph.
+The CLI replaces these local references with uploaded URLs; unreferenced
+attachments are appended. Native `gh --attach` does not deduplicate retries.
+
+CLI uploads require **push access to the target repository** and a credential
+accepted by GitHub's upload endpoint. Version 2.103.2 lets that endpoint decide
+which GitHub App tokens can upload; it does not guarantee support for every App
+or an Actions `GITHUB_TOKEN`. Verify the actual agent/CI credential. Contributors
+without upstream push access can use a public fork as described below, upload
+through the PR editor in GitHub's web interface, or ask a maintainer in the PR
+to upload their files. Opening a fork PR alone does not grant upload permission
+on the upstream repo. `scripts/pr-shots` targets GitHub.com, not GitHub
+Enterprise Server.
+
+Supported files are PNG, JPEG, GIF, WebP, SVG, MP4, MOV, and WebM. Images are
+limited to 10 MB; video limits are 10 MB on Free plans and 100 MB on paid plans.
+Use H.264 MP4 for broad playback support. Public-repository attachments are
+publicly accessible: use test data and inspect captures before uploading.
+
+Capture the affected screens from the running application and record the
+commit, viewport, theme, and reproduction steps with the evidence. Use the
+local environment workflow below; for Desktop recording, see
+[Scripting Desktop over CDP](#scripting-desktop-over-cdp). For stable screenshots:
+
+```js
+await page.screenshot({ path: "after.png", animations: "disabled" });
+```
+
+This completes finite CSS/Web Animations and resets infinite ones to their
+initial frame during capture. To compare a particular animation frame, pause
+`document.getAnimations()` and set each animation's `currentTime` to the same
+timestamp on both versions instead. Hold a loading state with a controlled
+local API response, rather than relying on a fixed sleep. Include a short
+recording when the motion or sequence itself is the change under review.
+
+#### CLI uploads from an external contributor's fork
+
+With GitHub CLI 2.103.2+, you can upload to a public fork or evidence repository
+you control, then use its native attachment URLs in your upstream PR. Choose a
+repository where your credential has push access and an issue you can use for
+contribution evidence. Forks may need Issues enabled in their repository
+settings. Review every capture before publishing and use synthetic test data
+suitable for public access.
+
+Save `evidence.md` beside the images, with the source commit for each capture,
+viewport, theme, and reproduction steps. Include local image references where
+the images should appear, for example `![Before](./before.png)` and
+`![After](./after.png)`.
+
+Replace `OWNER/EVIDENCE-REPO` with your public repository and `1` with the
+evidence issue's number. Run this from the directory containing the files.
+
+```bash
+gh issue comment 1 --repo OWNER/EVIDENCE-REPO --body-file ./evidence.md \
+  --attach ./before.png --attach ./after.png
+```
+
+The command prints the new comment's URL. Replace `COMMENT-ID` below with the
+number after `#issuecomment-` in that URL and read back that exact comment. The
+saved body contains the uploaded image Markdown.
+
+```bash
+gh api repos/OWNER/EVIDENCE-REPO/issues/comments/COMMENT-ID \
+  --jq .body > ./uploaded-evidence.md
+```
+
+Copy the relevant image Markdown into the Screenshots section of your upstream
+PR body, retaining captions and capture metadata. Keep the canonical
+`https://github.com/user-attachments/assets/...` URLs returned by GitHub. Raw-file
+URLs follow repository file retention, and Actions artifacts have expiry dates.
+To update an existing PR, replace `123` with your PR number, read its current
+body, and edit `pr.md` to add the evidence. Retain its other sections and closing
+issue references when saving it.
+
+```bash
+gh pr view 123 --repo multica-ai/multica --json body --jq .body > ./pr.md
+# Edit pr.md to add the uploaded image Markdown under Screenshots.
+gh pr edit 123 --repo multica-ai/multica --body-file ./pr.md
+```
+
+Check the upstream PR's rendered images and verify the URLs open while signed
+out. Keep the public evidence repository, issue, and original captures available
+for review. These native attachment URLs are independent of a source branch.
+
+Native `gh --attach` has no content-hash retry tracking. If it exits nonzero,
+inspect its output and read back the exact comment before retrying. A partial
+upload can still post the comment with the successful attachments. Reuse those
+URLs and attach only missing files in a new comment on the same evidence issue.
 
 ## Development Model
 
@@ -404,6 +592,24 @@ make migrate-down
 
 These generic targets require a valid env file in the current directory.
 
+### Dev Toolbar
+
+Set `VITE_DEV_TOOLBAR=1` to pin a status bar to the bottom of the Web and Desktop dev builds. It shows the client, backend host, workspace, your role, and route, plus live JS heap, last navigation time, main-thread long-task share, in-flight requests, and WebSocket state. Production builds never render it.
+
+```bash
+VITE_DEV_TOOLBAR=1 make up          # or: VITE_DEV_TOOLBAR=1 pnpm dev:web / pnpm dev:desktop
+```
+
+To keep it on, add the line to the env file `make` loads (`.env` / `.env.worktree`), or to `apps/web/.env.local` / `apps/desktop/.env.development.local` for a direct `pnpm dev:*`. The minimize button at its right end collapses it to a small handle. In Desktop, **View → Show Dev Toolbar** turns it off and on without a restart, and the choice is remembered; while it is off, nothing is recorded, and turning it back on starts a new recording.
+
+Each reading opens the last five minutes behind it, kept in memory in that tab only: the heap curve and Query cache size (Mem), route changes and their timings (Nav), long tasks and the route they hit (Jank), every API request with its status, `X-Request-ID`, body and a copyable curl (Net), WebSocket state changes (Sync), and console errors, uncaught exceptions and unhandled rejections (Errors).
+
+For realtime and agent bugs:
+
+- **Events** lists WebSocket events, filterable by type and searchable by issue key, ID or payload text. Each event shows which query keys its handling wrote, invalidated, removed or refetched, including the refreshes realtime sync debounces onto a timer (work after an `await` is not followed). A reconnect shows how long the socket was down and how many queries it refetched; **Drop connection** closes the socket to try it. **Replay locally** runs a recorded event through realtime sync's handlers again, without other subscribers, and any write request made while handling it is refused.
+- **Cache** lists the TanStack Query cache, stale and fetching entries, searchable by key, with a button to invalidate one query.
+- **Runtimes** shows each runtime's status and CLI version; **Tasks** lists the workspace's queued and running agent tasks, and clicking one opens its issue.
+
 ## How Database Creation Works
 
 Database creation is automatic.
@@ -480,10 +686,67 @@ Two constraints are enforced rather than documented:
   execution-environment helper for every task; `go run` deletes that binary when
   the launcher exits, so the daemon would register, heartbeat, and then fail
   every task with `fork/exec …/go-build…/exe/multica: no such file or directory`.
-- **`daemon start` is refused under a daemon-managed task.** A checkout below a
-  `.multica/daemon_task_context.json` marker cannot start a second daemon
-  competing for its own work, so `make up C=daemon` stops with that explanation
-  before spending a login on it. Use `C=api,web` there.
+- **Under a daemon-managed task, only the environment's own daemon starts.** A
+  checkout below a `.multica/daemon_task_context.json` marker is an agent's
+  workdir, and the CLI refuses `daemon start`, `stop` and `status` there so a
+  task never operates your own daemon or profile. It makes one exception: an
+  explicit `--profile` that the dev-env registry assigns to an environment (its
+  CLI profile, or the `desktop-localhost-<backend port>` profile its Desktop
+  signs in), pointed at that environment's API, from a process the task's
+  `MULTICA_*` identity was stripped from. `make up` launches the daemon and
+  Desktop exactly that way, so an agent can run `make up C=api,web,daemon` and
+  test a real agent run. `make destroy` stops the daemon and removes its profile.
+
+### An environment that outlives the agent's run
+
+When a reviewer should open the app after the run ends, an agent inside a
+Multica task starts an environment this repository declares in
+`.multica/environments.toml`:
+
+```bash
+multica env start web          # make up C=api,web
+multica env start desktop      # make up C=desktop ARGS=--cdp
+multica env stop web
+```
+
+The daemon lists each one in the issue sidebar and stops it after 24 hours.
+
+- `web` has the URL `http://localhost:$MULTICA_PORT`, which redirects to the web
+  app on the port `make up` allocated.
+- `desktop` has no URL. The sidebar shows it as an app, and Desktop on the same
+  machine brings its window forward.
+
+Both are this checkout's `make up` environment, so they share one API and
+database, and `make status` and `make env-exec` work as usual. Stopping one
+leaves the other running; stopping the last one, or the last one's app going
+away, runs `make destroy`. A component started with a plain `make up` counts
+as in use too, and an environment that existed before `multica env start` is
+left in place, with its own owner and TTL. See
+[Local Environments](CLI_AND_DAEMON.md#local-environments) for the file format.
+
+### Web with realistic content
+
+Every `make up`, whatever components it starts, signs `dev@localhost` in,
+marks the user onboarded, and seeds the `dev` workspace with two issues. The
+token sits in the environment's CLI profile, so a Playwright script can open
+`/dev/issues` directly by setting it as `multica_token` in `localStorage`
+before the first page load.
+
+For chat and Agent Builder content without a model or a daemon, add one-shot
+fixtures:
+
+```bash
+make up C=api,web ARGS="--ephemeral"
+make env-exec ARGS="-- node scripts/dev-fixtures.mjs all"      # or: chat builder issue, --json
+make destroy ARGS="--yes"
+```
+
+`chat` and `builder` each create a session with a user message and an assistant
+reply holding a wide table, code and a long log line; `issue` creates an issue
+with a wide description and a comment with a diff. The script registers a
+fixture runtime with the profile token and completes each task with canned
+Markdown through the daemon API, so it also works inside a daemon-managed task.
+It prints the URL of everything it created and exits.
 
 ### Desktop
 
@@ -500,6 +763,64 @@ this environment's Electron userData. Direct `pnpm dev:desktop` still uses its
 path-derived fallback when it is run outside `make up`.
 
 Log in with `dev@localhost` and `888888`.
+
+#### Scripting Desktop over CDP
+
+Some bugs only reproduce in Electron, so evidence for them has to come from the
+running app driven with real input. Start Desktop with a Chrome DevTools
+Protocol endpoint, then attach Playwright to it:
+
+```bash
+make up C=desktop ARGS="--ephemeral --cdp"
+make env-exec ARGS="-- node scripts/desktop-cdp.mjs --screenshot desktop.png"
+make env-exec ARGS="-- node scripts/desktop-cdp.mjs --record steps.mp4 ./steps.mjs"
+make destroy ARGS="--yes"
+```
+
+`--cdp` allocates a port for the environment, `--remote-debugging-port N`
+picks one, and `--no-cdp` drops it; later `make up` runs keep it. `make status`
+prints the endpoint, and `make status ARGS="--json"` reports `desktop_cdp_port`.
+
+`scripts/desktop-cdp.mjs` attaches to the main window of the already signed-in
+Desktop. A script argument is an ES module whose default export receives
+`{ browser, context, page, env, login, screencast, args }`. Drive it with
+`page.mouse` or locator clicks, which go through Chromium's input pipeline,
+rather than `element.click()` inside `page.evaluate`. `--login`, or `login()`
+from a script, signs `dev@localhost` back in after a step signed out.
+`--record` needs `ffmpeg` to encode; without it the frames and an ffconcat file
+stay in `<file>.frames/`. The helper only disconnects, so the app stays up for
+the next attach.
+
+#### Capturing the native window
+
+A renderer screenshot has no title bar or traffic lights. To capture the real
+macOS window of this environment's Desktop, start it with the debug port from
+above and run the capture script from the checkout:
+
+```bash
+make up C=desktop ARGS="--ephemeral --cdp"
+node scripts/desktop-window-capture.mjs window.png
+node scripts/desktop-window-capture.mjs --compare origin/main shots/ -- apps/desktop packages/views
+make destroy ARGS="--yes"
+```
+
+The script finds the window by its owner PID, the process listening on the
+CDP port that `make status` has verified for this environment. It never matches
+by app name or window title: a dev build is also called "Multica Canary", and
+its title is the current page, so either could pick up your own Desktop window.
+Transparent rounded corners are flattened onto white, and the colour profile is
+kept. The app running the command needs Screen Recording permission.
+
+`--compare BASE` writes `before.png` with BASE's version of the changed files
+and `after.png` with the worktree's. Desktop is stopped and relaunched for each
+state, because swapping files under HMR can leave the app stuck loading. The
+index is never touched, and the files are restored on success, failure and
+interrupt. A pathspec after `--` limits which files are swapped.
+
+`--prepare CMD` runs before every capture, in both modes, for example
+`make env-exec ARGS="-- node scripts/desktop-cdp.mjs ./open-page.mjs"` to open
+the page to show. It sees `DESKTOP_CAPTURE_STATE` set to `current`, `before` or
+`after`, and a non-zero exit aborts the run without capturing.
 
 ### Isolation Guarantee
 

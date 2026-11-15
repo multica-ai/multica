@@ -30,12 +30,14 @@ Le monorepo impose des frontières strictes entre les packages :
 
 | Package | Peut dépendre de | Ne doit PAS dépendre de |
 | --- | --- | --- |
-| `packages/core` | rien de spécifique à une application | `react-dom`, `localStorage`, `process.env`, `next/*`, bibliothèques d'UI |
+| `packages/core` | rien de spécifique à une application | `react-dom`, `next/*`, bibliothèques d'UI, `process.env`, `localStorage` ou `sessionStorage` en direct (persister via `StorageAdapter` ; seuls `analytics/exception-dedupe.ts` et `appearance/safe-mode.ts` utilisent `sessionStorage`, limité à l'onglet) |
 | `packages/ui` | rien | `@multica/core`, logique métier |
-| `packages/views` | `core/`, `ui/` | `next/*`, `react-router-dom`, stores |
+| `packages/views` | `core/`, `ui/` | `next/*`, `react-router-dom`, définitions de stores |
 | `apps/web/platform/` | `next/*` | autres applications |
 | `apps/desktop/.../platform/` | `react-router-dom`, electron | autres applications |
-| `apps/mobile/` | types et fonctions pures de `@multica/core` | pages React, stores et implémentations de plateforme de Web/Desktop |
+| `apps/mobile/` | types et fonctions pures de `@multica/core`, via le sous-chemin propre à chaque module | pages React, stores et implémentations de plateforme de Web/Desktop, y compris les barrels de core qui les réexportent |
+
+Le fichier `AGENTS.md` à la racine fait foi pour ces frontières et leurs rares exceptions ; modifiez les deux ensemble. Le lint impose la ligne `packages/core` (`packages/core/eslint.config.mjs`) et les imports de core dans mobile (`apps/mobile/eslint.config.js`).
 
 Si une logique apparaît dans les deux applications, elle DOIT être extraite dans un package partagé. Aucune exception pour une « petite » duplication. Mobile possède sa propre UI, sa propre couche de données et son propre processus de publication ; il ne partage que les types et les fonctions pures.
 
@@ -295,6 +297,7 @@ Consultez `auth.json` pour l'exemple de référence (la section `web` contient `
 - Guillemets : guillemets doubles droits `"..."`, comme dans la source anglaise. N'utilisez ni `「」` ni les guillemets typographiques.
 - Points de suspension : trois points `...` et non le caractère unique `…`. Suivez la source anglaise.
 - Mélange chinois-anglais : un seul espace de chaque côté du mot anglais (voir les règles de combinaison des mots).
+- Gras et ponctuation : un `**` fermant placé juste après une ponctuation et directement suivi de texte ne ferme pas le gras, et les astérisques s'affichent sur la page. En chinois, japonais et coréen, le gras est souvent suivi du mot suivant sans espace. Sortez la ponctuation du gras (`**问题（Problem）**和` → `**问题**（Problem）和`), ou ajoutez un espace quand la ponctuation fait partie d'un libellé (`点击 **+**添加` → `点击 **+** 添加`). `apps/docs/lib/unrendered-bold.test.ts` échoue si un `**` reste non rendu dans la documentation.
 
 ### Principes de style
 

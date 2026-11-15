@@ -21,7 +21,7 @@ export function SetParentIssueModal({
   const { t } = useT("modals");
   const issueId = (data?.issueId as string) || "";
   const wsId = useWorkspaceId();
-  const updateIssue = useUpdateIssue();
+  const { mutateAsync: updateIssue } = useUpdateIssue();
   const recentIssues = useParentIssueRecents(wsId, true);
 
   const { data: children = [] } = useQuery({
@@ -30,6 +30,9 @@ export function SetParentIssueModal({
   });
 
   const excludeIds = [issueId, ...children.map((c) => c.id)];
+
+  // The picker closes as soon as an issue is picked, unmounting this modal, so
+  // the toasts follow the request's promise rather than per-call callbacks.
 
   return (
     <IssuePickerModal
@@ -45,26 +48,24 @@ export function SetParentIssueModal({
         heading: t(($) => $.issue_picker.suggested_recent),
         issues: recentIssues,
       }]}
-      onSelect={async (selected) => {
-        try {
-          // The picker closes immediately after selection. Await the mutation
-          // so its result still reaches the user after this modal unmounts.
-          await updateIssue.mutateAsync({
-            id: issueId,
-            parent_issue_id: selected.id,
-          });
-          toast.success(
-            t(($) => $.set_parent.toast_success, {
-              identifier: selected.identifier,
-            }),
-          );
-        } catch (err) {
-          toast.error(
-            err instanceof Error && err.message
-              ? err.message
-              : t(($) => $.set_parent.toast_failed),
-          );
-        }
+      onSelect={(selected) => {
+        updateIssue({
+          id: issueId,
+          parent_issue_id: selected.id,
+        }).then(
+          () =>
+            toast.success(
+              t(($) => $.set_parent.toast_success, {
+                identifier: selected.identifier,
+              }),
+            ),
+          (err) =>
+            toast.error(
+              err instanceof Error && err.message
+                ? err.message
+                : t(($) => $.set_parent.toast_failed),
+            ),
+        );
       }}
     />
   );

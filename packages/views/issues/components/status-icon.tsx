@@ -7,6 +7,7 @@ import type {
   IssueStatusIcon,
 } from "@multica/core/types";
 import { STATUS_CONFIG } from "@multica/core/issues/config";
+import { paletteColor, paletteSlot } from "@multica/core/appearance";
 
 // Geometry constants (viewBox 0 0 14 14, center 7,7)
 
@@ -168,13 +169,13 @@ const ICON_RENDERERS: Record<IssueStatusIcon, () => React.ReactNode> = {
 };
 
 const BUILT_IN_ICON_COLOR: Record<BuiltInIssueStatus, string> = {
-  backlog: "text-muted-foreground",
-  todo: "text-muted-foreground",
-  in_progress: "text-warning",
-  in_review: "text-success",
-  done: "text-info",
-  blocked: "text-destructive",
-  cancelled: "text-muted-foreground",
+  backlog: "text-status-backlog",
+  todo: "text-status-todo",
+  in_progress: "text-status-in-progress",
+  in_review: "text-status-in-review",
+  done: "text-status-done",
+  blocked: "text-status-blocked",
+  cancelled: "text-status-cancelled",
 };
 
 // Public component
@@ -212,12 +213,16 @@ export function StatusIcon({
   // A custom color wins over the category's token, but only when the caller
   // isn't already forcing the glyph to inherit (selected rows, dark chips).
   const useCustomColor = !builtIn && !inheritColor && Boolean(color);
+  const customColor = !builtIn && color ? color : undefined;
 
   return (
     <svg
+      data-mc="status-icon"
+      data-color={customColor}
+      data-palette={customColor ? (paletteSlot(customColor) ?? undefined) : undefined}
       viewBox="0 0 14 14"
       fill="none"
-      style={useCustomColor ? { color: color ?? undefined } : undefined}
+      style={useCustomColor ? { color: paletteColor(color) } : undefined}
       className={`${className} ${
         inheritColor || useCustomColor
           ? ""

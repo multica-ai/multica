@@ -1,13 +1,31 @@
 "use client";
 
+import { Fragment } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { notificationPreferenceOptions } from "@multica/core/notification-preferences/queries";
 import { useUpdateNotificationPreferences } from "@multica/core/notification-preferences/mutations";
-import type { NotificationGroupKey, NotificationPreferences } from "@multica/core/types";
+import { notificationPreferenceValue } from "@multica/core/notification-preferences/patch";
+import type {
+  NotificationGroupKey,
+  NotificationPreferences,
+  OthersIssuesValue,
+} from "@multica/core/types";
+import { buttonVariants } from "@multica/ui/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@multica/ui/components/ui/select";
 import { Switch } from "@multica/ui/components/ui/switch";
+import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
 import { useT } from "../../i18n";
+import { ARCHIVED_VIEW_PARAM } from "../../inbox/components/inbox-view";
+import { AppLink } from "../../navigation";
 import { BrowserNotificationSetting } from "./browser-notification-setting";
 import {
   SettingsCard,
@@ -16,25 +34,34 @@ import {
   SettingsTab,
 } from "./settings-layout";
 
-// Inbox event groups rendered in the per-event toggle list. `system_notifications`
+// Inbox event groups, by how the event reaches you. `system_notifications`
 // is a sibling preference key but lives in its own section below.
-const INBOX_GROUP_KEYS = [
-  "assignments",
-  "status_changes",
-  "comments",
-  "mentions",
-  "updates",
-  "agent_activity",
+const INBOX_CATEGORIES = [
+  { key: "direct", groups: ["assignments", "mentions", "reactions"] },
+  { key: "issues", groups: ["status_changes", "comments", "updates"] },
+  { key: "projects", groups: ["new_issues"] },
+  { key: "agents", groups: ["agent_activity"] },
 ] as const;
-type InboxGroupKey = (typeof INBOX_GROUP_KEYS)[number];
 
 export function NotificationsTab() {
   const { t } = useT("settings");
   const wsId = useWorkspaceId();
+  const p = useWorkspacePaths();
   const { data } = useQuery(notificationPreferenceOptions(wsId));
   const mutation = useUpdateNotificationPreferences();
 
   const preferences = data?.preferences ?? {};
+
+  const save = (updated: NotificationPreferences) => {
+    mutation.mutate(updated, {
+      onError: (err) =>
+        toast.error(
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.notifications.toast_failed),
+        ),
+    });
+  };
 
   const handleToggle = (key: NotificationGroupKey, enabled: boolean) => {
     const updated: NotificationPreferences = {
@@ -45,15 +72,19 @@ export function NotificationsTab() {
     if (enabled) {
       delete updated[key];
     }
-    mutation.mutate(updated, {
-      onError: (err) =>
-        toast.error(
-          err instanceof Error && err.message
-            ? err.message
-            : t(($) => $.notifications.toast_failed),
-        ),
-    });
+    save(updated);
   };
+
+  const handleOthersIssues = (value: OthersIssuesValue) => {
+    const updated: NotificationPreferences = { ...preferences, others_issues: value };
+    if (value === "key_updates") delete updated.others_issues;
+    save(updated);
+  };
+
+  const othersIssuesItems: { value: OthersIssuesValue; label: string }[] = [
+    { value: "key_updates", label: t(($) => $.notifications.others_issues.key_updates) },
+    { value: "all", label: t(($) => $.notifications.others_issues.all) },
+  ];
 
   const systemEnabled = preferences.system_notifications !== "muted";
 
@@ -65,9 +96,45 @@ export function NotificationsTab() {
         anchor="inbox"
       >
         <SettingsCard>
-            {INBOX_GROUP_KEYS.map((key: InboxGroupKey) => {
-              const enabled = preferences[key] !== "muted";
-              return (
+          {INBOX_CATEGORIES.map((category, index) => (
+            <Fragment key={category.key}>
+              <div
+                className={cn(
+                  "border-b-0 px-4 pb-1 text-caption font-medium text-muted-foreground",
+                  index === 0 ? "pt-3" : "pt-4",
+                )}
+              >
+                {t(($) => $.notifications.categories[category.key])}
+              </div>
+              {category.key === "issues" && (
+                <SettingsRow
+                  anchor="others_issues"
+                  label={t(($) => $.notifications.others_issues.label)}
+                  description={t(($) => $.notifications.others_issues.description)}
+                >
+                  <Select
+                    items={othersIssuesItems}
+                    value={notificationPreferenceValue(preferences, "others_issues")}
+                    onValueChange={(next) => next && handleOthersIssues(next as OthersIssuesValue)}
+                  >
+                    <SelectTrigger
+                      size="sm"
+                      className="w-40"
+                      aria-label={t(($) => $.notifications.others_issues.label)}
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent align="end">
+                      {othersIssuesItems.map((item) => (
+                        <SelectItem key={item.value} value={item.value}>
+                          {item.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </SettingsRow>
+              )}
+              {category.groups.map((key) => (
                 <SettingsRow
                   key={key}
                   anchor={key}
@@ -75,30 +142,85 @@ export function NotificationsTab() {
                   description={t(($) => $.notifications.groups[key].description)}
                 >
                   <Switch
-                    checked={enabled}
+                    checked={preferences[key] !== "muted"}
                     aria-label={t(($) => $.notifications.groups[key].label)}
                     onCheckedChange={(checked) => handleToggle(key, checked)}
                   />
                 </SettingsRow>
-              );
-            })}
+              ))}
+            </Fragment>
+          ))}
+        </SettingsCard>
+      </SettingsSection>
+
+      <SettingsSection
+        title={t(($) => $.notifications.leaving.title)}
+        description={t(($) => $.notifications.leaving.description)}
+        anchor="leaving_inbox"
+      >
+        <SettingsCard>
+          <SettingsRow
+            label={t(($) => $.notifications.leaving.manual_label)}
+            description={t(($) => $.notifications.leaving.manual_description)}
+          >
+            <span className="text-caption text-muted-foreground">
+              {t(($) => $.notifications.leaving.manual_value)}
+            </span>
+          </SettingsRow>
+          <SettingsRow
+            anchor="auto_archive_completed"
+            label={t(($) => $.notifications.leaving.done_label)}
+            description={t(($) => $.notifications.leaving.done_description)}
+          >
+            <Switch
+              checked={preferences.auto_archive_completed !== "muted"}
+              aria-label={t(($) => $.notifications.leaving.done_label)}
+              onCheckedChange={(checked) => handleToggle("auto_archive_completed", checked)}
+            />
+          </SettingsRow>
+          <SettingsRow
+            anchor="archived"
+            label={t(($) => $.notifications.leaving.archived_label)}
+            description={t(($) => $.notifications.leaving.archived_description)}
+          >
+            <AppLink
+              href={`${p.inbox()}?${new URLSearchParams({ view: ARCHIVED_VIEW_PARAM })}`}
+              className={buttonVariants({ variant: "outline", size: "sm" })}
+            >
+              {t(($) => $.notifications.leaving.archived_action)}
+            </AppLink>
+          </SettingsRow>
         </SettingsCard>
       </SettingsSection>
 
       <SettingsSection
         title={t(($) => $.notifications.system.title)}
+        anchor={systemEnabled ? undefined : "chat_replies"}
       >
         <SettingsCard>
           <SettingsRow
             anchor="system"
             label={t(($) => $.notifications.system.label)}
           >
-              <Switch
-                checked={systemEnabled}
-                aria-label={t(($) => $.notifications.system.label)}
-                onCheckedChange={(checked) => handleToggle("system_notifications", checked)}
-              />
+            <Switch
+              checked={systemEnabled}
+              aria-label={t(($) => $.notifications.system.label)}
+              onCheckedChange={(checked) => handleToggle("system_notifications", checked)}
+            />
           </SettingsRow>
+          {systemEnabled && (
+            <SettingsRow
+              anchor="chat_replies"
+              className="pl-8"
+              label={t(($) => $.notifications.groups.chat_replies.label)}
+            >
+              <Switch
+                checked={preferences.chat_replies !== "muted"}
+                aria-label={t(($) => $.notifications.groups.chat_replies.label)}
+                onCheckedChange={(checked) => handleToggle("chat_replies", checked)}
+              />
+            </SettingsRow>
+          )}
         </SettingsCard>
 
         {/* Web-only: the browser permission banners require. Renders nothing on

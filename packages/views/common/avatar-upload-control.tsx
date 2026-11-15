@@ -247,6 +247,7 @@ export function AvatarUploadControl({
         "flex items-center justify-center",
         "focus-visible:ring-2 focus-visible:ring-ring",
         "disabled:cursor-not-allowed disabled:opacity-60",
+        // eslint-disable-next-line no-restricted-syntax -- avatar: the control is the avatar itself
         "rounded-full",
         className,
       )}
@@ -371,6 +372,7 @@ export function AvatarUploadControl({
               setPreviewError(false);
               onClear();
             }}
+            // eslint-disable-next-line no-restricted-syntax -- avatar: remove badge pinned to the avatar's corner
             className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-sm transition-colors hover:bg-muted hover:text-foreground"
             aria-label={t(($) => $.avatar_upload.remove)}
           >

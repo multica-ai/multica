@@ -1,10 +1,11 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useState, type ComponentType } from "react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AddChildIssueModal } from "./add-child-issue";
+import { AddProjectIssueModal } from "./add-project-issue";
 import { SetParentIssueModal } from "./set-parent-issue";
 
 const mocks = vi.hoisted(() => ({
-  mutate: vi.fn(),
   mutateAsync: vi.fn(),
   toast: { success: vi.fn(), error: vi.fn() },
 }));
@@ -15,7 +16,7 @@ vi.mock("@multica/core/issues/use-parent-issue-recents", () => ({
 vi.mock("sonner", () => ({ toast: mocks.toast }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
 vi.mock("@multica/core/issues/mutations", () => ({
-  useUpdateIssue: () => ({ mutate: mocks.mutate, mutateAsync: mocks.mutateAsync }),
+  useUpdateIssue: () => ({ mutateAsync: mocks.mutateAsync }),
 }));
 vi.mock("@multica/core/issues/queries", () => ({
   issueDetailOptions: (_wsId: string, issueId: string) => ({
@@ -31,17 +32,21 @@ vi.mock("@tanstack/react-query", () => ({
       ? { data: { id: queryKey[2], revision: 7, parent_issue_id: null } }
       : { data: [] },
 }));
+// Like the real picker, picking an issue closes the modal straight away.
 vi.mock("./issue-picker-modal", () => ({
   IssuePickerModal: ({
     onSelect,
+    onOpenChange,
   }: {
     onSelect: (issue: { id: string; identifier: string; revision: number }) => void;
+    onOpenChange: (open: boolean) => void;
   }) => (
     <button
       type="button"
-      onClick={() =>
-        onSelect({ id: "selected-1", identifier: "MUL-2", revision: 5 })
-      }
+      onClick={() => {
+        onSelect({ id: "selected-1", identifier: "MUL-2", revision: 5 });
+        onOpenChange(false);
+      }}
     >
       Select issue
     </button>
@@ -67,65 +72,84 @@ vi.mock("../i18n", () => ({
           toast_success: `Set ${String(vars?.identifier ?? "")}`,
           toast_failed: "Set failed",
         },
+        add_project_issue: {
+          title: "Add to project",
+          description: "Choose issue",
+          toast_success: `Moved ${String(vars?.identifier ?? "")}`,
+          toast_failed: "Move failed",
+        },
       }),
   }),
 }));
 
+type ModalComponent = ComponentType<{ onClose: () => void; data: Record<string, unknown> | null }>;
+
+/** The modal host unmounts a modal as soon as it closes. */
+function Host({ Component, data }: { Component: ModalComponent; data: Record<string, unknown> }) {
+  const [open, setOpen] = useState(true);
+  return open ? <Component onClose={() => setOpen(false)} data={data} /> : <span>Closed</span>;
+}
+
+function deferred() {
+  let settle!: { resolve: () => void; reject: (err: Error) => void };
+  mocks.mutateAsync.mockImplementation(
+    () => new Promise<void>((resolve, reject) => (settle = { resolve, reject })),
+  );
+  return {
+    resolve: () => act(async () => settle.resolve()),
+    reject: (err: Error) => act(async () => settle.reject(err)),
+  };
+}
+
 describe.each([
   {
     name: "AddChildIssueModal",
-    asyncMutation: false,
     Component: AddChildIssueModal,
-    expectedMutation: {
-      id: "selected-1",
-      parent_issue_id: "issue-1",
-    },
+    data: { issueId: "issue-1" },
+    expectedMutation: { id: "selected-1", parent_issue_id: "issue-1" },
+    success: "Added MUL-2",
   },
   {
     name: "SetParentIssueModal",
-    asyncMutation: true,
     Component: SetParentIssueModal,
-    expectedMutation: {
-      id: "issue-1",
-      parent_issue_id: "selected-1",
-    },
+    data: { issueId: "issue-1" },
+    expectedMutation: { id: "issue-1", parent_issue_id: "selected-1" },
+    success: "Set MUL-2",
   },
-])("$name", ({ Component, expectedMutation, asyncMutation }) => {
+  {
+    name: "AddProjectIssueModal",
+    Component: AddProjectIssueModal,
+    data: { projectId: "project-1" },
+    expectedMutation: { id: "selected-1", project_id: "project-1" },
+    success: "Moved MUL-2",
+  },
+])("$name", ({ Component, data, expectedMutation, success }) => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("shows success only after the mutation succeeds", async () => {
-    mocks.mutateAsync.mockResolvedValue({});
-    mocks.mutate.mockImplementation((_variables, callbacks) => {
-      callbacks.onSuccess();
-    });
-
-    render(<Component onClose={vi.fn()} data={{ issueId: "issue-1" }} />);
+  it("shows success once the update saves, after the modal has closed", async () => {
+    const request = deferred();
+    render(<Host Component={Component} data={data} />);
     fireEvent.click(screen.getByRole("button", { name: "Select issue" }));
 
-    if (asyncMutation) expect(mocks.mutateAsync).toHaveBeenCalledWith(expectedMutation);
-    else expect(mocks.mutate).toHaveBeenCalledWith(
-      expectedMutation,
-      expect.objectContaining({
-        onSuccess: expect.any(Function),
-        onError: expect.any(Function),
-      }),
-    );
-    await waitFor(() => expect(mocks.toast.success).toHaveBeenCalledTimes(1));
+    expect(screen.getByText("Closed")).toBeInTheDocument();
+    expect(mocks.mutateAsync).toHaveBeenCalledWith(expectedMutation);
+    expect(mocks.toast.success).not.toHaveBeenCalled();
+
+    await request.resolve();
+    expect(mocks.toast.success).toHaveBeenCalledWith(success);
     expect(mocks.toast.error).not.toHaveBeenCalled();
   });
 
-  it("does not report success when the mutation fails", async () => {
-    mocks.mutateAsync.mockRejectedValue(new Error("revision conflict"));
-    mocks.mutate.mockImplementation((_variables, callbacks) => {
-      callbacks.onError(new Error("revision conflict"));
-    });
-
-    render(<Component onClose={vi.fn()} data={{ issueId: "issue-1" }} />);
+  it("reports a failure, not success, after the modal has closed", async () => {
+    const request = deferred();
+    render(<Host Component={Component} data={data} />);
     fireEvent.click(screen.getByRole("button", { name: "Select issue" }));
 
+    expect(screen.getByText("Closed")).toBeInTheDocument();
+    await request.reject(new Error("revision conflict"));
     expect(mocks.toast.success).not.toHaveBeenCalled();
-    await waitFor(() => expect(mocks.toast.error).toHaveBeenCalledWith("revision conflict"));
+    expect(mocks.toast.error).toHaveBeenCalledWith("revision conflict");
   });
 });

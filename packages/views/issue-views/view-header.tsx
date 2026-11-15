@@ -53,7 +53,7 @@ import {
   type BuiltinViewKey,
 } from "@multica/core/issue-views/sidebar-views";
 import { issueViewTarget } from "@multica/core/issue-views/view-target";
-import { isUnreadView } from "@multica/core/issue-views/unread-view";
+import { isFilteredBuiltinViewKey } from "@multica/core/issue-views/builtin-issue-views";
 import {
   isIssueViewModified,
   isIssueViewUndefined,
@@ -62,6 +62,7 @@ import {
   modifiedFilterDimensions,
 } from "@multica/core/issue-views/definition";
 import { useIssueViewRenameStore } from "@multica/core/issue-views/rename-store";
+import { useIssueViewEditStore } from "@multica/core/issue-views/edit-store";
 import {
   myIssuesViewStore,
   type MyIssuesScope,
@@ -90,7 +91,7 @@ import type { IssueSurfaceController } from "../issues/surface/use-issue-surface
 import { useT } from "../i18n";
 import { useMyIssuesScope } from "../my-issues/use-my-issues-scope";
 import { DeleteViewDialog } from "./delete-view-dialog";
-import { UnreadViewIcon } from "./unread-view-icon";
+import { BUILTIN_VIEW_ICON, useBuiltinViewLabel } from "./builtin-views";
 import { useIssueViewActions } from "./use-view-actions";
 import { ViewNameInput } from "./view-name-input";
 
@@ -126,12 +127,18 @@ export function IssueViewHeader({
   controller,
   base,
   baseMenu,
+  baseBadge,
+  hideCreate = false,
   trailing,
 }: {
   controller: IssueSurfaceController;
   base: IssueViewHeaderBase;
   /** Name-menu items for the page itself, e.g. project actions. */
   baseMenu?: ReactNode;
+  /** Marker after the page's own name, e.g. an archived project's tag. */
+  baseBadge?: ReactNode;
+  /** Drops the new-issue button, e.g. on an archived project. */
+  hideCreate?: boolean;
   /** Layout toggles at the far end, e.g. the project's properties panel. */
   trailing?: ReactNode;
 }) {
@@ -158,6 +165,7 @@ export function IssueViewHeader({
   const setAssigneeTypeForPage = useIssuesScopeStore((s) => s.setScope);
   const setAssigneeType = (next: IssuesScope) => setAssigneeTypeForPage(scopePage, next);
   const myScope = useMyIssuesScope();
+  const builtinLabel = useBuiltinViewLabel();
   const setMyScope = useStore(myIssuesViewStore, (s) => s.setScope);
 
   const storeApi = useViewStoreApi();
@@ -167,19 +175,20 @@ export function IssueViewHeader({
   const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
   const toggleAgentRunningFilter = useViewStore((s) => s.toggleAgentRunningFilter);
 
-  const builtinKey: BuiltinViewKey | null =
-    base.kind === "workspace" ? "all_issues" : base.kind === "my" ? (myScope === "agents" ? "my_agents" : "my_issues") : null;
+  const builtinKey: BuiltinViewKey | null = base.kind === "workspace" ? "all_issues" : null;
   const baseName =
     base.kind === "project"
       ? base.project.title
-      : t(($) => $.views.builtin[builtinKey!]);
+      : base.kind === "my"
+        ? myScope === "agents"
+          ? t(($) => $.views.builtin.my_agents)
+          : t(($) => $.views.builtin.my_issues)
+        : builtinLabel("all_issues");
   const baseIcon =
     base.kind === "project" ? (
       <ProjectIcon project={base.project} size="sm" />
-    ) : builtinKey === "my_agents" ? (
-      <Bot className="size-4" />
-    ) : builtinKey === "my_issues" ? (
-      <CircleUser className="size-4" />
+    ) : base.kind === "my" ? (
+      myScope === "agents" ? <Bot className="size-4" /> : <CircleUser className="size-4" />
     ) : (
       <ListTodo className="size-4" />
     );
@@ -193,10 +202,19 @@ export function IssueViewHeader({
   // does; its filter menu opens as soon as the view is named.
   const needsSetup = !!activeView && canManage && isIssueViewUndefined(activeView);
   const [setupFilterOpen, setSetupFilterOpen] = useState(false);
-  const unreadView = isUnreadView(activeView);
-  const activeViewName = unreadView ? t(($) => $.views.builtin.unread) : activeView?.name;
-  const starId = unreadView
-    ? builtinViewItemId("unread")
+  const [filterOpen, setFilterOpen] = useState(false);
+  const editViewId = useIssueViewEditStore((s) => s.viewId);
+  const stopEdit = useIssueViewEditStore((s) => s.stop);
+  useEffect(() => {
+    if (!activeView || editViewId !== activeView.id) return;
+    stopEdit();
+    if (needsSetup) setSetupFilterOpen(true);
+    else setFilterOpen(true);
+  }, [activeView, editViewId, needsSetup, stopEdit]);
+  const activeBuiltin = isFilteredBuiltinViewKey(activeView?.id) ? activeView.id : null;
+  const activeViewName = activeBuiltin ? builtinLabel(activeBuiltin) : activeView?.name;
+  const starId = activeBuiltin
+    ? builtinViewItemId(activeBuiltin)
     : activeView
       ? savedViewItemId(activeView.id)
       : builtinKey
@@ -350,9 +368,10 @@ export function IssueViewHeader({
   const title = (
     <>
       <RefreshablePageIcon refreshing={controller.isRefreshing}>
-        {unreadView ? <UnreadViewIcon /> : activeView ? <Layers className="size-4" /> : baseIcon}
+        {activeBuiltin ? BUILTIN_VIEW_ICON[activeBuiltin] : activeView ? <Layers className="size-4" /> : baseIcon}
       </RefreshablePageIcon>
       <span className="min-w-0 truncate">{activeView ? activeViewName : baseName}</span>
+      {!activeView && baseBadge}
     </>
   );
 
@@ -461,7 +480,7 @@ export function IssueViewHeader({
                       <DropdownMenuItem
                         onClick={() =>
                           actions.copyLink(
-                            builtinKey === "my_agents"
+                            base.kind === "my" && myScope === "agents"
                               ? paths.myAgents()
                               : base.kind === "my"
                                 ? paths.myIssues()
@@ -487,6 +506,8 @@ export function IssueViewHeader({
 
           <IssueFilterMenu
             align="start"
+            open={filterOpen}
+            onOpenChange={setFilterOpen}
             tooltip={filterTooltip}
             trigger={
               <Button
@@ -552,15 +573,17 @@ export function IssueViewHeader({
             onTableFacetChange={controller.setActiveTableFacet}
             iconOnly
           />
-          <IconButton
-            label={t(($) => $.views.new_issue)}
-            shortcut={<ActionShortcutKeycaps action="createIssue" />}
-            tooltipSide="bottom"
-            className="text-muted-foreground"
-            onClick={() => controller.openCreateIssue()}
-          >
-            <SquarePen />
-          </IconButton>
+          {!hideCreate && (
+            <IconButton
+              label={t(($) => $.views.new_issue)}
+              shortcut={<ActionShortcutKeycaps action="createIssue" />}
+              tooltipSide="bottom"
+              className="text-muted-foreground"
+              onClick={() => controller.openCreateIssue()}
+            >
+              <SquarePen />
+            </IconButton>
+          )}
           {trailing && (
             <>
               <Separator orientation="vertical" className="ml-1 data-vertical:h-4 data-vertical:self-center" />
