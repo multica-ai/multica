@@ -295,3 +295,22 @@ export function sidebarProjects<P extends Pick<Project, "id" | "title" | "status
     }
   }
 }
+
+/** The "No project" row's id in the manual project order, beside the project ids. */
+export const NO_PROJECT_ORDER_ID = "no_project";
+
+/**
+ * Where the "No project" row sits among the shown projects: first, until it
+ * is dragged elsewhere. A sort by name or date leaves it first, since it is
+ * not a project.
+ */
+export function noProjectRowIndex(
+  shown: readonly Pick<Project, "id">[],
+  settings: Pick<SidebarProjectSettings, "ordering">,
+  manualOrder: readonly string[],
+): number {
+  const at = settings.ordering === "manual" ? manualOrder.indexOf(NO_PROJECT_ORDER_ID) : -1;
+  if (at === -1) return 0;
+  const before = new Set(manualOrder.slice(0, at));
+  return shown.filter((project) => before.has(project.id)).length;
+}

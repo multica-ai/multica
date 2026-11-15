@@ -86,6 +86,7 @@ interface TreeToggleRowProps extends React.ComponentProps<"div"> {
   listId: string;
   onPrefetch?: () => void;
   trailing?: React.ReactNode;
+  rowRef?: React.Ref<HTMLDivElement>;
 }
 
 /**
@@ -93,13 +94,14 @@ interface TreeToggleRowProps extends React.ComponentProps<"div"> {
  * the chevron takes the icon's place on hover as on `TreeRow`.
  */
 export const TreeToggleRow = forwardRef<HTMLButtonElement, TreeToggleRowProps>(function TreeToggleRow(
-  { label, icon, located = false, expanded, onExpandedChange, listId, onPrefetch, trailing, className, ...rowProps },
+  { label, icon, located = false, expanded, onExpandedChange, listId, onPrefetch, trailing, rowRef, className, ...rowProps },
   buttonRef,
 ) {
   const onKeyDown = treeRowKeyHandler(expanded, onExpandedChange);
   return (
     <div
       {...rowProps}
+      ref={rowRef}
       data-located={located ? "" : undefined}
       className={cn(
         PANEL_ROW_CLASS,

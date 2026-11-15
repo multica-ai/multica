@@ -15,9 +15,11 @@ import { issueKeys, issueTableFacetsOptions, sidebarIssuesOptions } from "@multi
 import { filterDependencyState, statusCatalogSource } from "@multica/core/issues/surface/filter-dependency";
 import {
   NO_PROJECT_FACET_KEY,
+  NO_PROJECT_ORDER_ID,
   NO_PROJECT_SIDEBAR_SOURCE,
   SIDEBAR_FIRST_PAGE,
   noProjectCountRequest,
+  noProjectRowIndex,
   noProjectSidebarRequest,
   projectSidebarRequest,
   projectSidebarSource,
@@ -156,23 +158,31 @@ export function ProjectsSection({
   const updatePrefs = useUpdateSidebarProjectPrefs(wsId);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   const { arm: armClickGuard, release: releaseClickGuard } = useDragClickGuard();
+  // "No project" sorts among the projects, under its own id in the manual order.
+  const rows = useMemo(() => {
+    const list: (Project | typeof NO_PROJECT_ORDER_ID)[] = [...projects];
+    if (projectSettings.showNoProject) {
+      list.splice(noProjectRowIndex(projects, projectSettings, projectOrder), 0, NO_PROJECT_ORDER_ID);
+    }
+    return list;
+  }, [projects, projectSettings, projectOrder]);
+  const ids = useMemo(() => rows.map((row) => (row === NO_PROJECT_ORDER_ID ? row : row.id)), [rows]);
 
   const onDragEnd = useCallback(
     ({ active, over }: DragEndEvent) => {
       releaseClickGuard();
       if (!over || active.id === over.id) return;
-      const ids = projects.map((project) => project.id);
       const from = ids.indexOf(String(active.id));
       const to = ids.indexOf(String(over.id));
       if (from === -1 || to === -1) return;
       const moved = arrayMove(ids, from, to);
       updatePrefs({
-        // Projects the filter hides keep their relative place after the shown ones.
+        // Rows the settings hide keep their relative place after the shown ones.
         projectOrder: [...moved, ...projectOrder.filter((id) => !moved.includes(id))],
         projectSettings: { ordering: "manual" },
       });
     },
-    [projects, projectOrder, releaseClickGuard, updatePrefs],
+    [ids, projectOrder, releaseClickGuard, updatePrefs],
   );
 
   return (
@@ -202,37 +212,39 @@ export function ProjectsSection({
         onDragEnd={onDragEnd}
         onDragCancel={releaseClickGuard}
       >
-        <SortableContext items={projects.map((project) => project.id)} strategy={verticalListSortingStrategy}>
+        <SortableContext items={ids} strategy={verticalListSortingStrategy}>
           <PanelList>
-            {projects.map((project) => (
-              <ProjectTreeItem
-                key={project.id}
-                wsId={wsId}
-                userId={userId}
-                project={project}
-                active={plainRowsLit && isPathWithin(pathname, p.projectDetail(project.id))}
-                showCount={projectSettings.showCount}
-                issueSettings={issueSettings}
-                activeIssueId={litSource === projectSidebarSource(project.id) ? activeIssueId : null}
-                openIssueId={activeIssueId}
-                located={locatedSource === projectSidebarSource(project.id)}
-              />
-            ))}
+            {rows.map((row) =>
+              row === NO_PROJECT_ORDER_ID ? (
+                <NoProjectTreeItem
+                  key={row}
+                  wsId={wsId}
+                  userId={userId}
+                  showCount={projectSettings.showCount}
+                  issueSettings={issueSettings}
+                  activeIssueId={litSource === NO_PROJECT_SIDEBAR_SOURCE ? activeIssueId : null}
+                  openIssueId={activeIssueId}
+                  located={locatedSource === NO_PROJECT_SIDEBAR_SOURCE}
+                />
+              ) : (
+                <ProjectTreeItem
+                  key={row.id}
+                  wsId={wsId}
+                  userId={userId}
+                  project={row}
+                  active={plainRowsLit && isPathWithin(pathname, p.projectDetail(row.id))}
+                  showCount={projectSettings.showCount}
+                  issueSettings={issueSettings}
+                  activeIssueId={litSource === projectSidebarSource(row.id) ? activeIssueId : null}
+                  openIssueId={activeIssueId}
+                  located={locatedSource === projectSidebarSource(row.id)}
+                />
+              ),
+            )}
           </PanelList>
         </SortableContext>
       </DndContext>
       <PanelList className="mt-px">
-        {projectSettings.showNoProject && (
-          <NoProjectTreeItem
-            wsId={wsId}
-            userId={userId}
-            showCount={projectSettings.showCount}
-            issueSettings={issueSettings}
-            activeIssueId={litSource === NO_PROJECT_SIDEBAR_SOURCE ? activeIssueId : null}
-            openIssueId={activeIssueId}
-            located={locatedSource === NO_PROJECT_SIDEBAR_SOURCE}
-          />
-        )}
         {totalProjects === 0 ? (
           <li>
             <button
@@ -263,6 +275,9 @@ export function ProjectsSection({
     </PanelSection>
   );
 }
+
+const SORTABLE_ROW_DRAGGING_CLASS =
+  "relative z-20 rounded-lg bg-surface-raised shadow-[var(--menu-shadow)] ring-1 ring-surface-border";
 
 /**
  * Issues outside every project, listed like a project's. No page shows them,
@@ -302,11 +317,20 @@ function NoProjectTreeItem({
       data.facets[0]?.values.find((value) => value.key === NO_PROJECT_FACET_KEY)?.count ?? 0,
   });
   const label = t(($) => $.panels.work.no_project);
+  const { listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({
+    id: NO_PROJECT_ORDER_ID,
+  });
 
   return (
-    <li>
+    <li
+      ref={setNodeRef}
+      style={{ transform: CSS.Translate.toString(transform), transition }}
+      className={cn(isDragging && SORTABLE_ROW_DRAGGING_CLASS)}
+    >
       <TreeToggleRow
         ref={rowRef}
+        rowRef={setActivatorNodeRef}
+        {...listeners}
         label={label}
         icon={<FolderMinus className="size-4 shrink-0" />}
         located={located}
@@ -402,10 +426,7 @@ function ProjectTreeItem({
     <li
       ref={setNodeRef}
       style={{ transform: CSS.Translate.toString(transform), transition }}
-      className={cn(
-        isDragging &&
-          "relative z-20 rounded-lg bg-surface-raised shadow-[var(--menu-shadow)] ring-1 ring-surface-border",
-      )}
+      className={cn(isDragging && SORTABLE_ROW_DRAGGING_CLASS)}
     >
       <TreeRow
         ref={linkRef}

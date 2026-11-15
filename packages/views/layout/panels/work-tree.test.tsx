@@ -9,6 +9,7 @@ import { buildIssueStatusCatalog } from "@multica/core/issue-statuses/queries";
 import { issueTableFacetsOptions } from "@multica/core/issues/queries";
 import {
   NO_PROJECT_FACET_KEY,
+  NO_PROJECT_ORDER_ID,
   NO_PROJECT_SIDEBAR_SOURCE,
   noProjectCountRequest,
 } from "@multica/core/issues/sidebar-list";
@@ -100,7 +101,11 @@ const savedPrefs = (prefs: Record<string, unknown>): IssueViewPreference => ({
   prefs: { hidden: [], order: [], ...prefs },
 });
 
-function renderSection(projects = PROJECTS, projectSettings: Partial<SidebarProjectSettings> = {}) {
+function renderSection(
+  projects = PROJECTS,
+  projectSettings: Partial<SidebarProjectSettings> = {},
+  order: string[] = ["p9"],
+) {
   const qc = new QueryClient({ defaultOptions: { queries: { enabled: false, retry: false } } });
   qc.setQueryData(issueTableFacetsOptions("ws-1", noProjectCountRequest([])).queryKey, {
     query_fingerprint: "",
@@ -112,7 +117,7 @@ function renderSection(projects = PROJECTS, projectSettings: Partial<SidebarProj
     savedPrefs({
       projects: { ...DEFAULT_SIDEBAR_PROJECT_SETTINGS, ordering: "name", ...projectSettings },
       issues: DEFAULT_SIDEBAR_ISSUE_SETTINGS,
-      order: ["p9"],
+      order,
     }),
   );
   renderWithI18n(
@@ -131,6 +136,11 @@ function renderSection(projects = PROJECTS, projectSettings: Partial<SidebarProj
     </QueryClientProvider>,
   );
 }
+
+const rowNames = () =>
+  screen
+    .getAllByRole("button", { name: /^(No project|Issues in .+)$/ })
+    .map((button) => button.getAttribute("aria-label")?.replace(/^Issues in /, "") ?? button.textContent);
 
 describe("ProjectsSection", () => {
   it("shows the project's chosen icon, keeping the folder when it has none", () => {
@@ -164,7 +174,7 @@ describe("ProjectsSection", () => {
     act(() => dnd.onDragEnd?.({ active: { id: "p3" }, over: { id: "p1" } } as DragEndEvent));
     await waitFor(() => expect(apiMock.putIssueViewPreference).toHaveBeenCalledTimes(1));
     const { prefs } = apiMock.putIssueViewPreference.mock.calls[0]![0];
-    expect(prefs.order).toEqual(["p3", "p1", "p2", "p9"]);
+    expect(prefs.order).toEqual([NO_PROJECT_ORDER_ID, "p3", "p1", "p2", "p9"]);
     expect(prefs.projects.ordering).toBe("manual");
   });
 
@@ -223,6 +233,22 @@ describe("ProjectsSection", () => {
     openCreateIssue.mockClear();
     fireEvent.click(screen.getByRole("button", { name: "New issue without a project" }));
     expect(openCreateIssue).toHaveBeenCalledWith();
+  });
+
+  it("lists No project first, and saves where it is dragged", async () => {
+    renderSection();
+    expect(rowNames()).toEqual(["No project", "Desktop", "Mobile", "Web"]);
+
+    act(() => dnd.onDragEnd?.({ active: { id: NO_PROJECT_ORDER_ID }, over: { id: "p2" } } as DragEndEvent));
+    await waitFor(() => expect(apiMock.putIssueViewPreference).toHaveBeenCalledTimes(1));
+    const { prefs } = apiMock.putIssueViewPreference.mock.calls[0]![0];
+    expect(prefs.order).toEqual(["p1", "p2", NO_PROJECT_ORDER_ID, "p3", "p9"]);
+    expect(prefs.projects.ordering).toBe("manual");
+  });
+
+  it("keeps No project where it was dragged", () => {
+    renderSection(PROJECTS, { ordering: "manual" }, ["p1", NO_PROJECT_ORDER_ID, "p2", "p3"]);
+    expect(rowNames()).toEqual(["Desktop", "No project", "Mobile", "Web"]);
   });
 
   it("leaves out No project when its setting is off", () => {

@@ -7,6 +7,8 @@ import {
   shownSidebarStatuses,
   builtinSidebarRequest,
   sidebarProjects,
+  noProjectRowIndex,
+  NO_PROJECT_ORDER_ID,
   viewSidebarRequest,
 } from "./sidebar-list";
 import {
@@ -242,5 +244,25 @@ describe("sidebarProjects", () => {
     expect(
       sidebarProjects(projects, { ...DEFAULT_SIDEBAR_PROJECT_SETTINGS, onlyMine: true }, [], "u1").map((p) => p.id),
     ).toEqual(["p1"]);
+  });
+});
+
+describe("noProjectRowIndex", () => {
+  const shown = [{ id: "p1" }, { id: "p2" }, { id: "p3" }];
+  const manual = DEFAULT_SIDEBAR_PROJECT_SETTINGS;
+
+  it("puts No project first until it is dragged", () => {
+    expect(noProjectRowIndex(shown, manual, [])).toBe(0);
+    expect(noProjectRowIndex(shown, manual, ["p2", "p1"])).toBe(0);
+  });
+
+  it("follows its place in the manual order, counting only the shown projects before it", () => {
+    expect(noProjectRowIndex(shown, manual, ["p1", "p2", NO_PROJECT_ORDER_ID, "p3"])).toBe(2);
+    expect(noProjectRowIndex(shown, manual, ["p1", "hidden", NO_PROJECT_ORDER_ID, "p2"])).toBe(1);
+    expect(noProjectRowIndex(shown, manual, ["p1", "p2", "p3", NO_PROJECT_ORDER_ID])).toBe(3);
+  });
+
+  it("stays first when the projects sort by name or date", () => {
+    expect(noProjectRowIndex(shown, { ordering: "name" }, ["p1", "p2", NO_PROJECT_ORDER_ID])).toBe(0);
   });
 });
