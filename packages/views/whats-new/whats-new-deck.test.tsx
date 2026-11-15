@@ -39,6 +39,8 @@ vi.mock("@multica/core/whats-new", async () => {
 });
 vi.mock("../navigation", () => ({ useNavigation: () => ({ pathname: "/acme/issues", push: mocks.push }) }));
 
+const ART = { ground: "brand" as const, Art: () => <div data-testid="hero-art" /> };
+
 const RELEASES: WhatsNewRelease[] = [
   {
     version: "0.3.0",
@@ -47,21 +49,24 @@ const RELEASES: WhatsNewRelease[] = [
       {
         id: "palette",
         icon: Command,
+        hero: ART,
         action: { kind: "command-palette" },
         copy: { en: { title: "Palette title", body: "Palette body" } },
       },
       {
         id: "runtimes",
         icon: Terminal,
+        hero: ART,
         action: { kind: "route", to: (p) => p.runtimes() },
         copy: { en: { title: "Runtimes title", body: "Runtimes body" } },
       },
+      { id: "plain", icon: Globe, copy: { en: { title: "Plain title", body: "Plain body" } } },
     ],
   },
   {
     version: "0.2.0",
     date: "2026-02-01",
-    highlights: [{ id: "language", icon: Globe, copy: { en: { title: "Language title", body: "Language body" } } }],
+    highlights: [{ id: "language", icon: Globe, hero: ART, copy: { en: { title: "Language title", body: "Language body" } } }],
   },
   {
     version: "0.1.0",
@@ -237,6 +242,27 @@ describe("WhatsNewDeck", () => {
     await wait(WHATS_NEW_DECK_DELAY_MS);
     expect(title("Palette title")).not.toBeInTheDocument();
     expect(useSessionPromptStore.getState().prompted).toBe(false);
+  });
+
+  it("leaves highlights without hero art to the What's new panel", async () => {
+    renderDeck();
+    await wait(WHATS_NEW_DECK_DELAY_MS);
+    expect(screen.queryByRole("heading", { name: "Plain title", hidden: true })).not.toBeInTheDocument();
+    expect(screen.getAllByTestId("hero-art")).toHaveLength(3);
+  });
+
+  it("stays away when no unread highlight has hero art", async () => {
+    RELEASES[0]!.highlights.forEach((h) => (h.hero = undefined));
+    try {
+      signIn({ whats_new_seen_version: "0.2.0" });
+      renderDeck();
+      await wait(WHATS_NEW_DECK_DELAY_MS);
+      expect(screen.queryByRole("region", { name: "What's new" })).not.toBeInTheDocument();
+      expect(useSessionPromptStore.getState().prompted).toBe(false);
+    } finally {
+      RELEASES[0]!.highlights[0]!.hero = ART;
+      RELEASES[0]!.highlights[1]!.hero = ART;
+    }
   });
 
   it("has nothing to deal once the newest release is seen", async () => {

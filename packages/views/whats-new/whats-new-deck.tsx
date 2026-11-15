@@ -4,6 +4,7 @@ import {
   useEffect,
   useId,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -23,6 +24,7 @@ import { useT } from "../i18n";
 import { useNavigation } from "../navigation";
 import { readSourceBackfillDismissCount } from "../onboarding/source-backfill-dismiss";
 import { HighlightActionButton } from "./highlight-action";
+import { HeroFrame, type WhatsNewHero } from "./heroes";
 import { highlightCopy, type WhatsNewHighlight, type WhatsNewRelease } from "./releases";
 import { useWhatsNew } from "./use-whats-new";
 import { formatReleaseDate, versionLabel } from "./whats-new-panel";
@@ -36,20 +38,18 @@ export const WHATS_NEW_DECK_MAX_CARDS = 5;
 const LEAVE_MS = 220;
 const EASE = "cubic-bezier(0.2, 0.8, 0.2, 1)";
 const MOVE = `transform 420ms ${EASE}, opacity 260ms ${EASE}, height 320ms ${EASE}`;
-const HERO_DOTS: CSSProperties = {
-  backgroundImage:
-    "radial-gradient(color-mix(in oklab, var(--brand-foreground) 22%, transparent) 1px, transparent 1.4px)",
-  backgroundSize: "14px 14px",
-};
-
 interface DeckCard {
   release: WhatsNewRelease;
   highlight: WhatsNewHighlight;
+  hero: WhatsNewHero;
 }
 
+/** Only highlights with hero art are dealt; the rest stay in the What's new panel. */
 function deckCards(unread: readonly WhatsNewRelease[]): DeckCard[] {
   return unread
-    .flatMap((release) => release.highlights.map((highlight) => ({ release, highlight })))
+    .flatMap((release) =>
+      release.highlights.flatMap((highlight) => (highlight.hero ? [{ release, highlight, hero: highlight.hero }] : [])),
+    )
     .slice(0, WHATS_NEW_DECK_MAX_CARDS);
 }
 
@@ -72,11 +72,13 @@ export function WhatsNewDeck() {
   const [leaving, setLeaving] = useState(false);
 
   const hasUnread = unread.length > 0;
-  const unreadRef = useRef(unread);
-  unreadRef.current = unread;
+  const dealable = useMemo(() => deckCards(unread), [unread]);
+  const dealableRef = useRef(dealable);
+  dealableRef.current = dealable;
+  const hasDealable = dealable.length > 0;
 
   useEffect(() => {
-    if (cards || !wsId || !hasUnread) return;
+    if (cards || !wsId || !hasDealable) return;
     let timer: number | undefined;
     const consider = () => {
       if (useSessionPromptStore.getState().prompted) return;
@@ -88,11 +90,11 @@ export function WhatsNewDeck() {
         return;
       }
       useSessionPromptStore.getState().markPrompted();
-      setCards(deckCards(unreadRef.current));
+      setCards(dealableRef.current);
     };
     timer = window.setTimeout(consider, WHATS_NEW_DECK_DELAY_MS);
     return () => window.clearTimeout(timer);
-  }, [cards, wsId, hasUnread]);
+  }, [cards, wsId, hasDealable]);
 
   useEffect(() => {
     if (!leaving) return;
@@ -281,17 +283,14 @@ function UpdateCard({
 }) {
   const { t, i18n } = useT("layout");
   const titleId = useId();
-  const { release, highlight } = card;
+  const { release, highlight, hero } = card;
   const copy = highlightCopy(highlight, i18n.language);
-  const Icon = highlight.icon;
   const last = index === count - 1;
 
   return (
     <div ref={ref} inert={!front} aria-hidden={!front} role="group" aria-labelledby={titleId}>
-      <div className="relative grid h-28 place-items-center overflow-hidden bg-brand" style={HERO_DOTS}>
-        <span className="grid size-12 place-items-center rounded-xl bg-surface-raised text-brand shadow-[var(--floating-shadow)]">
-          <Icon aria-hidden="true" className="size-6" />
-        </span>
+      <div className="relative">
+        <HeroFrame hero={hero} />
         <Button
           variant="ghost"
           size="icon-xs"
