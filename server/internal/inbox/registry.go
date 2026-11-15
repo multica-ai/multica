@@ -26,8 +26,9 @@ const (
 
 // typeGroups is every inbox type the server writes, mapped to the preference
 // group that can mute it. An empty group means the type is always delivered.
-// Deliver refuses a type missing here, and TestRegistryMatchesFrontendTypes
-// keeps this set equal to InboxItemType in packages/core/types/inbox.ts.
+// Deliver refuses a type missing here. TestRegistryMatchesFrontendTypes keeps
+// InboxItemType in packages/core/types/inbox.ts equal to these types plus
+// legacyTypes.
 //
 // `mentioned` is deliberately apart from `comments`: muting comment volume
 // must not silence someone asking for you by name.
@@ -60,7 +61,18 @@ var typeGroups = map[string]string{
 	"app_connect_requested": "",
 }
 
-// Types returns every registered inbox type, sorted.
+// legacyTypes are types earlier releases wrote and this server no longer
+// does. Their rows remain, so clients keep labels and filter groups for them,
+// but Deliver refuses them. Retiring a type moves it here rather than
+// deleting it.
+var legacyTypes = []string{
+	"review_requested",
+	"task_completed",
+	"agent_blocked",
+	"agent_completed",
+}
+
+// Types returns every inbox type the server delivers, sorted.
 func Types() []string {
 	types := make([]string, 0, len(typeGroups))
 	for t := range typeGroups {

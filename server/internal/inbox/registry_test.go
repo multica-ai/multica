@@ -1,9 +1,10 @@
 package inbox
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -71,43 +72,161 @@ func TestConnectedAppTypeGroups(t *testing.T) {
 	}
 }
 
-// The web, desktop and mobile clients switch on InboxItemType, and the server
-// writes only registered types. A type added or dropped on one side alone is
-// either a row no client can render or a client branch for a row that is never
-// written. This file is why packages/core/types/inbox.ts belongs in CI's
-// backend path filter.
+// The web, desktop and mobile clients switch on InboxItemType. It must list
+// exactly the types the server delivers plus the legacy types older releases
+// wrote: a delivered type missing there is a row no client can render, a
+// legacy type missing there is history that loses its label and filter, and a
+// type the server knows neither way is a client branch for a row that is
+// never written. This file is why packages/core/types/inbox.ts belongs in
+// CI's backend path filter.
 func TestRegistryMatchesFrontendTypes(t *testing.T) {
 	path := filepath.Join("..", "..", "..", "packages", "core", "types", "inbox.ts")
 	src, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}
-	union := regexp.MustCompile(`(?s)export type InboxItemType\s*=(.*?);`).FindSubmatch(src)
-	if union == nil {
-		t.Fatalf("InboxItemType not found in %s", path)
+	frontend, err := parseInboxItemType(string(src))
+	if err != nil {
+		t.Fatalf("%s: %v", path, err)
 	}
-	body := regexp.MustCompile(`(?m)//.*$`).ReplaceAll(union[1], nil)
-	var frontend []string
-	for _, m := range regexp.MustCompile(`"([^"]+)"`).FindAllSubmatch(body, -1) {
-		frontend = append(frontend, string(m[1]))
+	for _, problem := range frontendTypeMismatches(frontend) {
+		t.Error(problem)
 	}
-	sort.Strings(frontend)
+}
 
-	server := Types()
-	if strings.Join(frontend, ",") == strings.Join(server, ",") {
-		return
-	}
-	inFrontend := map[string]bool{}
-	for _, v := range frontend {
-		inFrontend[v] = true
-	}
-	for _, v := range server {
-		if !inFrontend[v] {
-			t.Errorf("server registers %q but InboxItemType does not list it", v)
+func TestLegacyTypesAreNotDelivered(t *testing.T) {
+	for _, legacy := range legacyTypes {
+		if _, ok := Group(legacy); ok {
+			t.Errorf("%q is both delivered and legacy", legacy)
 		}
-		delete(inFrontend, v)
 	}
-	for v := range inFrontend {
-		t.Errorf("InboxItemType lists %q but the server never registers it", v)
+}
+
+// The union's comments may contain semicolons, as the legacy note in
+// inbox.ts does; the declaration ends only at one outside a comment.
+func TestParseInboxItemTypeSkipsComments(t *testing.T) {
+	src := `export type InboxSeverity = "info";
+
+export type InboxItemType =
+  | "issue_assigned"
+  // No longer written, but older servers wrote them and those rows remain;
+  // keep their labels and filter groups so history still reads and filters.
+  | "review_requested"
+  /* a block; with "quotes" */
+  | "quick_create_done";
+
+export interface InboxItem { type: "not_a_member" }
+`
+	got, err := parseInboxItemType(src)
+	if err != nil {
+		t.Fatal(err)
 	}
+	want := []string{"issue_assigned", "quick_create_done", "review_requested"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("parsed %v, want %v", got, want)
+	}
+}
+
+func TestFrontendTypeMismatches(t *testing.T) {
+	complete := append(Types(), legacyTypes...)
+	without := func(drop string) []string {
+		var out []string
+		for _, v := range complete {
+			if v != drop {
+				out = append(out, v)
+			}
+		}
+		return out
+	}
+	cases := []struct {
+		name     string
+		frontend []string
+		want     string
+	}{
+		{"delivered plus legacy matches", complete, ""},
+		{"dropping a delivered type fails", without("children_done"), `"children_done"`},
+		{"dropping a legacy type fails", without("agent_blocked"), `"agent_blocked"`},
+		{"an unknown type fails", append(append([]string(nil), complete...), "brand_new"), `"brand_new"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			problems := strings.Join(frontendTypeMismatches(tc.frontend), "\n")
+			if tc.want == "" && problems != "" {
+				t.Fatalf("unexpected mismatches:\n%s", problems)
+			}
+			if !strings.Contains(problems, tc.want) {
+				t.Fatalf("mismatches %q do not name %s", problems, tc.want)
+			}
+		})
+	}
+}
+
+// parseInboxItemType returns the string literals of the InboxItemType union,
+// sorted. It skips // and /* */ comments, so a semicolon or quote inside one
+// neither ends the declaration nor adds a member.
+func parseInboxItemType(src string) ([]string, error) {
+	const decl = "export type InboxItemType"
+	start := strings.Index(src, decl)
+	if start < 0 {
+		return nil, errors.New("InboxItemType not found")
+	}
+	var types []string
+	for i := start + len(decl); i < len(src); i++ {
+		switch {
+		case strings.HasPrefix(src[i:], "//"):
+			end := strings.IndexByte(src[i:], '\n')
+			if end < 0 {
+				return nil, errors.New("InboxItemType is not terminated")
+			}
+			i += end
+		case strings.HasPrefix(src[i:], "/*"):
+			end := strings.Index(src[i+2:], "*/")
+			if end < 0 {
+				return nil, errors.New("unterminated block comment in InboxItemType")
+			}
+			i += end + 3
+		case src[i] == '"':
+			end := strings.IndexByte(src[i+1:], '"')
+			if end < 0 {
+				return nil, errors.New("unterminated string in InboxItemType")
+			}
+			types = append(types, src[i+1:i+1+end])
+			i += end + 1
+		case src[i] == ';':
+			sort.Strings(types)
+			return types, nil
+		}
+	}
+	return nil, errors.New("InboxItemType is not terminated")
+}
+
+// frontendTypeMismatches compares the client's InboxItemType with the
+// delivered and legacy types and describes every difference.
+func frontendTypeMismatches(frontend []string) []string {
+	listed := map[string]bool{}
+	for _, v := range frontend {
+		listed[v] = true
+	}
+	var problems []string
+	for _, v := range Types() {
+		if !listed[v] {
+			problems = append(problems, fmt.Sprintf("server delivers %q but InboxItemType does not list it", v))
+		}
+		delete(listed, v)
+	}
+	for _, v := range legacyTypes {
+		if !listed[v] {
+			problems = append(problems, fmt.Sprintf("legacy type %q left InboxItemType; older rows would lose their label and filter", v))
+		}
+		delete(listed, v)
+	}
+	var unknown []string
+	for v := range listed {
+		unknown = append(unknown, v)
+	}
+	sort.Strings(unknown)
+	for _, v := range unknown {
+		problems = append(problems, fmt.Sprintf("InboxItemType lists %q but the server neither delivers it nor lists it as legacy", v))
+	}
+	return problems
 }
