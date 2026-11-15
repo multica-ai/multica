@@ -1107,11 +1107,11 @@ func TestActualSweepPreservesReplay(t *testing.T) {
 	}
 }
 
-// TestProbeAndCopyBindTheSameObjectVersion reproduces the A -> B -> A sequence
-// the review named: HEAD measures version A, a same-length PUT replaces it with
-// B, the probe read happens, then A is restored before the conditional copy.
-// Copying A is legal, so only binding the PROBE to A keeps the published
-// metadata describing the published bytes.
+// TestProbeAndCopyBindTheSameObjectVersion reproduces an A -> B -> A sequence:
+// HEAD measures version A, a same-length PUT replaces it with B, the probe read
+// happens, then A is restored before the conditional copy. Copying A is legal,
+// so only binding the PROBE to A keeps the published metadata describing the
+// published bytes.
 func TestProbeAndCopyBindTheSameObjectVersion(t *testing.T) {
 	store := installDirectUploadStorage(t)
 	data := bytes.Repeat([]byte("a"), 64) // sniffs as text/plain
@@ -1136,8 +1136,8 @@ func TestProbeAndCopyBindTheSameObjectVersion(t *testing.T) {
 	defer func() { store.beforeReadPrefix = nil }()
 
 	w := completeUpload(t, presign.AttachmentID, testUserID, testWorkspaceID)
-	// Refusing a source that moved is the correct outcome; the test accepts it,
-	// exactly like the reviewer's.
+	// Refusing a source that moved is the correct outcome, so a 409 is accepted
+	// alongside a publish that bound both the probe and the copy to A.
 	if w.Code != http.StatusOK {
 		if w.Code != http.StatusConflict {
 			t.Fatalf("status = %d, want 200 or a 409 refusal: %s", w.Code, w.Body.String())
@@ -1154,5 +1154,126 @@ func TestProbeAndCopyBindTheSameObjectVersion(t *testing.T) {
 	if result.ContentType != want {
 		t.Fatalf("published content_type = %q, but the copied bytes sniff as %q — metadata and bytes describe different objects",
 			result.ContentType, want)
+	}
+}
+
+// testRevocationMatrix covers the one gate that only a private project can
+// exercise: losing project membership between the presign and the completion.
+// It is one table because the rule is one rule — the target's project
+// visibility is re-proved from live state on both the first publication and
+// every idempotent replay — and the four cases are the four shapes that reach
+// it (issue target, comment target, replay of a published issue attachment,
+// replay of an attachment since adopted into a private comment).
+func TestCompleteAttachmentUpload_RefusedAfterProjectRevocation(t *testing.T) {
+	cases := []struct {
+		name string
+		// adopt turns a published attachment into one bound to a comment, which
+		// is what the CLI does for `issue create --attachment`.
+		adopt bool
+		// replay completes twice: the first success publishes, the second runs
+		// the published-attachment access path instead of the publish path.
+		replay bool
+		target func(f privateProjectFixture) presignUploadRequest
+		want   string
+	}{
+		{
+			name:   "issue target",
+			target: func(f privateProjectFixture) presignUploadRequest { return presignUploadRequest{IssueID: f.secretIssue} },
+			want:   "the issue this upload targeted is no longer available",
+		},
+		{
+			name:   "comment target",
+			target: func(f privateProjectFixture) presignUploadRequest { return presignUploadRequest{CommentID: f.secretComment} },
+			want:   "the comment this upload targeted is no longer available",
+		},
+		{
+			name:   "replay of a published issue attachment",
+			replay: true,
+			target: func(f privateProjectFixture) presignUploadRequest { return presignUploadRequest{IssueID: f.secretIssue} },
+		},
+		{
+			name:   "replay of an attachment adopted into a private comment",
+			adopt:  true,
+			replay: true,
+			target: func(f privateProjectFixture) presignUploadRequest { return presignUploadRequest{} },
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := installDirectUploadStorage(t)
+			f := newPrivateProjectFixture(t)
+
+			req := tc.target(f)
+			req.Filename, req.ContentType, req.SizeBytes = "a.txt", "text/plain", 2
+			p := presignUpload(t, req, f.insider, testWorkspaceID)
+			store.putStagingObject(store.presignedKeys[0], []byte("hi"), "text/plain")
+
+			if tc.replay {
+				if w := completeUpload(t, p.AttachmentID, f.insider, testWorkspaceID); w.Code != http.StatusOK {
+					t.Fatalf("first complete = %d: %s", w.Code, w.Body.String())
+				}
+				if tc.adopt {
+					adoptIntoNewComment(t, f.secretIssue, p.AttachmentID, f.insider)
+				}
+			}
+
+			revokeProjectMembership(t, f.projectID, f.insider)
+
+			w := completeUpload(t, p.AttachmentID, f.insider, testWorkspaceID)
+			if w.Code == http.StatusOK {
+				t.Fatalf("a revoked project member completed the upload: %s", w.Body.String())
+			}
+			// The target cases name the gate they failed; a replay is refused by
+			// the published attachment's own access check, so it only has to be
+			// a refusal rather than a specific code.
+			if tc.want != "" && !strings.Contains(w.Body.String(), tc.want) {
+				t.Fatalf("body = %s, want it to name %q", w.Body.String(), tc.want)
+			}
+
+			// Whatever the refusal, nothing new may have been published: the
+			// session still names either no attachment or exactly the one the
+			// first completion created.
+			var attachmentID pgtype.UUID
+			if err := testPool.QueryRow(context.Background(),
+				`SELECT attachment_id FROM attachment_upload_session WHERE id = $1`,
+				p.AttachmentID).Scan(&attachmentID); err != nil {
+				t.Fatalf("read session: %v", err)
+			}
+			if !tc.replay && attachmentID.Valid {
+				t.Fatalf("a refused completion published attachment %s", uuidToString(attachmentID))
+			}
+		})
+	}
+}
+
+// revokeProjectMembership drops the member's row from the private project, which
+// is what the RemoveProjectMember route leaves behind. It writes the row
+// directly rather than driving the route: this test is about what the upload
+// endpoints re-check after the revocation has landed, not about the route that
+// performs it (that route has its own tests).
+func revokeProjectMembership(t *testing.T, projectID, userID string) {
+	t.Helper()
+	tag, err := testPool.Exec(context.Background(),
+		`DELETE FROM project_member WHERE project_id = $1 AND user_id = $2`, projectID, userID)
+	if err != nil {
+		t.Fatalf("revoke project membership: %v", err)
+	}
+	if tag.RowsAffected() != 1 {
+		t.Fatalf("revoked %d project memberships, want 1", tag.RowsAffected())
+	}
+}
+
+// adoptIntoNewComment binds a published attachment to a fresh comment on the
+// same issue, the way `multica issue comment add --attachment` does. It is a
+// plain update because the binding, not the route, is what the replay's access
+// check reads.
+func adoptIntoNewComment(t *testing.T, issueID, attachmentID, userID string) {
+	t.Helper()
+	commentID := dbfx.Comment(t, issueID, "adopt upload", testutil.Cols{"author_id": userID})
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE attachment SET issue_id = NULL, comment_id = $2 WHERE id = $1`,
+		attachmentID, commentID); err != nil {
+		t.Fatalf("bind attachment to comment: %v", err)
 	}
 }

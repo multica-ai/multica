@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -531,4 +532,60 @@ func newDirectUploadAttachmentCmd() *cobra.Command {
 	cmd.Flags().String("task", "", "")
 	cmd.Flags().String("output", "json", "")
 	return cmd
+}
+
+// TestAttachmentUploadCommand_BudgetOutlivesTheOldSixtySecondFloor guards the
+// command-level context every attachment entry point builds from the file's
+// size.
+//
+// The defect it pins: `attachment upload` used to wrap the whole command in a
+// flat `AtLeastAPITimeout(60 * time.Second)`, so a healthy transfer was cut off
+// after a minute no matter what the HTTP client allowed. The replacement sizes
+// the budget from the file, which for the smallest file is already twelve
+// minutes (the shared transfer ceiling plus metadata overhead), so the two are
+// only distinguishable by holding a transfer longer than the old floor. That is
+// why this test really does wait: any shorter hold passes against both, and
+// would be a test that asserts nothing. It cannot use t.Parallel: it sets
+// process environment, which the test runner forbids alongside parallel.
+func TestAttachmentUploadCommand_BudgetOutlivesTheOldSixtySecondFloor(t *testing.T) {
+	// One second past the flat floor the command used to impose.
+	const hold = 61 * time.Second
+
+	recorder := &uploadRecorder{t: t, attachmentID: "01a1cf5b-0000-7000-8000-000000000001"}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/storage/") {
+			_, _ = io.Copy(io.Discard, r.Body)
+			select {
+			case <-time.After(hold):
+			case <-r.Context().Done():
+				return
+			}
+		}
+		recorder.ServeHTTP(w, r)
+	}))
+	defer server.Close()
+	setCLITestServerEnv(t, server.URL)
+	// The command context is what this test is about, so the transport budgets
+	// must not be the one that fires: clear the total timeout and give the stall
+	// guard more room than the hold.
+	t.Setenv("MULTICA_HTTP_TIMEOUT", "")
+	t.Setenv("MULTICA_HTTP_STALL_TIMEOUT", "120s")
+
+	path := writeFixture(t, chdirTemp(t), "large.txt", 1024)
+	cmd := newAttachmentUploadTestCmd()
+	mustSet(t, cmd, "task", "task-budget")
+
+	started := time.Now()
+	if _, err := captureStdout(t, func() error { return runAttachmentUpload(cmd, []string{path}) }); err != nil {
+		t.Fatalf("upload failed after %s despite the sized transfer budget: %v",
+			time.Since(started).Round(time.Millisecond), err)
+	}
+	// The transfer really was held, so the success above is not a zero-length
+	// transfer passing against any budget at all.
+	if elapsed := time.Since(started); elapsed < hold {
+		t.Fatalf("upload returned in %s, before the server's %s hold", elapsed.Round(time.Millisecond), hold)
+	}
+	if !recorder.sawPath("/complete-upload") {
+		t.Fatalf("complete-upload was never called: %v", recorder.requestLog)
+	}
 }
