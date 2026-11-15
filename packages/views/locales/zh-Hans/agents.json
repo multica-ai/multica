@@ -205,13 +205,11 @@
     "edit": "编辑",
     "add": "添加",
     "manage": "管理",
-    "instructions_empty": "还没有指令。"
+    "instructions_empty": "还没有指令。",
+    "channels_empty": "这个智能体还没有连接消息渠道。"
   },
   "panel": {
-    "status": "状态",
-    "runs_7d": "运行（7 天）",
-    "edit_access_aria": "访问权限：{{value}}。更改访问权限",
-    "all_settings": "全部设置"
+    "status": "状态"
   },
   "pickers": {
     "concurrency_range": "最大并行运行数（{{min}}–{{max}}）",
@@ -261,11 +259,14 @@
     "clear_full": "清除选择（使用提供方默认）"
   },
   "tabs": {
+    "overview": "概览",
     "work": "工作",
     "capabilities": "能力",
     "settings": "设置",
     "general": "通用",
+    "profile": "资料",
     "access": "访问权限",
+    "channels": "消息渠道",
     "section_navigation_aria": "智能体分区",
     "activity": "动态",
     "tasks": "运行",
@@ -277,11 +278,17 @@
     "composio_mcp": "应用",
     "integrations": "集成",
     "runtime_config": "路由",
+    "runtime": "运行时与模型",
     "qoder_agent": "Qoder Cloud Agents",
     "discard_dialog_title": "放弃未保存的修改？",
-    "discard_dialog_description": "当前 tab 有未保存的修改，离开会丢弃这些修改。",
+    "discard_dialog_description": "当前分区有未保存的修改，离开会丢弃这些修改。",
     "discard_keep": "继续编辑",
     "discard_confirm": "放弃修改"
+  },
+  "nav": {
+    "define": "定义",
+    "connect": "接入",
+    "run": "运行"
   },
   "creation_studio": {
     "title": "创建智能体",

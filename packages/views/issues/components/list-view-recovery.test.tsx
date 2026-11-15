@@ -9,8 +9,8 @@ import { I18nProvider } from "@multica/core/i18n/react";
 import { WorkspaceSlugProvider } from "@multica/core/paths";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { getIssueSurfaceViewStore, pruneIssueSurfaceViewStates } from "@multica/core/issues/stores/surface-view-store";
-import type { Agent, Issue, IssueTableRowsRequest } from "@multica/core/types";
-import { AgentWorkDialog } from "../../agents/components/agent-work-dialog";
+import type { Issue, IssueTableRowsRequest } from "@multica/core/types";
+import { ActorIssuesPanel } from "../../common/actor-issues-panel";
 import { NavigationProvider } from "../../navigation";
 import { RESOURCES } from "../../locales";
 
@@ -35,7 +35,7 @@ const issue: Issue = {
   created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
 };
 
-describe("ListView row-page recovery through the agent work dialog", () => {
+describe("ListView row-page recovery through the agent work list", () => {
   let qc: QueryClient;
   let api: ApiClient;
   let fail: boolean;
@@ -91,7 +91,7 @@ describe("ListView row-page recovery through the agent work dialog", () => {
       <WorkspaceSlugProvider slug="synthetic">
         <I18nProvider locale="en" resources={RESOURCES}>
           <NavigationProvider value={{ pathname: "/synthetic/agents", searchParams: new URLSearchParams(), hash: "", push: () => {}, replace: () => {}, back: () => {}, getShareableUrl: (path) => path }}>
-            <AgentWorkDialog agent={{ id: actorId, name: "Synthetic agent" } as Agent} open onOpenChange={() => {}} />
+            <ActorIssuesPanel actorType="agent" actorId={actorId} />
           </NavigationProvider>
         </I18nProvider>
       </WorkspaceSlugProvider>

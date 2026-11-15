@@ -238,13 +238,11 @@
     "runs_count_few": "{{count}} запуска",
     "runs_count_many": "{{count}} запусков",
     "recent_this_week_few": "{{count}} за эту неделю",
-    "recent_this_week_many": "{{count}} за эту неделю"
+    "recent_this_week_many": "{{count}} за эту неделю",
+    "channels_empty": "К этому агенту не подключены мессенджеры."
   },
   "panel": {
-    "status": "Статус",
-    "runs_7d": "Запуски за 7 дней",
-    "edit_access_aria": "Доступ: {{value}}. Изменить доступ",
-    "all_settings": "Все настройки"
+    "status": "Статус"
   },
   "pickers": {
     "concurrency_range": "Максимум одновременных запусков ({{min}}–{{max}})",
@@ -294,11 +292,14 @@
     "clear_full": "Очистить выбор (использовать значение провайдера по умолчанию)"
   },
   "tabs": {
+    "overview": "Обзор",
     "work": "Работа",
     "capabilities": "Возможности",
     "settings": "Настройки",
     "general": "Общее",
+    "profile": "Профиль",
     "access": "Доступ",
+    "channels": "Мессенджеры",
     "section_navigation_aria": "Раздел агента",
     "activity": "Активность",
     "tasks": "Запуски",
@@ -310,11 +311,17 @@
     "composio_mcp": "Приложения",
     "integrations": "Интеграции",
     "runtime_config": "Маршрутизация",
+    "runtime": "Среда выполнения и модель",
     "qoder_agent": "Qoder Cloud Agents",
     "discard_dialog_title": "Отменить несохранённые изменения?",
-    "discard_dialog_description": "В этой вкладке есть несохранённые изменения. Если вы уйдёте сейчас, они будут потеряны.",
+    "discard_dialog_description": "В этом разделе есть несохранённые изменения. Если вы уйдёте сейчас, они будут потеряны.",
     "discard_keep": "Продолжить редактирование",
     "discard_confirm": "Отменить изменения"
+  },
+  "nav": {
+    "define": "Определение",
+    "connect": "Подключения",
+    "run": "Запуск"
   },
   "creation_studio": {
     "title": "Создание агента",

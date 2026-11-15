@@ -73,19 +73,14 @@ function combinedSaveStatus(
 }
 
 /**
- * Full-width General settings form. Every editable value is presented as an
- * explicit field; compact inspector chips are used only through their
- * settings-field variants, where the whole control is a visible click target.
+ * The agent's profile: how it shows up to people, beside a preview of the new
+ * chat it produces. Every editable value is an explicit field.
  */
-export function AgentDetailInspector({
+export function AgentProfileSettings({
   agent,
-  runtime,
-  runtimes,
-  members,
-  currentUserId,
   canEdit,
   onUpdate,
-}: InspectorProps) {
+}: Pick<InspectorProps, "agent" | "canEdit" | "onUpdate">) {
   const { t } = useT("agents");
   const { t: ts } = useT("settings");
   const update = useCallback(
@@ -136,13 +131,6 @@ export function AgentDetailInspector({
     isEqual: profileDraftsEqual,
   });
 
-  const {
-    qoderRuntime,
-    canDiscoverRuntimeModels,
-    runtimeOptions,
-    changeModel,
-    changeRuntime,
-  } = useExecutionControls({ agent, runtime, runtimes, currentUserId, update });
   const conversationStartersEnabled = useConfigStore(
     (state) => state.agentConversationStartersSupported,
   );
@@ -172,10 +160,9 @@ export function AgentDetailInspector({
 
   return (
     <div className="@container">
-      <div className="@4xl:grid @4xl:grid-cols-[minmax(0,1fr)_17.5rem] @4xl:items-start @4xl:gap-8">
+      <div className="@3xl:grid @3xl:grid-cols-[minmax(0,1fr)_17.5rem] @3xl:items-start @3xl:gap-8">
         <div className="min-w-0 space-y-8">
           <SettingsSection
-            title={t(($) => $.inspector.section_profile)}
             action={
               <SettingsSaveState
                 status={combinedSaveStatus(
@@ -280,88 +267,11 @@ export function AgentDetailInspector({
               ) : null}
             </SettingsCard>
           </SettingsSection>
-
-          <SettingsSection
-            title={t(($) => $.inspector.section_execution)}
-            description={
-              qoderRuntime ? t(($) => $.inspector.qoder_execution_note) : undefined
-            }
-          >
-            <SettingsCard>
-              <SettingsRow
-                label={t(($) => $.inspector.prop_runtime)}
-                size="select-wide"
-              >
-                <RuntimePicker
-                  variant="field"
-                  showLabel={false}
-                  value={agent.runtime_id}
-                  runtimes={runtimeOptions}
-                  members={members}
-                  currentUserId={currentUserId}
-                  canEdit={canEdit && !qoderRuntime}
-                  onChange={changeRuntime}
-                />
-              </SettingsRow>
-              {qoderRuntime ? null : (
-                <>
-                  <SettingsRow
-                    label={t(($) => $.inspector.prop_model)}
-                    size="select-wide"
-                  >
-                    <ModelPicker
-                      variant="field"
-                      showLabel={false}
-                      runtimeId={agent.runtime_id}
-                      runtimeOnline={canDiscoverRuntimeModels}
-                      value={agent.model ?? ""}
-                      canEdit={canEdit}
-                      onChange={changeModel}
-                    />
-                  </SettingsRow>
-                  <ThinkingSettingField
-                    label={t(($) => $.inspector.prop_thinking)}
-                    runtimeId={agent.runtime_id}
-                    runtimeOnline={canDiscoverRuntimeModels}
-                    provider={runtime?.provider ?? ""}
-                    model={agent.model ?? ""}
-                    value={agent.thinking_level ?? ""}
-                    canEdit={canEdit}
-                    onChange={(thinkingLevel) =>
-                      update({ thinking_level: thinkingLevel })
-                    }
-                  />
-                  <ServiceTierSettingField
-                    label={t(($) => $.inspector.prop_speed)}
-                    runtimeId={agent.runtime_id}
-                    runtimeOnline={canDiscoverRuntimeModels}
-                    provider={runtime?.provider ?? ""}
-                    model={agent.model ?? ""}
-                    value={agent.service_tier ?? ""}
-                    canEdit={canEdit}
-                    onChange={(serviceTier) =>
-                      update({ service_tier: serviceTier })
-                    }
-                  />
-                </>
-              )}
-              <SettingsRow
-                label={t(($) => $.inspector.prop_concurrency)}
-                size="select-wide"
-              >
-                <ConcurrencyField
-                  value={agent.max_concurrent_tasks}
-                  canEdit={canEdit}
-                  onSave={(next) => update({ max_concurrent_tasks: next })}
-                />
-              </SettingsRow>
-            </SettingsCard>
-          </SettingsSection>
         </div>
 
         <SettingsSection
           title={t(($) => $.conversation_starters.preview_label)}
-          className="hidden @4xl:sticky @4xl:top-0 @4xl:block"
+          className="hidden @3xl:sticky @3xl:top-0 @3xl:block"
         >
           <NewChatPreview
             name={name.trim() || agent.name}
@@ -372,6 +282,111 @@ export function AgentDetailInspector({
         </SettingsSection>
       </div>
     </div>
+  );
+}
+
+/**
+ * Where and how the agent runs: its runtime, the model and its options, and
+ * how many tasks it takes at once.
+ */
+export function AgentExecutionSettings({
+  agent,
+  runtime,
+  runtimes,
+  members,
+  currentUserId,
+  canEdit,
+  onUpdate,
+}: InspectorProps) {
+  const { t } = useT("agents");
+  const update = useCallback(
+    (data: Record<string, unknown>) => onUpdate(agent.id, data),
+    [agent.id, onUpdate],
+  );
+  const {
+    qoderRuntime,
+    canDiscoverRuntimeModels,
+    runtimeOptions,
+    changeModel,
+    changeRuntime,
+  } = useExecutionControls({ agent, runtime, runtimes, currentUserId, update });
+
+  return (
+    <SettingsSection
+      description={
+        qoderRuntime ? t(($) => $.inspector.qoder_execution_note) : undefined
+      }
+    >
+      <SettingsCard>
+        <SettingsRow
+          label={t(($) => $.inspector.prop_runtime)}
+          size="select-wide"
+        >
+          <RuntimePicker
+            variant="field"
+            showLabel={false}
+            value={agent.runtime_id}
+            runtimes={runtimeOptions}
+            members={members}
+            currentUserId={currentUserId}
+            canEdit={canEdit && !qoderRuntime}
+            onChange={changeRuntime}
+          />
+        </SettingsRow>
+        {qoderRuntime ? null : (
+          <>
+            <SettingsRow
+              label={t(($) => $.inspector.prop_model)}
+              size="select-wide"
+            >
+              <ModelPicker
+                variant="field"
+                showLabel={false}
+                runtimeId={agent.runtime_id}
+                runtimeOnline={canDiscoverRuntimeModels}
+                value={agent.model ?? ""}
+                canEdit={canEdit}
+                onChange={changeModel}
+              />
+            </SettingsRow>
+            <ThinkingSettingField
+              label={t(($) => $.inspector.prop_thinking)}
+              runtimeId={agent.runtime_id}
+              runtimeOnline={canDiscoverRuntimeModels}
+              provider={runtime?.provider ?? ""}
+              model={agent.model ?? ""}
+              value={agent.thinking_level ?? ""}
+              canEdit={canEdit}
+              onChange={(thinkingLevel) =>
+                update({ thinking_level: thinkingLevel })
+              }
+            />
+            <ServiceTierSettingField
+              label={t(($) => $.inspector.prop_speed)}
+              runtimeId={agent.runtime_id}
+              runtimeOnline={canDiscoverRuntimeModels}
+              provider={runtime?.provider ?? ""}
+              model={agent.model ?? ""}
+              value={agent.service_tier ?? ""}
+              canEdit={canEdit}
+              onChange={(serviceTier) =>
+                update({ service_tier: serviceTier })
+              }
+            />
+          </>
+        )}
+        <SettingsRow
+          label={t(($) => $.inspector.prop_concurrency)}
+          size="select-wide"
+        >
+          <ConcurrencyField
+            value={agent.max_concurrent_tasks}
+            canEdit={canEdit}
+            onSave={(next) => update({ max_concurrent_tasks: next })}
+          />
+        </SettingsRow>
+      </SettingsCard>
+    </SettingsSection>
   );
 }
 

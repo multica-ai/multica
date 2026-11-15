@@ -19,104 +19,82 @@ import {
   type NavigationAdapter,
 } from "../../navigation";
 
-// The page-level tests exercise the header actions, the URL-driven dialogs and
-// the real permission rules (via auth + member fixtures). Each body section,
-// the properties panel and both dialogs have their own tests, so they're
-// stubbed down to the props the page hands them.
-vi.mock("./agent-properties-panel", () => ({
-  AgentPropertiesPanel: ({
-    agent,
-    onUpdate,
-    onEditAccess,
-    onOpenSettings,
+// The page-level tests exercise the header actions, the section nav, the
+// URL-driven sections and the real permission rules (via auth + member
+// fixtures). The overview, each section's editor and the section rules have
+// their own tests, so they're stubbed down to the props the page hands them.
+vi.mock("./agent-overview", () => ({
+  AgentOverview: ({
+    header,
+    showSkills,
+    onViewAllWork,
   }: {
-    agent: Agent;
-    onUpdate: (id: string, data: Record<string, unknown>) => Promise<void>;
-    onEditAccess: () => void;
-    onOpenSettings: () => void;
+    header: React.ReactNode;
+    showSkills: boolean;
+    onViewAllWork: () => void;
   }) => (
     <div>
-      <span>model:{agent.model}</span>
-      <button
-        type="button"
-        onClick={() => void onUpdate(agent.id, { model: "new-model" })}
-      >
-        update model
-      </button>
-      <button type="button" onClick={onEditAccess}>
-        edit access
-      </button>
-      <button type="button" onClick={onOpenSettings}>
-        all settings
+      {header}
+      {showSkills ? <div>skills-summary</div> : null}
+      <button type="button" onClick={onViewAllWork}>
+        view all work
       </button>
     </div>
   ),
 }));
-vi.mock("./tabs/activity-tab", () => ({
-  AgentWorkSections: ({ onViewAll }: { onViewAll: () => void }) => (
-    <button type="button" onClick={onViewAll}>
-      view all work
-    </button>
-  ),
-}));
-vi.mock("./agent-instructions-section", () => ({
-  AgentInstructionsSection: () => <div>instructions-section</div>,
-}));
-vi.mock("./agent-channels-section", () => ({
-  AgentChannelLinks: () => <div>channel-links</div>,
-  AgentChannelsSection: () => <div id="messaging-channels">channels-section</div>,
-}));
-vi.mock("./agent-skills-section", () => ({
-  AgentSkillsSection: ({ onManage }: { onManage: () => void }) => (
-    <button type="button" onClick={onManage}>
-      manage skills
-    </button>
-  ),
-}));
-vi.mock("./agent-advanced-settings", () => ({
-  isAdvancedSection: (value: unknown) =>
-    typeof value === "string" &&
-    [
-      "general",
-      "access",
-      "env",
-      "custom_args",
-      "runtime_config",
-      "skills",
-      "mcp_config",
-      "composio_mcp",
-    ].includes(value),
-  AgentAdvancedSettings: ({
-    section,
-    onSectionChange,
-  }: {
-    section: string | null;
-    onSectionChange: (section: string | null) => void;
-  }) =>
-    section === null ? null : (
-      <div data-testid="advanced-settings">
-        advanced:{section}
-        <button type="button" onClick={() => onSectionChange(null)}>
-          close advanced
+vi.mock("./agent-sections", () => {
+  const sections = [
+    ["main", ["overview", "work"]],
+    ["define", ["general", "instructions", "skills", "mcp_config"]],
+    ["connect", ["channels", "access"]],
+    ["run", ["runtime", "custom_args"]],
+  ] as const;
+  const labelKeys: Record<string, string> = { general: "profile" };
+  const groups = sections.map(([key, ids]) => ({
+    key,
+    items: ids.map((id) => ({ id, labelKey: labelKeys[id] ?? id, icon: undefined })),
+  }));
+  return {
+    WIDE_AGENT_SECTIONS: new Set(),
+    useAgentSectionGroups: () => groups,
+    resolveAgentSection: (view: string | null) =>
+      groups.flatMap((group) => group.items).find((item) => item.id === view) ??
+      groups[0]!.items[0]!,
+    AgentSectionContent: ({
+      section,
+      agent,
+      onUpdate,
+      onDirtyChange,
+    }: {
+      section: string;
+      agent: Agent;
+      onUpdate: (id: string, data: Record<string, unknown>) => Promise<void>;
+      onDirtyChange: (dirty: boolean) => void;
+    }) => (
+      <div data-testid="section-content">
+        section:{section}
+        <span>model:{agent.model}</span>
+        <button
+          type="button"
+          onClick={() => void onUpdate(agent.id, { model: "new-model" })}
+        >
+          update model
+        </button>
+        <button type="button" onClick={() => onDirtyChange(true)}>
+          make dirty
         </button>
       </div>
     ),
+  };
+});
+vi.mock("../../common/actor-issues-panel", () => ({
+  ActorIssuesPanel: () => <div data-testid="work-list" />,
 }));
-vi.mock("./agent-work-dialog", () => ({
-  AgentWorkDialog: ({
-    open,
-    onOpenChange,
-  }: {
-    open: boolean;
-    onOpenChange: (open: boolean) => void;
-  }) =>
-    open ? (
-      <div data-testid="work-dialog">
-        <button type="button" onClick={() => onOpenChange(false)}>
-          close work
-        </button>
-      </div>
-    ) : null,
+vi.mock("./agent-channels-section", () => ({
+  AgentChannelLinks: () => <div>channel-links</div>,
+}));
+vi.mock("./agent-presence-indicator", () => ({
+  AgentPresenceIndicator: () => <span>presence</span>,
 }));
 vi.mock("../../common/actor-avatar", () => ({
   ActorAvatar: () => <div>actor-avatar</div>,
@@ -303,6 +281,13 @@ function renderPage(search = "") {
   return { push, replace, queryClient, ...view };
 }
 
+function sectionLink(name: string) {
+  return within(screen.getByRole("navigation", { name: "Agent section" })).getByRole(
+    "link",
+    { name },
+  );
+}
+
 function openMoreActions() {
   fireEvent.click(screen.getByRole("button", { name: "Agent actions" }));
   return screen.getByRole("menu");
@@ -485,7 +470,7 @@ describe("AgentDetailPage direct-detail fallback", () => {
     agentsRef.current = [];
     mockGetAgent.mockResolvedValue(baseAgent);
     mockUpdateAgent.mockImplementation(() => new Promise(() => {}));
-    const { queryClient } = renderPage();
+    const { queryClient } = renderPage("view=runtime");
     await screen.findByRole("button", { name: "Assign work" });
 
     fireEvent.click(screen.getByRole("button", { name: "update model" }));
@@ -503,7 +488,7 @@ describe("AgentDetailPage direct-detail fallback", () => {
 });
 
 describe("AgentDetailPage layout", () => {
-  it("puts the agent in the breadcrumb and its name and description in the body", async () => {
+  it("puts the agent in the breadcrumb and opens on its overview", async () => {
     agentsRef.current = [{ ...baseAgent, description: "Design and frontend" }];
     renderPage();
 
@@ -518,26 +503,38 @@ describe("AgentDetailPage layout", () => {
       screen.getByRole("heading", { name: "Lambda", level: 1 }),
     ).toBeInTheDocument();
     expect(screen.getByText("Design and frontend")).toBeInTheDocument();
-    expect(screen.getByText("instructions-section")).toBeInTheDocument();
+    expect(sectionLink("Overview")).toHaveAttribute("aria-current", "page");
     expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
   });
 
-  it("shows the Skills section, except on a Qoder Cloud Agents runtime", async () => {
+  it("links every section from the nav, grouped", async () => {
+    renderPage();
+    const nav = await screen.findByRole("navigation", { name: "Agent section" });
+    expect(within(nav).getByText("Define")).toBeInTheDocument();
+    expect(within(nav).getByText("Connect")).toBeInTheDocument();
+    expect(within(nav).getByText("Run")).toBeInTheDocument();
+    expect(sectionLink("Overview")).toHaveAttribute("href", "/acme/agents/agent-1");
+    expect(sectionLink("Instructions")).toHaveAttribute(
+      "href",
+      "/acme/agents/agent-1?view=instructions",
+    );
+    expect(sectionLink("Runtime & model")).toHaveAttribute(
+      "href",
+      "/acme/agents/agent-1?view=runtime",
+    );
+  });
+
+  it("shows the skills summary, except on a Qoder Cloud Agents runtime", async () => {
     const { unmount } = renderPage();
-    expect(
-      await screen.findByRole("button", { name: "manage skills" }),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("skills-summary")).toBeInTheDocument();
     unmount();
 
     runtimesRef.current = [{ id: "runtime-1", provider: "qoder_cloud" }];
     renderPage();
     await screen.findByRole("button", { name: "Assign work" });
     await waitFor(() =>
-      expect(
-        screen.queryByRole("button", { name: "manage skills" }),
-      ).not.toBeInTheDocument(),
+      expect(screen.queryByText("skills-summary")).not.toBeInTheDocument(),
     );
-    expect(screen.getByText("instructions-section")).toBeInTheDocument();
   });
 
   it("assigns work through the quick-create modal", async () => {
@@ -559,77 +556,86 @@ describe("AgentDetailPage layout", () => {
   });
 });
 
-describe("AgentDetailPage deep links", () => {
-  it("opens Settings at the section named by ?view=", async () => {
+describe("AgentDetailPage sections", () => {
+  it("opens the section named by ?view=, titled", async () => {
     renderPage("view=general&focus=conversation_starters");
-    expect(await screen.findByTestId("advanced-settings")).toHaveTextContent(
-      "advanced:general",
+    expect(await screen.findByTestId("section-content")).toHaveTextContent(
+      "section:general",
     );
+    expect(screen.getByRole("heading", { name: "Profile", level: 1 })).toBeInTheDocument();
+    expect(sectionLink("Profile")).toHaveAttribute("aria-current", "page");
   });
 
   it.each([
-    ["tab=settings", "advanced:general"],
-    ["tab=capabilities", "advanced:skills"],
-    ["view=mcp_config", "advanced:mcp_config"],
-  ])("maps the legacy link %s to %s", async (search, expected) => {
+    ["tab=settings", "section:general"],
+    ["tab=capabilities", "section:skills"],
+    ["view=mcp_config", "section:mcp_config"],
+  ])("maps the link %s to %s", async (search, expected) => {
     renderPage(search);
-    expect(await screen.findByTestId("advanced-settings")).toHaveTextContent(
+    expect(await screen.findByTestId("section-content")).toHaveTextContent(
       expected,
     );
   });
 
-  it.each(["view=overview", "view=instructions", "tab=overview", "view=bogus"])(
-    "renders the plain page for %s",
+  it("rewrites the retired ?view=integrations to channels", async () => {
+    const { replace } = renderPage("view=integrations");
+    await waitFor(() =>
+      expect(replace).toHaveBeenCalledWith("/acme/agents/agent-1?view=channels"),
+    );
+  });
+
+  it.each(["view=overview", "tab=overview", "tab=activity", "view=bogus"])(
+    "renders the overview for %s",
     async (search) => {
       renderPage(search);
       await screen.findByRole("button", { name: "Assign work" });
-      expect(screen.queryByTestId("advanced-settings")).not.toBeInTheDocument();
-      expect(screen.queryByTestId("work-dialog")).not.toBeInTheDocument();
+      expect(sectionLink("Overview")).toHaveAttribute("aria-current", "page");
+      expect(screen.queryByTestId("section-content")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("work-list")).not.toBeInTheDocument();
     },
   );
 
-  it("opens the full work list for ?view=work and clears the URL on close", async () => {
-    const { replace } = renderPage("view=work");
-    fireEvent.click(await screen.findByRole("button", { name: "close work" }));
-    expect(screen.queryByTestId("work-dialog")).not.toBeInTheDocument();
-    expect(replace).toHaveBeenCalledWith("/acme/agents/agent-1");
-  });
-
-  it("writes the open section to the URL, dropping a legacy ?tab=", async () => {
-    const { replace } = renderPage("tab=activity");
-    fireEvent.click(await screen.findByRole("button", { name: "manage skills" }));
-    expect(screen.getByTestId("advanced-settings")).toHaveTextContent(
-      "advanced:skills",
-    );
-    expect(replace).toHaveBeenLastCalledWith("/acme/agents/agent-1?view=skills");
-
-    fireEvent.click(screen.getByRole("button", { name: "close advanced" }));
-    expect(screen.queryByTestId("advanced-settings")).not.toBeInTheDocument();
-    expect(replace).toHaveBeenLastCalledWith("/acme/agents/agent-1");
-  });
-
-  it("opens Access settings from the properties panel", async () => {
-    renderPage();
-    fireEvent.click(await screen.findByRole("button", { name: "edit access" }));
-    expect(screen.getByTestId("advanced-settings")).toHaveTextContent(
-      "advanced:access",
-    );
-  });
-
-  it("opens Settings at General from the properties panel", async () => {
-    const { replace } = renderPage();
-    fireEvent.click(await screen.findByRole("button", { name: "all settings" }));
-    expect(screen.getByTestId("advanced-settings")).toHaveTextContent(
-      "advanced:general",
-    );
-    expect(replace).toHaveBeenLastCalledWith("/acme/agents/agent-1?view=general");
+  it("shows the agent's issues for ?view=work", async () => {
+    renderPage("view=work");
+    expect(await screen.findByTestId("work-list")).toBeInTheDocument();
   });
 
   it("opens the work list from View all", async () => {
-    const { replace } = renderPage();
+    const { push } = renderPage();
     fireEvent.click(await screen.findByRole("button", { name: "view all work" }));
-    expect(screen.getByTestId("work-dialog")).toBeInTheDocument();
-    expect(replace).toHaveBeenLastCalledWith("/acme/agents/agent-1?view=work");
+    expect(push).toHaveBeenCalledWith("/acme/agents/agent-1?view=work");
+  });
+
+  it("moves to another section from the nav", async () => {
+    const { push } = renderPage("view=runtime");
+    await screen.findByTestId("section-content");
+    fireEvent.click(sectionLink("Access"));
+    expect(push).toHaveBeenCalledWith("/acme/agents/agent-1?view=access");
+  });
+
+  it("asks before leaving a section with unsaved edits", async () => {
+    const { push } = renderPage("view=custom_args");
+    fireEvent.click(await screen.findByRole("button", { name: "make dirty" }));
+
+    fireEvent.click(sectionLink("Profile"));
+    expect(push).not.toHaveBeenCalled();
+    const dialog = await screen.findByRole("alertdialog");
+    expect(within(dialog).getByText("Discard unsaved changes?")).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Discard changes" }));
+    expect(push).toHaveBeenCalledWith("/acme/agents/agent-1?view=general");
+  });
+
+  it("keeps the unsaved section when the user keeps editing", async () => {
+    const { push } = renderPage("view=custom_args");
+    fireEvent.click(await screen.findByRole("button", { name: "make dirty" }));
+    fireEvent.click(sectionLink("Overview"));
+    const dialog = await screen.findByRole("alertdialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Keep editing" }));
+    expect(push).not.toHaveBeenCalled();
+    expect(screen.getByTestId("section-content")).toHaveTextContent(
+      "section:custom_args",
+    );
   });
 });
 
@@ -700,9 +706,9 @@ describe("AgentDetailPage DM button", () => {
     expect(
       await screen.findByText(/needs a runtime before it can run/i),
     ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Bind runtime" }));
-    expect(screen.getByTestId("advanced-settings")).toHaveTextContent(
-      "advanced:general",
+    expect(screen.getByRole("button", { name: "Bind runtime" })).toHaveAttribute(
+      "href",
+      "/acme/agents/agent-1?view=runtime",
     );
 
     fireEvent.click(screen.getByRole("button", { name: "DM" }));
@@ -716,7 +722,7 @@ describe("AgentDetailPage DM button", () => {
 });
 
 describe("AgentDetailPage more actions", () => {
-  it("keeps Settings and copy actions but no Archive for a system agent", async () => {
+  it("keeps copy actions but no Archive for a system agent", async () => {
     // An admin passes `canEditAgent`, so only the system key keeps Archive
     // out of the menu.
     agentsRef.current = [{ ...baseAgent, system_key: "mika" }];
@@ -725,9 +731,6 @@ describe("AgentDetailPage more actions", () => {
 
     await screen.findByRole("button", { name: "Assign work" });
     const menu = openMoreActions();
-    expect(
-      within(menu).getByRole("menuitem", { name: "Settings" }),
-    ).toBeInTheDocument();
     expect(
       within(menu).getByRole("menuitem", { name: "Copy link" }),
     ).toBeInTheDocument();
@@ -750,31 +753,13 @@ describe("AgentDetailPage more actions", () => {
     expect(push).toHaveBeenCalledWith("/acme/agents");
   });
 
-  it("opens Settings at General", async () => {
+  it("leaves settings to the section nav", async () => {
     renderPage();
     await screen.findByRole("button", { name: "Assign work" });
-    fireEvent.click(
-      within(openMoreActions()).getByRole("menuitem", { name: "Settings" }),
-    );
-    expect(screen.getByTestId("advanced-settings")).toHaveTextContent(
-      "advanced:general",
-    );
-  });
-
-  it("opens Settings at General from the header button", async () => {
-    const { replace } = renderPage();
-    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
-    expect(screen.getByTestId("advanced-settings")).toHaveTextContent(
-      "advanced:general",
-    );
-    expect(replace).toHaveBeenLastCalledWith("/acme/agents/agent-1?view=general");
-  });
-
-  it("keeps the header Settings button on an archived agent", async () => {
-    agentsRef.current = [{ ...baseAgent, archived_at: "2026-06-01T00:00:00Z" }];
-    renderPage();
-    await screen.findByText(/This agent is archived/);
-    expect(screen.getByRole("button", { name: "Settings" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Settings" })).not.toBeInTheDocument();
+    expect(
+      within(openMoreActions()).queryByRole("menuitem", { name: "Settings" }),
+    ).not.toBeInTheDocument();
   });
 
   it("copies the shareable link and the agent ID", async () => {

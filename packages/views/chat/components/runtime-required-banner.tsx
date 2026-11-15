@@ -36,7 +36,7 @@ export function RuntimeRequiredBanner({
           size="sm"
           className="h-6 shrink-0 bg-background/70 text-caption"
           render={
-            <AppLink href={`${paths.agentDetail(agentId)}?view=general`} />
+            <AppLink href={`${paths.agentDetail(agentId)}?view=runtime`} />
           }
           nativeButton={false}
         >

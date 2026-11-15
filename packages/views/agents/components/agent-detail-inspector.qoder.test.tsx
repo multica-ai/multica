@@ -27,7 +27,7 @@ vi.mock("./inspector/runtime-picker", () => ({
   },
 }));
 
-import { AgentDetailInspector } from "./agent-detail-inspector";
+import { AgentExecutionSettings } from "./agent-detail-inspector";
 
 function runtime(id: string, provider: string): AgentRuntime {
   return {
@@ -66,7 +66,7 @@ function renderInspector(bound: AgentRuntime) {
     <QueryClientProvider
       client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
     >
-      <AgentDetailInspector
+      <AgentExecutionSettings
         agent={agent}
         runtime={bound}
         runtimes={[claude, qoder]}
@@ -79,7 +79,7 @@ function renderInspector(bound: AgentRuntime) {
   );
 }
 
-describe("AgentDetailInspector and the Qoder runtime", () => {
+describe("AgentExecutionSettings and the Qoder runtime", () => {
   beforeEach(() => {
     picker.props = null;
     mockInitiateListModels.mockReset();

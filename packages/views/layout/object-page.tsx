@@ -24,6 +24,7 @@ import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { cn } from "@multica/ui/lib/utils";
 import { ActionShortcutKeycaps } from "../common/shortcut-keycaps";
 import { useT } from "../i18n";
+import { AppLink } from "../navigation";
 import {
   AnimatedRightSidebar,
   getAnimatedRightSidebarInitialOpen,
@@ -53,6 +54,11 @@ interface ObjectPageProps {
   actions?: ReactNode;
   /** The properties panel. Omit and the page has no panel or toggle. */
   panel?: ReactNode;
+  /**
+   * An `ObjectPageNav` for objects whose body is split into sections: a
+   * column left of the body, or a strip above it on a narrow page.
+   */
+  nav?: ReactNode;
   /** Persists the panel's size and open state per kind of object. */
   layoutId: string;
   /**
@@ -70,7 +76,7 @@ interface ObjectPageProps {
  * right panel the header toggles — the layout the issue page already uses.
  * There are no tabs: what a tab would hold is a section of the body.
  */
-export function ObjectPage({ type, segments, leaf, actions, panel, layoutId, children, scrollRef }: ObjectPageProps) {
+export function ObjectPage({ type, segments, leaf, actions, panel, nav, layoutId, children, scrollRef }: ObjectPageProps) {
   const { t } = useT("layout");
   const isMobile = useIsMobile();
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({ id: layoutId });
@@ -135,7 +141,17 @@ export function ObjectPage({ type, segments, leaf, actions, panel, layoutId, chi
     />
   );
 
-  const body = <div ref={scrollRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto">{children}</div>;
+  const scroller = <div ref={scrollRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto">{children}</div>;
+  const body = nav ? (
+    <div className="@container/object-page flex min-h-0 flex-1 flex-col">
+      <div className="flex min-h-0 flex-1 flex-col @3xl/object-page:flex-row">
+        {nav}
+        {scroller}
+      </div>
+    </div>
+  ) : (
+    scroller
+  );
 
   if (!panel) {
     return (
@@ -186,6 +202,90 @@ export function ObjectPage({ type, segments, leaf, actions, panel, layoutId, chi
         </Sheet>
       )}
     </div>
+  );
+}
+
+export interface ObjectPageNavItem {
+  id: string;
+  label: ReactNode;
+  icon?: IconComponent;
+  count?: ReactNode;
+  href: string;
+}
+
+export interface ObjectPageNavGroup {
+  key: string;
+  label?: ReactNode;
+  items: ObjectPageNavItem[];
+}
+
+/**
+ * The section list of an object page. Each section is a link, so it can be
+ * opened in a new tab or shared; `onItemClick` sees the click first and may
+ * cancel it, e.g. to ask about unsaved edits.
+ */
+export function ObjectPageNav({
+  label,
+  header,
+  groups,
+  active,
+  onItemClick,
+}: {
+  /** The nav's accessible name. */
+  label: string;
+  /** What the sections belong to, above them in the column. */
+  header?: ReactNode;
+  groups: ObjectPageNavGroup[];
+  active: string;
+  onItemClick?: (id: string, event: React.MouseEvent<HTMLAnchorElement>) => void;
+}) {
+  return (
+    <nav
+      aria-label={label}
+      className="shrink-0 border-b @3xl/object-page:w-56 @3xl/object-page:overflow-y-auto @3xl/object-page:border-r @3xl/object-page:border-b-0"
+    >
+      {header ? <div className="hidden px-3 pt-3 @3xl/object-page:block">{header}</div> : null}
+      <div className="flex w-full items-center gap-1 overflow-x-auto px-3 py-2 @3xl/object-page:flex-col @3xl/object-page:items-stretch @3xl/object-page:gap-4 @3xl/object-page:overflow-visible @3xl/object-page:py-3">
+        {groups.map((group) => (
+          <div
+            key={group.key}
+            className="flex shrink-0 items-center gap-1 @3xl/object-page:flex-col @3xl/object-page:items-stretch @3xl/object-page:gap-0.5"
+          >
+            {group.label ? (
+              <span className="hidden px-2.5 pb-1 text-micro font-medium text-muted-foreground @3xl/object-page:block">
+                {group.label}
+              </span>
+            ) : null}
+            {group.items.map((item) => {
+              const selected = item.id === active;
+              const Icon = item.icon;
+              return (
+                <AppLink
+                  key={item.id}
+                  href={item.href}
+                  aria-current={selected ? "page" : undefined}
+                  onClick={onItemClick ? (event) => onItemClick(item.id, event) : undefined}
+                  className={cn(
+                    "flex h-8 shrink-0 items-center gap-2 rounded-md px-2.5 text-caption transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    selected
+                      ? "bg-surface-selected text-surface-selected-foreground hover:bg-surface-selected"
+                      : "text-muted-foreground hover:bg-surface-hover hover:text-foreground",
+                  )}
+                >
+                  {Icon ? <Icon aria-hidden="true" className="size-4 shrink-0" /> : null}
+                  <span className="min-w-0 truncate">{item.label}</span>
+                  {item.count !== undefined && item.count !== null ? (
+                    <span className="ml-auto hidden pl-2 tabular-nums text-faint-foreground @3xl/object-page:inline">
+                      {item.count}
+                    </span>
+                  ) : null}
+                </AppLink>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+    </nav>
   );
 }
 
