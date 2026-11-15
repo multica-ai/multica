@@ -125,6 +125,7 @@
       "views": "视图",
       "new_project": "新建项目",
       "new_issue_in_project": "在 {{name}} 中新建任务",
+      "private_project": "项目成员及工作区 owner 和 admin 可见",
       "all_projects_other": "全部 {{count}} 个项目",
       "project_issues": "{{name}} 的任务",
       "project_issues_empty": "没有任务",

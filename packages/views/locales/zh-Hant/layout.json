@@ -125,6 +125,7 @@
       "views": "檢視",
       "new_project": "新建專案",
       "new_issue_in_project": "在 {{name}} 中新建任務",
+      "private_project": "專案成員及工作區 owner 和 admin 可見",
       "all_projects_other": "全部 {{count}} 個專案",
       "project_issues": "{{name}} 的任務",
       "project_issues_empty": "沒有任務",

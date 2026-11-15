@@ -125,6 +125,7 @@
       "views": "ビュー",
       "new_project": "新規プロジェクト",
       "new_issue_in_project": "{{name}} に新規タスク",
+      "private_project": "プロジェクトメンバーとワークスペースの owner と admin が閲覧できます",
       "all_projects_other": "すべてのプロジェクト（{{count}}）",
       "project_issues": "{{name}} のタスク",
       "project_issues_empty": "タスクはありません",
