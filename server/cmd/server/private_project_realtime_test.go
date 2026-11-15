@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"slices"
 	"sort"
 	"testing"
 	"time"
@@ -117,6 +118,60 @@ func TestRegisterListeners_HideFromAdminsLeavesAdminsOutOfTheAudience(t *testing
 			if got[i] != want[i] {
 				t.Fatalf("%s: delivered to %v, want %v", tc.projectID, got, want)
 			}
+		}
+	}
+}
+
+// mixedHideAudienceQuerier makes ppPrivate hide from admins and leaves
+// ppPrivate2 visible to them; adminInHidden makes ppAdmin a member of
+// ppPrivate.
+type mixedHideAudienceQuerier struct {
+	hideFromAdminsAudienceQuerier
+	adminInHidden bool
+}
+
+func (q mixedHideAudienceQuerier) ListPrivateProjectAudience(context.Context, pgtype.UUID) ([]db.ListPrivateProjectAudienceRow, error) {
+	rows := []db.ListPrivateProjectAudienceRow{
+		{ProjectID: ppUUID(ppPrivate), HideFromAdmins: true, UserID: ppUUID(ppMember)},
+		{ProjectID: ppUUID(ppPrivate2), UserID: ppUUID(ppOther)},
+	}
+	if q.adminInHidden {
+		rows = append(rows, db.ListPrivateProjectAudienceRow{ProjectID: ppUUID(ppPrivate), HideFromAdmins: true, UserID: ppUUID(ppAdmin)})
+	}
+	return rows, nil
+}
+
+func TestPrivateProjectAudienceAcrossHiddenAndVisibleProjects(t *testing.T) {
+	crossProject := []events.Event{
+		{Type: protocol.EventPullRequestUpdated, WorkspaceID: ppWorkspace,
+			Payload: map[string]any{"pull_request": map[string]any{"id": "pr"}, "linked_issue_ids": []string{ppSecretIssue, ppSecretIssue2}}},
+		{Type: protocol.EventTaskMessage, WorkspaceID: ppWorkspace, TaskID: ppCrossProjectTask,
+			Payload: map[string]any{"task_id": ppCrossProjectTask}},
+	}
+	for _, tc := range []struct {
+		name          string
+		adminInHidden bool
+		want          []string
+	}{
+		// A member of the hidden project who is an admin of the visible one
+		// can read both.
+		{"admin member of hidden project", true, []string{ppAdmin, ppOwner}},
+		// Without membership the hidden project stays closed to the admin, and
+		// a member of only one project never qualifies.
+		{"admin outside hidden project", false, []string{ppOwner}},
+	} {
+		for _, e := range crossProject {
+			t.Run(tc.name+"/"+e.Type, func(t *testing.T) {
+				a := newPrivateProjectAudience(mixedHideAudienceQuerier{adminInHidden: tc.adminInHidden})
+				got, private, err := a.Audience(context.Background(), e)
+				if err != nil || !private {
+					t.Fatalf("private=%v err=%v", private, err)
+				}
+				sort.Strings(got)
+				if !slices.Equal(got, tc.want) {
+					t.Fatalf("delivered to %v, want %v", got, tc.want)
+				}
+			})
 		}
 	}
 }

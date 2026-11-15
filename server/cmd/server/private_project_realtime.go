@@ -139,29 +139,38 @@ func (a *dbPrivateProjectAudience) Audience(ctx context.Context, e events.Event)
 	}
 	// A run can read more than one project (a quick-create into one project
 	// under a parent in another), and a pull request can be linked to issues in
-	// several; only members of every private one may see it.
-	var members []string
+	// several; only users who can access every private one may see it. Each
+	// project grants access on its own terms, so a user can qualify for one
+	// as a member and for another as an admin.
+	var out []string
 	private := false
-	managers := ws.managers
 	for _, projectID := range projectIDs {
-		projectMembers, ok := ws.projects[projectID]
-		if !ok {
+		if _, ok := ws.projects[projectID]; !ok {
 			continue
 		}
-		if ws.hideFromAdmins[projectID] {
-			managers = ws.owners
-		}
+		access := ws.projectAccess(projectID)
 		if !private {
-			members, private = projectMembers, true
+			out, private = access, true
 			continue
 		}
-		members = intersect(members, projectMembers)
+		out = intersect(out, access)
 	}
 	if !private {
 		return nil, false, nil
 	}
-	seen := make(map[string]struct{}, len(members)+len(managers))
-	out := make([]string, 0, len(members)+len(managers))
+	return out, true, nil
+}
+
+// projectAccess lists the users who can see a private project: workspace
+// managers (only owners when it hides from admins), then its members.
+func (ws workspaceAudience) projectAccess(projectID string) []string {
+	managers := ws.managers
+	if ws.hideFromAdmins[projectID] {
+		managers = ws.owners
+	}
+	members := ws.projects[projectID]
+	seen := make(map[string]struct{}, len(managers)+len(members))
+	out := make([]string, 0, len(managers)+len(members))
 	for _, ids := range [][]string{managers, members} {
 		for _, id := range ids {
 			if _, dup := seen[id]; dup {
@@ -171,7 +180,7 @@ func (a *dbPrivateProjectAudience) Audience(ctx context.Context, e events.Event)
 			out = append(out, id)
 		}
 	}
-	return out, true, nil
+	return out
 }
 
 func intersect(a, b []string) []string {
