@@ -97,9 +97,7 @@
     "section_labels": "Etiquetas",
     "filter_search_placeholder": "Filtrar...",
     "no_labels": "Todavía no hay etiquetas",
-    "no_results": "Sin resultados",
-    "manage_labels": "Gestionar etiquetas...",
-    "manage_labels_title": "Etiquetas de skills"
+    "no_results": "Sin resultados"
   },
   "detail": {
     "read_only": "Solo lectura",
@@ -254,15 +252,9 @@
     }
   },
   "create": {
-    "back": "Volver",
-    "back_aria": "Volver al selector de método",
     "close": "Cerrar",
     "close_aria": "Cerrar",
     "method": {
-      "chooser": {
-        "title": "Skill nueva",
-        "desc": "Elige cómo añadir una skill a este espacio de trabajo."
-      },
       "manual": {
         "title": "Crear manualmente",
         "desc": "Parte de un SKILL.md en blanco."

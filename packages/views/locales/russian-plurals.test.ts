@@ -7,7 +7,6 @@ const i18n = createI18n("ru", RESOURCES);
 
 const countedMessages = [
   ["schedule interval", (count: number) => i18n.t(($) => $.plugins.schedule.frequency_minutes, { ns: "settings", count })],
-  ["workspace invitations", (count: number) => i18n.t(($) => $.batch.submit_join, { ns: "invite", count })],
   ["automation deletion", (count: number) => i18n.t(($) => $.actions.delete_dialog.description, { ns: "autopilots", count, name: "Example" })],
   ["skill deletion", (count: number) => i18n.t(($) => $.actions.delete_dialog_desc, { ns: "skills", count })],
   ["issue deletion", (count: number) => i18n.t(($) => $.batch.delete_dialog_desc, { ns: "issues", count })],
@@ -21,7 +20,6 @@ const countedMessages = [
 
 const runMessages = [
   ["agent run count", (count: number) => i18n.t(($) => $.row.task_count, { ns: "agents", count })],
-  ["agent concurrency limit", (count: number) => i18n.t(($) => $.pickers.concurrency_tooltip, { ns: "agents", value: count })],
   ["cancelled runs", (count: number) => i18n.t(($) => $.row_actions.cancelled_tasks_toast, { ns: "agents", count })],
   ["queued runs", (count: number) => i18n.t(($) => $.overview.attention_queued, { ns: "agents", count })],
   ["active runs", (count: number) => i18n.t(($) => $.agent_activity.hover_header_tasks, { ns: "issues", count })],

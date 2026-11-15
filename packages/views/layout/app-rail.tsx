@@ -13,13 +13,20 @@ import {
 import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Settings, Users, type IconComponent } from "@multica/ui/icons";
+import { CheckCheck, ExternalLink, Link2, RotateCcw, Settings, Users, type IconComponent } from "@multica/ui/icons";
+import { toast } from "sonner";
 import { useChatStore } from "@multica/core/chat";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
 import { countUnreadChatMessages } from "@multica/core/chat/unread";
-import { useInboxUnreadCount } from "@multica/core/inbox/queries";
+import {
+  deduplicateInboxItems,
+  inboxListOptions,
+  useInboxUnreadCount,
+} from "@multica/core/inbox/queries";
+import { useMarkAllInboxRead } from "@multica/core/inbox/mutations";
 import { resolveRailOrder, useRailOrderStore } from "@multica/core/navigation";
 import {
+  RAIL_SPACES,
   useCurrentWorkspace,
   useWorkspacePaths,
   type AppSpaceId,
@@ -29,9 +36,17 @@ import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { CappedNumberFlow } from "@multica/ui/components/ui/number-flow";
 import { cn } from "@multica/ui/lib/utils";
+import { copyText } from "@multica/ui/lib/clipboard";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from "@multica/ui/components/ui/dropdown-menu";
 import { useAppForeground } from "../common/use-app-foreground";
+import { useRowMenu } from "../common/point-menu";
 import { useT } from "../i18n";
-import { AppLink, useNavigation } from "../navigation";
+import { AppLink, useIntentNavigate, useNavigation } from "../navigation";
 import { AccountMenu } from "./account-menu";
 import { useAppShell } from "./app-shell-context";
 import { NewIssueButton, SearchButton } from "./global-actions";
@@ -116,6 +131,30 @@ function RailBadgeMark({ badge }: { badge: RailBadge }) {
   );
 }
 
+/**
+ * The Inbox item returns to the last notification opened there. Once that
+ * notification has left the active list (archived here, on another device, or
+ * by the server), the Inbox page treats `?issue=` as a shared link and
+ * replaces itself with the issue, so the click looks like it did nothing.
+ * Drop a selection the cached list no longer holds; with no cached list the
+ * page still decides.
+ */
+function useInboxReturnHref(href: string, wsId: string | undefined): string {
+  const { data: items } = useQuery({ ...inboxListOptions(wsId ?? ""), enabled: false });
+  return useMemo(() => {
+    const queryAt = href.indexOf("?");
+    if (!items || queryAt < 0) return href;
+    const params = new URLSearchParams(href.slice(queryAt + 1));
+    const key = params.get("issue");
+    if (!key || params.has("view")) return href;
+    if (deduplicateInboxItems(items).some((item) => (item.issue_id ?? item.id) === key)) return href;
+    params.delete("issue");
+    const query = params.toString();
+    const path = href.slice(0, queryAt);
+    return query ? `${path}?${query}` : path;
+  }, [href, items]);
+}
+
 /** Hover previews of a collapsed nav. Mouse only: a touch tap navigates. */
 function usePeekHandlers(space: AppSpaceId, peekable: boolean) {
   const shell = useAppShell();
@@ -149,6 +188,9 @@ function RailSpaceLink({
   badge?: RailBadge;
 }) {
   const peekHandlers = usePeekHandlers(space, true);
+  // Desktop only: in a browser the link keeps the browser's own link menu.
+  const { openInNewTab } = useNavigation();
+  const rowMenu = useRowMenu();
   const link = (
     <AppLink
       href={href}
@@ -156,6 +198,7 @@ function RailSpaceLink({
       newTabTitle={fullLabel}
       draggable={false}
       aria-current={active ? "page" : undefined}
+      onContextMenu={openInNewTab ? rowMenu.openAtPointer : undefined}
       {...peekHandlers}
       className="group relative flex size-12 flex-col items-center justify-center gap-1 rounded-rail-item text-rail-item transition-colors outline-none hover:bg-rail-item-hover hover:text-rail-item-active-foreground focus-visible:outline-2 focus-visible:outline-ring aria-[current=page]:bg-rail-item-active aria-[current=page]:font-medium aria-[current=page]:text-rail-item-active-foreground"
     >
@@ -164,19 +207,92 @@ function RailSpaceLink({
       {badge && <RailBadgeMark badge={badge} />}
     </AppLink>
   );
+  // The menu portals out of the sortable item, but its React events still
+  // bubble through it; a press inside the menu must not start a drag.
+  const menu = rowMenu.menu.point && (
+    <span className="contents" onPointerDown={(event) => event.stopPropagation()}>
+      <RailSpaceMenu space={space} href={href} title={fullLabel} unread={badge?.kind === "count" ? badge.value : 0} state={rowMenu} />
+    </span>
+  );
   // A label the same as the full name still needs the tooltip whenever a
   // locale's text doesn't fit the 48px item.
   if (label === fullLabel) {
     return (
-      <TruncatedTooltip content={fullLabel} side="right">
-        {link}
-      </TruncatedTooltip>
+      <>
+        <TruncatedTooltip content={fullLabel} side="right">
+          {link}
+        </TruncatedTooltip>
+        {menu}
+      </>
     );
   }
   return (
-    <TooltipHint label={fullLabel} side="right">
-      {link}
-    </TooltipHint>
+    <>
+      <TooltipHint label={fullLabel} side="right">
+        {link}
+      </TooltipHint>
+      {menu}
+    </>
+  );
+}
+
+/** A rail space's right-click menu. */
+function RailSpaceMenu({
+  space,
+  href,
+  title,
+  unread,
+  state,
+}: {
+  space: RailSpaceId;
+  href: string;
+  title: string;
+  unread: number;
+  state: ReturnType<typeof useRowMenu>;
+}) {
+  const { t } = useT("layout");
+  const { t: tCommon } = useT("common");
+  const { getShareableUrl } = useNavigation();
+  const intentNavigate = useIntentNavigate();
+  const copyLink = async () => {
+    if (await copyText(getShareableUrl(href))) toast.success(t(($) => $.rail.link_copied));
+  };
+  const markAllRead = useMarkAllInboxRead();
+  const customOrder = useRailOrderStore((s) => s.order !== null);
+  const setOrder = useRailOrderStore((s) => s.setOrder);
+  return (
+    <DropdownMenu open={state.menu.open} onOpenChange={state.onOpenChange}>
+      <DropdownMenuContent align="start" anchor={state.anchor} className="w-auto min-w-44">
+        <DropdownMenuItem onClick={() => intentNavigate(href, "foreground-tab", title)}>
+          <ExternalLink />
+          {tCommon(($) => $.navigation.open_in_new_tab)}
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => void copyLink()}>
+          <Link2 />
+          {t(($) => $.rail.copy_link)}
+        </DropdownMenuItem>
+        {space === "inbox" && unread > 0 && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onClick={() =>
+                markAllRead.mutate(undefined, {
+                  onError: () => toast.error(t(($) => $.rail.mark_all_read_failed)),
+                })
+              }
+            >
+              <CheckCheck />
+              {t(($) => $.rail.mark_all_read)}
+            </DropdownMenuItem>
+          </>
+        )}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem disabled={!customOrder} onClick={() => setOrder(RAIL_SPACES)}>
+          <RotateCcw />
+          {t(($) => $.rail.reset_order)}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -218,6 +334,8 @@ export function AppRail({
   const shell = useAppShell();
   const badges = useRailBadges();
   const space = shell?.space ?? null;
+  const wsId = useCurrentWorkspace()?.id;
+  const inboxHref = useInboxReturnHref(shell?.spaceHref("inbox", p.inbox()) ?? p.inbox(), wsId);
   const settingsPeek = usePeekHandlers("settings", space === "settings");
   const savedOrder = useRailOrderStore((s) => s.order);
   const setOrder = useRailOrderStore((s) => s.setOrder);
@@ -309,7 +427,7 @@ export function AppRail({
                 <RailSpaceLink
                   space={id}
                   {...items[id]}
-                  href={shell?.spaceHref(id, items[id].href) ?? items[id].href}
+                  href={id === "inbox" ? inboxHref : (shell?.spaceHref(id, items[id].href) ?? items[id].href)}
                   active={space === id}
                   badge={badges[id]}
                 />

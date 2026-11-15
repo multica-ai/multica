@@ -127,12 +127,18 @@ export function IssueViewHeader({
   controller,
   base,
   baseMenu,
+  baseBadge,
+  hideCreate = false,
   trailing,
 }: {
   controller: IssueSurfaceController;
   base: IssueViewHeaderBase;
   /** Name-menu items for the page itself, e.g. project actions. */
   baseMenu?: ReactNode;
+  /** Marker after the page's own name, e.g. an archived project's tag. */
+  baseBadge?: ReactNode;
+  /** Drops the new-issue button, e.g. on an archived project. */
+  hideCreate?: boolean;
   /** Layout toggles at the far end, e.g. the project's properties panel. */
   trailing?: ReactNode;
 }) {
@@ -363,6 +369,7 @@ export function IssueViewHeader({
         {unreadView ? <UnreadViewIcon /> : activeView ? <Layers className="size-4" /> : baseIcon}
       </RefreshablePageIcon>
       <span className="min-w-0 truncate">{activeView ? activeViewName : baseName}</span>
+      {!activeView && baseBadge}
     </>
   );
 
@@ -564,15 +571,17 @@ export function IssueViewHeader({
             onTableFacetChange={controller.setActiveTableFacet}
             iconOnly
           />
-          <IconButton
-            label={t(($) => $.views.new_issue)}
-            shortcut={<ActionShortcutKeycaps action="createIssue" />}
-            tooltipSide="bottom"
-            className="text-muted-foreground"
-            onClick={() => controller.openCreateIssue()}
-          >
-            <SquarePen />
-          </IconButton>
+          {!hideCreate && (
+            <IconButton
+              label={t(($) => $.views.new_issue)}
+              shortcut={<ActionShortcutKeycaps action="createIssue" />}
+              tooltipSide="bottom"
+              className="text-muted-foreground"
+              onClick={() => controller.openCreateIssue()}
+            >
+              <SquarePen />
+            </IconButton>
+          )}
           {trailing && (
             <>
               <Separator orientation="vertical" className="ml-1 data-vertical:h-4 data-vertical:self-center" />

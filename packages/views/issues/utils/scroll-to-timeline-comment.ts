@@ -42,8 +42,9 @@ export function scrollToTimelineComment({
     container.scrollTop = target;
     return target;
   };
+  const findAnchor = () => container.querySelector<HTMLElement>(`[id="comment-${commentId}"]`);
   const land = () => {
-    const el = container.querySelector<HTMLElement>(`[id="comment-${commentId}"]`);
+    const el = findAnchor();
     if (!el || el.dataset.virtualThreadMounted === "false") {
       if (el) alignTarget(el, true);
       if (++mountFrames < 60) rafId = requestAnimationFrame(land);
@@ -52,7 +53,18 @@ export function scrollToTimelineComment({
     }
     if (!mounted) { mounted = true; onMounted?.(); }
     const align = () => {
-      const target = alignTarget(el);
+      // Look the anchor up again every frame. A commit between frames can
+      // unmount or replace it (Virtuoso re-ranging rows while a realtime update
+      // lands); a detached node measures as zero, which would scroll the
+      // timeline to the top and pass for a settled landing (MUL-9068).
+      const current = findAnchor();
+      if (!current || current.dataset.virtualThreadMounted === "false") {
+        if (++frames >= 30) { onComplete?.(); return; }
+        if (!current) virtualizer?.scrollIntoView({ index, align: "start", done: queueLanding });
+        queueLanding();
+        return;
+      }
+      const target = alignTarget(current);
       if (Math.abs(target - last) > 1 && ++frames < 30) {
         last = target;
         rafId = requestAnimationFrame(align);

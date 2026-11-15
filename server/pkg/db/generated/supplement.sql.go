@@ -104,7 +104,7 @@ WITH locked_task AS MATERIALIZED (
       AND r.workspace_id = $4
       AND t.status = 'running'
       AND cap.capability = 'task-supplement-v1'
-      AND r.provider IN ('codex', 'claude', 'grok', 'cursor', 'kiro')
+      AND r.provider IN ('codex', 'claude', 'grok', 'cursor', 'kiro', 'pi')
       AND ($5::text <> 'agent' OR (
           (SELECT count(*) FROM task_supplement s
            JOIN comment c ON c.id = s.comment_id
@@ -293,7 +293,7 @@ WITH locked_task AS MATERIALIZED (
       AND r.workspace_id = $3
       AND t.status = 'running'
       AND cap.capability = 'task-supplement-v1'
-      AND r.provider IN ('codex', 'claude', 'grok', 'cursor', 'kiro')
+      AND r.provider IN ('codex', 'claude', 'grok', 'cursor', 'kiro', 'pi')
     FOR UPDATE OF t
 ), touched_issue AS (
     UPDATE issue i SET
@@ -854,7 +854,7 @@ WITH candidate AS MATERIALIZED (
     SELECT id, workspace_id, issue_id, 'task-supplement-v1'
     FROM candidate
     WHERE $3::boolean
-      AND provider IN ('codex', 'claude', 'grok', 'cursor', 'kiro')
+      AND provider IN ('codex', 'claude', 'grok', 'cursor', 'kiro', 'pi')
       AND issue_id IS NOT NULL
     ON CONFLICT DO NOTHING
     RETURNING task_id

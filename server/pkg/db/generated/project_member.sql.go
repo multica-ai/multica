@@ -138,6 +138,38 @@ func (q *Queries) GetIssueProjectID(ctx context.Context, id pgtype.UUID) (pgtype
 	return project_id, err
 }
 
+const listAutopilotRunProjectIDs = `-- name: ListAutopilotRunProjectIDs :many
+SELECT r.id, a.project_id
+FROM autopilot_run r
+JOIN autopilot a ON a.id = r.autopilot_id
+WHERE r.id = ANY($1::uuid[])
+`
+
+type ListAutopilotRunProjectIDsRow struct {
+	ID        pgtype.UUID `json:"id"`
+	ProjectID pgtype.UUID `json:"project_id"`
+}
+
+func (q *Queries) ListAutopilotRunProjectIDs(ctx context.Context, ids []pgtype.UUID) ([]ListAutopilotRunProjectIDsRow, error) {
+	rows, err := q.db.Query(ctx, listAutopilotRunProjectIDs, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAutopilotRunProjectIDsRow{}
+	for rows.Next() {
+		var i ListAutopilotRunProjectIDsRow
+		if err := rows.Scan(&i.ID, &i.ProjectID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listHiddenProjectIDsForUser = `-- name: ListHiddenProjectIDsForUser :many
 SELECT p.id FROM project p
 WHERE p.workspace_id = $1
@@ -387,7 +419,7 @@ func (q *Queries) TouchProjectSearchIndexEntries(ctx context.Context, arg TouchP
 const updateProjectVisibility = `-- name: UpdateProjectVisibility :one
 UPDATE project SET visibility = $1, updated_at = now()
 WHERE id = $2 AND workspace_id = $3
-RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, creator_type, creator_id, visibility
+RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, creator_type, creator_id, visibility, archived_at, archived_by_type, archived_by_id
 `
 
 type UpdateProjectVisibilityParams struct {
@@ -417,6 +449,9 @@ func (q *Queries) UpdateProjectVisibility(ctx context.Context, arg UpdateProject
 		&i.CreatorType,
 		&i.CreatorID,
 		&i.Visibility,
+		&i.ArchivedAt,
+		&i.ArchivedByType,
+		&i.ArchivedByID,
 	)
 	return i, err
 }

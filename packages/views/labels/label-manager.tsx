@@ -43,6 +43,7 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { ColorPicker, COLOR_PICKER_PRESETS } from "../common/color-picker";
 import { useLocale, useT } from "../i18n";
+import { paletteColor } from "@multica/core/appearance";
 
 /**
  * Label catalogs a user can manage. Narrower than `LabelResourceType`:
@@ -64,9 +65,8 @@ const EMPTY_DRAFT: LabelDraft = {
 };
 
 /**
- * Search, create, edit and delete the labels of one catalog. Issue labels are
- * managed in Settings; skill labels on the Skills page, next to the skills
- * they tag — the two catalogs never mix.
+ * Search, create, edit and delete the labels of one catalog. Both catalogs are
+ * managed in Settings → Labels, one tab each — they never mix.
  */
 export function LabelManager({ scope }: { scope: LabelScope }) {
   const { t } = useT("settings");
@@ -145,7 +145,7 @@ export function LabelManager({ scope }: { scope: LabelScope }) {
                   <div className="flex min-w-0 items-center gap-3">
                     <span
                       className="size-2.5 shrink-0 rounded-full"
-                      style={{ backgroundColor: label.color }}
+                      style={{ backgroundColor: paletteColor(label.color) }}
                     />
                     <span className="truncate text-body font-medium">{label.name}</span>
                   </div>

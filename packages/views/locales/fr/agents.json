@@ -65,15 +65,6 @@
     "search_runtime_filtered": "Aucun agent sur « {{machine}} » ne correspond à « {{query}} ».",
     "runtime_filtered": "Aucun agent sur « {{machine}} »."
   },
-  "runtime_filter": {
-    "all": "Tous les runtimes",
-    "section_local": "Local",
-    "section_remote": "Distant",
-    "section_cloud": "Cloud",
-    "agent_count_one": "{{count}} agent",
-    "agent_count_other": "{{count}} agents",
-    "empty": "Aucune machine pour l'instant"
-  },
   "columns": {
     "agent": "Agent",
     "status": "Statut",
@@ -208,7 +199,6 @@
     "rename_required": "Le nom est obligatoire",
     "edit_description_title": "Modifier la description",
     "description_placeholder": "Que fait cet agent ?",
-    "save": "Enregistrer",
     "cancel": "Annuler"
   },
   "overview": {
@@ -234,12 +224,7 @@
     "edit_access_aria": "Accès : {{value}}. Modifier l'accès",
     "all_settings": "Tous les paramètres"
   },
-  "skill_attach": {
-    "trigger_aria": "Rattacher un skill de l'espace de travail",
-    "trigger_label": "Rattacher"
-  },
   "pickers": {
-    "concurrency_tooltip": "Concurrence · {{value}} exécutions simultanées au maximum",
     "concurrency_range": "Exécutions simultanées maximales ({{min}}–{{max}})",
     "runtime_none": "Aucun runtime",
     "runtime_tooltip": "Runtime · {{name}} · {{status}}",
@@ -315,13 +300,8 @@
     "duplicate_title": "Dupliquer {{name}}",
     "step_ai": "Construire par la conversation",
     "modes": {
-      "template": {
-        "title": "Partir d'un modèle",
-        "description": "Partez d'instructions et de skills sélectionnés, puis adaptez chaque détail à votre espace de travail."
-      },
       "ai": {
-        "title": "Construire avec l'IA",
-        "description": "Créez une configuration modifiable par la conversation."
+        "title": "Construire avec l'IA"
       }
     },
     "sections": {
@@ -349,10 +329,6 @@
       }
     },
     "builder": {
-      "setup_title": "Choisir un runtime pour l'Agent Builder",
-      "setup_description": "Ce runtime sert à la configuration et sera celui du nouvel agent par défaut.",
-      "start": "Démarrer la conversation",
-      "connect_runtime": "Connecter un runtime",
       "draft_parse_failed": "Cette réponse n’a pas permis de remplir le formulaire. Demandez à l’agent de générer à nouveau le brouillon ou remplissez le formulaire manuellement.",
       "start_failed": "Impossible de démarrer l'Agent Builder.",
       "send_failed": "Impossible d'envoyer votre message.",
@@ -463,23 +439,17 @@
     }
   },
   "create_dialog": {
-    "title_create": "Créer un agent",
-    "title_duplicate": "Dupliquer l'agent",
-    "description_duplicate": "Créez un agent à partir de « {{name}} ». Les instructions, l'environnement et les skills sont copiés pour vous.",
     "name_label": "Nom",
     "name_placeholder": "ex. Agent de recherche approfondie",
     "description_label": "Description",
     "description_placeholder": "Que fait cet agent ?",
-    "visibility_label": "Visibilité",
     "access": {
-      "label": "Accès",
       "private_title": "Privé",
       "private_desc": "Vous seul pouvez exécuter cet agent",
       "public_title": "Public",
       "public_desc": "Choisissez qui peut exécuter cet agent",
       "public_workspace_option": "Tout le monde dans cet espace de travail",
       "public_members_group": "Personnes précises",
-      "public_members_empty": "Aucun membre de l'espace de travail à choisir",
       "public_targets_empty_hint": "Choisissez au moins une option ci-dessous — sinon l'agent reste privé."
     },
     "runtime_label": "Runtime",
@@ -494,17 +464,10 @@
     "runtime_no_results": "Aucune machine correspondante",
     "runtime_group_online": "{{online}}/{{total}} en ligne",
     "duplicate_copy_suffix": " (copie)",
-    "create": "Créer",
-    "creating": "Création...",
-    "cancel": "Annuler",
-    "create_failed_toast": "Échec de la création de l'agent",
     "skill_attach_failed_toast": "Agent créé, mais échec du rattachement des skills : {{error}}",
     "squad_join_failed_toast": "L'agent « {{name}} » a été créé mais n'a pas pu rejoindre le squad : {{error}}. Vous pouvez l'ajouter manuellement depuis Membres.",
     "instructions": {
       "label": "Instructions",
-      "placeholder_blank": "Cliquez pour rédiger les instructions…",
-      "placeholder_duplicate": "Cliquez pour consulter ou modifier les instructions dupliquées",
-      "collapse": "Replier",
       "editor_placeholder": "Indiquez ce que cet agent doit faire, sur quoi se concentrer, ce qu'il faut éviter…"
     },
     "skills_section": {
@@ -584,6 +547,7 @@
       "bulk_placeholder": "API_KEY=valeur\nBASE_URL=https://exemple.com",
       "bulk_plaintext_notice": "Les valeurs sont affichées en clair pendant l'édition groupée.",
       "bulk_unsupported_toast": "« {{key}} » ne peut pas être affiché en texte — modifiez-le en ligne",
+      "bulk_invalid_key_toast": "L'édition groupée n'accepte que des noms comme API_KEY — modifiez « {{key}} » en ligne",
       "parse_error_malformed": "La ligne {{line}} n'est pas une affectation CLÉ=valeur",
       "parse_error_duplicate": "Clé « {{key}} » en double à la ligne {{line}}",
       "paste_invalid_toast": "Impossible d'analyser les variables d'environnement collées",
@@ -788,7 +752,7 @@
       "add_failed_toast": "Échec de l'ajout du skill"
     },
     "integrations": {
-      "members_note": "Seuls les propriétaires et administrateurs de l'espace de travail peuvent gérer cette connexion. Vous pouvez voir les bots connectés dans Paramètres → Intégrations."
+      "members_note": "Consultez et gérez les canaux de messagerie sur la page de l’agent."
     },
     "activity": {
       "status": {
@@ -1012,7 +976,40 @@
     "tool_kind_write": "Modifications",
     "tool_kind_read": "Lectures",
     "tool_kind_misc": "Autres",
-    "trigger_wakeup": "Réveil"
+    "trigger_wakeup": "Réveil",
+    "context_receipt_title": "Contexte reçu",
+    "context_receipt_summary_one": "{{count}} source · {{size}}",
+    "context_receipt_summary_other": "{{count}} sources · {{size}}",
+    "context_receipt_model": "Modèle",
+    "context_receipt_session": "Session",
+    "context_receipt_session_resumed": "Session précédente reprise (son historique est aussi dans le contexte)",
+    "context_receipt_session_new": "Nouvelle session",
+    "context_receipt_session_fresh_retry": "Nouvelle session après le refus de la reprise",
+    "context_receipt_mcp": "Serveurs MCP",
+    "context_receipt_mcp_none": "Aucun",
+    "context_receipt_warning": "{{source}} : {{status}}",
+    "context_receipt_col_source": "Source",
+    "context_receipt_col_size": "Taille",
+    "context_receipt_col_delivery": "Transmis via",
+    "context_receipt_col_load": "Chargé",
+    "context_receipt_same_as_brief": "Comme les instructions d'exécution",
+    "context_receipt_footnote": "Enregistré par le daemon avant le démarrage de l'agent. Tailles et hachages courts uniquement ; aucun contenu n'est stocké. « Vérifié » signifie que cette version du runtime a été testée et charge le fichier. Les tailles et hachages des skills couvrent le paquet complet écrit sur disque.",
+    "context_source_runtime_brief": "Instructions d'exécution",
+    "context_source_agent_instructions": "Instructions de l'agent",
+    "context_source_project_description": "Description du projet",
+    "context_source_existing_instructions": "Instructions du dépôt",
+    "context_source_task_prompt": "Prompt du tour",
+    "context_source_skill": "Skill : {{name}}",
+    "context_delivery_file": "Fichier",
+    "context_delivery_inline": "Prompt système",
+    "context_delivery_prompt": "Entrée du tour",
+    "context_delivery_embedded": "Dans les instructions d'exécution",
+    "context_delivery_none": "Aucun canal",
+    "context_load_delivered": "Transmis",
+    "context_load_verified": "Vérifié",
+    "context_load_verified_other_version": "Vérifié en {{version}} seulement",
+    "context_load_unverified": "Non vérifié",
+    "context_load_not_delivered": "Non transmis"
   },
   "task_failure": {
     "cancelled_by_system": "Annulée par le système",

@@ -4,6 +4,10 @@
  * themselves, so the UI has to explain the subscription, and delivery for it
  * is narrower than for the direct reasons.
  *
+ * `project` means the member subscribes to the issue's project; the server
+ * lists them without storing a row, and unsubscribing from the issue records an
+ * opt-out for this issue only.
+ *
  * Server-driven and open-ended by design: the API parses `reason` as a plain
  * string, so treat an unrecognized value as a direct subscription rather than
  * dropping the row.
@@ -15,7 +19,8 @@ export type IssueSubscriberReason =
   | "mentioned"
   | "manual"
   | "autopilot"
-  | "delegated";
+  | "delegated"
+  | "project";
 
 export interface IssueSubscriber {
   issue_id: string;

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
@@ -34,7 +34,11 @@ beforeEach(() => {
     return { rules: [] };
   });
 });
-afterEach(() => { cleanup(); vi.clearAllMocks(); });
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+  delete (window as { desktopAPI?: unknown }).desktopAPI;
+});
 
 function renderSettings() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -97,4 +101,21 @@ it("only offers members the personal connection entry", async () => {
   renderSettings();
   expect(await screen.findByRole("button", { name: "Connect my account" })).toBeVisible();
   expect(screen.queryByRole("button", { name: "Connect team account" })).not.toBeInTheDocument();
+});
+
+it("reloads accounts when the Desktop window is focused again after connecting in the browser", async () => {
+  (window as { desktopAPI?: unknown }).desktopAPI = { pickDirectory: vi.fn() };
+  renderSettings();
+  await screen.findByText("A saved app list is hiding other apps.");
+  expect(api.getAppsOverview).toHaveBeenCalledTimes(1);
+  fireEvent.focus(window);
+  await waitFor(() => expect(api.getAppsOverview).toHaveBeenCalledTimes(2));
+});
+
+it("does not reload on focus on the web, where the flow returns to this tab", async () => {
+  renderSettings();
+  await screen.findByText("A saved app list is hiding other apps.");
+  fireEvent.focus(window);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(api.getAppsOverview).toHaveBeenCalledTimes(1);
 });

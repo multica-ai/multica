@@ -60,16 +60,13 @@ function workspaceScoped(slug: string) {
     // Step 3: the agent exists; offer its first uses.
     newAgentDone: (agentId: string) =>
       `${ws}/agents/new/done/${encode(agentId)}`,
-    newAgentAi: () => `${ws}/agents/new/ai`,
     // One creation conversation. It is a durable object, not a step of the
-    // route above: it survives leaving the studio and is resumed later, so it
-    // owns an address instead of being a query param on the "start one" screen.
+    // routes above: it survives leaving the studio and is resumed later, so it
+    // owns an address instead of being a query param on the screen that started it.
     newAgentAiSession: (sessionId: string) =>
       `${ws}/agents/new/ai/${encode(sessionId)}`,
     agentDetail: (id: string) => `${ws}/agents/${encode(id)}`,
-    // Deep link behind "customize" in a chat's empty state: the agent's
-    // General settings, scrolled to the conversation starters that produced
-    // the buttons the viewer just looked at.
+    // The agent's General settings, scrolled to its conversation starters.
     agentConversationStarters: (id: string) =>
       `${ws}/agents/${encode(id)}?view=general&focus=${AGENT_FOCUS_CONVERSATION_STARTERS}`,
     memberDetail: (id: string) => `${ws}/members/${encode(id)}`,

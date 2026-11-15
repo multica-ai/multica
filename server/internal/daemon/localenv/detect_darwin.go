@@ -43,9 +43,14 @@ func listListeners(ctx context.Context) ([]Listener, error) {
 	return listeners, nil
 }
 
-// lsof exits 1 when it matches nothing, which is not an error here.
 func lsof(ctx context.Context, args ...string) (string, error) {
-	out, err := exec.CommandContext(ctx, "lsof", args...).Output()
+	return matchOutput(exec.CommandContext(ctx, "lsof", args...))
+}
+
+// matchOutput runs cmd for its output. lsof and ps exit 1 when they match
+// nothing, which is not an error here.
+func matchOutput(cmd *exec.Cmd) (string, error) {
+	out, err := cmd.Output()
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
 		return string(out), nil

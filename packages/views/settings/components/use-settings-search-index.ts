@@ -12,6 +12,7 @@ const NOTIFICATION_GROUPS = [
   "comments",
   "mentions",
   "updates",
+  "new_issues",
   "agent_activity",
 ] as const;
 
@@ -58,6 +59,12 @@ export function useSettingsSearchIndex(
         anchor: "theme",
         title: t(($) => $.appearance.theme.title),
         description: t(($) => $.appearance.theme.description),
+      },
+      {
+        tab: "appearance",
+        anchor: "theme-import",
+        title: t(($) => $.appearance.own.title),
+        description: t(($) => $.appearance.own.description),
       },
       {
         tab: "appearance",
@@ -137,6 +144,12 @@ export function useSettingsSearchIndex(
       },
       {
         tab: "preferences",
+        anchor: "comment-images",
+        title: t(($) => $.preferences.comment_images.title),
+        description: t(($) => $.preferences.comment_images.hint),
+      },
+      {
+        tab: "preferences",
         anchor: "chat",
         title: t(($) => $.chat.floating_label),
         description: t(($) => $.chat.floating_hint),
@@ -170,6 +183,11 @@ export function useSettingsSearchIndex(
       })),
       {
         tab: "notifications",
+        anchor: "chat_replies",
+        title: t(($) => $.notifications.groups.chat_replies.label),
+      },
+      {
+        tab: "notifications",
         anchor: "system",
         title: t(($) => $.notifications.system.label),
       },
@@ -192,6 +210,67 @@ export function useSettingsSearchIndex(
         tab: "shortcuts",
         title: t(($) => $.page.tabs.shortcuts),
         description: t(($) => $.shortcuts.description),
+      },
+      {
+        tab: "voice-input",
+        title: t(($) => $.page.tabs.voice_input),
+        description: t(($) => $.voice_input.description),
+      },
+      {
+        tab: "voice-input",
+        anchor: "voice-enabled",
+        title: t(($) => $.voice_input.enabled.title),
+        description: t(($) => $.voice_input.enabled.hint),
+      },
+      {
+        tab: "voice-input",
+        anchor: "voice-model",
+        title: t(($) => $.voice_input.model_title),
+        description: t(($) => $.voice_input.model_hint),
+      },
+      {
+        tab: "voice-input",
+        anchor: "voice-shortcut",
+        title: t(($) => $.voice_input.shortcut.title),
+        description: t(($) => $.voice_input.shortcut.hint),
+      },
+      {
+        tab: "voice-input",
+        anchor: "voice-activation",
+        title: t(($) => $.voice_input.activation.title),
+      },
+      {
+        tab: "voice-input",
+        anchor: "voice-language",
+        title: t(($) => $.voice_input.language.title),
+        description: t(($) => $.voice_input.language.hint),
+      },
+      {
+        tab: "voice-input",
+        anchor: "voice-fillers",
+        title: t(($) => $.voice_input.fillers.title),
+        description: t(($) => $.voice_input.fillers.hint),
+      },
+      {
+        tab: "voice-input",
+        anchor: "voice-vocabulary",
+        title: t(($) => $.voice_input.vocabulary.title),
+      },
+      {
+        tab: "voice-input",
+        anchor: "voice-device",
+        title: t(($) => $.voice_input.device.title),
+      },
+      {
+        tab: "voice-input",
+        anchor: "voice-test",
+        title: t(($) => $.voice_input.test.title),
+      },
+      {
+        tab: "voice-input",
+        anchor: "voice-history",
+        title: t(($) => $.voice_input.history.title),
+        description: t(($) => $.voice_input.history.description),
       },
       {
         tab: "apps",
@@ -217,12 +296,6 @@ export function useSettingsSearchIndex(
       { tab: "workspace", anchor: "delete", title: t(($) => $.workspace.delete_title) },
       { tab: "members", anchor: "invitations", title: t(($) => $.members.pending_label) },
       { tab: "members", anchor: "links", title: t(($) => $.members.share_links_label) },
-      {
-        tab: "wakeups",
-        anchor: "child-done",
-        title: t(($) => $.wakeups.child_done_title),
-        description: t(($) => $.wakeups.child_done_description),
-      },
       {
         tab: "labels",
         title: t(($) => $.page.tabs.labels),

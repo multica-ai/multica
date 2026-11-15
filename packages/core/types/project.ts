@@ -38,6 +38,11 @@ export interface Project {
   due_date: string | null;
   created_at: string;
   updated_at: string;
+  /**
+   * The later of the project's own last edit and the latest activity on its
+   * issues. Older servers omit it; read it through projectLastActivityAt.
+   */
+  last_activity_at?: string;
   issue_count: number;
   done_count: number;
   resource_count: number;
@@ -46,6 +51,19 @@ export interface Project {
    * Optional because older servers do not send it. (MUL-7420)
    */
   workflow_id?: string | null;
+  /**
+   * Set while the project is archived: hidden from default lists and pickers
+   * and closed to new issues, otherwise intact. Orthogonal to `status`.
+   * Optional because older servers do not send it. (MUL-8861)
+   */
+  archived_at?: string | null;
+  archived_by_type?: "member" | "agent" | null;
+  archived_by_id?: string | null;
+}
+
+export interface ArchiveProjectResponse extends Project {
+  /** Autopilots the archive paused because they file into this project. */
+  paused_autopilot_ids: string[];
 }
 
 export interface CreateProjectRequest {

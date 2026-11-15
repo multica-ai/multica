@@ -73,6 +73,8 @@ import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@multica/ui/components/ui/command";
 import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { MemberProfileCard } from "../../members/member-profile-card";
+import { HoverCard, HoverCardTrigger, HoverCardContent } from "@multica/ui/components/ui/hover-card";
 import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { PropRow } from "../../common/prop-row";
 import { TimelineHandoff } from "../../workflows/timeline-handoff";
@@ -96,7 +98,7 @@ import { AssigneePicker } from "./pickers/assignee-picker";
 import { LabelPicker } from "./pickers/label-picker";
 import { CustomPropertyValueEditor, CustomPropertyValueDisplay } from "./pickers/custom-property-picker";
 import { Switch } from "@multica/ui/components/ui/switch";
-import { IssueActionsDropdown, useIssueActions, useArchivedInboxItemId, IssueActionsContextMenu, IssueContextMenuProvider } from "../actions";
+import { IssueActionsDropdown, useIssuePageMenu, useIssueActions, useArchivedInboxItemId, IssueActionsContextMenu, IssueContextMenuProvider } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { SubIssuesAgentWorkingChip } from "./sub-issues-agent-working-chip";
@@ -124,6 +126,8 @@ import { PluginPanelSection } from "../../plugins";
 import { PullRequestsSection } from "./pull-requests-section";
 import { IssueEnvironmentsSection } from "./issue-environments-section";
 import { useGitHubSettings } from "@multica/core/github";
+import { useFeatureEnabled } from "@multica/core/config";
+import { PLUGINS_V1_FLAG } from "@multica/core/feature-flags";
 import { DeliverablesSection } from "./deliverables/deliverables-section";
 import { IssueAppsSection } from "./issue-apps-section";
 import { DeliverablesOverview } from "./deliverables/deliverables-overview";
@@ -132,7 +136,7 @@ import {
   useDeliverableDetails,
   type DeliverableOrigin,
 } from "./deliverables/deliverable-details";
-import { collectDeliverableFiles, mergeDeliverableSources } from "@multica/core/attachments/deliverables";
+import { collectDeliverableFiles, deliverableInventoryFromAttachments, mergeDeliverableSources } from "@multica/core/attachments/deliverables";
 import { AttachmentVersionsProvider } from "./deliverables/attachment-versions";
 import {
   OpenDeliverableOnLoad,
@@ -152,7 +156,7 @@ import {
 import { useRecentContextStore } from "@multica/core/chat";
 import { useRegisterCommandBarContext } from "../../search/register-context";
 import { useModalStore } from "@multica/core/modals";
-import { issueListOptions, issueDetailOptions, childIssuesOptions, childIssueProgressOptions, issueAttachmentsOptions, issueDeliverablesOptions } from "@multica/core/issues/queries";
+import { issueListOptions, issueDetailOptions, childIssuesOptions, childIssueProgressOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { issueLabelsOptions } from "@multica/core/labels";
@@ -161,6 +165,7 @@ import { memberListOptions, agentListOptions } from "@multica/core/workspace/que
 import {
   selectExpandedResolved,
   useCommentCollapseStore,
+  useCommentComposerStore,
   useRecentIssuesStore,
   useResolvedExpandStore,
   useSubIssuesCollapseStore,
@@ -168,6 +173,8 @@ import {
   SUB_ISSUE_ROW_PROPERTY_KEYS,
   type SubIssueRowProperties,
   type SubIssueRowPropertyKey,
+  ISSUE_SIDEBAR_SECTIONS,
+  type IssueSidebarSection,
 } from "@multica/core/issues/stores";
 import { BatchActionToolbar } from "./batch-action-toolbar";
 import {
@@ -198,7 +205,8 @@ import { useShowInSidebar } from "../../layout/panels/show-in-sidebar";
 import { ProgressRing } from "./progress-ring";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { MetadataSection } from "./metadata-section";
-import { IssueSidebarSectionHeader, IssueSidebarStack, IssueSidebarPropertyGrid } from "./issue-sidebar-section";
+import { IssueSidebarSectionHeader, IssueSidebarPropertyGrid } from "./issue-sidebar-section";
+import { IssueSidebarSections, letSidebarSettingsDragKeysThrough } from "./issue-sidebar-settings";
 import { useT } from "../../i18n";
 import { useIssueDetailScrollRestore } from "../hooks/use-issue-detail-scroll-restore";
 import { useIssueTimelineAnchor } from "../hooks/use-issue-timeline-anchor";
@@ -359,10 +367,14 @@ function formatActivity(
   locale: string,
   resolveActorName?: (type: string, id: string) => string,
   resolveStatusLabel?: (statusKey: string) => string,
+  requesterName?: string,
 ): string {
   const details = (entry.details ?? {}) as Record<string, string>;
   switch (entry.action) {
     case "created":
+      if (requesterName && entry.actor_type === "agent") {
+        return t(($) => $.activity.created_on_behalf_of, { name: requesterName });
+      }
       return t(($) => $.activity.created);
     case "status_changed":
       // PR auto-complete (MUL-7429) says why the status moved.
@@ -461,6 +473,17 @@ function formatActivity(
             : t(($) => $.activity.squad_leader_failed);
         default:
           return t(($) => $.activity.squad_leader_evaluated);
+      }
+    }
+    case "environment_controlled": {
+      const name = details.label || details.name || "?";
+      switch (details.action) {
+        case "stop":
+          return t(($) => $.activity.environment_stopped, { name });
+        case "restart":
+          return t(($) => $.activity.environment_restarted, { name });
+        default:
+          return t(($) => $.activity.environment_started, { name });
       }
     }
     default:
@@ -718,6 +741,7 @@ function ActivityBlock({
   t,
   timeAgo,
   locale,
+  requesterName,
 }: {
   entries: TimelineEntry[];
   expanded: boolean;
@@ -737,6 +761,7 @@ function ActivityBlock({
   t: ActivityT;
   timeAgo: (dateStr: string) => string;
   locale: string;
+  requesterName?: string;
 }) {
   const wakeupText = useWakeupText();
   if (!expanded) {
@@ -852,7 +877,7 @@ function ActivityBlock({
                     entry={entry}
                     text={isWakeup
                       ? formatWakeupActivity(entry, t, wakeupText, getActorName)
-                      : formatActivity(entry, t, locale, getActorName, resolveStatusLabel)}
+                      : formatActivity(entry, t, locale, getActorName, resolveStatusLabel, requesterName)}
                   />
                 </span>
                 {chip && (
@@ -1365,6 +1390,9 @@ export function IssueLoadError({
 
 // Loading skeleton
 
+const ISSUE_DETAIL_LAYOUT_ID = "multica_issue_detail_layout";
+const REVEALED_WAKEUPS: readonly IssueSidebarSection[] = ["wakeups"];
+
 /**
  * Exported so `IssueDetailRoute` can show the identical frame while it resolves
  * an identifier URL to its issue — the two waits are indistinguishable to the
@@ -1374,7 +1402,11 @@ export function IssueDetailSkeleton({
   leading,
   trailing,
   sidebar = true,
-}: { leading?: ReactNode; trailing?: ReactNode; sidebar?: boolean } = {}) {
+  layoutId = ISSUE_DETAIL_LAYOUT_ID,
+}: { leading?: ReactNode; trailing?: ReactNode; sidebar?: boolean; layoutId?: string } = {}) {
+  const { defaultLayout } = useDefaultLayout({ id: layoutId });
+  const sidebarOpen = sidebar && getAnimatedRightSidebarInitialOpen(true, defaultLayout);
+
   return (
     <div className="flex flex-1 min-h-0 flex-col">
       {/* The way back is real from the first frame, not once the issue lands:
@@ -1396,7 +1428,7 @@ export function IssueDetailSkeleton({
           {/* Width and gutters match the loaded column exactly (see its
               comment), so the skeleton doesn't reflow sideways when real
               content mounts. */}
-          <div className={cn(READING_COLUMN, "px-3 py-6 space-y-6 md:px-8 md:py-8")}>
+          <div className={cn(READING_COLUMN, "px-[var(--space-sm,0.75rem)] py-[var(--space-lg,1.5rem)] space-y-6 md:px-[var(--space-xl,2rem)] md:py-[var(--space-xl,2rem)]")}>
             <Skeleton className="h-8 w-3/4" />
             <div className="space-y-2">
               <Skeleton className="h-4 w-full" />
@@ -1416,7 +1448,7 @@ export function IssueDetailSkeleton({
             </div>
           </div>
         </div>
-        {sidebar && (
+        {sidebarOpen && (
           <div className="hidden md:block w-80 border-l p-4 space-y-5">
             {Array.from({ length: 4 }).map((_, i) => (
               <div key={i} className="flex items-center gap-2">
@@ -1440,7 +1472,7 @@ export function IssueDetailSkeleton({
 
 // IssueDetail
 
-export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId: linkedCommentId, highlightRequestToken: linkedRequestToken, highlightAppRequestId, leadingAction, variant = "page", trailingActions, readsInbox = true, skipInitialRefetch = false, openDeliverable, onDeliverableLinkDone }: IssueDetailProps) {
+export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = ISSUE_DETAIL_LAYOUT_ID, highlightCommentId: linkedCommentId, highlightRequestToken: linkedRequestToken, highlightAppRequestId, leadingAction, variant = "page", trailingActions, readsInbox = true, skipInitialRefetch = false, openDeliverable, onDeliverableLinkDone }: IssueDetailProps) {
   const isPeek = variant === "peek";
   const { t } = useT("issues");
   const { t: tCommon } = useT("common");
@@ -1518,6 +1550,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const [parentIssueOpen, setParentIssueOpen] = useState(true);
   const [pullRequestsOpen, setPullRequestsOpen] = useState(true);
   const githubSettings = useGitHubSettings();
+  const pluginsEnabled = useFeatureEnabled(PLUGINS_V1_FLAG, false);
 
   // Per-issue, per-session set of optional properties currently visible in
   // the sidebar Properties section. Seeded on issue switch with whichever
@@ -1598,6 +1631,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // User preference: pin the bottom comment bar to the scroll viewport. Off
   // below `md` regardless of the preference — see the hook.
   const stickyComposer = useStickyComposer();
+  // Read by the image rules in editor/styles/attachment.css.
+  const commentImageLayout = useCommentComposerStore((s) => s.imageLayout);
   // Mobile shows it only near the top of the page, where it covers the text
   // column the least; desktop shows it whenever the latest entry is more than
   // a screen away.
@@ -1675,6 +1710,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     });
   }, []);
   const didHighlightRef = useRef<string | null>(null);
+  // Highlight whose landing was cancelled after its anchor mounted but before
+  // it finished aligning; the landing effect resumes it.
+  const interruptedLandingRef = useRef<string | null>(null);
   // Last seen highlightRequestToken; a bump re-arms didHighlightRef so the
   // landing effect below replays on an already-mounted detail.
   const lastHighlightRequestTokenRef = useRef(highlightRequestToken);
@@ -1712,11 +1750,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     label: t(($) => $.reply.annotations.add_comment),
     onSelect: descriptionAnnotations.addSelection,
   } : undefined, [canAnnotateDescription, t, descriptionAnnotations.addSelection]);
-  const openCommentSubIssue = useCallback((commentId: string) => {
+  const openCommentSubIssue = useCallback((commentId: string, prompt?: string) => {
     if (!issue) return;
     openModal("quick-create-issue", {
       ...subIssueCreateDefaults(issue),
       anchor_comment_id: commentId,
+      ...(prompt ? { prompt } : {}),
     });
   }, [issue, openModal]);
 
@@ -2133,10 +2172,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // Flash the landed comment the same way inbox deep-links do, so the eye has
   // an anchor after the instant jump. (Folded resolved bars don't take the
   // highlight prop — the scroll itself is the feedback there.)
-  const flashJumpTarget = useCallback((commentId: string) => {
+  const flashJumpTarget = useCallback((commentId: string, duration = 2000) => {
     setHighlightedId(commentId);
     if (jumpFlashTimerRef.current !== null) window.clearTimeout(jumpFlashTimerRef.current);
-    jumpFlashTimerRef.current = window.setTimeout(() => setHighlightedId(null), 2000);
+    jumpFlashTimerRef.current = window.setTimeout(() => setHighlightedId(null), duration);
   }, []);
   // Jump to a mounted comment: any row in flat mode, or a reply inside a
   // rendered thread. Drive the container's scrollTop directly — never native
@@ -2346,11 +2385,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // editor's click-time fresh-sign download: NodeViews match
   // `src`/`href` against this list to resolve an attachment id before
   // calling `/api/attachments/{id}`.
+  // The same list is the issue's complete file inventory: it labels each
+  // comment file with its comment, independent of the bounded timeline.
   const { data: issueAttachments } = useQuery(issueAttachmentsOptions(id));
-  const { data: deliverableInventory = EMPTY_REPLIES, error: deliverablesError } = useQuery(issueDeliverablesOptions(id));
-  useEffect(() => {
-    if (deliverablesError) toast.error(deliverablesError.message);
-  }, [deliverablesError]);
+  const deliverableInventory = useMemo(
+    () => deliverableInventoryFromAttachments(issueAttachments ?? []),
+    [issueAttachments],
+  );
 
   // Sub-issue queries
   const parentIssueId = issue?.parent_issue_id;
@@ -2487,12 +2528,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       lastHighlightRequestTokenRef.current = highlightRequestToken;
       didHighlightRef.current = null;
     }
-    if (didHighlightRef.current === highlightCommentId) return;
+    // A landing this effect's cleanup cut short resumes (see the cleanup).
+    const resuming = interruptedLandingRef.current === highlightCommentId;
+    if (!resuming && didHighlightRef.current === highlightCommentId) return;
     // The deep link already landed before this mount (memento entry — a tab
     // switch back or an in-tab return). The restored scroll offset is the
     // state the user left, and the jump must not fight it. A fresh selection
     // clears the entry, so this only ever suppresses a *repeat* landing.
-    if (!activeDeliverableJump && consumedHighlightRef.current === highlightCommentId) {
+    if (!resuming && !activeDeliverableJump && consumedHighlightRef.current === highlightCommentId) {
       didHighlightRef.current = highlightCommentId;
       return;
     }
@@ -2544,22 +2587,33 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       }
     }
 
-    let fade: number | undefined;
+    interruptedLandingRef.current = null;
+    let completed = false;
     const cancel = scrollToTimelineComment({
       container, virtualizer: isFlatTimeline ? null : virtuosoRef.current,
       index: targetIdx, commentId: landingId,
       onMounted: () => {
         didHighlightRef.current = highlightCommentId;
         writeViewState(issueHighlightMementoKey(id), highlightCommentId);
-        setHighlightedId(landingId);
-        fade = window.setTimeout(() => setHighlightedId(null), 2500);
+        // Timer owned outside this effect, so a re-run cannot leave the
+        // highlight on.
+        flashJumpTarget(landingId, 2500);
       },
+      onComplete: () => { completed = true; },
     });
     return () => {
       cancel();
-      if (fade !== undefined) clearTimeout(fade);
+      // A commit while the landing is still aligning (a realtime comment, a
+      // run refresh, the refetch of a cached timeline) re-runs this effect and
+      // cancels the loop here. Once the anchor has mounted, the guards above
+      // count the landing as done, so mark it for the re-run to resume;
+      // otherwise the viewport stays wherever the loop stopped, often the top
+      // of the issue (MUL-9068).
+      if (!completed && didHighlightRef.current === highlightCommentId) {
+        interruptedLandingRef.current = highlightCommentId;
+      }
     };
-  }, [highlightCommentId, highlightRequestToken, activeDeliverableJump, id, writeViewState, items, targetIdx, scrollContainerEl, highlightRootId, expandedResolved, timelineView, toggleResolvedExpand, isFlatTimeline, measuredTimelineId, timelineLoading, commentTasksLoading]);
+  }, [highlightCommentId, highlightRequestToken, activeDeliverableJump, id, writeViewState, items, targetIdx, scrollContainerEl, highlightRootId, expandedResolved, timelineView, toggleResolvedExpand, isFlatTimeline, measuredTimelineId, timelineLoading, commentTasksLoading, flashJumpTarget]);
 
   const descEditorRef = useRef<ContentEditorRef>(null);
   const descriptionEditingRef = useRef(false);
@@ -2746,6 +2800,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const showInSidebar = useShowInSidebar(issue);
   // The inbox passes `onDone` and owns archive and restore there.
   const archivedInboxItemId = useArchivedInboxItemId(id, !onDone);
+  const pageMenu = useIssuePageMenu();
 
   // Labels live in their own query (not on the issue body) — fetch the count
   // here so seeding can decide whether the "Labels" optional row should be
@@ -2871,8 +2926,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   }, [beginDesktopSidebarToggle, isMobile, sidebarRef]);
 
   // The header's wakeup chip opens the sidebar and brings the Wakeups section
-  // into view with focus on its heading.
+  // into view with focus on its heading, showing it on this issue even when
+  // the reader hid it from the sidebar. The reveal lasts until the reader
+  // switches the section in settings or moves to another issue.
+  const [revealedWakeupsFor, setRevealedWakeupsFor] = useState<string | null>(null);
+  if (revealedWakeupsFor !== null && revealedWakeupsFor !== id) setRevealedWakeupsFor(null);
   const openWakeups = useCallback(() => {
+    setRevealedWakeupsFor(id);
     if (!sidebarOpen) handleToggleSidebar();
     window.requestAnimationFrame(() => {
       const heading = document.getElementById(`issue-wakeups-${id}`);
@@ -2924,12 +2984,17 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   if (loading) {
     // The host's trailing controls hold the peek's only close button, so the
     // waiting and missing states carry them too.
-    return <IssueDetailSkeleton leading={leadingAction} trailing={trailingActions} sidebar={!isPeek} />;
+    return <IssueDetailSkeleton leading={leadingAction} trailing={trailingActions} sidebar={!isPeek && desktopSidebarOpen} layoutId={layoutId} />;
   }
 
   if (!issue) {
     return <IssueNotFound showBackLink={!onDelete} leading={leadingAction} trailing={trailingActions} />;
   }
+
+  const requesterName =
+    issue.creator_type === "agent" && issue.requester_id
+      ? getActorName("member", issue.requester_id)
+      : undefined;
 
   const persistDescriptionSave = (
     draft: { markdown: string; baseMarkdown: string; attachmentIds: string[] },
@@ -3072,9 +3137,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     </div>
   );
 
-  const sidebarContent = (
-    <IssueSidebarStack>
-      {/* Properties */}
+  const sidebarSections: Record<IssueSidebarSection, ReactNode> = {
+    properties: (
       <div>
         <IssueSidebarSectionHeader title={t(($) => $.detail.section_properties)} open={propertiesOpen} onOpenChange={setPropertiesOpen}  />
         {propertiesOpen && <IssueSidebarPropertyGrid>
@@ -3187,22 +3251,21 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           {addPropertyRow}
         </IssueSidebarPropertyGrid>}
       </div>
-
-      <QuickActionsSection issueId={issue.id} />
-
+    ),
+    quick_actions: <QuickActionsSection issueId={issue.id} />,
+    wakeups: (
       <WakeupsSection
         issueId={issue.id}
         closed={["done", "closed"].includes(resolveStatusCategory(issue.status))}
         defaultAgentId={issue.assignee_type === "agent" ? (issue.assignee_id ?? undefined) : undefined}
       />
-
-      <PluginPanelSection issueId={issue.id} />
-
-      {/* Parent issue — standalone section, only when the issue has a
-          parent. Setting a parent is reachable via the issue actions menu;
-          this card surfaces an existing parent without occupying sidebar
-          space for issues that don't have one. */}
-      {parentIssue && (
+    ),
+    plugins: <PluginPanelSection issueId={issue.id} />,
+    // Parent issue — standalone section, only when the issue has a
+    // parent. Setting a parent is reachable via the issue actions menu;
+    // this card surfaces an existing parent without occupying sidebar
+    // space for issues that don't have one.
+    parent: parentIssue && (
         <div>
           <IssueSidebarSectionHeader title={t(($) => $.detail.section_parent_issue)} open={parentIssueOpen} onOpenChange={setParentIssueOpen}
             actions={<IconButton size="icon-xs" label={t(($) => $.actions.remove_parent_issue)} onClick={() => actions.removeParent()}><Unlink /></IconButton>} />
@@ -3226,49 +3289,67 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             </div>
           </div>}
         </div>
-      )}
-
-      <IssueDuplicatesSection issueId={issue.id} />
-
-      {/* Pull requests — hidden when the workspace disables the PR sidebar
-          (or the GitHub master switch is off). Backend data is kept either
-          way so re-enabling restores the section instantly. */}
-      {githubSettings.prSidebar && (
-        <PullRequestsSection
-          issueId={id}
-          identifier={issue.identifier}
-          open={pullRequestsOpen}
-          onOpenChange={setPullRequestsOpen}
-        />
-      )}
-
-      {/* Environments the issue's runs left running. Hidden until one starts. */}
-      <IssueEnvironmentsSection issueId={id} />
-
-      {/* Deliverables — the files this issue's comments delivered. Hidden
-          while there are none. */}
+    ),
+    duplicates: <IssueDuplicatesSection issueId={issue.id} />,
+    // Pull requests — unavailable when the workspace disables the PR sidebar
+    // (or the GitHub master switch is off). Backend data is kept either
+    // way so re-enabling restores the section instantly.
+    pull_requests: (
+      <PullRequestsSection
+        issueId={id}
+        identifier={issue.identifier}
+        open={pullRequestsOpen}
+        onOpenChange={setPullRequestsOpen}
+      />
+    ),
+    // Environments the issue's runs left running, and the "+" that starts one.
+    environments: <IssueEnvironmentsSection issueId={id} assigneeType={issue.assignee_type} assigneeId={issue.assignee_id} />,
+    // Deliverables — the files this issue's comments delivered. Hidden
+    // while there are none.
+    deliverables: (
       <DeliverablesSection
         files={deliverableFiles}
         onOpenOverview={openOverview}
         onCopyLink={copyDeliverableLink}
       />
-
-      {/* Apps the issue's runs used. Hidden until one makes a call. */}
-      <IssueAppsSection issueId={id} />
-
-      {/* Execution summary owns its query, realtime updates and disclosure. */}
-      <ExecutionLogSection key={id} issueId={id} identifier={issue.identifier} issueTitle={issue.title} hasChildren={childIssues.length > 0} />
-
-      {/* Details — creator and timestamps. Sits below the execution log
-          because it is the least-read block in the sidebar: the values
-          never change once the issue exists, while the log above it is
-          what people actually come here to check. */}
+    ),
+    // Apps the issue's runs used. Hidden until one makes a call.
+    apps: <IssueAppsSection issueId={id} />,
+    // Execution summary owns its query, realtime updates and disclosure.
+    execution_log: <ExecutionLogSection key={id} issueId={id} identifier={issue.identifier} issueTitle={issue.title} hasChildren={childIssues.length > 0} />,
+    // Details — creator and timestamps. Defaults to below the execution
+    // log because it is the least-read block in the sidebar: the values
+    // never change once the issue exists, while the log above it is
+    // what people actually come here to check.
+    details: (
       <div>
         <IssueSidebarSectionHeader title={t(($) => $.detail.section_details)} open={detailsOpen} onOpenChange={setDetailsOpen} />
         {detailsOpen && <IssueSidebarPropertyGrid>
-          <PropRow interactive={false} label={t(($) => $.detail.prop_created_by)}>
-            <ActorAvatar actorType={issue.creator_type} actorId={issue.creator_id} size="sm" enableHoverCard />
-            <span className="cursor-pointer truncate">{getActorName(issue.creator_type, issue.creator_id)}</span>
+          <PropRow
+            interactive={false}
+            label={t(($) => $.detail.prop_created_by)}
+            className={requesterName ? "items-start py-1.5" : undefined}
+          >
+            <div className="flex min-w-0 flex-1 items-start gap-1.5">
+              <ActorAvatar actorType={issue.creator_type} actorId={issue.creator_id} size="sm" enableHoverCard />
+              <div className="flex min-w-0 flex-1 flex-col">
+                <span className="cursor-pointer truncate">{getActorName(issue.creator_type, issue.creator_id)}</span>
+                {requesterName && issue.requester_id && (
+                  <HoverCard>
+                    <HoverCardTrigger
+                      render={<AppLink href={paths.memberDetail(issue.requester_id)} />}
+                      className="block truncate text-caption text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      title={t(($) => $.execution_log.attribution.on_behalf_of, { name: requesterName })}
+                    >
+                      {t(($) => $.execution_log.attribution.on_behalf_of, { name: requesterName })}
+                    </HoverCardTrigger>
+                    <HoverCardContent align="start" className="w-72">
+                      <MemberProfileCard userId={issue.requester_id} />
+                    </HoverCardContent>
+                  </HoverCard>
+                )}
+              </div>
+            </div>
           </PropRow>
           <PropRow interactive={false} label={t(($) => $.detail.prop_created)}>
             <span className="text-muted-foreground">{shortDate(issue.created_at, locale)}</span>
@@ -3278,9 +3359,19 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           </PropRow>
         </IssueSidebarPropertyGrid>}
       </div>
+    ),
+    metadata: <MetadataSection metadata={issue.metadata ?? {}} />,
+  };
 
-      <MetadataSection metadata={issue.metadata ?? {}} />
-    </IssueSidebarStack>
+  const sidebarContent = (
+    <IssueSidebarSections
+      sections={sidebarSections}
+      available={ISSUE_SIDEBAR_SECTIONS.filter(
+        (section) => (section !== "pull_requests" || githubSettings.prSidebar) && (section !== "plugins" || pluginsEnabled),
+      )}
+      revealed={revealedWakeupsFor === id ? REVEALED_WAKEUPS : undefined}
+      onRevealEnd={() => setRevealedWakeupsFor(null)}
+    />
   );
 
   // Shared row renderer for both timeline render modes (flat / virtualized).
@@ -3374,6 +3465,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         t={t}
         timeAgo={timeAgo}
         locale={locale}
+        requesterName={requesterName}
       />
     );
   };
@@ -3405,7 +3497,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
   const detailContent = (
     <CurrentIssueRenderContextProvider value={currentIssueRenderContext}>
-    <div className="relative flex h-full min-w-0 flex-1 flex-col">
+    <div
+      data-mc="issue-detail"
+      data-status={issue.status}
+      data-priority={issue.priority}
+      data-view={isPeek ? "peek" : "page"}
+      className="relative flex h-full min-w-0 flex-1 flex-col"
+    >
         {/* In-page find bar — floats over the top-right of the content column
             (below the breadcrumb header), outside the scroll container so it
             stays put while the timeline scrolls and its own text isn't walked.
@@ -3478,6 +3576,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               onDeletedFallbackPath={onDelete ? undefined : paths.issues()}
               archivedInboxItemId={archivedInboxItemId}
               onShowInSidebar={isPeek ? undefined : (showInSidebar ?? undefined)}
+              rowMenu={pageMenu.rowMenu}
               trigger={
                 <IconButton
                   label={tCommon(($) => $.more_actions)}
@@ -3516,6 +3615,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           ref={attachScrollContainer}
           data-tab-scroll-root={isPeek ? undefined : scrollContainerKey}
           className="@container relative flex-1 overflow-y-auto [scrollbar-gutter:stable_both-edges]"
+          onContextMenu={pageMenu.onContextMenu}
         >
         {/* Gutters: 32px is a comfortable reading margin on a desktop column
             but eats 16% of a 393px phone, so below `md` they drop to 12px.
@@ -3529,7 +3629,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             // and never reaches the chat launcher's corner (see IssuePeekHost).
             isPeek
               ? "mx-auto w-full px-6 py-5"
-              : cn(READING_COLUMN, "px-3 py-6 max-md:pb-chat-launcher md:px-8 md:py-8"),
+              : cn(READING_COLUMN, "px-[var(--space-sm,0.75rem)] py-[var(--space-lg,1.5rem)] max-md:pb-chat-launcher md:px-[var(--space-xl,2rem)] md:py-[var(--space-xl,2rem)]"),
           )}
         >
           <IssueDuplicateBanner
@@ -3542,6 +3642,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             }
           />
           <div id={descriptionSectionId}>
+          <div data-mc="issue-title">
           {titleLazy.active && (
             <div className={titleLazy.ready ? undefined : "hidden"}>
               <TitleEditor
@@ -3596,6 +3697,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               {issue.title}
             </div>
           )}
+          </div>
           {titleConflictDraft !== null ? (
             <RevisionConflictCompare
               className="mt-2"
@@ -3910,7 +4012,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           <div className="my-8 border-t" />
 
           {/* Activity / Comments */}
-          <div>
+          <div data-mc="issue-activity" data-comment-images={commentImageLayout}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <h2 className="text-title-sm font-semibold">{t(($) => $.detail.activity_section)}</h2>
@@ -3931,6 +4033,19 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                     </TooltipTrigger>
                     <TooltipContent side="top" className="max-w-64">
                       {t(($) => $.detail.delegated_subscription_hint)}
+                    </TooltipContent>
+                  </Tooltip>
+                )}
+                {/* Inherited from the project: say so, and that leaving
+                    here only covers this issue, so Unsubscribe is not read as
+                    leaving the whole project. */}
+                {isSubscribed && subscriptionReason === "project" && (
+                  <Tooltip>
+                    <TooltipTrigger className="cursor-default rounded-full bg-muted px-2 py-0.5 text-caption text-muted-foreground">
+                      {t(($) => $.detail.project_subscription_badge)}
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="max-w-64">
+                      {t(($) => $.detail.project_subscription_hint)}
                     </TooltipContent>
                   </Tooltip>
                 )}
@@ -4125,6 +4240,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           <IssueAppRequests issueId={id} highlightId={highlightAppRequestId} highlightToken={highlightRequestToken} />
           <div
             ref={composerRef}
+            data-comment-images={commentImageLayout}
             className={cn(
               "mt-4",
               stickyComposer &&
@@ -4233,7 +4349,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       <div className="flex flex-1 min-h-0">
         {detailContent}
         <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
-          <SheetContent side="right" showCloseButton={false} className="w-[320px] overflow-y-auto [scrollbar-gutter:stable] px-2 py-4">
+          <SheetContent
+            side="right"
+            showCloseButton={false}
+            className="w-[320px] overflow-y-auto [scrollbar-gutter:stable] px-2 py-4"
+            onKeyDown={letSidebarSettingsDragKeysThrough}
+          >
             {sidebarContent}
           </SheetContent>
         </Sheet>

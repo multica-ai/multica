@@ -2,6 +2,7 @@ import { act, type ReactNode } from "react";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import { DEFAULT_APPEARANCE, useAppearanceStore, useInstalledThemesStore } from "@multica/core/appearance";
 import { buildIssueStatusCatalog } from "@multica/core/issue-statuses/queries";
 import {
   useCommandBarContextStore,
@@ -377,6 +378,8 @@ describe("SearchCommand", () => {
     mockToast.warning.mockReset();
     mockSetTheme.mockReset();
     mockTheme.current = "system";
+    useAppearanceStore.setState(DEFAULT_APPEARANCE);
+    useInstalledThemesStore.setState({ themes: [], folders: {}, fromStore: {} });
     mockCommentCollapseAll.mockReset();
     mockCommentExpandAll.mockReset();
     mockResolvedCollapseAll.mockReset();
@@ -513,7 +516,7 @@ describe("SearchCommand", () => {
       expect(useSearchStore.getState().open).toBe(false);
     });
 
-    it("changes theme through a submenu that marks the current theme", async () => {
+    it("changes the mode through a submenu that marks the current mode and theme", async () => {
       const user = userEvent.setup();
       mockTheme.current = "dark";
       renderSearch();
@@ -521,12 +524,78 @@ describe("SearchCommand", () => {
       await user.click(await rowText("Change theme..."));
 
       expect(within(screen.getByRole("navigation", { name: "Current menu" })).getByText("Change theme")).toBeInTheDocument();
-      expect(renderedValues()).toEqual(["theme:light", "theme:dark", "theme:system"]);
-      expect(screen.getByLabelText("Current theme")).toBeInTheDocument();
+      expect(renderedHeadings()).toEqual(["Mode", "Theme"]);
+      expect(renderedValues()).toEqual([
+        "theme:light",
+        "theme:dark",
+        "theme:system",
+        "color-theme:default",
+        "color-theme:pop",
+        "color-theme:github",
+        "color-theme:blueprint",
+        "color-theme:notion",
+      ]);
+      expect(screen.getByLabelText("Current mode").closest("[cmdk-item]")).toHaveAttribute("data-value", "theme:dark");
+      expect(screen.getByLabelText("Current theme").closest("[cmdk-item]")).toHaveAttribute(
+        "data-value",
+        "color-theme:default",
+      );
 
       await user.click(screen.getByText("Light"));
       expect(mockSetTheme).toHaveBeenCalledWith("light");
       expect(useSearchStore.getState().open).toBe(false);
+    });
+
+    it("switches the colour theme from the theme submenu", async () => {
+      const user = userEvent.setup();
+      useAppearanceStore.setState({ theme: "github" });
+      renderSearch();
+      await user.type(input(), "主题");
+      await user.click(await rowText("Change theme..."));
+
+      expect(screen.getByLabelText("Current theme").closest("[cmdk-item]")).toHaveAttribute(
+        "data-value",
+        "color-theme:github",
+      );
+      await user.click(screen.getByText("Pop"));
+
+      expect(useAppearanceStore.getState().theme).toBe("pop");
+      expect(mockSetTheme).not.toHaveBeenCalled();
+      expect(useSearchStore.getState().open).toBe(false);
+    });
+
+    it("finds installed themes by id and truncates a long name", async () => {
+      const user = userEvent.setup();
+      const name = "A very long community theme name, forty!";
+      useInstalledThemesStore.setState({
+        themes: [{ apiVersion: 1, id: "solarized", name, css: "" }],
+        folders: {},
+        fromStore: {},
+      });
+      renderSearch();
+      await user.type(input(), "theme");
+      await user.click(await rowText("Change theme..."));
+      await user.type(screen.getByPlaceholderText("Filter..."), "solar");
+
+      expect(renderedHeadings()).toEqual(["Theme"]);
+      expect(renderedValues()).toEqual(["color-theme:solarized"]);
+      expect(await rowText(name)).toHaveClass("min-w-0", "flex-1", "truncate");
+
+      await user.keyboard("{Enter}");
+      expect(useAppearanceStore.getState().theme).toBe("solarized");
+    });
+
+    it("marks Default when the chosen theme is no longer installed", async () => {
+      const user = userEvent.setup();
+      useAppearanceStore.setState({ theme: "uninstalled" });
+      renderSearch();
+      await user.type(input(), "theme");
+      await user.click(await rowText("Change theme..."));
+
+      expect(screen.getByLabelText("Current theme").closest("[cmdk-item]")).toHaveAttribute(
+        "data-value",
+        "color-theme:default",
+      );
     });
 
     it("Backspace on an empty submenu input returns to the root", async () => {

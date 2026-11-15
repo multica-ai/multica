@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/netip"
 	"net/url"
 	"path"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -94,9 +96,16 @@ type AttachmentResponse struct {
 	// previous site-relative `/api/attachments/<id>/download` link only
 	// resolved when the document origin proxied /api to the API host.
 	MarkdownURL string `json:"markdown_url"`
-	ContentType string `json:"content_type"`
-	SizeBytes   int64  `json:"size_bytes"`
-	CreatedAt   string `json:"created_at"`
+	// Comment origin, set only by the issue attachment list: who posted the
+	// comment this file belongs to, and when. Absent for description files and
+	// for a comment that is gone. Lets the issue's file inventory label every
+	// historical file without loading the comments that carry it.
+	CommentAuthorType *string `json:"comment_author_type,omitempty"`
+	CommentAuthorID   *string `json:"comment_author_id,omitempty"`
+	CommentCreatedAt  *string `json:"comment_created_at,omitempty"`
+	ContentType       string  `json:"content_type"`
+	SizeBytes         int64   `json:"size_bytes"`
+	CreatedAt         string  `json:"created_at"`
 	// Displayed image dimensions, absent for non-images and older uploads.
 	Width  *int32 `json:"width,omitempty"`
 	Height *int32 `json:"height,omitempty"`
@@ -498,6 +507,9 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusForbidden, "invalid comment_id")
 				return
 			}
+			if !h.requireIssueIDVisible(w, r, workspaceID, comment.IssueID, http.StatusForbidden, "invalid comment_id") {
+				return
+			}
 			params.CommentID = comment.ID
 		}
 		if chatSessionID := r.FormValue("chat_session_id"); chatSessionID != "" {
@@ -572,6 +584,9 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		}
 		link, err := h.Storage.Upload(r.Context(), key, data, contentType, header.Filename)
 		if err != nil {
+			if writeRequestCancellation(w, r, err) {
+				return
+			}
 			slog.Error("file upload failed", "error", err)
 			writeError(w, http.StatusInternalServerError, "upload failed")
 			return
@@ -599,6 +614,11 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 		if err != nil {
+			if writeRequestCancellation(w, r, err) {
+				// The record write may have committed. Deleting uploaded bytes
+				// could leave a committed attachment pointing at a missing object.
+				return
+			}
 			slog.Error("failed to create attachment record", "error", err)
 			// S3 upload succeeded but DB record failed — still return the link
 			// so the file is usable. Log the error for investigation.
@@ -637,6 +657,9 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 	// No workspace context (e.g. avatar upload) — upload directly.
 	link, err := h.Storage.Upload(r.Context(), key, data, contentType, header.Filename)
 	if err != nil {
+		if writeRequestCancellation(w, r, err) {
+			return
+		}
 		slog.Error("file upload failed", "error", err)
 		writeError(w, http.StatusInternalServerError, "upload failed")
 		return
@@ -667,12 +690,50 @@ func (h *Handler) ListAttachments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	origins, err := h.attachmentCommentOrigins(r.Context(), issue, attachments)
+	if err != nil {
+		slog.Error("failed to load attachment comment origins", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list attachments")
+		return
+	}
+
 	mode := attachmentURLModeFromRequest(r)
 	resp := make([]AttachmentResponse, len(attachments))
 	for i, a := range attachments {
 		resp[i] = h.attachmentToResponse(a, mode)
+		if origin, ok := origins[a.CommentID]; ok {
+			authorType, authorID, createdAt := origin.AuthorType, uuidToString(origin.AuthorID), timestampToString(origin.CreatedAt)
+			resp[i].CommentAuthorType, resp[i].CommentAuthorID, resp[i].CommentCreatedAt = &authorType, &authorID, &createdAt
+		}
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// attachmentCommentOrigins loads, in one query, the author and time of each
+// live comment the attachments belong to, scoped to the issue and workspace.
+func (h *Handler) attachmentCommentOrigins(ctx context.Context, issue db.Issue, attachments []db.Attachment) (map[pgtype.UUID]db.ListCommentOriginsForIssueRow, error) {
+	ids := make([]pgtype.UUID, 0)
+	seen := make(map[pgtype.UUID]bool)
+	for _, a := range attachments {
+		if a.CommentID.Valid && !seen[a.CommentID] {
+			seen[a.CommentID] = true
+			ids = append(ids, a.CommentID)
+		}
+	}
+	origins := make(map[pgtype.UUID]db.ListCommentOriginsForIssueRow, len(ids))
+	if len(ids) == 0 {
+		return origins, nil
+	}
+	rows, err := h.Queries.ListCommentOriginsForIssue(ctx, db.ListCommentOriginsForIssueParams{
+		Ids: ids, IssueID: issue.ID, WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		origins[row.ID] = row
+	}
+	return origins, nil
 }
 
 // GetAttachmentByID — GET /api/attachments/{id}
@@ -999,11 +1060,17 @@ func shouldProxyAttachmentURL(rawURL string) bool {
 func (h *Handler) proxyAttachmentDownload(w http.ResponseWriter, r *http.Request, att db.Attachment, key string, forceAttachment bool) {
 	reader, err := h.Storage.GetReader(r.Context(), key)
 	if err != nil {
+		if writeRequestCancellation(w, r, err) {
+			return
+		}
 		slog.Error("failed to open attachment for download", "id", uuidToString(att.ID), "key", key, "error", err)
 		writeError(w, http.StatusNotFound, "attachment object not found")
 		return
 	}
 	defer reader.Close()
+	if writeRequestCancellation(w, r, r.Context().Err()) {
+		return
+	}
 
 	if att.ContentType != "" {
 		w.Header().Set("Content-Type", att.ContentType)
@@ -1034,6 +1101,22 @@ func (h *Handler) proxyAttachmentDownload(w http.ResponseWriter, r *http.Request
 
 	// Non-seekable backend: single-range fallback.
 	h.serveProxyRange(w, r, att, reader)
+}
+
+// A socket write can report a closed connection instead of context.Canceled.
+// Preserve unrelated write errors and distinguish them from storage reads.
+type attachmentStreamWriter struct {
+	http.ResponseWriter
+	request *http.Request
+}
+
+func (w attachmentStreamWriter) Write(data []byte) (int, error) {
+	n, err := w.ResponseWriter.Write(data)
+	if errors.Is(w.request.Context().Err(), context.Canceled) &&
+		(errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET) || errors.Is(err, net.ErrClosed)) {
+		err = errors.Join(context.Canceled, err)
+	}
+	return n, err
 }
 
 // serveProxyRange streams a (possibly partial) attachment body from a
@@ -1080,10 +1163,18 @@ func (h *Handler) serveProxyRange(w http.ResponseWriter, r *http.Request, att db
 	}
 
 	if serveFull {
+		if writeRequestCancellation(w, r, r.Context().Err()) {
+			return
+		}
 		if total >= 0 {
 			w.Header().Set("Content-Length", strconv.FormatInt(total, 10))
 		}
-		if _, err := io.Copy(w, reader); err != nil {
+		w.WriteHeader(http.StatusOK)
+		if _, err := io.Copy(attachmentStreamWriter{ResponseWriter: w, request: r}, reader); err != nil {
+			if isRequestCancellation(r, err) {
+				slog.Info("attachment download cancelled", "id", uuidToString(att.ID))
+				return
+			}
 			slog.Error("failed to stream attachment download", "id", uuidToString(att.ID), "error", err)
 		}
 		return
@@ -1095,6 +1186,9 @@ func (h *Handler) serveProxyRange(w http.ResponseWriter, r *http.Request, att db
 	// ServeContent path above).
 	if start > 0 {
 		if _, err := io.CopyN(io.Discard, reader, start); err != nil {
+			if writeRequestCancellation(w, r, err) {
+				return
+			}
 			// The skip failed BEFORE any response header was written. We must send
 			// an explicit error status here: a bare `return` would let net/http
 			// emit its default 200 OK + empty body, which a resuming client reads
@@ -1111,7 +1205,11 @@ func (h *Handler) serveProxyRange(w http.ResponseWriter, r *http.Request, att db
 	w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, start+length-1, total))
 	w.Header().Set("Content-Length", strconv.FormatInt(length, 10))
 	w.WriteHeader(http.StatusPartialContent)
-	if _, err := io.CopyN(w, reader, length); err != nil {
+	if _, err := io.CopyN(attachmentStreamWriter{ResponseWriter: w, request: r}, reader, length); err != nil {
+		if isRequestCancellation(r, err) {
+			slog.Info("attachment range download cancelled", "id", uuidToString(att.ID))
+			return
+		}
 		slog.Error("failed to stream attachment range", "id", uuidToString(att.ID), "error", err)
 	}
 }
@@ -1458,18 +1556,6 @@ func (h *Handler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 }
 
 // Attachment linking
-
-// linkAttachmentsByIssueIDs links unbound attachments to an issue. A caller
-// that did not already advance the issue revision can ask this visible change
-// to advance it exactly once.
-func (h *Handler) linkAttachmentsByIssueIDs(ctx context.Context, issueID, workspaceID pgtype.UUID, ids []pgtype.UUID, bumpRevision bool) (db.LinkAttachmentsToIssueRow, error) {
-	return h.Queries.LinkAttachmentsToIssue(ctx, db.LinkAttachmentsToIssueParams{
-		IssueID:       issueID,
-		WorkspaceID:   workspaceID,
-		AttachmentIds: ids,
-		BumpRevision:  bumpRevision,
-	})
-}
 
 // attachmentOwnerLockAttempts bounds the re-read below. An attachment gains an
 // owner once, when the issue or comment it was uploaded for links it, so one

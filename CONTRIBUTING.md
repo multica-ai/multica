@@ -134,11 +134,12 @@ attachments are appended. Native `gh --attach` does not deduplicate retries.
 CLI uploads require **push access to the target repository** and a credential
 accepted by GitHub's upload endpoint. Version 2.103.2 lets that endpoint decide
 which GitHub App tokens can upload; it does not guarantee support for every App
-or an Actions `GITHUB_TOKEN`. Verify the actual agent/CI credential. Without
-push access, upload through the PR editor in GitHub's web interface. Contributors
-who must stay in the CLI should ask a maintainer in the PR to upload their files;
-opening a fork PR alone does not grant upload permission on the upstream repo.
-This helper targets GitHub.com, not GitHub Enterprise Server.
+or an Actions `GITHUB_TOKEN`. Verify the actual agent/CI credential. Contributors
+without upstream push access can use a public fork as described below, upload
+through the PR editor in GitHub's web interface, or ask a maintainer in the PR
+to upload their files. Opening a fork PR alone does not grant upload permission
+on the upstream repo. `scripts/pr-shots` targets GitHub.com, not GitHub
+Enterprise Server.
 
 Supported files are PNG, JPEG, GIF, WebP, SVG, MP4, MOV, and WebM. Images are
 limited to 10 MB; video limits are 10 MB on Free plans and 100 MB on paid plans.
@@ -160,6 +161,60 @@ initial frame during capture. To compare a particular animation frame, pause
 timestamp on both versions instead. Hold a loading state with a controlled
 local API response, rather than relying on a fixed sleep. Include a short
 recording when the motion or sequence itself is the change under review.
+
+#### CLI uploads from an external contributor's fork
+
+With GitHub CLI 2.103.2+, you can upload to a public fork or evidence repository
+you control, then use its native attachment URLs in your upstream PR. Choose a
+repository where your credential has push access and an issue you can use for
+contribution evidence. Forks may need Issues enabled in their repository
+settings. Review every capture before publishing and use synthetic test data
+suitable for public access.
+
+Save `evidence.md` beside the images, with the source commit for each capture,
+viewport, theme, and reproduction steps. Include local image references where
+the images should appear, for example `![Before](./before.png)` and
+`![After](./after.png)`.
+
+Replace `OWNER/EVIDENCE-REPO` with your public repository and `1` with the
+evidence issue's number. Run this from the directory containing the files.
+
+```bash
+gh issue comment 1 --repo OWNER/EVIDENCE-REPO --body-file ./evidence.md \
+  --attach ./before.png --attach ./after.png
+```
+
+The command prints the new comment's URL. Replace `COMMENT-ID` below with the
+number after `#issuecomment-` in that URL and read back that exact comment. The
+saved body contains the uploaded image Markdown.
+
+```bash
+gh api repos/OWNER/EVIDENCE-REPO/issues/comments/COMMENT-ID \
+  --jq .body > ./uploaded-evidence.md
+```
+
+Copy the relevant image Markdown into the Screenshots section of your upstream
+PR body, retaining captions and capture metadata. Keep the canonical
+`https://github.com/user-attachments/assets/...` URLs returned by GitHub. Raw-file
+URLs follow repository file retention, and Actions artifacts have expiry dates.
+To update an existing PR, replace `123` with your PR number, read its current
+body, and edit `pr.md` to add the evidence. Retain its other sections and closing
+issue references when saving it.
+
+```bash
+gh pr view 123 --repo multica-ai/multica --json body --jq .body > ./pr.md
+# Edit pr.md to add the uploaded image Markdown under Screenshots.
+gh pr edit 123 --repo multica-ai/multica --body-file ./pr.md
+```
+
+Check the upstream PR's rendered images and verify the URLs open while signed
+out. Keep the public evidence repository, issue, and original captures available
+for review. These native attachment URLs are independent of a source branch.
+
+Native `gh --attach` has no content-hash retry tracking. If it exits nonzero,
+inspect its output and read back the exact comment before retrying. A partial
+upload can still post the comment with the successful attachments. Reuse those
+URLs and attach only missing files in a new comment on the same evidence issue.
 
 ## Development Model
 
@@ -537,6 +592,24 @@ make migrate-down
 
 These generic targets require a valid env file in the current directory.
 
+### Dev Toolbar
+
+Set `VITE_DEV_TOOLBAR=1` to pin a status bar to the bottom of the Web and Desktop dev builds. It shows the client, backend host, workspace, your role, and route, plus live JS heap, last navigation time, main-thread long-task share, in-flight requests, and WebSocket state. Production builds never render it.
+
+```bash
+VITE_DEV_TOOLBAR=1 make up          # or: VITE_DEV_TOOLBAR=1 pnpm dev:web / pnpm dev:desktop
+```
+
+To keep it on, add the line to the env file `make` loads (`.env` / `.env.worktree`), or to `apps/web/.env.local` / `apps/desktop/.env.development.local` for a direct `pnpm dev:*`. The minimize button at its right end collapses it to a small handle. In Desktop, **View → Show Dev Toolbar** turns it off and on without a restart, and the choice is remembered; while it is off, nothing is recorded, and turning it back on starts a new recording.
+
+Each reading opens the last five minutes behind it, kept in memory in that tab only: the heap curve and Query cache size (Mem), route changes and their timings (Nav), long tasks and the route they hit (Jank), every API request with its status, `X-Request-ID`, body and a copyable curl (Net), WebSocket state changes (Sync), and console errors, uncaught exceptions and unhandled rejections (Errors).
+
+For realtime and agent bugs:
+
+- **Events** lists WebSocket events, filterable by type and searchable by issue key, ID or payload text. Each event shows which query keys its handling wrote, invalidated, removed or refetched, including the refreshes realtime sync debounces onto a timer (work after an `await` is not followed). A reconnect shows how long the socket was down and how many queries it refetched; **Drop connection** closes the socket to try it. **Replay locally** runs a recorded event through realtime sync's handlers again, without other subscribers, and any write request made while handling it is refused.
+- **Cache** lists the TanStack Query cache, stale and fetching entries, searchable by key, with a button to invalidate one query.
+- **Runtimes** shows each runtime's status and CLI version; **Tasks** lists the workspace's queued and running agent tasks, and clicking one opens its issue.
+
 ## How Database Creation Works
 
 Database creation is automatic.
@@ -623,6 +696,33 @@ Two constraints are enforced rather than documented:
   `MULTICA_*` identity was stripped from. `make up` launches the daemon and
   Desktop exactly that way, so an agent can run `make up C=api,web,daemon` and
   test a real agent run. `make destroy` stops the daemon and removes its profile.
+
+### An environment that outlives the agent's run
+
+When a reviewer should open the app after the run ends, an agent inside a
+Multica task starts an environment this repository declares in
+`.multica/environments.toml`:
+
+```bash
+multica env start web          # make up C=api,web
+multica env start desktop      # make up C=desktop ARGS=--cdp
+multica env stop web
+```
+
+The daemon lists each one in the issue sidebar and stops it after 24 hours.
+
+- `web` has the URL `http://localhost:$MULTICA_PORT`, which redirects to the web
+  app on the port `make up` allocated.
+- `desktop` has no URL. The sidebar shows it as an app, and Desktop on the same
+  machine brings its window forward.
+
+Both are this checkout's `make up` environment, so they share one API and
+database, and `make status` and `make env-exec` work as usual. Stopping one
+leaves the other running; stopping the last one, or the last one's app going
+away, runs `make destroy`. A component started with a plain `make up` counts
+as in use too, and an environment that existed before `multica env start` is
+left in place, with its own owner and TTL. See
+[Local Environments](CLI_AND_DAEMON.md#local-environments) for the file format.
 
 ### Web with realistic content
 

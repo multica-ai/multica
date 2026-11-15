@@ -10,7 +10,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/logger"
-	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/projectaccess"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -72,8 +71,7 @@ func (h *Handler) hiddenProjectsForAgentRun(ctx context.Context, workspaceID pgt
 func (h *Handler) requestHiddenProjects(w http.ResponseWriter, r *http.Request, workspaceID string) (projectaccess.Hidden, bool) {
 	hidden, err := h.hiddenProjects(r, workspaceID)
 	if err != nil {
-		if errors.Is(r.Context().Err(), context.Canceled) && errors.Is(err, context.Canceled) {
-			w.WriteHeader(middleware.StatusClientClosedRequest)
+		if writeQueryCancellation(w, r, err) {
 			return projectaccess.Hidden{}, false
 		}
 		slog.Warn("resolve project access failed", append(logger.RequestAttrs(r), "workspace_id", workspaceID, "error", err)...)
@@ -124,6 +122,29 @@ func (h *Handler) requireIssueIDVisible(w http.ResponseWriter, r *http.Request, 
 		return false
 	}
 	if !hidden.CanSeeProject(projectID) {
+		writeError(w, status, notFoundMsg)
+		return false
+	}
+	return true
+}
+
+// requireTaskVisible is requireIssueIDVisible for a run. A run without an
+// issue (a run-only autopilot, a quick-create) still reads a project, so its
+// visibility comes from projectaccess.TaskProjects rather than its issue id.
+func (h *Handler) requireTaskVisible(w http.ResponseWriter, r *http.Request, workspaceID string, task db.AgentTaskQueue, status int, notFoundMsg string) bool {
+	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+	if !ok {
+		return false
+	}
+	if hidden.Empty() {
+		return true
+	}
+	projects, err := projectaccess.TaskProjects(r.Context(), h.Queries, task)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve project access")
+		return false
+	}
+	if !hidden.CanSeeProjects(projects) {
 		writeError(w, status, notFoundMsg)
 		return false
 	}
@@ -203,35 +224,90 @@ func (h *Handler) requireAssigneeCanAccessProject(w http.ResponseWriter, r *http
 	return true
 }
 
+// attachmentInHiddenProject reports whether an attachment belongs to an issue,
+// or to a comment on an issue, in one of the hidden projects. A comment
+// attachment need not carry its issue id, so the comment answers for it.
+func (h *Handler) attachmentInHiddenProject(ctx context.Context, hidden projectaccess.Hidden, att db.Attachment) (bool, error) {
+	if hidden.Empty() {
+		return false, nil
+	}
+	var projectID pgtype.UUID
+	var err error
+	switch {
+	case att.IssueID.Valid:
+		projectID, err = h.Queries.GetIssueProjectID(ctx, att.IssueID)
+	case att.CommentID.Valid:
+		projectID, err = h.Queries.GetCommentIssueProjectID(ctx, att.CommentID)
+	default:
+		return false, nil
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return !hidden.CanSeeProject(projectID), nil
+}
+
 // requireAttachmentVisible 404s an attachment on an issue (or a comment on an
 // issue) in a project the caller cannot see.
 func (h *Handler) requireAttachmentVisible(w http.ResponseWriter, r *http.Request, workspaceID string, att db.Attachment) bool {
-	if att.IssueID.Valid {
-		return h.requireIssueIDVisible(w, r, workspaceID, att.IssueID, http.StatusNotFound, "attachment not found")
-	}
-	if !att.CommentID.Valid {
+	if !att.IssueID.Valid && !att.CommentID.Valid {
 		return true
 	}
 	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
 	if !ok {
 		return false
 	}
-	if hidden.Empty() {
-		return true
-	}
-	projectID, err := h.Queries.GetCommentIssueProjectID(r.Context(), att.CommentID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return true
-	}
+	inHidden, err := h.attachmentInHiddenProject(r.Context(), hidden, att)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to resolve project access")
 		return false
 	}
-	if !hidden.CanSeeProject(projectID) {
+	if inHidden {
 		writeError(w, http.StatusNotFound, "attachment not found")
 		return false
 	}
 	return true
+}
+
+// visibleAttachmentIDs drops, from ids a write is about to adopt, every
+// attachment the request cannot see, so a hidden one is skipped exactly like
+// a missing one. It writes a 500 and returns ok=false when access cannot be
+// resolved.
+func (h *Handler) visibleAttachmentIDs(w http.ResponseWriter, r *http.Request, workspaceID pgtype.UUID, ids []pgtype.UUID) ([]pgtype.UUID, bool) {
+	if len(ids) == 0 {
+		return ids, true
+	}
+	hidden, ok := h.requestHiddenProjects(w, r, uuidToString(workspaceID))
+	if !ok {
+		return nil, false
+	}
+	if hidden.Empty() {
+		return ids, true
+	}
+	atts, err := h.Queries.ListAttachmentsByIDs(r.Context(), db.ListAttachmentsByIDsParams{AttachmentIds: ids, WorkspaceID: workspaceID})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve project access")
+		return nil, false
+	}
+	drop := map[pgtype.UUID]bool{}
+	for _, att := range atts {
+		inHidden, err := h.attachmentInHiddenProject(r.Context(), hidden, att)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to resolve project access")
+			return nil, false
+		}
+		drop[att.ID] = inHidden
+	}
+	out := ids[:0:0]
+	for _, id := range ids {
+		if !drop[id] {
+			out = append(out, id)
+		}
+	}
+	return out, true
 }
 
 // requireChatProjectVisible gates a chat session's project context
@@ -263,6 +339,25 @@ func (h *Handler) requireChatProjectVisible(w http.ResponseWriter, r *http.Reque
 		return false
 	}
 	return true
+}
+
+// chatRunProjectID is the chat session project whose context a claimed chat
+// run may carry: none once the session's creator, the run's human or the
+// agent's owner can no longer see it. The session keeps its project_id, so
+// the context comes back if access does.
+func (h *Handler) chatRunProjectID(ctx context.Context, cs db.ChatSession, task db.AgentTaskQueue, agentOwnerID pgtype.UUID) (pgtype.UUID, error) {
+	if !cs.ProjectID.Valid {
+		return cs.ProjectID, nil
+	}
+	principals := append(projectaccess.RunPrincipals(task, agentOwnerID), cs.CreatorID)
+	hidden, err := projectaccess.ForPrincipals(ctx, h.Queries, cs.WorkspaceID, principals...)
+	if err != nil {
+		return pgtype.UUID{}, err
+	}
+	if !hidden.CanSeeProject(cs.ProjectID) {
+		return pgtype.UUID{}, nil
+	}
+	return cs.ProjectID, nil
 }
 
 // hiddenProjectPredicate is the dynamic-SQL twin of the sqlc

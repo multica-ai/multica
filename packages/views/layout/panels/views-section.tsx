@@ -61,6 +61,7 @@ import { ViewNameInput } from "../../issue-views/view-name-input";
 import { UnreadViewIcon } from "../../issue-views/unread-view-icon";
 import { useBuiltinViewNavigation } from "../../issue-views/builtin-views";
 import { useNavigation } from "../../navigation";
+import { shouldOpenRowMenu, useRowMenu } from "../../common/point-menu";
 import { useT } from "../../i18n";
 import { PANEL_ROW_CLASS, PanelCount, PanelLink, PanelList, PanelSection, isPathWithin, panelRowAnchor, panelRowStateClass } from "../panel-nav";
 import { useDragClickGuard } from "../use-drag-click-guard";
@@ -257,21 +258,20 @@ function SortableViewRow({ id, children }: { id: string; children: (drag: DragBi
 }
 
 /** "…" on hover, and the same menu on right-click. */
+/** A view row's ⋯ menu. A right-click on the row opens it at the cursor. */
 function RowMenu({
   label,
-  open,
-  onOpenChange,
+  state,
   className,
   children,
 }: {
   label: string;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+  state: ReturnType<typeof useRowMenu>;
   className?: string;
   children: React.ReactNode;
 }) {
   return (
-    <DropdownMenu open={open} onOpenChange={onOpenChange}>
+    <DropdownMenu open={state.menu.open} onOpenChange={state.onOpenChange}>
       <DropdownMenuTrigger
         render={
           <button
@@ -284,7 +284,12 @@ function RowMenu({
       >
         <MoreHorizontal className="size-3.5" />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" side="right" className="w-auto min-w-48">
+      <DropdownMenuContent
+        align="start"
+        side={state.menu.point ? "bottom" : "right"}
+        anchor={state.anchor}
+        className="w-auto min-w-48"
+      >
         {children}
       </DropdownMenuContent>
     </DropdownMenu>
@@ -322,7 +327,7 @@ function BuiltinViewRow({
   const p = useWorkspacePaths();
   const listId = useId();
   const linkRef = useRef<HTMLAnchorElement>(null);
-  const [menuOpen, setMenuOpen] = useState(false);
+  const rowMenu = useRowMenu();
   const builtinNav = useBuiltinViewNavigation();
   const { searchParams } = useNavigation();
   const myScope = useStore(myIssuesViewStore, (s) => myIssuesScopeFor(NO_SEARCH, s.scope));
@@ -374,12 +379,11 @@ function BuiltinViewRow({
         toggleLabel={t(($) => $.panels.work.project_issues, { name: label })}
         onPrefetch={prefetch}
         onContextMenu={(event) => {
-          event.preventDefault();
-          setMenuOpen(true);
+          if (shouldOpenRowMenu(event)) rowMenu.openAtPointer(event);
         }}
         onNavigateInPlace={() => builtinNav.prepare(builtin)}
         trailing={
-          <RowMenu label={t(($) => $.panels.work.view_actions, { name: label })} open={menuOpen} onOpenChange={setMenuOpen}>
+          <RowMenu label={t(($) => $.panels.work.view_actions, { name: label })} state={rowMenu}>
             <DropdownMenuItem onClick={() => actions.copyLink(href)}>
               <Link2 className="size-3.5" />
               {t(($) => $.panels.work.view_copy_link)}
@@ -434,7 +438,7 @@ function UnreadViewRow({
   const p = useWorkspacePaths();
   const listId = useId();
   const linkRef = useRef<HTMLAnchorElement>(null);
-  const [menuOpen, setMenuOpen] = useState(false);
+  const rowMenu = useRowMenu();
   const target = issueViewTarget(wsId, UNREAD_VIEW, p);
   const open = useActiveIssueViewStore(
     (s) => pathname === target.path && s.active[target.containerKey] === UNREAD_VIEW_ID,
@@ -468,8 +472,7 @@ function UnreadViewRow({
         toggleLabel={t(($) => $.panels.work.project_issues, { name: label })}
         onPrefetch={prefetch}
         onContextMenu={(event) => {
-          event.preventDefault();
-          setMenuOpen(true);
+          if (shouldOpenRowMenu(event)) rowMenu.openAtPointer(event);
         }}
         onNavigateInPlace={() => setActive(target.containerKey, UNREAD_VIEW_ID)}
         trailing={
@@ -481,8 +484,7 @@ function UnreadViewRow({
             />
             <RowMenu
               label={t(($) => $.panels.work.view_actions, { name: label })}
-              open={menuOpen}
-              onOpenChange={setMenuOpen}
+              state={rowMenu}
               className="absolute right-0"
             >
               <DropdownMenuItem onClick={() => actions.copyLink(target.href)}>
@@ -541,7 +543,7 @@ function SavedViewRow({
   const { view } = item;
   const listId = useId();
   const linkRef = useRef<HTMLAnchorElement>(null);
-  const [menuOpen, setMenuOpen] = useState(false);
+  const rowMenu = useRowMenu();
   const target = issueViewTarget(wsId, view, p);
   const active = useActiveIssueViewStore(
     (s) => plainRowsLit && pathname === target.path && s.active[target.containerKey] === view.id,
@@ -594,12 +596,11 @@ function SavedViewRow({
         toggleLabel={t(($) => $.panels.work.project_issues, { name: view.name })}
         onPrefetch={prefetch}
         onContextMenu={(event) => {
-          event.preventDefault();
-          setMenuOpen(true);
+          if (shouldOpenRowMenu(event)) rowMenu.openAtPointer(event);
         }}
         onNavigateInPlace={() => setActive(target.containerKey, view.id)}
         trailing={
-          <RowMenu label={t(($) => $.panels.work.view_actions, { name: view.name })} open={menuOpen} onOpenChange={setMenuOpen}>
+          <RowMenu label={t(($) => $.panels.work.view_actions, { name: view.name })} state={rowMenu}>
             {canManage && (
               <>
                 <DropdownMenuItem onClick={() => actions.edit(view)}>

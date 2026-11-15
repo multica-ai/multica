@@ -2,8 +2,9 @@
 
 import { forwardRef, memo, useCallback, useLayoutEffect, useRef, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { ChevronDown, ChevronRight, ChevronUp } from "@multica/ui/icons";
+import { ChevronDown, ChevronRight, ChevronUp, Lock } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { ShimmerText } from "@multica/ui/components/common/shimmer-text";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@multica/ui/components/ui/tooltip";
@@ -17,7 +18,7 @@ import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-st
 import { issueUnreadTarget, useIssueUnread } from "@multica/core/issues/unread";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
-import type { AgentTask, Issue, IssueUnread, ListIssuesParams } from "@multica/core/types";
+import type { AgentTask, Issue, IssueUnread } from "@multica/core/types";
 import { AppLink } from "../../navigation";
 import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
 import { StatusIcon } from "../../issues/components/status-icon";
@@ -52,6 +53,8 @@ interface TreeRowProps extends React.ComponentProps<"div"> {
   /** Label for the expand toggle; `aria-expanded` carries its state. */
   toggleLabel?: string;
   onPrefetch?: () => void;
+  /** Right after the label, which truncates before it: a marker like a lock. */
+  labelSuffix?: React.ReactNode;
   /** End of the row: a count, or a settings button. */
   trailing?: React.ReactNode;
   onNavigate?: (event: React.MouseEvent<HTMLAnchorElement>) => void;
@@ -76,6 +79,7 @@ export const TreeRow = forwardRef<HTMLAnchorElement, TreeRowProps>(function Tree
     listId,
     toggleLabel,
     onPrefetch,
+    labelSuffix,
     trailing,
     onNavigate,
     onNavigateInPlace,
@@ -155,15 +159,35 @@ export const TreeRow = forwardRef<HTMLAnchorElement, TreeRowProps>(function Tree
           onKeyDown={onKeyDown}
           onClick={onNavigate}
           onNavigateInPlace={onNavigateInPlace}
-          className="min-w-0 flex-1 truncate outline-none after:absolute after:inset-0 after:rounded-lg focus-visible:after:outline-2 focus-visible:after:outline-ring"
+          className="flex min-w-0 flex-1 items-center gap-1.5 outline-none after:absolute after:inset-0 after:rounded-lg focus-visible:after:outline-2 focus-visible:after:outline-ring"
         >
-          {label}
+          <span className="min-w-0 truncate">{label}</span>
+          {labelSuffix}
         </AppLink>
       </TruncatedTooltip>
       {trailing}
     </div>
   );
 });
+
+/** Marks a private project, which only its members and workspace owners and
+ *  admins can see. It sits above the row link's
+ *  stretched hit area so its tooltip opens; a click still reaches the link. */
+export function PrivateProjectLock() {
+  const { t } = useT("layout");
+  const label = t(($) => $.panels.work.private_project);
+  return (
+    <TooltipHint label={label}>
+      <span
+        role="img"
+        aria-label={label}
+        className="relative z-10 flex shrink-0 text-faint-foreground in-data-[active=true]:text-muted-foreground"
+      >
+        <Lock className="size-3" />
+      </span>
+    </TooltipHint>
+  );
+}
 
 /** Issues under an expanded row sit flush and a step smaller than the rows
  *  around them, so a group reads as one block. */
@@ -176,7 +200,9 @@ export function issueRowMenuOpenClass(active: boolean) {
   return active ? undefined : "data-popup-open:bg-surface-hover data-popup-open:text-foreground";
 }
 
-const EMPTY_PARAMS: ListIssuesParams = {};
+const EMPTY_PARAMS: SidebarIssuesRequest = {
+  table: { scope: { kind: "workspace" }, filters: {}, sort: { field: "position", direction: "asc" } },
+};
 const EMPTY_ISSUES: Issue[] = [];
 
 /**

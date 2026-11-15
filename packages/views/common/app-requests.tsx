@@ -24,6 +24,7 @@ import { useActorName } from "@multica/core/workspace/hooks";
 import type { AppRequest } from "@multica/core/types";
 import { useLocale, useT } from "../i18n";
 import { currentPath, useNavigation } from "../navigation";
+import { isDesktopShell, openExternal } from "../platform";
 
 const CONNECTED_PARAM = "app_connected";
 const CONNECT_ERROR_PARAM = "app_connect_error";
@@ -254,7 +255,10 @@ function AppRequestCard({
       // The callback appends its own query, so the fragment stays behind.
       const returnTo = currentPath({ ...navigation, hash: "" });
       const { redirect_url } = await api.connectApp("personal", app, returnTo);
-      window.location.href = redirect_url;
+      openExternal(redirect_url, { webTarget: "same-tab" });
+      // Desktop opens the hosted flow in the system browser and stays here;
+      // the card resolves through the request's realtime update.
+      if (isDesktopShell()) setConnecting(false);
     } catch {
       toast.error(t(($) => $.connected_apps.toast_failed));
       setConnecting(false);

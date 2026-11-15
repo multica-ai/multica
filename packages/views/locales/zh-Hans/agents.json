@@ -64,14 +64,6 @@
     "search_runtime_filtered": "\"{{machine}}\"上没有匹配\"{{query}}\"的智能体。",
     "runtime_filtered": "\"{{machine}}\"上还没有智能体。"
   },
-  "runtime_filter": {
-    "all": "全部运行时",
-    "section_local": "本地",
-    "section_remote": "远程",
-    "section_cloud": "云端",
-    "agent_count_other": "{{count}} 个智能体",
-    "empty": "还没有机器"
-  },
   "columns": {
     "agent": "智能体",
     "status": "状态",
@@ -199,7 +191,6 @@
     "rename_required": "名称必填",
     "edit_description_title": "编辑描述",
     "description_placeholder": "这个智能体做什么？",
-    "save": "保存",
     "cancel": "取消"
   },
   "overview": {
@@ -222,12 +213,7 @@
     "edit_access_aria": "访问权限：{{value}}。更改访问权限",
     "all_settings": "全部设置"
   },
-  "skill_attach": {
-    "trigger_aria": "附加工作区 skill",
-    "trigger_label": "附加"
-  },
   "pickers": {
-    "concurrency_tooltip": "并发 · 最多 {{value}} 次并行运行",
     "concurrency_range": "最大并行运行数（{{min}}–{{max}}）",
     "runtime_none": "无运行时",
     "runtime_tooltip": "运行时 · {{name}} · {{status}}",
@@ -303,13 +289,8 @@
     "duplicate_title": "复制 {{name}}",
     "step_ai": "通过对话创建",
     "modes": {
-      "template": {
-        "title": "使用模板",
-        "description": "从整理好的指令和 skill 开始，再根据工作区需要修改每个细节。"
-      },
       "ai": {
-        "title": "通过 AI 创建",
-        "description": "通过对话生成可编辑的配置草稿。"
+        "title": "通过 AI 创建"
       }
     },
     "sections": {
@@ -337,10 +318,6 @@
       }
     },
     "builder": {
-      "setup_title": "为智能体构建器选择运行时",
-      "setup_description": "该运行时用于创建对话，并默认用于新智能体。",
-      "start": "开始对话",
-      "connect_runtime": "连接运行时",
       "draft_parse_failed": "本次回复未能填入表单。请让智能体重新生成草稿，或手动填写。",
       "start_failed": "无法启动智能体构建器。",
       "send_failed": "无法发送消息。",
@@ -448,23 +425,17 @@
     }
   },
   "create_dialog": {
-    "title_create": "创建智能体",
-    "title_duplicate": "复制智能体",
-    "description_duplicate": "基于\"{{name}}\"创建一个新智能体。指令、环境变量和 skill 会一并复制。",
     "name_label": "名称",
     "name_placeholder": "例如：深度研究智能体",
     "description_label": "描述",
     "description_placeholder": "这个智能体做什么？",
-    "visibility_label": "可见性",
     "access": {
-      "label": "访问权限",
       "private_title": "私有",
       "private_desc": "只有你可以运行该智能体",
       "public_title": "公开",
       "public_desc": "选择谁可以运行该智能体",
       "public_workspace_option": "工作区内所有人",
       "public_members_group": "指定成员",
-      "public_members_empty": "没有可选择的工作区成员",
       "public_targets_empty_hint": "至少勾选下方一项——否则该智能体仍为私有。"
     },
     "runtime_label": "运行时",
@@ -479,17 +450,10 @@
     "runtime_no_results": "没有匹配的机器",
     "runtime_group_online": "{{online}}/{{total}} 在线",
     "duplicate_copy_suffix": "（副本）",
-    "create": "创建",
-    "creating": "创建中...",
-    "cancel": "取消",
-    "create_failed_toast": "创建智能体失败",
     "skill_attach_failed_toast": "智能体已创建，但 skill 关联失败：{{error}}",
     "squad_join_failed_toast": "智能体\"{{name}}\"已创建，但加入小队失败：{{error}}。你可以在 Members 标签里手动添加。",
     "instructions": {
       "label": "指令",
-      "placeholder_blank": "点击撰写指令…",
-      "placeholder_duplicate": "点击查看或编辑复制的指令",
-      "collapse": "收起",
       "editor_placeholder": "写下这个智能体该做什么、关注什么、要避开什么…"
     },
     "skills_section": {
@@ -566,6 +530,7 @@
       "bulk_placeholder": "API_KEY=值\nBASE_URL=https://example.com",
       "bulk_plaintext_notice": "批量编辑时，值以明文显示。",
       "bulk_unsupported_toast": "\"{{key}}\" 的值无法用文本表示，请用逐条编辑修改",
+      "bulk_invalid_key_toast": "批量编辑只支持 API_KEY 这类变量名，请用逐条编辑修改 \"{{key}}\"",
       "parse_error_malformed": "第 {{line}} 行不是 KEY=value 格式",
       "parse_error_duplicate": "第 {{line}} 行的 key \"{{key}}\" 重复",
       "paste_invalid_toast": "无法解析粘贴的环境变量",
@@ -768,7 +733,7 @@
       "add_failed_toast": "添加 skill 失败"
     },
     "integrations": {
-      "members_note": "只有工作区的所有者和管理员可以管理此连接。你可以在\"设置 → 集成\"中查看已连接的 Bot。"
+      "members_note": "在智能体主页查看和管理消息渠道。"
     },
     "activity": {
       "status": {
@@ -987,7 +952,39 @@
     "tool_kind_write": "编辑",
     "tool_kind_read": "读取",
     "tool_kind_misc": "其他",
-    "trigger_wakeup": "唤醒触发"
+    "trigger_wakeup": "唤醒触发",
+    "context_receipt_title": "上下文回执",
+    "context_receipt_summary_other": "{{count}} 个来源 · {{size}}",
+    "context_receipt_model": "模型",
+    "context_receipt_session": "会话",
+    "context_receipt_session_resumed": "复用了之前的会话（其历史也在上下文中）",
+    "context_receipt_session_new": "新会话",
+    "context_receipt_session_fresh_retry": "恢复会话被拒后改用新会话",
+    "context_receipt_mcp": "MCP 服务",
+    "context_receipt_mcp_none": "无",
+    "context_receipt_warning": "{{source}}：{{status}}",
+    "context_receipt_col_source": "来源",
+    "context_receipt_col_size": "大小",
+    "context_receipt_col_delivery": "交付方式",
+    "context_receipt_col_load": "加载状态",
+    "context_receipt_same_as_brief": "同运行说明",
+    "context_receipt_footnote": "由 daemon 在智能体启动前记录。只保存大小和短哈希，不保存内容。“已验证”表示该运行环境的这个版本经过测试，确认会加载该文件。 技能的大小和哈希覆盖实际写入的整个技能包。",
+    "context_source_runtime_brief": "运行说明",
+    "context_source_agent_instructions": "智能体指令",
+    "context_source_project_description": "项目描述",
+    "context_source_existing_instructions": "仓库自带指令",
+    "context_source_task_prompt": "本轮 prompt",
+    "context_source_skill": "技能：{{name}}",
+    "context_delivery_file": "文件",
+    "context_delivery_inline": "系统提示",
+    "context_delivery_prompt": "本轮输入",
+    "context_delivery_embedded": "在运行说明内",
+    "context_delivery_none": "无交付渠道",
+    "context_load_delivered": "已送达",
+    "context_load_verified": "已验证",
+    "context_load_verified_other_version": "仅在 {{version}} 验证过",
+    "context_load_unverified": "未验证",
+    "context_load_not_delivered": "未送达"
   },
   "task_failure": {
     "cancelled_by_system": "已由系统取消",

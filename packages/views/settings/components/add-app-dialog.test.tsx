@@ -20,7 +20,11 @@ const catalog = [
 ];
 
 beforeEach(() => { vi.mocked(api.connectApp).mockRejectedValue(new Error("offline")); });
-afterEach(() => { cleanup(); vi.clearAllMocks(); });
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+  delete (window as { desktopAPI?: unknown }).desktopAPI;
+});
 
 function renderDialog(scope: AppAccountScope, canManage = true) {
   render(<I18nProvider locale="en" resources={{ en: { common: enCommon, settings: enSettings } }}>
@@ -70,5 +74,20 @@ describe("AddAppDialog", () => {
     await user.click(connect);
     await waitFor(() => expect(api.connectApp).toHaveBeenCalledTimes(2));
     expect(api.connectApp).toHaveBeenLastCalledWith("team", "notion");
+  });
+
+  it("hands the hosted flow to the system browser on Desktop and frees the row", async () => {
+    // Desktop blocks same-window navigation to another origin, so assigning
+    // the location left the row on "Connecting..." forever.
+    const openExternal = vi.fn();
+    (window as { desktopAPI?: unknown }).desktopAPI = { openExternal, pickDirectory: vi.fn() };
+    vi.mocked(api.connectApp).mockResolvedValue({ redirect_url: "https://connect.example.test/flow" });
+    const user = userEvent.setup();
+    renderDialog("team");
+    const connect = screen.getByRole("button", { name: "Connect" });
+    await user.click(connect);
+    await waitFor(() => expect(openExternal).toHaveBeenCalledWith("https://connect.example.test/flow"));
+    await waitFor(() => expect(connect).toBeEnabled());
+    expect(connect).toHaveTextContent("Connect");
   });
 });

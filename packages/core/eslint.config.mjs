@@ -1,5 +1,6 @@
 import reactConfig from "@multica/eslint-config/react";
 import { ICON_LIBRARY_IMPORT_PATTERNS } from "@multica/eslint-config/base";
+import { NO_FULL_PAGE_NAVIGATION } from "@multica/eslint-config/full-page-navigation";
 
 // Package boundary (AGENTS.md): core is headless and runs unchanged in web,
 // desktop and SSR. No UI libraries, no react-dom, no next/*, no Web Storage
@@ -77,6 +78,7 @@ export default [
     ignores: TESTS,
     rules: {
       ...boundaryRules(),
+      "no-restricted-syntax": ["error", NO_FULL_PAGE_NAVIGATION],
       "no-restricted-imports": [
         "error",
         {

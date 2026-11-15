@@ -3,7 +3,7 @@
 import { useMemo, useState, useCallback, useRef, useEffect } from "react";
 import { useRegisterCommandBarContext } from "../../search/register-context";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
-import { Check, ChevronRight, FileQuestion, Link2, PanelRight, Pencil, Pin, PinOff, Trash2, UserMinus } from "@multica/ui/icons";
+import { Archive, ArchiveRestore, BellOff, BellRing, Check, ChevronRight, FileQuestion, Link2, PanelRight, Pencil, Pin, PinOff, Trash2, UserMinus } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
@@ -12,9 +12,9 @@ import type { Project, ProjectStatus, ProjectPriority } from "@multica/core/type
 import { useAuthStore } from "@multica/core/auth";
 import { canDeleteProject } from "@multica/core/projects/deletion-permissions";
 import { canChangeProjectLead } from "@multica/core/projects/access";
-import { projectDetailOptions } from "@multica/core/projects/queries";
+import { projectDetailOptions, projectSubscriptionOptions } from "@multica/core/projects/queries";
 import { Spinner } from "@multica/ui/components/ui/spinner";
-import { useUpdateProject, useDeleteProject, ProjectDeletionOfflineError } from "@multica/core/projects/mutations";
+import { useUpdateProject, useDeleteProject, useSetProjectSubscription, ProjectDeletionOfflineError } from "@multica/core/projects/mutations";
 import { pinListOptions } from "@multica/core/pins";
 import { useCreatePin, useDeletePin } from "@multica/core/pins";
 import { useModalStore } from "@multica/core/modals";
@@ -81,7 +81,15 @@ import {
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
 import { useT } from "../../i18n";
-import { useProjectStatusLabels, useProjectPriorityLabels } from "./labels";
+import { useProjectStatusLabels, useProjectPriorityLabels, useFormatRelativeDate } from "./labels";
+import {
+  ArchivedProjectNotice,
+  ArchivedProjectTag,
+  useArchiveProjects,
+  useOfferArchiveOnComplete,
+  useRestoreProjects,
+} from "./project-archive";
+import { PAGE_GUTTER } from "../../layout/page-header";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 
 // Property row — sidebar property display
@@ -125,6 +133,10 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const userId = useAuthStore((s) => s.user?.id);
   const deleteProject = useDeleteProject();
   const deleted = deleteProject.isSuccess && deleteProject.variables === projectId;
+  const { requestArchive, dialog: archiveDialog } = useArchiveProjects();
+  const restore = useRestoreProjects();
+  const offerArchive = useOfferArchiveOnComplete();
+  const formatRelativeDate = useFormatRelativeDate();
   const { data: project, isLoading } = useQuery({
     ...projectDetailOptions(wsId, projectId),
     enabled: !deleted,
@@ -165,6 +177,22 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const canDelete = !!project && canDeleteProject(project, userId ?? null, role, agents);
   const createPin = useCreatePin();
   const deletePinMut = useDeletePin();
+  const { data: isSubscribed = false } = useQuery({
+    ...projectSubscriptionOptions(wsId, projectId),
+    enabled: !!project,
+  });
+  const setSubscription = useSetProjectSubscription();
+  const handleToggleSubscription = () => {
+    setSubscription.mutate(
+      { id: projectId, subscribed: !isSubscribed },
+      {
+        onSuccess: (subscribed) => {
+          if (subscribed) toast.success(t(($) => $.detail.toast_subscribed));
+        },
+        onError: () => toast.error(t(($) => $.detail.toast_subscription_failed)),
+      },
+    );
+  };
   const descEditorRef = useRef<ContentEditorRef>(null);
   const isMobile = useIsMobile();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -242,6 +270,15 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
     [project, updateProject],
   );
 
+  const handleStatusChange = useCallback(
+    (status: ProjectStatus) => {
+      if (!project) return;
+      handleUpdateField({ status });
+      offerArchive(project, status);
+    },
+    [project, handleUpdateField, offerArchive],
+  );
+
   const handleDelete = useCallback(() => {
     if (!project || deleteProject.isPending) return;
     deleteProject.mutate(project.id, {
@@ -291,6 +328,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   }
 
   const issueMetrics = getProjectIssueMetrics(project);
+  const archived = !!project.archived_at;
   const statusCfg = PROJECT_STATUS_CONFIG[project.status];
 
   const sidebarContent = (
@@ -355,7 +393,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
               />
               <DropdownMenuContent align="start" className="w-44">
                 {PROJECT_STATUS_ORDER.map((s) => (
-                  <DropdownMenuItem key={s} onClick={() => handleUpdateField({ status: s as ProjectStatus })}>
+                  <DropdownMenuItem key={s} onClick={() => handleStatusChange(s as ProjectStatus)}>
                     <span className={cn("size-2 rounded-full", PROJECT_STATUS_CONFIG[s].dotColor)} />
                     <span>{statusLabels[s]}</span>
                     {s === project.status && <Check className="ml-auto h-3.5 w-3.5" />}
@@ -470,6 +508,18 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
             <ProjectDueDatePicker dueDate={project.due_date} onUpdate={handleUpdateField} />
           </PropRow>
           <ProjectWorkflowPropRow project={project} onOpen={openWorkflowSheet} />
+          {archived && (
+            <PropRow label={t(($) => $.archive.prop_label)}>
+              <span className="tabular-nums">{formatRelativeDate(project.archived_at!)}</span>
+              {project.archived_by_type && project.archived_by_id && (
+                <>
+                  <span className="text-muted-foreground">·</span>
+                  <ActorAvatar actorType={project.archived_by_type} actorId={project.archived_by_id} size="sm" enableHoverCard />
+                  <span className="truncate">{getActorName(project.archived_by_type, project.archived_by_id)}</span>
+                </>
+              )}
+            </PropRow>
+          )}
         </div>}
       </div>
 
@@ -533,16 +583,27 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
 
   return (
     <>
-    <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
+    <ResizablePanelGroup
+      data-mc="object-page"
+      data-type="project"
+      orientation="horizontal"
+      className="flex-1 min-h-0"
+      defaultLayout={defaultLayout}
+      onLayoutChanged={onLayoutChanged}
+    >
       <ResizablePanel id="content" minSize="50%">
         <div ref={rightSidebarShortcutTargetRef} className="flex h-full flex-col">
           <IssueSurface
             scope={issueScope}
             modes={["board", "list", "table", "swimlane", "gantt"]}
+            allowCreate={!archived}
             renderHeader={({ controller }) => (
+              <>
               <IssueViewHeader
                 controller={controller}
                 base={{ kind: "project", project }}
+                baseBadge={archived ? <ArchivedProjectTag /> : undefined}
+                hideCreate={archived}
                 baseMenu={
                   <>
                     <DropdownMenuItem
@@ -573,20 +634,36 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                       {isPinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
                       {isPinned ? t(($) => $.detail.unpin_tooltip) : t(($) => $.detail.pin_tooltip)}
                     </DropdownMenuItem>
+                    <DropdownMenuItem
+                      disabled={setSubscription.isPending}
+                      onClick={handleToggleSubscription}
+                    >
+                      {isSubscribed ? <BellOff className="h-3.5 w-3.5" /> : <BellRing className="h-3.5 w-3.5" />}
+                      {isSubscribed ? t(($) => $.detail.unsubscribe_action) : t(($) => $.detail.subscribe_action)}
+                    </DropdownMenuItem>
                     <ProjectWorkflowMenuItem project={project} onOpen={() => setWorkflowSheetOpen(true)} />
+                    <DropdownMenuSeparator />
+                    {archived ? (
+                      <DropdownMenuItem onClick={() => restore(project)}>
+                        <ArchiveRestore className="h-3.5 w-3.5" />
+                        {t(($) => $.detail.restore_action)}
+                      </DropdownMenuItem>
+                    ) : (
+                      <DropdownMenuItem onClick={() => requestArchive([project])}>
+                        <Archive className="h-3.5 w-3.5" />
+                        {t(($) => $.detail.archive_action)}
+                      </DropdownMenuItem>
+                    )}
                     {canDelete && (
-                      <>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          variant="destructive"
-                          disabled={deleting}
-                          aria-busy={deleting}
-                          onClick={() => setDeleteDialogOpen(true)}
-                        >
-                          {deleting ? <Spinner className="size-3.5" aria-hidden="true" /> : <Trash2 className="h-3.5 w-3.5" />}
-                          {t(($) => $.detail.delete_action)}
-                        </DropdownMenuItem>
-                      </>
+                      <DropdownMenuItem
+                        variant="destructive"
+                        disabled={deleting}
+                        aria-busy={deleting}
+                        onClick={() => setDeleteDialogOpen(true)}
+                      >
+                        {deleting ? <Spinner className="size-3.5" aria-hidden="true" /> : <Trash2 className="h-3.5 w-3.5" />}
+                        {t(($) => $.detail.delete_action)}
+                      </DropdownMenuItem>
                     )}
                   </>
                 }
@@ -609,6 +686,12 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                   </Tooltip>
                 }
               />
+              {archived && (
+                <div className={cn("shrink-0 pt-2", PAGE_GUTTER)}>
+                  <ArchivedProjectNotice project={project} />
+                </div>
+              )}
+              </>
             )}
           />
           </div>
@@ -642,6 +725,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       </ResizablePanelGroup>
 
       <ProjectWorkflowSheet project={project} open={workflowSheetOpen} onOpenChange={setWorkflowSheetOpen} />
+      {archiveDialog}
 
       {/* Delete confirmation */}
       {canDelete && (
@@ -658,7 +742,29 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                 {t(($) => $.delete_dialog.description)}
               </AlertDialogDescription>
             </AlertDialogHeader>
+            {!archived && (
+              <div className="flex items-start gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-caption text-muted-foreground">
+                <Archive className="mt-0.5 size-3.5 shrink-0" />
+                <span>{t(($) => $.delete_dialog.archive_hint)}</span>
+              </div>
+            )}
             <AlertDialogFooter>
+              {!archived && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="sm:mr-auto"
+                  disabled={deleting}
+                  onClick={() => {
+                    setDeleteDialogOpen(false);
+                    requestArchive([project], { immediate: true });
+                  }}
+                >
+                  <Archive className="size-3.5" />
+                  {t(($) => $.delete_dialog.archive_instead)}
+                </Button>
+              )}
               <AlertDialogCancel disabled={deleting}>
                 {t(($) => $.delete_dialog.cancel)}
               </AlertDialogCancel>

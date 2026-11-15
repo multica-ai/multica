@@ -824,3 +824,161 @@ func TestPrivateProjectWakeupListsSkipOutsiders(t *testing.T) {
 		}
 	}
 }
+
+// A run on a private project's issue is listed as restricted to members
+// outside the project, id included. Stopping it by that id must need the same
+// access as reading it.
+func TestPrivateProjectRunCancelNeedsVisibility(t *testing.T) {
+	f := newPrivateProjectFixture(t)
+	var agentID string
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT id FROM agent WHERE workspace_id = $1 AND name = 'Handler Test Agent'`, testWorkspaceID,
+	).Scan(&agentID); err != nil {
+		t.Fatalf("load seeded agent: %v", err)
+	}
+	queuedRun := func() string {
+		return dbfx.Task(t, agentID, testutil.Cols{"issue_id": f.secretIssue, "runtime_id": testRuntimeID})
+	}
+
+	taskID := queuedRun()
+	rec := httptest.NewRecorder()
+	testHandler.CancelTaskByUser(rec, cancelTaskByUserRequest(t, f.outsider, taskID))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("outsider cancel = %d, want 404", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), f.secretIssue) {
+		t.Errorf("outsider cancel response names the private issue: %s", rec.Body.String())
+	}
+	if got := taskStatus(t, taskID); got != "queued" {
+		t.Errorf("run after outsider cancel = %q, want queued", got)
+	}
+
+	for i, tc := range []struct {
+		name   string
+		userID string
+	}{
+		{"project member", f.insider},
+		{"workspace owner outside the member list", testUserID},
+	} {
+		// An issue holds one pending run per agent, so the first case stops
+		// the run the outsider could not.
+		if i > 0 {
+			taskID = queuedRun()
+		}
+		rec := httptest.NewRecorder()
+		testHandler.CancelTaskByUser(rec, cancelTaskByUserRequest(t, tc.userID, taskID))
+		if rec.Code != http.StatusOK {
+			t.Errorf("%s: cancel = %d, want 200: %s", tc.name, rec.Code, rec.Body.String())
+		}
+		if got := taskStatus(t, taskID); got != "cancelled" {
+			t.Errorf("%s: run after cancel = %q, want cancelled", tc.name, got)
+		}
+	}
+}
+
+// Sub-issue progress is read for every parent in one call, not through an
+// issue, so its counts have to leave out sub-issues in a project the caller
+// cannot see.
+func TestPrivateProjectChildProgressSkipsHiddenSubIssues(t *testing.T) {
+	f := newPrivateProjectFixture(t)
+	dbfx.Issue(t, f.marker+" public child", testutil.Cols{"parent_issue_id": f.publicIssue})
+	dbfx.Issue(t, f.marker+" secret child", testutil.Cols{"project_id": f.projectID, "parent_issue_id": f.publicIssue, "status": "done"})
+	secretOnlyParent := dbfx.Issue(t, f.marker+" parent of one secret child")
+	dbfx.Issue(t, f.marker+" lone secret child", testutil.Cols{"project_id": f.projectID, "parent_issue_id": secretOnlyParent})
+
+	type counts struct{ Total, Done int64 }
+	progress := func(userID string) map[string]counts {
+		t.Helper()
+		var body struct {
+			Progress []struct {
+				ParentIssueID string `json:"parent_issue_id"`
+				Total         int64  `json:"total"`
+				Done          int64  `json:"done"`
+			} `json:"progress"`
+		}
+		req := asUser(newRequest(http.MethodGet, "/api/issues/child-progress", nil), userID)
+		testutil.Call(t, testHandler.ChildIssueProgress, req).Want(http.StatusOK).JSON(&body)
+		out := map[string]counts{}
+		for _, p := range body.Progress {
+			out[p.ParentIssueID] = counts{p.Total, p.Done}
+		}
+		return out
+	}
+	for _, tc := range []struct {
+		name       string
+		userID     string
+		mixed      counts
+		secretOnly counts
+	}{
+		{"project member", f.insider, counts{2, 1}, counts{1, 0}},
+		{"workspace owner outside the member list", testUserID, counts{2, 1}, counts{1, 0}},
+		{"workspace member outside the project", f.outsider, counts{1, 0}, counts{}},
+	} {
+		got := progress(tc.userID)
+		if got[f.publicIssue] != tc.mixed {
+			t.Errorf("%s: parent with a public and a secret sub-issue = %+v, want %+v", tc.name, got[f.publicIssue], tc.mixed)
+		}
+		if got[secretOnlyParent] != tc.secretOnly {
+			t.Errorf("%s: parent with only a secret sub-issue = %+v, want %+v", tc.name, got[secretOnlyParent], tc.secretOnly)
+		}
+	}
+}
+
+func TestPrivateProjectPullRequestSummariesSkipHiddenIssues(t *testing.T) {
+	f := newPrivateProjectFixture(t)
+	now := time.Now()
+	linkGitHub := func(issueID string, number int) string {
+		prID := dbfx.Insert(t, "github_pull_request", testutil.Cols{
+			"workspace_id": testWorkspaceID, "installation_id": 0,
+			"repo_owner": "acme", "repo_name": f.marker, "pr_number": number,
+			"title": "pr", "state": "open", "html_url": "https://github.test/pr",
+			"pr_created_at": now, "pr_updated_at": now,
+		})
+		dbfx.InsertNoID(t, "issue_pull_request", testutil.Cols{"issue_id": issueID, "pull_request_id": prID},
+			"pull_request_id = $1", prID)
+		return prID
+	}
+	publicPR := linkGitHub(f.publicIssue, 1)
+	secretGitHubPR := linkGitHub(f.secretIssue, 2)
+	secretGitLabPR := dbfx.Insert(t, "vcs_pull_request", testutil.Cols{
+		"workspace_id": testWorkspaceID, "connection_id": testWorkspaceID, "provider": "gitlab",
+		"repo_owner": "acme", "repo_name": f.marker, "pr_number": 3,
+		"title": "mr", "state": "open", "html_url": "https://gitlab.test/mr",
+		"pr_created_at": now, "pr_updated_at": now,
+	})
+	dbfx.InsertNoID(t, "issue_vcs_pull_request", testutil.Cols{"issue_id": f.secretIssue, "pull_request_id": secretGitLabPR},
+		"pull_request_id = $1", secretGitLabPR)
+
+	visible := func(userID string) map[string]bool {
+		t.Helper()
+		var body struct {
+			PullRequests []IssuePullRequestSummaryResponse `json:"pull_requests"`
+		}
+		req := asUser(newRequest(http.MethodGet, "/api/issues/pull-requests", nil), userID)
+		testutil.Call(t, testHandler.ListIssuePullRequestSummaries, req).Want(http.StatusOK).JSON(&body)
+		out := map[string]bool{}
+		for _, pr := range body.PullRequests {
+			out[pr.ID] = true
+		}
+		return out
+	}
+	for _, tc := range []struct {
+		name       string
+		userID     string
+		seesSecret bool
+	}{
+		{"project member", f.insider, true},
+		{"workspace owner outside the member list", testUserID, true},
+		{"workspace member outside the project", f.outsider, false},
+	} {
+		got := visible(tc.userID)
+		if !got[publicPR] {
+			t.Errorf("%s: missing the PR linked to a public issue", tc.name)
+		}
+		for _, prID := range []string{secretGitHubPR, secretGitLabPR} {
+			if got[prID] != tc.seesSecret {
+				t.Errorf("%s: sees PR %s on a private-project issue = %v, want %v", tc.name, prID, got[prID], tc.seesSecret)
+			}
+		}
+	}
+}

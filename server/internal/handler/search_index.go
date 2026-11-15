@@ -269,6 +269,9 @@ func (h *Handler) runSearchIndexRead(ctx context.Context, fn func(q *db.Queries)
 }
 
 func (h *Handler) writeSearchIndexError(w http.ResponseWriter, r *http.Request, op string, err error) {
+	if writeQueryCancellation(w, r, err) {
+		return
+	}
 	if isSearchStatementTimeout(err) {
 		writeError(w, http.StatusServiceUnavailable, "search index read timed out; please retry")
 		return
@@ -284,8 +287,15 @@ func (h *Handler) GetSearchIndexManifest(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
+	hidden, ok := h.requestHiddenProjects(w, r, uuidToString(wsUUID))
+	if !ok {
+		return
+	}
 	release, ok := acquireSearchIndexBootstrapSlot(r.Context())
 	if !ok {
+		if writeRequestCancellation(w, r, r.Context().Err()) {
+			return
+		}
 		writeSearchIndexBusy(w)
 		return
 	}
@@ -293,11 +303,17 @@ func (h *Handler) GetSearchIndexManifest(w http.ResponseWriter, r *http.Request)
 	var row db.GetSearchIndexManifestRow
 	err := h.runSearchIndexRead(r.Context(), func(q *db.Queries) error {
 		var err error
-		row, err = q.GetSearchIndexManifest(r.Context(), wsUUID)
+		row, err = q.GetSearchIndexManifest(r.Context(), db.GetSearchIndexManifestParams{
+			WorkspaceID:      wsUUID,
+			HiddenProjectIds: hidden.Param(),
+		})
 		return err
 	})
 	if err != nil {
 		h.writeSearchIndexError(w, r, "manifest", err)
+		return
+	}
+	if writeQueryCancellation(w, r, r.Context().Err()) {
 		return
 	}
 	writeJSON(w, http.StatusOK, SearchIndexManifestResponse{
@@ -337,6 +353,9 @@ func (h *Handler) GetSearchIndexSnapshot(w http.ResponseWriter, r *http.Request)
 	}
 	release, ok := acquireSearchIndexBootstrapSlot(ctx)
 	if !ok {
+		if writeRequestCancellation(w, r, r.Context().Err()) {
+			return
+		}
 		writeSearchIndexBusy(w)
 		return
 	}
@@ -397,7 +416,7 @@ func (h *Handler) GetSearchIndexSnapshot(w http.ResponseWriter, r *http.Request)
 	}
 
 	resp := SearchIndexSnapshotResponse{
-		Issues:          h.searchIndexIssues(ctx, wsUUID, visibleIssues),
+		Issues:          h.searchIndexIssues(ctx, wsUUID, hidden, visibleIssues),
 		Comments:        make([]SearchIndexComment, 0, len(comments)),
 		Projects:        searchIndexProjects(visibleProjects(hidden, projects)),
 		NextAfterNumber: nextAfterNumber,
@@ -408,6 +427,9 @@ func (h *Handler) GetSearchIndexSnapshot(w http.ResponseWriter, r *http.Request)
 			continue
 		}
 		resp.Comments = append(resp.Comments, searchIndexComment(c.ID, c.IssueID, c.Content, c.CreatedAt))
+	}
+	if writeQueryCancellation(w, r, r.Context().Err()) {
+		return
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -427,6 +449,9 @@ func (h *Handler) ListSearchIndexChanges(w http.ResponseWriter, r *http.Request)
 		Limit  int    `json:"limit"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, searchIndexCursorMaxBytes+1024)).Decode(&req); err != nil {
+		if writeRequestCancellation(w, r, err) {
+			return
+		}
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -550,7 +575,7 @@ func (h *Handler) ListSearchIndexChanges(w http.ResponseWriter, r *http.Request)
 	}
 
 	resp := SearchIndexChangesResponse{
-		Issues:   h.searchIndexIssues(ctx, wsUUID, issues),
+		Issues:   h.searchIndexIssues(ctx, wsUUID, hidden, issues),
 		Comments: []SearchIndexComment{},
 		Projects: searchIndexProjects(projects),
 		Deleted: SearchIndexDeleted{
@@ -607,10 +632,13 @@ func (h *Handler) ListSearchIndexChanges(w http.ResponseWriter, r *http.Request)
 	} else {
 		resp.Cursor = encodeSearchIndexCursor(searchIndexCursor{Since: target})
 	}
+	if writeQueryCancellation(w, r, r.Context().Err()) {
+		return
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
-func (h *Handler) searchIndexIssues(ctx context.Context, wsUUID pgtype.UUID, issues []db.Issue) []SearchIndexIssue {
+func (h *Handler) searchIndexIssues(ctx context.Context, wsUUID pgtype.UUID, hidden projectaccess.Hidden, issues []db.Issue) []SearchIndexIssue {
 	out := make([]SearchIndexIssue, 0, len(issues))
 	if len(issues) == 0 {
 		return out
@@ -620,7 +648,7 @@ func (h *Handler) searchIndexIssues(ctx context.Context, wsUUID pgtype.UUID, iss
 	for _, is := range issues {
 		originals = appendDuplicateOriginal(originals, is.Status, is.DuplicateOfIssueID)
 	}
-	fill := h.newStatusCategoryFiller(ctx, wsUUID, originals...)
+	fill := h.newStatusCategoryFiller(ctx, wsUUID, hidden, originals...)
 	for _, is := range issues {
 		resp := issueToResponse(is, prefix)
 		fill(&resp)

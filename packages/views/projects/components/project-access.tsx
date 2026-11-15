@@ -2,7 +2,7 @@
 
 import { useId, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Globe, Lock, Shield, UserPlus, X } from "@multica/ui/icons";
+import { Bot, Globe, Lock, Shield, UserPlus, X } from "@multica/ui/icons";
 import type { MemberWithUser, Project, ProjectVisibility } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -101,7 +101,12 @@ function AccessFields({ visibility, onVisibilityChange, members, selected, leadI
           </div>
         </div>
       ) : null}
-      <p className="flex items-start gap-2 text-caption text-muted-foreground"><Shield className="mt-0.5 size-4 shrink-0" aria-hidden="true" />{t(($) => $.access.admin_notice)}</p>
+      {visibility === "private" ? (
+        <div className="space-y-2">
+          <p className="flex items-start gap-2 text-caption text-muted-foreground"><Shield className="mt-0.5 size-4 shrink-0" aria-hidden="true" />{t(($) => $.access.admin_notice)}</p>
+          <p className="flex items-start gap-2 text-caption text-muted-foreground"><Bot className="mt-0.5 size-4 shrink-0" aria-hidden="true" />{t(($) => $.access.agent_notice)}</p>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -115,7 +120,7 @@ export function ProjectAccessControl({ project }: { project: Project }) {
   return (
     <Dialog open={open} onOpenChange={(value) => { if (!changeAccess.isPending) setOpen(value); }}>
       <DialogTrigger render={<Button type="button" variant="ghost" size="sm" className="h-auto min-h-7 max-w-full justify-start px-0" aria-label={t(($) => $.access.label)}><Icon /><span className="truncate">{project.visibility === "private" ? t(($) => $.access.private) : t(($) => $.access.workspace)}</span></Button>} />
-      <DialogContent className="flex max-h-[90dvh] flex-col sm:max-w-lg">
+      <DialogContent className="flex max-h-[90%] flex-col sm:max-w-lg">
         <DialogHeader><DialogTitle>{t(($) => $.access.title, { title: project.title })}</DialogTitle><DialogDescription>{t(($) => $.access.description)}</DialogDescription></DialogHeader>
         {open ? <ProjectAccessEditor project={project} onClose={() => setOpen(false)} changeAccess={changeAccess} /> : null}
       </DialogContent>
