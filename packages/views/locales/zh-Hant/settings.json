@@ -1919,6 +1919,7 @@
   },
   "voice_input": {
     "description": "在對話、留言和回覆中口述輸入。語音在這台電腦上轉寫，不會離開本機。",
+    "description_server": "在聊天、留言和回覆中語音輸入。語音會串流傳送到你的 Multica 伺服器所設定的語音轉文字服務。",
     "model_title": "語音模型",
     "model_hint": "模型在這台電腦上執行。下載一個，或在已下載的模型之間切換。",
     "engine_unavailable": "這台電腦暫不支援本機語音轉寫。",

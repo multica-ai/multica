@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
-import { screen } from "@testing-library/react";
+import { act, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { configStore } from "@multica/core/config";
 import { DEFAULT_VOICE_SETTINGS, useVoiceModelsStore, useVoiceSettingsStore } from "@multica/core/voice";
 import { renderWithI18n } from "../../test/i18n";
 import { VoiceInputTab } from "./voice-input-tab";
@@ -14,9 +15,12 @@ vi.mock("../../navigation", () => ({
   ),
   useOptionalNavigation: () => null,
 }));
-vi.mock("../../voice/engine", async () => {
+vi.mock("../../voice/engine", async (importOriginal) => {
   const { useVoiceModelsStore } = await import("@multica/core/voice");
-  return { useVoiceModels: () => useVoiceModelsStore((s) => s.models) };
+  return {
+    ...(await importOriginal<typeof import("../../voice/engine")>()),
+    useVoiceModels: () => useVoiceModelsStore((s) => s.models),
+  };
 });
 
 beforeEach(() => {
@@ -38,6 +42,7 @@ beforeEach(() => {
 
 afterEach(() => {
   delete (window as unknown as { desktopAPI?: unknown }).desktopAPI;
+  act(() => configStore.getState().setVoiceTranscriptionEnabled(false));
 });
 
 describe("VoiceInputTab", () => {
@@ -53,5 +58,17 @@ describe("VoiceInputTab", () => {
     expect(useVoiceSettingsStore.getState().enabled).toBe(true);
     expect(screen.getByRole("switch", { name: "Voice input" })).toBeChecked();
     expect(screen.getByText("Speech model")).toBeInTheDocument();
+  });
+
+  it("on the web, transcribed by the server: no models to manage and no local history", async () => {
+    delete (window as unknown as { desktopAPI?: unknown }).desktopAPI;
+    configStore.getState().setVoiceTranscriptionEnabled(true);
+    renderWithI18n(<VoiceInputTab />);
+    expect(screen.getByText(/speech-to-text service your Multica server/)).toBeInTheDocument();
+    expect(screen.queryByText("History")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("switch", { name: "Voice input" }));
+    expect(screen.queryByText("Speech model")).not.toBeInTheDocument();
+    expect(await screen.findByText("Microphone")).toBeInTheDocument();
   });
 });

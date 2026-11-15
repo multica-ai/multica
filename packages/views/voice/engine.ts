@@ -1,9 +1,12 @@
 /**
- * Desktop's on-device engine as the voice session's runtime: the microphone
- * recorder, the preload IPC to the speech engine, and decoding a clip to the
- * samples the engine takes.
+ * The voice session's runtime: the microphone recorder plus a speech engine.
+ * Desktop transcribes on the device through the preload IPC. A browser has no
+ * local engine, so the web app streams to the speech provider the server
+ * configured, with a short-lived token the server mints.
  */
 import { useEffect } from "react";
+import { api } from "@multica/core/api";
+import { useConfigStore } from "@multica/core/config";
 import {
   connectVoiceRuntime,
   useVoiceModelsStore,
@@ -13,6 +16,7 @@ import {
   type VoiceRuntime,
 } from "@multica/core/voice";
 import { localVoiceAPI } from "../platform/local-voice";
+import { DeepgramStream } from "./deepgram-stream";
 import { Recording } from "./recorder";
 
 const SAMPLE_RATE = 16000;
@@ -72,8 +76,60 @@ function desktopVoiceRuntime(): VoiceRuntime | null {
   };
 }
 
-/** Desktop's speech models; null on web and until the engine first answers. */
+/**
+ * The server engine's one model: always ready, nothing to download. Flux
+ * hears English and decides its own language handling, so the app offers no
+ * language choice for it.
+ */
+export const SERVER_VOICE_MODEL: VoiceModel = {
+  id: "server",
+  name: "Server",
+  author: "",
+  licenseUrl: "",
+  languages: ["en"],
+  languageHint: false,
+  sizeBytes: 0,
+  status: "ready",
+  receivedBytes: 0,
+};
+
+/** Streams to the server's speech provider: each finished sentence is typed as it ends. */
+export function serverVoiceRuntime(): VoiceRuntime {
+  return {
+    record: (onMeter, onLimit) => new Recording(onMeter, onLimit),
+    prepare: () => {},
+    // Streams never send a clip; only history re-transcribes one, and the web keeps none.
+    transcribe: async () => ({ ok: false, reason: "engine-unavailable" }),
+    stream: (handlers, onMeter, onLimit) =>
+      new DeepgramStream(handlers, onMeter, onLimit, () => api.createVoiceSession()),
+    watchModels: (onChange) => onChange({ engineAvailable: true, models: [SERVER_VOICE_MODEL] }),
+  };
+}
+
+/**
+ * The speech models of this app's engine; null until one is connected and
+ * answers. Desktop keeps its on-device engine; the web app uses the server's
+ * once the config reports it.
+ */
 export function useVoiceModels(): VoiceModels | null {
-  useEffect(() => connectVoiceRuntime(desktopVoiceRuntime), []);
+  const serverTranscription = useConfigStore((s) => s.voiceTranscriptionEnabled);
+  useEffect(() => {
+    // The session connects one runtime for the life of the page, so the web
+    // app waits for the config instead of connecting "none" first.
+    if (localVoiceAPI()) connectVoiceRuntime(desktopVoiceRuntime);
+    else if (serverTranscription) connectVoiceRuntime(serverVoiceRuntime);
+  }, [serverTranscription]);
   return useVoiceModelsStore((s) => s.models);
+}
+
+/** Whether this app can transcribe at all: Desktop's engine or the server's. */
+export function useVoiceInputAvailable(): boolean {
+  const serverTranscription = useConfigStore((s) => s.voiceTranscriptionEnabled);
+  return localVoiceAPI() !== undefined || serverTranscription;
+}
+
+/** Recordings go to the server rather than an engine on this device. */
+export function useServerVoiceEngine(): boolean {
+  const serverTranscription = useConfigStore((s) => s.voiceTranscriptionEnabled);
+  return localVoiceAPI() === undefined && serverTranscription;
 }

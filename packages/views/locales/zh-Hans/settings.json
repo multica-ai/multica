@@ -1919,6 +1919,7 @@
   },
   "voice_input": {
     "description": "在对话、评论和回复中口述输入。语音在这台电脑上转写，不会离开本机。",
+    "description_server": "在聊天、评论和回复中语音输入。语音会流式发送到你的 Multica 服务器所配置的语音转文字服务。",
     "model_title": "语音模型",
     "model_hint": "模型在这台电脑上运行。下载一个，或在已下载的模型之间切换。",
     "engine_unavailable": "这台电脑暂不支持本地语音转写。",

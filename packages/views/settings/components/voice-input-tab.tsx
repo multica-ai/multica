@@ -25,7 +25,7 @@ import { SegmentedToggle } from "../../common/segmented-toggle";
 import { ShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { AppLink, useOptionalNavigation } from "../../navigation";
 import { useLocale, useT } from "../../i18n";
-import { useVoiceModels, VoiceModelRows, voiceInputSupported } from "../../voice";
+import { useServerVoiceEngine, useVoiceModels, VoiceModelRows, voiceInputSupported } from "../../voice";
 import { settingsHref } from "./settings-navigation";
 import { VoiceHistorySection } from "./voice-history";
 import {
@@ -36,17 +36,23 @@ import {
 } from "./settings-layout";
 
 /**
- * Speech models and how dictation behaves on this computer. Desktop only:
- * transcription runs on the device, so the tab needs Desktop's engine.
+ * Speech models and how dictation behaves on this computer. Desktop
+ * transcribes on the device; the web app sends recordings to the server
+ * when it transcribes them, and then has no models to manage.
  */
 export function VoiceInputTab() {
   const { t } = useT("settings");
   const engineAvailable = useVoiceModels()?.engineAvailable;
+  const serverEngine = useServerVoiceEngine();
   const enabled = useVoiceSettingsStore((state) => state.enabled);
   return (
     <SettingsTab
       title={t(($) => $.page.tabs.voice_input)}
-      description={t(($) => $.voice_input.description)}
+      description={
+        serverEngine
+          ? t(($) => $.voice_input.description_server)
+          : t(($) => $.voice_input.description)
+      }
       scope="device"
     >
       <SettingsSection>
@@ -56,6 +62,7 @@ export function VoiceInputTab() {
       </SettingsSection>
       {enabled && (
         <>
+          {!serverEngine && (
           <SettingsSection
             title={t(($) => $.voice_input.model_title)}
             description={
@@ -71,6 +78,7 @@ export function VoiceInputTab() {
               </SettingsCard>
             )}
           </SettingsSection>
+          )}
           <SettingsSection title={t(($) => $.voice_input.input_title)} anchor="voice-input">
             <SettingsCard>
               <ShortcutRow />
