@@ -831,8 +831,27 @@
     "toast_profile_failed": "Failed to update profile"
   },
   "notifications": {
-    "title": "Inbox Notifications",
-    "description": "Muted events remain visible on the issue.",
+    "title": "Inbox",
+    "description": "Choose which events reach the Inbox in the Work sidebar. A turned-off event creates no notification, and turning it back on doesn't bring back what you missed.",
+    "categories": {
+      "direct": "About you",
+      "issues": "Issues you subscribe to",
+      "projects": "Projects you subscribe to",
+      "agents": "Agents"
+    },
+    "leaving": {
+      "title": "Leaving the Inbox",
+      "description": "Reading a notification doesn't take it out of the Inbox.",
+      "manual_label": "Archive by hand",
+      "manual_description": "From its row in the sidebar, or the top of the notification",
+      "manual_value": "Anytime",
+      "done_label": "Issue done",
+      "done_description": "When an issue reaches a Done status, its notifications are archived. Cancelling it doesn't.",
+      "done_value": "Automatic",
+      "archived_label": "Archived notifications",
+      "archived_description": "Find them again and unarchive them",
+      "archived_action": "View archived"
+    },
     "toast_failed": "Failed to update notification settings",
     "groups": {
       "assignments": {

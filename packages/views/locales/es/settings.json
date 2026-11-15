@@ -831,8 +831,27 @@
     "toast_profile_failed": "Error al actualizar el perfil"
   },
   "notifications": {
-    "title": "Notificaciones de la bandeja",
-    "description": "Los eventos silenciados siguen visibles en la tarea.",
+    "title": "Bandeja de entrada",
+    "description": "Elige qué eventos llegan a la bandeja de entrada de la barra lateral de Trabajo. Un evento desactivado no crea notificaciones, y al reactivarlo no se recuperan las que te perdiste.",
+    "categories": {
+      "direct": "Sobre ti",
+      "issues": "Tareas a las que te suscribes",
+      "projects": "Proyectos a los que te suscribes",
+      "agents": "Agentes"
+    },
+    "leaving": {
+      "title": "Salir de la bandeja de entrada",
+      "description": "Leer una notificación no la saca de la bandeja de entrada.",
+      "manual_label": "Archivar a mano",
+      "manual_description": "Desde su fila en la barra lateral o desde la parte superior de la notificación",
+      "manual_value": "En cualquier momento",
+      "done_label": "Tarea completada",
+      "done_description": "Cuando una tarea pasa a un estado Completado, sus notificaciones se archivan. Cancelarla no las archiva.",
+      "done_value": "Automático",
+      "archived_label": "Notificaciones archivadas",
+      "archived_description": "Encuéntralas de nuevo y desarchívalas",
+      "archived_action": "Ver archivadas"
+    },
     "toast_failed": "Error al actualizar la configuración de notificaciones",
     "groups": {
       "assignments": {
