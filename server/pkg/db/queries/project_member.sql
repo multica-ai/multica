@@ -5,8 +5,8 @@ SELECT id FROM project
 WHERE workspace_id = $1 AND visibility = 'private';
 
 -- name: ListHiddenProjectIDsForUser :many
--- Private projects a regular (non owner/admin) workspace member cannot see.
--- Owners and admins see every project; callers skip this query for them.
+-- Private projects a workspace member cannot see: the ones they are not a
+-- member of. A workspace role grants no access (MUL-9284).
 SELECT p.id FROM project p
 WHERE p.workspace_id = sqlc.arg('workspace_id')
   AND p.visibility = 'private'
@@ -60,6 +60,30 @@ WHERE project_id = sqlc.arg('project_id') AND workspace_id = sqlc.arg('workspace
 -- A member leaving the workspace leaves every private project in it.
 DELETE FROM project_member
 WHERE workspace_id = sqlc.arg('workspace_id') AND user_id = sqlc.arg('user_id');
+
+-- name: HandOverPrivateProjectLeads :many
+-- A private project always has a human lead, who manages its access
+-- (MUL-9284). When that lead leaves the workspace the project's
+-- longest-standing other member takes over. A project with no other member is
+-- left without a lead, for a workspace owner to recover. Run before the
+-- leaver's project_member rows are deleted.
+UPDATE project
+SET lead_id = (
+        SELECT pm.user_id FROM project_member pm
+        WHERE pm.project_id = project.id AND pm.user_id <> sqlc.arg('user_id')
+        ORDER BY pm.created_at ASC, pm.user_id ASC
+        LIMIT 1
+    ),
+    lead_type = CASE WHEN EXISTS (
+        SELECT 1 FROM project_member pm
+        WHERE pm.project_id = project.id AND pm.user_id <> sqlc.arg('user_id')
+    ) THEN 'member' END,
+    updated_at = now()
+WHERE project.workspace_id = sqlc.arg('workspace_id')
+  AND project.visibility = 'private'
+  AND project.lead_type = 'member'
+  AND project.lead_id = sqlc.arg('user_id')
+RETURNING *;
 
 -- name: UpdateProjectVisibility :one
 UPDATE project SET visibility = sqlc.arg('visibility'), updated_at = now()

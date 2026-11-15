@@ -138,6 +138,77 @@ func (q *Queries) GetIssueProjectID(ctx context.Context, id pgtype.UUID) (pgtype
 	return project_id, err
 }
 
+const handOverPrivateProjectLeads = `-- name: HandOverPrivateProjectLeads :many
+UPDATE project
+SET lead_id = (
+        SELECT pm.user_id FROM project_member pm
+        WHERE pm.project_id = project.id AND pm.user_id <> $1
+        ORDER BY pm.created_at ASC, pm.user_id ASC
+        LIMIT 1
+    ),
+    lead_type = CASE WHEN EXISTS (
+        SELECT 1 FROM project_member pm
+        WHERE pm.project_id = project.id AND pm.user_id <> $1
+    ) THEN 'member' END,
+    updated_at = now()
+WHERE project.workspace_id = $2
+  AND project.visibility = 'private'
+  AND project.lead_type = 'member'
+  AND project.lead_id = $1
+RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, creator_type, creator_id, visibility, archived_at, archived_by_type, archived_by_id
+`
+
+type HandOverPrivateProjectLeadsParams struct {
+	UserID      pgtype.UUID `json:"user_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// A private project always has a human lead, who manages its access
+// (MUL-9284). When that lead leaves the workspace the project's
+// longest-standing other member takes over. A project with no other member is
+// left without a lead, for a workspace owner to recover. Run before the
+// leaver's project_member rows are deleted.
+func (q *Queries) HandOverPrivateProjectLeads(ctx context.Context, arg HandOverPrivateProjectLeadsParams) ([]Project, error) {
+	rows, err := q.db.Query(ctx, handOverPrivateProjectLeads, arg.UserID, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Project{}
+	for rows.Next() {
+		var i Project
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Title,
+			&i.Description,
+			&i.Icon,
+			&i.Status,
+			&i.LeadType,
+			&i.LeadID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Priority,
+			&i.StartDate,
+			&i.DueDate,
+			&i.WorkflowID,
+			&i.CreatorType,
+			&i.CreatorID,
+			&i.Visibility,
+			&i.ArchivedAt,
+			&i.ArchivedByType,
+			&i.ArchivedByID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAutopilotRunProjectIDs = `-- name: ListAutopilotRunProjectIDs :many
 SELECT r.id, a.project_id
 FROM autopilot_run r
@@ -185,8 +256,8 @@ type ListHiddenProjectIDsForUserParams struct {
 	UserID      pgtype.UUID `json:"user_id"`
 }
 
-// Private projects a regular (non owner/admin) workspace member cannot see.
-// Owners and admins see every project; callers skip this query for them.
+// Private projects a workspace member cannot see: the ones they are not a
+// member of. A workspace role grants no access (MUL-9284).
 func (q *Queries) ListHiddenProjectIDsForUser(ctx context.Context, arg ListHiddenProjectIDsForUserParams) ([]pgtype.UUID, error) {
 	rows, err := q.db.Query(ctx, listHiddenProjectIDsForUser, arg.WorkspaceID, arg.UserID)
 	if err != nil {

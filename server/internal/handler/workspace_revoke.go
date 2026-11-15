@@ -265,6 +265,15 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 		result.ReadyChats = append(result.ReadyChats, readyChats...)
 	}
 
+	// A private project is managed by its lead, so one the leaver leads goes
+	// to its longest-standing other member before the leaver's rows are gone.
+	result.HandedOverProjects, err = qtx.HandOverPrivateProjectLeads(ctx, db.HandOverPrivateProjectLeadsParams{
+		WorkspaceID: workspaceID, UserID: userID,
+	})
+	if err != nil {
+		return empty, err
+	}
+
 	// No FK cascade (repo rule): a departing member leaves every private
 	// project in the workspace and stops watching every project.
 	if err := qtx.DeleteProjectMembersByUser(ctx, db.DeleteProjectMembersByUserParams{
@@ -301,6 +310,10 @@ type revocationResult struct {
 	SharedRuntimeCount int
 	SharedTeardown     service.RuntimeTeardownResult
 	ReadyChats         []pgtype.UUID
+	// HandedOverProjects are the private projects the leaver led, as they
+	// stand after the handover: led by another member, or by nobody when the
+	// leaver was the only one.
+	HandedOverProjects []db.Project
 }
 
 func (r revocationResult) isEmpty() bool {
@@ -312,6 +325,16 @@ func (r revocationResult) isEmpty() bool {
 // agent:archived, and signal a runtime-list refresh. Safe to call on an empty
 // result — it returns immediately.
 func (h *Handler) publishRevocation(ctx context.Context, result revocationResult, workspaceIDStr, actorType, actorIDStr string) {
+	for _, project := range result.HandedOverProjects {
+		slog.Info("private project lead handed over",
+			"workspace_id", workspaceIDStr,
+			"project_id", uuidToString(project.ID),
+			"new_lead_id", uuidToString(project.LeadID),
+		)
+		h.publish(protocol.EventProjectUpdated, workspaceIDStr, actorType, actorIDStr, map[string]any{
+			"project": projectToResponse(project),
+		})
+	}
 	if result.isEmpty() {
 		return
 	}

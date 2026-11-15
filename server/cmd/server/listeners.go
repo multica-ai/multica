@@ -104,7 +104,7 @@ var memberPrivateEvents = map[string]bool{
 // horizontal-scaling plan tracked in MUL-1138.
 //
 // audience, when given, narrows events about private projects (MUL-8472) to
-// their members and workspace owners/admins; see privateProjectAudience.
+// their members; see privateProjectAudience.
 func registerListeners(bus *events.Bus, b realtime.Broadcaster, audience ...privateProjectAudience) {
 	var projectAudience privateProjectAudience
 	if len(audience) > 0 {
