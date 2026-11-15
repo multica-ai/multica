@@ -27,6 +27,10 @@ A workspace must always keep at least one `owner`: the last `owner` cannot be de
 Roles do not decide who can run an agent. Each agent has its own Access scope, and `owner` and `admin` cannot bypass it to run agents they were not granted. See [Agents](/agents#permissions-and-access).
 </Callout>
 
+<Callout type="info">
+Roles do not open private projects either. An `owner` or `admin` sees a private project only when they are on its member list. See [Private projects](/projects#private-projects).
+</Callout>
+
 ## Invite members
 
 `owner` and `admin` open **Settings → Members**, click **Invite member**, enter an email, pick a role, and send. Invitations can only grant `admin` or `member`; an `owner` must join the workspace first and then be promoted by an existing `owner`.
