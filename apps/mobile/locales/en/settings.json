@@ -73,6 +73,8 @@
     "comments_description": "New comments on issues you're subscribed to.",
     "mentions": "Mentions",
     "mentions_description": "When someone @mentions you, including @all and @squad.",
+    "reactions": "Reactions",
+    "reactions_description": "When someone reacts to an issue you created or a comment you wrote.",
     "updates": "Issue updates",
     "updates_description": "Edits to title, description, labels, priority, or due date.",
     "new_issues": "New issues",

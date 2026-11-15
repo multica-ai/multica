@@ -4,6 +4,7 @@ export type NotificationGroupKey =
   | "comments"
   | "chat_replies"
   | "mentions"
+  | "reactions"
   | "updates"
   | "new_issues"
   | "agent_activity"

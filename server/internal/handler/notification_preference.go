@@ -23,6 +23,7 @@ var validNotifGroups = map[string]bool{
 	"comments":             true,
 	"chat_replies":         true,
 	"mentions":             true,
+	"reactions":            true,
 	"updates":              true,
 	"agent_activity":       true,
 	"new_issues":           true,

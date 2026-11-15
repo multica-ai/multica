@@ -870,6 +870,10 @@
         "label": "Menciones",
         "description": "Cuando alguien te @menciona, incluidos @all y @squad"
       },
+      "reactions": {
+        "label": "Reacciones",
+        "description": "Cuando alguien reacciona a una tarea que creaste o a un comentario que escribiste"
+      },
       "updates": {
         "label": "Prioridad y fecha de entrega",
         "description": "Cuando cambian la prioridad o la fecha de entrega de tareas que sigues"

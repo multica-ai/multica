@@ -105,10 +105,6 @@ JOIN selected_ids selected ON selected.id = i.id
 LEFT JOIN issue iss ON iss.id = i.issue_id
 ORDER BY i.created_at DESC, i.id DESC;
 
--- name: GetInboxItem :one
-SELECT * FROM inbox_item
-WHERE id = $1;
-
 -- name: GetInboxItemInWorkspace :one
 SELECT * FROM inbox_item
 WHERE id = $1 AND workspace_id = $2;

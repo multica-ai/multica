@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/events"
@@ -381,6 +382,60 @@ func TestNotification_StatusChanged_Muted(t *testing.T) {
 	}
 	if items := inboxItemsForRecipient(t, queries, normalID); len(items) != 1 {
 		t.Fatalf("expected normal subscriber to receive 1 item, got %d", len(items))
+	}
+}
+
+// TestNotification_ReactionAdded_Muted verifies that reactions="muted" stops
+// the reaction_added row an issue creator would otherwise get.
+func TestNotification_ReactionAdded_Muted(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	for _, tc := range []struct {
+		name  string
+		prefs string
+		want  int
+	}{
+		{"reactions muted", `{"reactions":"muted"}`, 0},
+		{"comments muted", `{"comments":"muted"}`, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			email := "notif-reaction-" + strings.ReplaceAll(tc.name, " ", "-") + "@multica.ai"
+			creatorID := createNotificationMember(t, email)
+			t.Cleanup(func() { cleanupTestUser(t, email) })
+
+			issueID := createTestIssue(t, testWorkspaceID, creatorID)
+			t.Cleanup(func() {
+				cleanupInboxForIssue(t, issueID)
+				cleanupTestIssue(t, issueID)
+			})
+
+			if _, err := testPool.Exec(context.Background(), `
+				INSERT INTO notification_preference (workspace_id, user_id, preferences)
+				VALUES ($1, $2, $3::jsonb)
+			`, testWorkspaceID, creatorID, tc.prefs); err != nil {
+				t.Fatalf("seed notification preference: %v", err)
+			}
+
+			bus.Publish(events.Event{
+				Type:        protocol.EventIssueReactionAdded,
+				WorkspaceID: testWorkspaceID,
+				ActorType:   "member",
+				ActorID:     testUserID,
+				Payload: map[string]any{
+					"reaction":     handler.IssueReactionResponse{Emoji: "👍"},
+					"creator_type": "member",
+					"creator_id":   creatorID,
+					"issue_id":     issueID,
+					"issue_title":  "reaction mute test issue",
+					"issue_status": "todo",
+				},
+			})
+
+			if items := inboxItemsForRecipient(t, queries, creatorID); len(items) != tc.want {
+				t.Fatalf("expected %d inbox items for creator, got %d", tc.want, len(items))
+			}
+		})
 	}
 }
 

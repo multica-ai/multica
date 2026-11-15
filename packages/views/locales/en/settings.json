@@ -870,6 +870,10 @@
         "label": "Mentions",
         "description": "When someone @mentions you, including @all and @squad"
       },
+      "reactions": {
+        "label": "Reactions",
+        "description": "When someone reacts to an issue you created or a comment you wrote"
+      },
       "updates": {
         "label": "Priority & Due date",
         "description": "When priority or due date changes on issues you follow"

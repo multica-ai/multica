@@ -861,6 +861,10 @@
         "label": "멘션",
         "description": "누군가 나를 @멘션할 때(@all, @squad 포함)"
       },
+      "reactions": {
+        "label": "반응",
+        "description": "내가 만든 태스크나 내가 쓴 댓글에 누군가 반응할 때"
+      },
       "updates": {
         "label": "우선순위 및 마감일",
         "description": "팔로우 중인 태스크의 우선순위나 마감일이 바뀔 때"

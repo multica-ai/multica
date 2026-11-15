@@ -25,7 +25,7 @@ import {
 // Inbox event groups, by how the event reaches you. `system_notifications`
 // is a sibling preference key but lives in its own section below.
 const INBOX_CATEGORIES = [
-  { key: "direct", groups: ["assignments", "mentions"] },
+  { key: "direct", groups: ["assignments", "mentions", "reactions"] },
   { key: "issues", groups: ["status_changes", "comments", "updates"] },
   { key: "projects", groups: ["new_issues"] },
   { key: "agents", groups: ["agent_activity"] },

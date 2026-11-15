@@ -861,6 +861,10 @@
         "label": "提及",
         "description": "有人 @ 你時，包括 @all 和 @squad"
       },
+      "reactions": {
+        "label": "表情回應",
+        "description": "有人對你建立的任務或你寫的評論加上表情時"
+      },
       "updates": {
         "label": "優先順序與截止日期",
         "description": "你訂閱的任務優先順序或截止日期變更時"
