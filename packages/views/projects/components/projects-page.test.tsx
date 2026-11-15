@@ -50,12 +50,16 @@ vi.mock("@tanstack/react-query", () => ({
     }
     return { data: [], isLoading: false };
   },
+  useQueryClient: () => ({ ensureQueryData: async () => ({ autopilots: [] }) }),
 }));
 
 vi.mock("@multica/core/projects", () => ({
   projectListOptions: () => ({ queryKey: ["projects"] }),
+  isProjectArchived: (project: { archived_at?: string | null }) => !!project.archived_at,
   useUpdateProject: () => ({ mutate: mocks.updateProject }),
   useDeleteProject: () => ({ mutateAsync: mocks.deleteProject }),
+  useArchiveProject: () => ({ mutateAsync: vi.fn() }),
+  useRestoreProject: () => ({ mutateAsync: vi.fn() }),
   useProjectViewStore: (selector: (state: unknown) => unknown) =>
     selector(mocks.projectViewState),
 }));
@@ -465,6 +469,32 @@ describe("ProjectsPage header", () => {
     await user.click(screen.getByRole("button", { name: /^Closed projects/ }));
     expect(screen.queryByText(PROJECT.title)).not.toBeInTheDocument();
     expect(screen.getByText("Old Roadmap")).toBeInTheDocument();
+  });
+
+  it("keeps archived projects out of every scope but Archived", async () => {
+    const user = userEvent.setup();
+    const ARCHIVED: Project = {
+      ...CLOSED,
+      id: "project-archived",
+      title: "Shelved Launch",
+      archived_at: "2026-01-02T00:00:00Z",
+      archived_by_type: "member",
+      archived_by_id: "user-1",
+    };
+    mocks.projects = [PROJECT, CLOSED, ARCHIVED];
+    renderProjects();
+
+    expect(screen.queryByText("Shelved Launch")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Archived projects/ })).toHaveTextContent("1");
+
+    await user.click(screen.getByRole("button", { name: /^Closed projects/ }));
+    expect(screen.queryByText("Shelved Launch")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^Archived projects/ }));
+    expect(screen.getByRole("heading", { level: 1, name: "Archived projects" })).toBeInTheDocument();
+    expect(screen.getByText("Shelved Launch")).toBeInTheDocument();
+    expect(screen.queryByText("Old Roadmap")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Restore" }).length).toBeGreaterThan(0);
   });
 
   it("has no search, and offers Reset only while a filter narrows the list", () => {

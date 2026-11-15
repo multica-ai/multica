@@ -4,9 +4,11 @@ import { useState } from "react";
 import { FolderKanban } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { projectListOptions } from "@multica/core/projects/queries";
+import { isProjectArchived, selectableProjects } from "@multica/core/projects";
 import { useWorkspaceId } from "@multica/core/hooks";
 import type { UpdateIssueRequest } from "@multica/core/types";
 import { ProjectIcon } from "./project-icon";
+import { ArchivedProjectTag } from "./project-archive";
 import {
   PropertyPicker,
   PickerItem,
@@ -63,7 +65,7 @@ export function ProjectPicker({
   // Client-side filter: substring match plus pinyin so Chinese project names
   // are reachable by latin input (e.g. "sjtmh" → "数据透明化").
   const query = filter.trim().toLowerCase();
-  const filtered = projects.filter(
+  const filtered = selectableProjects(projects, projectId).filter(
     (p) => p.title.toLowerCase().includes(query) || matchesPinyin(p.title, query),
   );
 
@@ -126,6 +128,7 @@ export function ProjectPicker({
           >
             <ProjectIcon project={p} size="sm" />
             <span className="truncate">{p.title}</span>
+            {isProjectArchived(p) && <ArchivedProjectTag />}
           </PickerItem>
         ))}
 

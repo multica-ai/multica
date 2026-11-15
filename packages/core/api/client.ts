@@ -112,6 +112,7 @@ import type {
   StartMikaOnboardingResponse,
   CancelTaskResponse,
   Project,
+  ArchiveProjectResponse,
   CreateProjectRequest,
   UpdateProjectRequest,
   ListProjectsResponse,
@@ -378,6 +379,7 @@ import {
   RuntimeUsageListSchema,
   SearchIssuesResponseSchema,
   ProjectSchema,
+  ArchiveProjectResponseSchema,
   ListProjectMembersResponseSchema,
   ProjectSubscriptionSchema,
   ListProjectsResponseSchema,
@@ -1414,11 +1416,12 @@ export class ApiClient {
     });
   }
 
-  async searchProjects(params: { q: string; limit?: number; offset?: number; include_closed?: boolean; signal?: AbortSignal }): Promise<SearchProjectsResponse> {
+  async searchProjects(params: { q: string; limit?: number; offset?: number; include_closed?: boolean; include_archived?: boolean; signal?: AbortSignal }): Promise<SearchProjectsResponse> {
     const search = new URLSearchParams({ q: params.q });
     if (params.limit !== undefined) search.set("limit", String(params.limit));
     if (params.offset !== undefined) search.set("offset", String(params.offset));
     if (params.include_closed) search.set("include_closed", "true");
+    if (params.include_archived) search.set("include_archived", "true");
     const raw = await this.fetch<unknown>(
       `/api/projects/search?${search}`,
       params.signal ? { signal: params.signal } : undefined,
@@ -4406,9 +4409,10 @@ export class ApiClient {
   }
 
   // Projects
-  async listProjects(params?: { status?: string }): Promise<ListProjectsResponse> {
+  async listProjects(params?: { status?: string; include_archived?: boolean }): Promise<ListProjectsResponse> {
     const search = new URLSearchParams();
     if (params?.status) search.set("status", params.status);
+    if (params?.include_archived) search.set("include_archived", "true");
     const raw = await this.fetch<unknown>(`/api/projects?${search}`);
     return parseWithFallback(raw, ListProjectsResponseSchema, EMPTY_LIST_PROJECTS_RESPONSE, {
       endpoint: "GET /api/projects",
@@ -4438,6 +4442,18 @@ export class ApiClient {
 
   async deleteProject(id: string): Promise<void> {
     await this.fetch(`/api/projects/${id}`, { method: "DELETE" });
+  }
+
+  async archiveProject(id: string): Promise<ArchiveProjectResponse> {
+    const raw = await this.fetch<unknown>(`/api/projects/${id}/archive`, { method: "POST" });
+    return parseWithFallback(raw, ArchiveProjectResponseSchema, { ...EMPTY_PROJECT, paused_autopilot_ids: [] }, {
+      endpoint: "POST /api/projects/:id/archive",
+    });
+  }
+
+  async restoreProject(id: string): Promise<Project> {
+    const raw = await this.fetch<unknown>(`/api/projects/${id}/restore`, { method: "POST" });
+    return parseWithFallback(raw, ProjectSchema, EMPTY_PROJECT, { endpoint: "POST /api/projects/:id/restore" });
   }
 
   async getProjectMembers(id: string): Promise<ListProjectMembersResponse> {

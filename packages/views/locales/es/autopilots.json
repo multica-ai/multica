@@ -21,7 +21,8 @@
     "active": "Activo",
     "paused": "En pausa",
     "paused_runtime_required": "En pausa: el asignado necesita un runtime",
-    "archived": "Archivado"
+    "archived": "Archivado",
+    "paused_project_archived": "En pausa: su proyecto está archivado"
   },
   "execution_mode": {
     "create_issue": "Crear tarea",
@@ -115,7 +116,8 @@
       "create_issue": "{{agent}} crea una tarea en cada ejecución",
       "run_only": "{{agent}} lo ejecuta sin crear una tarea",
       "with_trigger": "{{trigger}} · {{action}}"
-    }
+    },
+    "paused_project_archived": "En pausa porque su proyecto se archivó. Restaura el proyecto y reactiva esta automatización."
   },
   "access": {
     "title": "Gestionar acceso",

@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { isContentTruncated, TruncatedTooltip } from "../truncated-tooltip";
-import { TooltipProvider } from "../../ui/tooltip";
+import { Tooltip, TooltipProvider, TooltipTrigger } from "../../ui/tooltip";
 
 afterEach(() => {
   cleanup();
@@ -160,6 +160,46 @@ describe("TruncatedTooltip", () => {
         vi.advanceTimersByTime(550);
       });
       expect(tooltipPopup()).toHaveTextContent("A very long project name");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("yields to a descendant's own tooltip while the pointer is on it", async () => {
+    renderWithTooltips(
+      <TruncatedTooltip content="A very long project name">
+        <button type="button">
+          <span data-testid="label" style={{ overflowX: "hidden", overflowY: "hidden" }}>
+            A very long project name
+          </span>
+          <Tooltip>
+            <TooltipTrigger render={<span data-testid="lock" />} />
+          </Tooltip>
+        </button>
+      </TruncatedTooltip>,
+    );
+    setBox(screen.getByTestId("label"), { scrollWidth: 240, clientWidth: 120 });
+
+    vi.useFakeTimers();
+    try {
+      // Arriving straight on the lock: React derives the row's enter from this.
+      fireEvent.pointerOver(screen.getByTestId("lock"), { pointerType: "mouse" });
+      await act(async () => {
+        vi.advanceTimersByTime(550);
+      });
+      expect(tooltipPopup()).toBeNull();
+
+      fireEvent.pointerOver(screen.getByTestId("label"), { pointerType: "mouse" });
+      await act(async () => {
+        vi.advanceTimersByTime(550);
+      });
+      expect(tooltipPopup()).toHaveTextContent("A very long project name");
+
+      fireEvent.pointerOver(screen.getByTestId("lock"), { pointerType: "mouse" });
+      await act(async () => {
+        vi.advanceTimersByTime(550);
+      });
+      expect(tooltipPopup()).toBeNull();
     } finally {
       vi.useRealTimers();
     }

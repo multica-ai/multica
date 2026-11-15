@@ -4,7 +4,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import {
   Zap, Play, Clock, Plus, Trash2, CheckCircle2, XCircle, Loader2, Pencil,
   Ban, ChevronDown, ChevronRight, MoreHorizontal, Link2, ArrowUpRight, FilePlus2,
-  Webhook, RotateCw, Server, FileQuestion, FileText, Square,
+  Webhook, RotateCw, Server, FileQuestion, FileText, Square, Archive,
 } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { autopilotDetailOptions, autopilotRunsOptions, autopilotRunOptions } from "@multica/core/autopilots/queries";
@@ -1215,6 +1215,23 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
                 className="font-medium underline underline-offset-2"
               >
                 {t(($) => $.detail.bind_runtime)}
+              </AppLink>
+            )}
+          </div>
+        )}
+        {autopilot.pause_reason === "project_archived" && (
+          <div
+            role="status"
+            className="flex items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-caption text-muted-foreground"
+          >
+            <Archive className="size-3.5 shrink-0" />
+            <span className="flex-1">{t(($) => $.detail.paused_project_archived)}</span>
+            {autopilot.project_id && (
+              <AppLink
+                href={wsPaths.projectDetail(autopilot.project_id)}
+                className="font-medium underline underline-offset-2"
+              >
+                {t(($) => $.detail.open_project)}
               </AppLink>
             )}
           </div>

@@ -126,6 +126,7 @@
       "new_issue_in_project": "Nueva tarea en {{name}}",
       "new_issue_no_project": "Nueva tarea sin proyecto",
       "no_project": "Sin proyecto",
+      "private_project": "Visible para los miembros del proyecto y los owner y admin del espacio de trabajo",
       "all_projects_one": "{{count}} proyecto en total",
       "all_projects_other": "{{count}} proyectos en total",
       "project_issues": "Tareas en {{name}}",

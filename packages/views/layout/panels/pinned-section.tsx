@@ -12,7 +12,7 @@ import {
 } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Folder, X } from "@multica/ui/icons";
+import { Archive, Folder, X } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { ShimmerText } from "@multica/ui/components/common/shimmer-text";
@@ -38,6 +38,7 @@ import {
   ISSUE_ROW_LINK_CLASS,
   IssueAgentBadge,
   IssueUnreadDot,
+  PrivateProjectLock,
   SIDEBAR_SHIMMER_CLASS,
   SidebarIssueStatus,
   issueRowMenuOpenClass,
@@ -211,6 +212,7 @@ function SortablePinItem({
   active,
   running = false,
   unread = false,
+  labelSuffix,
   trailing,
   issue,
 }: {
@@ -224,6 +226,8 @@ function SortablePinItem({
   running?: boolean;
   /** Brightens the label while the issue has an unread agent result. */
   unread?: boolean;
+  /** Right after the label, which truncates before it. */
+  labelSuffix?: React.ReactNode;
   trailing?: React.ReactNode;
   /** A pinned issue's row opens the issue context menu on right-click. */
   issue?: Issue;
@@ -251,12 +255,15 @@ function SortablePinItem({
         aria-current={active ? "page" : undefined}
         className={cn(ISSUE_ROW_LINK_CLASS, "gap-2.5")}
       >
-        <ShimmerText
-          active={running}
-          className={cn("min-w-0 flex-1 truncate", SIDEBAR_SHIMMER_CLASS, unread && "text-foreground")}
-        >
-          {label}
-        </ShimmerText>
+        <span className="flex min-w-0 flex-1 items-center gap-1.5">
+          <ShimmerText
+            active={running}
+            className={cn("min-w-0 truncate", SIDEBAR_SHIMMER_CLASS, unread && "text-foreground")}
+          >
+            {label}
+          </ShimmerText>
+          {labelSuffix}
+        </span>
         {/* Holds the same right-edge slot as a tree row's avatars, and yields
             it to the unpin button on hover. */}
         {trailing && (
@@ -318,6 +325,7 @@ function PinRow({
   onUnpin: () => void;
   wsId: string;
 }) {
+  const { t: tProjects } = useT("projects");
   const isIssue = pin.item_type === "issue";
   const agents = useIssueAgentState(wsId, isIssue ? pin.item_id : "");
   const unread = useIssueUnread(wsId, isIssue ? pin.item_id : "");
@@ -376,6 +384,16 @@ function PinRow({
       onUnpin={onUnpin}
       label={project.title}
       active={active}
+      labelSuffix={project.visibility === "private" && <PrivateProjectLock />}
+      trailing={
+        project.archived_at ? (
+          <Archive
+            role="img"
+            aria-label={tProjects(($) => $.archive.badge)}
+            className="size-3 shrink-0 text-muted-foreground"
+          />
+        ) : undefined
+      }
       iconNode={
         project.icon ? <ProjectIcon project={project} size="md" /> : <Folder className="size-4 shrink-0" />
       }

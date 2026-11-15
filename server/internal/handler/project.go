@@ -53,6 +53,12 @@ type ProjectResponse struct {
 	// Visibility is "workspace" (every member) or "private" (project members
 	// plus workspace owners/admins). (MUL-8472)
 	Visibility string `json:"visibility"`
+	// ArchivedAt is non-null while the project is archived: hidden from
+	// default lists and pickers, closed to new issues, otherwise intact.
+	// Orthogonal to Status. (MUL-8861)
+	ArchivedAt     *string `json:"archived_at"`
+	ArchivedByType *string `json:"archived_by_type"`
+	ArchivedByID   *string `json:"archived_by_id"`
 }
 
 func projectToResponse(p db.Project) ProjectResponse {
@@ -74,6 +80,10 @@ func projectToResponse(p db.Project) ProjectResponse {
 		UpdatedAt:   timestampToString(p.UpdatedAt),
 		WorkflowID:  uuidToPtr(p.WorkflowID),
 		Visibility:  projectVisibilityOrDefault(p.Visibility),
+
+		ArchivedAt:     timestampToPtr(p.ArchivedAt),
+		ArchivedByType: textToPtr(p.ArchivedByType),
+		ArchivedByID:   uuidToPtr(p.ArchivedByID),
 	}
 }
 
@@ -181,10 +191,13 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 	if p := r.URL.Query().Get("priority"); p != "" {
 		priorityFilter = pgtype.Text{String: p, Valid: true}
 	}
+	// Archived projects are opt-in so agents resolving a project by name only
+	// see the ones that still accept work.
 	projects, err := h.Queries.ListProjects(r.Context(), db.ListProjectsParams{
-		WorkspaceID: wsUUID,
-		Status:      statusFilter,
-		Priority:    priorityFilter,
+		WorkspaceID:     wsUUID,
+		Status:          statusFilter,
+		Priority:        priorityFilter,
+		IncludeArchived: r.URL.Query().Get("include_archived") == "true",
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list projects")
@@ -831,7 +844,7 @@ type SearchProjectResponse struct {
 }
 
 // buildProjectSearchQuery builds a dynamic SQL query for project search.
-func buildProjectSearchQuery(phrase string, terms []string, includeClosed bool, hiddenProjectIDs ...pgtype.UUID) (string, []any) {
+func buildProjectSearchQuery(phrase string, terms []string, includeClosed, includeArchived bool, hiddenProjectIDs ...pgtype.UUID) (string, []any) {
 	phrase = strings.ToLower(phrase)
 	for i, t := range terms {
 		terms[i] = strings.ToLower(t)
@@ -889,6 +902,9 @@ func buildProjectSearchQuery(phrase string, terms []string, includeClosed bool, 
 	if !includeClosed {
 		whereClause += " AND p.status NOT IN ('completed', 'cancelled')"
 	}
+	if !includeArchived {
+		whereClause += " AND p.archived_at IS NULL"
+	}
 
 	// --- ORDER BY ranking ---
 	var rankCases []string
@@ -922,8 +938,10 @@ func buildProjectSearchQuery(phrase string, terms []string, includeClosed bool, 
 	// list. Demote ahead of rankExpr, with the same direct-hit exception as
 	// issue search (see buildSearchQuery): an exact title means the user is
 	// targeting that one project.
+	// Archived projects sink below cancelled ones for the same reason: they
+	// stay findable, but are rarely what the user is reaching for.
 	cancelledRank := fmt.Sprintf(
-		"CASE WHEN p.status = 'cancelled' AND LOWER(p.title) <> %s THEN 1 ELSE 0 END",
+		"CASE WHEN LOWER(p.title) = %s THEN 0 WHEN p.archived_at IS NOT NULL THEN 2 WHEN p.status = 'cancelled' THEN 1 ELSE 0 END",
 		phraseParam,
 	)
 
@@ -958,6 +976,7 @@ func buildProjectSearchQuery(phrase string, terms []string, includeClosed bool, 
 		p.status, p.priority, p.lead_type, p.lead_id,
 		p.start_date, p.due_date,
 		p.created_at, p.updated_at, p.visibility, p.creator_type, p.creator_id,
+		p.archived_at, p.archived_by_type, p.archived_by_id,
 		%s AS match_source
 	FROM project p
 	WHERE p.workspace_id = %s AND %s
@@ -1002,6 +1021,7 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 	}
 
 	includeClosed := r.URL.Query().Get("include_closed") == "true"
+	includeArchived := r.URL.Query().Get("include_archived") == "true"
 
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
 	if !ok {
@@ -1013,7 +1033,7 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	sqlQuery, args := buildProjectSearchQuery(q, terms, includeClosed, hidden.Param()...)
+	sqlQuery, args := buildProjectSearchQuery(q, terms, includeClosed, includeArchived, hidden.Param()...)
 	args[1] = wsUUID
 	args[len(args)-2] = limit
 	args[len(args)-1] = offset
@@ -1044,6 +1064,9 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 				&row.project.Visibility,
 				&row.project.CreatorType,
 				&row.project.CreatorID,
+				&row.project.ArchivedAt,
+				&row.project.ArchivedByType,
+				&row.project.ArchivedByID,
 				&row.matchSource,
 			); err != nil {
 				return fmt.Errorf("scan: %w", err)
