@@ -156,6 +156,7 @@
       "projects_only_mine": "只看我負責的專案",
       "projects_show_no_project": "顯示「無專案」",
       "projects_show_count": "未完成任務數",
+      "projects_minimal_icons": "僅顯示預設圖示",
       "new_view": "新增檢視",
       "all_views": "全部檢視",
       "view_actions": "{{name}} 的操作",

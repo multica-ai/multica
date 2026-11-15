@@ -234,6 +234,7 @@ export function ProjectsSection({
                   project={row}
                   active={plainRowsLit && isPathWithin(pathname, p.projectDetail(row.id))}
                   showCount={projectSettings.showCount}
+                  minimalIcon={projectSettings.minimalIcons}
                   issueSettings={issueSettings}
                   activeIssueId={litSource === projectSidebarSource(row.id) ? activeIssueId : null}
                   openIssueId={activeIssueId}
@@ -386,6 +387,7 @@ function ProjectTreeItem({
   project,
   active,
   showCount,
+  minimalIcon,
   issueSettings,
   activeIssueId,
   openIssueId,
@@ -396,6 +398,7 @@ function ProjectTreeItem({
   project: Project;
   active: boolean;
   showCount: boolean;
+  minimalIcon: boolean;
   issueSettings: SidebarIssueSettings;
   activeIssueId: string | null;
   openIssueId: string | null;
@@ -436,7 +439,11 @@ function ProjectTreeItem({
         href={p.projectDetail(project.id)}
         label={project.title}
         icon={
-          project.icon ? <ProjectIcon project={project} size="md" /> : <Folder className="size-4 shrink-0" />
+          project.icon && !minimalIcon ? (
+            <ProjectIcon project={project} size="md" />
+          ) : (
+            <Folder className="size-4 shrink-0" />
+          )
         }
         active={active}
         located={located}

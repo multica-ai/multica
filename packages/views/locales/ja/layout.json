@@ -156,6 +156,7 @@
       "projects_only_mine": "自分がリードするプロジェクトのみ",
       "projects_show_no_project": "「プロジェクトなし」を表示",
       "projects_show_count": "未完了タスク数",
+      "projects_minimal_icons": "デフォルトのアイコンのみ",
       "new_view": "新規ビュー",
       "all_views": "すべてのビュー",
       "view_actions": "{{name}} の操作",

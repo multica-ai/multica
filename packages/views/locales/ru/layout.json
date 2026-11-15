@@ -133,6 +133,7 @@
       "projects_only_mine": "Только проекты, которыми я руковожу",
       "projects_show_no_project": "Показывать «Нет проекта»",
       "projects_show_count": "Число открытых задач",
+      "projects_minimal_icons": "Только стандартные значки",
       "new_view": "Новое представление",
       "all_views": "Все представления",
       "view_actions": "Действия с «{{name}}»",
