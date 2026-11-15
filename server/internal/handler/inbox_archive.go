@@ -39,7 +39,9 @@ type archivedInboxFacetsResponse struct {
 }
 
 // Values the closed-set filters accept; the type groups mirror the CASE in
-// inbox_archive.sql and INBOX_TYPE_GROUPS in packages/core/inbox.
+// inbox_archive.sql and INBOX_TYPE_GROUPS in packages/core/inbox. "review" no
+// longer matches anything, but installed clients still offer it as a filter,
+// so it stays accepted rather than failing their request.
 var (
 	archivedInboxTypeGroups = []string{"mention", "comment", "assign", "review", "change", "run", "system"}
 	archivedInboxDueDates   = []string{"overdue", "today", "this_week", "next_7_days", "none"}

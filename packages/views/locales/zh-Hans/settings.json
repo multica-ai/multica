@@ -875,7 +875,7 @@
       },
       "agent_activity": {
         "label": "智能体活动",
-        "description": "智能体运行失败时"
+        "description": "智能体运行失败，或智能体请求的应用操作被拦截、过期时"
       },
       "chat_replies": {
         "label": "包含聊天回复"

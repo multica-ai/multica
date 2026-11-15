@@ -875,7 +875,7 @@
       },
       "agent_activity": {
         "label": "AI 代理活動",
-        "description": "AI 代理執行失敗時"
+        "description": "AI 代理執行失敗，或 AI 代理請求的應用操作被攔截、過期時"
       },
       "chat_replies": {
         "label": "包含聊天回覆"

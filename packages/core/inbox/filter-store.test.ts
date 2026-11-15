@@ -161,7 +161,7 @@ describe("notification dimensions", () => {
     expect(inboxTypeGroup("reaction_added")).toBe("comment");
     expect(inboxTypeGroup("issue_subscribed")).toBe("assign");
     expect(inboxTypeGroup("children_done")).toBe("change");
-    expect(inboxTypeGroup("agent_blocked")).toBe("run");
+    expect(inboxTypeGroup("task_failed")).toBe("run");
     expect(inboxTypeGroup("quick_create_failed")).toBe("system");
     expect(inboxTypeGroup("something_new")).toBe("system");
   });

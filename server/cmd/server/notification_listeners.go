@@ -739,7 +739,8 @@ func notifyDelegatedIssueCreated(
 
 // notifyMentionedMembers creates inbox items for each @mentioned member,
 // excluding the actor and any IDs in the skip set. When an @all mention is
-// present, all workspace members are notified (excluding agents).
+// present, all workspace members are notified (excluding agents). Returns the
+// members that received a row.
 func notifyMentionedMembers(
 	bus *events.Bus,
 	queries *db.Queries,
@@ -749,9 +750,11 @@ func notifyMentionedMembers(
 	issueTitle string,
 	issueStatus string,
 	title string,
+	body string,
 	skip map[string]bool,
 	details []byte,
-) {
+) map[string]bool {
+	notified := map[string]bool{}
 	// Collect the set of member IDs to notify.
 	recipientIDs := map[string]bool{}
 
@@ -833,6 +836,7 @@ func notifyMentionedMembers(
 			Severity:      "info",
 			IssueID:       parseUUID(issueID),
 			Title:         title,
+			Body:          util.StrToText(body),
 			ActorType:     util.StrToText(e.ActorType),
 			ActorID:       optionalUUID(e.ActorID),
 			Details:       details,
@@ -844,6 +848,7 @@ func notifyMentionedMembers(
 		if !inserted {
 			continue
 		}
+		notified[id] = true
 		resp := inboxItemToResponse(item)
 		resp["issue_status"] = issueStatus
 		bus.Publish(events.Event{
@@ -854,6 +859,7 @@ func notifyMentionedMembers(
 			Payload:     map[string]any{"item": resp},
 		})
 	}
+	return notified
 }
 
 // registerNotificationListeners wires up event bus listeners that create inbox
@@ -896,7 +902,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		if issue.Description != nil && *issue.Description != "" {
 			mentions := parseMentions(*issue.Description)
 			notifyMentionedMembers(bus, queries, e, mentions, issue.ID, issue.Title, issue.Status,
-				issue.Title, skip, emptyDetails)
+				issue.Title, "", skip, emptyDetails)
 		}
 
 		notifyDelegatedIssueCreated(ctx, queries, bus, issue, e, skip)
@@ -1106,7 +1112,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 				}
 				skip := map[string]bool{e.ActorID: true}
 				notifyMentionedMembers(bus, queries, e, added, issue.ID, issue.Title, issue.Status,
-					issue.Title, skip, emptyDetails)
+					issue.Title, "", skip, emptyDetails)
 			}
 		}
 	})
@@ -1159,18 +1165,20 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			})
 		}
 
+		// Mentions first: a member who gets a `mentioned` row for this comment
+		// does not also get its `new_comment`, so one comment is one
+		// notification. A member who muted mentions still gets the comment.
+		mentioned := map[string]bool{}
+		if mentions := parseMentions(commentContent); len(mentions) > 0 {
+			skip := map[string]bool{e.ActorID: true}
+			mentioned = notifyMentionedMembers(bus, queries, e, mentions, issueID, issueTitle, issueStatus,
+				issueTitle, commentContent, skip, commentDetails)
+		}
+
 		notifySubscribers(ctx, queries, bus, issueID, issueStatus, e.WorkspaceID, e,
-			nil, "new_comment", "info",
+			mentioned, "new_comment", "info",
 			issueTitle, commentContent,
 			commentDetails)
-
-		// Notify @mentions in comment content.
-		mentions := parseMentions(commentContent)
-		if len(mentions) > 0 {
-			skip := map[string]bool{e.ActorID: true}
-			notifyMentionedMembers(bus, queries, e, mentions, issueID, issueTitle, issueStatus,
-				issueTitle, skip, commentDetails)
-		}
 	})
 
 	// issue_reaction:added — notify the issue creator

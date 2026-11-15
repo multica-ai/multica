@@ -884,7 +884,7 @@
       },
       "agent_activity": {
         "label": "Agent activity",
-        "description": "When an agent run fails"
+        "description": "When an agent run fails, or an app action an agent asked to run is blocked or expires"
       },
       "chat_replies": {
         "label": "Include chat replies"

@@ -17,7 +17,6 @@ export type InboxTypeGroup =
   | "mention"
   | "comment"
   | "assign"
-  | "review"
   | "change"
   | "run"
   | "system";
@@ -26,7 +25,6 @@ export const INBOX_TYPE_GROUPS: readonly InboxTypeGroup[] = [
   "mention",
   "comment",
   "assign",
-  "review",
   "change",
   "run",
   "system",
@@ -40,17 +38,13 @@ const TYPE_GROUP: Partial<Record<InboxItemType, InboxTypeGroup>> = {
   unassigned: "assign",
   assignee_changed: "assign",
   issue_subscribed: "assign",
-  review_requested: "review",
   issue_created: "change",
   status_changed: "change",
   priority_changed: "change",
   start_date_changed: "change",
   due_date_changed: "change",
   children_done: "change",
-  task_completed: "run",
   task_failed: "run",
-  agent_blocked: "run",
-  agent_completed: "run",
 };
 
 export function inboxTypeGroup(type: string): InboxTypeGroup {
@@ -361,11 +355,6 @@ export function effectiveInboxFilters(
   }
   if (archived && next.agent) next = withoutInboxFilter(next, "agent");
   return next;
-}
-
-/** @deprecated Use `effectiveInboxFilters` with `archived: true`. */
-export function inboxFiltersForArchive(filters: InboxFilters): InboxFilters {
-  return filters.agent ? withoutInboxFilter(filters, "agent") : filters;
 }
 
 /** Start of the received window, at a local midnight so it holds all day. */

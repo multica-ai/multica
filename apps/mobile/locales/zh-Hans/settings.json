@@ -80,7 +80,7 @@
     "new_issues": "新任务",
     "new_issues_description": "你订阅的项目中有新任务创建时。",
     "agent_activity": "智能体动态",
-    "agent_activity_description": "智能体运行失败时。",
+    "agent_activity_description": "智能体运行失败，或智能体请求的应用操作被拦截、过期时。",
     "inbox_notifications": "收件箱通知",
     "system": "系统",
     "system_notifications": "系统通知",

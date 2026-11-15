@@ -80,7 +80,7 @@
     "new_issues": "New issues",
     "new_issues_description": "When an issue is created in a project you subscribe to.",
     "agent_activity": "Agent activity",
-    "agent_activity_description": "When an agent run fails.",
+    "agent_activity_description": "When an agent run fails, or an app action an agent asked to run is blocked or expires.",
     "inbox_notifications": "Inbox notifications",
     "system": "System",
     "system_notifications": "System notifications",

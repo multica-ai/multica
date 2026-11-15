@@ -884,7 +884,7 @@
       },
       "agent_activity": {
         "label": "Activité des agents",
-        "description": "Lorsqu'une exécution d'agent échoue"
+        "description": "Lorsqu'une exécution d'agent échoue, ou qu'une action d'app demandée par un agent est bloquée ou expire"
       },
       "chat_replies": {
         "label": "Inclure les réponses du chat"
