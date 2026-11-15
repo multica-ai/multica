@@ -125,6 +125,7 @@
       "views": "뷰",
       "new_project": "새 프로젝트",
       "new_issue_in_project": "{{name}}에 새 태스크",
+      "private_project": "프로젝트 멤버와 워크스페이스 owner, admin이 볼 수 있습니다",
       "all_projects_other": "전체 프로젝트 {{count}}개",
       "project_issues": "{{name}}의 태스크",
       "project_issues_empty": "태스크가 없습니다",
