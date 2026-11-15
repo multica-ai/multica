@@ -912,8 +912,8 @@ func pinTaskSessionViaAPI(t *testing.T, taskID, daemonID, sessionID, workDir str
 	t.Helper()
 
 	w := httptest.NewRecorder()
-	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/tasks/"+taskID+"/session",
-		map[string]any{"session_id": sessionID, "work_dir": workDir}, testWorkspaceID, daemonID)
+	req := newOwnerDaemonRequest(http.MethodPost, "/api/daemon/tasks/"+taskID+"/session",
+		map[string]any{"session_id": sessionID, "work_dir": workDir})
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("taskId", taskID)
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))

@@ -70,4 +70,13 @@ describe("findLiteralRanges", () => {
     const fencePos = text.indexOf("==x==");
     expect(ranges.some((r) => fencePos >= r.start && fencePos < r.end)).toBe(true);
   });
+
+  it.each([
+    ["a longer outer fence around an inner ``` block", "````markdown\n```js\n==x==\n```\n````"],
+    ["a tilde fence", "~~~\n==x==\n~~~"],
+    ["an unclosed fence", "```\ncode\n==x=="],
+  ])("treats == inside %s as literal", (_, text) => {
+    const pos = text.indexOf("==x==");
+    expect(findLiteralRanges(text).some((r) => pos >= r.start && pos < r.end)).toBe(true);
+  });
 });

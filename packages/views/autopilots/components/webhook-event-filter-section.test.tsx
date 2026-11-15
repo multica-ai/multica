@@ -10,7 +10,9 @@ import { WebhookEventFilterSection } from "./webhook-event-filter-section";
 
 describe("WebhookEventFilterSection", () => {
   it("names the add control instead of shipping a bare + icon", () => {
-    renderWithI18n(<WebhookEventFilterSection filters={[]} onChange={vi.fn()} />);
+    renderWithI18n(
+      <WebhookEventFilterSection filters={[]} onChange={vi.fn()} />,
+    );
     expect(screen.getByRole("button", { name: "Add" })).toBeInTheDocument();
   });
 
@@ -27,7 +29,9 @@ describe("WebhookEventFilterSection", () => {
   });
 
   it("keeps add disabled until an event is typed", () => {
-    renderWithI18n(<WebhookEventFilterSection filters={[]} onChange={vi.fn()} />);
+    renderWithI18n(
+      <WebhookEventFilterSection filters={[]} onChange={vi.fn()} />,
+    );
     const add = screen.getByRole("button", { name: "Add" });
     expect(add).toBeDisabled();
 
@@ -38,7 +42,9 @@ describe("WebhookEventFilterSection", () => {
   });
 
   it("stays disabled for whitespace-only input", () => {
-    renderWithI18n(<WebhookEventFilterSection filters={[]} onChange={vi.fn()} />);
+    renderWithI18n(
+      <WebhookEventFilterSection filters={[]} onChange={vi.fn()} />,
+    );
     fireEvent.change(screen.getByPlaceholderText("e.g. workflow_run"), {
       target: { value: "   " },
     });
@@ -47,7 +53,9 @@ describe("WebhookEventFilterSection", () => {
 
   it("commits the row through onChange when add is clicked", () => {
     const onChange = vi.fn();
-    renderWithI18n(<WebhookEventFilterSection filters={[]} onChange={onChange} />);
+    renderWithI18n(
+      <WebhookEventFilterSection filters={[]} onChange={onChange} />,
+    );
     fireEvent.change(screen.getByPlaceholderText("e.g. workflow_run"), {
       target: { value: "workflow_run" },
     });
@@ -73,5 +81,24 @@ describe("WebhookEventFilterSection", () => {
       screen.getAllByRole("button", { name: "Remove filter" })[1]!,
     );
     expect(onChange).toHaveBeenCalledWith([{ event: "issues" }]);
+  });
+
+  it.each([
+    [
+      "zh-Hans",
+      `https://multica.ai/docs/zh/autopilots#${encodeURIComponent("事件过滤")}`,
+    ],
+    [
+      "zh-Hant",
+      `https://multica.ai/docs/zh-Hant/autopilots#${encodeURIComponent("事件過濾")}`,
+    ],
+  ] as const)("links the %s event filter docs section", (locale, href) => {
+    renderWithI18n(
+      <WebhookEventFilterSection filters={[]} onChange={vi.fn()} />,
+      {
+        locale,
+      },
+    );
+    expect(screen.getByRole("link")).toHaveAttribute("href", href);
   });
 });

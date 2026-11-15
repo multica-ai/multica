@@ -5,6 +5,7 @@ import {
   getAutopilotQuotaBody,
   getInboxDisplayTitle,
   getInboxNavigationTarget,
+  getInboxNoticeBody,
 } from "./inbox-display";
 
 function item(overrides: Partial<InboxItem>): InboxItem {
@@ -55,6 +56,20 @@ describe("deduplicateInboxItems", () => {
         comment_id: "comment-1",
       },
     });
+  });
+
+  it("anchors at the oldest unread comment, or the newest once all are read", () => {
+    const unread = deduplicateInboxItems([
+      item({ id: "older", created_at: "2026-06-15T08:00:00Z", details: { comment_id: "comment-1" } }),
+      item({ id: "newer", created_at: "2026-06-15T08:02:00Z", details: { comment_id: "comment-2" } }),
+    ]);
+    expect(unread[0]?.details?.comment_id).toBe("comment-1");
+
+    const read = deduplicateInboxItems([
+      item({ id: "older", read: true, created_at: "2026-06-15T08:00:00Z", details: { comment_id: "comment-1" } }),
+      item({ id: "newer", read: true, created_at: "2026-06-15T08:02:00Z", details: { comment_id: "comment-2" } }),
+    ]);
+    expect(read[0]?.details?.comment_id).toBe("comment-2");
   });
 });
 
@@ -149,5 +164,36 @@ describe("getAutopilotQuotaBody", () => {
         }),
       ),
     ).toBe("Readable server fallback");
+  });
+});
+
+describe("getInboxNoticeBody", () => {
+  const joined = (details: InboxItem["details"]) =>
+    item({
+      issue_id: null,
+      type: "project_owner_joined",
+      title: "Secret Plan",
+      body: "Server fallback",
+      details,
+    });
+
+  it("names the workspace owner who joined a private project", () => {
+    const notice = joined({ project_id: "p1", joined_by: "Grace" });
+
+    expect(getInboxNoticeBody(notice)).toContain("Grace is a workspace owner");
+    expect(getInboxDisplayTitle(notice)).toBe("Secret Plan");
+    expect(getInboxNavigationTarget(notice, "acme", "history-1")).toEqual({
+      pathname: "/[workspace]/inbox/[id]",
+      params: { workspace: "acme", id: "inbox-1" },
+    });
+  });
+
+  it("keeps the server body when the name is missing, and other notices as they were", () => {
+    expect(getInboxNoticeBody(joined(null))).toBe("Server fallback");
+    expect(
+      getInboxNoticeBody(
+        item({ issue_id: null, type: "autopilot_paused", body: "Paused" }),
+      ),
+    ).toBe("Paused");
   });
 });

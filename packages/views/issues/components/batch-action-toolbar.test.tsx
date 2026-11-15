@@ -11,6 +11,11 @@ const selection = vi.hoisted(() => ({
   clear: () => {},
 }));
 
+const deletionPolicy = vi.hoisted(() => ({ allowed: true }));
+vi.mock("@multica/core/issues/use-issue-deletion", () => ({
+  useIssueDeletion: () => ({ canDelete: () => deletionPolicy.allowed }),
+}));
+
 vi.mock("@multica/core/issues/stores/selection-store", () => ({
   useIssueSelectionStore: (selector: (s: typeof selection) => unknown) =>
     selector(selection),
@@ -21,6 +26,42 @@ vi.mock("@multica/core/issues/mutations", () => ({
   useBatchDeleteIssues: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
+const { WORKFLOWS, PROJECTS } = vi.hoisted(() => {
+  const workflow = (id: string, isDefault: boolean, keys: string[]) => ({
+    id,
+    workspace_id: "ws-1",
+    name: id,
+    description: "",
+    is_default: isDefault,
+    steps: keys.map((status_key) => ({ status_key, handler: { type: "none" }, instructions: "" })),
+    project_ids: [],
+    created_at: "",
+    updated_at: "",
+  });
+  return {
+    WORKFLOWS: [
+      workflow("default", true, ["todo", "in_progress", "done"]),
+      workflow("dev", false, ["todo", "in_progress", "code_review", "done"]),
+      workflow("design", false, ["todo", "mockup", "done"]),
+    ],
+    PROJECTS: [
+      { id: "p-dev", workflow_id: "dev" },
+      { id: "p-design", workflow_id: "design" },
+      { id: "p-default", workflow_id: null },
+    ],
+  };
+});
+
+vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
+vi.mock("@multica/core/issue-workflows", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/issue-workflows")>()),
+  useIssueWorkflows: () => ({ workflows: WORKFLOWS }),
+}));
+vi.mock("@tanstack/react-query", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@tanstack/react-query")>()),
+  useQuery: () => ({ data: PROJECTS }),
+}));
+
 vi.mock("../../i18n", () => ({
   useT: () => ({ t: () => "label" }),
 }));
@@ -28,8 +69,12 @@ vi.mock("../../i18n", () => ({
 // Render each picker as a probe that surfaces the value the toolbar passed in,
 // so the test asserts the wiring (real `commonIssueFields` runs underneath).
 vi.mock("./pickers", () => ({
-  StatusPicker: ({ status }: { status: string | null }) => (
-    <div data-testid="status-picker" data-status={status ?? "__none__"} />
+  StatusPicker: ({ status, allowedStatuses }: { status: string | null; allowedStatuses?: ReadonlySet<string> | null }) => (
+    <div
+      data-testid="status-picker"
+      data-status={status ?? "__none__"}
+      data-allowed={allowedStatuses ? [...allowedStatuses].sort().join(",") : "__all__"}
+    />
   ),
   PriorityPicker: ({ priority }: { priority: string | null }) => (
     <div data-testid="priority-picker" data-priority={priority ?? "__none__"} />
@@ -49,6 +94,20 @@ vi.mock("./pickers", () => ({
       data-assignee-id={assigneeId ?? "__null__"}
       data-mixed={String(Boolean(mixed))}
     />
+  ),
+  DueDatePicker: ({ dueDate }: { dueDate: string | null }) => (
+    <div data-testid="due-date-picker" data-due={dueDate ?? "__none__"} />
+  ),
+  StartDatePicker: () => null,
+}));
+vi.mock("./pickers/batch-label-picker", () => ({
+  BatchLabelPicker: ({ issues }: { issues: Issue[] }) => (
+    <div data-testid="label-picker" data-issues={issues.map((issue) => issue.id).join(",")} />
+  ),
+}));
+vi.mock("../../projects/components/project-picker", () => ({
+  ProjectPicker: ({ projectId }: { projectId: string | null | undefined }) => (
+    <div data-testid="project-picker" data-project={projectId === undefined ? "__mixed__" : projectId ?? "__none__"} />
   ),
 }));
 
@@ -81,6 +140,7 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
 }
 
 beforeEach(() => {
+  deletionPolicy.allowed = true;
   selection.selectedIds = new Set();
 });
 
@@ -129,6 +189,47 @@ describe("BatchActionToolbar picker wiring", () => {
     expect(assignee).toHaveAttribute("data-mixed", "false");
     expect(assignee).toHaveAttribute("data-assignee-type", "__null__");
     expect(assignee).toHaveAttribute("data-assignee-id", "__null__");
+  });
+
+  it("hands the label, project and due date pickers the selection's shared values", () => {
+    const issues = [
+      makeIssue({ id: "a", project_id: "p-dev", due_date: "2026-02-01" }),
+      makeIssue({ id: "b", project_id: "p-dev", due_date: "2026-02-01" }),
+      makeIssue({ id: "c", project_id: null, due_date: "2026-03-01" }),
+    ];
+    selection.selectedIds = new Set(["a", "b"]);
+    const view = render(<BatchActionToolbar issues={issues} />);
+
+    expect(screen.getByTestId("label-picker")).toHaveAttribute("data-issues", "a,b");
+    expect(screen.getByTestId("project-picker")).toHaveAttribute("data-project", "p-dev");
+    expect(screen.getByTestId("due-date-picker")).toHaveAttribute("data-due", "2026-02-01");
+
+    selection.selectedIds = new Set(["a", "b", "c"]);
+    view.rerender(<BatchActionToolbar issues={[...issues]} />);
+    expect(screen.getByTestId("project-picker")).toHaveAttribute("data-project", "__mixed__");
+    expect(screen.getByTestId("due-date-picker")).toHaveAttribute("data-due", "__none__");
+  });
+
+  it("offers only the statuses every selected project's workflow allows", () => {
+    const issues = [
+      makeIssue({ id: "a", project_id: "p-dev" }),
+      makeIssue({ id: "b", project_id: "p-design" }),
+      makeIssue({ id: "c", project_id: "p-default" }),
+    ];
+    selection.selectedIds = new Set(["a", "b", "c"]);
+
+    render(<BatchActionToolbar issues={issues} />);
+
+    expect(screen.getByTestId("status-picker")).toHaveAttribute("data-allowed", "done,todo");
+  });
+
+  it("offers Default's statuses for issues on Default or outside any project (MUL-8250)", () => {
+    const issues = [makeIssue({ id: "a", project_id: "p-default" }), makeIssue({ id: "b" })];
+    selection.selectedIds = new Set(["a", "b"]);
+
+    render(<BatchActionToolbar issues={issues} />);
+
+    expect(screen.getByTestId("status-picker")).toHaveAttribute("data-allowed", "done,in_progress,todo");
   });
 
   it("renders nothing when nothing is selected", () => {

@@ -7,64 +7,62 @@ import (
 	"path/filepath"
 )
 
-// ErrUnresolvablePath is returned by ResolveSymlinksBestEffort when the
-// operating system's own resolution of the path cannot be determined well
-// enough to compare against a root: an unknown redirecting reparse point whose
-// final location even a handle query cannot name, or a Windows drive-relative
-// path on a drive whose current directory this process cannot observe. A
-// caller that uses the result as a containment check must treat the error as
-// OUTSIDE — "cannot say where this opens" is not "opens where the string
-// says". A caller that only wants a canonical form should fall back to the
-// input unchanged.
+// ErrUnresolvablePath is returned by ResolveSymlinks and
+// ResolveSymlinksBestEffort when the operating system's own resolution of the
+// path cannot be determined well enough to compare against a root: an unknown
+// redirecting reparse point whose final location even a handle query cannot
+// name, or a Windows drive-relative path on a drive whose current directory
+// this process cannot observe. A caller that uses the result as a containment
+// check must treat the error as OUTSIDE — "cannot say where this opens" is not
+// "opens where the string says". A caller that only wants a canonical form
+// should fall back to the input unchanged.
 var ErrUnresolvablePath = errors.New("path resolution cannot be determined")
 
-// ResolveSymlinksBestEffort canonicalizes p the way the operating system would
-// open it, as far as the filesystem allows: it follows every symlink in the
-// existing prefix of p — on Windows directory junctions and other reparse
-// points too — applying ".." segments to the FOLLOWED path, not to the string,
-// and re-attaches the part that does not exist yet. The result is absolute,
-// and the error is ErrUnresolvablePath when even a fail-closed answer is
-// impossible to compute (see above).
+// ResolveSymlinks is the strict counterpart of ResolveSymlinksBestEffort: it
+// resolves p the way the operating system opens it — every symlink followed,
+// and on Windows every directory junction too — and fails when any component
+// is missing, unreadable, or cannot be resolved. It is for callers that must
+// prove a path lies inside a root before trusting it, where
+// filepath.EvalSymlinks cannot serve on Windows: under the winsymlink
+// semantics this module's go directive selects, it fails with ENOTDIR on any
+// path that passes THROUGH a junction (a workspaces root moved to another
+// drive and left behind as a junction, #8946), and returns a junction at the
+// END of a path unfollowed, so a link out of the root reads as inside it.
 //
-// Windows path kinds are preserved rather than flattened onto the working
-// directory. A root-relative path (`\tmp\desc.md`) resolves against the root
-// of the working directory's volume, and a drive-relative path (`C:tmp\desc`)
-// against the working directory only when that drive IS the working
-// directory's drive, because those are the files os.ReadFile actually opens.
-// Prefixing either with the working directory instead would let a same-named
-// file inside the workdir shadow the outside file the kernel reads, and a
-// containment check would pass on the shadow. The same grammar applies to
-// link targets, which the kernel resolves by the same rules rather than
-// relative to the link.
+// Every location it returns was walked component by component. On Windows a
+// path that can only be spelled in the device namespace — a volume GUID, a raw
+// device, or a link into one — is ErrUnresolvablePath rather than a lexical
+// answer, because two such strings can compare as nested while a junction
+// between them leads somewhere else entirely (see evalPathStrict).
 //
-// Two properties matter to callers that compare the result against a root.
+// On Unix this is filepath.EvalSymlinks. On Windows a path with no junction in
+// it keeps the spelling filepath.EvalSymlinks gives it (see canonicalSpelling),
+// so switching a caller over changes nothing for such paths.
 //
-// First, a path that does not fully exist still has to land in the same
-// namespace as the root. filepath.EvalSymlinks fails outright when any
-// component is missing, and falling back to filepath.Clean does not follow
-// symlinks at all, so the two sides of the comparison end up in different
-// namespaces (on macOS every /tmp and /var path is a symlink into /private) and
-// a path inside the root reads as outside it. Falling back one level via
-// filepath.Dir only narrows that to "the leaf is missing" — and inverts the
-// error for a deeper miss, since an unresolvable tail then reads as inside a
-// root it actually escapes. The walk below resolves the longest prefix the
-// filesystem can speak for and re-attaches the rest, so every component that
-// exists is still resolved and a symlink or junction planted inside the root
-// cannot smuggle a candidate past a containment check. Any resolution error
-// stops the descent, not just "not exists" — permission-denied on an ancestor
-// is equally a "cannot canonicalize here".
+// This mirrors Python's Path.resolve(strict=True).
+func ResolveSymlinks(p string) (string, error) {
+	abs := absNoClean(p)
+	if !filepath.IsAbs(abs) {
+		return "", fmt.Errorf("%w: %q has no observable base to resolve against", ErrUnresolvablePath, p)
+	}
+	resolved, err := evalPathStrict(abs)
+	if err != nil {
+		return "", err
+	}
+	return canonicalSpelling(resolved), nil
+}
+
+// ResolveSymlinksBestEffort returns an absolute path with existing symlinks
+// resolved and an unresolved tail reattached. Return ErrUnresolvablePath when
+// even a fail-closed result cannot be computed.
 //
-// Second, ".." is resolved physically wherever the filesystem can say so. The
-// path is never lexically cleaned before resolution, because filepath.Clean
-// (and filepath.Abs, and filepath.Join across the whole input) collapse
-// "escape/.." into nothing and thereby cross a symlink boundary invisibly: a
-// caller comparing the cleaned string sees a path inside its root while the
-// kernel would open one outside it. The walk applies each ".." to the resolved
-// prefix, which is the order the kernel uses. Only the tail after the first
-// unresolvable component is joined lexically, where a mismatch is inert — a
-// path with an unresolvable prefix cannot be opened at all.
+// Resolve .. against the followed path, never a lexically cleaned input: cleaning
+// first can hide a symlink escape. Resolve the longest existing prefix so missing
+// descendants remain in the same namespace as a containment root. Stop descent
+// on any resolution failure, including permission errors.
 //
-// This mirrors Python's Path.resolve(strict=False).
+// Preserve Windows volume-rooted and drive-relative semantics for both input and
+// link targets so the result matches the path the kernel would open.
 func ResolveSymlinksBestEffort(p string) (string, error) {
 	if p == "" {
 		return "", nil

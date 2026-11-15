@@ -71,21 +71,12 @@ describe("useInPageFind without the CSS Custom Highlight API", () => {
   let container: HTMLElement;
 
   beforeEach(() => {
-    // jsdom lays nothing out and doesn't implement Range.getClientRects, which
-    // the scroll-to-match path now calls in every browser. Return a single
-    // zero-size rect so scrollRangeIntoView no-ops instead of throwing.
-    (Range.prototype as { getClientRects: () => DOMRectList }).getClientRects =
-      () =>
-        [
-          { top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0 },
-        ] as unknown as DOMRectList;
     container = document.createElement("div");
     container.innerHTML = "<h1>Find me</h1><p>find me twice: find</p>";
     document.body.appendChild(container);
   });
 
   afterEach(() => {
-    delete (Range.prototype as { getClientRects?: unknown }).getClientRects;
     container.remove();
   });
 

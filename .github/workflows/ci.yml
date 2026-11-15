@@ -26,6 +26,7 @@ jobs:
       backend: ${{ steps.decide.outputs.backend }}
       sqlc: ${{ steps.decide.outputs.sqlc }}
       runtime: ${{ steps.decide.outputs.runtime }}
+      processtree: ${{ steps.decide.outputs.processtree }}
       quality_only: ${{ steps.decide.outputs.quality_only }}
       scripts: ${{ steps.decide.outputs.scripts }}
       installer: ${{ steps.decide.outputs.installer }}
@@ -40,8 +41,11 @@ jobs:
         with:
           node-version: 22
 
-      - name: Test CI selection and gates
-        run: node --test scripts/ci-scope.test.mjs scripts/check-image-budget.test.mjs
+      # Path selection must be proven before it skips anything. Every other
+      # scripts/**/*.test.mjs suite runs through `pnpm test:scripts` in the
+      # frontend-quality action.
+      - name: Test CI selection
+        run: node --test scripts/ci-scope.test.mjs
 
       - name: Filter paths
         id: filter
@@ -72,7 +76,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.26.x"
+          go-version: "~1.27.4"
           check-latest: true
           cache-dependency-path: server/go.sum
 
@@ -217,6 +221,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Report runner CPU
+        run: |
+          nproc
+          lscpu
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
 
@@ -348,9 +357,9 @@ jobs:
         id: go
         uses: actions/setup-go@v5
         with:
-          # Deliberately independent from the minimum patch in server/go.mod:
-          # CI follows the newest 1.26 patch available to setup-go.
-          go-version: "1.26.x"
+          # Keep the security floor even when the setup-go manifest lags;
+          # continue accepting newer patches within Go 1.27.
+          go-version: "~1.27.4"
           check-latest: true
           cache: false
 
@@ -450,7 +459,7 @@ jobs:
         id: go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.26.x"
+          go-version: "~1.27.4"
           check-latest: true
           cache: false
 
@@ -488,9 +497,9 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          # Deliberately independent from the minimum patch in server/go.mod:
-          # CI follows the newest 1.26 patch available to setup-go.
-          go-version: "1.26.x"
+          # Keep the security floor even when the setup-go manifest lags;
+          # continue accepting newer patches within Go 1.27.
+          go-version: "~1.27.4"
           check-latest: true
           cache-dependency-path: server/go.sum
 
@@ -498,10 +507,47 @@ jobs:
         working-directory: server
         run: go tool govulncheck ./...
 
+  # Every other backend job builds for Linux, so a `_darwin.go` file or a
+  # `//go:build darwin` test that falls out of step with a shared signature
+  # stayed green until the release build compiled it. Cross-vetting from
+  # ubuntu type-checks the whole module, tests included, the way macOS builds
+  # it, without paying for a macOS runner. arm64 because that is what Apple
+  # silicon users run; cgo is off when cross-compiling, as in the release.
+  # Its own runner rather than a backend-tests step: a cold darwin vet adds
+  # ~1 GB to the build cache that job publishes (see MUL-7547), and here it
+  # runs in parallel with the long pole instead of extending it.
+  backend-darwin-vet:
+    needs: changes
+    if: ${{ needs.changes.outputs.backend == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "~1.27.4"
+          check-latest: true
+          cache: false
+
+      - name: Restore Go module cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('server/go.sum') }}
+
+      - name: Vet darwin build
+        working-directory: server
+        env:
+          GOOS: darwin
+          GOARCH: arm64
+        run: go vet ./...
+
   # Preserve the existing required-check name while allowing tests, generated
   # SQL verification, and the vulnerability scan to run independently.
   backend:
-    needs: [changes, backend-tests, backend-agent-tests, sqlc-check, go-vulnerability-scan, macos-runtime, windows-execenv, script-checks, installer]
+    needs: [changes, backend-tests, backend-agent-tests, backend-darwin-vet, sqlc-check, go-vulnerability-scan, macos-runtime, macos-processtree, windows-execenv, script-checks, installer]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
@@ -509,7 +555,7 @@ jobs:
       - name: Check backend job results
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
-          JOB_SCOPES: '{"backend-tests":"backend","backend-agent-tests":"backend","sqlc-check":"sqlc","go-vulnerability-scan":"backend","macos-runtime":"full","windows-execenv":"runtime","script-checks":"scripts","installer":"installer"}'
+          JOB_SCOPES: '{"backend-tests":"backend","backend-agent-tests":"backend","backend-darwin-vet":"backend","sqlc-check":"sqlc","go-vulnerability-scan":"backend","macos-runtime":"full","macos-processtree":"processtree","windows-execenv":"runtime","script-checks":"scripts","installer":"installer"}'
         run: node scripts/ci-scope.mjs gate
 
   windows-execenv:
@@ -527,11 +573,17 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          # Deliberately independent from the minimum patch in server/go.mod:
-          # CI follows the newest 1.26 patch available to setup-go.
-          go-version: "1.26.x"
+          # Keep the security floor even when the setup-go manifest lags;
+          # continue accepting newer patches within Go 1.27.
+          go-version: "~1.27.4"
           check-latest: true
           cache-dependency-path: server/go.sum
+
+      - name: Test Windows WeCom media streaming and plaintext cleanup
+        working-directory: server
+        # These tests need no database. Windows must prove private file access,
+        # streaming without buffered fallback, and cleanup after process exit.
+        run: go test ./internal/integrations/wecom -v -run '^(TestStreamingDecrypt|TestMediaTempFile|TestPeekFile|TestIngest|TestTheStreamingPath)' -count=1 -timeout=5m
 
       - name: Test Windows execution-environment isolation
         working-directory: server
@@ -545,7 +597,14 @@ jobs:
         # These fixtures must redirect both the Windows user profile and the
         # platform-native Hermes home; otherwise discovery scans the runner's
         # real skills instead of the test directories.
-        run: go test ./internal/daemon -v -run '^(TestListRuntimeLocalSkills_HermesFollowsTaskHome|TestLocalSkills_DiscoversACPProviderRoots)$' -count=1 -timeout=5m
+        run: go test ./internal/daemon -v -run '^(TestListRuntimeLocalSkills_HermesFollowsTaskHome|TestLocalSkills_DiscoversACPProviderRoots|TestGC_LocalCodexHomePreservesJunctionTargets)$' -count=1 -timeout=5m
+
+      - name: Test Windows Git Bash temp lifecycle
+        working-directory: server
+        run: |
+          $env:MULTICA_TEST_GIT_BASH = "$env:ProgramFiles\Git\usr\bin\bash.exe"
+          if (-not (Test-Path -LiteralPath $env:MULTICA_TEST_GIT_BASH)) { throw "Git for Windows is required" }
+          go test -tags=gitbashintegration ./internal/daemon -v -run '^(TestWindowsGitBashTaskTempLifecycle|TestTaskMulticaEnvironment.*|TestTaskTempBaseDir)$' -count=1 -timeout=5m
 
       - name: Test Windows agent launcher argv/stdin handling
         working-directory: server
@@ -588,6 +647,10 @@ jobs:
         # inherited stdout neither keeps Result blocked nor survives cleanup.
         # -v makes RUN/PASS evidence explicit in CI logs.
         run: go test ./pkg/agent -v -run '^(TestStartOwnedProcessTreeCapturesImmediateDescendants|TestStartOwnedProcessTreeLeavesNoSuspendedChild|TestWaitProcessGroupGoneWithoutOwnershipReportsUnconfirmed|TestCodexInitializeRetrySupportedWithOwnedProcessTree|TestCodexWindowsDescendantsDieWithTheOwnedProcessTree|TestCodeArtsWindowsCancellationTerminatesDescendants)$' -count=1 -timeout=5m
+
+      - name: Test Windows Hermes gateway ownership and reservation
+        working-directory: server
+        run: go test ./pkg/agent -v -run '^(TestHermesGatewayWindowsCleanupOwnsDescendants|TestHermesGatewayReservation)$' -count=1 -timeout=5m
 
       - name: Test bounded CLI output collection on Windows
         working-directory: server
@@ -738,6 +801,22 @@ jobs:
         # the command interpreter can run.
         run: go test ./internal/daemon -v -run '^(TestCanonicalExecutablePath|TestTrimExtendedLengthPrefix|TestResolveAgentExecutablePathKeeps|TestResolveAgentExecutablePath_ProfileOverride|TestResolveAgentEntry(FollowsRetargetedInstallerJunction|CanonicalizesRediscoveredJunction|ForLaunchKeepsCmdShimLaunchable|ForLaunchRejectsUnverifiedInitialJunctionTarget|ForLaunchRejectsRediscoveredJunctionWhenFinalPathResolutionFails|DoesNotSharePreRetargetSingleflightResult|ForLaunchFailsWhenJunctionKeepsRetargeting)|TestHandleTaskReportsWindowsCodexProcessStartFailure)' -count=1 -timeout=5m
 
+      - name: Test Windows task workdirs under a junctioned workspaces root
+        working-directory: server
+        # #8946: a workspaces root moved to another drive and left behind as a
+        # directory junction puts a junction in the middle of every task path.
+        # filepath.EvalSymlinks fails with ENOTDIR there, so every repo checkout
+        # was refused as "not owned by the active task" and every follow-up
+        # silently lost its workdir. The strict resolver also has to walk
+        # extended-length (`\\?\`) spellings instead of comparing them as
+        # strings, and refuse volume-GUID paths it cannot walk. Only a real
+        # Windows filesystem has junctions; the ubuntu backend job covers the
+        # symlink shapes.
+        # -v so a skip or a pattern that stops matching is visible.
+        run: |
+          go test ./internal/util -v -run '^(TestResolveSymlinksFollowsJunctions|TestResolveSymlinksExtendedLengthPaths)$' -count=1 -timeout=5m
+          go test ./internal/daemon -v -run '^(TestAuthorizeRepoCheckoutWorkDirThroughJunctionedRoot|TestAuthorizeRepoCheckoutWorkDirFollowsJunctionsInsideTheWorkdir|TestAuthorizeRepoCheckoutWorkDirExtendedLengthSpelling|TestShouldReusePriorWorkdirThroughJunctionedRoot)$' -count=1 -timeout=5m
+
       - name: Build Windows CLI helper entrypoint
         working-directory: server
         run: go build ./cmd/multica
@@ -755,15 +834,17 @@ jobs:
         # backend job still covers the untagged and Unix arms.
         run: go test -race ./pkg/agent -v -run 'TestCursorBackground|TestCaptureCursorBackground' -count=1 -timeout=5m
 
-  # The only macOS runner here, and the only place cursor_background_process_darwin.go
-  # is ever built: it signals a process group through XNU's per-process unique
-  # identity so a recycled PID cannot redirect a kill, and the two tests pinning
-  # that are `//go:build darwin`. Windows keeps its arm as a step in
-  # windows-execenv, but macOS has no sibling job to join, and this covers one
-  # integration's background shell rather than the shared launch path every
-  # agent uses. So the daily full run carries it instead of charging every
-  # backend merge for a macOS runner; `full` also means the stress counts below
-  # are now the only finalization pass, replacing the single-count merge variant.
+  # The daily macOS runtime runner, and the only place the darwin-only code
+  # runs (backend-darwin-vet only type-checks it). It began with
+  # cursor_background_process_darwin.go, which signals a process group through
+  # XNU's per-process unique identity so a recycled PID cannot redirect a kill,
+  # and the two tests pinning that are `//go:build darwin`. Windows keeps its
+  # arm as a step in windows-execenv, but macOS has no sibling job to join,
+  # and this covers one integration's background shell rather than the shared
+  # launch path every agent uses. So the daily full run carries it instead of
+  # charging every backend merge for a macOS runner; `full` also means the
+  # stress counts below are now the only finalization pass, replacing the
+  # single-count merge variant.
   macos-runtime:
     needs: changes
     if: ${{ needs.changes.outputs.full == 'true' }}
@@ -772,7 +853,8 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26.x"
+          go-version: "~1.27.4"
+          check-latest: true
           cache-dependency-path: server/go.sum
       - name: Verify Cursor background lifecycle and watchdog races
         shell: bash
@@ -794,6 +876,48 @@ jobs:
         shell: bash
         working-directory: server
         run: CGO_ENABLED=0 go test ./pkg/agent -run '^TestCaptureCursorBackground(KernelRejectsStaleIdentity|DetachedSession|LateDescendant)$' -count=1
+
+      # The ubuntu backend job passes these same tests through the Linux
+      # implementations; only a macOS host reaches pi_cleanup_darwin.go,
+      # localenv's lsof/ps/AppKit detection, and the LaunchAgent writer.
+      # localenv's focusApp needs a GUI login session and stays uncovered.
+      # Runs even when a Cursor step above failed, since it shares nothing with
+      # them. -race reuses the objects those steps already built.
+      # -v so a silent skip or a -run pattern that stops matching is visible.
+      - name: Test macOS Pi cleanup, local environments, and autostart
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: server
+        run: |
+          go test -race ./pkg/agent -v -run '^TestPiCleanup' -count=1 -timeout=10m
+          go test -race ./internal/daemon -v -run '^TestPiCleanup' -count=1 -timeout=10m
+          go test -race ./internal/daemon/localenv -v -count=1 -timeout=10m
+          go test -race ./cmd/multica -v -run 'Autostart|LaunchAgent' -count=1 -timeout=10m
+
+  # MUL-9162: Darwin's kill(-pgid) skips group members that are exiting or
+  # zombies and returns EPERM instead of ESRCH while the group drains, so
+  # processtree treats that EPERM as "nothing left to signal". The branch is
+  # gated on runtime.GOOS, so the ubuntu backend job passes the same tests
+  # without ever reaching it; only a macOS host proves the handling is still
+  # there. Scoped to the package itself (stdlib-only, ~10s at -count=3) so a
+  # macOS runner is charged only to PRs that touch it, plus every full run.
+  # -count=3 because the test lands in the drain window only a few times per
+  # thousand iterations.
+  macos-processtree:
+    needs: changes
+    if: ${{ needs.changes.outputs.processtree == 'true' }}
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "~1.27.4"
+          check-latest: true
+          cache-dependency-path: server/go.sum
+      - name: Test macOS process-group drain handling
+        shell: bash
+        working-directory: server
+        run: go test ./internal/daemon/processtree/ -v -count=3 -timeout=5m
 
   image-budget:
     # Soft gate against the 21.7MB of raw PNG/JPG that MUL-6352 cleared out:
@@ -866,11 +990,17 @@ jobs:
       - name: Test self-host env derivation
         run: bash scripts/selfhost-config.test.sh
 
+      - name: Test check script
+        run: bash scripts/check.test.sh
+
       - name: Test worktree database cleanup
         run: bash scripts/worktree-db.test.sh
 
       - name: Test development environment registry
         run: bash scripts/dev-env.test.sh
+
+      - name: Test agent environment lifecycle
+        run: bash scripts/agent-environment.test.sh
 
       - name: Test UI performance comparison runner
         run: bash scripts/perf-compare.test.sh
@@ -883,6 +1013,13 @@ jobs:
         run: |
           node scripts/generate-reserved-slugs.mjs
           git diff --exit-code -- packages/core/paths/reserved-slugs.ts
+
+      - name: Verify attachment text-preview whitelist is up to date
+        # The Go handler embeds the JSON source directly while the shared
+        # web/desktop view consumes the checked-in generated TypeScript file.
+        run: |
+          node scripts/generate-attachment-text-preview.mjs
+          git diff --exit-code -- packages/views/editor/utils/text-preview-whitelist.generated.ts
 
       - name: Setup Helm
         uses: azure/setup-helm@v4

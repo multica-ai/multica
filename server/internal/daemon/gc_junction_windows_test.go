@@ -3,11 +3,15 @@
 package daemon
 
 import (
+	"context"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 )
 
 // The per-task codex-home links shared user content into the task directory —
@@ -42,6 +46,13 @@ func createJunction(t *testing.T, src, dst string) {
 }
 
 func TestCleanTaskArtifacts_DoesNotFollowDirectoryJunction(t *testing.T) {
+	t.Run("active environment guard", func(t *testing.T) {
+		root := t.TempDir()
+		alias := filepath.Join(t.TempDir(), "alias")
+		createJunction(t, root, alias)
+		assertEnvRootGuardSharesAliases(t, root, alias)
+	})
+
 	d := newGCTestDaemon(t, http.NewServeMux())
 
 	taskDir := t.TempDir()
@@ -58,7 +69,7 @@ func TestCleanTaskArtifacts_DoesNotFollowDirectoryJunction(t *testing.T) {
 	// user's ~/.codex/skills/<name>.
 	createJunction(t, userSkill, filepath.Join(taskDir, "codex-home", "skills", "alpha"))
 
-	removed, _, _ := d.cleanTaskArtifacts(taskDir, []string{"node_modules"})
+	removed, _, _ := d.cleanTaskArtifacts(context.Background(), taskDir, []string{"node_modules"})
 	if removed != 0 {
 		t.Errorf("removed %d artifacts through a junction, want 0", removed)
 	}
@@ -84,5 +95,49 @@ func TestTaskSize_DoesNotCountDirectoryJunction(t *testing.T) {
 	}
 	if artifacts != 0 {
 		t.Errorf("artifacts = %d, want 0", artifacts)
+	}
+}
+
+func TestGC_LocalCodexHomePreservesJunctionTargets(t *testing.T) {
+	for _, name := range []string{"live store", "expired store", "store inside task root", "junctioned workspaces root"} {
+		t.Run(name, func(t *testing.T) {
+			d := newGCTestDaemon(t, chatGCMux("chat", "active"))
+			d.cfg.GCCompletedTaskTTL = DefaultGCCompletedTaskTTL
+			if name == "junctioned workspaces root" {
+				d.cfg.WorkspacesRoot, _ = junctionedWorkspacesRoot(t)
+			}
+			taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws", "local-task", &execenv.GCMeta{
+				Kind: execenv.GCKindChat, ChatSessionID: "chat", WorkspaceID: "ws",
+				LocalDirectory: true, CompletedAt: time.Now().Add(-15 * 24 * time.Hour),
+			})
+			writeFile(t, filepath.Join(taskDir, "codex-home/state_5.sqlite"), 32)
+			store, skills, plugins := filepath.Join(t.TempDir(), "conversation"), t.TempDir(), t.TempDir()
+			if name == "store inside task root" {
+				store = filepath.Join(taskDir, "conversation")
+			}
+			for _, target := range []string{store, skills, plugins} {
+				writeFile(t, filepath.Join(target, "keep"), 64)
+			}
+			createJunction(t, store, filepath.Join(taskDir, "codex-home/sessions"))
+			createJunction(t, skills, filepath.Join(taskDir, "codex-home/skills"))
+			createJunction(t, plugins, filepath.Join(taskDir, "codex-home/plugins/cache"))
+			if name == "expired store" {
+				if err := os.RemoveAll(store); err != nil {
+					t.Fatal(err)
+				}
+			}
+			d.gcWorkspace(context.Background(), filepath.Dir(taskDir), &gcStats{})
+			if name == "store inside task root" {
+				assertKept(t, taskDir, "codex-home/state_5.sqlite")
+			} else {
+				assertGone(t, taskDir, "codex-home")
+			}
+			for _, target := range []string{skills, plugins} {
+				assertKept(t, target, "keep")
+			}
+			if name != "expired store" {
+				assertKept(t, store, "keep")
+			}
+		})
 	}
 }

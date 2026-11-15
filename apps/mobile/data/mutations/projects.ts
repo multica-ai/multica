@@ -169,22 +169,13 @@ export function useDeleteProjectResource(projectId: string) {
   return useMutation({
     mutationKey: ["deleteProjectResource", projectId] as const,
     mutationFn: (resourceId: string) =>
-      api.deleteProjectResource(projectId, resourceId).then(() => resourceId),
-    onMutate: async (resourceId) => {
+      api.deleteProjectResource(projectId, resourceId),
+    onSuccess: async (_data, resourceId) => {
       const key = projectKeys.resources(wsId, projectId);
       await qc.cancelQueries({ queryKey: key });
-      const prev = qc.getQueryData<ProjectResource[]>(key);
       qc.setQueryData<ProjectResource[]>(key, (old) =>
         old ? old.filter((r) => r.id !== resourceId) : old,
       );
-      return { prev, key };
-    },
-    onError: (_err, _vars, ctx) => {
-      if (ctx?.prev !== undefined) {
-        qc.setQueryData(ctx.key, ctx.prev);
-      }
-    },
-    onSuccess: () => {
       const dropCount = (p: Project): Project => ({
         ...p,
         resource_count: Math.max(0, p.resource_count - 1),
@@ -198,6 +189,10 @@ export function useDeleteProjectResource(projectId: string) {
           ? old.map((p) => (p.id === projectId ? dropCount(p) : p))
           : old,
       );
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: projectKeys.detail(wsId, projectId) });
+      qc.invalidateQueries({ queryKey: projectKeys.list(wsId) });
     },
   });
 }
