@@ -54,6 +54,7 @@ Common resource types:
 ```bash
 multica project list --output json
 multica project get <project-id> --output json
+multica project overview <project-id>                 # project + progress + resources in one read
 multica project progress <project-id> --output json   # scope/completed/started, weekly history, forecast, by assignee
 multica project create --title "<title>" --repo <github-url> --output json
 multica project create --title "<title>" --start-date 2026-03-01 --due-date 2026-03-31 --output json
