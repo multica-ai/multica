@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// TestPrivateProjectMembersOnlyBackfill pins what migration 659 does to the
+// TestPrivateProjectMembersOnlyBackfill pins what migration 660 does to the
 // private projects that exist when the role-based rule is removed: whoever saw
 // one through their role is now a member, and every one of them is led by a
 // human who is a member.
@@ -124,9 +124,9 @@ func TestPrivateProjectMembersOnlyBackfill(t *testing.T) {
 		t.Fatalf("seed project members: %v", err)
 	}
 
-	applyMigrationFile(t, ctx, pool, "659_private_project_members_only.up.sql")
+	applyMigrationFile(t, ctx, pool, "660_private_project_members_only.up.sql")
 	// Idempotent: a second run changes nothing the assertions below can see.
-	applyMigrationFile(t, ctx, pool, "659_private_project_members_only.up.sql")
+	applyMigrationFile(t, ctx, pool, "660_private_project_members_only.up.sql")
 
 	members := func(project string) []string {
 		t.Helper()
@@ -205,5 +205,5 @@ func TestPrivateProjectMembersOnlyBackfill(t *testing.T) {
 	})
 
 	// The down migration is a documented no-op and must stay runnable.
-	applyMigrationFile(t, ctx, pool, "659_private_project_members_only.down.sql")
+	applyMigrationFile(t, ctx, pool, "660_private_project_members_only.down.sql")
 }
