@@ -11,7 +11,11 @@
  * setup dialog instead of recording.
  *
  * Recording and transcription are platform work behind `VoiceRuntime`. The
- * app connects one (Desktop's on-device engine); without it nothing records.
+ * app connects one (Desktop's on-device engine, or the server's speech
+ * provider on the web); without it nothing records. A runtime that streams
+ * types each finished sentence while the user is still talking and shows the
+ * words of the sentence in progress; the others transcribe the whole clip
+ * when the recording ends.
  */
 import { create } from "zustand";
 import { getShortcut } from "../shortcuts/store";
@@ -57,6 +61,23 @@ export interface VoiceDecodeOptions {
   hotwords: string[];
 }
 
+export interface VoiceStreamHandlers {
+  /** The words of the sentence in progress; each call replaces the last. */
+  onInterim: (text: string) => void;
+  /** A finished sentence, to type into the composer now. */
+  onTurn: (text: string) => void;
+  /** The stream broke after it opened. */
+  onError: () => void;
+}
+
+export interface VoiceStream {
+  /** Resolves once audio is flowing; rejects with a VoiceRecorderError, or any error when the stream cannot open. */
+  start: (deviceId: string | null, options: VoiceDecodeOptions) => Promise<void>;
+  /** Stop listening; resolves once the last sentence has been delivered (or given up on). */
+  finish: () => Promise<void>;
+  discard: () => void;
+}
+
 export interface VoiceRuntime {
   /** `onLimit` fires when the recording hits its length cap. */
   record: (onMeter: (meter: VoiceMeter) => void, onLimit: () => void) => VoiceRecorder;
@@ -67,6 +88,15 @@ export interface VoiceRuntime {
   watchModels: (onChange: (models: VoiceModels) => void) => void;
   /** Keep recordings on this device; absent where there is nowhere to keep them. */
   history?: VoiceHistoryRuntime;
+  /**
+   * Transcribe while the user talks instead of after. When present, a
+   * recording is a stream and `record`/`transcribe` are not used for it.
+   */
+  stream?: (
+    handlers: VoiceStreamHandlers,
+    onMeter: (meter: VoiceMeter) => void,
+    onLimit: () => void,
+  ) => VoiceStream;
 }
 
 export interface VoiceHistoryRuntime {
@@ -118,11 +148,14 @@ interface VoiceSessionState {
   session: VoiceState;
   /** Level history and elapsed time; changes ~20 times a second while recording. */
   meter: VoiceMeter;
+  /** A stream's sentence in progress, not typed yet. */
+  interim: string;
 }
 
 export const useVoiceSessionStore = create<VoiceSessionState>()(() => ({
   session: IDLE,
   meter: EMPTY_METER,
+  interim: "",
 }));
 
 let runtime: VoiceRuntime | null = null;
@@ -133,6 +166,9 @@ let focusedId: string | null = null;
 
 let session = 0;
 let recording: VoiceRecorder | null = null;
+let streaming: VoiceStream | null = null;
+/** The stream typed at least one sentence. */
+let streamTyped = false;
 let lastClip: Blob | null = null;
 /** The history entry for `lastClip`, and whether its outcome is still open. */
 let historyEntry: Promise<string | null> | null = null;
@@ -160,6 +196,16 @@ function setState(patch: Partial<VoiceState>) {
 
 function setMeter(meter: VoiceMeter) {
   useVoiceSessionStore.setState({ meter });
+}
+
+function setInterim(interim: string) {
+  if (useVoiceSessionStore.getState().interim !== interim) useVoiceSessionStore.setState({ interim });
+}
+
+function endStream() {
+  streaming?.discard();
+  streaming = null;
+  setInterim("");
 }
 
 function isCapturing() {
@@ -224,8 +270,13 @@ function begin(targetId: string, mode: VoiceMode) {
     return;
   }
   target.activate?.();
+  if (runtime.stream) {
+    beginStream(targetId, mode, runtime.stream);
+    return;
+  }
   runtime.prepare(model, decodeOptions());
   const token = ++session;
+  endStream();
   recording?.discard();
   lastClip = null;
   historyEntry = null;
@@ -255,7 +306,102 @@ function begin(targetId: string, mode: VoiceMode) {
   );
 }
 
+function beginStream(targetId: string, mode: VoiceMode, open: NonNullable<VoiceRuntime["stream"]>) {
+  const token = ++session;
+  recording?.discard();
+  recording = null;
+  endStream();
+  lastClip = null;
+  historyEntry = null;
+  historyOpen = false;
+  sendAfterInsert = false;
+  streamTyped = false;
+  const current = open(
+    {
+      onInterim: (text) => {
+        if (token === session) setInterim(text);
+      },
+      onTurn: (text) => {
+        if (token !== session) return;
+        setInterim("");
+        const cleaned = cleanTranscript(text);
+        if (!cleaned) return;
+        streamTyped = true;
+        typeTurn(token, cleaned);
+      },
+      onError: () => {
+        if (token !== session) return;
+        endStream();
+        clearHold();
+        fail("transcription-failed", false);
+      },
+    },
+    (next) => {
+      if (token === session) setMeter(next);
+    },
+    () => {
+      if (token === session) void finish(false);
+    },
+  );
+  streaming = current;
+  setMeter(EMPTY_METER);
+  setState({ targetId, phase: "requesting", mode, error: null, canRetry: false });
+  current.start(useVoiceSettingsStore.getState().deviceId, decodeOptions()).then(
+    () => {
+      if (token === session) setState({ phase: "recording" });
+    },
+    (err: unknown) => {
+      if (token !== session) return;
+      endStream();
+      clearHold();
+      fail(err instanceof VoiceRecorderError ? err.failure : "transcription-failed", false);
+    },
+  );
+}
+
+/** Type one finished sentence of a stream; the session keeps recording. */
+function typeTurn(token: number, text: string, attempt = 0) {
+  if (token !== session) return;
+  const { targetId } = state();
+  const target = targetId ? targets.get(targetId) : undefined;
+  if (!target) {
+    cancelVoice();
+    return;
+  }
+  if (target.insert(text)) return;
+  if (attempt < INSERT_ATTEMPTS) setTimeout(() => typeTurn(token, text, attempt + 1), 100);
+}
+
+async function finishStream(current: VoiceStream, send: boolean) {
+  streaming = null;
+  clearHold();
+  const token = session;
+  const { elapsedMs } = useVoiceSessionStore.getState().meter;
+  setState({ phase: "transcribing", mode: state().mode === "pending" ? "strip" : state().mode });
+  await current.finish();
+  if (token !== session) return;
+  setInterim("");
+  if (!streamTyped) {
+    // An accidental tap of a hold-to-talk control is not worth an error.
+    if (elapsedMs < HOLD_MS) cancelVoice();
+    else fail("no-speech", false);
+    return;
+  }
+  const { targetId } = state();
+  setState(IDLE);
+  if (send && targetId) targets.get(targetId)?.submit?.();
+}
+
 async function finish(send: boolean) {
+  if (streaming && isCapturing()) {
+    if (state().phase === "requesting") {
+      // Released while the permission prompt is still open: keep going as a tap.
+      if (state().mode !== "strip") setState({ mode: "strip" });
+      return;
+    }
+    await finishStream(streaming, send);
+    return;
+  }
   const current = recording;
   if (!current || !isCapturing()) return;
   if (state().phase === "requesting") {
@@ -339,6 +485,7 @@ function deliver(token: number, text: string, attempt = 0) {
 
 function openSetup(targetId: string) {
   session++;
+  endStream();
   recording?.discard();
   recording = null;
   clearHold();
@@ -358,6 +505,7 @@ export function cancelVoice() {
   historyEntry = null;
   historyOpen = false;
   session++;
+  endStream();
   recording?.discard();
   recording = null;
   lastClip = null;
@@ -522,6 +670,11 @@ export function useVoiceState(): VoiceState {
 
 export function useVoiceMeter(): VoiceMeter {
   return useVoiceSessionStore((s) => s.meter);
+}
+
+/** The sentence a stream is still hearing; empty when nothing is pending. */
+export function useVoiceInterim(): string {
+  return useVoiceSessionStore((s) => s.interim);
 }
 
 export function getVoiceState(): VoiceState {

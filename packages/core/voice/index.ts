@@ -37,6 +37,7 @@ export {
   stopVoice,
   toggleVoice,
   transcribeVoiceClip,
+  useVoiceInterim,
   useVoiceMeter,
   useVoiceState,
   type VoiceClip,
@@ -48,4 +49,6 @@ export {
   type VoiceRecorderFailure,
   type VoiceRuntime,
   type VoiceState,
+  type VoiceStream,
+  type VoiceStreamHandlers,
 } from "./session";

@@ -16,6 +16,7 @@ import {
   retryVoice,
   stopVoice,
   toggleVoice,
+  useVoiceInterim,
   useVoiceMeter,
   useVoiceSettingsStore,
   type VoiceErrorKind,
@@ -160,6 +161,24 @@ function RecDot({ className }: { className?: string }) {
 }
 
 /**
+ * The sentence a stream is still hearing, faded until it is typed. Long
+ * sentences keep their newest words in view.
+ */
+function Interim({ text, className }: { text: string; className?: string }) {
+  return (
+    <span
+      aria-live="off"
+      className={cn(
+        "flex min-w-0 justify-end overflow-hidden text-caption [mask-image:linear-gradient(to_right,transparent,black_24px)]",
+        className,
+      )}
+    >
+      <span className="shrink-0 whitespace-nowrap">{text}</span>
+    </span>
+  );
+}
+
+/**
  * The mic every composer carries. Tap to dictate into the toolbar strip;
  * press and hold to talk, release to insert.
  */
@@ -216,6 +235,7 @@ export function VoiceMicButton({ voice, className }: { voice: ComposerVoice; cla
  */
 export function VoiceStrip({ voice }: { voice: ComposerVoice }) {
   const { t } = useT("editor");
+  const interim = useVoiceInterim();
   const phase = voice.session?.phase;
   if (!voice.showStrip) return null;
   if (phase === "transcribing") {
@@ -224,9 +244,13 @@ export function VoiceStrip({ voice }: { voice: ComposerVoice }) {
         <span className="flex size-[var(--button-height-sm)] shrink-0 items-center justify-center">
           <Mic className="size-4 text-muted-foreground" />
         </span>
-        <ShimmerText className="ml-1 truncate text-caption font-medium text-muted-foreground">
-          {t(($) => $.voice.transcribing)}
-        </ShimmerText>
+        {interim ? (
+          <Interim text={interim} className="ml-1 flex-1 text-faint-foreground" />
+        ) : (
+          <ShimmerText className="ml-1 truncate text-caption font-medium text-muted-foreground">
+            {t(($) => $.voice.transcribing)}
+          </ShimmerText>
+        )}
       </div>
     );
   }
@@ -252,7 +276,11 @@ export function VoiceStrip({ voice }: { voice: ComposerVoice }) {
             <span className="sr-only">{t(($) => $.voice.recording)}</span>
             <Elapsed className="text-muted-foreground" />
           </span>
-          <Waveform density="strip" className="min-w-0 flex-1 text-foreground" />
+          {interim ? (
+            <Interim text={interim} className="flex-1 text-faint-foreground" />
+          ) : (
+            <Waveform density="strip" className="min-w-0 flex-1 text-foreground" />
+          )}
           <IconButton
             label={t(($) => $.voice.insert)}
             shortcut={<ActionShortcutKeycaps action="voiceInput" />}
@@ -287,6 +315,7 @@ export function VoiceStrip({ voice }: { voice: ComposerVoice }) {
  */
 export function VoiceHud({ voice }: { voice: ComposerVoice }) {
   const { t } = useT("editor");
+  const interim = useVoiceInterim();
   const phase = voice.session?.phase;
   if (!voice.showHud) return null;
   return (
@@ -301,7 +330,11 @@ export function VoiceHud({ voice }: { voice: ComposerVoice }) {
             <span className="sr-only">{t(($) => $.voice.recording)}</span>
             <Waveform density="hud" className="w-[86px]" />
             <Elapsed className="opacity-70" />
-            <span className="text-caption opacity-70">{t(($) => $.voice.release_to_insert)}</span>
+            {interim ? (
+              <Interim text={interim} className="max-w-[240px] opacity-50" />
+            ) : (
+              <span className="text-caption opacity-70">{t(($) => $.voice.release_to_insert)}</span>
+            )}
           </>
         ) : (
           <>
