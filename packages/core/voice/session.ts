@@ -68,6 +68,8 @@ export interface VoiceStreamHandlers {
   onTurn: (text: string) => void;
   /** The stream broke after it opened. */
   onError: () => void;
+  /** The microphone is open; what remains of starting is network, not a permission prompt. */
+  onMicrophone?: () => void;
 }
 
 export interface VoiceStream {
@@ -175,6 +177,12 @@ let recording: VoiceRecorder | null = null;
 let streaming: VoiceStream | null = null;
 /** The stream typed at least one sentence. */
 let streamTyped = false;
+/** The stream's microphone is open, so a release while starting is not answering a prompt. */
+let streamMicOpen = false;
+/** Released (or stopped) while the stream was still connecting: stop as soon as it is up. */
+let stopWhenStreaming: { send: boolean } | null = null;
+/** Sentences are typed in the order they ended; finishing waits for the last one. */
+let turnQueue: Promise<void> = Promise.resolve();
 let lastClip: Blob | null = null;
 /** The history entry for `lastClip`, and whether its outcome is still open. */
 let historyEntry: Promise<string | null> | null = null;
@@ -211,6 +219,7 @@ function setInterim(interim: string) {
 function endStream() {
   streaming?.discard();
   streaming = null;
+  stopWhenStreaming = null;
   setInterim("");
 }
 
@@ -322,6 +331,9 @@ function beginStream(targetId: string, mode: VoiceMode, open: NonNullable<VoiceR
   historyOpen = false;
   sendAfterInsert = false;
   streamTyped = false;
+  streamMicOpen = false;
+  stopWhenStreaming = null;
+  turnQueue = Promise.resolve();
   const current = open(
     {
       onInterim: (text) => {
@@ -333,7 +345,10 @@ function beginStream(targetId: string, mode: VoiceMode, open: NonNullable<VoiceR
         const cleaned = cleanTranscript(text);
         if (!cleaned) return;
         streamTyped = true;
-        typeTurn(token, cleaned);
+        turnQueue = turnQueue.then(() => typeTurn(token, cleaned));
+      },
+      onMicrophone: () => {
+        if (token === session) streamMicOpen = true;
       },
       onError: () => {
         if (token !== session) return;
@@ -354,10 +369,15 @@ function beginStream(targetId: string, mode: VoiceMode, open: NonNullable<VoiceR
   setState({ targetId, phase: "requesting", mode, error: null, canRetry: false });
   current.start(useVoiceSettingsStore.getState().deviceId, decodeOptions()).then(
     () => {
-      if (token === session) setState({ phase: "recording" });
+      // A stream that failed while starting has already reported its error.
+      if (token !== session || streaming !== current) return;
+      setState({ phase: "recording" });
+      const stop = stopWhenStreaming;
+      stopWhenStreaming = null;
+      if (stop) void finishStream(current, stop.send);
     },
     (err: unknown) => {
-      if (token !== session) return;
+      if (token !== session || streaming !== current) return;
       endStream();
       clearHold();
       fail(err instanceof VoiceRecorderError ? err.failure : "stream-failed", false);
@@ -365,17 +385,21 @@ function beginStream(targetId: string, mode: VoiceMode, open: NonNullable<VoiceR
   );
 }
 
-/** Type one finished sentence of a stream; the session keeps recording. */
-function typeTurn(token: number, text: string, attempt = 0) {
-  if (token !== session) return;
-  const { targetId } = state();
-  const target = targetId ? targets.get(targetId) : undefined;
-  if (!target) {
-    cancelVoice();
-    return;
+/**
+ * Type one finished sentence of a stream; the session keeps recording. A
+ * lazily-mounted editor gets the same grace as a clip's transcript; one that
+ * never comes up, or a composer that went away, ends the session.
+ */
+async function typeTurn(token: number, text: string) {
+  for (let attempt = 0; attempt <= INSERT_ATTEMPTS; attempt++) {
+    if (token !== session) return;
+    const { targetId } = state();
+    const target = targetId ? targets.get(targetId) : undefined;
+    if (!target) break;
+    if (target.insert(text)) return;
+    await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  if (target.insert(text)) return;
-  if (attempt < INSERT_ATTEMPTS) setTimeout(() => typeTurn(token, text, attempt + 1), 100);
+  if (token === session) cancelVoice();
 }
 
 async function finishStream(current: VoiceStream, send: boolean) {
@@ -385,6 +409,8 @@ async function finishStream(current: VoiceStream, send: boolean) {
   const { elapsedMs } = useVoiceSessionStore.getState().meter;
   setState({ phase: "transcribing", mode: state().mode === "pending" ? "strip" : state().mode });
   await current.finish();
+  // Every sentence lands before the session ends or the composer sends.
+  await turnQueue;
   if (token !== session) return;
   setInterim("");
   if (!streamTyped) {
@@ -401,6 +427,11 @@ async function finishStream(current: VoiceStream, send: boolean) {
 async function finish(send: boolean) {
   if (streaming && isCapturing()) {
     if (state().phase === "requesting") {
+      if (streamMicOpen) {
+        // Only the connection is still coming up: stop once it is.
+        stopWhenStreaming = { send };
+        return;
+      }
       // Released while the permission prompt is still open: keep going as a tap.
       if (state().mode !== "strip") setState({ mode: "strip" });
       return;

@@ -20,10 +20,18 @@ func (f fakeVoiceSessions) NewSession(context.Context) (speech.Session, error) {
 	return f.session, f.err
 }
 
-func postVoiceSession(h *Handler) *httptest.ResponseRecorder {
+func postVoiceSessionAs(h *Handler, userID string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPost, "/api/voice/sessions", nil)
+	if userID != "" {
+		req.Header.Set("X-User-ID", userID)
+	}
 	w := httptest.NewRecorder()
-	h.CreateVoiceSession(w, httptest.NewRequest(http.MethodPost, "/api/voice/sessions", nil))
+	h.CreateVoiceSession(w, req)
 	return w
+}
+
+func postVoiceSession(h *Handler) *httptest.ResponseRecorder {
+	return postVoiceSessionAs(h, "user-1")
 }
 
 func TestCreateVoiceSessionIsOffWithoutAProvider(t *testing.T) {
@@ -54,5 +62,27 @@ func TestCreateVoiceSessionProviderDown(t *testing.T) {
 	w := postVoiceSession(&Handler{Speech: fakeVoiceSessions{err: errors.New("dial tcp: refused")}})
 	if w.Code != http.StatusBadGateway {
 		t.Fatalf("want 502, got %d", w.Code)
+	}
+}
+
+func TestCreateVoiceSessionNeedsAUser(t *testing.T) {
+	w := postVoiceSessionAs(&Handler{Speech: fakeVoiceSessions{}}, "")
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("want 401 without a user, got %d", w.Code)
+	}
+}
+
+func TestCreateVoiceSessionIsLimitedPerUser(t *testing.T) {
+	h := &Handler{Speech: fakeVoiceSessions{session: speech.Session{Token: "t"}}, VoiceSessionLimiter: NewMemoryVoiceSessionLimiter()}
+	for i := 0; i < voiceSessionsPerWindow; i++ {
+		if w := postVoiceSessionAs(h, "user-1"); w.Code != http.StatusOK {
+			t.Fatalf("session %d: want 200, got %d", i+1, w.Code)
+		}
+	}
+	if w := postVoiceSessionAs(h, "user-1"); w.Code != http.StatusTooManyRequests {
+		t.Fatalf("over the budget: want 429, got %d", w.Code)
+	}
+	if w := postVoiceSessionAs(h, "user-2"); w.Code != http.StatusOK {
+		t.Fatalf("another user has their own budget: want 200, got %d", w.Code)
 	}
 }

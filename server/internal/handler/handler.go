@@ -258,6 +258,8 @@ type Handler struct {
 	// the operator configured a provider (DEEPGRAM_API_KEY): its route returns
 	// 404 and /api/config omits voice_transcription_enabled.
 	Speech speech.TokenIssuer
+	// VoiceSessionLimiter bounds how many voice sessions one user mints.
+	VoiceSessionLimiter SlidingWindowRateLimiter
 	// IssueStatusCatalog reads the workspace status catalog. Defaults to
 	// Queries; a test can substitute a counting wrapper to assert HOW MANY
 	// catalog reads a request performs, which is the only property that

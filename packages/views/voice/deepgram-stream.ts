@@ -22,6 +22,8 @@ const SAMPLE_RATE = 16000;
 const MAX_STREAM_MS = 10 * 60_000;
 /** How long finishing waits for Flux to end the sentence in progress. */
 const CLOSE_WAIT_MS = 2000;
+/** A stream that has not opened by now is not going to. */
+const OPEN_TIMEOUT_MS = 10_000;
 
 /**
  * Mic audio to 16-bit mono PCM at the target rate, in 80 ms chunks (Flux's
@@ -91,6 +93,8 @@ export class DeepgramStream implements VoiceStream {
   private pending = "";
   private stopping = false;
   private closed = false;
+  /** Rejects a start still waiting for the socket, when the stream is discarded. */
+  private abortOpen: ((err: Error) => void) | null = null;
 
   constructor(
     private readonly handlers: VoiceStreamHandlers,
@@ -100,10 +104,11 @@ export class DeepgramStream implements VoiceStream {
   ) {}
 
   async start(deviceId: string | null, { hotwords }: VoiceDecodeOptions): Promise<void> {
-    // Created before the first await, inside the press: iOS Safari only lets
-    // a user gesture start audio.
+    // Created and resumed before the first await, inside the press: iOS
+    // Safari only lets a user gesture start audio.
     const audio = new AudioContext();
     this.audio = audio;
+    if (audio.state === "suspended") void audio.resume().catch(() => {});
     try {
       this.media = await openMicrophone(deviceId);
     } catch (err) {
@@ -111,6 +116,7 @@ export class DeepgramStream implements VoiceStream {
       throw new VoiceRecorderError(failureOf(err));
     }
     if (this.closed) return this.release();
+    this.handlers.onMicrophone?.();
     try {
       await loadWorklet(audio);
       if (this.closed) return this.release();
@@ -126,9 +132,17 @@ export class DeepgramStream implements VoiceStream {
       socket.binaryType = "arraybuffer";
       this.socket = socket;
       await new Promise<void>((resolve, reject) => {
-        socket.onopen = () => resolve();
-        socket.onerror = () => reject(new Error("the speech provider refused the stream"));
-        socket.onclose = () => reject(new Error("the speech provider closed the stream"));
+        const timer = setTimeout(() => reject(new Error("the speech provider did not answer")), OPEN_TIMEOUT_MS);
+        const settle = (err?: Error) => {
+          clearTimeout(timer);
+          this.abortOpen = null;
+          if (err) reject(err);
+          else resolve();
+        };
+        this.abortOpen = settle;
+        socket.onopen = () => settle();
+        socket.onerror = () => settle(new Error("the speech provider refused the stream"));
+        socket.onclose = () => settle(new Error("the speech provider closed the stream"));
       });
       if (this.closed) return this.release();
       socket.onmessage = (event) => this.receive(event.data);
@@ -148,12 +162,18 @@ export class DeepgramStream implements VoiceStream {
         if (socket.readyState === WebSocket.OPEN) socket.send(event.data);
       };
       source.connect(worklet);
+      // A silent path to the speakers keeps every browser pulling audio
+      // through the worklet; a node with no route to the destination may not run.
+      const silence = audio.createGain();
+      silence.gain.value = 0;
+      worklet.connect(silence).connect(audio.destination);
       this.worklet = worklet;
       this.meter = new LevelMeter(audio, source, (meter) => {
         this.onMeter(meter);
         if (meter.elapsedMs >= MAX_STREAM_MS) this.onLimit();
       });
       if (audio.state === "suspended") await audio.resume();
+      if (this.closed) throw new Error("the stream ended while starting");
     } catch (err) {
       this.release();
       throw err;
@@ -227,6 +247,7 @@ export class DeepgramStream implements VoiceStream {
 
   private release() {
     this.closed = true;
+    this.abortOpen?.(new Error("the stream was discarded"));
     this.stopAudio();
     const socket = this.socket;
     this.socket = null;

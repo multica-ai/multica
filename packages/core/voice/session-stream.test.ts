@@ -111,13 +111,13 @@ describe("a streaming runtime", () => {
     expect(box.inserted).toEqual([]);
 
     stream.handlers!.onTurn("Assign the issue to Alice.");
-    expect(box.inserted).toEqual(["Assign the issue to Alice."]);
+    await vi.waitFor(() => expect(box.inserted).toEqual(["Assign the issue to Alice."]));
     expect(interim()).toBe("");
     expect(getVoiceState().phase).toBe("recording");
 
     stream.handlers!.onInterim("Then um close");
     stream.handlers!.onTurn("Then um close it.");
-    expect(box.inserted).toEqual(["Assign the issue to Alice.", "Then close it."]);
+    await vi.waitFor(() => expect(box.inserted).toEqual(["Assign the issue to Alice.", "Then close it."]));
   });
 
   it("tapping again lets the provider end the last sentence, then stops", async () => {
@@ -158,12 +158,14 @@ describe("a streaming runtime", () => {
     tap("box");
     await untilPhase("recording");
     stream.handlers!.onTurn("Keep this.");
+    await vi.waitFor(() => expect(box.inserted).toEqual(["Keep this."]));
     stream.handlers!.onInterim("not this");
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
     expect(getVoiceState().phase).toBe("idle");
     expect(stream.discard).toHaveBeenCalled();
     expect(interim()).toBe("");
     stream.handlers!.onTurn("not this.");
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(box.inserted).toEqual(["Keep this."]);
   });
 
@@ -207,5 +209,70 @@ describe("a streaming runtime", () => {
     unregister.pop()!();
     expect(getVoiceState().phase).toBe("idle");
     expect(stream.discard).toHaveBeenCalled();
+  });
+
+  it("a hold released while only the connection is coming up stops once it is up", async () => {
+    useVoiceSettingsStore.getState().update({ activation: "hold" });
+    const box = target("box");
+    let connected!: () => void;
+    stream.start.mockImplementation(() => {
+      stream.handlers!.onMicrophone?.();
+      return new Promise<void>((resolve) => (connected = resolve));
+    });
+    stream.finish.mockImplementation(async () => stream.handlers!.onTurn("Too short to say much."));
+    pressVoice("box");
+    releaseVoice();
+    expect(getVoiceState().phase).toBe("requesting");
+    connected();
+    await untilPhase("idle");
+    expect(stream.finish).toHaveBeenCalledTimes(1);
+    expect(box.inserted).toEqual(["Too short to say much."]);
+  });
+
+  it("a hold released at the permission prompt keeps recording as a tap", async () => {
+    useVoiceSettingsStore.getState().update({ activation: "hold" });
+    target("box");
+    let granted!: () => void;
+    stream.start.mockImplementation(() => new Promise<void>((resolve) => (granted = resolve)));
+    pressVoice("box");
+    releaseVoice();
+    granted();
+    await untilPhase("recording");
+    expect(getVoiceState().mode).toBe("strip");
+    expect(stream.finish).not.toHaveBeenCalled();
+  });
+
+  it("stop-and-send waits for a sentence the editor was not ready for", async () => {
+    let ready = false;
+    const box = target("box", {
+      insert: vi.fn((text: string) => {
+        if (!ready) return false;
+        box.inserted.push(text);
+        return true;
+      }),
+    });
+    tap("box");
+    await untilPhase("recording");
+    stream.handlers!.onTurn("First.");
+    stream.handlers!.onTurn("Second.");
+    stopVoice(true);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(box.submit).not.toHaveBeenCalled();
+    ready = true;
+    await untilPhase("idle");
+    expect(box.inserted).toEqual(["First.", "Second."]);
+    expect(box.submit).toHaveBeenCalledTimes(1);
+  });
+
+  it("a stream that fails while starting stays failed", async () => {
+    target("box");
+    let connected!: () => void;
+    stream.start.mockImplementation(() => new Promise<void>((resolve) => (connected = resolve)));
+    tap("box");
+    stream.handlers!.onError();
+    expect(getVoiceState().error).toBe("stream-failed");
+    connected();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(getVoiceState().phase).toBe("error");
   });
 });

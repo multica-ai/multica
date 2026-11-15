@@ -3,7 +3,21 @@ package handler
 import (
 	"log/slog"
 	"net/http"
+	"time"
 )
+
+// Each dictation mints one session, and a Deepgram grant token works for any
+// stream opened during its 30 seconds, so the per-user budget is what bounds
+// what one account (or a leaked token of it) can spend.
+const (
+	voiceSessionsPerWindow = 30
+	voiceSessionWindow     = time.Minute
+)
+
+// NewMemoryVoiceSessionLimiter bounds voice-session minting per user.
+func NewMemoryVoiceSessionLimiter() SlidingWindowRateLimiter {
+	return newMemorySlidingWindowRateLimiter(SlidingWindowRateLimit{Limit: voiceSessionsPerWindow, Window: voiceSessionWindow})
+}
 
 // CreateVoiceSession mints a short-lived token for one voice-input stream
 // from the web app. The provider's API key stays on the server; the token
@@ -14,6 +28,16 @@ import (
 func (h *Handler) CreateVoiceSession(w http.ResponseWriter, r *http.Request) {
 	if h.Speech == nil {
 		writeError(w, http.StatusNotFound, "voice input is not configured on this server")
+		return
+	}
+	userID := requestUserID(r)
+	if userID == "" {
+		writeError(w, http.StatusUnauthorized, "sign in to use voice input")
+		return
+	}
+	allowed, err := slidingWindowLimiterAllow(r.Context(), h.VoiceSessionLimiter, userID)
+	if err != nil || !allowed {
+		writeError(w, http.StatusTooManyRequests, "too many dictations started; wait a minute")
 		return
 	}
 	session, err := h.Speech.NewSession(r.Context())

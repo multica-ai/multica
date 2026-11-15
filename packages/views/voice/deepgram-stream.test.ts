@@ -43,7 +43,18 @@ class FakeSocket {
 const node = () => ({ connect: vi.fn(), disconnect: vi.fn() });
 
 class FakeAudioContext {
+  static last: FakeAudioContext | null = null;
   state = "running";
+  destination = {};
+  gains: { gain: { value: number }; connect: ReturnType<typeof vi.fn> }[] = [];
+  createGain = vi.fn(() => {
+    const gain = { gain: { value: 1 }, connect: vi.fn((next: unknown) => next) };
+    this.gains.push(gain);
+    return gain;
+  });
+  constructor() {
+    FakeAudioContext.last = this;
+  }
   audioWorklet = { addModule: vi.fn(async () => {}) };
   createMediaStreamSource = vi.fn(() => node());
   createAnalyser = vi.fn(() => ({ ...node(), fftSize: 0, getByteTimeDomainData: vi.fn() }));
@@ -54,8 +65,13 @@ class FakeAudioContext {
 }
 
 class FakeWorkletNode {
+  static last: FakeWorkletNode | null = null;
   port = { onmessage: null as ((event: { data: ArrayBuffer }) => void) | null };
+  connect = vi.fn((next: unknown) => next);
   disconnect = vi.fn();
+  constructor() {
+    FakeWorkletNode.last = this;
+  }
 }
 
 const track = { stop: vi.fn() };
@@ -70,7 +86,7 @@ function handlers() {
   } satisfies VoiceStreamHandlers;
 }
 
-async function opened(h = handlers(), openSession = vi.fn(async () => session)) {
+async function opened(h: VoiceStreamHandlers = handlers(), openSession = vi.fn(async () => session)) {
   const stream = new DeepgramStream(h, vi.fn(), vi.fn(), openSession);
   const started = stream.start(null, { language: "en", hotwords: ["Alice", "Multica"] });
   await vi.waitFor(() => expect(FakeSocket.last).not.toBeNull());
@@ -209,5 +225,48 @@ describe("DeepgramStream", () => {
     const stream = new DeepgramStream(handlers(), vi.fn(), vi.fn(), vi.fn(async () => ({ ...session, provider: "other" })));
     await expect(stream.start(null, { language: "en", hotwords: [] })).rejects.toThrow(/unsupported/);
     expect(FakeSocket.last).toBeNull();
+  });
+
+  it("sends the worklet's PCM to the socket, through a silent route to the speakers", async () => {
+    const { socket } = await opened();
+    const audio = FakeAudioContext.last!;
+    expect(audio.gains).toHaveLength(1);
+    expect(audio.gains[0]!.gain.value).toBe(0);
+    expect(audio.gains[0]!.connect).toHaveBeenCalledWith(audio.destination);
+    const chunk = new ArrayBuffer(8);
+    FakeWorkletNode.last!.port.onmessage!({ data: chunk });
+    expect(socket.sent).toContain(chunk);
+  });
+
+  it("tells the session once the microphone is open, before the network part", async () => {
+    const h = { ...handlers(), onMicrophone: vi.fn() };
+    let micOpenAtGrant = false;
+    const openSession = vi.fn(async () => {
+      micOpenAtGrant = h.onMicrophone.mock.calls.length === 1;
+      return session;
+    });
+    await opened(h, openSession);
+    expect(micOpenAtGrant).toBe(true);
+  });
+
+  it("a socket that never opens gives up and releases the microphone", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const stream = new DeepgramStream(handlers(), vi.fn(), vi.fn(), vi.fn(async () => session));
+    const started = stream.start(null, { language: "en", hotwords: [] });
+    const outcome = started.then(() => "opened", (err: Error) => err.message);
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(FakeSocket.last).not.toBeNull();
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(outcome).resolves.toMatch(/did not answer/);
+    expect(track.stop).toHaveBeenCalled();
+  });
+
+  it("discarding while the socket is connecting settles the start", async () => {
+    const stream = new DeepgramStream(handlers(), vi.fn(), vi.fn(), vi.fn(async () => session));
+    const started = stream.start(null, { language: "en", hotwords: [] });
+    await vi.waitFor(() => expect(FakeSocket.last).not.toBeNull());
+    stream.discard();
+    await expect(started).rejects.toThrow(/discarded/);
+    expect(FakeSocket.last!.readyState).toBe(FakeSocket.CLOSED);
   });
 });
