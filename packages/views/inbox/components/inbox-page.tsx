@@ -21,7 +21,6 @@ import {
   shortcutMatchesEvent,
 } from "@multica/core/shortcuts";
 import { isImeComposing } from "@multica/core/utils";
-import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
 import {
   inboxListOptions,
@@ -1038,24 +1037,17 @@ export function InboxPage() {
             size="sm"
             data-testid="recover-quick-create"
             onClick={() => {
-              // Seed the legacy advanced form with the original prompt so the
-              // user can recover their input in the full editor instead of
-              // retyping. The agent picker hint becomes the assignee
-              // candidate (still editable).
-              const prompt = detailItem.details?.original_prompt ?? "";
-              const agentId = detailItem.details?.agent_id;
-              // Restore this request's project, clearing an unrelated draft's
-              // selection when the original had none (or predates the hint).
-              useIssueDraftStore.getState().setShared({
-                projectId: detailItem.details?.project_id || undefined,
+              // The dialog owns isolation and seeds only after the ordinary
+              // draft has been backed up. Opening recovery must not edit it.
+              useModalStore.getState().open("create-issue", {
+                quick_create_recovery: {
+                  notificationId: detailItem.id,
+                  workspaceId: detailItem.workspace_id,
+                  description: detailItem.details?.original_prompt ?? "",
+                  projectId: detailItem.details?.project_id || undefined,
+                  agentId: detailItem.details?.agent_id || undefined,
+                },
               });
-              useIssueDraftStore.getState().setManual({
-                description: prompt,
-                ...(agentId
-                  ? { assigneeType: "agent" as const, assigneeId: agentId }
-                  : {}),
-              });
-              useModalStore.getState().open("create-issue");
             }}
           >
             {t(($) => $.detail.edit_advanced)}

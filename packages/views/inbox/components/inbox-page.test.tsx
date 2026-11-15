@@ -858,13 +858,15 @@ describe("InboxPage", () => {
     render(<InboxPage />);
     fireEvent.click(screen.getByTestId("row"));
     fireEvent.click(screen.getByTestId("recover-quick-create"));
-    expect(issueDraftState.setManual).toHaveBeenCalledWith({
-      description: "Original request", assigneeType: "agent", assigneeId: "original-agent",
+    // Opening recovery carries intent without mutating the ordinary draft.
+    expect(issueDraftState.setManual).not.toHaveBeenCalled();
+    expect(issueDraftState.setShared).not.toHaveBeenCalled();
+    expect(modalState.open).toHaveBeenCalledWith("create-issue", {
+      quick_create_recovery: {
+        notificationId: "project-recovery", workspaceId: "workspace-1", description: "Original request",
+        agentId: "original-agent", projectId: projectId || undefined,
+      },
     });
-    // Explicitly replace any unrelated draft project, including for a
-    // no-project request or an older notification without that field.
-    expect(issueDraftState.setShared).toHaveBeenCalledWith({ projectId: projectId || undefined });
-    expect(modalState.open).toHaveBeenCalledWith("create-issue");
   });
 
   it("retries a failed quick-create with its original source context", async () => {

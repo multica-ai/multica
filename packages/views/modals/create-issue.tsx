@@ -223,13 +223,22 @@ function WorkflowHandoffHint({ projectId, status }: { projectId?: string; status
   );
 }
 
+export interface RecoveryProjectAvailability {
+  /** Null while the workspace catalog has not resolved successfully. */
+  activeIds: ReadonlySet<string> | null;
+  failed: boolean;
+  retry: () => void;
+}
+
 export function ManualCreatePanel({
+  recoveryProjects,
   onClose,
   onSwitchMode,
   data,
   isExpanded,
   setIsExpanded,
 }: {
+  recoveryProjects?: RecoveryProjectAvailability;
   onClose: () => void;
   /** Called with the carry payload to seed the agent panel after switch. */
   onSwitchMode?: (carry?: Record<string, unknown> | null) => void;
@@ -312,12 +321,21 @@ export function ManualCreatePanel({
   const [customPropertyPickerId, setCustomPropertyPickerId] = useState<string | null>(null);
   const [propertyErrorId, setPropertyErrorId] = useState<string | null>(null);
   const [unavailablePropertyRemoved, setUnavailablePropertyRemoved] = useState(false);
-  const [projectId, setProjectId] = useState<string | undefined>(() => {
+  const [selectedProjectId, setProjectId] = useState<string | undefined>(() => {
     if (data && "project_id" in data) {
       return (data.project_id as string | null) ?? undefined;
     }
     return draft.shared.projectId;
   });
+  const recoveryProjectBlocked = !!selectedProjectId && recoveryProjects?.activeIds === null;
+  const projectId = selectedProjectId && recoveryProjects?.activeIds
+    && !recoveryProjects.activeIds.has(selectedProjectId) ? undefined : selectedProjectId;
+  useEffect(() => {
+    if (selectedProjectId && recoveryProjects?.activeIds && !recoveryProjects.activeIds.has(selectedProjectId)) {
+      setProjectId(undefined);
+      setShared({ projectId: undefined });
+    }
+  }, [recoveryProjects?.activeIds, selectedProjectId, setShared]);
   const [parentIssueId, setParentIssueId] = useState<string | undefined>(
     (data?.parent_issue_id as string) || undefined,
   );
@@ -538,6 +556,7 @@ export function ManualCreatePanel({
     uploadGate: gate,
     normalize: () => title.trim(),
     onSubmit: async (): Promise<boolean> => {
+      if (recoveryProjectBlocked) return false;
       setUnavailablePropertyRemoved(false);
       // Flush the description editor's pending debounce into the store BEFORE
       // snapshotting, so a late flush of pre-submit typing cannot masquerade
@@ -908,12 +927,14 @@ export function ManualCreatePanel({
 
   // One state for the button and the keyboard paths, so a rendered affordance
   // can never disagree with what `handleSubmit` will actually do.
-  const submitState: "submitting" | "uploading" | "missing_title" | "source_unavailable" | "ready" =
+  const submitState: "submitting" | "uploading" | "missing_title" | "source_unavailable" | "project_unavailable" | "ready" =
     submitting
       ? "submitting"
       : gate.uploading
         ? "uploading"
-        : anchorCommentId && !sourcePreview
+        : recoveryProjectBlocked
+          ? "project_unavailable"
+          : anchorCommentId && !sourcePreview
           ? "source_unavailable"
           : !title.trim()
             ? "missing_title"
@@ -931,7 +952,7 @@ export function ManualCreatePanel({
       // keyboard and screen-reader users could never reach the tooltip that
       // explains why nothing happens. `handleSubmit` is the real gate either way.
       disabled={submitBusy}
-      aria-disabled={submitState === "missing_title" || submitState === "source_unavailable" || undefined}
+      aria-disabled={submitState === "missing_title" || submitState === "source_unavailable" || submitState === "project_unavailable" || undefined}
       aria-busy={submitBusy || undefined}
       // The Button base only dims/blocks on native `disabled`, so aria-disabled
       // would otherwise stay a fully lit, pressable-looking primary button.
@@ -1465,6 +1486,15 @@ export function ManualCreatePanel({
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
+
+            {recoveryProjectBlocked && recoveryProjects?.failed && (
+              <div role="alert" className="flex items-center gap-2 px-5 pb-3 text-caption text-destructive">
+                <span>{t(($) => $.create_issue.recovery_projects_error)}</span>
+                <Button type="button" size="sm" variant="outline" onClick={recoveryProjects.retry}>
+                  {tIssues(($) => $.detail.load_retry)}
+                </Button>
+              </div>
+            )}
 
             {unavailablePropertyRemoved && (
               <p role="alert" className="px-5 pb-3 text-caption text-destructive">
