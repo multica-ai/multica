@@ -33,9 +33,11 @@ function FileUploadButton({
     for (const file of files) onSelect(file);
   };
 
-  // `size-*`, not `h-* w-*`: the icon button's own `[&_svg:not([class*='size-'])]`
-  // rule would otherwise override it (icon-xs forces 12px).
-  const iconSize = size === "sm" ? "size-3.5" : "size-4";
+  // The default size takes the button's own icon size so it matches the
+  // composer's other icon buttons (the mic). `sm` needs `size-*`, not
+  // `h-* w-*`: the button's `[&_svg:not([class*='size-'])]` rule would
+  // otherwise override it (icon-xs forces 12px).
+  const iconSize = size === "sm" ? "size-3.5" : undefined;
   const buttonSize = size === "sm" ? "icon-xs" : "icon-sm";
 
   return (

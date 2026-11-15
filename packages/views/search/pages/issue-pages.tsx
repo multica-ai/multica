@@ -18,6 +18,7 @@ import { issueLabelsOptions, labelListOptions } from "@multica/core/labels/queri
 import { useAttachLabelToIssue, useDetachLabel } from "@multica/core/labels/mutations";
 import { useModalStore } from "@multica/core/modals";
 import { projectListOptions } from "@multica/core/projects/queries";
+import { selectableProjects } from "@multica/core/projects";
 import { quickActionListOptions } from "@multica/core/quick-actions";
 import type { Issue, IssuePriority, Label } from "@multica/core/types";
 import { StatusIcon } from "../../issues/components/status-icon";
@@ -428,7 +429,9 @@ export function IssueProjectPage({ target, query }: { target: IssueTarget; query
   const writer = useIssueTargetWriter(target);
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
   const current = common(writer.issues, (issue) => issue.project_id);
-  const live = projects.filter((project) => project.status !== "cancelled" || project.id === current);
+  const live = selectableProjects(projects, current).filter(
+    (project) => project.status !== "cancelled" || project.id === current,
+  );
   const visible = filterByLabel(live, query, (project) => project.title);
   const noProjectLabel = t(($) => $.pages.no_project);
   const q = query.trim().toLowerCase();

@@ -42,7 +42,7 @@ import { shouldOpenRowMenu, useRowMenu } from "../../common/point-menu";
 import { CollectionRowContext } from "../collection-list/row-context";
 import { useDragClickGuard } from "../use-drag-click-guard";
 import { ProjectsSectionSettings } from "./sidebar-settings";
-import { SidebarIssueList, TreeRow } from "./sidebar-tree";
+import { PrivateProjectLock, SidebarIssueList, TreeRow } from "./sidebar-tree";
 
 const DRAG_MODIFIERS = [restrictToVerticalAxis, restrictToFirstScrollableAncestor];
 
@@ -317,6 +317,7 @@ function ProjectTreeItem({
         listId={listId}
         toggleLabel={t(($) => $.panels.work.project_issues, { name: project.title })}
         onPrefetch={prefetch}
+        labelSuffix={project.visibility === "private" && <PrivateProjectLock />}
         onContextMenu={(event: MouseEvent) => {
           if (shouldOpenRowMenu(event)) rowMenu.openAtPointer(event);
         }}

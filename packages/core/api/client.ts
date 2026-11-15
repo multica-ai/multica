@@ -114,6 +114,7 @@ import type {
   StartMikaOnboardingResponse,
   CancelTaskResponse,
   Project,
+  ArchiveProjectResponse,
   CreateProjectRequest,
   UpdateProjectRequest,
   ListProjectsResponse,
@@ -380,6 +381,7 @@ import {
   RuntimeUsageListSchema,
   SearchIssuesResponseSchema,
   ProjectSchema,
+  ArchiveProjectResponseSchema,
   ListProjectMembersResponseSchema,
   ProjectSubscriptionSchema,
   ListProjectsResponseSchema,
@@ -840,9 +842,6 @@ function dingTalkGroupSearch(params: ListDingTalkGroupsParams): string {
 // (server/internal/middleware/auth.go). Matched rather than inferred from the
 // status, because 403 also covers real authorization failures that must not
 // be retried.
-/** The most groups `POST /api/inbox/archive-updates` takes in one request. */
-const INBOX_ARCHIVE_UPDATES_MAX_GROUPS = 500;
-
 const CSRF_REJECTED_ERROR = "CSRF validation failed";
 
 // One header, two possible values — see ApiClient.readCsrfValue.
@@ -1419,11 +1418,12 @@ export class ApiClient {
     });
   }
 
-  async searchProjects(params: { q: string; limit?: number; offset?: number; include_closed?: boolean; signal?: AbortSignal }): Promise<SearchProjectsResponse> {
+  async searchProjects(params: { q: string; limit?: number; offset?: number; include_closed?: boolean; include_archived?: boolean; signal?: AbortSignal }): Promise<SearchProjectsResponse> {
     const search = new URLSearchParams({ q: params.q });
     if (params.limit !== undefined) search.set("limit", String(params.limit));
     if (params.offset !== undefined) search.set("offset", String(params.offset));
     if (params.include_closed) search.set("include_closed", "true");
+    if (params.include_archived) search.set("include_archived", "true");
     const raw = await this.fetch<unknown>(
       `/api/projects/search?${search}`,
       params.signal ? { signal: params.signal } : undefined,
@@ -3134,11 +3134,8 @@ export class ApiClient {
   }
 
   // Inbox
-  // `include_snoozed` asks for the rows the Snoozed section shows. The server
-  // leaves them out for a client that does not ask, which would otherwise list
-  // a snoozed issue as plainly unread.
   async listInbox(): Promise<InboxItem[]> {
-    const raw = await this.fetch<unknown>("/api/inbox?include_snoozed=true");
+    const raw = await this.fetch<unknown>("/api/inbox");
     return parseWithFallback(raw, InboxItemListSchema, EMPTY_INBOX_ITEMS, {
       endpoint: "GET /api/inbox",
     });
@@ -3205,21 +3202,6 @@ export class ApiClient {
     return this.fetch(`/api/inbox/${id}/unarchive`, { method: "POST" });
   }
 
-  /**
-   * Snooze the item's issue until `until` (an ISO time). Issue-level, like
-   * archive: every active row on the issue goes with it.
-   */
-  async snoozeInbox(id: string, until: string): Promise<void> {
-    await this.fetch(`/api/inbox/${id}/snooze`, {
-      method: "POST",
-      body: JSON.stringify({ until }),
-    });
-  }
-
-  async unsnoozeInbox(id: string): Promise<void> {
-    await this.fetch(`/api/inbox/${id}/unsnooze`, { method: "POST" });
-  }
-
   // Raw unread ROW count — not the number any badge shows. The inbox renders
   // one row per issue, so a single issue with three unread notifications
   // counts once there and three times here. `getInboxUnreadSummary` is the
@@ -3230,15 +3212,19 @@ export class ApiClient {
     return this.fetch("/api/inbox/unread-count");
   }
 
-  // Cross-workspace inbox summary: one entry per workspace the user belongs
-  // to that has unread items or issues waiting on them. Backs the Inbox badge
-  // and the workspace-switcher dot for OTHER workspaces. Schema-guarded so a
-  // contract drift hides them rather than crashing the sidebar.
+  // Cross-workspace unread summary: one entry per workspace the user belongs
+  // to that has unread inbox items. Backs the workspace-switcher dot for
+  // OTHER workspaces. Schema-guarded so a contract drift hides the dot rather
+  // than crashing the sidebar.
   async getInboxUnreadSummary(): Promise<InboxWorkspaceUnread[]> {
     const raw = await this.fetch<unknown>("/api/inbox/unread-summary");
     return parseWithFallback(raw, InboxUnreadSummarySchema, EMPTY_INBOX_UNREAD_SUMMARY, {
       endpoint: "GET /api/inbox/unread-summary",
     });
+  }
+
+  async markAllInboxRead(): Promise<{ count: number }> {
+    return this.fetch("/api/inbox/mark-all-read", { method: "POST" });
   }
 
   /**
@@ -3254,22 +3240,16 @@ export class ApiClient {
     });
   }
 
-  /**
-   * Archive issues that only carry updates. `groups` are list keys
-   * (`issue_id ?? id`). The server re-checks each one and leaves it when it
-   * has since gained something addressed to the user or was snoozed; with
-   * `readOnly`, also when its newest update is unread.
-   */
-  async archiveInboxUpdates(groups: readonly string[], readOnly: boolean): Promise<void> {
-    for (let start = 0; start < groups.length; start += INBOX_ARCHIVE_UPDATES_MAX_GROUPS) {
-      await this.fetch("/api/inbox/archive-updates", {
-        method: "POST",
-        body: JSON.stringify({
-          groups: groups.slice(start, start + INBOX_ARCHIVE_UPDATES_MAX_GROUPS),
-          read_only: readOnly,
-        }),
-      });
-    }
+  async archiveAllInbox(): Promise<{ count: number }> {
+    return this.fetch("/api/inbox/archive-all", { method: "POST" });
+  }
+
+  async archiveAllReadInbox(): Promise<{ count: number }> {
+    return this.fetch("/api/inbox/archive-all-read", { method: "POST" });
+  }
+
+  async archiveCompletedInbox(): Promise<{ count: number }> {
+    return this.fetch("/api/inbox/archive-completed", { method: "POST" });
   }
 
   // Notification preferences
@@ -4431,9 +4411,10 @@ export class ApiClient {
   }
 
   // Projects
-  async listProjects(params?: { status?: string }): Promise<ListProjectsResponse> {
+  async listProjects(params?: { status?: string; include_archived?: boolean }): Promise<ListProjectsResponse> {
     const search = new URLSearchParams();
     if (params?.status) search.set("status", params.status);
+    if (params?.include_archived) search.set("include_archived", "true");
     const raw = await this.fetch<unknown>(`/api/projects?${search}`);
     return parseWithFallback(raw, ListProjectsResponseSchema, EMPTY_LIST_PROJECTS_RESPONSE, {
       endpoint: "GET /api/projects",
@@ -4463,6 +4444,18 @@ export class ApiClient {
 
   async deleteProject(id: string): Promise<void> {
     await this.fetch(`/api/projects/${id}`, { method: "DELETE" });
+  }
+
+  async archiveProject(id: string): Promise<ArchiveProjectResponse> {
+    const raw = await this.fetch<unknown>(`/api/projects/${id}/archive`, { method: "POST" });
+    return parseWithFallback(raw, ArchiveProjectResponseSchema, { ...EMPTY_PROJECT, paused_autopilot_ids: [] }, {
+      endpoint: "POST /api/projects/:id/archive",
+    });
+  }
+
+  async restoreProject(id: string): Promise<Project> {
+    const raw = await this.fetch<unknown>(`/api/projects/${id}/restore`, { method: "POST" });
+    return parseWithFallback(raw, ProjectSchema, EMPTY_PROJECT, { endpoint: "POST /api/projects/:id/restore" });
   }
 
   async getProjectMembers(id: string): Promise<ListProjectMembersResponse> {

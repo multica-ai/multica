@@ -90,6 +90,7 @@ export function IssueSurface({
   modes,
   surfaceKey,
   createDefaults,
+  allowCreate = true,
   search,
   renderHeader,
   renderEmpty,
@@ -186,6 +187,7 @@ export function IssueSurface({
           scope={effectiveScope}
           modes={modes}
           createDefaults={createDefaults}
+          allowCreate={allowCreate}
           search={search}
           renderHeader={renderHeader}
           renderEmpty={renderEmpty}
@@ -208,6 +210,7 @@ function IssueSurfaceContent({
   scope,
   modes,
   createDefaults,
+  allowCreate = true,
   search,
   renderHeader,
   renderEmpty,
@@ -319,7 +322,7 @@ function IssueSurfaceContent({
               title={t(($) => $.detail.empty_issues_title)}
               description={t(($) => $.detail.empty_issues_hint)}
               actions={
-                <>
+                allowCreate && <>
                   <Button size="sm" onClick={() => controller.openCreateIssue()}>
                     <Plus aria-hidden="true" />
                     {t(($) => $.detail.empty_issues_new_button)}
@@ -351,7 +354,7 @@ function IssueSurfaceContent({
                 childProgressMap={controller.childProgressMap}
                 projectMap={controller.projectMap}
                 projectId={controller.projectId}
-                onCreateIssue={openCreateIssue}
+                onCreateIssue={allowCreate ? openCreateIssue : undefined}
                 statusPagination={controller.statusPagination}
                 groupBranches={controller.groupBranches}
               />
@@ -364,7 +367,7 @@ function IssueSurfaceContent({
                 projectMap={controller.projectMap}
                 projectId={controller.projectId}
                 onMoveIssue={controller.moveIssue}
-                onCreateIssue={openCreateIssue}
+                onCreateIssue={allowCreate ? openCreateIssue : undefined}
                 statusPagination={controller.statusPagination!}
               />
             )}
@@ -393,7 +396,7 @@ function IssueSurfaceContent({
                 childProgressMap={controller.childProgressMap}
                 projectMap={controller.projectMap}
                 projectId={controller.projectId}
-                onCreateIssue={openCreateIssue}
+                onCreateIssue={allowCreate ? openCreateIssue : undefined}
                 groupBranches={controller.groupBranches}
               />
             )}

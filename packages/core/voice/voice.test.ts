@@ -66,13 +66,25 @@ describe("sanitizeVoiceSettings", () => {
   it("falls back to defaults for junk", () => {
     expect(sanitizeVoiceSettings(null)).toEqual(DEFAULT_VOICE_SETTINGS);
     expect(
-      sanitizeVoiceSettings({ activation: "shout", language: "xx", deviceId: 3, removeFillers: "yes" }),
+      sanitizeVoiceSettings({
+        enabled: "on",
+        activation: "shout",
+        language: "xx",
+        deviceId: 3,
+        removeFillers: "yes",
+      }),
     ).toEqual(DEFAULT_VOICE_SETTINGS);
+  });
+
+  it("is off until the user turns it on", () => {
+    expect(DEFAULT_VOICE_SETTINGS.enabled).toBe(false);
+    expect(sanitizeVoiceSettings({ activation: "hold" }).enabled).toBe(false);
   });
 
   it("keeps valid values and dedupes the vocabulary", () => {
     const words = Array.from({ length: MAX_VOCABULARY_WORDS + 5 }, (_, i) => `w${i}`);
     const settings = sanitizeVoiceSettings({
+      enabled: true,
       activation: "hold",
       language: "zh",
       deviceId: "mic-1",
@@ -80,6 +92,7 @@ describe("sanitizeVoiceSettings", () => {
       vocabulary: ["Multica", "multica", " ", 7, ...words],
       modelId: "sensevoice-small",
     });
+    expect(settings.enabled).toBe(true);
     expect(settings.activation).toBe("hold");
     expect(settings.language).toBe("zh");
     expect(settings.deviceId).toBe("mic-1");

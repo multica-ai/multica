@@ -968,6 +968,9 @@ func (h *Handler) writeSourceContextError(w http.ResponseWriter, err error, limi
 	case errors.Is(err, service.ErrParentIssueNotFound), errors.Is(err, service.ErrProjectNotFound):
 		status = http.StatusBadRequest
 		message = err.Error()
+	case errors.Is(err, service.ErrProjectArchived):
+		status, code = http.StatusConflict, projectArchivedCode
+		message = err.Error()
 	case errors.As(err, &propertyErr):
 		status, code = http.StatusBadRequest, "invalid_issue_property"
 		message = propertyErr.Message

@@ -1,7 +1,6 @@
 "use client";
 
-import { Archive, ArchiveRestore, Check, CircleDot, Clock, ExternalLink, Trash2, Undo2 } from "@multica/ui/icons";
-import { inboxSnoozeOptions, type InboxSnoozePreset } from "@multica/core/inbox/snooze";
+import { Archive, ArchiveRestore, Check, CircleDot, ExternalLink, Trash2 } from "@multica/ui/icons";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import type { InboxItem } from "@multica/core/types";
 import type { RowActionItem } from "../../common/row-actions-menu";
@@ -18,12 +17,7 @@ export interface InboxRowActions {
    * reversal-of-the-current-view the row's inline button performs.
    */
   onAction: (id: string) => void;
-  /** Delete for good. Offered in the archive only. */
   onDelete: (id: string) => void;
-  /** Put the row's issue away until a time. Absent where snoozing is not offered. */
-  onSnooze?: (id: string, until: Date) => void;
-  /** Bring a snoozed issue back now. */
-  onUnsnooze?: (id: string) => void;
 }
 
 /**
@@ -53,12 +47,6 @@ export function useInboxItemActions(
       ? paths.workspace(slug).issueDetail(item.issue_id)
       : null;
   const isArchivedView = view === "archived";
-  const snoozeLabel: Record<InboxSnoozePreset, string> = {
-    in_one_hour: t(($) => $.context_menu.snooze_in_one_hour),
-    later_today: t(($) => $.context_menu.snooze_later_today),
-    tomorrow: t(($) => $.context_menu.snooze_tomorrow),
-    next_week: t(($) => $.context_menu.snooze_next_week),
-  };
 
   const groups: RowActionItem[][] = [];
 
@@ -98,35 +86,6 @@ export function useInboxItemActions(
     ]);
   }
 
-  // Snoozing is for the main list: an archived row is already put away. The
-  // menus have no room for a time field, so they offer the fixed choices and
-  // the detail header's menu covers any other time.
-  if (!isArchivedView) {
-    const { onSnooze, onUnsnooze } = actions;
-    const now = new Date();
-    const snoozed =
-      item.snoozed_until != null && new Date(item.snoozed_until).getTime() > now.getTime();
-    if (snoozed && onUnsnooze) {
-      groups.push([
-        {
-          key: "unsnooze",
-          label: t(($) => $.context_menu.unsnooze),
-          icon: <Undo2 className="h-4 w-4" />,
-          onSelect: () => onUnsnooze(item.id),
-        },
-      ]);
-    } else if (!snoozed && onSnooze) {
-      groups.push(
-        inboxSnoozeOptions(now).map((option) => ({
-          key: `snooze-${option.preset}`,
-          label: snoozeLabel[option.preset],
-          icon: <Clock className="h-4 w-4" />,
-          onSelect: () => onSnooze(item.id, option.until),
-        })),
-      );
-    }
-  }
-
   groups.push([
     {
       key: "archive-toggle",
@@ -142,19 +101,15 @@ export function useInboxItemActions(
     },
   ]);
 
-  // Deleting is for the archive. In the main list a row leaves by being
-  // handled, archived or snoozed, all of which can be undone.
-  if (isArchivedView) {
-    groups.push([
-      {
-        key: "delete",
-        label: t(($) => $.context_menu.delete),
-        icon: <Trash2 className="h-4 w-4" />,
-        danger: true,
-        onSelect: () => actions.onDelete(item.id),
-      },
-    ]);
-  }
+  groups.push([
+    {
+      key: "delete",
+      label: t(($) => $.context_menu.delete),
+      icon: <Trash2 className="h-4 w-4" />,
+      danger: true,
+      onSelect: () => actions.onDelete(item.id),
+    },
+  ]);
 
   return groups;
 }

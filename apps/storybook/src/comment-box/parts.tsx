@@ -155,7 +155,7 @@ export function AttachButton({ small = false, className }: { small?: boolean; cl
   const { t } = useCopy();
   return (
     <IconButton label={t(TEXT.attach)} size={small ? "icon-xs" : "icon-sm"} className={cn("text-muted-foreground", className)}>
-      <Paperclip className={small ? "size-3.5" : "size-4"} />
+      <Paperclip className={small ? "size-3.5" : undefined} />
     </IconButton>
   );
 }

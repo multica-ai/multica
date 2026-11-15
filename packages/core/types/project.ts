@@ -46,6 +46,19 @@ export interface Project {
    * Optional because older servers do not send it. (MUL-7420)
    */
   workflow_id?: string | null;
+  /**
+   * Set while the project is archived: hidden from default lists and pickers
+   * and closed to new issues, otherwise intact. Orthogonal to `status`.
+   * Optional because older servers do not send it. (MUL-8861)
+   */
+  archived_at?: string | null;
+  archived_by_type?: "member" | "agent" | null;
+  archived_by_id?: string | null;
+}
+
+export interface ArchiveProjectResponse extends Project {
+  /** Autopilots the archive paused because they file into this project. */
+  paused_autopilot_ids: string[];
 }
 
 export interface CreateProjectRequest {

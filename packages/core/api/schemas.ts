@@ -1810,7 +1810,14 @@ export const ProjectSchema = z.object({
   done_count: z.number().default(0),
   resource_count: z.number().default(0),
   workflow_id: z.string().nullable().default(null),
+  archived_at: z.string().nullable().default(null).catch(null),
+  archived_by_type: z.enum(["member", "agent"]).nullable().default(null).catch(null),
+  archived_by_id: z.string().nullable().default(null).catch(null),
 }).loose();
+
+export const ArchiveProjectResponseSchema = ProjectSchema.extend({
+  paused_autopilot_ids: z.array(z.string()).default([]).catch([]),
+});
 
 export const EMPTY_PROJECT: Project = {
   id: "", workspace_id: "", title: "", description: null, icon: null,
@@ -3075,11 +3082,6 @@ export const InboxUnreadSummarySchema = z.array(
     .object({
       workspace_id: z.string(),
       count: z.number(),
-      // Absent from a server that predates the sectioned Inbox. A value that
-      // is not a number is dropped the same way, so the badge falls back to
-      // `count` instead of the whole summary failing.
-      needs_you: z.number().optional().catch(undefined),
-      next_wake_at: z.string().optional().catch(undefined),
     })
     .loose(),
 );
@@ -3183,10 +3185,6 @@ export const InboxItemListSchema = z.array(
       read: z.boolean(),
       archived: z.boolean(),
       created_at: z.string(),
-      // Absent from a server that predates the sectioned Inbox. Neither may
-      // fail the row: an unknown section or a malformed time reads as unset.
-      section: z.enum(["needs_you", "updates"]).nullish().catch(undefined),
-      snoozed_until: z.string().nullish().catch(undefined),
     })
     .loose(),
 );

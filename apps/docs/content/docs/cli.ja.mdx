@@ -408,6 +408,7 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 | | `cancel-task <task-id>` | 進行中またはキュー中の実行をキャンセル | `--issue` |
 | `project` | `list/get/create/update/delete` | プロジェクトを管理 | `create`: `--title`（必須）、`--lead`、`--status`、`--icon`、`--start-date`、`--due-date`、`--repo`（繰り返し可） |
 | | `status <id> <status>` | プロジェクトのステータスを変更 | |
+| | `archive/restore <id>` | プロジェクトをアーカイブ／復元。アーカイブ済みのプロジェクトは `list` に表示されず、新しいタスクを受け付けず、そこにタスクを作成する自動化は一時停止される | `list --archived` でアーカイブ済みのプロジェクトのみを表示 |
 | | `resource list/add/update/remove` | プロジェクトの追加リソースを管理 | `--type`、`--url`、`--default-branch-hint`、`--ref`、`--local-path`、`--daemon-id`、`--execution-mode`（ローカルディレクトリの `in_place` / `worktree`） |
 | `label` | `list/get/create/update/delete` | ワークスペースのラベルを管理 | `list`: `--resource-type`（`issue` または `skill`）、`--full-id`；`create`: `--name`、`--color`、`--resource-type`（`issue` または `skill`）、`--description` |
 | `property` | `list/get/create/update/archive/unarchive` | ワークスペースのカスタムプロパティを管理 | `create`: `--name`、`--type`（`text`、`number`、`select`、`multi_select`、`date`、`checkbox`、`url`、`actor`、`multi_actor`、`multi_text`、`multi_url`）、`--option`（繰り返し可、select 系のみ）；`list`: `--include-archived`；タイプは作成後に変更できません |

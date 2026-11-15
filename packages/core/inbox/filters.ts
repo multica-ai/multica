@@ -5,7 +5,7 @@ import {
   dueDateMatches,
   type DueDateFilter,
 } from "../issues/stores/filter-tree";
-import type { InboxItem, InboxItemType, Issue, IssuePriority, IssueStatus } from "../types";
+import type { InboxItem, InboxItemType, IssuePriority, IssueStatus } from "../types";
 import { groupInboxRows, sortInboxNewestFirst, withCommentAnchor } from "./group";
 
 /**
@@ -49,7 +49,6 @@ const TYPE_GROUP: Partial<Record<InboxItemType, InboxTypeGroup>> = {
   children_done: "change",
   task_completed: "run",
   task_failed: "run",
-  task_cancelled: "run",
   agent_blocked: "run",
   agent_completed: "run",
 };
@@ -70,6 +69,10 @@ const RECEIVED_DAYS: Record<InboxReceivedFilter, number> = {
   last_7_days: 7,
   last_30_days: 30,
 };
+
+/** Whether an agent is running or queued on the issue. Active inbox only. */
+export type InboxAgentFilter = "running" | "idle";
+export const INBOX_AGENT_FILTERS: readonly InboxAgentFilter[] = ["running", "idle"];
 
 /** Multi-value dimensions; each one can be flipped to "is not". */
 export type InboxListDimension =
@@ -116,6 +119,7 @@ export interface InboxFilters {
   readonly assignees: readonly string[];
   readonly labels: readonly string[];
   readonly dueDates: readonly DueDateFilter[];
+  readonly agent: InboxAgentFilter | null;
   /** Dimensions whose values are excluded rather than required. */
   readonly negated: readonly InboxListDimension[];
 }
@@ -134,21 +138,17 @@ export const INBOX_DIMENSION_FIELD: Record<InboxListDimension, ListField> = {
 };
 
 /** One chip / one "active" row: a list dimension or a single-choice one. */
-export type InboxFilterKey = InboxListDimension | "received" | "unread";
-
-/**
- * What the main Inbox can be narrowed by: the issue. Its sections already say
- * what kind of notification a row is and whether it is read, so the dimensions
- * about the notification belong to the archive, which is one flat list.
- */
-export const INBOX_NOTIFICATION_FILTER_KEYS: readonly InboxFilterKey[] = ["unread", "type", "actor", "received"];
+export type InboxFilterKey = InboxListDimension | "received" | "unread" | "agent";
 
 export function inboxFilterValues(filters: InboxFilters, dimension: InboxListDimension): readonly string[] {
   return filters[INBOX_DIMENSION_FIELD[dimension]];
 }
 
-/** The filters the server-filtered archive is asked with. */
-export type ArchivedInboxFilters = InboxFilters;
+/**
+ * The server-filtered archive has no agent dimension, so `agent` never
+ * reaches its endpoints or query keys.
+ */
+export type ArchivedInboxFilters = Omit<InboxFilters, "agent">;
 
 /**
  * Stable identity for "who this notification came from", used as the value of
@@ -193,6 +193,7 @@ export const EMPTY_INBOX_FILTERS: InboxFilters = Object.freeze({
   assignees: Object.freeze([]),
   labels: Object.freeze([]),
   dueDates: Object.freeze([]),
+  agent: null,
   negated: Object.freeze([]),
 });
 
@@ -205,6 +206,7 @@ export function activeInboxFilterKeys(filters: InboxFilters): InboxFilterKey[] {
   if (filters.received) keys.push("received");
   if (filters.statuses.length > 0) keys.push("status");
   if (filters.priorities.length > 0) keys.push("priority");
+  if (filters.agent) keys.push("agent");
   if (filters.projects.length > 0) keys.push("project");
   if (filters.assignees.length > 0) keys.push("assignee");
   if (filters.labels.length > 0) keys.push("label");
@@ -235,6 +237,8 @@ export function withoutInboxFilter(filters: InboxFilters, key: InboxFilterKey): 
       return { ...filters, unreadOnly: false };
     case "received":
       return { ...filters, received: null };
+    case "agent":
+      return { ...filters, agent: null };
     default:
       return {
         ...filters,
@@ -245,6 +249,7 @@ export function withoutInboxFilter(filters: InboxFilters, key: InboxFilterKey): 
 }
 
 const RECEIVED_SET = new Set<string>(INBOX_RECEIVED_FILTERS);
+const AGENT_SET = new Set<string>(INBOX_AGENT_FILTERS);
 const TYPE_SET = new Set<string>(INBOX_TYPE_GROUPS);
 const DUE_SET = new Set<string>(DUE_DATE_FILTERS);
 const DIMENSION_SET = new Set<string>(INBOX_LIST_DIMENSIONS);
@@ -275,6 +280,11 @@ export function sanitizeInboxFilters(raw: unknown): InboxFilters {
     assignees: stringList(value.assignees),
     labels: stringList(value.labels),
     dueDates: stringList(value.dueDates, DUE_SET) as DueDateFilter[],
+    agent: typeof value.agent === "string" && AGENT_SET.has(value.agent)
+      ? (value.agent as InboxAgentFilter)
+      : value.idleOnly === true
+        ? "idle"
+        : null,
     negated: stringList(value.negated, DIMENSION_SET) as InboxListDimension[],
   };
   return {
@@ -315,20 +325,6 @@ export function inboxIssueFieldsSupport(
     : "unsupported";
 }
 
-/**
- * Capability of the main Inbox list, for the page, its preview and the filter
- * menu alike. With no notification there is nothing to probe, but nothing for
- * the server to answer either: every row left is a run in "Working", matched
- * against its issue on the client. The selection holds for those rows, and an
- * older server is still caught by the first notification that arrives.
- */
-export function activeInboxFilterSupport(
-  items: readonly InboxItem[],
-): { priority: InboxPriorityFilterSupport; issueFields: InboxFilterSupport } {
-  if (items.length === 0) return { priority: "supported", issueFields: "supported" };
-  return { priority: inboxPriorityFilterSupport(items), issueFields: inboxIssueFieldsSupport(items) };
-}
-
 /** Ignore a stale priority selection until the backend capability is proven. */
 export function inboxFiltersForPrioritySupport(
   filters: InboxFilters,
@@ -345,11 +341,8 @@ export function inboxFiltersForPrioritySupport(
  * than hiding every row: priority and the issue fields until the server is
  * known to send them, and on the archive also everything only that newer
  * server understands — type, received, and "is not" — since an older one
- * would ignore them and answer a different question.
- *
- * The two views share one stored selection. The main Inbox only reads its
- * issue dimensions (INBOX_NOTIFICATION_FILTER_KEYS), so a notification
- * dimension picked in the archive is dormant there rather than lost.
+ * would ignore them and answer a different question. The archive has no
+ * agent dimension at all.
  */
 export function effectiveInboxFilters(
   filters: InboxFilters,
@@ -366,8 +359,13 @@ export function effectiveInboxFilters(
       : [...INBOX_ISSUE_FIELD_DIMENSIONS];
     next = dormant.reduce(withoutInboxFilter, next);
   }
-  if (!archived) next = INBOX_NOTIFICATION_FILTER_KEYS.reduce(withoutInboxFilter, next);
+  if (archived && next.agent) next = withoutInboxFilter(next, "agent");
   return next;
+}
+
+/** @deprecated Use `effectiveInboxFilters` with `archived: true`. */
+export function inboxFiltersForArchive(filters: InboxFilters): InboxFilters {
+  return filters.agent ? withoutInboxFilter(filters, "agent") : filters;
 }
 
 /** Start of the received window, at a local midnight so it holds all day. */
@@ -407,38 +405,77 @@ export function archivedInboxQuery(
   return params;
 }
 
+const EMPTY_ISSUE_IDS: ReadonlySet<string> = new Set();
+
 /** Page state `filterInboxItems` needs beyond the selected filters. */
 export interface InboxFilterContext {
+  /** Issues an agent is running or queued on. Read only by `agent`. */
+  readonly activeIssueIds?: ReadonlySet<string>;
   /**
    * Group key (`issue_id ?? id`) of the open notification, pinned against the
    * unread dimension only. Set by the page after opening marks the row read.
    */
   readonly pinnedUnreadKey?: string | null;
+  /**
+   * Group key of the open notification, pinned against the agent dimension
+   * only. Set by the page once the row was opened while it matched.
+   */
+  readonly pinnedAgentKey?: string | null;
   /** Clock for the received and due-date dimensions. */
   readonly now?: Date;
 }
 
-/** The issue fields an inbox row carries, which the issue dimensions read. */
-export type InboxIssueProjection = Pick<
-  InboxItem,
-  | "issue_id"
-  | "issue_status"
-  | "issue_priority"
-  | "issue_project_id"
-  | "issue_assignee_type"
-  | "issue_assignee_id"
-  | "issue_due_date"
-  | "issue_label_ids"
->;
-
 type RowTest = (item: InboxItem) => boolean;
-type IssueTest = (issue: InboxIssueProjection) => boolean;
 
-type NotificationDimension = "type" | "actor";
-type IssueDimension = Exclude<InboxListDimension, NotificationDimension>;
+/** Values a row has in a dimension; null when it has no issue to ask. */
+function dimensionValues(item: InboxItem, dimension: InboxListDimension, today: string): readonly string[] | null {
+  switch (dimension) {
+    case "type":
+      return [inboxTypeGroup(item.type)];
+    case "actor": {
+      const key = inboxActorKey(item);
+      return key ? [key] : [];
+    }
+    default:
+      break;
+  }
+  if (item.issue_id == null) return null;
+  switch (dimension) {
+    case "status":
+      return item.issue_status == null ? null : [item.issue_status];
+    case "priority":
+      return item.issue_priority == null ? null : [item.issue_priority];
+    case "project":
+      return [item.issue_project_id ?? FILTER_NONE_VALUE];
+    case "assignee":
+      return [
+        item.issue_assignee_type && item.issue_assignee_id
+          ? `${item.issue_assignee_type}:${item.issue_assignee_id}`
+          : FILTER_NONE_VALUE,
+      ];
+    case "label":
+      return item.issue_label_ids ?? [];
+    case "dueDate":
+      return DUE_DATE_FILTERS.filter((bucket) => dueDateMatches(item.issue_due_date, bucket, today));
+  }
+}
 
-const NOTIFICATION_DIMENSIONS: readonly NotificationDimension[] = ["type", "actor"];
-const ISSUE_DIMENSIONS: readonly IssueDimension[] = [
+function dimensionTest(filters: InboxFilters, dimension: InboxListDimension, today: string): RowTest | null {
+  const selected = inboxFilterValues(filters, dimension);
+  if (selected.length === 0) return null;
+  const set = new Set(selected);
+  const negated = filters.negated.includes(dimension);
+  return (item) => {
+    const values = dimensionValues(item, dimension, today);
+    // A notification without an issue answers no issue question, "is not"
+    // included.
+    if (values === null) return false;
+    return values.some((value) => set.has(value)) !== negated;
+  };
+}
+
+const NOTIFICATION_DIMENSIONS: readonly InboxListDimension[] = ["type", "actor"];
+const ISSUE_DIMENSIONS: readonly InboxListDimension[] = [
   "status",
   "priority",
   "project",
@@ -447,90 +484,34 @@ const ISSUE_DIMENSIONS: readonly IssueDimension[] = [
   "dueDate",
 ];
 
-function isNotificationDimension(dimension: InboxListDimension): dimension is NotificationDimension {
-  return dimension === "type" || dimension === "actor";
-}
-
-/** Values a notification has in a dimension about itself. */
-function notificationValues(item: InboxItem, dimension: NotificationDimension): readonly string[] {
-  if (dimension === "type") return [inboxTypeGroup(item.type)];
-  const key = inboxActorKey(item);
-  return key ? [key] : [];
-}
-
-/** Values an issue has in a dimension; null when there is no issue to ask. */
-function issueValues(issue: InboxIssueProjection, dimension: IssueDimension, today: string): readonly string[] | null {
-  if (issue.issue_id == null) return null;
-  switch (dimension) {
-    case "status":
-      return issue.issue_status == null ? null : [issue.issue_status];
-    case "priority":
-      return issue.issue_priority == null ? null : [issue.issue_priority];
-    case "project":
-      return [issue.issue_project_id ?? FILTER_NONE_VALUE];
-    case "assignee":
-      return [
-        issue.issue_assignee_type && issue.issue_assignee_id
-          ? `${issue.issue_assignee_type}:${issue.issue_assignee_id}`
-          : FILTER_NONE_VALUE,
-      ];
-    case "label":
-      return issue.issue_label_ids ?? [];
-    case "dueDate":
-      return DUE_DATE_FILTERS.filter((bucket) => dueDateMatches(issue.issue_due_date, bucket, today));
-  }
-}
-
-function dimensionValues(item: InboxItem, dimension: InboxListDimension, today: string): readonly string[] | null {
-  return isNotificationDimension(dimension) ? notificationValues(item, dimension) : issueValues(item, dimension, today);
-}
-
-function dimensionTest<Row>(
-  filters: InboxFilters,
-  dimension: InboxListDimension,
-  valuesOf: (row: Row) => readonly string[] | null,
-): ((row: Row) => boolean) | null {
-  const selected = inboxFilterValues(filters, dimension);
-  if (selected.length === 0) return null;
-  const set = new Set(selected);
-  const negated = filters.negated.includes(dimension);
-  return (row) => {
-    const values = valuesOf(row);
-    // A notification without an issue answers no issue question, "is not"
-    // included.
-    if (values === null) return false;
-    return values.some((value) => set.has(value)) !== negated;
-  };
-}
-
 interface CompiledInboxFilters {
   /** Per-notification tests, keyed so a facet can leave its own out. */
   notification: Map<InboxListDimension | "received", RowTest>;
-  issue: Map<InboxListDimension, IssueTest>;
+  issue: Map<InboxListDimension, RowTest>;
 }
 
 function compile(filters: InboxFilters, now: Date): CompiledInboxFilters {
   const today = toDateOnly(now);
   const notification = new Map<InboxListDimension | "received", RowTest>();
   for (const dimension of NOTIFICATION_DIMENSIONS) {
-    const test = dimensionTest(filters, dimension, (item: InboxItem) => notificationValues(item, dimension));
+    const test = dimensionTest(filters, dimension, today);
     if (test) notification.set(dimension, test);
   }
   if (filters.received) {
     const after = inboxReceivedAfter(filters.received, now).getTime();
     notification.set("received", (item) => new Date(item.created_at).getTime() >= after);
   }
-  const issue = new Map<InboxListDimension, IssueTest>();
+  const issue = new Map<InboxListDimension, RowTest>();
   for (const dimension of ISSUE_DIMENSIONS) {
-    const test = dimensionTest(filters, dimension, (row: InboxIssueProjection) => issueValues(row, dimension, today));
+    const test = dimensionTest(filters, dimension, today);
     if (test) issue.set(dimension, test);
   }
   return { notification, issue };
 }
 
-function passes<Row>(
-  tests: Map<string, (row: Row) => boolean>,
-  item: Row,
+function passes(
+  tests: Map<string, RowTest>,
+  item: InboxItem,
   skip?: string,
 ): boolean {
   for (const [key, test] of tests) {
@@ -539,32 +520,14 @@ function passes<Row>(
   return true;
 }
 
-/** The issue fields of an issue, shaped like an inbox row carries them. */
-export function inboxIssueProjection(
-  issue: Pick<Issue, "id" | "status" | "priority" | "project_id" | "assignee_type" | "assignee_id" | "due_date" | "labels">,
-): InboxIssueProjection {
-  return {
-    issue_id: issue.id,
-    issue_status: issue.status,
-    issue_priority: issue.priority,
-    issue_project_id: issue.project_id,
-    issue_assignee_type: issue.assignee_type,
-    issue_assignee_id: issue.assignee_id,
-    issue_due_date: issue.due_date,
-    issue_label_ids: (issue.labels ?? []).map((label) => label.id),
-  };
-}
-
-/**
- * Whether an issue passes the issue dimensions: the test for a row that has
- * no notification to ask, such as an issue an agent is working on.
- */
-export function inboxIssueMatches(
-  issue: InboxIssueProjection,
-  filters: InboxFilters,
-  now: Date = new Date(),
+function agentMatches(
+  item: InboxItem,
+  agent: InboxAgentFilter | null,
+  activeIssueIds: ReadonlySet<string>,
 ): boolean {
-  return passes(compile(filters, now).issue, issue);
+  if (!agent) return true;
+  if (item.issue_id == null) return false;
+  return activeIssueIds.has(item.issue_id) === (agent === "running");
 }
 
 /**
@@ -579,23 +542,30 @@ export function inboxIssueMatches(
  * notification filter that is simply the newest row, as deduplication shows.
  *
  * The issue dimensions — status, priority, project, assignee, label, due
- * date — ask about the issue, so a notification without one never matches
- * them, "is not" included. `unreadOnly` reads the rendered row. The
+ * date, agent — ask about the issue, so a notification without one never
+ * matches them, "is not" included. `unreadOnly` reads the rendered row. The
  * unread badge (`useInboxUnreadCount`) counts the same newest-per-issue rows
  * from the server's summary endpoint, so "only unread" and the number next to
  * Inbox still cannot disagree when no other filter is set.
  *
- * `pinnedUnreadKey` names the notification whose detail is open. Opening an
- * unread notification marks it read, which would otherwise remove the row the
- * user is reading from under the detail pane. The pinned row therefore
- * survives the unread dimension only. Every other dimension always applies,
- * because changing one is an explicit request to filter the notification
- * itself out.
+ * `pinnedUnreadKey` / `pinnedAgentKey` name the notification whose detail is
+ * open. Opening an unread notification marks it read, and replying from the
+ * detail can start or finish an agent on its issue; either would otherwise
+ * remove the row the user is working in from under the detail pane. The
+ * pinned row therefore survives the unread and agent dimensions only, and
+ * each pin only crosses its own dimension. Every other dimension always
+ * applies, because changing one is an explicit request to filter the
+ * notification itself out.
  */
 export function filterInboxItems(
   items: readonly InboxItem[],
   filters: InboxFilters,
-  { pinnedUnreadKey = null, now = new Date() }: InboxFilterContext = {},
+  {
+    activeIssueIds = EMPTY_ISSUE_IDS,
+    pinnedUnreadKey = null,
+    pinnedAgentKey = null,
+    now = new Date(),
+  }: InboxFilterContext = {},
 ): InboxItem[] {
   const tests = compile(filters, now);
   const out: InboxItem[] = [];
@@ -607,7 +577,10 @@ export function filterInboxItems(
       !filters.unreadOnly ||
       row.read !== true ||
       (pinnedUnreadKey != null && key === pinnedUnreadKey);
-    if (matchesUnread) out.push(withCommentAnchor(row, group));
+    const matchesAgent =
+      agentMatches(row, filters.agent, activeIssueIds) ||
+      (pinnedAgentKey != null && key === pinnedAgentKey);
+    if (matchesUnread && matchesAgent) out.push(withCommentAnchor(row, group));
   }
   return sortInboxNewestFirst(out);
 }
@@ -637,7 +610,10 @@ function bump(counts: Map<string, number>, key: string) {
 export function inboxFacetCounts(
   items: readonly InboxItem[],
   filters: InboxFilters,
-  { now = new Date() }: Pick<InboxFilterContext, "now"> = {},
+  {
+    activeIssueIds = EMPTY_ISSUE_IDS,
+    now = new Date(),
+  }: Pick<InboxFilterContext, "activeIssueIds" | "now"> = {},
 ): InboxFacetCounts {
   const tests = compile(filters, now);
   const today = toDateOnly(now);
@@ -661,7 +637,7 @@ export function inboxFacetCounts(
   const readMatches = (item: InboxItem) => !filters.unreadOnly || item.read !== true;
   for (const group of groupInboxRows(items)) {
     const head = group[0];
-    if (!head) continue;
+    if (!head || !agentMatches(head, filters.agent, activeIssueIds)) continue;
     const issueOk = passes(tests.issue, head);
 
     const row = group.find((item) => passes(tests.notification, item));

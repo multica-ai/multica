@@ -656,11 +656,8 @@ func TestNotification_AssigneeChanged(t *testing.T) {
 	}
 }
 
-// TestNotification_TaskCompleted verifies that a task:completed event for a
-// run no member started by hand does NOT create inbox notifications: whoever
-// answers for the issue hears through the agent's comment or the status it
-// sets. The hand-back to a member who did start the run is covered in
-// inbox_sections_test.go.
+// TestNotification_TaskCompleted verifies that task:completed events do NOT
+// create inbox notifications (completion is visible from the status change).
 func TestNotification_TaskCompleted(t *testing.T) {
 	queries := db.New(testPool)
 	bus := newNotificationBus(t, queries)
@@ -691,7 +688,7 @@ func TestNotification_TaskCompleted(t *testing.T) {
 		},
 	})
 
-	// No inbox notification should be created for this task:completed
+	// No inbox notification should be created for task:completed
 	creatorItems := inboxItemsForRecipient(t, queries, testUserID)
 	if len(creatorItems) != 0 {
 		t.Fatalf("expected 0 inbox items for creator on task:completed, got %d", len(creatorItems))

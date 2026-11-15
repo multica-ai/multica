@@ -24,6 +24,8 @@ export const MAX_VOCABULARY_WORDS = 40;
 export const MAX_VOCABULARY_WORD_LENGTH = 40;
 
 export interface VoiceSettings {
+  /** Show the mic in composers and listen for the voice shortcut. Off until the user turns it on. */
+  enabled: boolean;
   activation: VoiceActivation;
   language: VoiceLanguage;
   /** Input device id; null follows the system default. */
@@ -38,6 +40,7 @@ export interface VoiceSettings {
 }
 
 export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
+  enabled: false,
   activation: "auto",
   language: "auto",
   deviceId: null,
@@ -60,6 +63,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /** Keep what is valid from storage and fall back to defaults for the rest. */
 export function sanitizeVoiceSettings(value: unknown): VoiceSettings {
   const raw = isRecord(value) ? value : {};
+  const enabled = typeof raw.enabled === "boolean" ? raw.enabled : DEFAULT_VOICE_SETTINGS.enabled;
   const activation = ["auto", "toggle", "hold"].includes(raw.activation as string)
     ? (raw.activation as VoiceActivation)
     : DEFAULT_VOICE_SETTINGS.activation;
@@ -76,7 +80,7 @@ export function sanitizeVoiceSettings(value: unknown): VoiceSettings {
   const keepHistory = (VOICE_HISTORY_RETENTIONS as readonly string[]).includes(raw.keepHistory as string)
     ? (raw.keepHistory as VoiceHistoryRetention)
     : DEFAULT_VOICE_SETTINGS.keepHistory;
-  return { activation, language, deviceId, removeFillers, vocabulary, modelId, keepHistory };
+  return { enabled, activation, language, deviceId, removeFillers, vocabulary, modelId, keepHistory };
 }
 
 function normalizeVocabulary(words: readonly string[]): string[] {
@@ -115,6 +119,7 @@ export const useVoiceSettingsStore = create<VoiceSettingsState>()(
 
 function pickSettings(state: VoiceSettings): VoiceSettings {
   return {
+    enabled: state.enabled,
     activation: state.activation,
     language: state.language,
     deviceId: state.deviceId,

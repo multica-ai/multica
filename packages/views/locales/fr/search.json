@@ -88,7 +88,9 @@
   },
   "inbox": {
     "archive": "Archiver",
-    "mark_unread": "Marquer comme non lu"
+    "mark_unread": "Marquer comme non lu",
+    "mark_all_read": "Tout marquer comme lu dans la boîte de réception",
+    "archive_all_read": "Archiver tous les éléments lus"
   },
   "chat": {
     "link_project": "Associer à un projet...",

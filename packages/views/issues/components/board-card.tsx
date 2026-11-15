@@ -253,7 +253,7 @@ export const BoardCardContent = memo(function BoardCardContent({
             </span>
           )}
           {showPullRequests && (
-            <IssuePullRequestChips pullRequests={pullRequests} max={2} />
+            <IssuePullRequestChips pullRequests={pullRequests} max={2} insideLink />
           )}
           {cardCustomProperties.map((property) => (
             <span

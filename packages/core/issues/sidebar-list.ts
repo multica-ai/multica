@@ -190,14 +190,14 @@ export function viewSidebarRequest(
  * issues a built-in lists. `null` when the settings leave nothing to list.
  */
 export function builtinSidebarRequest(
-  builtin: BuiltinViewKey,
+  builtin: Exclude<BuiltinViewKey, "unread">,
   myRelation: MyIssuesRelation,
   settings: SidebarIssueSettings,
   statuses: readonly StatusRef[],
 ): SidebarIssuesRequest | null {
   const shown = shownSidebarStatuses(settings, statuses);
   if (shown.length === 0) return null;
-  const relation = myRelation === "all" ? "any" : myRelation;
+  const relation = builtin === "my_agents" ? "involved" : myRelation === "all" ? "any" : myRelation;
   return {
     table: {
       scope: builtin === "all_issues" ? { kind: "workspace" } : { kind: "my", relation },
@@ -211,7 +211,9 @@ export function builtinSidebarRequest(
 }
 
 /** The projects the sidebar lists, filtered and ordered by its settings. */
-export function sidebarProjects<P extends Pick<Project, "id" | "title" | "status" | "lead_type" | "lead_id" | "created_at" | "updated_at">>(
+export function sidebarProjects<
+  P extends Pick<Project, "id" | "title" | "status" | "lead_type" | "lead_id" | "created_at" | "updated_at" | "archived_at">,
+>(
   projects: readonly P[],
   settings: SidebarProjectSettings,
   manualOrder: readonly string[],
@@ -220,6 +222,7 @@ export function sidebarProjects<P extends Pick<Project, "id" | "title" | "status
   const statuses = new Set<string>(settings.statuses);
   const shown = projects.filter(
     (p) =>
+      !p.archived_at &&
       statuses.has(p.status) &&
       (!settings.onlyMine || (p.lead_type === "member" && !!userId && p.lead_id === userId)),
   );

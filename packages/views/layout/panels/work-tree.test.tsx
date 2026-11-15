@@ -131,6 +131,13 @@ describe("ProjectsSection", () => {
     expect(iconSlot("Mobile")?.querySelector("svg")).not.toBeNull();
   });
 
+  it("marks a private project with a lock inside its link", () => {
+    renderSection([{ ...project("p1", "Desktop"), visibility: "private" }, { ...project("p2", "Mobile"), visibility: "workspace" }]);
+    const lock = screen.getByRole("img", { name: "Visible to project members and workspace owners and admins" });
+    expect(lock.closest("a")).toHaveTextContent("Desktop");
+    expect(screen.getAllByRole("img", { name: "Visible to project members and workspace owners and admins" })).toHaveLength(1);
+  });
+
   it("expands a project in place, keeping its count", () => {
     renderSection();
     expect(screen.getAllByText("3")).toHaveLength(3);
@@ -185,7 +192,14 @@ describe("ProjectsSection", () => {
 
     const menu = await screen.findByRole("menu");
     const items = Array.from(menu.querySelectorAll('[role="menuitem"]'), (el) => el.textContent?.trim());
-    expect(items).toEqual(["New issue in this project", "Rename", "Open in new tab", "Pin to sidebar", "Copy link"]);
+    expect(items).toEqual([
+      "New issue in this project",
+      "Rename",
+      "Open in new tab",
+      "Pin to sidebar",
+      "Copy link",
+      "Archive",
+    ]);
 
     fireEvent.click(screen.getByRole("menuitem", { name: "New issue in this project" }));
     expect(openCreateIssue).toHaveBeenCalledWith({ project_id: "p2" });

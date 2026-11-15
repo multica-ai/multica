@@ -5,12 +5,9 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"sort"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/inbox"
 	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -42,13 +39,6 @@ type InboxItemResponse struct {
 	ActorType         *string         `json:"actor_type"`
 	ActorID           *string         `json:"actor_id"`
 	Details           json.RawMessage `json:"details"`
-	// Section is the Inbox section the row belongs to: "needs_you" when it is
-	// addressed to the recipient, "updates" when they only follow the issue
-	// (inbox.EffectiveSection).
-	Section string `json:"section"`
-	// SnoozedUntil is when a snoozed row comes back. A time in the past means
-	// it already has.
-	SnoozedUntil *string `json:"snoozed_until"`
 }
 
 func inboxToResponse(i db.InboxItem) InboxItemResponse {
@@ -68,8 +58,6 @@ func inboxToResponse(i db.InboxItem) InboxItemResponse {
 		ActorType:     textToPtr(i.ActorType),
 		ActorID:       uuidToPtr(i.ActorID),
 		Details:       json.RawMessage(i.Details),
-		Section:       inbox.EffectiveSection(i.Section, i.Type, i.Read),
-		SnoozedUntil:  timestampToPtr(i.SnoozedUntil),
 	}
 }
 
@@ -153,8 +141,6 @@ func inboxRowToResponse(r db.ListInboxItemsRow) InboxItemResponse {
 		ActorType:         textToPtr(r.ActorType),
 		ActorID:           uuidToPtr(r.ActorID),
 		Details:           json.RawMessage(r.Details),
-		Section:           inbox.EffectiveSection(r.Section, r.Type, r.Read),
-		SnoozedUntil:      timestampToPtr(r.SnoozedUntil),
 	}
 }
 
@@ -227,18 +213,9 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A snoozed row is out of the Inbox until its time passes. A client that
-	// shows the Snoozed section asks for those rows; one that predates it gets
-	// the list without them, so a snoozed issue is hidden there too instead of
-	// sitting in its inbox as unread.
-	includeSnoozed := r.URL.Query().Get("include_snoozed") == "true"
-	now := time.Now()
-	resp := make([]InboxItemResponse, 0, len(items))
-	for _, item := range items {
-		if !includeSnoozed && item.SnoozedUntil.Valid && item.SnoozedUntil.Time.After(now) {
-			continue
-		}
-		resp = append(resp, inboxRowToResponse(item))
+	resp := make([]InboxItemResponse, len(items))
+	for i, item := range items {
+		resp[i] = inboxRowToResponse(item)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -407,11 +384,9 @@ func (h *Handler) ArchiveInboxItem(w http.ResponseWriter, r *http.Request) {
 // one item archives every sibling for the same issue, so restoring brings the
 // whole group back.
 //
-// `read` is untouched on purpose for an issue that needs the member. An item
-// archived while unread comes back unread, which raises the unread badge again
-// — the badge only ever counted non-archived items, so restoring one is a real
-// addition, not a bug. An update comes back unread whatever it was: see
-// MarkRestoredInboxUpdateUnread.
+// `read` is untouched on purpose. An item archived while unread comes back
+// unread, which raises the unread badge again — the badge only ever counted
+// non-archived items, so restoring one is a real addition, not a bug.
 func (h *Handler) UnarchiveInboxItem(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	prev, ok := h.loadInboxItemForUser(w, r, id)
@@ -432,17 +407,6 @@ func (h *Handler) UnarchiveInboxItem(w http.ResponseWriter, r *http.Request) {
 			RecipientID:   item.RecipientID,
 			IssueID:       item.IssueID,
 		})
-	}
-
-	if flipped, err := h.Queries.MarkRestoredInboxUpdateUnread(r.Context(), db.MarkRestoredInboxUpdateUnreadParams{
-		ID:            item.ID,
-		NeedsYouTypes: inbox.NeedsYouTypes,
-	}); err != nil {
-		slog.Warn("inbox: mark restored update unread failed", append(logger.RequestAttrs(r), "item_id", id, "error", err)...)
-	} else if flipped > 0 {
-		if fresh, err := h.Queries.GetInboxItem(r.Context(), item.ID); err == nil {
-			item = fresh
-		}
 	}
 
 	userID := requestUserID(r)
@@ -486,167 +450,40 @@ func (h *Handler) CountUnreadInbox(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]int64{"count": count})
 }
 
-// InboxWorkspaceUnreadResponse is one workspace's inbox counts in the
+// InboxWorkspaceUnreadResponse is one workspace's unread inbox count in the
 // cross-workspace summary.
 type InboxWorkspaceUnreadResponse struct {
 	WorkspaceID string `json:"workspace_id"`
-	// Count is the number of unread issues. Clients that predate the sectioned
-	// Inbox show it as their badge, so its meaning does not change.
-	Count int64 `json:"count"`
-	// NeedsYou is the number of issues waiting on the user, read or not: the
-	// rows of the Inbox's "Needs you" section, and the badge of a client that
-	// shows it (MUL-9215).
-	NeedsYou int64 `json:"needs_you"`
-	// NextWakeAt is when the workspace's next snoozed issue comes back, RFC
-	// 3339, or absent with none. The counts leave snoozed issues out and
-	// nothing is sent when a snooze runs out, so a client re-reads the
-	// summary then.
-	NextWakeAt *string `json:"next_wake_at,omitempty"`
+	Count       int64  `json:"count"`
 }
 
-// UnreadInboxSummary returns per-workspace inbox counts across every workspace
-// the user belongs to. The rail badge and the workspace switcher dot read it
-// without fetching each workspace's full inbox list. It is account-level by
-// nature: it ignores the active workspace and keys only on the authenticated
-// user. A workspace appears when either count is above zero or it has a
-// snoozed issue still to come back.
+// UnreadInboxSummary returns per-workspace unread inbox counts across every
+// workspace the user belongs to. The sidebar uses it to light a dot on the
+// workspace switcher when a workspace OTHER than the active one has unread
+// items, without fetching each workspace's full inbox list. It is
+// account-level by nature: it ignores the active workspace and keys only on
+// the authenticated user.
 func (h *Handler) UnreadInboxSummary(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
 		return
 	}
 
-	unread, err := h.Queries.CountUnreadInboxByWorkspace(r.Context(), parseUUID(userID))
+	rows, err := h.Queries.CountUnreadInboxByWorkspace(r.Context(), parseUUID(userID))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to summarize unread inbox")
 		return
 	}
-	needsYou, err := h.Queries.CountNeedsYouInboxByWorkspace(r.Context(), db.CountNeedsYouInboxByWorkspaceParams{
-		RecipientID:   parseUUID(userID),
-		NeedsYouTypes: inbox.NeedsYouTypes,
-	})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to summarize inbox")
-		return
-	}
-	wakes, err := h.Queries.NextInboxWakeByWorkspace(r.Context(), parseUUID(userID))
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to summarize inbox")
-		return
-	}
 
-	byWorkspace := make(map[string]*InboxWorkspaceUnreadResponse, len(unread)+len(needsYou))
-	entry := func(workspaceID pgtype.UUID) *InboxWorkspaceUnreadResponse {
-		id := uuidToString(workspaceID)
-		if byWorkspace[id] == nil {
-			byWorkspace[id] = &InboxWorkspaceUnreadResponse{WorkspaceID: id}
+	resp := make([]InboxWorkspaceUnreadResponse, len(rows))
+	for i, row := range rows {
+		resp[i] = InboxWorkspaceUnreadResponse{
+			WorkspaceID: uuidToString(row.WorkspaceID),
+			Count:       row.Count,
 		}
-		return byWorkspace[id]
 	}
-	for _, row := range unread {
-		entry(row.WorkspaceID).Count = row.Count
-	}
-	for _, row := range needsYou {
-		entry(row.WorkspaceID).NeedsYou = row.Count
-	}
-	for _, row := range wakes {
-		entry(row.WorkspaceID).NextWakeAt = timestampToPtr(row.NextWakeAt)
-	}
-
-	resp := make([]InboxWorkspaceUnreadResponse, 0, len(byWorkspace))
-	for _, summary := range byWorkspace {
-		resp = append(resp, *summary)
-	}
-	sort.Slice(resp, func(i, j int) bool { return resp[i].WorkspaceID < resp[j].WorkspaceID })
 
 	writeJSON(w, http.StatusOK, resp)
-}
-
-// inboxSnoozeMaxDuration bounds how far ahead an issue can be snoozed. The
-// picker offers hours to days; a year is far past any of it and keeps a typo
-// or a clock gone wrong from parking an issue for good.
-const inboxSnoozeMaxDuration = 366 * 24 * time.Hour
-
-type SnoozeInboxRequest struct {
-	// Until is when the issue comes back, RFC 3339.
-	Until string `json:"until"`
-}
-
-// SnoozeInboxItem takes an issue out of the Inbox until a time the member
-// picks. It is issue-level, like archiving: every active row the member has on
-// the item's issue is snoozed with it. The issue comes back when the time
-// passes, or earlier when something new is addressed to the member: a row
-// written after the snooze carries no wake time.
-func (h *Handler) SnoozeInboxItem(w http.ResponseWriter, r *http.Request) {
-	item, ok := h.loadInboxItemForUser(w, r, chi.URLParam(r, "id"))
-	if !ok {
-		return
-	}
-	var req SnoozeInboxRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	until, err := time.Parse(time.RFC3339, req.Until)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "until must be an RFC 3339 time")
-		return
-	}
-	now := time.Now()
-	if !until.After(now) {
-		writeError(w, http.StatusBadRequest, "until must be in the future")
-		return
-	}
-	if until.After(now.Add(inboxSnoozeMaxDuration)) {
-		writeError(w, http.StatusBadRequest, "until is too far in the future")
-		return
-	}
-	if item.Archived {
-		writeError(w, http.StatusConflict, "an archived notification cannot be snoozed")
-		return
-	}
-
-	count, err := h.Queries.SnoozeInboxGroup(r.Context(), db.SnoozeInboxGroupParams{
-		ID:           item.ID,
-		SnoozedUntil: pgtype.Timestamptz{Time: until, Valid: true},
-	})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to snooze")
-		return
-	}
-
-	snoozedUntil := until.UTC().Format(time.RFC3339)
-	h.publish(protocol.EventInboxSnoozed, uuidToString(item.WorkspaceID), "member", requestUserID(r), map[string]any{
-		"item_id":       uuidToString(item.ID),
-		"issue_id":      uuidToPtr(item.IssueID),
-		"recipient_id":  uuidToString(item.RecipientID),
-		"snoozed_until": snoozedUntil,
-	})
-	writeJSON(w, http.StatusOK, map[string]any{"count": count, "snoozed_until": snoozedUntil})
-}
-
-// UnsnoozeInboxItem brings a snoozed issue back now. Issue-level, mirroring
-// SnoozeInboxItem.
-func (h *Handler) UnsnoozeInboxItem(w http.ResponseWriter, r *http.Request) {
-	item, ok := h.loadInboxItemForUser(w, r, chi.URLParam(r, "id"))
-	if !ok {
-		return
-	}
-	count, err := h.Queries.UnsnoozeInboxGroup(r.Context(), item.ID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to unsnooze")
-		return
-	}
-	// Bringing back an issue that was not snoozed changes no row, so it must
-	// not make every open client refetch its inbox.
-	if count > 0 {
-		h.publish(protocol.EventInboxUnsnoozed, uuidToString(item.WorkspaceID), "member", requestUserID(r), map[string]any{
-			"item_id":      uuidToString(item.ID),
-			"issue_id":     uuidToPtr(item.IssueID),
-			"recipient_id": uuidToString(item.RecipientID),
-		})
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"count": count})
 }
 
 func (h *Handler) MarkAllInboxRead(w http.ResponseWriter, r *http.Request) {
@@ -776,82 +613,6 @@ func (h *Handler) ArchiveAllReadInbox(w http.ResponseWriter, r *http.Request) {
 		"recipient_id": userID,
 		"count":        count,
 	})
-
-	writeJSON(w, http.StatusOK, map[string]any{"count": count})
-}
-
-// inboxArchiveUpdatesMaxGroups bounds one archive-updates request. A client
-// with more groups to put away sends them in several requests.
-const inboxArchiveUpdatesMaxGroups = 500
-
-type ArchiveInboxUpdatesRequest struct {
-	// The issues to archive, by issue id. A notification without an issue is
-	// named by its own id, which is how the Inbox keys its rows.
-	Groups []string `json:"groups"`
-	// Archive only the groups that have been read.
-	ReadOnly bool `json:"read_only"`
-}
-
-// ArchiveInboxUpdates archives the listed issues as long as they are still
-// only updates for the caller (see ArchiveInboxUpdateGroups). The Inbox calls
-// it with read_only for the updates the member has read, which leave the list
-// once read, and without it when the member clears the "Updates" section.
-//
-// A listed issue that needs the caller, is snoozed, or (with read_only) has
-// become unread again is left alone, so the count can be lower than the
-// number of groups sent.
-func (h *Handler) ArchiveInboxUpdates(w http.ResponseWriter, r *http.Request) {
-	userID, ok := requireUserID(w, r)
-	if !ok {
-		return
-	}
-	workspaceID := ctxWorkspaceID(r.Context())
-	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
-	if !ok {
-		return
-	}
-	var req ArchiveInboxUpdatesRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	if len(req.Groups) > inboxArchiveUpdatesMaxGroups {
-		writeError(w, http.StatusBadRequest, "too many groups")
-		return
-	}
-	groupIDs := make([]pgtype.UUID, 0, len(req.Groups))
-	for _, group := range req.Groups {
-		groupID, ok := parseUUIDOrBadRequest(w, group, "group id")
-		if !ok {
-			return
-		}
-		groupIDs = append(groupIDs, groupID)
-	}
-	if len(groupIDs) == 0 {
-		writeJSON(w, http.StatusOK, map[string]any{"count": 0})
-		return
-	}
-
-	count, err := h.Queries.ArchiveInboxUpdateGroups(r.Context(), db.ArchiveInboxUpdateGroupsParams{
-		WorkspaceID:   wsUUID,
-		RecipientID:   parseUUID(userID),
-		GroupIds:      groupIDs,
-		NeedsYouTypes: inbox.NeedsYouTypes,
-		ReadOnly:      req.ReadOnly,
-	})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to archive inbox updates")
-		return
-	}
-
-	// Nothing archived changes no row, so it must not make every open client
-	// refetch its inbox.
-	if count > 0 {
-		h.publish(protocol.EventInboxBatchArchived, workspaceID, "member", userID, map[string]any{
-			"recipient_id": userID,
-			"count":        count,
-		})
-	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"count": count})
 }
