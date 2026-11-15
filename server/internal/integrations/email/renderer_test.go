@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/inbox"
 )
 
 func TestRender_MentionedIncludesActorTitleAndLink(t *testing.T) {
@@ -72,11 +74,17 @@ func TestRender_EmptyBaseURLDoesNotCrash(t *testing.T) {
 	}
 }
 
-// The web inbox labels every notification type it knows; an email for one of
-// them must not fall back to the generic "Update" subject. Reading the label
-// file makes an upstream sync that adds an inbox type fail here instead of
-// silently degrading the email.
+// Every inbox type the server delivers, and every type the web inbox labels
+// (which also covers legacy rows), must have its own subject instead of the
+// generic "Update". Checking both lists makes an upstream change that adds a
+// type fail here instead of silently degrading the email.
 func TestActionVerb_CoversEveryInboxType(t *testing.T) {
+	for _, notifType := range inbox.Types() {
+		if actionVerb(notifType) == actionVerb("") {
+			t.Errorf("actionVerb(%q) falls back to the generic subject; add a case for it", notifType)
+		}
+	}
+
 	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "packages", "views", "locales", "en", "inbox.json"))
 	if err != nil {
 		t.Skipf("inbox labels not available: %v", err)

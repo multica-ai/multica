@@ -122,6 +122,8 @@ func actionVerb(notifType string) string {
 		return "Connect an app"
 	case "app_action_result":
 		return "App action result"
+	case "project_owner_joined":
+		return "Owner joined project"
 	default:
 		return "Update"
 	}
