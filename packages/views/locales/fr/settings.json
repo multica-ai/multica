@@ -432,6 +432,14 @@
         "label": "Archiver la notification",
         "description": "Archiver la notification ouverte, ou la restaurer lors de la consultation des archives."
       },
+      "unsubscribeArchiveInboxItem": {
+        "label": "Se désabonner et archiver",
+        "description": "Se désabonner de la tâche de la notification ouverte et l'archiver. Disponible sur les tâches qui ne sont ni à vous ni à vos agents."
+      },
+      "snoozeInboxItem": {
+        "label": "Reporter la notification",
+        "description": "Reporte la tâche ouverte depuis la boîte de réception, ou la fait revenir si elle est reportée."
+      },
       "send": {
         "label": "Envoyer",
         "description": "Permet aussi de créer des tâches."
@@ -722,6 +730,7 @@
     "save_failed": "Impossible d'enregistrer la propriété",
     "limit_hint": "{{count}}/{{max}} propriétés actives",
     "archived_badge": "Archivée",
+    "options_preview": "Voir toutes les options de {{name}}",
     "types": {
       "text": "Texte",
       "number": "Nombre",
@@ -831,8 +840,32 @@
     "toast_profile_failed": "Échec de la mise à jour du profil"
   },
   "notifications": {
-    "title": "Notifications de la boîte de réception",
-    "description": "Les événements désactivés restent visibles dans la tâche.",
+    "title": "Boîte de réception",
+    "description": "Choisissez les événements qui arrivent dans la boîte de réception de la barre latérale Travail. Un événement désactivé ne crée aucune notification, et le réactiver ne récupère pas celles manquées.",
+    "categories": {
+      "direct": "Vous concernant",
+      "issues": "Tâches que vous suivez",
+      "projects": "Projets que vous suivez",
+      "agents": "Agents"
+    },
+    "others_issues": {
+      "label": "Tâches des autres",
+      "description": "Tâches assignées à quelqu'un d'autre ou à son agent, que vous suivez seulement parce que vous les avez créées, commentées ou y avez été mentionné. Les mises à jour clés sont les @mentions, les réponses dans les fils auxquels vous avez participé et les statuts qui demandent une personne, comme en relecture, bloquée ou terminée.",
+      "key_updates": "Mises à jour clés",
+      "all": "Toute l'activité"
+    },
+    "leaving": {
+      "title": "Sortir de la boîte de réception",
+      "description": "Lire une notification ne la retire pas de la boîte de réception.",
+      "manual_label": "Archiver à la main",
+      "manual_description": "Depuis sa ligne dans la barre latérale ou le haut de la notification",
+      "manual_value": "À tout moment",
+      "done_label": "Archiver les tâches que vous terminez",
+      "done_description": "Quand vous passez une tâche à un statut Terminé ou Annulé, ses notifications sont archivées. Celles terminées par d'autres restent dans la boîte de réception.",
+      "archived_label": "Notifications archivées",
+      "archived_description": "Retrouvez-les et désarchivez-les",
+      "archived_action": "Voir les archivées"
+    },
     "toast_failed": "Échec de la mise à jour des réglages de notification",
     "groups": {
       "assignments": {
@@ -851,6 +884,10 @@
         "label": "Mentions",
         "description": "Quand quelqu'un vous @mentionne, y compris via @all et @squad"
       },
+      "reactions": {
+        "label": "Réactions",
+        "description": "Quand quelqu'un réagit à une tâche que vous avez créée ou à un commentaire que vous avez écrit"
+      },
       "updates": {
         "label": "Priorité et date d'échéance",
         "description": "Quand la priorité ou la date d'échéance change sur les tâches que vous suivez"
@@ -861,7 +898,7 @@
       },
       "agent_activity": {
         "label": "Activité des agents",
-        "description": "Lorsqu'une exécution d'agent échoue"
+        "description": "Lorsqu'une exécution d'agent échoue, ou qu'une action d'app demandée par un agent est bloquée ou expire"
       },
       "chat_replies": {
         "label": "Inclure les réponses du chat"
@@ -1958,5 +1995,26 @@
       "retry_failed": "Impossible de transcrire cet enregistrement",
       "show_more": "Afficher plus"
     }
+  },
+  "private_projects": {
+    "title": "Projets privés",
+    "description": "Seuls les membres d’un projet privé peuvent l’ouvrir. En tant que propriétaire de l’espace de travail, vous voyez qui fait partie de chacun et pouvez vous y ajouter quand vous devez intervenir.",
+    "empty": "Cet espace de travail n’a aucun projet privé.",
+    "load_failed": "Impossible de charger les projets privés.",
+    "retry": "Réessayer",
+    "no_members": "Aucun membre",
+    "lead_name": "{{name}} (responsable)",
+    "more_members": "+{{count}} autres",
+    "archived": "Archivé",
+    "member": "Vous êtes membre",
+    "open": "Ouvrir",
+    "join": "Rejoindre",
+    "join_title": "Rejoindre « {{title}} » ?",
+    "join_description": "Vous serez ajouté à la liste des membres de ce projet et verrez ses tâches, commentaires et pièces jointes. Ses membres actuels seront prévenus.",
+    "join_description_empty": "Ce projet n’a aucun membre. Vous en serez le seul membre et verrez ses tâches, commentaires et pièces jointes.",
+    "join_confirm": "Rejoindre le projet",
+    "cancel": "Annuler",
+    "toast_joined": "Vous avez rejoint {{title}}",
+    "toast_failed": "Impossible de rejoindre le projet."
   }
 }

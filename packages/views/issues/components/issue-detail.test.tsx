@@ -134,7 +134,11 @@ vi.mock("@multica/core/paths", async () => {
 const settingsPush = vi.hoisted(() => vi.fn());
 
 // Mock navigation
-vi.mock("../../navigation", () => ({
+vi.mock("../../navigation", async () => ({
+  // Real hold hook (pure React) the header's Inbox actions read through.
+  ...(await vi.importActual<typeof import("../../navigation/use-held-until-arrival")>(
+    "../../navigation/use-held-until-arrival",
+  )),
   AppLink: ({ children, href, ...props }: any) => (
     <a href={href} {...props}>
       {children}
@@ -2099,6 +2103,53 @@ describe("IssueDetail (shared)", () => {
       await screen.findByText("Retrying after the deploy");
       await waitFor(() => expect(container.querySelector(`#comment-failure-notice [data-run-id="${task.id}"]`)).not.toBeNull());
       expectStatedOnce(container.querySelector("#comment-failure-notice") as HTMLElement);
+    });
+
+    // A task_failed notification names the task (MUL-9340); the run renders
+    // under its notice's id when it left one, and under the task id otherwise.
+    describe("lands a failed run's notification", () => {
+      const taskId = failedRun().id;
+
+      it.each(["failure-notice", taskId])("in a thread with a notice, through %s", async (target) => {
+        const root = mockTimeline[0]!;
+        const task = failedRun({ trigger_comment_id: root.id, delivered_comment_ids: [root.id] });
+        mockApiObj.listTimeline.mockResolvedValue([root, notice(task, root.id)]);
+        mockApiObj.listTasksByIssue.mockResolvedValue([task]);
+        const { container } = renderIssueDetailWithHighlight(target);
+
+        await waitFor(() => expect(container.querySelector("#comment-failure-notice [data-run-id]")).not.toBeNull());
+        await waitFor(() => expect(hasHighlightedCommentBackground(container.querySelector("#comment-failure-notice"))).toBe(true));
+      });
+
+      it("in a thread without a notice, through the task id", async () => {
+        const root = mockTimeline[0]!;
+        const task = failedRun({ trigger_comment_id: root.id, delivered_comment_ids: [root.id] });
+        mockApiObj.listTimeline.mockResolvedValue([root]);
+        mockApiObj.listTasksByIssue.mockResolvedValue([task]);
+        const { container } = renderIssueDetailWithHighlight(task.id);
+
+        await waitFor(() => expect(container.querySelector(`#comment-${task.id}`)).not.toBeNull());
+        await waitFor(() => expect(hasHighlightedCommentBackground(container.querySelector(`#comment-${task.id}`))).toBe(true));
+      });
+
+      it("at the top level with a notice, through the task id", async () => {
+        const task = failedRun();
+        mockApiObj.listTimeline.mockResolvedValue([...mockTimeline, notice(task, null)]);
+        mockApiObj.listTasksByIssue.mockResolvedValue([task]);
+        const { container } = renderIssueDetailWithHighlight(task.id);
+
+        await waitFor(() => expect(container.querySelector(`#comment-failure-notice [data-run-comment-id="${task.id}"]`)).not.toBeNull());
+        await waitFor(() => expect(hasHighlightedCommentBackground(container.querySelector("#comment-failure-notice"))).toBe(true));
+      });
+
+      it("at the top level without a notice, through the task id", async () => {
+        const task = failedRun();
+        mockApiObj.listTasksByIssue.mockResolvedValue([task]);
+        const { container } = renderIssueDetailWithHighlight(task.id);
+
+        await waitFor(() => expect(container.querySelector(`#comment-${task.id}`)).not.toBeNull());
+        await waitFor(() => expect(hasHighlightedCommentBackground(container.querySelector(`#comment-${task.id}`))).toBe(true));
+      });
     });
   });
 
@@ -4119,7 +4170,7 @@ describe("IssueDetail (shared)", () => {
     async function openSubscriberPicker() {
       const heading = await screen.findByText("Activity");
       const header = heading.parentElement?.parentElement;
-      const trigger = header?.querySelector('[data-slot="popover-trigger"]');
+      const trigger = header?.querySelector('[data-trigger="popover"]');
       if (!trigger) throw new Error("subscriber picker trigger not found");
       fireEvent.click(trigger);
       return waitFor(() => {

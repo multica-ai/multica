@@ -27,6 +27,10 @@ import { RolesDemo } from "@/components/demos/roles-demo";
 역할은 에이전트를 실행할 수 있는 사람을 결정하지 않습니다. 각 에이전트에는 별도의 접근 범위(Access)가 있으며, `owner`와 `admin`도 권한이 없는 에이전트를 우회해서 실행할 수 없습니다. 자세한 내용은 [에이전트](/agents#권한과-access)를 참고하세요.
 </Callout>
 
+<Callout type="info">
+역할로 비공개 프로젝트를 볼 수 있게 되지도 않습니다. `owner`나 `admin`도 멤버 목록에 있을 때만 비공개 프로젝트를 볼 수 있습니다. 자세한 내용은 [비공개 프로젝트](/projects#private-projects)를 참고하세요.
+</Callout>
+
 ## 멤버 초대
 
 `owner`와 `admin`은 **설정 → 멤버**에서 **멤버 초대**를 누르고 이메일을 입력한 뒤 역할을 선택해 초대를 보냅니다. 초대 시 부여할 수 있는 역할은 `admin`과 `member`뿐입니다. `owner`로 지정하려면 먼저 워크스페이스에 참여한 다음 기존 `owner`가 역할을 올려야 합니다.

@@ -6,7 +6,7 @@ import { AppShellProvider, useAppShell } from "./app-shell-context";
 import { ListColumn } from "./list-column";
 
 vi.mock("../navigation", () => ({
-  useNavigation: () => ({ pathname: "/acme/inbox" }),
+  useNavigation: () => ({ pathname: "/acme/chat" }),
 }));
 
 let shell: ReturnType<typeof useAppShell> = null;
@@ -15,8 +15,8 @@ function Reader() {
   return null;
 }
 
-/** No stored width: the theme's, or 240px when it sets none. */
-const UNSTORED_SIDEBAR_WIDTH = "clamp(200px, var(--sidebar-panel-width, 240px), 320px)";
+/** No stored width: the theme's, or 280px when it sets none. */
+const UNSTORED_SIDEBAR_WIDTH = "clamp(200px, var(--sidebar-panel-width, 280px), 320px)";
 
 describe("ListColumn", () => {
   it("collapses the list column from its edge, like the space panel", () => {
@@ -106,7 +106,7 @@ describe("ListColumn", () => {
         </SidebarProvider>,
       );
       const column = container.querySelector("[data-slot='list-column']");
-      act(() => shell!.requestPeek("inbox"));
+      act(() => shell!.requestPeek("chat"));
       act(() => vi.advanceTimersByTime(200));
       expect(column).not.toHaveAttribute("inert");
       expect(column).toHaveClass("w-0");

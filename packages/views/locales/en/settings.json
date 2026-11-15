@@ -432,6 +432,14 @@
         "label": "Archive notification",
         "description": "Archive the open inbox notification, or restore it while reading the archive."
       },
+      "unsubscribeArchiveInboxItem": {
+        "label": "Unsubscribe & archive",
+        "description": "Leave the open notification's issue and archive it. Offered on issues that are not yours or your agents'."
+      },
+      "snoozeInboxItem": {
+        "label": "Snooze notification",
+        "description": "Snooze the open inbox issue, or bring it back now if it is snoozed."
+      },
       "send": {
         "label": "Send",
         "description": "Also submits new issues."
@@ -722,6 +730,7 @@
     "save_failed": "Couldn't save property",
     "limit_hint": "{{count}}/{{max}} active properties",
     "archived_badge": "Archived",
+    "options_preview": "Show all options for {{name}}",
     "types": {
       "text": "Text",
       "number": "Number",
@@ -831,8 +840,32 @@
     "toast_profile_failed": "Failed to update profile"
   },
   "notifications": {
-    "title": "Inbox Notifications",
-    "description": "Muted events remain visible on the issue.",
+    "title": "Inbox",
+    "description": "Choose which events reach the Inbox in the Work sidebar. A turned-off event creates no notification, and turning it back on doesn't bring back what you missed.",
+    "categories": {
+      "direct": "About you",
+      "issues": "Issues you subscribe to",
+      "projects": "Projects you subscribe to",
+      "agents": "Agents"
+    },
+    "others_issues": {
+      "label": "Other people's issues",
+      "description": "Issues assigned to someone else or their agent, that you only follow because you created, commented on or were mentioned in them. Key updates are @mentions, replies in threads you joined, and statuses that need a person, like in review, blocked or done.",
+      "key_updates": "Key updates only",
+      "all": "All activity"
+    },
+    "leaving": {
+      "title": "Leaving the Inbox",
+      "description": "Reading a notification doesn't take it out of the Inbox.",
+      "manual_label": "Archive by hand",
+      "manual_description": "From its row in the sidebar, or the top of the notification",
+      "manual_value": "Anytime",
+      "done_label": "Archive issues you complete",
+      "done_description": "When you move an issue to Done or Cancelled, its notifications are archived. Issues others complete stay in your Inbox.",
+      "archived_label": "Archived notifications",
+      "archived_description": "Find them again and unarchive them",
+      "archived_action": "View archived"
+    },
     "toast_failed": "Failed to update notification settings",
     "groups": {
       "assignments": {
@@ -851,6 +884,10 @@
         "label": "Mentions",
         "description": "When someone @mentions you, including @all and @squad"
       },
+      "reactions": {
+        "label": "Reactions",
+        "description": "When someone reacts to an issue you created or a comment you wrote"
+      },
       "updates": {
         "label": "Priority & Due date",
         "description": "When priority or due date changes on issues you follow"
@@ -861,7 +898,7 @@
       },
       "agent_activity": {
         "label": "Agent activity",
-        "description": "When an agent run fails"
+        "description": "When an agent run fails, or an app action an agent asked to run is blocked or expires"
       },
       "chat_replies": {
         "label": "Include chat replies"
@@ -1958,5 +1995,26 @@
       "retry_failed": "Couldn't transcribe this recording",
       "show_more": "Show more"
     }
+  },
+  "private_projects": {
+    "title": "Private projects",
+    "description": "Only the members of a private project can open it. As a workspace owner you can see who is in each one, and add yourself when you need to step in.",
+    "empty": "This workspace has no private projects.",
+    "load_failed": "Could not load private projects.",
+    "retry": "Retry",
+    "no_members": "No members",
+    "lead_name": "{{name}} (lead)",
+    "more_members": "+{{count}} more",
+    "archived": "Archived",
+    "member": "You're a member",
+    "open": "Open",
+    "join": "Join",
+    "join_title": "Join “{{title}}”?",
+    "join_description": "You will be added to this project's member list and will see its issues, comments, and attachments. Its current members will be notified.",
+    "join_description_empty": "This project has no members. You will be its only member, and will see its issues, comments, and attachments.",
+    "join_confirm": "Join project",
+    "cancel": "Cancel",
+    "toast_joined": "You joined {{title}}",
+    "toast_failed": "Could not join the project."
   }
 }

@@ -426,6 +426,14 @@
         "label": "알림 보관",
         "description": "열린 인박스 알림을 보관합니다. 보관함을 보는 중에는 보관을 해제합니다."
       },
+      "unsubscribeArchiveInboxItem": {
+        "label": "구독 해제 후 보관",
+        "description": "열린 알림의 태스크 구독을 해제하고 보관합니다. 나 또는 내 에이전트의 태스크가 아닐 때 사용할 수 있습니다."
+      },
+      "snoozeInboxItem": {
+        "label": "알림 미루기",
+        "description": "인박스에서 연 태스크를 미룹니다. 이미 미뤘다면 지금 되돌립니다."
+      },
       "send": {
         "label": "보내기",
         "description": "새 태스크 생성에도 사용됩니다."
@@ -713,6 +721,7 @@
     "save_failed": "속성을 저장하지 못했습니다",
     "limit_hint": "활성 속성 {{count}}/{{max}}",
     "archived_badge": "보관됨",
+    "options_preview": "{{name}}의 모든 옵션 보기",
     "types": {
       "text": "텍스트",
       "number": "숫자",
@@ -822,8 +831,32 @@
     "toast_profile_failed": "프로필을 업데이트하지 못했습니다"
   },
   "notifications": {
-    "title": "인박스 알림",
-    "description": "알림을 꺼도 태스크에서 관련 활동을 볼 수 있습니다.",
+    "title": "인박스",
+    "description": "'작업' 사이드바의 인박스에 들어올 이벤트를 고릅니다. 끈 이벤트는 알림을 만들지 않으며, 다시 켜도 놓친 알림은 돌아오지 않습니다.",
+    "categories": {
+      "direct": "나와 직접 관련된 것",
+      "issues": "구독 중인 태스크",
+      "projects": "구독 중인 프로젝트",
+      "agents": "에이전트"
+    },
+    "others_issues": {
+      "label": "다른 사람의 태스크",
+      "description": "다른 사람이나 그 사람의 에이전트에게 배정된 태스크 중, 만들거나 댓글을 달거나 멘션되어 자동으로 구독한 것. 주요 업데이트는 나를 향한 @멘션, 참여한 스레드의 답글, 그리고 검토 필요·차단·완료처럼 사람이 봐야 하는 상태입니다.",
+      "key_updates": "주요 업데이트만",
+      "all": "모든 활동"
+    },
+    "leaving": {
+      "title": "인박스에서 빠지는 경우",
+      "description": "읽어도 인박스에서 사라지지 않습니다.",
+      "manual_label": "직접 보관",
+      "manual_description": "사이드바의 행이나 알림 상단에서",
+      "manual_value": "언제든지",
+      "done_label": "내가 완료한 태스크 보관",
+      "done_description": "태스크를 완료 또는 취소 계열 상태로 바꾸면 그 알림은 보관됩니다. 다른 사람이 완료한 태스크는 인박스에 남습니다.",
+      "archived_label": "보관된 알림",
+      "archived_description": "여기서 다시 찾고 보관을 해제할 수 있습니다",
+      "archived_action": "보관된 알림 보기"
+    },
     "toast_failed": "알림 설정을 업데이트하지 못했습니다",
     "groups": {
       "assignments": {
@@ -842,6 +875,10 @@
         "label": "멘션",
         "description": "누군가 나를 @멘션할 때(@all, @squad 포함)"
       },
+      "reactions": {
+        "label": "반응",
+        "description": "내가 만든 태스크나 내가 쓴 댓글에 누군가 반응할 때"
+      },
       "updates": {
         "label": "우선순위 및 마감일",
         "description": "팔로우 중인 태스크의 우선순위나 마감일이 바뀔 때"
@@ -852,7 +889,7 @@
       },
       "agent_activity": {
         "label": "에이전트 활동",
-        "description": "에이전트 실행이 실패할 때"
+        "description": "에이전트 실행이 실패하거나, 에이전트가 요청한 앱 작업이 차단되거나 만료될 때"
       },
       "chat_replies": {
         "label": "채팅 답변 포함"
@@ -1937,5 +1974,26 @@
       "retry_failed": "이 녹음을 변환하지 못했습니다",
       "show_more": "더 보기"
     }
+  },
+  "private_projects": {
+    "title": "비공개 프로젝트",
+    "description": "비공개 프로젝트는 해당 프로젝트 멤버만 열 수 있습니다. 워크스페이스 소유자는 각 프로젝트의 멤버를 확인하고, 개입이 필요할 때 자신을 추가할 수 있습니다.",
+    "empty": "이 워크스페이스에는 비공개 프로젝트가 없습니다.",
+    "load_failed": "비공개 프로젝트를 불러오지 못했습니다.",
+    "retry": "다시 시도",
+    "no_members": "멤버 없음",
+    "lead_name": "{{name}}(리드)",
+    "more_members": "외 {{count}}명",
+    "archived": "보관됨",
+    "member": "참여 중",
+    "open": "열기",
+    "join": "참여",
+    "join_title": "“{{title}}” 프로젝트에 참여할까요?",
+    "join_description": "이 프로젝트의 멤버 목록에 추가되며 태스크, 댓글, 첨부 파일을 볼 수 있게 됩니다. 현재 멤버에게 알림이 전송됩니다.",
+    "join_description_empty": "이 프로젝트에는 멤버가 없습니다. 참여하면 유일한 멤버가 되며 태스크, 댓글, 첨부 파일을 볼 수 있게 됩니다.",
+    "join_confirm": "프로젝트 참여",
+    "cancel": "취소",
+    "toast_joined": "{{title}}에 참여했습니다",
+    "toast_failed": "프로젝트에 참여하지 못했습니다."
   }
 }

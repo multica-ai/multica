@@ -1711,6 +1711,17 @@ describe("CreateIssueModal", () => {
     expect(mockSetAgent).toHaveBeenCalledWith({ prompt: "Refactor auth" });
   });
 
+  it("opens without a project when asked for none, over an unfinished draft's project", async () => {
+    const user = userEvent.setup();
+    const firstOpen = renderModal(<CreateIssueModal onClose={vi.fn()} />);
+    await user.click(screen.getByTestId("project-picker"));
+    firstOpen.unmount();
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} data={{ project_id: null }} />);
+
+    expect(screen.getByTestId("project-picker")).toHaveAttribute("data-project-id", "none");
+  });
+
   it("restores an unfinished project selection after manual create remounts", async () => {
     const user = userEvent.setup();
 

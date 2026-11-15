@@ -54,7 +54,7 @@ type ProjectResponse struct {
 	// Default workflow. (MUL-7420)
 	WorkflowID *string `json:"workflow_id"`
 	// Visibility is "workspace" (every member) or "private" (project members
-	// plus workspace owners/admins). (MUL-8472)
+	// only, whatever their workspace role). (MUL-8472, MUL-9284)
 	Visibility string `json:"visibility"`
 	// ArchivedAt is non-null while the project is archived: hidden from
 	// default lists and pickers, closed to new issues, otherwise intact.
@@ -188,7 +188,8 @@ type UpdateProjectRequest struct {
 	StartDate   *string `json:"start_date"`
 	DueDate     *string `json:"due_date"`
 	// Visibility switches between "workspace" and "private" (MUL-8472).
-	// MemberIDs is only read together with a switch to "private".
+	// MemberIDs adds project members to a project that is or becomes
+	// "private"; see prepareProjectAccessUpdate.
 	Visibility *string  `json:"visibility"`
 	MemberIDs  []string `json:"member_ids,omitempty"`
 }

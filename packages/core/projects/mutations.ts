@@ -147,6 +147,21 @@ export function useRestoreProject() {
   });
 }
 
+// A workspace owner adding themselves to a private project they could not see.
+// Everything keyed on project visibility may have changed for them, the same
+// as when someone else adds them.
+export function useJoinPrivateProject() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (id: string) => api.joinPrivateProject(id),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
+    },
+  });
+}
+
 export function useSetProjectSubscription() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();

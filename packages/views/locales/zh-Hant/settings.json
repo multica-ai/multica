@@ -426,6 +426,14 @@
         "label": "歸檔通知",
         "description": "歸檔當前開啟的收件箱通知；在歸檔列表中則取消歸檔。"
       },
+      "unsubscribeArchiveInboxItem": {
+        "label": "取消訂閱並歸檔",
+        "description": "退訂當前通知所在的任務並歸檔它。僅在不屬於你或你的智能體的任務上可用。"
+      },
+      "snoozeInboxItem": {
+        "label": "延後通知",
+        "description": "延後從收件箱開啟的任務；已延後時讓它現在回來。"
+      },
       "send": {
         "label": "傳送",
         "description": "也用於提交新任務。"
@@ -713,6 +721,7 @@
     "save_failed": "儲存屬性失敗",
     "limit_hint": "{{count}}/{{max}} 個啟用中屬性",
     "archived_badge": "已歸檔",
+    "options_preview": "查看 {{name}} 的全部選項",
     "types": {
       "text": "文字",
       "number": "數字",
@@ -822,8 +831,32 @@
     "toast_profile_failed": "更新資料失敗"
   },
   "notifications": {
-    "title": "收件箱通知",
-    "description": "關閉通知後，仍可在任務中檢視相關動態。",
+    "title": "收件箱",
+    "description": "決定哪些動態會進入「工作」側欄的收件箱。關閉後不再產生這類通知，重新開啟也找不回關閉期間的通知。",
+    "categories": {
+      "direct": "與你直接相關",
+      "issues": "你訂閱的任務",
+      "projects": "你訂閱的專案",
+      "agents": "AI 代理"
+    },
+    "others_issues": {
+      "label": "別人的任務",
+      "description": "任務指派給別人或別人的 AI 代理，而你只是因為建立、留言或被 @ 自動訂閱了它。關鍵更新指 @你、回覆你參與的討論，以及待評審、受阻、完成等需要人來看的狀態。",
+      "key_updates": "僅關鍵更新",
+      "all": "全部動態"
+    },
+    "leaving": {
+      "title": "移出收件箱",
+      "description": "通知不會因為已讀而離開收件箱。",
+      "manual_label": "手動歸檔",
+      "manual_description": "在側欄列上或通知詳情頂部點歸檔",
+      "manual_value": "隨時",
+      "done_label": "自動歸檔我完成的任務",
+      "done_description": "你把任務改為「已完成」或「已取消」類狀態時，它的通知自動歸檔。別人完成的任務會留在收件箱。",
+      "archived_label": "已歸檔的通知",
+      "archived_description": "可以在這裡找回並取消歸檔",
+      "archived_action": "查看已歸檔"
+    },
     "toast_failed": "更新通知設定失敗",
     "groups": {
       "assignments": {
@@ -842,6 +875,10 @@
         "label": "提及",
         "description": "有人 @ 你時，包括 @all 和 @squad"
       },
+      "reactions": {
+        "label": "表情回應",
+        "description": "有人對你建立的任務或你寫的評論加上表情時"
+      },
       "updates": {
         "label": "優先順序與截止日期",
         "description": "你訂閱的任務優先順序或截止日期變更時"
@@ -852,7 +889,7 @@
       },
       "agent_activity": {
         "label": "AI 代理活動",
-        "description": "AI 代理執行失敗時"
+        "description": "AI 代理執行失敗，或 AI 代理請求的應用操作被攔截、過期時"
       },
       "chat_replies": {
         "label": "包含聊天回覆"
@@ -1937,5 +1974,26 @@
       "retry_failed": "這段錄音轉寫失敗",
       "show_more": "顯示更多"
     }
+  },
+  "private_projects": {
+    "title": "私有專案",
+    "description": "私有專案只有專案成員能開啟。身為工作區所有者，你可以看到每個私有專案裡有哪些成員，並在需要介入時把自己加進去。",
+    "empty": "這個工作區還沒有私有專案。",
+    "load_failed": "無法載入私有專案。",
+    "retry": "重試",
+    "no_members": "沒有成員",
+    "lead_name": "{{name}}（負責人）",
+    "more_members": "另外 {{count}} 人",
+    "archived": "已歸檔",
+    "member": "你已是成員",
+    "open": "開啟",
+    "join": "加入",
+    "join_title": "加入「{{title}}」？",
+    "join_description": "你會出現在這個專案的成員名單裡，並能看到其中的任務、評論和附件。現有成員會收到通知。",
+    "join_description_empty": "這個專案目前沒有成員。加入後你將是唯一的成員，並能看到其中的任務、評論和附件。",
+    "join_confirm": "加入專案",
+    "cancel": "取消",
+    "toast_joined": "已加入 {{title}}",
+    "toast_failed": "加入專案失敗。"
   }
 }

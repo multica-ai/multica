@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode, type SyntheticEvent } from "react";
+import { useState, type ReactNode } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -22,6 +22,7 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import type { Project, UpdateProjectRequest } from "@multica/core/types";
 import { AppLink } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { CardControl } from "../../common/card-control";
 import { PAGE_GUTTER } from "../../layout/page-header";
 import { useT } from "../../i18n";
 import { ProjectStatusBadge, ProjectPriorityBadge } from "./project-badge";
@@ -214,27 +215,6 @@ function ProjectBoardCard({
       >
         <ProjectRowActions project={project} pinned={pinned} canDelete={canDelete} />
       </div>
-    </div>
-  );
-}
-
-/**
- * Keeps a picker inside the card link from following the link or starting a
- * drag. Menus open on press, so only the click's default is cancelled.
- */
-function CardControl({ children, className }: { children: ReactNode; className?: string }) {
-  const stop = (event: SyntheticEvent) => event.stopPropagation();
-  return (
-    <div
-      className={className}
-      onPointerDown={stop}
-      onMouseDown={stop}
-      onClick={(event) => {
-        event.stopPropagation();
-        event.preventDefault();
-      }}
-    >
-      {children}
     </div>
   );
 }

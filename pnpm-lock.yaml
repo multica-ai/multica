@@ -159,6 +159,12 @@ catalogs:
     remark-math:
       specifier: ^6.0.0
       version: 6.0.0
+    remark-mdx:
+      specifier: ^3.1.1
+      version: 3.1.1
+    remark-parse:
+      specifier: ^11.0.0
+      version: 11.0.0
     shadcn:
       specifier: ^4.1.0
       version: 4.1.0
@@ -177,6 +183,9 @@ catalogs:
     typescript:
       specifier: npm:@typescript/typescript6@6.0.2
       version: 6.0.2
+    unified:
+      specifier: ^11.0.5
+      version: 11.0.5
     vitest:
       specifier: ^4.1.0
       version: 4.1.0
@@ -412,6 +421,9 @@ importers:
       '@tailwindcss/postcss':
         specifier: 'catalog:'
         version: 4.2.2
+      '@types/mdast':
+        specifier: 'catalog:'
+        version: 4.0.4
       '@types/react':
         specifier: ^19.2.0
         version: 19.2.14
@@ -421,12 +433,24 @@ importers:
       '@typescript/native':
         specifier: 'catalog:'
         version: typescript@7.0.2
+      remark-gfm:
+        specifier: 'catalog:'
+        version: 4.0.1
+      remark-mdx:
+        specifier: 'catalog:'
+        version: 3.1.1
+      remark-parse:
+        specifier: 'catalog:'
+        version: 11.0.0
       tailwindcss:
         specifier: 'catalog:'
         version: 4.2.2
       typescript:
         specifier: 'catalog:'
         version: '@typescript/typescript6@6.0.2'
+      unified:
+        specifier: 'catalog:'
+        version: 11.0.5
       vitest:
         specifier: 'catalog:'
         version: 4.1.0(@opentelemetry/api@1.9.1)(@types/node@25.5.0)(jsdom@29.0.1(@noble/hashes@1.8.0))(msw@2.12.14(@types/node@25.5.0)(@typescript/typescript6@6.0.2))(vite@8.0.1(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.3)(@types/node@25.5.0)(jiti@2.7.0)(terser@5.47.1)(yaml@2.9.1))

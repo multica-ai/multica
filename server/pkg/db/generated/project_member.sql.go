@@ -138,6 +138,38 @@ func (q *Queries) GetIssueProjectID(ctx context.Context, id pgtype.UUID) (pgtype
 	return project_id, err
 }
 
+const getProjectAccessManager = `-- name: GetProjectAccessManager :one
+SELECT pm.user_id
+FROM project_member pm
+JOIN project p ON p.id = pm.project_id
+WHERE pm.project_id = $1 AND pm.workspace_id = $2
+ORDER BY COALESCE(p.lead_type = 'member' AND p.lead_id = pm.user_id, false) DESC,
+         COALESCE(p.creator_type = 'member' AND p.creator_id = pm.user_id, false) DESC,
+         pm.created_at ASC,
+         COALESCE(pm.added_by = pm.user_id, false) DESC,
+         pm.user_id ASC
+LIMIT 1
+`
+
+type GetProjectAccessManagerParams struct {
+	ProjectID   pgtype.UUID `json:"project_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// The one project member who manages a private project's access besides the
+// workspace owners and admins on its list (MUL-9284): its lead when that is a
+// person on the list, otherwise its creator when on the list, otherwise its
+// longest-standing member. The lead itself is free to be an agent or nobody,
+// so this is what keeps a project with members from having no person in
+// charge of them. People added together share a join time; among them the
+// one who added the rest comes first. No row when the list is empty.
+func (q *Queries) GetProjectAccessManager(ctx context.Context, arg GetProjectAccessManagerParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, getProjectAccessManager, arg.ProjectID, arg.WorkspaceID)
+	var user_id pgtype.UUID
+	err := row.Scan(&user_id)
+	return user_id, err
+}
+
 const listAutopilotRunProjectIDs = `-- name: ListAutopilotRunProjectIDs :many
 SELECT r.id, a.project_id
 FROM autopilot_run r
@@ -185,8 +217,8 @@ type ListHiddenProjectIDsForUserParams struct {
 	UserID      pgtype.UUID `json:"user_id"`
 }
 
-// Private projects a regular (non owner/admin) workspace member cannot see.
-// Owners and admins see every project; callers skip this query for them.
+// Private projects a workspace member cannot see: the ones they are not a
+// member of. A workspace role grants no access (MUL-9284).
 func (q *Queries) ListHiddenProjectIDsForUser(ctx context.Context, arg ListHiddenProjectIDsForUserParams) ([]pgtype.UUID, error) {
 	rows, err := q.db.Query(ctx, listHiddenProjectIDsForUser, arg.WorkspaceID, arg.UserID)
 	if err != nil {

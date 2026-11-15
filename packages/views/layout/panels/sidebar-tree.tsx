@@ -62,6 +62,90 @@ interface TreeRowProps extends React.ComponentProps<"div"> {
   rowRef?: React.Ref<HTMLDivElement>;
 }
 
+// A step below the selected row: no fill, so it marks the place without
+// competing with a lit row.
+const TREE_ROW_LOCATED_CLASS =
+  "data-located:font-medium data-located:text-foreground data-located:[&_svg_.icon-body]:fill-current data-located:[&_svg_.icon-body]:[fill-opacity:0.2]";
+
+function treeRowKeyHandler(expanded: boolean, onExpandedChange: ((expanded: boolean) => void) | undefined) {
+  return (event: React.KeyboardEvent) => {
+    if (!onExpandedChange) return;
+    if (event.key === "ArrowRight" && !expanded) {
+      event.preventDefault();
+      onExpandedChange(true);
+    } else if (event.key === "ArrowLeft" && expanded) {
+      event.preventDefault();
+      onExpandedChange(false);
+    }
+  };
+}
+
+interface TreeToggleRowProps extends React.ComponentProps<"div"> {
+  label: string;
+  icon: React.ReactNode;
+  located?: boolean;
+  expanded: boolean;
+  onExpandedChange: (expanded: boolean) => void;
+  listId: string;
+  onPrefetch?: () => void;
+  trailing?: React.ReactNode;
+  rowRef?: React.Ref<HTMLDivElement>;
+}
+
+/**
+ * A tree row with no page of its own: the whole row expands it in place, and
+ * the chevron takes the icon's place on hover as on `TreeRow`.
+ */
+export const TreeToggleRow = forwardRef<HTMLButtonElement, TreeToggleRowProps>(function TreeToggleRow(
+  { label, icon, located = false, expanded, onExpandedChange, listId, onPrefetch, trailing, rowRef, className, ...rowProps },
+  buttonRef,
+) {
+  const onKeyDown = treeRowKeyHandler(expanded, onExpandedChange);
+  return (
+    <div
+      {...rowProps}
+      ref={rowRef}
+      data-located={located ? "" : undefined}
+      className={cn(
+        PANEL_ROW_CLASS,
+        panelRowStateClass(false),
+        "group/row relative",
+        expanded && "text-foreground",
+        TREE_ROW_LOCATED_CLASS,
+        className,
+      )}
+    >
+      <span className="relative flex size-4 shrink-0 items-center justify-center">
+        <span className="flex group-hover/row:opacity-0 group-has-[:focus-visible]/row:opacity-0 [@media(pointer:coarse)]:opacity-0">
+          {icon}
+        </span>
+        <ChevronRight
+          aria-hidden
+          className={cn(
+            "absolute size-3.5 text-muted-foreground opacity-0 transition-transform duration-150 ease-out group-hover/row:opacity-100 group-has-[:focus-visible]/row:opacity-100 motion-reduce:transition-none [@media(pointer:coarse)]:opacity-100",
+            expanded && "rotate-90",
+          )}
+        />
+      </span>
+      <TruncatedTooltip content={label}>
+        <button
+          ref={buttonRef}
+          type="button"
+          aria-expanded={expanded}
+          aria-controls={expanded ? listId : undefined}
+          onClick={() => onExpandedChange(!expanded)}
+          onKeyDown={onKeyDown}
+          onPointerEnter={onPrefetch}
+          className="min-w-0 flex-1 truncate text-left outline-none after:absolute after:inset-0 after:rounded-lg focus-visible:after:outline-2 focus-visible:after:outline-ring"
+        >
+          {label}
+        </button>
+      </TruncatedTooltip>
+      {trailing}
+    </div>
+  );
+});
+
 /**
  * A nav row that expands in place. The link stretches over the whole row so
  * the row still opens its page; the chevron, shown in the icon's place on
@@ -89,16 +173,7 @@ export const TreeRow = forwardRef<HTMLAnchorElement, TreeRowProps>(function Tree
   },
   linkRef,
 ) {
-  const onKeyDown = (event: React.KeyboardEvent) => {
-    if (!onExpandedChange) return;
-    if (event.key === "ArrowRight" && !expanded) {
-      event.preventDefault();
-      onExpandedChange(true);
-    } else if (event.key === "ArrowLeft" && expanded) {
-      event.preventDefault();
-      onExpandedChange(false);
-    }
-  };
+  const onKeyDown = treeRowKeyHandler(!!expanded, onExpandedChange);
 
   return (
     <div
@@ -111,9 +186,7 @@ export const TreeRow = forwardRef<HTMLAnchorElement, TreeRowProps>(function Tree
         panelRowStateClass(active),
         "group/row relative",
         expanded && !active && "text-foreground",
-        // A step below the selected row: no fill, so it marks the place
-        // without competing with a lit row.
-        "data-located:font-medium data-located:text-foreground data-located:[&_svg_.icon-body]:fill-current data-located:[&_svg_.icon-body]:[fill-opacity:0.2]",
+        TREE_ROW_LOCATED_CLASS,
         className,
       )}
     >
@@ -170,9 +243,9 @@ export const TreeRow = forwardRef<HTMLAnchorElement, TreeRowProps>(function Tree
   );
 });
 
-/** Marks a private project, which only its members and workspace owners and
- *  admins can see. It sits above the row link's
- *  stretched hit area so its tooltip opens; a click still reaches the link. */
+/** Marks a private project, which only its members can see. It sits above
+ *  the row link's stretched hit area so its tooltip opens; a click still
+ *  reaches the link. */
 export function PrivateProjectLock() {
   const { t } = useT("layout");
   const label = t(($) => $.panels.work.private_project);

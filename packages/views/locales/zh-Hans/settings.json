@@ -426,6 +426,14 @@
         "label": "归档通知",
         "description": "归档当前打开的收件箱通知；在归档列表中则取消归档。"
       },
+      "unsubscribeArchiveInboxItem": {
+        "label": "取消订阅并归档",
+        "description": "退订当前通知所在的任务并归档它。仅在不属于你或你的智能体的任务上可用。"
+      },
+      "snoozeInboxItem": {
+        "label": "延后通知",
+        "description": "延后从收件箱打开的任务；已延后时让它现在回来。"
+      },
       "send": {
         "label": "发送",
         "description": "也用于提交新任务。"
@@ -713,6 +721,7 @@
     "save_failed": "保存属性失败",
     "limit_hint": "{{count}}/{{max}} 个启用中属性",
     "archived_badge": "已归档",
+    "options_preview": "查看 {{name}} 的全部选项",
     "types": {
       "text": "文本",
       "number": "数字",
@@ -822,8 +831,32 @@
     "toast_profile_failed": "更新资料失败"
   },
   "notifications": {
-    "title": "收件箱通知",
-    "description": "关闭通知后，仍可在任务中查看相关动态。",
+    "title": "收件箱",
+    "description": "决定哪些动态会进入「工作」侧栏的收件箱。关闭后不再产生这类通知，重新打开也找不回关闭期间的通知。",
+    "categories": {
+      "direct": "与你直接相关",
+      "issues": "你订阅的任务",
+      "projects": "你订阅的项目",
+      "agents": "智能体"
+    },
+    "others_issues": {
+      "label": "别人的任务",
+      "description": "任务分配给别人或别人的智能体，而你只是因为创建、评论或被 @ 自动订阅了它。关键更新指 @你、回复你参与的讨论，以及待评审、受阻、完成等需要人来看的状态。",
+      "key_updates": "仅关键更新",
+      "all": "全部动态"
+    },
+    "leaving": {
+      "title": "移出收件箱",
+      "description": "通知不会因为已读而离开收件箱。",
+      "manual_label": "手动归档",
+      "manual_description": "在侧栏行上或通知详情顶部点归档",
+      "manual_value": "随时",
+      "done_label": "自动归档我完成的任务",
+      "done_description": "你把任务改为「已完成」或「已取消」类状态时，它的通知自动归档。别人完成的任务会留在收件箱。",
+      "archived_label": "已归档的通知",
+      "archived_description": "可以在这里找回并取消归档",
+      "archived_action": "查看已归档"
+    },
     "toast_failed": "更新通知设置失败",
     "groups": {
       "assignments": {
@@ -842,6 +875,10 @@
         "label": "提及",
         "description": "有人 @ 你时，包括 @all 和 @squad"
       },
+      "reactions": {
+        "label": "表情回应",
+        "description": "有人对你创建的任务或你写的评论添加表情时"
+      },
       "updates": {
         "label": "优先级与截止日期",
         "description": "你订阅的任务优先级或截止日期变更时"
@@ -852,7 +889,7 @@
       },
       "agent_activity": {
         "label": "智能体活动",
-        "description": "智能体运行失败时"
+        "description": "智能体运行失败，或智能体请求的应用操作被拦截、过期时"
       },
       "chat_replies": {
         "label": "包含聊天回复"
@@ -1937,5 +1974,26 @@
       "retry_failed": "这段录音转写失败",
       "show_more": "显示更多"
     }
+  },
+  "private_projects": {
+    "title": "私有项目",
+    "description": "私有项目只有项目成员能打开。作为工作区所有者，你可以看到每个私有项目里有哪些成员，并在需要介入时把自己加进去。",
+    "empty": "这个工作区还没有私有项目。",
+    "load_failed": "无法加载私有项目。",
+    "retry": "重试",
+    "no_members": "没有成员",
+    "lead_name": "{{name}}（负责人）",
+    "more_members": "另外 {{count}} 人",
+    "archived": "已归档",
+    "member": "你已是成员",
+    "open": "打开",
+    "join": "加入",
+    "join_title": "加入「{{title}}」？",
+    "join_description": "你会出现在这个项目的成员名单里，并能看到其中的任务、评论和附件。现有成员会收到通知。",
+    "join_description_empty": "这个项目目前没有成员。加入后你将是唯一的成员，并能看到其中的任务、评论和附件。",
+    "join_confirm": "加入项目",
+    "cancel": "取消",
+    "toast_joined": "已加入 {{title}}",
+    "toast_failed": "加入项目失败。"
   }
 }

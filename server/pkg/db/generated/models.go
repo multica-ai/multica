@@ -916,6 +916,7 @@ type InboxItem struct {
 	Details       []byte             `json:"details"`
 	Section       pgtype.Text        `json:"section"`
 	SnoozedUntil  pgtype.Timestamptz `json:"snoozed_until"`
+	SnoozedAt     pgtype.Timestamptz `json:"snoozed_at"`
 }
 
 type InstanceTelemetryState struct {
