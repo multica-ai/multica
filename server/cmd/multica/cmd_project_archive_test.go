@@ -94,10 +94,8 @@ func TestRunProjectListArchivedOnly(t *testing.T) {
 	defer srv.Close()
 
 	cmd := &cobra.Command{Use: "list"}
-	cmd.Flags().String("output", "json", "")
-	cmd.Flags().Bool("full-id", false, "")
-	cmd.Flags().String("status", "", "")
-	cmd.Flags().Bool("archived", false, "")
+	registerProjectListFlags(cmd)
+	_ = cmd.Flags().Set("output", "json")
 	_ = cmd.Flags().Set("archived", "true")
 
 	out, err := captureStdout(t, func() error { return runProjectList(cmd, nil) })

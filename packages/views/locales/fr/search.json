@@ -125,7 +125,6 @@
     "unsubscribed": "Désabonné",
     "label_added": "Libellé {{name}} ajouté",
     "label_removed": "Libellé {{name}} retiré",
-    "label_failed": "Impossible d'ajouter le libellé {{name}} à toutes les tâches",
     "update_failed": "Échec de la mise à jour",
     "assigned": "{{identifier}} assignée à {{name}}"
   },

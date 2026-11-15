@@ -1,4 +1,11 @@
 export { canDeleteProject } from "./deletion-permissions";
+export { projectLastActivityAt } from "./activity";
+export {
+  PROJECTS_PAGE_SCOPE,
+  projectsPagePrefsFromDoc,
+  useProjectsPagePrefsSync,
+  type ProjectsPagePrefs,
+} from "./page-prefs";
 export { projectKeys, projectListOptions, projectDetailOptions, projectSubscriptionOptions } from "./queries";
 export {
   useCreateProject,
@@ -16,7 +23,9 @@ export {
   PROJECT_SORT_DEFAULT_DIRECTION,
   PROJECT_DEFAULT_HIDDEN_COLUMNS,
   EMPTY_PROJECT_FILTERS,
-  type ProjectViewMode,
+  boardGroupBy,
+  type ProjectLayout,
+  type ProjectGroupBy,
   type ProjectSortField,
   type ProjectSortDirection,
   type ProjectColumnKey,

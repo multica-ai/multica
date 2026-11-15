@@ -1165,6 +1165,19 @@ export function useRealtimeSync(
       }, 1_000));
     };
 
+    // A project's last_activity_at is the newest activity among its issues,
+    // so every event that advances an issue's activity can move it. Refresh
+    // at most once a second, one second after the first event: agents comment
+    // and edit in bursts, and the list recomputes stats for every project.
+    const projectActivityTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    const scheduleProjectActivityRefresh = (wsId: string) => {
+      if (projectActivityTimers.has(wsId)) return;
+      projectActivityTimers.set(wsId, setTimeout(() => {
+        projectActivityTimers.delete(wsId);
+        qc.invalidateQueries({ queryKey: projectKeys.list(wsId) });
+      }, 1_000));
+    };
+
     const timers = new Map<string, ReturnType<typeof setTimeout>>();
     const timerCauses = new Map<string, SyncCauses>();
     const debouncedRefresh = (prefix: string, fn: () => void) => {
@@ -1303,7 +1316,10 @@ export function useRealtimeSync(
       const { issue_id, labels, issue_revision } = p as IssueLabelsChangedPayload;
       if (!issue_id) return;
       const wsId = getCurrentWsId();
-      if (wsId) onIssueLabelsChanged(qc, wsId, issue_id, labels ?? [], issue_revision);
+      if (wsId) {
+        onIssueLabelsChanged(qc, wsId, issue_id, labels ?? [], issue_revision);
+        scheduleProjectActivityRefresh(wsId);
+      }
     });
 
     // Personal; may belong to a workspace other than the open one.
@@ -1324,7 +1340,10 @@ export function useRealtimeSync(
       const { issue_id, metadata, issue_revision } = p as IssueMetadataChangedPayload;
       if (!issue_id) return;
       const wsId = getCurrentWsId();
-      if (wsId) onIssueMetadataChanged(qc, wsId, issue_id, metadata ?? {}, issue_revision);
+      if (wsId) {
+        onIssueMetadataChanged(qc, wsId, issue_id, metadata ?? {}, issue_revision);
+        scheduleProjectActivityRefresh(wsId);
+      }
     });
 
     const unsubIssuePropertiesChanged = ws.on("issue_properties:changed", (p) => {
@@ -1333,6 +1352,7 @@ export function useRealtimeSync(
       const wsId = getCurrentWsId();
       if (wsId) {
         onIssuePropertiesChanged(qc, wsId, issue_id, properties ?? {}, issue_revision);
+        scheduleProjectActivityRefresh(wsId);
         // The catalog embeds per-definition usage counts; every value
         // set/unset shifts them. The list is tiny, so a refetch beats
         // trying to patch counts client-side.
@@ -1403,6 +1423,7 @@ export function useRealtimeSync(
       if (wsId) {
         invalidateUpdatedAtSortedIssueLists(qc, wsId);
         invalidateLastActivitySortedIssueLists(qc, wsId);
+        scheduleProjectActivityRefresh(wsId);
         // A comment carries only the aggregate owner revision, not a full
         // Issue snapshot. Mark stale projections for an authoritative fetch
         // without making a later full snapshot look older than the cache.
@@ -1422,6 +1443,7 @@ export function useRealtimeSync(
       const wsId = getCurrentWsId();
       if (wsId) {
         invalidateLastActivitySortedIssueLists(qc, wsId);
+        scheduleProjectActivityRefresh(wsId);
         if (issue_revision) {
           onIssueAuxiliaryRevision(qc, wsId, comment.issue_id, issue_revision);
         } else {
@@ -1438,6 +1460,7 @@ export function useRealtimeSync(
       const wsId = getCurrentWsId();
       if (wsId) {
         invalidateLastActivitySortedIssueLists(qc, wsId);
+        scheduleProjectActivityRefresh(wsId);
         if (issue_revision) {
           onIssueAuxiliaryRevision(qc, wsId, issue_id, issue_revision);
         } else {
@@ -2087,6 +2110,8 @@ export function useRealtimeSync(
       disposed = true;
       workingAgentTimers.forEach(clearTimeout);
       workingAgentTimers.clear();
+      projectActivityTimers.forEach(clearTimeout);
+      projectActivityTimers.clear();
       workingAgentDirty.clear();
       workingAgentCauses.clear();
     };

@@ -4798,8 +4798,13 @@ func (h *Handler) publishClearedDuplicates(ctx context.Context, cleared []cleare
 // Batch operations
 
 type BatchUpdateIssuesRequest struct {
-	IssueIDs []string           `json:"issue_ids"`
-	Updates  UpdateIssueRequest `json:"updates"`
+	IssueIDs   []string           `json:"issue_ids"`
+	Updates    UpdateIssueRequest `json:"updates"`
+	Labels     *BatchLabelOps     `json:"labels"`
+	Properties *BatchPropertyOps  `json:"properties"`
+	// DryRun runs every check and reports the per-issue outcome without
+	// writing anything.
+	DryRun bool `json:"dry_run"`
 }
 
 func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
@@ -4846,21 +4851,27 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	// at the top level, "update" misspelled as singular). Telling the truth
 	// here — `{"updated": 0}` — keeps the wire shape stable while making the
 	// count match reality. See multica-ai/multica#1660.
-	hasMutation := req.Updates.Title != nil ||
+	hasFieldUpdate := req.Updates.Title != nil ||
 		req.Updates.Description != nil ||
 		req.Updates.Status != nil ||
 		req.Updates.Priority != nil ||
 		req.Updates.Position != nil
-	if !hasMutation {
+	if !hasFieldUpdate {
 		for _, k := range []string{"assignee_type", "assignee_id", "start_date", "due_date", "parent_issue_id", "project_id", "stage"} {
 			if _, ok := rawUpdates[k]; ok {
-				hasMutation = true
+				hasFieldUpdate = true
 				break
 			}
 		}
 	}
-	if !hasMutation {
-		writeJSON(w, http.StatusOK, map[string]any{"updated": 0})
+	hasLabelOps := req.Labels != nil && (len(req.Labels.Add) > 0 || len(req.Labels.Remove) > 0 || req.Labels.Clear)
+	hasPropertyOps := req.Properties != nil && (len(req.Properties.Set) > 0 || len(req.Properties.Unset) > 0)
+	if !hasFieldUpdate && !hasLabelOps && !hasPropertyOps {
+		writeJSON(w, http.StatusOK, map[string]any{"updated": 0, "results": []batchIssueResult{}})
+		return
+	}
+	if req.Updates.Description != nil && (hasLabelOps || hasPropertyOps) {
+		writeError(w, http.StatusBadRequest, "a batch update cannot change description together with labels or properties; send them as two requests")
 		return
 	}
 	if req.Updates.Priority != nil {
@@ -4920,8 +4931,24 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		}
 		batchProjectID = projectUUID
 	}
+	labelPlan, ok := h.resolveBatchLabelPlan(w, r, wsUUID, req.Labels)
+	if !ok {
+		return
+	}
+	propertyPlan, ok := h.resolveBatchPropertyPlan(w, r, wsUUID, req.Properties)
+	if !ok {
+		return
+	}
 
 	updated := 0
+	// Every issue gets one entry, so a caller can tell which issues a short
+	// `updated` count left out and why. (MUL-8882)
+	results := make([]batchIssueResult, 0, len(req.IssueIDs))
+	prefix := h.getIssuePrefix(r.Context(), wsUUID)
+	identifierOf := func(issue db.Issue) string { return prefix + "-" + strconv.Itoa(int(issue.Number)) }
+	skip := func(issueID, identifier, code, message string) {
+		results = append(results, batchIssueResult{IssueID: issueID, Identifier: identifier, Outcome: batchOutcomeSkipped, Code: code, Message: message})
+	}
 	// One Resolver for the whole batch — a per-issue filler would query the
 	// catalog once per custom-status row. (MUL-6243)
 	fillBatch := h.newStatusCategoryFiller(r.Context(), wsUUID, projectaccess.Hidden{})
@@ -4933,18 +4960,27 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	seen := make(map[pgtype.UUID]bool, len(req.IssueIDs))
 	for _, issueID := range req.IssueIDs {
 		issueUUID, err := util.ParseUUID(issueID)
 		if err != nil {
+			skip(issueID, "", "invalid_id", "not a valid issue id")
 			continue
 		}
+		if seen[issueUUID] {
+			continue
+		}
+		seen[issueUUID] = true
 		prevIssue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
 			ID:          issueUUID,
 			WorkspaceID: wsUUID,
 		})
 		if err != nil || !hidden.CanSeeProject(prevIssue.ProjectID) {
+			skip(issueID, "", "not_found", "issue not found in this workspace")
 			continue
 		}
+		identifier := identifierOf(prevIssue)
+		issueID = uuidToString(prevIssue.ID)
 
 		params := db.UpdateIssueParams{
 			SourceTaskID:  h.wakeupSourceTaskID(r),
@@ -4984,6 +5020,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			if req.Updates.AssigneeID != nil {
 				assigneeUUID, err := util.ParseUUID(*req.Updates.AssigneeID)
 				if err != nil {
+					skip(issueID, identifier, "invalid_value", "assignee_id must be a UUID")
 					continue
 				}
 				params.AssigneeID = assigneeUUID
@@ -4995,6 +5032,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			if req.Updates.StartDate != nil && *req.Updates.StartDate != "" {
 				d, err := util.ParseCalendarDate(*req.Updates.StartDate)
 				if err != nil {
+					skip(issueID, identifier, "invalid_value", "start_date must be a calendar date (YYYY-MM-DD)")
 					continue
 				}
 				params.StartDate = d
@@ -5006,6 +5044,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			if req.Updates.DueDate != nil && *req.Updates.DueDate != "" {
 				d, err := util.ParseCalendarDate(*req.Updates.DueDate)
 				if err != nil {
+					skip(issueID, identifier, "invalid_value", "due_date must be a calendar date (YYYY-MM-DD)")
 					continue
 				}
 				params.DueDate = d
@@ -5018,10 +5057,12 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			if req.Updates.ParentIssueID != nil {
 				newParentID, err := util.ParseUUID(*req.Updates.ParentIssueID)
 				if err != nil {
+					skip(issueID, identifier, "invalid_value", "parent_issue_id must be a UUID")
 					continue
 				}
 				// Cannot set self as parent.
 				if newParentID == prevIssue.ID {
+					skip(issueID, identifier, "parent_self", "an issue cannot be its own parent")
 					continue
 				}
 				// Validate parent exists in the same workspace.
@@ -5030,6 +5071,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 					WorkspaceID: prevIssue.WorkspaceID,
 				})
 				if err != nil || !hidden.CanSeeProject(newParent.ProjectID) {
+					skip(issueID, identifier, "parent_not_found", "parent issue not found in this workspace")
 					continue
 				}
 				// Cycle detection: walk up from the new parent to ensure we don't reach this issue.
@@ -5047,6 +5089,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 					cursor = ancestor.ParentIssueID
 				}
 				if cycleDetected {
+					skip(issueID, identifier, "parent_cycle", fmt.Sprintf("%s is a descendant of this issue, so making it the parent would create a cycle", identifierOf(newParent)))
 					continue
 				}
 				params.ParentIssueID = newParentID
@@ -5061,6 +5104,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		if _, ok := rawUpdates["stage"]; ok {
 			if req.Updates.Stage != nil {
 				if *req.Updates.Stage < 1 {
+					skip(issueID, identifier, "invalid_value", "stage must be 1 or greater")
 					continue
 				}
 				params.Stage = pgtype.Int4{Int32: *req.Updates.Stage, Valid: true}
@@ -5069,39 +5113,55 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// Validate the resulting assignee pair when this batch update touches
-		// either assignee field. Skip the issue silently on failure.
-		//
-		// Scoped PER ISSUE (prevIssue is this iteration's row), so one bound
-		// issue in the batch can never lend its authority to the others: an
-		// unbound entry simply fails the check and is skipped. This IS a real
-		// agent-reachable authorization point — a task token authenticates as its
-		// bound workspace member, so requireUserID above is satisfied and
-		// resolveActor still classifies the caller as an agent (MUL-6691).
-		_, batchTouchedType := rawUpdates["assignee_type"]
-		_, batchTouchedID := rawUpdates["assignee_id"]
-		// Project workflow (MUL-7420), per issue: an issue whose workflow does
-		// not list the batch status is skipped like the other per-item guards;
-		// entering a handoff step reassigns this issue to the step's handler.
-		callerType, _ := h.resolveActor(r, userID, workspaceID)
-		callerRun := h.agentRunOnIssue(r, callerType, prevIssue)
-		handoff, err := h.applyIssueWorkflow(r.Context(), prevIssue, &params, req.Updates.Status != nil, batchTouchedType || batchTouchedID, false, callerRun)
-		if err != nil {
-			continue
-		}
+		var callerRun *db.AgentTaskQueue
+		var handoff *workflowHandoff
 		issueStatusGuard := batchStatusKey
-		if params.Status.Valid {
-			issueStatusGuard = params.Status.String
-		}
-		if batchTouchedType || batchTouchedID || handoff != nil {
-			if status, _ := h.validateAssigneePair(r.Context(), r, workspaceID, params.AssigneeType, params.AssigneeID); status != 0 {
+		if hasFieldUpdate {
+			// Validate the resulting assignee pair when this batch update touches
+			// either assignee field. Skip the issue on failure.
+			//
+			// Scoped PER ISSUE (prevIssue is this iteration's row), so one bound
+			// issue in the batch can never lend its authority to the others: an
+			// unbound entry simply fails the check and is skipped. This IS a real
+			// agent-reachable authorization point — a task token authenticates as its
+			// bound workspace member, so requireUserID above is satisfied and
+			// resolveActor still classifies the caller as an agent (MUL-6691).
+			_, batchTouchedType := rawUpdates["assignee_type"]
+			_, batchTouchedID := rawUpdates["assignee_id"]
+			// Project workflow (MUL-7420), per issue: an issue whose workflow does
+			// not list the batch status is skipped like the other per-item guards;
+			// entering a handoff step reassigns this issue to the step's handler.
+			callerType, _ := h.resolveActor(r, userID, workspaceID)
+			callerRun = h.agentRunOnIssue(r, callerType, prevIssue)
+			handoff, err = h.applyIssueWorkflow(r.Context(), prevIssue, &params, req.Updates.Status != nil, batchTouchedType || batchTouchedID, false, callerRun)
+			if err != nil {
+				skip(issueID, identifier, "workflow_rejected", err.Error())
 				continue
+			}
+			if params.Status.Valid {
+				issueStatusGuard = params.Status.String
+			}
+			if batchTouchedType || batchTouchedID || handoff != nil {
+				if status, msg := h.validateAssigneePair(r.Context(), r, workspaceID, params.AssigneeType, params.AssigneeID); status != 0 {
+					skip(issueID, identifier, "assignee_not_allowed", msg)
+					continue
+				}
 			}
 		}
 
-		writeCtx := withWakeupHandedTo(r.Context(), h.handedToAgent(r.Context(), prevIssue, params, handoff != nil))
+		if req.DryRun {
+			results = append(results, batchIssueResult{IssueID: issueID, Identifier: identifier, Outcome: batchOutcomeWouldUpdate})
+			continue
+		}
+
+		writeCtx := r.Context()
+		if hasFieldUpdate {
+			writeCtx = withWakeupHandedTo(writeCtx, h.handedToAgent(r.Context(), prevIssue, params, handoff != nil))
+		}
 		var issue db.Issue
-		if req.Updates.Description != nil {
+		labelsChanged, propertiesChanged := false, false
+		switch {
+		case req.Updates.Description != nil:
 			// One batch-level base cannot describe multiple issue documents.
 			// Preserve every marked channel-media block conservatively, matching
 			// legacy single-update clients that omit description_base.
@@ -5112,8 +5172,18 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			if err == nil {
 				prevIssue = lockedPrev
 			}
-		} else {
+		case labelPlan == nil && propertyPlan == nil:
 			issue, err = h.updateIssueWithStatusGuard(writeCtx, wsUUID, issueStatusGuard, params)
+		default:
+			var fieldParams *db.UpdateIssueParams
+			if hasFieldUpdate {
+				fieldParams = &params
+			} else {
+				issueStatusGuard = ""
+			}
+			var written batchIssueWrite
+			written, err = h.writeBatchIssue(writeCtx, wsUUID, prevIssue, fieldParams, issueStatusGuard, labelPlan, propertyPlan)
+			issue, labelsChanged, propertiesChanged = written.issue, written.labelsChanged, written.propertiesChanged
 		}
 		if err != nil {
 			// The archive race is a property of the batch's shared target
@@ -5122,73 +5192,101 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			if writeIssueStatusRaceError(w, err) {
 				return
 			}
+			var skipErr *batchSkipError
+			if errors.As(err, &skipErr) {
+				skip(issueID, identifier, skipErr.code, skipErr.message)
+				continue
+			}
 			slog.Warn("batch update issue failed", "issue_id", issueID, "error", err)
+			skip(issueID, identifier, "write_failed", "failed to write this issue")
 			continue
 		}
 
-		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
-		resp := issueToResponse(issue, prefix)
 		actorType, actorID := h.resolveActor(r, userID, workspaceID)
-		h.advanceRunStep(r.Context(), callerRun, prevIssue, issue)
+		if hasFieldUpdate {
+			resp := issueToResponse(issue, prefix)
+			h.advanceRunStep(r.Context(), callerRun, prevIssue, issue)
 
-		fillBatch(&resp)
-		assigneeChanged := (req.Updates.AssigneeType != nil || req.Updates.AssigneeID != nil || handoff != nil) &&
-			(prevIssue.AssigneeType.String != issue.AssigneeType.String || uuidToString(prevIssue.AssigneeID) != uuidToString(issue.AssigneeID))
-		statusChanged := (req.Updates.Status != nil || params.Status.Valid) && prevIssue.Status != issue.Status
-		priorityChanged := req.Updates.Priority != nil && prevIssue.Priority != issue.Priority
-		projectChanged := req.Updates.ProjectID != nil && uuidToString(prevIssue.ProjectID) != uuidToString(issue.ProjectID)
+			fillBatch(&resp)
+			assigneeChanged := (req.Updates.AssigneeType != nil || req.Updates.AssigneeID != nil || handoff != nil) &&
+				(prevIssue.AssigneeType.String != issue.AssigneeType.String || uuidToString(prevIssue.AssigneeID) != uuidToString(issue.AssigneeID))
+			statusChanged := (req.Updates.Status != nil || params.Status.Valid) && prevIssue.Status != issue.Status
+			priorityChanged := req.Updates.Priority != nil && prevIssue.Priority != issue.Priority
+			projectChanged := req.Updates.ProjectID != nil && uuidToString(prevIssue.ProjectID) != uuidToString(issue.ProjectID)
 
-		batchHandoffNote := req.Updates.HandoffNote
-		trigger, willRun := h.IssueService.WillEnqueueRun(r.Context(),
-			service.IssueTriggerInput{
-				Issue:              issue,
-				PrevStatus:         prevIssue.Status,
-				AssigneeChanged:    assigneeChanged || handoff != nil,
-				StatusChanged:      statusChanged,
-				EnteredHandoffStep: handoff != nil,
-			},
-			h.issueTriggerWriteProbe(r, actorType, actorID, issue),
-		)
-		willRun = willRun && !req.Updates.SuppressRun
-		batchPayload := map[string]any{
-			"issue":                      resp,
-			"assignee_changed":           assigneeChanged,
-			"status_changed":             statusChanged,
-			"priority_changed":           priorityChanged,
-			"project_changed":            projectChanged,
-			"title_changed":              req.Updates.Title != nil && prevIssue.Title != issue.Title,
-			"prev_title":                 prevIssue.Title,
-			"parent_changed":             prevIssue.ParentIssueID != issue.ParentIssueID,
-			"prev_parent_issue_id":       uuidToPtr(prevIssue.ParentIssueID),
-			"prev_status":                prevIssue.Status,
-			"duplicate_of_issue_id":      liveDuplicateMark(issue.Status, issue.DuplicateOfIssueID),
-			"prev_duplicate_of_issue_id": liveDuplicateMark(prevIssue.Status, prevIssue.DuplicateOfIssueID),
+			batchHandoffNote := req.Updates.HandoffNote
+			trigger, willRun := h.IssueService.WillEnqueueRun(r.Context(),
+				service.IssueTriggerInput{
+					Issue:              issue,
+					PrevStatus:         prevIssue.Status,
+					AssigneeChanged:    assigneeChanged || handoff != nil,
+					StatusChanged:      statusChanged,
+					EnteredHandoffStep: handoff != nil,
+				},
+				h.issueTriggerWriteProbe(r, actorType, actorID, issue),
+			)
+			willRun = willRun && !req.Updates.SuppressRun
+			batchPayload := map[string]any{
+				"issue":                      resp,
+				"assignee_changed":           assigneeChanged,
+				"status_changed":             statusChanged,
+				"priority_changed":           priorityChanged,
+				"project_changed":            projectChanged,
+				"title_changed":              req.Updates.Title != nil && prevIssue.Title != issue.Title,
+				"prev_title":                 prevIssue.Title,
+				"parent_changed":             prevIssue.ParentIssueID != issue.ParentIssueID,
+				"prev_parent_issue_id":       uuidToPtr(prevIssue.ParentIssueID),
+				"prev_status":                prevIssue.Status,
+				"duplicate_of_issue_id":      liveDuplicateMark(issue.Status, issue.DuplicateOfIssueID),
+				"prev_duplicate_of_issue_id": liveDuplicateMark(prevIssue.Status, prevIssue.DuplicateOfIssueID),
+			}
+			if handoff != nil {
+				batchPayload["workflow_handoff"] = workflowHandoffPayload(issue, handoff, h.workflowHandoffBrief(r.Context(), issue, handoff), willRun)
+			}
+			h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, batchPayload)
+
+			// Reassignment does not cancel existing tasks (#4963 / MUL-4113) —
+			// mirrors UpdateIssue. See that handler for the rationale.
+			//
+			// Same single predicate as UpdateIssue — batch must not grow its own
+			// copy of the enqueue rule (the historical source of four-entry-point
+			// drift, MUL-3375). suppress_run applies batch-wide.
+			if handoff != nil && req.Updates.StopPreviousAssigneeRuns {
+				h.stopPreviousAssigneeRuns(r.Context(), prevIssue, issue, actorType, actorID)
+			}
+			if willRun {
+				h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, batchHandoffNote)
+			}
+
+			// No status change — not even → cancelled — cancels active tasks here,
+			// mirroring UpdateIssue (MUL-4465). See that handler for the rationale.
+
+			if statusChanged || prevIssue.ParentIssueID != issue.ParentIssueID || prevIssue.Stage != issue.Stage {
+				changedParents = append(changedParents, issue.ParentIssueID, prevIssue.ParentIssueID)
+			}
 		}
-		if handoff != nil {
-			batchPayload["workflow_handoff"] = workflowHandoffPayload(issue, handoff, h.workflowHandoffBrief(r.Context(), issue, handoff), willRun)
+		if labelsChanged {
+			if labels, ok := h.listLabelsForIssueSafe(r, issue.ID, issue.WorkspaceID); ok {
+				h.publish(protocol.EventIssueLabelsChanged, workspaceID, actorType, actorID, map[string]any{
+					"issue_id":       issueID,
+					"labels":         labelsToResponse(labels),
+					"issue_revision": issue.Revision,
+				})
+			}
 		}
-		h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, batchPayload)
-
-		// Reassignment does not cancel existing tasks (#4963 / MUL-4113) —
-		// mirrors UpdateIssue. See that handler for the rationale.
-		//
-		// Same single predicate as UpdateIssue — batch must not grow its own
-		// copy of the enqueue rule (the historical source of four-entry-point
-		// drift, MUL-3375). suppress_run applies batch-wide.
-		if handoff != nil && req.Updates.StopPreviousAssigneeRuns {
-			h.stopPreviousAssigneeRuns(r.Context(), prevIssue, issue, actorType, actorID)
-		}
-		if willRun {
-			h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, batchHandoffNote)
-		}
-
-		// No status change — not even → cancelled — cancels active tasks here,
-		// mirroring UpdateIssue (MUL-4465). See that handler for the rationale.
-
-		if statusChanged || prevIssue.ParentIssueID != issue.ParentIssueID || prevIssue.Stage != issue.Stage {
-			changedParents = append(changedParents, issue.ParentIssueID, prevIssue.ParentIssueID)
+		if propertiesChanged {
+			h.publish(protocol.EventIssuePropertiesChanged, workspaceID, actorType, actorID, map[string]any{
+				"issue_id":       issueID,
+				"properties":     parseIssueProperties(issue.Properties),
+				"issue_revision": issue.Revision,
+			})
 		}
 
+		outcome := batchOutcomeUpdated
+		if issue.Revision == prevIssue.Revision {
+			outcome = batchOutcomeUnchanged
+		}
+		results = append(results, batchIssueResult{IssueID: issueID, Identifier: identifier, Outcome: outcome})
 		updated++
 	}
 
@@ -5198,12 +5296,17 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	// by the sweep.
 	h.processChildEvents(r.Context(), changedParents...)
 
-	slog.Info("batch update issues", append(logger.RequestAttrs(r), "count", updated)...)
-	writeJSON(w, http.StatusOK, map[string]any{"updated": updated})
+	slog.Info("batch update issues", append(logger.RequestAttrs(r), "count", updated, "dry_run", req.DryRun)...)
+	response := map[string]any{"updated": updated, "results": results}
+	if req.DryRun {
+		response["dry_run"] = true
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 type BatchDeleteIssuesRequest struct {
 	IssueIDs []string `json:"issue_ids"`
+	DryRun   bool     `json:"dry_run"`
 }
 
 func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
@@ -5234,28 +5337,45 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	prefix := h.getIssuePrefix(r.Context(), wsUUID)
+	results := make([]batchIssueResult, 0, len(req.IssueIDs))
 	seenIssueIDs := make(map[pgtype.UUID]struct{}, len(req.IssueIDs))
 	for _, issueID := range req.IssueIDs {
 		issueUUID, err := util.ParseUUID(issueID)
 		if err != nil {
+			results = append(results, batchIssueResult{IssueID: issueID, Outcome: batchOutcomeSkipped, Code: "invalid_id", Message: "not a valid issue id"})
 			continue
 		}
 		if _, duplicate := seenIssueIDs[issueUUID]; duplicate {
 			continue
 		}
+		seenIssueIDs[issueUUID] = struct{}{}
 		issue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
 			ID:          issueUUID,
 			WorkspaceID: wsUUID,
 		})
 		if err != nil || !hidden.CanSeeProject(issue.ProjectID) {
+			results = append(results, batchIssueResult{IssueID: issueID, Outcome: batchOutcomeSkipped, Code: "not_found", Message: "issue not found"})
 			continue
 		}
 
-		seenIssueIDs[issueUUID] = struct{}{}
 		issues = append(issues, issue)
 		excludedIDs = append(excludedIDs, issue.ID)
+		outcome := batchOutcomeDeleted
+		if req.DryRun {
+			outcome = batchOutcomeWouldDelete
+		}
+		results = append(results, batchIssueResult{
+			IssueID:    uuidToString(issue.ID),
+			Identifier: prefix + "-" + strconv.Itoa(int(issue.Number)),
+			Outcome:    outcome,
+		})
 	}
 	if !h.requireIssueDeletion(w, r, wsUUID, issues) {
+		return
+	}
+	if req.DryRun {
+		writeJSON(w, http.StatusOK, map[string]any{"deleted": 0, "results": results, "dry_run": true})
 		return
 	}
 	for _, issue := range issues {
@@ -5278,5 +5398,5 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 	deleted := len(issues)
 
 	slog.Info("batch delete issues", append(logger.RequestAttrs(r), "count", deleted)...)
-	writeJSON(w, http.StatusOK, map[string]any{"deleted": deleted})
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": deleted, "results": results})
 }

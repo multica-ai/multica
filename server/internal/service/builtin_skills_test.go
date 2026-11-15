@@ -352,17 +352,18 @@ func TestPlatformSkillDescriptionNamesEveryDomain(t *testing.T) {
 	// These are task nouns, not section headings: a task arrives as "set up an
 	// autopilot", never as "Core model".
 	triggerWords := map[string]string{
-		"references/issues.md":       "issue",
-		"references/sub-issues.md":   "sub-issue",
-		"references/mentions.md":     "mention",
-		"references/agents.md":       "agent",
-		"references/squads.md":       "squad",
-		"references/autopilots.md":   "autopilot",
-		"references/projects.md":     "project",
-		"references/runtimes.md":     "runtime",
-		"references/environments.md": "local environment",
-		"references/skill-import.md": "skill import",
-		"references/themes.md":       "theme",
+		"references/issues.md":        "issue",
+		"references/sub-issues.md":    "sub-issue",
+		"references/batch-changes.md": "batch",
+		"references/mentions.md":      "mention",
+		"references/agents.md":        "agent",
+		"references/squads.md":        "squad",
+		"references/autopilots.md":    "autopilot",
+		"references/projects.md":      "project",
+		"references/runtimes.md":      "runtime",
+		"references/environments.md":  "local environment",
+		"references/skill-import.md":  "skill import",
+		"references/themes.md":        "theme",
 	}
 
 	skill, ok := findSkill(t, PlatformSkillName)
