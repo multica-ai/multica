@@ -871,6 +871,7 @@ export const SidebarProjectPrefsDocSchema = z.object({
     onlyMine: z.boolean().optional().catch(undefined),
     showCount: z.boolean().optional().catch(undefined),
     showNoProject: z.boolean().optional().catch(undefined),
+    minimalIcons: z.boolean().optional().catch(undefined),
   }).catch({}),
   issues: z.object({
     sortBy: z.enum(["updated_at", "created_at", "priority", "status", "title", "due_date"]).optional().catch(undefined),

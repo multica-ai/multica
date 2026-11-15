@@ -194,6 +194,11 @@ function ProjectsGroup({
         checked={settings.showCount}
         onChange={(showCount) => update({ showCount })}
       />
+      <SwitchField
+        label={t(($) => $.panels.work.projects_minimal_icons)}
+        checked={settings.minimalIcons}
+        onChange={(minimalIcons) => update({ minimalIcons })}
+      />
     </section>
   );
 }

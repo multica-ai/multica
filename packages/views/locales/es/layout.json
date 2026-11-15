@@ -160,6 +160,7 @@
       "projects_only_mine": "Solo los proyectos que dirijo",
       "projects_show_no_project": "Mostrar «Sin proyecto»",
       "projects_show_count": "Número de tareas abiertas",
+      "projects_minimal_icons": "Solo iconos predeterminados",
       "new_view": "Nueva vista",
       "all_views": "Todas las vistas",
       "view_actions": "Acciones de {{name}}",

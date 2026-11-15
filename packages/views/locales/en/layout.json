@@ -160,6 +160,7 @@
       "projects_only_mine": "Only projects I lead",
       "projects_show_no_project": "Show “No project”",
       "projects_show_count": "Open issue count",
+      "projects_minimal_icons": "Default icons only",
       "new_view": "New view",
       "all_views": "All views",
       "view_actions": "Actions for {{name}}",

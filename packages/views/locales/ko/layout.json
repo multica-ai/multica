@@ -156,6 +156,7 @@
       "projects_only_mine": "내가 리드하는 프로젝트만",
       "projects_show_no_project": "'프로젝트 없음' 표시",
       "projects_show_count": "미완료 태스크 수",
+      "projects_minimal_icons": "기본 아이콘만 표시",
       "new_view": "새 뷰",
       "all_views": "모든 뷰",
       "view_actions": "{{name}} 작업",
