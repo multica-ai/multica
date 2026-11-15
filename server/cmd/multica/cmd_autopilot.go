@@ -425,7 +425,7 @@ func runAutopilotCreate(cmd *cobra.Command, _ []string) error {
 		body["description"] = v
 	}
 	if v, _ := cmd.Flags().GetString("project"); v != "" {
-		projectRef, err := resolveProjectID(ctx, client, v)
+		projectRef, err := resolveProjectIDForNewWork(ctx, client, v)
 		if err != nil {
 			return fmt.Errorf("resolve project: %w", err)
 		}
@@ -492,7 +492,7 @@ func runAutopilotUpdate(cmd *cobra.Command, args []string) error {
 		if v == "" {
 			body["project_id"] = nil
 		} else {
-			projectRef, err := resolveProjectID(ctx, client, v)
+			projectRef, err := resolveProjectIDForNewWork(ctx, client, v)
 			if err != nil {
 				return fmt.Errorf("resolve project: %w", err)
 			}

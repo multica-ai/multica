@@ -303,3 +303,36 @@ func TestArchiveProjectPausesAutopilotsAndBlocksResume(t *testing.T) {
 		t.Fatalf("resume after restore: expected 200, got %d %s", w.Code, w.Body.String())
 	}
 }
+
+func TestArchivedProjectStillCountsAsWorkflowUser(t *testing.T) {
+	seedTestCatalog(t)
+	resetDefaultWorkflow(t)
+	wf := createTestWorkflow(t, "Archived user "+workflowTestSuffix(), "in_progress")
+	projectID := createWorkflowTestProject(t, "Archived workflow project")
+	setProjectWorkflow(t, projectID, map[string]any{"workflow_id": wf.ID}).Want(http.StatusOK)
+
+	projectIDs := func() []string {
+		t.Helper()
+		var list struct {
+			Workflows []IssueWorkflowResponse `json:"workflows"`
+		}
+		testutil.Call(t, testHandler.ListIssueWorkflows, workflowRequest("GET", "/api/issue-workflows", nil)).Want(http.StatusOK).JSON(&list)
+		for _, row := range list.Workflows {
+			if row.ID == wf.ID {
+				return row.ProjectIDs
+			}
+		}
+		t.Fatalf("workflow %s missing from list", wf.ID)
+		return nil
+	}
+	if got := projectIDs(); len(got) != 1 || got[0] != projectID {
+		t.Fatalf("before archive: project_ids = %v, want [%s]", got, projectID)
+	}
+
+	if w := archiveProjectForTest(t, testUserID, projectID); w.Code != http.StatusOK {
+		t.Fatalf("ArchiveProject: %d %s", w.Code, w.Body.String())
+	}
+	if got := projectIDs(); len(got) != 1 || got[0] != projectID {
+		t.Fatalf("after archive: project_ids = %v, want the archived project still listed", got)
+	}
+}

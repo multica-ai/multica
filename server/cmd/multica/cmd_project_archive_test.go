@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
+	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/spf13/cobra"
 )
 
@@ -107,5 +110,42 @@ func TestRunProjectListArchivedOnly(t *testing.T) {
 	}
 	if len(projects) != 1 || projects[0]["id"] != archiveTestArchivedID {
 		t.Fatalf("--archived listed %v, want only the archived project", projects)
+	}
+}
+
+func TestResolveProjectIDPrefersLiveProjectOnSharedPrefix(t *testing.T) {
+	const (
+		live     = "11111111-aaaa-1111-1111-111111111111"
+		archived = "11111111-bbbb-1111-1111-111111111111"
+		shelved  = "22222222-2222-2222-2222-222222222222"
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"projects": []any{
+			map[string]any{"id": live, "title": "Live", "status": "in_progress", "archived_at": nil},
+			map[string]any{"id": archived, "title": "Old", "status": "completed", "archived_at": "2026-11-01T00:00:00Z"},
+			map[string]any{"id": shelved, "title": "Shelved", "status": "paused", "archived_at": "2026-11-01T00:00:00Z"},
+		}})
+	}))
+	defer srv.Close()
+	client := cli.NewAPIClient(srv.URL, "ws-1", "test-token")
+	ctx := context.Background()
+
+	for name, resolve := range map[string]func(context.Context, *cli.APIClient, string) (resolvedID, error){
+		"read":     resolveProjectID,
+		"new work": resolveProjectIDForNewWork,
+	} {
+		ref, err := resolve(ctx, client, "11111111")
+		if err != nil || ref.ID != live {
+			t.Fatalf("%s: shared prefix resolved to %+v, %v; want the live project", name, ref, err)
+		}
+	}
+
+	ref, err := resolveProjectID(ctx, client, "22222222")
+	if err != nil || ref.ID != shelved || !ref.Archived {
+		t.Fatalf("read of an archived-only prefix = %+v, %v; want the archived project", ref, err)
+	}
+	if _, err := resolveProjectIDForNewWork(ctx, client, "22222222"); err == nil ||
+		!strings.Contains(err.Error(), "archived") || !strings.Contains(err.Error(), "multica project restore "+shelved) {
+		t.Fatalf("new work into an archived-only prefix: err = %v, want the restore hint", err)
 	}
 }

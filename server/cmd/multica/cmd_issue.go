@@ -1618,7 +1618,12 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 		body["parent_issue_id"] = parent.ID
 	}
 	if v, _ := cmd.Flags().GetString("project"); v != "" {
-		project, err := resolveProjectID(ctx, client, v)
+		resolveProject := resolveProjectIDForNewWork
+		if _, ok := body["parent_issue_id"]; ok {
+			// A sub-issue may stay in its parent's archived project; the server checks that.
+			resolveProject = resolveProjectID
+		}
+		project, err := resolveProject(ctx, client, v)
 		if err != nil {
 			return fmt.Errorf("resolve project: %w", err)
 		}
@@ -1860,7 +1865,7 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		if v == "" {
 			body["project_id"] = nil
 		} else {
-			project, err := resolveProjectID(ctx, client, v)
+			project, err := resolveProjectIDForNewWork(ctx, client, v)
 			if err != nil {
 				return fmt.Errorf("resolve project: %w", err)
 			}
