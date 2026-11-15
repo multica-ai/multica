@@ -18,7 +18,9 @@ describe("project access API contracts", () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ ...EMPTY_PROJECT, id: "p1", visibility: "private" })))
       .mockResolvedValueOnce(new Response(JSON.stringify({ members: [member], total: 1 })))
       .mockResolvedValueOnce(new Response(JSON.stringify({ members: "invalid", total: 1 })))
-      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ members: [member], total: 1, manager_id: "m1" })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ members: [member], total: 1, manager_id: 7 })));
     vi.stubGlobal("fetch", fetchMock);
     const client = new ApiClient("https://api.example.test");
     const created = await client.createProject({ title: "Secret", visibility: "private", member_ids: ["m1"] });
@@ -28,10 +30,15 @@ describe("project access API contracts", () => {
     expect(added.members[0]).toEqual({ ...member, avatar_url: null });
     expect(fetchMock.mock.calls[1]?.[0]).toBe("https://api.example.test/api/projects/p1/members");
     expect(JSON.parse(fetchMock.mock.calls[1]?.[1].body)).toEqual({ user_ids: ["m1"] });
-    expect(await client.getProjectMembers("p1")).toEqual({ members: [], total: 0 });
+    // A server that predates manager_id names nobody.
+    expect(added.manager_id).toBeNull();
+    expect(await client.getProjectMembers("p1")).toEqual({ members: [], total: 0, manager_id: null });
     await client.removeProjectMember("p1", "m1");
     expect(fetchMock.mock.calls[3]?.[0]).toBe("https://api.example.test/api/projects/p1/members/m1");
     expect(fetchMock.mock.calls[3]?.[1].method).toBe("DELETE");
+    expect((await client.getProjectMembers("p1")).manager_id).toBe("m1");
+    // A malformed manager costs the answer, not the member list.
+    expect(await client.getProjectMembers("p1")).toMatchObject({ members: [{ user_id: "m1" }], manager_id: null });
   });
 
   it("reads the owner's overview of private projects and survives malformed rows", async () => {

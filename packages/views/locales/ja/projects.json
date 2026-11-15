@@ -56,8 +56,7 @@
     "assign_placeholder": "リードを割り当て...",
     "members_group": "メンバー",
     "agents_group": "エージェント",
-    "no_results": "結果なし",
-    "private_needs_person": "プライベートプロジェクトのリードはメンバーである必要があります。"
+    "no_results": "結果なし"
   },
   "relative_date": {
     "today": "今日",
@@ -232,6 +231,7 @@
     "no_members": "該当するメンバーはいません",
     "no_selected": "メンバーはいません",
     "members_only_notice": "アクセスできるのはこのリストのメンバーだけです。ワークスペースの owner と admin も追加が必要です。",
+    "manager": "アクセスを管理",
     "you": "あなた",
     "remove": "{{name}}を削除",
     "failed": "アクセス権を保存できませんでした。",

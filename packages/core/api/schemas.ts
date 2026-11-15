@@ -1848,6 +1848,8 @@ export const ProjectMemberSchema = z.object({
 export const ListProjectMembersResponseSchema = z.object({
   members: z.array(ProjectMemberSchema),
   total: z.number(),
+  // Absent from a server that predates it; see canManageProjectAccess.
+  manager_id: z.string().nullable().default(null).catch(null),
 }).loose();
 
 // The workspace owner's overview of private projects (`/api/projects/private`).

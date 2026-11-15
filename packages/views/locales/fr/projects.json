@@ -56,8 +56,7 @@
     "assign_placeholder": "Assigner un responsable...",
     "members_group": "Membres",
     "agents_group": "Agents",
-    "no_results": "Aucun résultat",
-    "private_needs_person": "Un projet privé doit avoir une personne pour responsable."
+    "no_results": "Aucun résultat"
   },
   "relative_date": {
     "today": "Aujourd'hui",
@@ -232,6 +231,7 @@
     "no_members": "Aucun membre correspondant",
     "no_selected": "Aucun membre du projet",
     "members_only_notice": "Seules les personnes de cette liste ont accès. Les owner et admin de l’espace de travail doivent aussi y être ajoutés.",
+    "manager": "Gère l’accès",
     "you": "Vous",
     "remove": "Retirer {{name}}",
     "failed": "Impossible d’enregistrer les accès.",

@@ -87,7 +87,7 @@ it("joins only after confirmation, and says existing members are told", async ()
   expect(screen.getAllByRole("button", { name: "Open" })).toHaveLength(2);
 });
 
-it("warns that joining a project without a lead makes the owner its lead", async () => {
+it("says what joining an empty project means, and promises no lead either way", async () => {
   projects = [
     overview({ lead_type: "member", lead_id: "gone" }),
     overview({ id: "p3", title: "Empty Room", lead_type: null, lead_id: null, members: [] }),
@@ -99,13 +99,15 @@ it("warns that joining a project without a lead makes the owner its lead", async
 
   await user.click(leaderless!);
   let dialog = await screen.findByRole("alertdialog");
-  expect(within(dialog).getByText(/you will become its lead/)).toBeVisible();
+  expect(within(dialog).getByText(/Its current members will be notified/)).toBeVisible();
+  expect(within(dialog).queryByText(/lead/)).not.toBeInTheDocument();
   await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
   await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
 
   await user.click(empty!);
   dialog = await screen.findByRole("alertdialog");
-  expect(within(dialog).getByText(/its only member and its lead/)).toBeVisible();
+  expect(within(dialog).getByText(/You will be its only member/)).toBeVisible();
+  expect(within(dialog).queryByText(/lead/)).not.toBeInTheDocument();
 });
 
 it("reports a failed join and leaves the project unjoined", async () => {

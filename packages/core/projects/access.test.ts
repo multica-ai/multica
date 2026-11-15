@@ -1,31 +1,46 @@
 import { describe, expect, it } from "vitest";
-import { canChangeProjectLead, canManageProjectAccess, isAllowedProjectLead } from "./access";
+import { canChangeProjectLead, canManageProjectAccess } from "./access";
 
-const privateProject = { visibility: "private" as const, lead_type: "member" as const, lead_id: "lead" };
-const openProject = { visibility: "workspace" as const, lead_type: null, lead_id: null };
+const led = { visibility: "private" as const, lead_type: "member" as const, lead_id: "lead" };
+const agentLed = { visibility: "private" as const, lead_type: "agent" as const, lead_id: "agent" };
+const unled = { visibility: "private" as const, lead_type: null, lead_id: null };
+const open = { visibility: "workspace" as const, lead_type: "member" as const, lead_id: "lead" };
 
 describe("project access rules", () => {
-  it("lets owners, admins and the member lead manage a private project's access", () => {
-    expect(canManageProjectAccess(privateProject, "owner", "owner")).toBe(true);
-    expect(canManageProjectAccess(privateProject, "admin", "admin")).toBe(true);
-    expect(canManageProjectAccess(privateProject, "lead", "member")).toBe(true);
-    expect(canManageProjectAccess(privateProject, "someone", "member")).toBe(false);
-    expect(canManageProjectAccess(privateProject, null, "owner")).toBe(false);
+  it("lets owners and admins manage access whoever the manager is", () => {
+    expect(canManageProjectAccess(agentLed, "owner", "owner", "creator")).toBe(true);
+    expect(canManageProjectAccess(agentLed, "admin", "admin", null)).toBe(true);
+    expect(canManageProjectAccess(open, "admin", "admin", null)).toBe(true);
+    expect(canManageProjectAccess(agentLed, null, "owner", "creator")).toBe(false);
+  });
+
+  it("lets the member the server names manage a private project", () => {
+    expect(canManageProjectAccess(led, "lead", "member", "lead")).toBe(true);
+    expect(canManageProjectAccess(led, "someone", "member", "lead")).toBe(false);
+    // An agent lead or no lead: the creator, or whoever is next in line.
+    expect(canManageProjectAccess(agentLed, "creator", "member", "creator")).toBe(true);
+    expect(canManageProjectAccess(unled, "creator", "member", "creator")).toBe(true);
+    expect(canManageProjectAccess(agentLed, "someone", "member", "creator")).toBe(false);
+    // The server's answer wins over the lead, e.g. a lead who has left.
+    expect(canManageProjectAccess(led, "lead", "member", "creator")).toBe(false);
+  });
+
+  it("falls back to a person who leads it while no manager is named", () => {
+    expect(canManageProjectAccess(led, "lead", "member", undefined)).toBe(true);
+    expect(canManageProjectAccess(led, "lead", "member", null)).toBe(true);
+    expect(canManageProjectAccess(led, "someone", "member", undefined)).toBe(false);
+    expect(canManageProjectAccess(agentLed, "agent", "member", undefined)).toBe(false);
+    expect(canManageProjectAccess(unled, "creator", "member", undefined)).toBe(false);
+  });
+
+  it("gives a member nothing for leading a workspace-visible project", () => {
+    expect(canManageProjectAccess(open, "lead", "member", "lead")).toBe(false);
   });
 
   it("keeps the lead of a private project to its access managers", () => {
-    expect(canChangeProjectLead(openProject, "someone", "member")).toBe(true);
-    expect(canChangeProjectLead(privateProject, "someone", "member")).toBe(false);
-    expect(canChangeProjectLead(privateProject, "lead", "member")).toBe(true);
-  });
-
-  it("accepts only a person as the lead of a private project", () => {
-    expect(isAllowedProjectLead(privateProject, { lead_type: "member", lead_id: "m1" })).toBe(true);
-    expect(isAllowedProjectLead(privateProject, { lead_type: "agent", lead_id: "a1" })).toBe(false);
-    expect(isAllowedProjectLead(privateProject, { lead_type: null, lead_id: null })).toBe(false);
-    expect(isAllowedProjectLead(privateProject, { lead_type: "member", lead_id: null })).toBe(false);
-    // A workspace-visible project keeps every choice.
-    expect(isAllowedProjectLead(openProject, { lead_type: "agent", lead_id: "a1" })).toBe(true);
-    expect(isAllowedProjectLead(openProject, { lead_type: null, lead_id: null })).toBe(true);
+    expect(canChangeProjectLead(open, "someone", "member", null)).toBe(true);
+    expect(canChangeProjectLead(agentLed, "someone", "member", "creator")).toBe(false);
+    expect(canChangeProjectLead(agentLed, "creator", "member", "creator")).toBe(true);
+    expect(canChangeProjectLead(agentLed, "owner", "owner", "creator")).toBe(true);
   });
 });

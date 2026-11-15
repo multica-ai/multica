@@ -4487,7 +4487,7 @@ export class ApiClient {
 
   async getProjectMembers(id: string): Promise<ListProjectMembersResponse> {
     const raw = await this.fetch<unknown>(`/api/projects/${id}/members`);
-    return parseWithFallback(raw, ListProjectMembersResponseSchema, { members: [], total: 0 }, {
+    return parseWithFallback(raw, ListProjectMembersResponseSchema, { members: [], total: 0, manager_id: null }, {
       endpoint: "GET /api/projects/:id/members",
     });
   }
@@ -4515,7 +4515,7 @@ export class ApiClient {
     const raw = await this.fetch<unknown>(`/api/projects/${id}/members`, {
       method: "POST", body: JSON.stringify({ user_ids: userIds }),
     });
-    return parseWithFallback(raw, ListProjectMembersResponseSchema, { members: [], total: 0 }, {
+    return parseWithFallback(raw, ListProjectMembersResponseSchema, { members: [], total: 0, manager_id: null }, {
       endpoint: "POST /api/projects/:id/members",
     });
   }

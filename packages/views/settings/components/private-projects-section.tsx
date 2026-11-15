@@ -28,15 +28,6 @@ import { SettingsCard, SettingsRow, SettingsSection } from "./settings-layout";
 
 const SHOWN_MEMBERS = 8;
 
-// Joining makes the owner the lead when the project has no lead left among
-// its members. Mirrors JoinPrivateProject on the server.
-function hasMemberLead(project: PrivateProjectOverview): boolean {
-  return (
-    project.lead_type === "member" &&
-    project.members.some((member) => member.user_id === project.lead_id)
-  );
-}
-
 /**
  * A private project is open to its member list only, so an owner who is not
  * in one cannot reach it from anywhere else in the app. This is the way back
@@ -155,9 +146,6 @@ export function PrivateProjectsSection() {
               {joining && joining.members.length === 0
                 ? t(($) => $.private_projects.join_description_empty)
                 : t(($) => $.private_projects.join_description)}
-              {joining && joining.members.length > 0 && !hasMemberLead(joining)
-                ? ` ${t(($) => $.private_projects.join_lead_note)}`
-                : null}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

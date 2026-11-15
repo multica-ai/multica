@@ -56,8 +56,7 @@
     "assign_placeholder": "指派負責人...",
     "members_group": "成員",
     "agents_group": "AI 代理",
-    "no_results": "未找到結果",
-    "private_needs_person": "私有專案的負責人必須是一位成員。"
+    "no_results": "未找到結果"
   },
   "relative_date": {
     "today": "今天",
@@ -232,6 +231,7 @@
     "no_members": "沒有相符的成員",
     "no_selected": "尚無專案成員",
     "members_only_notice": "只有名單裡的成員可以存取，工作區 owner 和 admin 也需要加入名單。",
+    "manager": "管理存取權限",
     "you": "你",
     "remove": "移除{{name}}",
     "failed": "無法儲存存取權限。",

@@ -56,8 +56,7 @@
     "assign_placeholder": "Assign lead...",
     "members_group": "Members",
     "agents_group": "Agents",
-    "no_results": "No results",
-    "private_needs_person": "A private project needs a person as its lead."
+    "no_results": "No results"
   },
   "relative_date": {
     "today": "Today",
@@ -232,6 +231,7 @@
     "no_members": "No matching members",
     "no_selected": "No project members",
     "members_only_notice": "Only the people listed here have access. Workspace owners and admins have to be added too.",
+    "manager": "Manages access",
     "you": "You",
     "remove": "Remove {{name}}",
     "failed": "Could not save access changes.",

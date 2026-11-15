@@ -16,6 +16,13 @@ export interface ProjectMember {
 export interface ListProjectMembersResponse {
   members: ProjectMember[];
   total: number;
+  /**
+   * The member who manages a private project's access besides the workspace
+   * owners and admins on its list: its lead when that is a person, otherwise
+   * its creator, otherwise its longest-standing member. Null for a
+   * workspace-visible project.
+   */
+  manager_id: string | null;
 }
 
 /**

@@ -6,7 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useAuthStore } from "@multica/core/auth";
-import { canChangeProjectLead } from "@multica/core/projects/access";
+import { canChangeProjectLead, useProjectAccessManagerId } from "@multica/core/projects/access";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { Popover, PopoverContent, PopoverTrigger } from "@multica/ui/components/ui/popover";
 import type { Project, UpdateProjectRequest } from "@multica/core/types";
@@ -26,19 +26,16 @@ export function ProjectLeadPicker({ project, handleUpdate, renderTrigger, align 
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const userId = useAuthStore((s) => s.user?.id);
-  const canManage = canChangeProjectLead(project, userId, members.find((m) => m.user_id === userId)?.role);
+  const role = members.find((m) => m.user_id === userId)?.role;
+  const managerId = useProjectAccessManagerId(wsId, project, userId, role);
+  const canManage = canChangeProjectLead(project, userId, role, managerId);
 
   const [leadOpen, setLeadOpen] = useState(false);
   const [leadFilter, setLeadFilter] = useState("");
   const leadQuery = leadFilter.toLowerCase();
 
-  // The lead of a private project manages who can see it, so it is always a
-  // person: never an agent and never nobody. Naming someone outside the member
-  // list adds them to it, the same as the server does.
-  const isPrivate = project.visibility === "private";
-
   const filteredMembers = members.filter((m) => m.name.toLowerCase().includes(leadQuery) || matchesPinyin(m.name, leadQuery));
-  const filteredAgents = isPrivate ? [] : agents.filter((a) => !a.archived_at && (a.name.toLowerCase().includes(leadQuery) || matchesPinyin(a.name, leadQuery)));
+  const filteredAgents = agents.filter((a) => !a.archived_at && (a.name.toLowerCase().includes(leadQuery) || matchesPinyin(a.name, leadQuery)));
 
   const leadId = project.lead_id;
   const leadType = project.lead_type;
@@ -58,16 +55,14 @@ export function ProjectLeadPicker({ project, handleUpdate, renderTrigger, align 
           />
         </div>
         <div className="p-1 max-h-48 overflow-y-auto">
-          {isPrivate ? null : (
-            <button
-              type="button"
-              onClick={() => { handleUpdate({ lead_type: null, lead_id: null }); setLeadOpen(false); }}
-              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-body hover:bg-accent transition-colors"
-            >
-              <UserMinus className="h-3.5 w-3.5 text-muted-foreground" />
-              <span className="text-muted-foreground">{t(($) => $.lead.no_lead)}</span>
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => { handleUpdate({ lead_type: null, lead_id: null }); setLeadOpen(false); }}
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-body hover:bg-accent transition-colors"
+          >
+            <UserMinus className="h-3.5 w-3.5 text-muted-foreground" />
+            <span className="text-muted-foreground">{t(($) => $.lead.no_lead)}</span>
+          </button>
           {filteredMembers.length > 0 && (
             <>
               <div className="px-2 pt-2 pb-1 text-caption font-medium text-muted-foreground uppercase tracking-wider">{t(($) => $.lead.members_group)}</div>
