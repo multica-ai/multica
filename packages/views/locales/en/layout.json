@@ -167,6 +167,8 @@
       "inbox_view_archived": "View archived",
       "inbox_empty": "No notifications",
       "inbox_settings": "Inbox display",
+      "inbox_compact": "Compact rows",
+      "inbox_open": "Open",
       "inbox_show_count": "Unread count",
       "inbox_rail_badge": "Unread badge on Work",
       "inbox_types": "Notify me about",

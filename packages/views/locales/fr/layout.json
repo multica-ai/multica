@@ -167,6 +167,8 @@
       "inbox_view_archived": "Voir les archivées",
       "inbox_empty": "Aucune notification",
       "inbox_settings": "Affichage de la boîte de réception",
+      "inbox_compact": "Lignes compactes",
+      "inbox_open": "Ouvrir",
       "inbox_show_count": "Nombre de non lus",
       "inbox_rail_badge": "Badge de non lus sur Travail",
       "inbox_types": "Me notifier pour",

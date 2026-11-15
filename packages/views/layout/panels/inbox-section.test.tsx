@@ -18,6 +18,8 @@ const state = vi.hoisted(() => ({
   archiveAll: vi.fn(),
   archiveAllRead: vi.fn(),
   archiveCompleted: vi.fn(),
+  markRead: vi.fn(),
+  markUnread: vi.fn(),
 }));
 
 vi.mock("@multica/core/paths", async (importOriginal) => {
@@ -34,7 +36,13 @@ vi.mock("@multica/core/inbox/mutations", () => ({
   useArchiveAllInbox: () => ({ mutate: state.archiveAll }),
   useArchiveAllReadInbox: () => ({ mutate: state.archiveAllRead }),
   useArchiveCompletedInbox: () => ({ mutate: state.archiveCompleted }),
+  useMarkInboxRead: () => ({ mutate: state.markRead }),
+  useMarkInboxUnread: () => ({ mutate: state.markUnread }),
 }));
+vi.mock("@multica/core/workspace/hooks", () => ({
+  useActorName: () => ({ getActorName: () => "Leo Park" }),
+}));
+vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => null }));
 vi.mock("@multica/ui/components/common/tooltip-hint", () => ({
   TooltipHint: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
@@ -97,7 +105,15 @@ const rows = () => Array.from(document.querySelectorAll<HTMLElement>("[data-inbo
 
 beforeEach(() => {
   state.unread = 0;
-  for (const spy of [state.archive, state.markAllRead, state.archiveAll, state.archiveAllRead, state.archiveCompleted]) {
+  for (const spy of [
+    state.archive,
+    state.markAllRead,
+    state.archiveAll,
+    state.archiveAllRead,
+    state.archiveCompleted,
+    state.markRead,
+    state.markUnread,
+  ]) {
     spy.mockReset();
   }
   useSidebarTreeStore.setState({ inboxCollapsed: false, inboxSettings: DEFAULT_SIDEBAR_INBOX_SETTINGS });
@@ -128,9 +144,35 @@ describe("InboxSection", () => {
       item({ id: "n3", issue_id: null, title: "Autopilot paused", type: "autopilot_paused", created_at: "2026-11-08T08:00:00Z" }),
     ]);
 
-    expect(screen.getByRole("link", { name: "Commented" })).toHaveAttribute("href", "/acme/issues/issue-a#comment-c-1");
-    expect(screen.getByRole("link", { name: "Assigned" })).toHaveAttribute("href", "/acme/issues/issue-b");
-    expect(screen.getByRole("link", { name: "Autopilot paused" })).toHaveAttribute("href", "/acme/inbox?issue=n3");
+    expect(screen.getByRole("link", { name: /^Commented/ })).toHaveAttribute("href", "/acme/issues/issue-a#comment-c-1");
+    expect(screen.getByRole("link", { name: /^Assigned/ })).toHaveAttribute("href", "/acme/issues/issue-b");
+    expect(screen.getByRole("link", { name: /^Autopilot paused/ })).toHaveAttribute("href", "/acme/inbox?issue=n3");
+  });
+
+  it("puts who did what under the title, or keeps one line when compact", () => {
+    const items = [item({ id: "n1", issue_id: "issue-a", title: "Commented", body: "Ship it on Friday" })];
+    const { unmount } = renderSection(items);
+    expect(rows()[0]).toHaveTextContent("Leo Park Ship it on Friday");
+    unmount();
+
+    useSidebarTreeStore.setState({ inboxSettings: { ...DEFAULT_SIDEBAR_INBOX_SETTINGS, compact: true } });
+    renderSection(items);
+    expect(rows()[0]).toHaveTextContent("Commented");
+    expect(rows()[0]).not.toHaveTextContent("Leo Park");
+    expect(rows()[0]!.querySelector("[data-mc='unread-dot']")).not.toBeNull();
+  });
+
+  it("shows the whole notification on hover, with its actions", async () => {
+    renderSection([item({ id: "n1", issue_id: "issue-a", title: "Commented", body: "Ship it on Friday" })]);
+    fireEvent.mouseEnter(rows()[0]!.firstElementChild!);
+    const card = await screen.findByText("Ship it on Friday", { selector: "[data-inbox-card] p" }, { timeout: 2000 });
+    const actions = within(card.closest<HTMLElement>("[data-inbox-card]")!);
+
+    expect(actions.getByRole("link", { name: "Open" })).toHaveAttribute("href", "/acme/issues/issue-a");
+    fireEvent.click(actions.getByRole("button", { name: "Mark as read" }));
+    expect(state.markRead).toHaveBeenCalledWith("n1");
+    fireEvent.click(actions.getByRole("button", { name: "Archive" }));
+    expect(state.archive).toHaveBeenCalledWith("n1");
   });
 
   it("archives a row from its hover button", () => {
@@ -160,8 +202,8 @@ describe("InboxSection", () => {
       ],
       "issue-a",
     );
-    expect(screen.getByRole("link", { name: "Open one" })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("link", { name: "Other one" })).not.toHaveAttribute("aria-current");
+    expect(screen.getByRole("link", { name: /^Open one/ })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: /^Other one/ })).not.toHaveAttribute("aria-current");
   });
 
   it("shows the unread count beside the label unless turned off", () => {
@@ -204,8 +246,8 @@ describe("InboxSection", () => {
       null,
       "/acme/inbox?issue=n1",
     );
-    expect(screen.getByRole("link", { name: "Autopilot paused" })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("link", { name: "Other one" })).not.toHaveAttribute("aria-current");
+    expect(screen.getByRole("link", { name: /^Autopilot paused/ })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: /^Other one/ })).not.toHaveAttribute("aria-current");
   });
 
   it("offers the bulk actions from the section header", async () => {

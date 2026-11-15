@@ -57,12 +57,15 @@ export interface SidebarInboxSettings {
   showCount: boolean;
   /** The unread count on the Work rail item. */
   railBadge: boolean;
+  /** One line per notification, without the actor and what happened. */
+  compact: boolean;
 }
 
 export const DEFAULT_SIDEBAR_INBOX_SETTINGS: SidebarInboxSettings = {
   limit: 5,
   showCount: true,
   railBadge: true,
+  compact: false,
 };
 
 export interface SidebarLocateRequest {

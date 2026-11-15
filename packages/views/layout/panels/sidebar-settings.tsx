@@ -443,6 +443,11 @@ export function InboxSectionSettings({ className }: { className?: string }) {
         <h3 className="text-label font-medium text-foreground">{t(($) => $.nav.inbox)}</h3>
         <LimitField value={settings.limit} onChange={(limit) => update({ limit })} />
         <SwitchField
+          label={t(($) => $.panels.work.inbox_compact)}
+          checked={settings.compact}
+          onChange={(compact) => update({ compact })}
+        />
+        <SwitchField
           label={t(($) => $.panels.work.inbox_show_count)}
           checked={settings.showCount}
           onChange={(showCount) => update({ showCount })}

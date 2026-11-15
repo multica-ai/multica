@@ -1,11 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Archive, BookCheck, CheckCheck, History, ListChecks, MoreHorizontal } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
+import { Button, buttonVariants } from "@multica/ui/components/ui/button";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@multica/ui/components/ui/hover-card";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -20,18 +22,26 @@ import {
   useArchiveCompletedInbox,
   useArchiveInbox,
   useMarkAllInboxRead,
+  useMarkInboxRead,
+  useMarkInboxUnread,
 } from "@multica/core/inbox/mutations";
 import { deduplicateInboxItems, inboxListOptions, useInboxUnreadCount } from "@multica/core/inbox/queries";
+import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
+import { issueDetailOptions } from "@multica/core/issues/queries";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
 import { useWorkspacePaths } from "@multica/core/paths";
 import type { InboxItem } from "@multica/core/types";
+import { useActorName } from "@multica/core/workspace/hooks";
 import { AppLink, useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 import { INBOX_TYPE_ICONS } from "../../inbox/components/inbox-filter-options";
 import { getInboxDisplayTitle, inboxRowHref, isAutopilotQuotaNotice } from "../../inbox/components/inbox-display";
 import { ARCHIVED_VIEW_PARAM } from "../../inbox/components/inbox-view";
-import { useTypeLabels } from "../../inbox/components/inbox-detail-label";
+import { ActorAvatar } from "../../common/actor-avatar";
+import { InboxDetailLabel, useTypeLabels } from "../../inbox/components/inbox-detail-label";
 import { useTimeAgo } from "../../inbox/components/inbox-list-item";
+import { StatusIcon } from "../../issues/components";
+import { useStatusLabel } from "../../issues/utils/status-label";
 import { PANEL_ROW_CLASS, PanelCount, PanelList, PanelSection, panelRowAnchor, panelRowStateClass } from "../panel-nav";
 import { InboxSectionSettings, SECTION_SETTINGS_REVEAL_CLASS } from "./sidebar-settings";
 import { ISSUE_ROW_LINK_CLASS, TREE_ROW_BUTTON_CLASS } from "./sidebar-tree";
@@ -101,6 +111,7 @@ export function InboxSection({
   const collapsed = useSidebarTreeStore((s) => s.inboxCollapsed);
   const setCollapsed = useSidebarTreeStore((s) => s.setInboxCollapsed);
   const showCount = useSidebarTreeStore((s) => s.inboxSettings.showCount);
+  const compact = useSidebarTreeStore((s) => s.inboxSettings.compact);
   const unread = useInboxUnreadCount(wsId);
   const archive = useArchiveInbox();
   const { searchParams } = useNavigation();
@@ -132,6 +143,7 @@ export function InboxSection({
                 (!!item.issue_id && item.issue_id === activeIssueId) ||
                 (!!openKey && (item.issue_id ?? item.id) === openKey)
               }
+              compact={compact}
               onArchive={() => archive.mutate(item.id)}
             />
           ))}
@@ -237,50 +249,95 @@ function InboxRow({
   item,
   href,
   active,
+  compact,
   onArchive,
 }: {
   item: InboxItem;
   href: string;
   active: boolean;
+  /** One line (type icon, title, dot or time) instead of the actor line under the title. */
+  compact: boolean;
   onArchive: () => void;
 }) {
   const { t } = useT("inbox");
   const typeLabels = useTypeLabels();
   const timeAgo = useTimeAgo();
   const Icon = INBOX_TYPE_ICONS[inboxTypeGroup(item.type)];
-  const title = isAutopilotQuotaNotice(item.type) ? typeLabels[item.type] : getInboxDisplayTitle(item);
+  const title = inboxRowTitle(item, typeLabels);
   const unread = item.read !== true;
   const archiveLabel = t(($) => $.list.archive_tooltip);
+  // Hidden while the archive button stands in its place.
+  const yields = "group-hover/inbox:invisible group-focus-within/inbox:invisible";
+  const time = (
+    <span className={cn("shrink-0 text-caption tabular-nums text-faint-foreground", yields)}>
+      {timeAgo(item.created_at)}
+    </span>
+  );
+  const dot = <span data-mc="unread-dot" aria-hidden className="size-1.5 shrink-0 rounded-full bg-brand" />;
+  const titleText = (
+    <span className={cn("min-w-0 flex-1 truncate", unread && "font-medium text-foreground")}>{title}</span>
+  );
 
   return (
     <li data-inbox-row data-read={unread ? "false" : "true"} className="group/inbox relative">
-      <div {...panelRowAnchor(active)} className={cn(PANEL_ROW_CLASS, panelRowStateClass(active), "relative")}>
-        <span title={typeLabels[item.type]} className="flex shrink-0 items-center">
-          <Icon aria-hidden className="size-4" />
-        </span>
-        <AppLink
-          href={href}
-          newTabTitle={title}
-          draggable={false}
-          aria-current={active ? "page" : undefined}
-          className={cn(ISSUE_ROW_LINK_CLASS, "gap-2.5")}
+      <HoverCard>
+        <HoverCardTrigger
+          delay={500}
+          closeDelay={100}
+          render={<div />}
+          {...panelRowAnchor(active)}
+          className={cn(PANEL_ROW_CLASS, panelRowStateClass(active), "relative", !compact && "items-start py-[5px]")}
         >
-          <span className={cn("min-w-0 flex-1 truncate", unread && "font-medium text-foreground")}>{title}</span>
-          {/* Yields its slot to the archive button on hover. */}
-          <span className="flex shrink-0 items-center group-hover/inbox:invisible group-focus-within/inbox:invisible">
-            {unread ? (
-              <span data-mc="unread-dot" aria-hidden className="size-1.5 rounded-full bg-brand" />
+          {compact ? (
+            <span title={typeLabels[item.type]} className="flex shrink-0 items-center">
+              <Icon aria-hidden className="size-4" />
+            </span>
+          ) : (
+            <span className="mt-0.5 flex shrink-0">
+              <InboxActorAvatar item={item} size="xs" />
+            </span>
+          )}
+          <AppLink
+            href={href}
+            newTabTitle={title}
+            draggable={false}
+            aria-current={active ? "page" : undefined}
+            className={cn(ISSUE_ROW_LINK_CLASS, compact ? "gap-2.5" : "flex-col items-stretch gap-0")}
+          >
+            {compact ? (
+              <>
+                {titleText}
+                {unread ? <span className={cn("flex shrink-0 items-center", yields)}>{dot}</span> : time}
+              </>
             ) : (
-              <span className="text-caption tabular-nums text-faint-foreground">{timeAgo(item.created_at)}</span>
+              <>
+                <span className="flex min-w-0 items-center gap-2 leading-5">
+                  {titleText}
+                  {time}
+                </span>
+                <span className="flex min-w-0 items-center gap-2 text-caption leading-4 text-muted-foreground">
+                  <span className="min-w-0 flex-1 truncate">
+                    <InboxActorLine item={item} />
+                  </span>
+                  {unread && dot}
+                </span>
+              </>
             )}
-          </span>
-        </AppLink>
-      </div>
+          </AppLink>
+        </HoverCardTrigger>
+        <HoverCardContent side="right" align="start" sideOffset={12} alignOffset={-8} className="w-72 p-3">
+          <InboxRowCard item={item} href={href} title={title} onArchive={onArchive} />
+        </HoverCardContent>
+      </HoverCard>
       <TooltipHint label={archiveLabel}>
         <button
           type="button"
           aria-label={archiveLabel}
-          className="absolute top-1/2 right-1.5 z-10 hidden size-5 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground group-hover/inbox:flex group-focus-within/inbox:flex hover:bg-surface-selected hover:text-foreground"
+          className={cn(
+            "absolute right-1.5 z-10 hidden size-5 items-center justify-center rounded-md text-muted-foreground group-hover/inbox:flex group-focus-within/inbox:flex hover:bg-surface-selected hover:text-foreground",
+            // On the title's line, where the time was.
+            compact ? "top-1/2 -translate-y-1/2" : "top-[5px]",
+          )}
           onClick={(event) => {
             event.preventDefault();
             event.stopPropagation();
@@ -291,5 +348,110 @@ function InboxRow({
         </button>
       </TooltipHint>
     </li>
+  );
+}
+
+function inboxRowTitle(item: InboxItem, typeLabels: ReturnType<typeof useTypeLabels>) {
+  return isAutopilotQuotaNotice(item.type) ? typeLabels[item.type] : getInboxDisplayTitle(item);
+}
+
+function InboxActorAvatar({ item, size }: { item: InboxItem; size: "xs" | "sm" }) {
+  return (
+    <ActorAvatar
+      actorType={item.actor_type ?? item.recipient_type}
+      actorId={item.actor_id ?? item.recipient_id}
+      size={size}
+    />
+  );
+}
+
+/** Who did what: the actor's name, then what the notification says happened. */
+function InboxActorLine({ item, detail }: { item: InboxItem; detail?: ReactNode }) {
+  const { getActorName } = useActorName();
+  const name =
+    item.actor_type && item.actor_type !== "system" && item.actor_id
+      ? getActorName(item.actor_type, item.actor_id)
+      : null;
+  return (
+    <>
+      {name && <span className="font-medium">{name} </span>}
+      {detail ?? <InboxDetailLabel item={item} />}
+    </>
+  );
+}
+
+/** The whole notification, shown while a row is hovered. */
+function InboxRowCard({
+  item,
+  href,
+  title,
+  onArchive,
+}: {
+  item: InboxItem;
+  href: string;
+  title: string;
+  onArchive: () => void;
+}) {
+  const { t } = useT("layout");
+  const { t: tInbox } = useT("inbox");
+  const typeLabels = useTypeLabels();
+  const timeAgo = useTimeAgo();
+  const { categoryOf, colorOf, iconOf } = useIssueStatuses(item.workspace_id);
+  const statusLabelOf = useStatusLabel(item.workspace_id);
+  const markRead = useMarkInboxRead();
+  const markUnread = useMarkInboxUnread();
+  const { data: issue } = useQuery({ ...issueDetailOptions(item.workspace_id, item.issue_id ?? ""), enabled: !!item.issue_id });
+  const unread = item.read !== true;
+  // A comment gets its own block, so the line above names only the kind.
+  const comment = item.type === "new_comment" && item.body ? item.body : null;
+  const status = item.issue_status;
+
+  return (
+    <div data-inbox-card className="flex flex-col gap-2">
+      <div className="flex min-w-0 items-center gap-2 text-caption text-muted-foreground">
+        <InboxActorAvatar item={item} size="sm" />
+        <span className="min-w-0 flex-1 truncate">
+          <InboxActorLine item={item} detail={comment ? typeLabels[item.type] : undefined} />
+        </span>
+        <span className="shrink-0 tabular-nums">{timeAgo(item.created_at)}</span>
+      </div>
+      <p className="font-medium leading-snug">{title}</p>
+      {comment && (
+        <p className="line-clamp-4 rounded-md bg-muted px-2 py-1.5 text-caption leading-5 whitespace-pre-wrap">
+          {comment}
+        </p>
+      )}
+      {status && (
+        <div className="flex items-center gap-1.5 text-caption text-muted-foreground">
+          <StatusIcon
+            status={status}
+            category={categoryOf(status)}
+            color={colorOf(status)}
+            icon={iconOf(status)}
+            className="size-3.5 shrink-0"
+          />
+          <span className="truncate">
+            {issue?.identifier ? `${issue.identifier} · ` : ""}
+            {statusLabelOf(status)}
+          </span>
+        </div>
+      )}
+      <div className="-mx-1 mt-1 flex items-center gap-1 border-t border-border pt-2">
+        <AppLink href={href} className={buttonVariants({ size: "sm", variant: "secondary" })}>
+          {t(($) => $.panels.work.inbox_open)}
+        </AppLink>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="text-muted-foreground"
+          onClick={() => (unread ? markRead.mutate(item.id) : markUnread.mutate(item.id))}
+        >
+          {unread ? tInbox(($) => $.context_menu.mark_read) : tInbox(($) => $.context_menu.mark_unread)}
+        </Button>
+        <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={onArchive}>
+          {tInbox(($) => $.context_menu.archive)}
+        </Button>
+      </div>
+    </div>
   );
 }

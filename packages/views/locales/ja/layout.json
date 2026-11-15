@@ -163,6 +163,8 @@
       "inbox_view_archived": "アーカイブ済みを表示",
       "inbox_empty": "通知はありません",
       "inbox_settings": "インボックスの表示",
+      "inbox_compact": "コンパクト表示",
+      "inbox_open": "開く",
       "inbox_show_count": "未読数",
       "inbox_rail_badge": "「作業」に未読バッジを表示",
       "inbox_types": "受け取る通知",

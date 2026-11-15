@@ -163,6 +163,8 @@
       "inbox_view_archived": "보관된 알림 보기",
       "inbox_empty": "알림 없음",
       "inbox_settings": "인박스 표시",
+      "inbox_compact": "간결하게 표시",
+      "inbox_open": "열기",
       "inbox_show_count": "읽지 않은 수",
       "inbox_rail_badge": "'작업'에 읽지 않음 배지 표시",
       "inbox_types": "받을 알림",

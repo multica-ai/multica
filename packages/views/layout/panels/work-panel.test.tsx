@@ -53,6 +53,7 @@ vi.mock("@multica/core/api", async (importOriginal) => ({
 vi.mock("../../issue-views/use-view-actions", () => ({ useIssueViewActions: () => actions }));
 vi.mock("../../issue-views/delete-view-dialog", () => ({ DeleteViewDialog: () => null }));
 vi.mock("../../issues/components/status-icon", () => ({ StatusIcon: () => <span /> }));
+vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => null }));
 vi.mock("@dnd-kit/core", () => ({
   DndContext: ({ children }: { children: ReactNode }) => <>{children}</>,
   PointerSensor: vi.fn(),
@@ -117,6 +118,8 @@ const ISSUE = {
   title: "Fix the sidebar",
   status: "todo",
 } as Issue;
+// An Inbox row's link also reads out who did what, after the title.
+const INBOX_ROW_NAME = new RegExp(`^${ISSUE.title}`);
 const OTHER = {
   id: "7b9e2c41-0d3a-4f6b-8e7c-2a1b0c9d8e7f",
   identifier: "MUL-2",
@@ -280,9 +283,9 @@ describe("WorkPanel Inbox highlight", () => {
   it("lights an issue opened from the Inbox there only", async () => {
     renderPanel("/acme/my-issues", [], [], [], [inboxItem(ISSUE)]);
     await within(await waitFor(inMyIssues)).findByRole("link", { name: ISSUE.title });
-    fireEvent.click(within(inInbox()).getByRole("link", { name: ISSUE.title }));
+    fireEvent.click(within(inInbox()).getByRole("link", { name: INBOX_ROW_NAME }));
 
-    expect(within(inInbox()).getByRole("link", { name: ISSUE.title })).toHaveAttribute("aria-current", "page");
+    expect(within(inInbox()).getByRole("link", { name: INBOX_ROW_NAME })).toHaveAttribute("aria-current", "page");
     expect(within(inMyIssues()).getByRole("link", { name: ISSUE.title })).not.toHaveAttribute("aria-current");
     expect(allIssues()).not.toHaveAttribute("aria-current");
   });
@@ -290,11 +293,11 @@ describe("WorkPanel Inbox highlight", () => {
   it("moves the light to the list the issue is clicked in next", async () => {
     renderPanel("/acme/my-issues", [], [], [], [inboxItem(ISSUE)]);
     await within(await waitFor(inMyIssues)).findByRole("link", { name: ISSUE.title });
-    fireEvent.click(within(inInbox()).getByRole("link", { name: ISSUE.title }));
+    fireEvent.click(within(inInbox()).getByRole("link", { name: INBOX_ROW_NAME }));
     fireEvent.click(within(inMyIssues()).getByRole("link", { name: ISSUE.title }));
 
     expect(within(inMyIssues()).getByRole("link", { name: ISSUE.title })).toHaveAttribute("aria-current", "page");
-    expect(within(inInbox()).getByRole("link", { name: ISSUE.title })).not.toHaveAttribute("aria-current");
+    expect(within(inInbox()).getByRole("link", { name: INBOX_ROW_NAME })).not.toHaveAttribute("aria-current");
   });
 
   it("lights the issue the issue header moved on to from the Inbox", async () => {
@@ -302,7 +305,7 @@ describe("WorkPanel Inbox highlight", () => {
     renderPanel(`/acme/issues/${ISSUE.id}`, [], [], [], [inboxItem(ISSUE)]);
 
     await waitFor(() =>
-      expect(within(inInbox()).getByRole("link", { name: ISSUE.title })).toHaveAttribute("aria-current", "page"),
+      expect(within(inInbox()).getByRole("link", { name: INBOX_ROW_NAME })).toHaveAttribute("aria-current", "page"),
     );
     expect(allIssues()).not.toHaveAttribute("aria-current");
   });
@@ -310,7 +313,7 @@ describe("WorkPanel Inbox highlight", () => {
   it("falls back to the other lists once the notification is archived", async () => {
     const qc = renderPanel("/acme/my-issues", [], [], [], [inboxItem(ISSUE)]);
     await within(await waitFor(inMyIssues)).findByRole("link", { name: ISSUE.title });
-    fireEvent.click(within(inInbox()).getByRole("link", { name: ISSUE.title }));
+    fireEvent.click(within(inInbox()).getByRole("link", { name: INBOX_ROW_NAME }));
     act(() => {
       qc.setQueryData(inboxListOptions("ws-1").queryKey, [{ ...inboxItem(ISSUE), archived: true }]);
     });

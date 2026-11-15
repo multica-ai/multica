@@ -163,6 +163,8 @@
       "inbox_view_archived": "查看已歸檔",
       "inbox_empty": "暫無通知",
       "inbox_settings": "收件箱顯示",
+      "inbox_compact": "緊湊顯示",
+      "inbox_open": "開啟",
       "inbox_show_count": "未讀數量",
       "inbox_rail_badge": "在「工作」上顯示未讀數",
       "inbox_types": "接收以下通知",
