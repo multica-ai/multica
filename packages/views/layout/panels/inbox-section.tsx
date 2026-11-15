@@ -95,7 +95,13 @@ export function useInboxSectionRows(wsId: string | undefined, openKey: string | 
   const collapsed = useSidebarTreeStore((s) => s.inboxCollapsed);
   const [expandedWsId, setExpandedWsId] = useState<string | null>(null);
   const expanded = expandedWsId === (wsId ?? null);
-  const displayed = useMemo(() => (expanded ? rows : rows.slice(0, limit)), [expanded, rows, limit]);
+  // Newer notifications must not push the open row past the limit: the row
+  // would leave, and the open issue's highlight with it.
+  const displayed = useMemo(() => {
+    if (expanded) return rows;
+    const open = openKey ? rows.findIndex((item) => (item.issue_id ?? item.id) === openKey) : -1;
+    return open >= limit ? [...rows.slice(0, limit - 1), rows[open]!] : rows.slice(0, limit);
+  }, [expanded, rows, limit, openKey]);
   // A collapsed section shows no rows, so it lights none.
   const shownIssueIds = useMemo(
     () => new Set(collapsed ? [] : displayed.flatMap((item) => (item.issue_id ? [item.issue_id] : []))),
@@ -316,7 +322,7 @@ function InboxRow({
   item: InboxItem;
   href: string;
   active: boolean;
-  /** One line (type icon, title, dot or time) instead of the actor line under the title. */
+  /** One line (status, title, agents, dot or time) instead of the actor line under the title. */
   compact: boolean;
   onArchive: () => void;
 }) {
@@ -324,6 +330,9 @@ function InboxRow({
   const typeLabels = useTypeLabels();
   const timeAgo = useTimeAgo();
   const Icon = INBOX_TYPE_ICONS[inboxTypeGroup(item.type)];
+  const { categoryOf, colorOf, iconOf } = useIssueStatuses(item.workspace_id);
+  const statusLabelOf = useStatusLabel(item.workspace_id);
+  const status = item.issue_status;
   const title = inboxRowTitle(item, typeLabels);
   const writeViewState = useViewStateWriter();
   const requestLanding = useInboxSelectionStore((s) => s.requestLanding);
@@ -340,11 +349,8 @@ function InboxRow({
   const archiveLabel = t(($) => $.list.archive_tooltip);
   // Hidden while the archive button stands in its place.
   const yields = "group-hover/inbox:invisible group-focus-within/inbox:invisible";
-  const time = (
-    <span className={cn("shrink-0 text-caption tabular-nums text-faint-foreground", yields)}>
-      {timeAgo(item.created_at)}
-    </span>
-  );
+  const timeClass = "shrink-0 text-caption tabular-nums text-faint-foreground";
+  const time = <span className={cn(timeClass, yields)}>{timeAgo(item.created_at)}</span>;
   // Takes the time's place while an agent runs or waits on the issue.
   const agentBadge = agents && (
     <span className={cn("flex shrink-0 items-center", yields)}>
@@ -352,6 +358,20 @@ function InboxRow({
     </span>
   );
   const dot = <span data-mc="unread-dot" aria-hidden className="size-1.5 shrink-0 rounded-full bg-brand" />;
+  // Leads the row like a Pinned or tree issue row. Display only: the link
+  // covers the row, and the hover card already names the status.
+  const statusIcon = status && (
+    <span data-inbox-status={status} aria-hidden className={cn("flex shrink-0", !compact && "mt-[3px]")}>
+      <StatusIcon
+        status={status}
+        category={categoryOf(status)}
+        color={colorOf(status)}
+        icon={iconOf(status)}
+        className="size-3.5"
+      />
+    </span>
+  );
+  const statusText = status && <span className="sr-only">, {statusLabelOf(status)}</span>;
   const titleText = (
     <ShimmerText
       active={running}
@@ -376,15 +396,16 @@ function InboxRow({
           {...panelRowAnchor(active)}
           className={cn(PANEL_ROW_CLASS, panelRowStateClass(active), "relative", !compact && "items-start py-[5px]")}
         >
-          {compact ? (
-            <span title={typeLabels[item.type]} className="flex shrink-0 items-center">
-              <Icon aria-hidden className="size-4" />
-            </span>
-          ) : (
-            <span className="mt-0.5 flex shrink-0">
-              <InboxActorAvatar item={item} size="xs" />
-            </span>
-          )}
+          {statusIcon ||
+            (compact ? (
+              <span title={typeLabels[item.type]} className="flex shrink-0 items-center">
+                <Icon aria-hidden className="size-4" />
+              </span>
+            ) : (
+              <span className="mt-0.5 flex shrink-0">
+                <InboxActorAvatar item={item} size="xs" />
+              </span>
+            ))}
           <AppLink
             href={href}
             newTabTitle={title}
@@ -396,19 +417,27 @@ function InboxRow({
             {compact ? (
               <>
                 {titleText}
-                {agentBadge ||
-                  (unread ? <span className={cn("flex shrink-0 items-center", yields)}>{dot}</span> : time)}
+                {statusText}
+                {agentBadge}
+                {unread ? <span className={cn("flex shrink-0 items-center", yields)}>{dot}</span> : !agents && time}
               </>
             ) : (
               <>
                 <span className="flex min-w-0 items-center gap-2 leading-5">
                   {titleText}
+                  {statusText}
                   {agentBadge || time}
                 </span>
                 <span className="flex min-w-0 items-center gap-2 text-caption leading-4 text-muted-foreground">
-                  <span className="min-w-0 flex-1 truncate">
-                    <InboxActorLine item={item} />
+                  <span className="flex min-w-0 flex-1 items-center gap-1.5">
+                    {/* The status took the avatar's column; it stays with the name. */}
+                    {statusIcon && <InboxActorAvatar item={item} size="xs" />}
+                    <span className="min-w-0 flex-1 truncate">
+                      <InboxActorLine item={item} />
+                    </span>
                   </span>
+                  {/* The agents hold the title line's time slot, so the time moves down. */}
+                  {agents && <span className={timeClass}>{timeAgo(item.created_at)}</span>}
                   {unread && dot}
                 </span>
               </>

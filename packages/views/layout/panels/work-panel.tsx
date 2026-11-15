@@ -124,9 +124,12 @@ export function WorkPanel() {
     requestLocate(null);
     const path = new URL(link.getAttribute("href") ?? "", window.location.href).pathname;
     const segment = routeSegment(path, p.issues());
+    // An Inbox row's hover card renders in a portal, outside the row's list.
     const list = link.closest("[data-pinned-section]")
       ? PINS_LIST
-      : (link.closest("[data-sidebar-list]")?.getAttribute("data-sidebar-list") ?? null);
+      : link.closest("[data-inbox-card]")
+        ? INBOX_LIST
+        : (link.closest("[data-sidebar-list]")?.getAttribute("data-sidebar-list") ?? null);
     setClickedIssue(segment ? { segment, list } : null);
     // Inbox rows link by issue id, which is what the issue header compares.
     if (segment && wsId) rememberSidebarIssue(wsId, list === INBOX_LIST ? segment : null);
