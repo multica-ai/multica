@@ -63,6 +63,7 @@ Docs-only changes can use link/reference checks and `git diff --check`; state th
 - WebSocket events patch or invalidate Query caches, not server payloads in Zustand. Clearing client-owned pointers is allowed with one responder and a self-initiated guard when this client can cause the event.
 - Optimistic field patches require a predictable result, rare failure, trivial rollback, and staying on the current screen. Snapshot before patching, roll back on failure, and invalidate uncertain projections on settle.
 - Create/delete/leave and confirmation flows await the server before navigation or cleanup; do not optimistically delete entities. Exceptions: workspace leave (known debt under Desktop Rules) and mobile inbox mark-read (mobile instructions).
+- When the caller can unmount before the request settles (moving to the next item, closing a dialog or menu), attach toasts and follow-up work to the request promise (`mutateAsync().then(onSuccess, onError)`) or to `useMutation`'s own callbacks, not to per-call `mutate(vars, { onSuccess, onError })` callbacks, which React Query skips once the caller unmounts. Test these flows with the real mutation hook and a mocked API, unmounting the caller before the request settles (`packages/views/inbox/components/use-inbox-snooze.test.tsx`, `packages/views/issues/actions/__tests__/issue-inbox-actions.test.tsx`).
 - Message sends use visible pending state and retry on failure.
 
 ## API Compatibility
