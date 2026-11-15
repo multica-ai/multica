@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Check } from "@multica/ui/icons";
+import { Check, Loader2 } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { Badge } from "@multica/ui/components/ui/badge";
 import {
@@ -45,9 +45,9 @@ export function PrivateProjectsSection() {
   const confirmJoin = async () => {
     if (!joining) return;
     const { id, title } = joining;
-    setJoining(null);
     try {
       await join.mutateAsync(id);
+      setJoining(null);
       toast.success(t(($) => $.private_projects.toast_joined, { title }));
     } catch (error) {
       toast.error(
@@ -136,7 +136,7 @@ export function PrivateProjectsSection() {
         )}
       </SettingsCard>
 
-      <AlertDialog open={!!joining} onOpenChange={(open) => { if (!open) setJoining(null); }}>
+      <AlertDialog open={!!joining} onOpenChange={(open) => { if (!open && !join.isPending) setJoining(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
@@ -149,8 +149,9 @@ export function PrivateProjectsSection() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>{t(($) => $.private_projects.cancel)}</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmJoin}>
+            <AlertDialogCancel disabled={join.isPending}>{t(($) => $.private_projects.cancel)}</AlertDialogCancel>
+            <AlertDialogAction disabled={join.isPending} onClick={() => void confirmJoin()}>
+              {join.isPending ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : null}
               {t(($) => $.private_projects.join_confirm)}
             </AlertDialogAction>
           </AlertDialogFooter>

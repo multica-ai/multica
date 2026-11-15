@@ -110,14 +110,43 @@ it("says what joining an empty project means, and promises no lead either way", 
   expect(within(dialog).queryByText(/lead/)).not.toBeInTheDocument();
 });
 
-it("reports a failed join and leaves the project unjoined", async () => {
+it("keeps the confirmation open and locked while the join is in flight", async () => {
+  let finish!: () => void;
+  const join = api.joinPrivateProject.getMockImplementation() as (id: string) => Promise<unknown>;
+  api.joinPrivateProject.mockImplementationOnce((id: string) =>
+    new Promise((resolve) => { finish = () => resolve(join(id)); }));
+  const user = userEvent.setup();
+  renderSection();
+  await user.click(await screen.findByRole("button", { name: "Join" }));
+  const dialog = await screen.findByRole("alertdialog");
+  const confirm = within(dialog).getByRole("button", { name: "Join project" });
+  await user.click(confirm);
+  await waitFor(() => expect(confirm).toBeDisabled());
+  expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeDisabled();
+  await user.click(confirm);
+  await user.keyboard("{Escape}");
+  expect(screen.getByRole("alertdialog")).toBeVisible();
+  expect(api.joinPrivateProject).toHaveBeenCalledTimes(1);
+
+  finish();
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
+  expect(toast.success).toHaveBeenCalledWith("You joined Secret Plan");
+});
+
+it("reports a failed join and keeps the confirmation open to retry in place", async () => {
   api.joinPrivateProject.mockRejectedValueOnce(new Error("Join denied"));
   const user = userEvent.setup();
   renderSection();
   await user.click(await screen.findByRole("button", { name: "Join" }));
-  await user.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Join project" }));
+  const dialog = await screen.findByRole("alertdialog");
+  await user.click(within(dialog).getByRole("button", { name: "Join project" }));
   await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Join denied"));
-  expect(screen.getByRole("button", { name: "Join" })).toBeVisible();
+  expect(screen.getByRole("alertdialog")).toBeVisible();
+
+  await user.click(within(dialog).getByRole("button", { name: "Join project" }));
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
+  expect(api.joinPrivateProject).toHaveBeenCalledTimes(2);
+  expect(toast.success).toHaveBeenCalledWith("You joined Secret Plan");
 });
 
 it("says so when there are no private projects, and offers a retry when loading fails", async () => {
