@@ -87,7 +87,7 @@ function setup({
 
 beforeEach(() => {
   vi.clearAllMocks();
-  useInboxSelectionStore.setState({ sidebarIssueByWorkspace: { ws: "issue-1" } });
+  useInboxSelectionStore.setState({ sidebarIssueByWorkspace: { ws: "issue-1" }, sidebarTabIssuesByWorkspace: {} });
   useInboxFilterStore.getState().clearFilters("ws");
 });
 afterEach(cleanup);
@@ -110,6 +110,16 @@ describe("IssueInboxActions", () => {
     nav.arrive("issue-2");
     fireEvent.click(screen.getByRole("button", { name: "Archive" }));
     expect(state.archive).toHaveBeenLastCalledWith("n-2", expect.anything());
+  });
+
+  it("shows on an issue the Inbox opened in another tab", () => {
+    useInboxSelectionStore.setState({
+      sidebarIssueByWorkspace: { ws: "issue-1" },
+      sidebarTabIssuesByWorkspace: { ws: ["issue-2"] },
+    });
+    setup({ issueId: "issue-2" });
+    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+    expect(state.archive).toHaveBeenCalledWith("n-2", expect.anything());
   });
 
   it("leaves once the issue is opened from outside the Inbox", () => {

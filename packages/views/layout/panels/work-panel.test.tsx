@@ -31,6 +31,7 @@ import type {
 } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
+import { IssueInboxActions } from "../../issues/actions/issue-inbox-actions";
 import { KeptRowsRelease, WorkPanel } from "./work-panel";
 
 const apiMock = vi.hoisted(() => ({ listIssueTableRows: vi.fn(), getIssue: vi.fn() }));
@@ -156,6 +157,8 @@ function renderPanel(
   inbox: InboxItem[] = [],
   /** As on web, a push lands only once the next page has loaded ("Finish loading"). */
   deferPush = false,
+  /** As on desktop: links can open tabs, and an issue page shows its header. */
+  desktop = false,
 ) {
   const qc = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
   qc.setQueryData(inboxListOptions("ws-1").queryKey, inbox);
@@ -183,7 +186,15 @@ function renderPanel(
     // A compact sheet unmounts the panel whenever it closes.
     const [sheetOpen, setSheetOpen] = useState(true);
     const [loading, setLoading] = useState<string | null>(null);
+    const [newTab, setNewTab] = useState<string | null>(null);
+    const openTab = (path: string) => setPathname(new URL(path, "http://x").pathname);
     const adapter: NavigationAdapter = {
+      openInNewTab: desktop
+        ? (path, _title, opts) => {
+            setNewTab(path);
+            if (opts?.activate) openTab(path);
+          }
+        : undefined,
       push: deferPush ? setLoading : setPathname,
       replace: setPathname,
       back: vi.fn(),
@@ -195,7 +206,16 @@ function renderPanel(
     return (
       <NavigationProvider value={adapter}>
         <KeptRowsRelease />
+        {/* Each desktop tab mounts its own page. */}
+        {desktop && pathname.startsWith("/acme/issues/") && (
+          <div data-testid="issue-header">
+            <IssueInboxActions key={pathname} issueId={pathname.split("/").at(-1)!} onMarkDone={() => {}} />
+          </div>
+        )}
         {sheetOpen && spaceForPath(pathname) === "work" && <WorkPanel />}
+        <button type="button" onClick={() => newTab && openTab(newTab)}>
+          Switch to new tab
+        </button>
         <button type="button" onClick={() => setPathname("/acme/agents")}>
           Leave Work
         </button>
@@ -242,7 +262,7 @@ beforeEach(() => {
   });
   useActiveIssueViewStore.setState({ active: {} });
   useSidebarKeptStore.setState({ held: {} });
-  useInboxSelectionStore.setState({ sidebarIssueByWorkspace: {} });
+  useInboxSelectionStore.setState({ sidebarIssueByWorkspace: {}, sidebarTabIssuesByWorkspace: {} });
   apiMock.listIssueTableRows.mockResolvedValue({
     rows: [ISSUE, OTHER].map((issue) => ({ issue })),
     total: 2,
@@ -417,6 +437,8 @@ describe("WorkPanel Inbox highlight while the next page loads", () => {
 
       expect(inboxRow(ISSUE)).toHaveAttribute("aria-current", "page");
       expect(useInboxSelectionStore.getState().sidebarIssueByWorkspace["ws-1"]).toBe(ISSUE.id);
+      // A browser tab has a store of its own.
+      expect(useInboxSelectionStore.getState().sidebarTabIssuesByWorkspace["ws-1"]).toBeUndefined();
 
       // Nothing was left pending for a later page to settle.
       fireEvent.click(screen.getByRole("button", { name: "Leave Work" }));
@@ -434,6 +456,71 @@ describe("WorkPanel Inbox highlight while the next page loads", () => {
 
     await waitFor(() => expect(within(inInbox()).queryByRole("link", { name: INBOX_ROW_NAME })).toBeNull());
     expect(allIssues()).not.toHaveAttribute("aria-current");
+  });
+});
+
+describe("WorkPanel Inbox across desktop tabs", () => {
+  const inInbox = () => document.querySelector('[data-sidebar-list="inbox"]') as HTMLElement;
+  const inMyIssues = () => document.querySelector('[data-sidebar-list="builtin:my_work"]') as HTMLElement;
+  const inboxRow = (issue: Issue) => within(inInbox()).getByRole("link", { name: new RegExp(`^${issue.title}`) });
+  const offersInboxActions = () => !!within(screen.getByTestId("issue-header")).queryByRole("button", { name: "Archive" });
+  const switchToNewTab = () => fireEvent.click(screen.getByRole("button", { name: "Switch to new tab" }));
+  const switchBack = () => fireEvent.click(screen.getByRole("button", { name: "Return to issue" }));
+
+  async function openFromInbox() {
+    useSidebarTreeStore.setState({ expanded: ["builtin:my_work"], projectsCollapsed: true });
+    const qc = renderPanel("/acme/my-issues", [], [], [], [inboxItem(ISSUE), inboxItem(OTHER)], false, true);
+    act(() => {
+      qc.setQueryData(issueDetailOptions("ws-1", ISSUE.id).queryKey, ISSUE);
+      qc.setQueryData(issueDetailOptions("ws-1", OTHER.id).queryKey, OTHER);
+    });
+    fireEvent.click(inboxRow(ISSUE));
+    expect(offersInboxActions()).toBe(true);
+  }
+
+  it.each([
+    ["Cmd-click", (link: HTMLElement) => fireEvent.click(link, { metaKey: true })],
+    ["Ctrl-click", (link: HTMLElement) => fireEvent.click(link, { ctrlKey: true })],
+    [
+      "middle click",
+      (link: HTMLElement) => fireEvent(link, new MouseEvent("auxclick", { bubbles: true, cancelable: true, button: 1 })),
+    ],
+  ])("keeps both issues opened from the Inbox after a %s opens a background tab", async (_, open) => {
+    await openFromInbox();
+    open(inboxRow(OTHER));
+
+    expect(offersInboxActions()).toBe(true);
+    expect(inboxRow(ISSUE)).toHaveAttribute("aria-current", "page");
+
+    switchToNewTab();
+    expect(offersInboxActions()).toBe(true);
+    expect(inboxRow(OTHER)).toHaveAttribute("aria-current", "page");
+
+    switchBack();
+    expect(offersInboxActions()).toBe(true);
+    expect(inboxRow(ISSUE)).toHaveAttribute("aria-current", "page");
+  });
+
+  it("keeps both issues opened from the Inbox after a Cmd+Shift-click opens a foreground tab", async () => {
+    await openFromInbox();
+    fireEvent.click(inboxRow(OTHER), { metaKey: true, shiftKey: true });
+
+    expect(offersInboxActions()).toBe(true);
+    expect(inboxRow(OTHER)).toHaveAttribute("aria-current", "page");
+
+    switchBack();
+    expect(offersInboxActions()).toBe(true);
+    expect(inboxRow(ISSUE)).toHaveAttribute("aria-current", "page");
+  });
+
+  it("stops counting a tab's issue as opened from the Inbox once it is opened from another list", async () => {
+    await openFromInbox();
+    fireEvent.click(inboxRow(OTHER), { metaKey: true });
+    switchToNewTab();
+    fireEvent.click(await within(inMyIssues()).findByRole("link", { name: OTHER.title }));
+
+    expect(offersInboxActions()).toBe(false);
+    expect(within(inMyIssues()).getByRole("link", { name: OTHER.title })).toHaveAttribute("aria-current", "page");
   });
 });
 

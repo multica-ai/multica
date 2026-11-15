@@ -44,7 +44,7 @@ export function IssueInboxActions({
   const wsId = useWorkspaceId();
   const p = useWorkspacePaths();
   const { push } = useNavigation();
-  const fromInbox = useSidebarInboxIssue(wsId, issueId).value === issueId;
+  const { fromInbox } = useSidebarInboxIssue(wsId, issueId);
   const rememberSidebarIssue = useInboxSelectionStore((s) => s.rememberSidebarIssue);
   const { rows } = useFilteredInboxRows(wsId, issueId, fromInbox);
   const index = fromInbox ? rows.findIndex((row) => row.issue_id === issueId) : -1;

@@ -115,33 +115,30 @@ export function WorkPanel() {
   const inbox = useSidebarInboxIssue(wsId, currentIssueId, clicked.movingOn);
   const movingOn = clicked.movingOn || inbox.movingOn;
   const clickedIssue = clicked.value;
-  const inboxIssueId = inbox.value;
   const clickedList = clickedIssue && isOpenIssue(clickedIssue.segment) ? clickedIssue.list : undefined;
   // The notification open beside the section: an issue opened from it, or an
   // issue-less one on the Inbox page.
   const inboxOpenKey =
     pathname === p.inbox()
       ? searchParams.get("issue")
-      : currentIssueId && inboxIssueId === currentIssueId
+      : currentIssueId && inbox.fromInbox
         ? currentIssueId
         : null;
   const inboxRows = useInboxSectionRows(wsId, inboxOpenKey);
   const rememberSidebarIssue = useInboxSelectionStore((s) => s.rememberSidebarIssue);
+  const rememberSidebarTabIssue = useInboxSelectionStore((s) => s.rememberSidebarTabIssue);
+  const forgetSidebarTabIssue = useInboxSelectionStore((s) => s.forgetSidebarTabIssue);
   // Moving on from an archived row keeps the issue lit nowhere rather than elsewhere.
   const inboxClaimsIssue =
-    !!currentIssueId &&
-    inboxIssueId === currentIssueId &&
-    (movingOn || inboxRows.shownIssueIds.has(currentIssueId));
+    !!currentIssueId && inbox.fromInbox && (movingOn || inboxRows.shownIssueIds.has(currentIssueId));
   const treeClaimsIssue = inboxClaimsIssue || (clickedList !== undefined && clickedList !== PINS_LIST);
   const pins = usePanelPins(wsId, userId, pathname, treeClaimsIssue ? null : currentIssueId);
   const requestLocate = useSidebarTreeStore((s) => s.requestLocate);
   const rememberClickedIssue = (event: React.MouseEvent) => {
+    // A middle click opens a tab; other buttons open nothing.
+    if (event.type === "auxclick" && event.button !== 1) return;
     const link = (event.target as HTMLElement).closest("a[href]");
     if (!link) return;
-    // A click that opens a tab or window, as AppLink resolves it, leaves this
-    // page and its records where they are.
-    if (resolveClickIntent(event) !== "push" || (event.shiftKey && !openInNewTab)) return;
-    requestLocate(null);
     const path = new URL(link.getAttribute("href") ?? "", window.location.href).pathname;
     const segment = routeSegment(path, p.issues());
     // An Inbox row's hover card renders in a portal, outside the row's list.
@@ -150,9 +147,20 @@ export function WorkPanel() {
       : link.closest("[data-inbox-card]")
         ? INBOX_LIST
         : (link.closest("[data-sidebar-list]")?.getAttribute("data-sidebar-list") ?? null);
+    // A click that opens a tab or window, as AppLink resolves it, leaves this
+    // page and its records where they are. A desktop tab shares this page's
+    // store, so an issue the Inbox opens there is recorded beside them.
+    if (resolveClickIntent(event) !== "push" || (event.shiftKey && !openInNewTab)) {
+      if (openInNewTab && segment && wsId && list === INBOX_LIST) rememberSidebarTabIssue(wsId, segment);
+      return;
+    }
+    requestLocate(null);
     setClickedIssue(segment ? { segment, list } : null);
     // Inbox rows link by issue id, which is what the issue header compares.
-    if (segment && wsId) rememberSidebarIssue(wsId, list === INBOX_LIST ? segment : null);
+    if (segment && wsId) {
+      rememberSidebarIssue(wsId, list === INBOX_LIST ? segment : null);
+      forgetSidebarTabIssue(wsId, segment);
+    }
   };
 
   const { projectSettings, projectOrder } = useSidebarProjectPrefs(wsId ?? "");
@@ -223,7 +231,7 @@ export function WorkPanel() {
       {/* Outside PanelBody: clicks inside the menu's portal still bubble
           through the React tree, and must not reach rememberClickedIssue. */}
       <IssueContextMenuProvider variant="sidebar">
-        <PanelBody onClickCapture={rememberClickedIssue}>
+        <PanelBody onClickCapture={rememberClickedIssue} onAuxClickCapture={rememberClickedIssue}>
           {wsId && (
             <InboxSection
               wsId={wsId}
