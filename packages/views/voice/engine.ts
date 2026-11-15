@@ -101,7 +101,7 @@ export function serverVoiceRuntime(): VoiceRuntime {
     // Streams never send a clip; only history re-transcribes one, and the web keeps none.
     transcribe: async () => ({ ok: false, reason: "engine-unavailable" }),
     stream: (handlers, onMeter, onLimit) =>
-      new DeepgramStream(handlers, onMeter, onLimit, () => api.createVoiceSession()),
+      new DeepgramStream(handlers, onMeter, onLimit, (signal) => api.createVoiceSession(signal)),
     watchModels: (onChange) => onChange({ engineAvailable: true, models: [SERVER_VOICE_MODEL] }),
   };
 }

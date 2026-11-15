@@ -3369,8 +3369,8 @@ export class ApiClient {
    * A short-lived token for one voice-input stream, and where to open it.
    * Only servers whose config reports voice_transcription_enabled serve this.
    */
-  async createVoiceSession(): Promise<VoiceSession> {
-    const raw = await this.fetch<unknown>("/api/voice/sessions", { method: "POST" });
+  async createVoiceSession(signal?: AbortSignal): Promise<VoiceSession> {
+    const raw = await this.fetch<unknown>("/api/voice/sessions", { method: "POST", signal });
     return parseWithFallback(raw, VoiceSessionSchema, EMPTY_VOICE_SESSION, {
       endpoint: "POST /api/voice/sessions",
     });

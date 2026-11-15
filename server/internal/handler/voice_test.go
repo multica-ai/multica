@@ -86,3 +86,23 @@ func TestCreateVoiceSessionIsLimitedPerUser(t *testing.T) {
 		t.Fatalf("another user has their own budget: want 200, got %d", w.Code)
 	}
 }
+
+func TestRedisVoiceSessionLimiterIsSharedAcrossReplicas(t *testing.T) {
+	rdb := newRedisTestClient(t)
+	defer rdb.Close()
+
+	ctx := context.Background()
+	a, b := NewRedisVoiceSessionLimiter(rdb), NewRedisVoiceSessionLimiter(rdb)
+	for i := 0; i < voiceSessionsPerWindow; i++ {
+		replica := a
+		if i%2 == 1 {
+			replica = b
+		}
+		if !replica.Allow(ctx, "voice-user") {
+			t.Fatalf("session %d should be allowed", i+1)
+		}
+	}
+	if a.Allow(ctx, "voice-user") || b.Allow(ctx, "voice-user") {
+		t.Fatal("the budget must be shared by every replica")
+	}
+}

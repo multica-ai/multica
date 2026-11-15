@@ -97,6 +97,7 @@ async function opened(h: VoiceStreamHandlers = handlers(), openSession = vi.fn(a
 
 beforeEach(() => {
   FakeSocket.last = null;
+  FakeWorkletNode.last = null;
   track.stop.mockReset();
   getUserMedia.mockReset().mockResolvedValue({ getTracks: () => [track] });
   vi.stubGlobal("WebSocket", FakeSocket);
@@ -268,5 +269,37 @@ describe("DeepgramStream", () => {
     stream.discard();
     await expect(started).rejects.toThrow(/discarded/);
     expect(FakeSocket.last!.readyState).toBe(FakeSocket.CLOSED);
+  });
+
+  it("keeps what is said while the stream connects and sends it first, in order", async () => {
+    let grant!: (value: typeof session) => void;
+    const stream = new DeepgramStream(handlers(), vi.fn(), vi.fn(), () => new Promise((resolve) => (grant = resolve)));
+    const started = stream.start(null, { language: "en", hotwords: [] });
+    await vi.waitFor(() => expect(FakeWorkletNode.last).not.toBeNull());
+    const early = [new ArrayBuffer(1), new ArrayBuffer(2)];
+    for (const chunk of early) FakeWorkletNode.last!.port.onmessage!({ data: chunk });
+    grant(session);
+    await vi.waitFor(() => expect(FakeSocket.last).not.toBeNull());
+    const socket = FakeSocket.last!;
+    expect(socket.sent).toEqual([]);
+    socket.open();
+    await started;
+    const live = new ArrayBuffer(3);
+    FakeWorkletNode.last!.port.onmessage!({ data: live });
+    expect(socket.sent).toEqual([...early, live]);
+  });
+
+  it("discarding while the token is on its way cancels the request", async () => {
+    let signal!: AbortSignal;
+    const stream = new DeepgramStream(handlers(), vi.fn(), vi.fn(), (s) => {
+      signal = s;
+      return new Promise(() => {});
+    });
+    const started = stream.start(null, { language: "en", hotwords: [] }).catch(() => {});
+    await vi.waitFor(() => expect(signal).toBeDefined());
+    stream.discard();
+    expect(signal.aborted).toBe(true);
+    expect(track.stop).toHaveBeenCalled();
+    void started;
   });
 });

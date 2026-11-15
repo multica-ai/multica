@@ -4,19 +4,36 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/redis/go-redis/v9"
 )
 
-// Each dictation mints one session, and a Deepgram grant token works for any
-// stream opened during its 30 seconds, so the per-user budget is what bounds
-// what one account (or a leaked token of it) can spend.
+// Each dictation mints one session. The per-user budget bounds how many
+// grants one account (or a leaked credential of it) can mint. It does not
+// bound the streams themselves: a grant opens any number of streams during
+// its 30 seconds, each running until closed. That is the contract of
+// Deepgram grant tokens, accepted here because only signed-in members can
+// mint; bounding stream time would take a server-side stream proxy.
 const (
 	voiceSessionsPerWindow = 30
 	voiceSessionWindow     = time.Minute
 )
 
-// NewMemoryVoiceSessionLimiter bounds voice-session minting per user.
+const voiceSessionLimiterKeyPrefix = "mul:voice:session:"
+
+func voiceSessionLimit() SlidingWindowRateLimit {
+	return SlidingWindowRateLimit{Limit: voiceSessionsPerWindow, Window: voiceSessionWindow}
+}
+
+// NewMemoryVoiceSessionLimiter bounds voice-session minting per user on one
+// replica (local and Redis-less deployments).
 func NewMemoryVoiceSessionLimiter() SlidingWindowRateLimiter {
-	return newMemorySlidingWindowRateLimiter(SlidingWindowRateLimit{Limit: voiceSessionsPerWindow, Window: voiceSessionWindow})
+	return newMemorySlidingWindowRateLimiter(voiceSessionLimit())
+}
+
+// NewRedisVoiceSessionLimiter shares the per-user budget across replicas.
+func NewRedisVoiceSessionLimiter(rdb redis.UniversalClient) SlidingWindowRateLimiter {
+	return newRedisSlidingWindowRateLimiter(rdb, voiceSessionLimit(), voiceSessionLimiterKeyPrefix)
 }
 
 // CreateVoiceSession mints a short-lived token for one voice-input stream
