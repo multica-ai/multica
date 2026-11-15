@@ -417,7 +417,7 @@ function InboxRow({
             if (event.key === "Enter") setCardOpen(false);
           }}
           {...panelRowAnchor(active)}
-          className={cn(PANEL_ROW_CLASS, panelRowStateClass(active), "relative", !compact && "items-start py-2")}
+          className={cn(PANEL_ROW_CLASS, panelRowStateClass(active), "relative", !compact && "items-start py-1.5")}
         >
           {statusIcon ||
             (compact ? (
@@ -493,7 +493,7 @@ function InboxRow({
           className={cn(
             "absolute right-1.5 z-10 hidden size-5 items-center justify-center rounded-md text-muted-foreground group-hover/inbox:flex group-focus-within/inbox:flex hover:bg-surface-selected hover:text-foreground",
             // On the title's line, where the time was.
-            compact ? "top-1/2 -translate-y-1/2" : "top-2",
+            compact ? "top-1/2 -translate-y-1/2" : "top-1.5",
           )}
           onClick={(event) => {
             event.preventDefault();
