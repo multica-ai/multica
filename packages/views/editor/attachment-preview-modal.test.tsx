@@ -150,6 +150,7 @@ vi.mock("../i18n", () => ({
           copy_contents: "Copy contents",
           contents_copied: "Contents copied",
           copy_failed: "Couldn't copy contents",
+          more_actions: "More actions",
           open_in_new_tab: "Open in new tab",
           wrap_lines: "Wrap lines",
           viewport: "Viewport width",

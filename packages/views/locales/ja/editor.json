@@ -59,6 +59,7 @@
     "copy_contents": "内容をコピー",
     "contents_copied": "内容をコピーしました",
     "copy_failed": "内容をコピーできませんでした",
+    "more_actions": "その他の操作",
     "preview": "プレビュー",
     "preview_loading": "プレビューを読み込み中…",
     "preview_failed": "プレビューを読み込めませんでした",

@@ -59,6 +59,7 @@
     "copy_contents": "Copy contents",
     "contents_copied": "Contents copied",
     "copy_failed": "Couldn't copy contents",
+    "more_actions": "More actions",
     "preview": "Preview",
     "preview_loading": "Loading preview…",
     "preview_failed": "Couldn't load preview",
