@@ -280,6 +280,39 @@ describe("InboxSection", () => {
     expect(rows()[0]!.querySelector("[data-mc='unread-dot']")).not.toBeNull();
   });
 
+  it("leads an issue's row with its status, and an issue-less notice with who sent it", () => {
+    const items = [
+      item({ id: "n1", issue_id: "issue-a", title: "Commented", issue_status: "in_review" }),
+      item({ id: "n2", issue_id: null, title: "Autopilot paused", type: "autopilot_paused", issue_status: null, created_at: "2026-11-09T08:00:00Z" }),
+    ];
+    const { unmount } = renderSection(items);
+    const lead = () => rows().map((row) => row.querySelector("[data-mc='nav-item']")!.firstElementChild);
+    expect(lead()[0]).toHaveAttribute("data-inbox-status", "in_review");
+    expect(screen.getByRole("link", { name: /^Commented, In Review/ })).toBeInTheDocument();
+    expect(lead()[1]).not.toHaveAttribute("data-inbox-status");
+    unmount();
+
+    useSidebarTreeStore.setState({ inboxSettings: { ...DEFAULT_SIDEBAR_INBOX_SETTINGS, compact: true } });
+    renderSection(items);
+    expect(lead()[0]).toHaveAttribute("data-inbox-status", "in_review");
+    expect(lead()[1]).toHaveAttribute("title", "Autopilot paused");
+  });
+
+  it("moves the time under the title while an agent holds its place, and keeps the unread dot when compact", () => {
+    const items = [item({ id: "n1", issue_id: "issue-a", title: "Working one" })];
+    const tasks = [{ id: "t1", issue_id: "issue-a", agent_id: "a1", status: "running" as const }];
+    const { unmount } = renderSection(items, null, "/acme/issues", tasks);
+    const [titleLine, actorLine] = Array.from(screen.getByRole("link", { name: /^Working one/ }).children);
+    expect(within(titleLine as HTMLElement).getByTestId("agents")).toBeInTheDocument();
+    expect(actorLine).toHaveTextContent(/\d+d$/);
+    unmount();
+
+    useSidebarTreeStore.setState({ inboxSettings: { ...DEFAULT_SIDEBAR_INBOX_SETTINGS, compact: true } });
+    renderSection(items, null, "/acme/issues", tasks);
+    expect(within(rows()[0]!).getByTestId("agents")).toBeInTheDocument();
+    expect(rows()[0]!.querySelector("[data-mc='unread-dot']")).not.toBeNull();
+  });
+
   it("shows the whole notification on hover, with its actions", async () => {
     renderSection([item({ id: "n1", issue_id: "issue-a", title: "Commented", body: "Ship it on Friday" })]);
     fireEvent.mouseEnter(rows()[0]!.firstElementChild!);
