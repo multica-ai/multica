@@ -1036,6 +1036,7 @@ export function InboxPage() {
         {isQuickCreateOutcome(detailItem.type) && (
           <Button
             size="sm"
+            data-testid="recover-quick-create"
             onClick={() => {
               // Seed the legacy advanced form with the original prompt so the
               // user can recover their input in the full editor instead of
@@ -1043,6 +1044,11 @@ export function InboxPage() {
               // candidate (still editable).
               const prompt = detailItem.details?.original_prompt ?? "";
               const agentId = detailItem.details?.agent_id;
+              // Restore this request's project, clearing an unrelated draft's
+              // selection when the original had none (or predates the hint).
+              useIssueDraftStore.getState().setShared({
+                projectId: detailItem.details?.project_id || undefined,
+              });
               useIssueDraftStore.getState().setManual({
                 description: prompt,
                 ...(agentId
