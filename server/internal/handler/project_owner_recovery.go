@@ -20,11 +20,12 @@ import (
 // Owner recovery for private projects (MUL-9284).
 //
 // A private project is visible to its members only, so one whose members have
-// all left, or whose lead is unreachable, would be lost to the workspace. The
-// workspace owner is the way back in: they can list every private project by
-// name and members, and add themselves to one. Joining is an ordinary
-// membership, shown in the member list and announced to the existing members;
-// until they join, the owner reads none of the project's content.
+// all left would be lost to the workspace. The workspace owner is the way back
+// in: they can list every private project by name and members, and add
+// themselves to one. Joining is an ordinary membership, shown in the member
+// list and announced to the existing members; until they join, the owner
+// reads none of the project's content. Once on the list they manage its
+// access like any owner or admin who is a member (canManageProjectAccess).
 //
 // These two handlers are the only code that reads private projects without
 // filtering by membership.
@@ -123,9 +124,8 @@ func (h *Handler) ListPrivateProjectsForOwner(w http.ResponseWriter, r *http.Req
 
 // JoinPrivateProject — POST /api/projects/{id}/join
 //
-// The workspace owner adds themselves to a private project. They also become
-// its lead when it has none who is still a member, which is what makes an
-// abandoned project manageable again.
+// The workspace owner adds themselves to a private project. Its lead is left
+// as it is.
 func (h *Handler) JoinPrivateProject(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 	owner, ok := h.requireWorkspaceOwnerRecovery(w, r, workspaceID)
@@ -178,29 +178,6 @@ func (h *Handler) JoinPrivateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	leadIsMember := false
-	if project.LeadType.Valid && project.LeadType.String == "member" {
-		for _, id := range existing {
-			if id == project.LeadID {
-				leadIsMember = true
-				break
-			}
-		}
-	}
-	tookLead := !leadIsMember
-	if tookLead {
-		project, err = qtx.UpdateProject(ctx, db.UpdateProjectParams{
-			ID:          project.ID,
-			LeadType:    pgtype.Text{String: "member", Valid: true},
-			LeadTypeSet: true,
-			LeadID:      owner.UserID,
-			LeadIDSet:   true,
-		})
-		if err != nil {
-			h.writeProjectWriteError(w, r, err, "update")
-			return
-		}
-	}
 	if err := touchProjectSearchIndex(r, qtx, project); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update search index")
 		return
@@ -213,17 +190,11 @@ func (h *Handler) JoinPrivateProject(w http.ResponseWriter, r *http.Request) {
 	slog.Info("workspace owner joined private project", append(logger.RequestAttrs(r),
 		"project_id", uuidToString(project.ID),
 		"user_id", uuidToString(owner.UserID),
-		"took_lead", tookLead,
 	)...)
 
-	resp := projectToResponse(project)
-	ownerID := uuidToString(owner.UserID)
 	h.publishProjectMembersChanged(project, owner.UserID)
-	if tookLead {
-		h.publish(protocol.EventProjectUpdated, workspaceID, "member", ownerID, map[string]any{"project": resp})
-	}
 	h.notifyProjectOwnerJoined(ctx, project, owner.UserID, existing)
-	writeJSON(w, http.StatusOK, resp)
+	writeJSON(w, http.StatusOK, projectToResponse(project))
 }
 
 // notifyProjectOwnerJoined tells the members a private project already had

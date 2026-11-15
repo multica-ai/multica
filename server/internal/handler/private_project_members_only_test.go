@@ -9,10 +9,12 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/projectaccess"
 	"github.com/multica-ai/multica/server/internal/testutil"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// MUL-9284: only the member list opens a private project, and a private
-// project always has a human lead.
+// MUL-9284: only the member list opens a private project. Its lead is as free
+// as any project's (a person, an agent or nobody), so who manages the member
+// list is settled apart from it: see canManageProjectAccess.
 
 type projectLead struct{ leadType, leadID string }
 
@@ -82,83 +84,92 @@ func TestPrivateProjectUnreadCountIgnoresWorkspaceRole(t *testing.T) {
 	}
 }
 
-func TestPrivateProjectCreateAlwaysHasHumanLead(t *testing.T) {
+// projectManagerID asks the members endpoint, as a project member, who
+// manages the project's access.
+func projectManagerID(t *testing.T, userID, projectID string) string {
+	t.Helper()
+	var resp struct {
+		ManagerID *string `json:"manager_id"`
+	}
+	req := withURLParam(asUser(newRequest(http.MethodGet, "/api/projects/"+projectID+"/members", nil), userID), "id", projectID)
+	testutil.Call(t, testHandler.ListProjectMembers, req).Want(http.StatusOK).JSON(&resp)
+	if resp.ManagerID == nil {
+		return ""
+	}
+	return *resp.ManagerID
+}
+
+func addProjectMembersAs(t *testing.T, userID, projectID string, ids ...string) *testutil.Response {
+	t.Helper()
+	req := withURLParam(asUser(newRequest(http.MethodPost, "/api/projects/"+projectID+"/members", map[string]any{"user_ids": ids}), userID), "id", projectID)
+	return testutil.Call(t, testHandler.AddProjectMembers, req)
+}
+
+func TestPrivateProjectLeadIsOptionalAndMayBeAnAgent(t *testing.T) {
 	f := newPrivateProjectFixture(t)
 	agentID := dbfx.Agent(t, f.marker+" lead agent", testRuntimeID)
-	create := func(userID string, body map[string]any) *testutil.Response {
+	agentLead := projectLead{"agent", agentID}
+
+	create := func(t *testing.T, body map[string]any) string {
+		t.Helper()
 		body["title"] = f.marker + " created"
 		body["visibility"] = "private"
-		return testutil.Call(t, testHandler.CreateProject, asUser(newRequest(http.MethodPost, "/api/projects", body), userID))
-	}
-	created := func(resp *testutil.Response) ProjectResponse {
-		t.Helper()
 		var project ProjectResponse
-		resp.Want(http.StatusCreated).JSON(&project)
+		testutil.Call(t, testHandler.CreateProject, asUser(newRequest(http.MethodPost, "/api/projects", body), f.insider)).
+			Want(http.StatusCreated).JSON(&project)
 		t.Cleanup(func() {
 			testPool.Exec(context.Background(), `DELETE FROM project_member WHERE project_id = $1`, project.ID)
 			testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, project.ID)
 		})
-		return project
+		return project.ID
 	}
-
-	t.Run("no lead named: the creator leads", func(t *testing.T) {
-		project := created(create(f.insider, map[string]any{}))
-		if got := loadProjectLead(t, project.ID); got != (projectLead{"member", f.insider}) {
-			t.Fatalf("lead = %+v, want the creator", got)
+	t.Run("created with no lead", func(t *testing.T) {
+		projectID := create(t, map[string]any{})
+		if got := loadProjectLead(t, projectID); got != (projectLead{}) {
+			t.Fatalf("lead = %+v, want none", got)
+		}
+		if members := projectMemberIDs(t, projectID); len(members) != 1 || !members[f.insider] {
+			t.Fatalf("members = %v, want only the creator", members)
 		}
 	})
-	t.Run("another member named: they lead and are a member", func(t *testing.T) {
-		project := created(create(f.insider, map[string]any{"lead_type": "member", "lead_id": f.outsider}))
-		if got := loadProjectLead(t, project.ID); got != (projectLead{"member", f.outsider}) {
+	t.Run("created with an agent lead", func(t *testing.T) {
+		projectID := create(t, map[string]any{"lead_type": "agent", "lead_id": agentID})
+		if got := loadProjectLead(t, projectID); got != agentLead {
+			t.Fatalf("lead = %+v, want the agent", got)
+		}
+		if members := projectMemberIDs(t, projectID); len(members) != 1 || !members[f.insider] {
+			t.Fatalf("members = %v, want only the creator", members)
+		}
+	})
+	t.Run("created with another member as lead", func(t *testing.T) {
+		projectID := create(t, map[string]any{"lead_type": "member", "lead_id": f.outsider})
+		if got := loadProjectLead(t, projectID); got != (projectLead{"member", f.outsider}) {
 			t.Fatalf("lead = %+v, want the named member", got)
 		}
-		if members := projectMemberIDs(t, project.ID); !members[f.outsider] || !members[f.insider] {
+		if members := projectMemberIDs(t, projectID); len(members) != 2 || !members[f.outsider] || !members[f.insider] {
 			t.Fatalf("members = %v, want the creator and the lead", members)
 		}
 	})
-	t.Run("agent lead refused", func(t *testing.T) {
-		before := dbfx.Count(t, `SELECT count(*) FROM project WHERE workspace_id = $1`, testWorkspaceID)
-		create(f.insider, map[string]any{"lead_type": "agent", "lead_id": agentID}).Want(http.StatusBadRequest)
-		if after := dbfx.Count(t, `SELECT count(*) FROM project WHERE workspace_id = $1`, testWorkspaceID); after != before {
-			t.Fatal("a refused create still stored a project")
+
+	t.Run("handed to an agent, then cleared", func(t *testing.T) {
+		dbfx.Exec(t, `UPDATE project SET lead_type = 'member', lead_id = $1 WHERE id = $2`, f.insider, f.projectID)
+		updateProjectAs(t, f.insider, f.projectID, map[string]any{"lead_type": "agent", "lead_id": agentID}).Want(http.StatusOK)
+		if got := loadProjectLead(t, f.projectID); got != agentLead {
+			t.Fatalf("lead = %+v, want the agent", got)
+		}
+		updateProjectAs(t, testUserID, f.projectID, map[string]any{"lead_type": nil, "lead_id": nil}).Want(http.StatusOK)
+		if got := loadProjectLead(t, f.projectID); got != (projectLead{}) {
+			t.Fatalf("lead = %+v, want none", got)
+		}
+		if members := projectMemberIDs(t, f.projectID); len(members) != 2 || !members[testUserID] || !members[f.insider] {
+			t.Fatalf("members = %v, want them unchanged", members)
 		}
 	})
 }
 
-func TestPrivateProjectLeadCannotBeClearedOrGivenToAnAgent(t *testing.T) {
-	f := newPrivateProjectFixture(t)
-	agentID := dbfx.Agent(t, f.marker+" lead agent", testRuntimeID)
-	dbfx.Exec(t, `UPDATE project SET lead_type = 'member', lead_id = $1 WHERE id = $2`, f.insider, f.projectID)
-	for name, body := range map[string]map[string]any{
-		"cleared":           {"lead_type": nil, "lead_id": nil},
-		"id cleared":        {"lead_id": nil},
-		"given to an agent": {"lead_type": "agent", "lead_id": agentID},
-	} {
-		// Both the lead and a workspace owner in the list are refused: it is
-		// the project that needs a lead, whoever asks.
-		for _, actor := range []string{f.insider, testUserID} {
-			updateProjectAs(t, actor, f.projectID, body).Want(http.StatusBadRequest)
-			if got := loadProjectLead(t, f.projectID); got != (projectLead{"member", f.insider}) {
-				t.Fatalf("%s: refused update left lead = %+v", name, got)
-			}
-		}
-	}
-	// Handing it to another human stays possible.
-	updateProjectAs(t, f.insider, f.projectID, map[string]any{"lead_type": "member", "lead_id": testUserID}).Want(http.StatusOK)
-	if got := loadProjectLead(t, f.projectID); got != (projectLead{"member", testUserID}) {
-		t.Fatalf("lead after handover = %+v", got)
-	}
-
-	// A workspace-visible project keeps an optional lead of either kind.
-	open := dbfx.Project(t, f.marker+" open project")
-	updateProjectAs(t, f.outsider, open, map[string]any{"lead_type": "agent", "lead_id": agentID}).Want(http.StatusOK)
-	updateProjectAs(t, f.outsider, open, map[string]any{"lead_type": nil, "lead_id": nil}).Want(http.StatusOK)
-	if got := loadProjectLead(t, open); got != (projectLead{}) {
-		t.Fatalf("workspace-visible project lead = %+v, want none", got)
-	}
-}
-
-func TestProjectTurningPrivateGetsHumanLead(t *testing.T) {
+// Making a project private leaves its lead alone: it adds the caller, and the
+// lead when that is a person who can still be added.
+func TestProjectTurningPrivateKeepsItsLead(t *testing.T) {
 	marker := newPrivateProjectFixture(t).marker
 	agentID := dbfx.Agent(t, marker+" lead agent", testRuntimeID)
 	human := createPlainMember(t, marker+"-human-lead@multica.test")
@@ -166,19 +177,19 @@ func TestProjectTurningPrivateGetsHumanLead(t *testing.T) {
 	departed := "00000000-0000-0000-0000-0000000d0001"
 
 	for _, tc := range []struct {
-		name     string
-		lead     projectLead
-		body     map[string]any
-		wantCode int
-		wantLead projectLead
+		name        string
+		lead        projectLead
+		body        map[string]any
+		wantLead    projectLead
+		wantMembers []string
 	}{
-		{"no lead: the caller leads", projectLead{}, nil, http.StatusOK, projectLead{"member", testUserID}},
-		{"agent lead: the caller replaces it", projectLead{"agent", agentID}, nil, http.StatusOK, projectLead{"member", testUserID}},
-		{"departed lead: the caller replaces them", projectLead{"member", departed}, nil, http.StatusOK, projectLead{"member", testUserID}},
-		{"human lead kept", projectLead{"member", human}, nil, http.StatusOK, projectLead{"member", human}},
-		{"lead named in the same request", projectLead{}, map[string]any{"lead_type": "member", "lead_id": human}, http.StatusOK, projectLead{"member", human}},
-		{"agent named in the same request", projectLead{"member", human}, map[string]any{"lead_type": "agent", "lead_id": agentID}, http.StatusBadRequest, projectLead{"member", human}},
-		{"lead cleared in the same request", projectLead{"member", human}, map[string]any{"lead_type": nil, "lead_id": nil}, http.StatusBadRequest, projectLead{"member", human}},
+		{"no lead", projectLead{}, nil, projectLead{}, []string{testUserID}},
+		{"agent lead", projectLead{"agent", agentID}, nil, projectLead{"agent", agentID}, []string{testUserID}},
+		{"human lead", projectLead{"member", human}, nil, projectLead{"member", human}, []string{testUserID, human}},
+		{"lead who left the workspace", projectLead{"member", departed}, nil, projectLead{"member", departed}, []string{testUserID}},
+		{"person named in the same request", projectLead{}, map[string]any{"lead_type": "member", "lead_id": human}, projectLead{"member", human}, []string{testUserID, human}},
+		{"agent named in the same request", projectLead{"member", human}, map[string]any{"lead_type": "agent", "lead_id": agentID}, projectLead{"agent", agentID}, []string{testUserID}},
+		{"lead cleared in the same request", projectLead{"member", human}, map[string]any{"lead_type": nil, "lead_id": nil}, projectLead{}, []string{testUserID}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cols := testutil.Cols{}
@@ -193,101 +204,258 @@ func TestProjectTurningPrivateGetsHumanLead(t *testing.T) {
 			for k, v := range tc.body {
 				body[k] = v
 			}
-			updateProjectAs(t, testUserID, projectID, body).Want(tc.wantCode)
+			updateProjectAs(t, testUserID, projectID, body).Want(http.StatusOK)
+			if n := dbfx.Count(t, `SELECT count(*) FROM project WHERE id = $1 AND visibility = 'private'`, projectID); n != 1 {
+				t.Fatal("project did not turn private")
+			}
 			if got := loadProjectLead(t, projectID); got != tc.wantLead {
 				t.Fatalf("lead = %+v, want %+v", got, tc.wantLead)
 			}
-			if tc.wantCode != http.StatusOK {
-				if n := dbfx.Count(t, `SELECT count(*) FROM project WHERE id = $1 AND visibility = 'private'`, projectID); n != 0 {
-					t.Fatal("a refused update still made the project private")
-				}
-				return
-			}
 			members := projectMemberIDs(t, projectID)
-			if !members[testUserID] || !members[tc.wantLead.leadID] || members[departed] {
-				t.Fatalf("members = %v, want the caller and the lead", members)
+			if len(members) != len(tc.wantMembers) {
+				t.Fatalf("members = %v, want %v", members, tc.wantMembers)
+			}
+			for _, id := range tc.wantMembers {
+				if !members[id] {
+					t.Fatalf("members = %v, want %v", members, tc.wantMembers)
+				}
 			}
 		})
 	}
+
+	// A departed user named as the new lead is still refused, and nothing
+	// about the project changes.
+	projectID := dbfx.Project(t, marker+" refused")
+	updateProjectAs(t, testUserID, projectID, map[string]any{"visibility": "private", "lead_type": "member", "lead_id": departed}).Want(http.StatusBadRequest)
+	if n := dbfx.Count(t, `SELECT count(*) FROM project WHERE id = $1 AND visibility = 'private'`, projectID); n != 0 {
+		t.Fatal("a refused update still made the project private")
+	}
 }
 
-func TestPrivateProjectLeadHandedOverWhenLeadLeavesWorkspace(t *testing.T) {
+// Who manages a private project's member list when no workspace owner or
+// admin is on it: the lead if a person on the list, else the creator if on
+// the list, else whoever has been on it longest.
+func TestPrivateProjectAccessManager(t *testing.T) {
+	marker := newPrivateProjectFixture(t).marker
+	agentID := dbfx.Agent(t, marker+" lead agent", testRuntimeID)
+	lead := createPlainMember(t, marker+"-mgr-lead@multica.test")
+	creator := createPlainMember(t, marker+"-mgr-creator@multica.test")
+	early := createPlainMember(t, marker+"-mgr-early@multica.test")
+	late := createPlainMember(t, marker+"-mgr-late@multica.test")
+	admin := createWorkspaceAdmin(t, marker+"-mgr-admin@multica.test")
+	// Not on any list: the one each manager is asked to add.
+	newcomer := createPlainMember(t, marker+"-mgr-newcomer@multica.test")
+
+	// Members are listed oldest first; ages are a day apart.
+	for _, tc := range []struct {
+		name    string
+		cols    testutil.Cols
+		members []string
+		want    string
+	}{
+		{
+			"a person who leads it",
+			testutil.Cols{"lead_type": "member", "lead_id": lead, "creator_type": "member", "creator_id": creator},
+			[]string{early, creator, lead}, lead,
+		},
+		{
+			"agent lead: the creator",
+			testutil.Cols{"lead_type": "agent", "lead_id": agentID, "creator_type": "member", "creator_id": creator},
+			[]string{early, creator, late}, creator,
+		},
+		{
+			"no lead: the creator",
+			testutil.Cols{"creator_type": "member", "creator_id": creator},
+			[]string{early, creator, late}, creator,
+		},
+		{
+			"lead not on the list: the creator",
+			testutil.Cols{"lead_type": "member", "lead_id": lead, "creator_type": "member", "creator_id": creator},
+			[]string{early, creator}, creator,
+		},
+		{
+			"creator not on the list: the longest-standing member",
+			testutil.Cols{"lead_type": "agent", "lead_id": agentID, "creator_type": "member", "creator_id": creator},
+			[]string{early, late}, early,
+		},
+		{
+			"created by an agent: the longest-standing member",
+			// An agent's id never matches a user, but the type is what rules it out.
+			testutil.Cols{"creator_type": "agent", "creator_id": late},
+			[]string{early, late}, early,
+		},
+		{
+			"no creator recorded: the longest-standing member",
+			testutil.Cols{},
+			[]string{early, late}, early,
+		},
+		{
+			"an admin on the list does not displace the manager",
+			testutil.Cols{"creator_type": "member", "creator_id": creator},
+			[]string{admin, creator, late}, creator,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.cols["visibility"] = projectaccess.VisibilityPrivate
+			projectID := dbfx.Project(t, marker+" managed", tc.cols)
+			t.Cleanup(func() {
+				testPool.Exec(context.Background(), `DELETE FROM project_member WHERE project_id = $1`, projectID)
+			})
+			for i, userID := range tc.members {
+				addProjectMemberRow(t, projectID, userID)
+				dbfx.Exec(t, `UPDATE project_member SET created_at = now() - make_interval(days => $3) WHERE project_id = $1 AND user_id = $2`,
+					projectID, userID, len(tc.members)-i)
+			}
+			for _, userID := range tc.members {
+				if got := projectManagerID(t, userID, projectID); got != tc.want {
+					t.Fatalf("manager_id as seen by %s = %q, want %q", userID, got, tc.want)
+				}
+			}
+			// The rule is enforced, not just reported: every write that
+			// changes who sees the project takes the manager, or an owner or
+			// admin who is on the list.
+			for _, userID := range tc.members {
+				if userID == tc.want || userID == admin {
+					continue
+				}
+				addProjectMembersAs(t, userID, projectID, newcomer).Want(http.StatusForbidden)
+				req := testutil.WithURLParams(asUser(newRequest(http.MethodDelete, "/api/projects/"+projectID+"/members/"+userID, nil), userID), "id", projectID, "userId", userID)
+				testutil.Call(t, testHandler.RemoveProjectMember, req).Want(http.StatusForbidden)
+				updateProjectAs(t, userID, projectID, map[string]any{"visibility": "workspace"}).Want(http.StatusForbidden)
+				updateProjectAs(t, userID, projectID, map[string]any{"lead_type": "member", "lead_id": userID}).Want(http.StatusForbidden)
+			}
+			if members := projectMemberIDs(t, projectID); len(members) != len(tc.members) || members[newcomer] {
+				t.Fatalf("refused requests changed the member list: %v", members)
+			}
+			if n := dbfx.Count(t, `SELECT count(*) FROM project WHERE id = $1 AND visibility = 'private'`, projectID); n != 1 {
+				t.Fatal("a refused request made the project workspace-visible")
+			}
+			for _, userID := range tc.members {
+				if userID != admin {
+					continue
+				}
+				addProjectMembersAs(t, admin, projectID, newcomer).Want(http.StatusOK)
+				removeProjectMemberRow(t, projectID, newcomer)
+			}
+			addProjectMembersAs(t, tc.want, projectID, newcomer).Want(http.StatusOK)
+			if !projectMemberIDs(t, projectID)[newcomer] {
+				t.Fatal("the manager's add did not add the member")
+			}
+		})
+	}
+
+	t.Run("people added together: the one who added the rest", func(t *testing.T) {
+		projectID := dbfx.Project(t, marker+" tied", testutil.Cols{"visibility": projectaccess.VisibilityPrivate})
+		t.Cleanup(func() {
+			testPool.Exec(context.Background(), `DELETE FROM project_member WHERE project_id = $1`, projectID)
+		})
+		// One statement, as when a project is made private with a member
+		// list: every row gets the same join time.
+		dbfx.Exec(t, `INSERT INTO project_member (workspace_id, project_id, user_id, added_by)
+			SELECT $1, $2, u, $3 FROM unnest($4::uuid[]) AS u`, testWorkspaceID, projectID, late, []string{early, late, creator})
+		if got := projectManagerID(t, early, projectID); got != late {
+			t.Fatalf("manager_id = %q, want the member who added the others (%q)", got, late)
+		}
+	})
+
+	t.Run("nobody for an empty list or a workspace-visible project", func(t *testing.T) {
+		ctx := context.Background()
+		empty := dbfx.Project(t, marker+" empty", testutil.Cols{
+			"visibility": projectaccess.VisibilityPrivate, "lead_type": "member", "lead_id": lead, "creator_type": "member", "creator_id": creator,
+		})
+		open := dbfx.Project(t, marker+" open", testutil.Cols{"lead_type": "member", "lead_id": lead})
+		t.Cleanup(func() {
+			testPool.Exec(context.Background(), `DELETE FROM project_member WHERE project_id = $1`, open)
+		})
+		// Rows of a project that is no longer private are kept, and count
+		// for nothing while it stays workspace-visible.
+		addProjectMemberRow(t, open, lead)
+		for name, projectID := range map[string]string{"empty": empty, "open": open} {
+			project, err := testHandler.Queries.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{
+				ID: parseUUID(projectID), WorkspaceID: parseUUID(testWorkspaceID),
+			})
+			if err != nil {
+				t.Fatalf("%s: load project: %v", name, err)
+			}
+			manager, err := testHandler.projectAccessManager(ctx, project)
+			if err != nil || manager.Valid {
+				t.Fatalf("%s: manager = %s, err = %v; want none", name, uuidToString(manager), err)
+			}
+		}
+		if got := projectManagerID(t, lead, open); got != "" {
+			t.Fatalf("workspace-visible project: manager_id = %q, want none", got)
+		}
+	})
+}
+
+// A member who leaves the workspace leaves every member list. Nothing else
+// about their projects is rewritten: whoever is next in line manages access.
+func TestPrivateProjectAccessManagerAfterLeadLeavesWorkspace(t *testing.T) {
 	ctx := context.Background()
 	marker := newPrivateProjectFixture(t).marker
-	memberID := func(userID string) string {
-		t.Helper()
-		var id string
-		if err := testPool.QueryRow(ctx, `SELECT id FROM member WHERE workspace_id = $1 AND user_id = $2`, testWorkspaceID, userID).Scan(&id); err != nil {
-			t.Fatalf("load member row: %v", err)
-		}
-		return id
-	}
 	leaver := createPlainMember(t, marker+"-leaver@multica.test")
 	early := createPlainMember(t, marker+"-early@multica.test")
 	late := createPlainMember(t, marker+"-late@multica.test")
+	newcomer := createPlainMember(t, marker+"-newcomer@multica.test")
+	var leaverMemberID string
+	if err := testPool.QueryRow(ctx, `SELECT id FROM member WHERE workspace_id = $1 AND user_id = $2`, testWorkspaceID, leaver).Scan(&leaverMemberID); err != nil {
+		t.Fatalf("load member row: %v", err)
+	}
 
-	private := testutil.Cols{"visibility": projectaccess.VisibilityPrivate, "lead_type": "member", "lead_id": leaver}
-	shared := dbfx.Project(t, marker+" shared", private)
-	solo := dbfx.Project(t, marker+" solo", private)
-	// Led by the leaver, but workspace-visible: the rule does not reach it.
-	open := dbfx.Project(t, marker+" open", testutil.Cols{"lead_type": "member", "lead_id": leaver})
-	// Private and led by someone else: untouched.
-	other := dbfx.Project(t, marker+" other", testutil.Cols{"visibility": projectaccess.VisibilityPrivate, "lead_type": "member", "lead_id": early})
-	// Created by someone who is still a member, alongside one who joined earlier.
+	led := testutil.Cols{"visibility": projectaccess.VisibilityPrivate, "lead_type": "member", "lead_id": leaver}
+	shared := dbfx.Project(t, marker+" shared", led)
+	solo := dbfx.Project(t, marker+" solo", led)
+	// Created by someone who stays, alongside a member who joined earlier.
 	founded := dbfx.Project(t, marker+" founded", testutil.Cols{
 		"visibility": projectaccess.VisibilityPrivate, "lead_type": "member", "lead_id": leaver,
 		"creator_type": "member", "creator_id": late,
 	})
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM project_member WHERE project_id = ANY($1::uuid[])`, []string{shared, solo, open, other, founded})
+		testPool.Exec(context.Background(), `DELETE FROM project_member WHERE project_id = ANY($1::uuid[])`, []string{shared, solo, founded})
 	})
 	addProjectMemberRow(t, solo, leaver)
-	addProjectMemberRow(t, other, early)
-	addProjectMemberRow(t, other, leaver)
-	// Explicit join times: the handover goes to whoever has been in longest,
-	// unless the project's creator is among those who stay.
 	for _, projectID := range []string{shared, founded} {
 		for i, userID := range []string{leaver, late, early} {
 			addProjectMemberRow(t, projectID, userID)
 			dbfx.Exec(t, `UPDATE project_member SET created_at = now() - make_interval(days => $3) WHERE project_id = $1 AND user_id = $2`, projectID, userID, i*10)
 		}
 	}
+	if got := projectManagerID(t, early, shared); got != leaver {
+		t.Fatalf("manager before the lead left = %q, want the lead", got)
+	}
 
-	result, err := testHandler.revokeAndRemoveMember(ctx, parseUUID(testWorkspaceID), parseUUID(leaver), parseUUID(memberID(leaver)), parseUUID(testUserID))
-	if err != nil {
+	if _, err := testHandler.revokeAndRemoveMember(ctx, parseUUID(testWorkspaceID), parseUUID(leaver), parseUUID(leaverMemberID), parseUUID(testUserID)); err != nil {
 		t.Fatalf("revokeAndRemoveMember: %v", err)
 	}
 
-	if got := loadProjectLead(t, shared); got != (projectLead{"member", early}) {
-		t.Errorf("shared project lead = %+v, want its longest-standing remaining member", got)
+	for _, projectID := range []string{shared, solo, founded} {
+		if got := loadProjectLead(t, projectID); got != (projectLead{"member", leaver}) {
+			t.Errorf("lead = %+v, want it left as it was", got)
+		}
+		if projectMemberIDs(t, projectID)[leaver] {
+			t.Error("the leaver is still on a member list")
+		}
 	}
-	if members := projectMemberIDs(t, shared); members[leaver] || !members[early] || !members[late] {
-		t.Errorf("shared project members = %v, want only the two who stayed", members)
+	if got := projectManagerID(t, late, shared); got != early {
+		t.Errorf("shared project manager = %q, want its longest-standing remaining member", got)
 	}
-	if got := loadProjectLead(t, founded); got != (projectLead{"member", late}) {
-		t.Errorf("founded project lead = %+v, want its creator, who is still a member", got)
+	if got := projectManagerID(t, early, founded); got != late {
+		t.Errorf("founded project manager = %q, want its creator", got)
 	}
-	// Nobody is left to take it: no lead, no members, still private. The
-	// workspace owner recovers it (TestWorkspaceOwnerJoinsPrivateProject).
-	if got := loadProjectLead(t, solo); got != (projectLead{}) {
-		t.Errorf("solo project lead = %+v, want none", got)
+	addProjectMembersAs(t, late, shared, newcomer).Want(http.StatusForbidden)
+	addProjectMembersAs(t, early, shared, newcomer).Want(http.StatusOK)
+	// The new manager can also name a lead who is still here.
+	updateProjectAs(t, early, shared, map[string]any{"lead_type": "member", "lead_id": late}).Want(http.StatusOK)
+	if got := projectManagerID(t, early, shared); got != late {
+		t.Errorf("manager after naming a new lead = %q, want that lead", got)
+	}
+	// Nobody is left on this one. It stays private; the workspace owner is
+	// the way back in (TestWorkspaceOwnerJoinsPrivateProject).
+	if members := projectMemberIDs(t, solo); len(members) != 0 {
+		t.Errorf("solo project members = %v, want none", members)
 	}
 	if n := dbfx.Count(t, `SELECT count(*) FROM project WHERE id = $1 AND visibility = 'private'`, solo); n != 1 {
 		t.Error("solo project is no longer private")
-	}
-	if got := loadProjectLead(t, open); got != (projectLead{"member", leaver}) {
-		t.Errorf("workspace-visible project lead = %+v, want it left alone", got)
-	}
-	if got := loadProjectLead(t, other); got != (projectLead{"member", early}) {
-		t.Errorf("project led by someone else = %+v, want it left alone", got)
-	}
-
-	handed := map[string]bool{}
-	for _, p := range result.HandedOverProjects {
-		handed[uuidToString(p.ID)] = true
-	}
-	if len(handed) != 3 || !handed[shared] || !handed[solo] || !handed[founded] {
-		t.Errorf("handed-over projects = %v, want the three private projects the leaver led", handed)
 	}
 }
 

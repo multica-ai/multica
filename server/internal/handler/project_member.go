@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -20,15 +21,10 @@ import (
 // Private projects (MUL-8472, MUL-9284). Only project members see one; a
 // workspace role grants no visibility. Among the people who can see it:
 //
-//   - change visibility or lead, add/remove members: the project's lead, or a
-//     workspace owner/admin
+//   - change visibility or lead, add/remove members: a workspace owner/admin,
+//     or the project's access manager (canManageProjectAccess)
 //   - ordinary project members: read-only membership, no self-removal
 //   - agents: none of these; an agent's access is derived from humans
-//
-// The lead is therefore what keeps a private project manageable, so a private
-// project always has a human lead who is one of its members.
-
-const errPrivateProjectLead = "a private project must have a workspace member as its lead"
 
 type ProjectMemberResponse struct {
 	ProjectID     string  `json:"project_id"`
@@ -50,9 +46,6 @@ type AddProjectMembersRequest struct {
 type projectAccessUpdate struct {
 	visibility string // target visibility; "" leaves it unchanged
 	addIDs     []pgtype.UUID
-	// leadID, when valid, is the member who becomes lead because the project
-	// is turning private without a usable human lead.
-	leadID pgtype.UUID
 }
 
 func (u projectAccessUpdate) empty() bool { return u.visibility == "" && len(u.addIDs) == 0 }
@@ -65,17 +58,64 @@ func (h *Handler) requireHumanProjectAccessActor(w http.ResponseWriter, r *http.
 	return true
 }
 
-// canManageProjectAccess: workspace owner/admin, or the member lead of a
-// private project. Callers have already established that the member can see
-// the project, which on a private one means being a project member. Any
-// member may set the lead of a workspace-visible project, so leading one
+// canManageProjectAccess reports whether member may change who sees project:
+// its visibility, its member list and, on a private project, its lead.
+// Callers have already established that the member can see the project, which
+// on a private one means being a project member.
+//
+// Workspace owners and admins may. On a private project so may its access
+// manager (GetProjectAccessManager): the lead when that is a person, otherwise
+// the creator, otherwise the longest-standing member. The lead of a private
+// project may be an agent or nobody, so without that fallback a project whose
+// list holds no owner or admin would have nobody able to manage it.
+//
+// Any member may set the lead of a workspace-visible project, so leading one
 // grants nothing; making it private takes an owner/admin.
-func canManageProjectAccess(member db.Member, project db.Project) bool {
+func (h *Handler) canManageProjectAccess(ctx context.Context, member db.Member, project db.Project) (bool, error) {
 	if projectaccess.IsManagerRole(member.Role) {
-		return true
+		return true, nil
 	}
-	return projectVisibilityOrDefault(project.Visibility) == projectaccess.VisibilityPrivate &&
-		project.LeadType.Valid && project.LeadType.String == "member" && project.LeadID == member.UserID
+	manager, err := h.projectAccessManager(ctx, project)
+	if err != nil {
+		return false, err
+	}
+	return manager.Valid && manager == member.UserID, nil
+}
+
+// projectAccessManager is the member who manages a private project's access
+// besides workspace owners and admins. Invalid for a workspace-visible
+// project, and for a private one with no members.
+func (h *Handler) projectAccessManager(ctx context.Context, project db.Project) (pgtype.UUID, error) {
+	if projectVisibilityOrDefault(project.Visibility) != projectaccess.VisibilityPrivate {
+		return pgtype.UUID{}, nil
+	}
+	manager, err := h.Queries.GetProjectAccessManager(ctx, db.GetProjectAccessManagerParams{
+		ProjectID:   project.ID,
+		WorkspaceID: project.WorkspaceID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return pgtype.UUID{}, nil
+	}
+	return manager, err
+}
+
+// requireProjectAccessManager answers 403 with denied unless the caller may
+// manage the project's access.
+func (h *Handler) requireProjectAccessManager(w http.ResponseWriter, r *http.Request, member db.Member, project db.Project, denied string) bool {
+	ok, err := h.canManageProjectAccess(r.Context(), member, project)
+	if err != nil {
+		if writeQueryCancellation(w, r, err) {
+			return false
+		}
+		slog.Warn("resolve project access manager failed", append(logger.RequestAttrs(r), "project_id", uuidToString(project.ID), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to resolve project access")
+		return false
+	}
+	if !ok {
+		writeError(w, http.StatusForbidden, denied)
+		return false
+	}
+	return true
 }
 
 func parseProjectMemberIDs(w http.ResponseWriter, raw []string, field string) ([]pgtype.UUID, bool) {
@@ -99,15 +139,11 @@ func parseProjectMemberIDs(w http.ResponseWriter, raw []string, field string) ([
 // before anything is written. Two things change who can see a project:
 //
 //   - a visibility switch (requested = nil leaves it alone), which takes a
-//     human workspace admin or the member lead;
+//     human who manages the project's access;
 //   - on a private project, a new member lead who is not yet a project member.
 //     A member lead must be a project member, so the update adds them, which
 //     is granting access: it takes a human who could add members directly.
 //     Agents never grant access, here or anywhere else.
-//
-// It also keeps a private project led by a human: the lead cannot be cleared
-// or handed to an agent, and a project turning private without a usable human
-// lead gets the caller as its lead.
 //
 // newLeadType / newLeadID are the lead the project will have after the update.
 func (h *Handler) prepareProjectAccessUpdate(w http.ResponseWriter, r *http.Request, project db.Project, requested *string, rawMemberIDs []string, newLeadType pgtype.Text, newLeadID pgtype.UUID, leadChanged bool) (projectAccessUpdate, bool) {
@@ -115,8 +151,10 @@ func (h *Handler) prepareProjectAccessUpdate(w http.ResponseWriter, r *http.Requ
 	current := projectVisibilityOrDefault(project.Visibility)
 	memberLead := newLeadType.Valid && newLeadType.String == "member" && newLeadID.Valid
 
-	// The lead of a private project manages its access, so changing it is an
-	// access change. On a workspace-visible project the lead is an ordinary
+	// A person who leads a private project manages its access, so changing
+	// the lead is an access change: naming a person hands them the member
+	// list, and clearing it or naming an agent hands the list to whoever is
+	// next in line. On a workspace-visible project the lead is an ordinary
 	// field anyone can set, as it was before private projects existed.
 	if leadChanged && current == projectaccess.VisibilityPrivate {
 		if !h.requireHumanProjectAccessActor(w, r, workspaceID) {
@@ -126,8 +164,7 @@ func (h *Handler) prepareProjectAccessUpdate(w http.ResponseWriter, r *http.Requ
 		if !ok {
 			return projectAccessUpdate{}, false
 		}
-		if !canManageProjectAccess(member, project) {
-			writeError(w, http.StatusForbidden, "only workspace admins and the project lead can change the project lead")
+		if !h.requireProjectAccessManager(w, r, member, project, "only workspace admins and the member who manages this project's access can change the project lead") {
 			return projectAccessUpdate{}, false
 		}
 	}
@@ -145,8 +182,7 @@ func (h *Handler) prepareProjectAccessUpdate(w http.ResponseWriter, r *http.Requ
 		if !ok {
 			return projectAccessUpdate{}, false
 		}
-		if !canManageProjectAccess(member, project) {
-			writeError(w, http.StatusForbidden, "only workspace admins and the project lead can change project visibility")
+		if !h.requireProjectAccessManager(w, r, member, project, "only workspace admins and the member who manages this project's access can change project visibility") {
 			return projectAccessUpdate{}, false
 		}
 		update := projectAccessUpdate{visibility: target}
@@ -155,31 +191,22 @@ func (h *Handler) prepareProjectAccessUpdate(w http.ResponseWriter, r *http.Requ
 			if !ok {
 				return projectAccessUpdate{}, false
 			}
-			// The caller and the lead always keep access to a project they
-			// make private.
+			// The caller and a member lead always keep access to a project
+			// they make private. A lead this request did not name may have
+			// left the workspace since; there is nobody to add then, and
+			// the project goes on naming them as any project would.
 			ids = append(ids, member.UserID)
-			switch {
-			case leadChanged && !memberLead:
-				writeError(w, http.StatusBadRequest, errPrivateProjectLead)
-				return projectAccessUpdate{}, false
-			case leadChanged:
-				ids = append(ids, newLeadID)
-			default:
-				// The existing lead stays if it is a human still in the
-				// workspace; none, an agent, or someone who has left makes
-				// the caller the lead.
-				keep := false
-				if memberLead {
+			if memberLead {
+				present := true
+				if !leadChanged {
 					var err error
-					if keep, err = h.isWorkspaceMemberUser(r, project.WorkspaceID, newLeadID); err != nil {
+					if present, err = h.isWorkspaceMemberUser(r, project.WorkspaceID, newLeadID); err != nil {
 						writeError(w, http.StatusInternalServerError, "failed to check the project lead")
 						return projectAccessUpdate{}, false
 					}
 				}
-				if keep {
+				if present {
 					ids = append(ids, newLeadID)
-				} else {
-					update.leadID = member.UserID
 				}
 			}
 			update.addIDs = ids
@@ -187,12 +214,8 @@ func (h *Handler) prepareProjectAccessUpdate(w http.ResponseWriter, r *http.Requ
 		return update, true
 	}
 
-	if current != projectaccess.VisibilityPrivate || !leadChanged {
+	if current != projectaccess.VisibilityPrivate || !leadChanged || !memberLead {
 		return projectAccessUpdate{}, true
-	}
-	if !memberLead {
-		writeError(w, http.StatusBadRequest, errPrivateProjectLead)
-		return projectAccessUpdate{}, false
 	}
 	isMember, err := h.isProjectMember(r, project, newLeadID)
 	if err != nil {
@@ -366,7 +389,15 @@ func (h *Handler) ListProjectMembers(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list project members")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"members": resp, "total": len(resp)})
+	// manager_id names the member who manages access besides workspace owners
+	// and admins, so a client can show who that is and whether it is the
+	// caller without repeating the rule.
+	manager, err := h.projectAccessManager(r.Context(), project)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve project access")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"members": resp, "total": len(resp), "manager_id": uuidToPtr(manager)})
 }
 
 // AddProjectMembers — POST /api/projects/{id}/members {"user_ids": [...]}
@@ -396,8 +427,7 @@ func (h *Handler) AddProjectMembers(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !canManageProjectAccess(member, project) {
-		writeError(w, http.StatusForbidden, "only workspace admins and the project lead can add members")
+	if !h.requireProjectAccessManager(w, r, member, project, "only workspace admins and the member who manages this project's access can add members") {
 		return
 	}
 	tx, err := h.TxStarter.Begin(r.Context())
@@ -450,8 +480,7 @@ func (h *Handler) RemoveProjectMember(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !canManageProjectAccess(member, project) {
-		writeError(w, http.StatusForbidden, "only workspace admins and the project lead can remove project members")
+	if !h.requireProjectAccessManager(w, r, member, project, "only workspace admins and the member who manages this project's access can remove project members") {
 		return
 	}
 	if project.LeadType.Valid && project.LeadType.String == "member" && project.LeadID == target {

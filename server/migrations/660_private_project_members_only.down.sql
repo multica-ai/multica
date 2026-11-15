@@ -1,3 +1,0 @@
--- Nothing to undo. The up migration only gave private projects a member of
--- theirs as lead, and those leads are not told apart from ones people chose.
--- The role-based rule this replaced reads those projects correctly as they are.

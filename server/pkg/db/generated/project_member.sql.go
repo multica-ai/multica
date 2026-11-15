@@ -138,78 +138,36 @@ func (q *Queries) GetIssueProjectID(ctx context.Context, id pgtype.UUID) (pgtype
 	return project_id, err
 }
 
-const handOverPrivateProjectLeads = `-- name: HandOverPrivateProjectLeads :many
-UPDATE project
-SET lead_id = (
-        SELECT pm.user_id FROM project_member pm
-        WHERE pm.project_id = project.id AND pm.user_id <> $1
-        ORDER BY (project.creator_type = 'member' AND project.creator_id = pm.user_id) DESC NULLS LAST,
-                 pm.created_at ASC, pm.user_id ASC
-        LIMIT 1
-    ),
-    lead_type = CASE WHEN EXISTS (
-        SELECT 1 FROM project_member pm
-        WHERE pm.project_id = project.id AND pm.user_id <> $1
-    ) THEN 'member' END,
-    updated_at = now()
-WHERE project.workspace_id = $2
-  AND project.visibility = 'private'
-  AND project.lead_type = 'member'
-  AND project.lead_id = $1
-RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, creator_type, creator_id, visibility, archived_at, archived_by_type, archived_by_id
+const getProjectAccessManager = `-- name: GetProjectAccessManager :one
+SELECT pm.user_id
+FROM project_member pm
+JOIN project p ON p.id = pm.project_id
+WHERE pm.project_id = $1 AND pm.workspace_id = $2
+ORDER BY COALESCE(p.lead_type = 'member' AND p.lead_id = pm.user_id, false) DESC,
+         COALESCE(p.creator_type = 'member' AND p.creator_id = pm.user_id, false) DESC,
+         pm.created_at ASC,
+         COALESCE(pm.added_by = pm.user_id, false) DESC,
+         pm.user_id ASC
+LIMIT 1
 `
 
-type HandOverPrivateProjectLeadsParams struct {
-	UserID      pgtype.UUID `json:"user_id"`
+type GetProjectAccessManagerParams struct {
+	ProjectID   pgtype.UUID `json:"project_id"`
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
-// A private project always has a human lead, who manages its access
-// (MUL-9284). When that lead leaves the workspace the project goes to its
-// creator if they are still a member of it, and otherwise to its
-// longest-standing other member. People added together share a join time, so
-// without the creator rule that choice would fall to the user id. A project
-// with no other member is left without a lead, for a workspace owner to
-// recover. Run before the leaver's project_member rows are deleted.
-func (q *Queries) HandOverPrivateProjectLeads(ctx context.Context, arg HandOverPrivateProjectLeadsParams) ([]Project, error) {
-	rows, err := q.db.Query(ctx, handOverPrivateProjectLeads, arg.UserID, arg.WorkspaceID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []Project{}
-	for rows.Next() {
-		var i Project
-		if err := rows.Scan(
-			&i.ID,
-			&i.WorkspaceID,
-			&i.Title,
-			&i.Description,
-			&i.Icon,
-			&i.Status,
-			&i.LeadType,
-			&i.LeadID,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.Priority,
-			&i.StartDate,
-			&i.DueDate,
-			&i.WorkflowID,
-			&i.CreatorType,
-			&i.CreatorID,
-			&i.Visibility,
-			&i.ArchivedAt,
-			&i.ArchivedByType,
-			&i.ArchivedByID,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
+// The one project member who manages a private project's access besides the
+// workspace owners and admins on its list (MUL-9284): its lead when that is a
+// person on the list, otherwise its creator when on the list, otherwise its
+// longest-standing member. The lead itself is free to be an agent or nobody,
+// so this is what keeps a project with members from having no person in
+// charge of them. People added together share a join time; among them the
+// one who added the rest comes first. No row when the list is empty.
+func (q *Queries) GetProjectAccessManager(ctx context.Context, arg GetProjectAccessManagerParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, getProjectAccessManager, arg.ProjectID, arg.WorkspaceID)
+	var user_id pgtype.UUID
+	err := row.Scan(&user_id)
+	return user_id, err
 }
 
 const listAutopilotRunProjectIDs = `-- name: ListAutopilotRunProjectIDs :many

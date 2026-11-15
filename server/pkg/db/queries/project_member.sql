@@ -61,32 +61,24 @@ WHERE project_id = sqlc.arg('project_id') AND workspace_id = sqlc.arg('workspace
 DELETE FROM project_member
 WHERE workspace_id = sqlc.arg('workspace_id') AND user_id = sqlc.arg('user_id');
 
--- name: HandOverPrivateProjectLeads :many
--- A private project always has a human lead, who manages its access
--- (MUL-9284). When that lead leaves the workspace the project goes to its
--- creator if they are still a member of it, and otherwise to its
--- longest-standing other member. People added together share a join time, so
--- without the creator rule that choice would fall to the user id. A project
--- with no other member is left without a lead, for a workspace owner to
--- recover. Run before the leaver's project_member rows are deleted.
-UPDATE project
-SET lead_id = (
-        SELECT pm.user_id FROM project_member pm
-        WHERE pm.project_id = project.id AND pm.user_id <> sqlc.arg('user_id')
-        ORDER BY (project.creator_type = 'member' AND project.creator_id = pm.user_id) DESC NULLS LAST,
-                 pm.created_at ASC, pm.user_id ASC
-        LIMIT 1
-    ),
-    lead_type = CASE WHEN EXISTS (
-        SELECT 1 FROM project_member pm
-        WHERE pm.project_id = project.id AND pm.user_id <> sqlc.arg('user_id')
-    ) THEN 'member' END,
-    updated_at = now()
-WHERE project.workspace_id = sqlc.arg('workspace_id')
-  AND project.visibility = 'private'
-  AND project.lead_type = 'member'
-  AND project.lead_id = sqlc.arg('user_id')
-RETURNING *;
+-- name: GetProjectAccessManager :one
+-- The one project member who manages a private project's access besides the
+-- workspace owners and admins on its list (MUL-9284): its lead when that is a
+-- person on the list, otherwise its creator when on the list, otherwise its
+-- longest-standing member. The lead itself is free to be an agent or nobody,
+-- so this is what keeps a project with members from having no person in
+-- charge of them. People added together share a join time; among them the
+-- one who added the rest comes first. No row when the list is empty.
+SELECT pm.user_id
+FROM project_member pm
+JOIN project p ON p.id = pm.project_id
+WHERE pm.project_id = sqlc.arg('project_id') AND pm.workspace_id = sqlc.arg('workspace_id')
+ORDER BY COALESCE(p.lead_type = 'member' AND p.lead_id = pm.user_id, false) DESC,
+         COALESCE(p.creator_type = 'member' AND p.creator_id = pm.user_id, false) DESC,
+         pm.created_at ASC,
+         COALESCE(pm.added_by = pm.user_id, false) DESC,
+         pm.user_id ASC
+LIMIT 1;
 
 -- name: UpdateProjectVisibility :one
 UPDATE project SET visibility = sqlc.arg('visibility'), updated_at = now()

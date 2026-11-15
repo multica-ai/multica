@@ -39,8 +39,6 @@ import {
   memberListOptions,
 } from "@multica/core/workspace/queries";
 import { canDeleteProject } from "@multica/core/projects/deletion-permissions";
-import { isAllowedProjectLead } from "@multica/core/projects/access";
-import { toast } from "sonner";
 import { useModalStore } from "@multica/core/modals";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
@@ -563,14 +561,7 @@ export function ProjectsPage() {
 
   const moveToGroup = (project: Project, key: string) => {
     if (!groupField) return;
-    const update = projectGroupUpdate(groupField, key);
-    // Dropping a private project on "No lead" or an agent would only bounce
-    // back from the server; say why instead.
-    if (groupField === "lead" && !isAllowedProjectLead(project, update)) {
-      toast.error(t(($) => $.lead.private_needs_person));
-      return;
-    }
-    updateProject.mutate({ id: project.id, ...update });
+    updateProject.mutate({ id: project.id, ...projectGroupUpdate(groupField, key) });
   };
 
   const changeLayout = (next: ProjectLayout) => {

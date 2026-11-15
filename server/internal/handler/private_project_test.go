@@ -318,10 +318,10 @@ func TestPrivateProjectVisibilityAndMembersAPI(t *testing.T) {
 	if project.Visibility != projectaccess.VisibilityPrivate {
 		t.Fatalf("visibility = %q", project.Visibility)
 	}
-	// A private project is never created without a human lead: the creator
-	// leads it, which is what lets a regular member manage the one they made.
-	if project.LeadType == nil || *project.LeadType != "member" || project.LeadID == nil || *project.LeadID != f.insider {
-		t.Fatalf("lead = %v %v, want the creator", project.LeadType, project.LeadID)
+	// No lead was named and none is invented. The creator manages access to
+	// the project they made, which is what lets a regular member run one.
+	if project.LeadType != nil || project.LeadID != nil {
+		t.Fatalf("lead = %v %v, want none", project.LeadType, project.LeadID)
 	}
 
 	members := func(userID string) *testutil.Response {
@@ -330,11 +330,15 @@ func TestPrivateProjectVisibilityAndMembersAPI(t *testing.T) {
 	}
 	members(f.outsider).Want(http.StatusNotFound)
 	var list struct {
-		Members []ProjectMemberResponse `json:"members"`
+		Members   []ProjectMemberResponse `json:"members"`
+		ManagerID *string                 `json:"manager_id"`
 	}
 	members(f.insider).Want(http.StatusOK).JSON(&list)
 	if len(list.Members) != 1 || list.Members[0].UserID != f.insider {
 		t.Fatalf("members = %+v, want only the creator", list.Members)
+	}
+	if list.ManagerID == nil || *list.ManagerID != f.insider {
+		t.Fatalf("manager_id = %v, want the creator", list.ManagerID)
 	}
 
 	add := func(userID string, ids ...string) *testutil.Response {
@@ -363,7 +367,7 @@ func TestPrivateProjectVisibilityAndMembersAPI(t *testing.T) {
 		t.Fatal("refused requests changed project membership")
 	}
 
-	// The lead adds; unknown workspace users are rejected.
+	// The creator adds; unknown workspace users are rejected.
 	add(f.insider, "00000000-0000-0000-0000-00000000beef").Want(http.StatusBadRequest)
 	add(f.insider, f.outsider, testUserID).Want(http.StatusOK)
 
@@ -374,7 +378,7 @@ func TestPrivateProjectVisibilityAndMembersAPI(t *testing.T) {
 	update(f.outsider, map[string]any{"visibility": "workspace"}).Want(http.StatusForbidden)
 	members(f.outsider).Want(http.StatusOK)
 
-	// Once in the member list, a workspace owner manages access like the lead.
+	// Once in the member list, a workspace owner manages access too.
 	remove(testUserID, f.outsider).Want(http.StatusNoContent)
 	members(f.outsider).Want(http.StatusNotFound)
 

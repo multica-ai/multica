@@ -140,18 +140,27 @@ func TestWorkspaceOwnerJoinsPrivateProject(t *testing.T) {
 		t.Errorf("insider notices after a repeated join = %d, want 1", n)
 	}
 
-	t.Run("an abandoned project gets the owner as lead", func(t *testing.T) {
-		abandoned := dbfx.Project(t, f.marker+" abandoned", testutil.Cols{"visibility": projectaccess.VisibilityPrivate})
+	// Joining never touches the lead. On a project nobody is left in, the
+	// owner manages access through their role once they are on the list.
+	t.Run("an abandoned project keeps its lead", func(t *testing.T) {
+		agentID := dbfx.Agent(t, f.marker+" lead agent", testRuntimeID)
+		abandoned := dbfx.Project(t, f.marker+" abandoned", testutil.Cols{
+			"visibility": projectaccess.VisibilityPrivate, "lead_type": "agent", "lead_id": agentID,
+		})
 		t.Cleanup(func() {
 			testPool.Exec(context.Background(), `DELETE FROM project_member WHERE project_id = $1`, abandoned)
 		})
 		join(testUserID, abandoned).Want(http.StatusOK)
-		if got := loadProjectLead(t, abandoned); got != (projectLead{"member", testUserID}) {
-			t.Errorf("lead = %+v, want the owner", got)
+		if got := loadProjectLead(t, abandoned); got != (projectLead{"agent", agentID}) {
+			t.Errorf("lead = %+v, want the agent it had", got)
 		}
+		if got := projectManagerID(t, testUserID, abandoned); got != testUserID {
+			t.Errorf("manager_id = %q, want the owner, its only member", got)
+		}
+		addProjectMembersAs(t, testUserID, abandoned, f.outsider).Want(http.StatusOK)
 	})
 
-	t.Run("a lead outside the member list is replaced", func(t *testing.T) {
+	t.Run("a lead outside the member list stays", func(t *testing.T) {
 		stale := dbfx.Project(t, f.marker+" stale lead", testutil.Cols{
 			"visibility": projectaccess.VisibilityPrivate, "lead_type": "member", "lead_id": f.outsider,
 		})
@@ -160,8 +169,12 @@ func TestWorkspaceOwnerJoinsPrivateProject(t *testing.T) {
 			testPool.Exec(context.Background(), `DELETE FROM project_member WHERE project_id = $1`, stale)
 		})
 		join(testUserID, stale).Want(http.StatusOK)
-		if got := loadProjectLead(t, stale); got != (projectLead{"member", testUserID}) {
-			t.Errorf("lead = %+v, want the owner", got)
+		if got := loadProjectLead(t, stale); got != (projectLead{"member", f.outsider}) {
+			t.Errorf("lead = %+v, want it left as it was", got)
+		}
+		// The member who was already there still manages it, beside the owner.
+		if got := projectManagerID(t, testUserID, stale); got != f.insider {
+			t.Errorf("manager_id = %q, want the member who was there first", got)
 		}
 	})
 }

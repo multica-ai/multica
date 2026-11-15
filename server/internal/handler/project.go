@@ -483,18 +483,8 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		ids = append(ids, creator)
-		// MUL-9284: the lead manages a private project's access, so one is
-		// never created without a human lead. The creator leads it unless the
-		// request names another member.
-		if leadType.Valid && leadType.String != "member" {
-			writeError(w, http.StatusBadRequest, errPrivateProjectLead)
-			return
-		}
-		if leadID.Valid {
-			leadType = pgtype.Text{String: "member", Valid: true}
+		if leadType.Valid && leadType.String == "member" && leadID.Valid {
 			ids = append(ids, leadID)
-		} else {
-			leadType, leadID = pgtype.Text{String: "member", Valid: true}, creator
 		}
 		private = true
 		privateMemberIDs = ids
@@ -762,10 +752,6 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	access, ok := h.prepareProjectAccessUpdate(w, r, prevProject, req.Visibility, req.MemberIDs, newLeadType, newLeadID, leadChanged)
 	if !ok {
 		return
-	}
-	if access.leadID.Valid {
-		params.LeadType, params.LeadTypeSet = pgtype.Text{String: "member", Valid: true}, true
-		params.LeadID, params.LeadIDSet = access.leadID, true
 	}
 	project, ok := h.writeProjectUpdate(w, r, params, access, userID)
 	if !ok {

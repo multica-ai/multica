@@ -31,7 +31,6 @@ export default function ProjectLeadPickerRoute() {
     <ProjectLeadPickerBody
       value={value}
       query={query}
-      peopleOnly={project?.visibility === "private"}
       onChange={(next) => {
         if (next === null) {
           updateProject.mutate({ lead_type: null, lead_id: null });
