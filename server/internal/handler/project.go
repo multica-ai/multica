@@ -45,7 +45,10 @@ type ProjectResponse struct {
 	// latest activity on any of its issues.
 	LastActivityAt string `json:"last_activity_at"`
 	IssueCount     int64  `json:"issue_count"`
-	DoneCount      int64  `json:"done_count"`
+	// DoneCount counts every terminal issue, cancelled included. Progress is
+	// the figure to show as completion. (MUL-8879)
+	DoneCount int64           `json:"done_count"`
+	Progress  ProjectProgress `json:"progress"`
 	// ResourceCount is a breadcrumb pointing at the sub-collection at
 	// /api/projects/{id}/resources. Resources themselves stay out of this
 	// payload to keep parent metadata and child collections separate; clients
@@ -86,6 +89,7 @@ func projectToResponse(p db.Project) ProjectResponse {
 		LastActivityAt: timestampToString(p.UpdatedAt),
 		WorkflowID:     uuidToPtr(p.WorkflowID),
 		Visibility:     projectVisibilityOrDefault(p.Visibility),
+		Progress:       newProjectProgress(0, 0, 0, 0),
 
 		ArchivedAt:     timestampToPtr(p.ArchivedAt),
 		ArchivedByType: textToPtr(p.ArchivedByType),
@@ -102,41 +106,122 @@ func projectVisibilityOrDefault(v string) string {
 	return v
 }
 
-func (h *Handler) fillProjectIssueStats(ctx context.Context, resp *ProjectResponse, project db.Project) {
-	terminalStatusKeys := h.projectTerminalIssueStatusKeys(ctx, project.WorkspaceID)
-	stats, err := h.Queries.GetProjectIssueStats(ctx, db.GetProjectIssueStatsParams{
-		WorkspaceID:        project.WorkspaceID,
-		ProjectIds:         []pgtype.UUID{project.ID},
-		TerminalStatusKeys: terminalStatusKeys,
-	})
-	if err != nil || len(stats) == 0 {
-		return
-	}
-	applyProjectIssueStats(resp, project.UpdatedAt, stats[0])
+// ProjectProgress is a project's completion, counted in issues. Cancelled
+// (closed-category) issues leave the scope instead of counting as done, and
+// started issues are reported but do not add to Percent. (MUL-8879)
+type ProjectProgress struct {
+	// Unit is what the counts measure; "issues" until estimates exist.
+	Unit      string `json:"unit"`
+	Scope     int64  `json:"scope"`
+	Completed int64  `json:"completed"`
+	Started   int64  `json:"started"`
+	Unstarted int64  `json:"unstarted"`
+	Cancelled int64  `json:"cancelled"`
+	// Percent is Completed / Scope rounded down, so 100 means every issue in
+	// scope is done.
+	Percent int64 `json:"percent"`
 }
 
-// applyProjectIssueStats fills the issue counts and moves LastActivityAt to
-// the latest issue activity when that is later than the project's own edit.
+func newProjectProgress(total, terminal, completed, started int64) ProjectProgress {
+	cancelled := terminal - completed
+	scope := total - cancelled
+	p := ProjectProgress{
+		Unit:      "issues",
+		Scope:     scope,
+		Completed: completed,
+		Started:   started,
+		Unstarted: scope - completed - started,
+		Cancelled: cancelled,
+	}
+	if scope > 0 {
+		p.Percent = completed * 100 / scope
+	}
+	return p
+}
+
+// applyProjectIssueStats fills the issue counts and progress, and moves
+// LastActivityAt to the latest issue activity when that is later than the
+// project's own edit.
 func applyProjectIssueStats(resp *ProjectResponse, projectUpdatedAt pgtype.Timestamptz, s db.GetProjectIssueStatsRow) {
 	resp.IssueCount = s.TotalCount
 	resp.DoneCount = s.DoneCount
+	resp.Progress = newProjectProgress(s.TotalCount, s.DoneCount, s.CompletedCount, s.StartedCount)
 	if s.LastIssueActivityAt.Valid &&
 		(!projectUpdatedAt.Valid || s.LastIssueActivityAt.Time.After(projectUpdatedAt.Time)) {
 		resp.LastActivityAt = timestampToString(s.LastIssueActivityAt)
 	}
 }
 
-// projectTerminalIssueStatusKeys keeps project responses useful if the custom
-// status catalog cannot be read. Canonical terminal keys are less complete
-// than the workspace catalog, but they avoid rendering every project as 0/0.
-func (h *Handler) projectTerminalIssueStatusKeys(ctx context.Context, workspaceID pgtype.UUID) []string {
-	keys, err := h.terminalIssueStatusKeys(ctx, workspaceID)
-	if err == nil {
-		return keys
+// projectStatusKeySets holds the status keys of each category project
+// progress counts, for indexed `status = ANY(...)` predicates.
+type projectStatusKeySets struct {
+	terminal  []string
+	completed []string
+	started   []string
+}
+
+// projectStatusKeySets keeps project responses useful if the custom status
+// catalog cannot be read: the built-in keys are less complete than the
+// workspace catalog, but they avoid rendering every project as 0/0.
+func (h *Handler) projectStatusKeySets(ctx context.Context, workspaceID pgtype.UUID) projectStatusKeySets {
+	custom, err := issuestatus.CustomKeyCategories(ctx, h.Queries, workspaceID)
+	if err != nil {
+		slog.Warn("read project status categories failed; using built-in keys",
+			"workspace_id", uuidToString(workspaceID), "error", err)
+		custom = nil
 	}
-	slog.Warn("expand project terminal status categories failed; using canonical keys",
-		"workspace_id", uuidToString(workspaceID), "error", err)
-	return []string{issuestatus.Done, issuestatus.Cancelled}
+	var sets projectStatusKeySets
+	add := func(key, category string) {
+		switch category {
+		case issuestatus.CategoryDone:
+			sets.completed = append(sets.completed, key)
+			sets.terminal = append(sets.terminal, key)
+		case issuestatus.CategoryClosed:
+			sets.terminal = append(sets.terminal, key)
+		case issuestatus.CategoryStarted:
+			sets.started = append(sets.started, key)
+		}
+	}
+	for _, key := range issuestatus.Canonical() {
+		category, _ := issuestatus.CategoryForBehavior(key)
+		add(key, category)
+	}
+	for key, category := range custom {
+		add(key, category)
+	}
+	return sets
+}
+
+// loadProjectIssueStatsMap returns issue stats keyed by project id. A failed
+// read leaves the map empty, so callers render zero counts rather than fail.
+func (h *Handler) loadProjectIssueStatsMap(ctx context.Context, workspaceID pgtype.UUID, projectIDs []pgtype.UUID) map[string]db.GetProjectIssueStatsRow {
+	out := make(map[string]db.GetProjectIssueStatsRow, len(projectIDs))
+	if len(projectIDs) == 0 {
+		return out
+	}
+	keys := h.projectStatusKeySets(ctx, workspaceID)
+	stats, err := h.Queries.GetProjectIssueStats(ctx, db.GetProjectIssueStatsParams{
+		WorkspaceID:         workspaceID,
+		ProjectIds:          projectIDs,
+		TerminalStatusKeys:  keys.terminal,
+		CompletedStatusKeys: keys.completed,
+		StartedStatusKeys:   keys.started,
+	})
+	if err != nil {
+		slog.Warn("load project issue stats failed",
+			"workspace_id", uuidToString(workspaceID), "error", err)
+		return out
+	}
+	for _, s := range stats {
+		out[uuidToString(s.ProjectID)] = s
+	}
+	return out
+}
+
+func (h *Handler) fillProjectIssueStats(ctx context.Context, resp *ProjectResponse, project db.Project) {
+	if s, ok := h.loadProjectIssueStatsMap(ctx, project.WorkspaceID, []pgtype.UUID{project.ID})[uuidToString(project.ID)]; ok {
+		applyProjectIssueStats(resp, project.UpdatedAt, s)
+	}
 }
 
 func (h *Handler) loadProjectResourceCount(ctx context.Context, projectID pgtype.UUID) int64 {
@@ -231,24 +316,14 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 	projects = visible
 
 	// Batch-fetch issue stats and resource counts for all projects
-	statsMap := make(map[string]db.GetProjectIssueStatsRow)
+	statsMap := map[string]db.GetProjectIssueStatsRow{}
 	resourceCountMap := make(map[string]int64)
 	if len(projects) > 0 {
 		projectIDs := make([]pgtype.UUID, len(projects))
 		for i, p := range projects {
 			projectIDs[i] = p.ID
 		}
-		terminalStatusKeys := h.projectTerminalIssueStatusKeys(r.Context(), wsUUID)
-		stats, statsErr := h.Queries.GetProjectIssueStats(r.Context(), db.GetProjectIssueStatsParams{
-			WorkspaceID:        wsUUID,
-			ProjectIds:         projectIDs,
-			TerminalStatusKeys: terminalStatusKeys,
-		})
-		if statsErr == nil {
-			for _, s := range stats {
-				statsMap[uuidToString(s.ProjectID)] = s
-			}
-		}
+		statsMap = h.loadProjectIssueStatsMap(r.Context(), wsUUID, projectIDs)
 		counts, err := h.Queries.GetProjectResourceCounts(r.Context(), projectIDs)
 		if err == nil {
 			for _, c := range counts {
@@ -1149,24 +1224,14 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Batch-fetch issue stats and resource counts
-	statsMap := make(map[string]db.GetProjectIssueStatsRow)
+	statsMap := map[string]db.GetProjectIssueStatsRow{}
 	resourceCountMap := make(map[string]int64)
 	if len(results) > 0 {
 		projectIDs := make([]pgtype.UUID, len(results))
 		for i, r := range results {
 			projectIDs[i] = r.project.ID
 		}
-		terminalStatusKeys := h.projectTerminalIssueStatusKeys(ctx, wsUUID)
-		stats, statsErr := h.Queries.GetProjectIssueStats(ctx, db.GetProjectIssueStatsParams{
-			WorkspaceID:        wsUUID,
-			ProjectIds:         projectIDs,
-			TerminalStatusKeys: terminalStatusKeys,
-		})
-		if statsErr == nil {
-			for _, s := range stats {
-				statsMap[uuidToString(s.ProjectID)] = s
-			}
-		}
+		statsMap = h.loadProjectIssueStatsMap(ctx, wsUUID, projectIDs)
 		counts, err := h.Queries.GetProjectResourceCounts(ctx, projectIDs)
 		if err == nil {
 			for _, c := range counts {
