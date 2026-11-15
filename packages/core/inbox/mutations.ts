@@ -4,6 +4,8 @@ import { api } from "../api";
 import { inboxKeys, mapArchivedInboxCache, patchArchivedInboxCaches, type ArchivedInboxCache } from "./queries";
 import { onInboxInvalidate, onInboxSummaryInvalidate } from "./ws-updaters";
 import { useWorkspaceId } from "../hooks";
+import { issueKeys } from "../issues/queries";
+import { refreshSubscribedIssues } from "../issues/subscribed";
 import type { InboxItem } from "../types";
 
 /**
@@ -217,6 +219,63 @@ export function useUnarchiveInbox() {
       // rises again when it was archived unread.
       refreshInboxAfterWrite(qc, wsId);
     },
+  });
+}
+
+export type InboxUnsubscribeScope = "issue" | "subtree";
+
+/** Subscription state changed for the viewer: re-read everything derived from it. */
+function refreshAfterSubscriptionWrite(qc: QueryClient, wsId: string) {
+  refreshInboxAfterWrite(qc, wsId);
+  qc.invalidateQueries({ queryKey: issueKeys.subscribersAll() });
+  void refreshSubscribedIssues(qc, wsId);
+}
+
+/**
+ * Leave the issue an inbox item is about, then archive the item: the one-step
+ * "stop telling me about this" for issues the viewer is only watching.
+ *
+ * Unsubscribes first so a failed unsubscribe never archives — an archived row
+ * whose issue keeps notifying would read as the action having worked. The row
+ * leaves the list optimistically, like a plain archive.
+ */
+export function useUnsubscribeArchiveInbox() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: async ({ id, issueId, scope }: { id: string; issueId: string; scope: InboxUnsubscribeScope }) => {
+      if (scope === "subtree") await api.unsubscribeFromIssueSubtree(issueId);
+      else await api.unsubscribeFromIssue(issueId);
+      await api.archiveInbox(id);
+    },
+    onMutate: async ({ issueId }) => {
+      await qc.cancelQueries({ queryKey: inboxKeys.list(wsId) });
+      const prev = qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId));
+      qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), (old) =>
+        old?.map((item) => (item.issue_id === issueId ? { ...item, archived: true } : item)),
+      );
+      return { prev };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(inboxKeys.list(wsId), ctx.prev);
+    },
+    onSettled: () => refreshAfterSubscriptionWrite(qc, wsId),
+  });
+}
+
+/**
+ * Undo for `useUnsubscribeArchiveInbox` with scope "issue": subscribe again
+ * (which clears the opt-out) and restore the item to the inbox.
+ */
+export function useUndoUnsubscribeArchiveInbox() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: async ({ id, issueId }: { id: string; issueId: string }) => {
+      await api.subscribeToIssue(issueId);
+      await api.unarchiveInbox(id);
+    },
+    onSettled: () => refreshAfterSubscriptionWrite(qc, wsId),
   });
 }
 

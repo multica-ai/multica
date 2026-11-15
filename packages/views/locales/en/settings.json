@@ -432,6 +432,10 @@
         "label": "Archive notification",
         "description": "Archive the open inbox notification, or restore it while reading the archive."
       },
+      "unsubscribeArchiveInboxItem": {
+        "label": "Unsubscribe & archive",
+        "description": "Leave the open notification's issue and archive it. Offered on issues that are not yours or your agents'."
+      },
       "send": {
         "label": "Send",
         "description": "Also submits new issues."

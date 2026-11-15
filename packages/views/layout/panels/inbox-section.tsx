@@ -3,7 +3,8 @@
 import { type ReactNode, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Archive, BookCheck, CheckCheck, History, ListChecks, MoreHorizontal } from "@multica/ui/icons";
+import { Archive, BellOff, BookCheck, CheckCheck, History, ListChecks, MoreHorizontal } from "@multica/ui/icons";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { cn } from "@multica/ui/lib/utils";
 import { useIsCompact } from "@multica/ui/hooks/use-mobile";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
@@ -47,6 +48,7 @@ import { InboxDetailLabel, useTypeLabels } from "../../inbox/components/inbox-de
 import { InboxFilterMenu } from "../../inbox/components/inbox-filter-menu";
 import { useFilteredInboxRows } from "../../inbox/components/use-filtered-inbox-rows";
 import { useTimeAgo } from "../../inbox/components/inbox-list-item";
+import { useInboxUnsubscribable, useUnsubscribeArchive } from "../../inbox/components/use-unsubscribe-archive";
 import { StatusIcon } from "../../issues/components";
 import { useStatusLabel } from "../../issues/utils/status-label";
 import {
@@ -142,6 +144,8 @@ export function InboxSection({
   const compact = useSidebarTreeStore((s) => s.inboxSettings.compact);
   const unread = useInboxUnreadCount(wsId);
   const archive = useArchiveInbox();
+  const unsubscribable = useInboxUnsubscribable(wsId);
+  const unsubscribeArchive = useUnsubscribeArchive();
   const { searchParams } = useNavigation();
   const isCompact = useIsCompact();
   const { list, rows: all, displayed, expanded, limit, setExpanded } = rows;
@@ -187,6 +191,11 @@ export function InboxSection({
               }
               compact={compact}
               onArchive={() => archive.mutate(item.id)}
+              onUnsubscribe={
+                item.issue_id && unsubscribable(item)
+                  ? () => unsubscribeArchive({ id: item.id, issueId: item.issue_id! })
+                  : undefined
+              }
             />
           ))}
         </PanelList>
@@ -318,6 +327,7 @@ function InboxRow({
   active,
   compact,
   onArchive,
+  onUnsubscribe,
 }: {
   item: InboxItem;
   href: string;
@@ -325,6 +335,8 @@ function InboxRow({
   /** One line (status, title, agents, dot or time) instead of the actor line under the title. */
   compact: boolean;
   onArchive: () => void;
+  /** Unsubscribe & archive; only for issues that are not the viewer's own. */
+  onUnsubscribe?: () => void;
 }) {
   const { t } = useT("inbox");
   const typeLabels = useTypeLabels();
@@ -483,6 +495,7 @@ function InboxRow({
               land();
             }}
             onArchive={onArchive}
+            onUnsubscribe={onUnsubscribe}
           />
         </HoverCardContent>
       </HoverCard>
@@ -544,12 +557,14 @@ function InboxRowCard({
   title,
   onOpen,
   onArchive,
+  onUnsubscribe,
 }: {
   item: InboxItem;
   href: string;
   title: string;
   onOpen: () => void;
   onArchive: () => void;
+  onUnsubscribe?: () => void;
 }) {
   const { t } = useT("layout");
   const { t: tInbox } = useT("inbox");
@@ -610,6 +625,15 @@ function InboxRowCard({
         <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={onArchive}>
           {tInbox(($) => $.context_menu.archive)}
         </Button>
+        {onUnsubscribe && (
+          <IconButton
+            label={tInbox(($) => $.context_menu.unsubscribe_archive)}
+            className="ml-auto text-muted-foreground"
+            onClick={onUnsubscribe}
+          >
+            <BellOff />
+          </IconButton>
+        )}
       </div>
     </div>
   );

@@ -432,6 +432,10 @@
         "label": "Archiver la notification",
         "description": "Archiver la notification ouverte, ou la restaurer lors de la consultation des archives."
       },
+      "unsubscribeArchiveInboxItem": {
+        "label": "Se désabonner et archiver",
+        "description": "Se désabonner de la tâche de la notification ouverte et l'archiver. Disponible sur les tâches qui ne sont ni à vous ni à vos agents."
+      },
       "send": {
         "label": "Envoyer",
         "description": "Permet aussi de créer des tâches."

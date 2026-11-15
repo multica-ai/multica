@@ -7,7 +7,12 @@ import { IconButton } from "@multica/ui/components/common/icon-button";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useModalStore } from "@multica/core/modals";
-import { useArchiveInbox, useMarkInboxRead, useMarkInboxUnread } from "@multica/core/inbox/mutations";
+import {
+  useArchiveInbox,
+  useMarkInboxRead,
+  useMarkInboxUnread,
+  type InboxUnsubscribeScope,
+} from "@multica/core/inbox/mutations";
 import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
 import {
   getShortcut,
@@ -19,13 +24,15 @@ import { isImeComposing } from "@multica/core/utils";
 import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { inboxRowHref } from "../../inbox/components/inbox-display";
 import { useFilteredInboxRows } from "../../inbox/components/use-filtered-inbox-rows";
+import { UnsubscribeArchiveButton } from "../../inbox/components/unsubscribe-archive-button";
+import { useUnsubscribeArchive } from "../../inbox/components/use-unsubscribe-archive";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 
 /**
  * The Inbox's actions in the header of an issue opened from the Work panel's
- * Inbox section, while the section still lists it. Marking it done or
- * archiving opens the next notification the section lists, so the Inbox can
+ * Inbox section, while the section still lists it. Marking it done,
+ * archiving or unsubscribing opens the next notification the section lists, so the Inbox can
  * be worked through without leaving the page.
  *
  * `onMarkDone` sets the issue done and calls back once that is saved; it is
@@ -51,6 +58,7 @@ export function IssueInboxActions({
   const markRead = useMarkInboxRead();
   const markUnread = useMarkInboxUnread();
   const archive = useArchiveInbox();
+  const unsubscribeArchive = useUnsubscribeArchive();
 
   const failed = (fallback: string) => (err: unknown) =>
     toast.error(err instanceof Error && err.message ? err.message : fallback);
@@ -69,6 +77,13 @@ export function IssueInboxActions({
       onSuccess: () => toast.success(t(($) => $.toasts.archived)),
       onError: failed(t(($) => $.errors.archive_failed)),
     });
+    openNext(next);
+  };
+
+  const unsubscribeItem = (scope: InboxUnsubscribeScope) => {
+    if (!item?.issue_id) return;
+    const next = rows[index + 1] ?? rows[index - 1] ?? null;
+    unsubscribeArchive({ id: item.id, issueId: item.issue_id }, scope);
     openNext(next);
   };
 
@@ -127,6 +142,7 @@ export function IssueInboxActions({
           <CircleDot />
         </IconButton>
       )}
+      <UnsubscribeArchiveButton issueId={issueId} userId={item.recipient_id} onConfirm={unsubscribeItem} />
       {onMarkDone && (
         <IconButton
           label={tIssues(($) => $.detail.mark_done_tooltip)}

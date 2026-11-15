@@ -426,6 +426,10 @@
         "label": "歸檔通知",
         "description": "歸檔當前開啟的收件箱通知；在歸檔列表中則取消歸檔。"
       },
+      "unsubscribeArchiveInboxItem": {
+        "label": "取消訂閱並歸檔",
+        "description": "退訂當前通知所在的任務並歸檔它。僅在不屬於你或你的智能體的任務上可用。"
+      },
       "send": {
         "label": "傳送",
         "description": "也用於提交新任務。"

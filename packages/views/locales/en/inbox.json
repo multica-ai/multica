@@ -42,7 +42,8 @@
     "archive": "Archive",
     "unarchive": "Unarchive",
     "open_in_new_tab": "Open in new tab",
-    "delete": "Delete"
+    "delete": "Delete",
+    "unsubscribe_archive": "Unsubscribe & archive"
   },
   "list": {
     "loading_selection": "Loading notification…",
@@ -125,7 +126,11 @@
     "source_context_retry_started": "Retry started with the original context",
     "archived": "Notification archived",
     "unarchived": "Notification restored",
-    "deleted": "Notification deleted"
+    "deleted": "Notification deleted",
+    "unsubscribed_archived": "Unsubscribed and archived",
+    "unsubscribed_archived_subtree": "Unsubscribed from this issue and its sub-issues",
+    "unsubscribed_hint": "New activity on it won't reach your inbox",
+    "undo": "Undo"
   },
   "errors": {
     "archived_lookup_failed": "Failed to load the linked notification",
@@ -142,7 +147,9 @@
     "unarchive_failed": "Failed to unarchive",
     "archived_load_failed": "Failed to load archived notifications",
     "filters_load_failed": "Could not load filters",
-    "delete_failed": "Failed to delete notification. Try again."
+    "delete_failed": "Failed to delete notification. Try again.",
+    "unsubscribe_archive_failed": "Failed to unsubscribe",
+    "undo_unsubscribe_failed": "Failed to undo"
   },
   "delete_dialog": {
     "title": "Delete notification?",
@@ -150,5 +157,12 @@
     "issue_description": "This permanently deletes the notifications for this issue in this view. The issue and its runs are kept.",
     "cancel": "Cancel",
     "active_issue_description": "This permanently deletes the active notifications for this issue. Previously archived notifications remain and will be visible again in Archived. The issue and its runs are kept."
+  },
+  "unsubscribe": {
+    "title": "Unsubscribe and archive. You won't be notified about it again.",
+    "this_issue": "This issue only",
+    "subtree_one": "This issue and its {{count}} sub-issue",
+    "subtree_other": "This issue and its {{count}} sub-issues",
+    "subtree_unknown": "This issue and its sub-issues"
   }
 }

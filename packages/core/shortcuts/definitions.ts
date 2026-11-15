@@ -14,6 +14,7 @@ export type ShortcutActionId =
   | "newChat"
   | "findInIssue"
   | "archiveInboxItem"
+  | "unsubscribeArchiveInboxItem"
   | "send"
   | "voiceInput"
   | "goBack"
@@ -108,6 +109,13 @@ export const SHORTCUT_ACTIONS: readonly ShortcutActionDefinition[] = [
     id: "archiveInboxItem",
     category: "general",
     defaultShortcut: createShortcutChord("E"),
+    allowInEditable: false,
+  },
+  // Shift on archive: "archive, and stop telling me about this issue".
+  {
+    id: "unsubscribeArchiveInboxItem",
+    category: "general",
+    defaultShortcut: createShortcutChord("E", { shift: true }),
     allowInEditable: false,
   },
   { id: "send", category: "general", defaultShortcut: primary("Enter"), allowInEditable: true },

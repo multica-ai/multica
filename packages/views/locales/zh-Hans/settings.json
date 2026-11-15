@@ -426,6 +426,10 @@
         "label": "归档通知",
         "description": "归档当前打开的收件箱通知；在归档列表中则取消归档。"
       },
+      "unsubscribeArchiveInboxItem": {
+        "label": "取消订阅并归档",
+        "description": "退订当前通知所在的任务并归档它。仅在不属于你或你的智能体的任务上可用。"
+      },
       "send": {
         "label": "发送",
         "description": "也用于提交新任务。"

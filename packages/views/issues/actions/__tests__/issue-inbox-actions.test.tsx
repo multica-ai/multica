@@ -26,6 +26,8 @@ vi.mock("@multica/core/inbox/mutations", () => ({
   useMarkInboxRead: () => ({ mutate: state.markRead }),
   useMarkInboxUnread: () => ({ mutate: state.markUnread }),
   useArchiveInbox: () => ({ mutate: state.archive }),
+  useUnsubscribeArchiveInbox: () => ({ mutate: vi.fn() }),
+  useUndoUnsubscribeArchiveInbox: () => ({ mutate: vi.fn() }),
 }));
 
 function item(overrides: Partial<InboxItem> & { id: string }): InboxItem {
