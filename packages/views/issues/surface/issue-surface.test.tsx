@@ -29,7 +29,6 @@ import { IssueSurface, IssueSurfaceWithStore } from "./issue-surface";
 import { createIssueStatusListStore } from "@multica/core/issue-statuses";
 import { baselineFromQuery } from "@multica/core/issue-views/baseline";
 import { useActiveIssueViewStore } from "@multica/core/issue-views/active-view-store";
-import { UNREAD_VIEW_ID } from "@multica/core/issue-views/unread-view";
 import { setCurrentWorkspace } from "@multica/core/platform";
 import { statusTableMethodsFromLegacy } from "./status-table-test-api";
 
@@ -788,6 +787,7 @@ describe("IssueSurface — filtered empty state", () => {
       getWorkspaceWorkingAgents: vi.fn(() => Promise.resolve([])),
       getChildIssueProgress: vi.fn(() => never()),
       listIssueUnread: vi.fn(() => Promise.resolve([])),
+      listSubscribedIssueIds: vi.fn(() => Promise.resolve([])),
       listIssueViews: vi.fn(() => Promise.resolve([])),
     } as unknown as ApiClient);
     pruneIssueSurfaceViewStates([]);
@@ -850,8 +850,8 @@ describe("IssueSurface — filtered empty state", () => {
     expect(screen.queryByText("filtered_empty.title")).toBeNull();
   });
 
-  function unreadViewSurface() {
-    useActiveIssueViewStore.getState().setActive("ws-1:workspace", UNREAD_VIEW_ID);
+  function subscribedViewSurface() {
+    useActiveIssueViewStore.getState().setActive("ws-1:workspace", "subscribed");
     return (
       <QueryClientProvider client={qc}>
         <IssueSurface
@@ -864,42 +864,23 @@ describe("IssueSurface — filtered empty state", () => {
     );
   }
 
-  it("keeps the built-in Unread view's condition when its filters are cleared", async () => {
-    const store = getIssueSurfaceViewStore(`view:${UNREAD_VIEW_ID}`);
-    act(() => store.setState({ unreadFilter: true, agentRunningFilter: true }));
+  it("keeps a built-in view's condition when its filters are cleared", async () => {
+    const store = getIssueSurfaceViewStore("view:subscribed");
+    act(() => store.setState({ relationFilters: ["subscribed"], agentRunningFilter: true }));
 
-    render(unreadViewSurface());
+    render(subscribedViewSurface());
 
     fireEvent.click(await screen.findByRole("button", { name: "filtered_empty.clear_button" }));
     expect(store.getState().agentRunningFilter).toBe(false);
-    expect(store.getState().unreadFilter).toBe(true);
-    await screen.findByText("filtered_empty.unread_title");
+    expect(store.getState().relationFilters).toEqual(["subscribed"]);
+    await screen.findByText("filtered_empty.title");
     expect(screen.queryByRole("button", { name: "filtered_empty.clear_button" })).toBeNull();
   });
 
   it.each(["created_at", "updated_at"] as const)(
-    "offers recovery for an empty Unread view narrowed only by %s",
+    "clears %s with other user filters while preserving the built-in view's condition and display",
     async (field) => {
-      const store = getIssueSurfaceViewStore(`view:${UNREAD_VIEW_ID}`);
-      act(() => store.getState().setDateFilter({ field, from: "2026-01-01", to: "2026-01-02" }));
-
-      render(unreadViewSurface());
-
-      await screen.findByText("filtered_empty.title");
-      expect(screen.queryByText("filtered_empty.unread_title")).toBeNull();
-      fireEvent.click(screen.getByRole("button", { name: "filtered_empty.clear_button" }));
-
-      expect(store.getState().dateFilter).toBeNull();
-      expect(store.getState().unreadFilter).toBe(true);
-      await screen.findByText("filtered_empty.unread_title");
-      expect(screen.queryByRole("button", { name: "filtered_empty.clear_button" })).toBeNull();
-    },
-  );
-
-  it.each(["created_at", "updated_at"] as const)(
-    "clears %s with other user filters while preserving Unread and display settings",
-    async (field) => {
-      const store = getIssueSurfaceViewStore(`view:${UNREAD_VIEW_ID}`);
+      const store = getIssueSurfaceViewStore("view:subscribed");
       act(() => store.setState({
         dateFilter: { field, from: "2026-01-01", to: "2026-01-02" },
         priorityFilters: ["high"],
@@ -909,7 +890,7 @@ describe("IssueSurface — filtered empty state", () => {
         showSubIssues: false,
       }));
 
-      render(unreadViewSurface());
+      render(subscribedViewSurface());
 
       fireEvent.click(await screen.findByRole("button", { name: "filtered_empty.clear_button" }));
 
@@ -917,16 +898,18 @@ describe("IssueSurface — filtered empty state", () => {
         dateFilter: null,
         priorityFilters: [],
         agentRunningFilter: false,
-        unreadFilter: true,
+        relationFilters: ["subscribed"],
         sortBy: "title",
         sortDirection: "asc",
         showSubIssues: false,
       });
-      await screen.findByText("filtered_empty.unread_title");
+      await waitFor(() =>
+        expect(screen.queryByRole("button", { name: "filtered_empty.clear_button" })).toBeNull(),
+      );
     },
   );
 
-  it("clears a date interval on an ordinary surface without adding Unread", async () => {
+  it("clears a date interval on an ordinary surface without adding a relation", async () => {
     const store = getIssueSurfaceViewStore("project:pf");
     act(() => store.getState().setDateFilter({ field: "created_at", from: "2026-01-01", to: "2026-01-02" }));
 
@@ -935,36 +918,85 @@ describe("IssueSurface — filtered empty state", () => {
     fireEvent.click(await screen.findByRole("button", { name: "filtered_empty.clear_button" }));
 
     expect(store.getState().dateFilter).toBeNull();
-    expect(store.getState().unreadFilter).toBe(false);
+    expect(store.getState().relationFilters).toEqual([]);
     await screen.findByText("detail.empty_issues_title");
   });
 
-  it("keeps the built-in Unread view's condition when a workspace switch reloads its state", async () => {
+  it("keeps a built-in view's condition when a workspace switch reloads its state", async () => {
     setCurrentWorkspace("acme", "ws-1");
-    const store = getIssueSurfaceViewStore(`view:${UNREAD_VIEW_ID}`);
-    render(unreadViewSurface());
-    await screen.findByText("filtered_empty.unread_title");
+    const store = getIssueSurfaceViewStore("view:subscribed");
+    render(subscribedViewSurface());
+    await screen.findByText("filtered_empty.title");
 
     // The next workspace has no saved state for this view, so the reload
-    // resets the store to defaults, unread off.
+    // resets the store to defaults, without the relation.
     await act(async () => {
       setCurrentWorkspace("beta", "ws-1");
       await new Promise((resolve) => setTimeout(resolve, 20));
     });
 
-    expect(store.getState().unreadFilter).toBe(true);
-    expect(screen.getByText("filtered_empty.unread_title")).toBeInTheDocument();
+    expect(store.getState().relationFilters).toEqual(["subscribed"]);
     setCurrentWorkspace(null, null);
   });
 
-  it("restores the built-in Unread view's condition from state saved without it", async () => {
-    const store = getIssueSurfaceViewStore(`view:${UNREAD_VIEW_ID}`);
-    act(() => store.setState({ unreadFilter: false }));
+  it("restores a built-in view's condition from state saved without it, and un-negates it", async () => {
+    const store = getIssueSurfaceViewStore("view:subscribed");
+    act(() => store.setState({ relationFilters: [], negatedFilters: ["relation"] }));
 
-    render(unreadViewSurface());
+    render(subscribedViewSurface());
 
-    await screen.findByText("filtered_empty.unread_title");
-    expect(store.getState().unreadFilter).toBe(true);
+    await screen.findByText("filtered_empty.title");
+    expect(store.getState().relationFilters).toEqual(["subscribed"]);
+    expect(store.getState().negatedFilters).toEqual([]);
+  });
+
+  it("keeps a built-in view to exactly its relations: another one would widen it", async () => {
+    const store = getIssueSurfaceViewStore("view:subscribed");
+    render(subscribedViewSurface());
+    await screen.findByText("filtered_empty.title");
+
+    act(() => store.getState().toggleRelationFilter("assigned"));
+
+    expect(store.getState().relationFilters).toEqual(["subscribed"]);
+  });
+
+  it("keeps Working to running agents: adding idle would list every issue", async () => {
+    const store = getIssueSurfaceViewStore("view:working");
+    useActiveIssueViewStore.getState().setActive("ws-1:workspace", "working");
+    render(
+      <QueryClientProvider client={qc}>
+        <IssueSurface
+          scope={{ type: "workspace", actorKind: "all" }}
+          modes={["list"]}
+          renderHeader={() => null}
+          batchToolbar="never"
+        />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(store.getState().agentRunningFilter).toBe(true));
+
+    act(() => store.setState({ agentIdleFilter: true }));
+
+    expect(store.getState()).toMatchObject({ agentRunningFilter: true, agentIdleFilter: false });
+  });
+
+  it("puts back the agent filter Working is defined by", async () => {
+    const store = getIssueSurfaceViewStore("view:working");
+    act(() => store.setState({ agentRunningFilter: false, agentIdleFilter: true }));
+    useActiveIssueViewStore.getState().setActive("ws-1:workspace", "working");
+
+    render(
+      <QueryClientProvider client={qc}>
+        <IssueSurface
+          scope={{ type: "workspace", actorKind: "all" }}
+          modes={["list"]}
+          renderHeader={() => null}
+          batchToolbar="never"
+        />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(store.getState()).toMatchObject({ agentRunningFilter: true, agentIdleFilter: false }));
   });
 });
 

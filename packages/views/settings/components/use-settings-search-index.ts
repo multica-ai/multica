@@ -183,6 +183,12 @@ export function useSettingsSearchIndex(
       })),
       {
         tab: "notifications",
+        anchor: "archived",
+        title: t(($) => $.notifications.leaving.archived_label),
+        description: t(($) => $.notifications.leaving.archived_description),
+      },
+      {
+        tab: "notifications",
         anchor: "chat_replies",
         title: t(($) => $.notifications.groups.chat_replies.label),
       },

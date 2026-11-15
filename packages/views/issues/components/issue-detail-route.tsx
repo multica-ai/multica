@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { useCanonicalIssue } from "@multica/core/issues/canonical-id";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
+import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
 import { useNavigation } from "../../navigation";
 import { IssueDetail, IssueDetailSkeleton, IssueNotFound, IssueLoadError } from "./issue-detail";
 import { IssuePeekHost } from "./issue-peek";
@@ -61,10 +62,16 @@ export function parseCommentHighlightHash(hash: string): string | undefined {
   return match?.[1];
 }
 
-function useCommentHighlightHash(): { hash: string; commentId?: string } {
+/** `#app-request-<id>`: an app's confirmation request on the issue, as a notification links it. */
+export function parseAppRequestHighlightHash(hash: string): string | undefined {
+  const match = /^#app-request-([A-Za-z0-9_-]+)$/.exec(hash);
+  return match?.[1];
+}
+
+function useHighlightHash(): { hash: string; commentId?: string; appRequestId?: string } {
   const { hash } = useNavigation();
 
-  return { hash, commentId: parseCommentHighlightHash(hash) };
+  return { hash, commentId: parseCommentHighlightHash(hash), appRequestId: parseAppRequestHighlightHash(hash) };
 }
 
 /**
@@ -83,7 +90,10 @@ export function IssueDetailRoute({ routeId, onDelete, deliverable }: IssueDetail
   const {
     canonicalId, issue, isResolving, notFound, loadFailed, isRetrying, retry, hasLoaded,
   } = useCanonicalIssue(wsId, routeId);
-  const highlight = useCommentHighlightHash();
+  const highlight = useHighlightHash();
+  const landingToken = useInboxSelectionStore((s) =>
+    s.landing && s.landing.issueId === canonicalId ? s.landing.token : 0,
+  );
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
 
@@ -122,6 +132,8 @@ export function IssueDetailRoute({ routeId, onDelete, deliverable }: IssueDetail
         skipInitialRefetch={hasLoaded}
         onDelete={onDelete}
         highlightCommentId={highlight.commentId}
+        highlightAppRequestId={highlight.appRequestId}
+        highlightRequestToken={landingToken}
         openDeliverable={deliverable}
         onDeliverableLinkDone={deliverable ? onDeliverableLinkDone : undefined}
       />

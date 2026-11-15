@@ -9,17 +9,36 @@ import { issueViewEverywhereOptions } from "./queries";
 import { issueViewPreferenceOptions, useUpdateIssueViewPreference } from "./preferences";
 
 /** The views every workspace has without saving anything. */
-export type BuiltinViewKey = "my_issues" | "my_agents" | "all_issues" | "unread";
-export const BUILTIN_VIEW_KEYS: readonly BuiltinViewKey[] = ["my_issues", "my_agents", "all_issues", "unread"];
-
-/**
- * The built-ins starred before the user arranges the list. Unread is opt-in
- * while it overlaps with Inbox.
- */
-const DEFAULT_STARRED_BUILTINS: readonly BuiltinViewKey[] = ["my_issues", "my_agents", "all_issues"];
+export type BuiltinViewKey = "all_issues" | "my_work" | "working" | "subscribed";
+export const BUILTIN_VIEW_KEYS: readonly BuiltinViewKey[] = ["all_issues", "my_work", "working", "subscribed"];
 
 export const builtinViewItemId = (key: BuiltinViewKey) => `builtin:${key}`;
 export const savedViewItemId = (viewId: string) => `view:${viewId}`;
+
+/** Built-ins an order saved before My work replaced My issues and My agents can hold. */
+const LEGACY_MY_WORK_IDS = new Set(["builtin:my_issues", "builtin:my_agents"]);
+const LEGACY_UNREAD_ID = "builtin:unread";
+
+/**
+ * A saved order in today's built-ins: My issues and My agents become My work,
+ * followed by Working and Subscribed, which did not exist then; Unread goes.
+ */
+export function migrateSidebarViewOrder(order: readonly string[]): string[] {
+  if (!order.some((id) => LEGACY_MY_WORK_IDS.has(id) || id === LEGACY_UNREAD_ID)) return [...order];
+  const added = [builtinViewItemId("working"), builtinViewItemId("subscribed")].filter((id) => !order.includes(id));
+  const next: string[] = [];
+  for (const id of order) {
+    if (id === LEGACY_UNREAD_ID) continue;
+    if (!LEGACY_MY_WORK_IDS.has(id)) {
+      next.push(id);
+      continue;
+    }
+    const myWork = builtinViewItemId("my_work");
+    if (next.includes(myWork)) continue;
+    next.push(myWork, ...added);
+  }
+  return [...new Set(next)];
+}
 
 export const SIDEBAR_VIEWS_SCOPE = { scope_type: "sidebar" } as const;
 
@@ -40,7 +59,7 @@ export function defaultSidebarViewOrder(
   userId: string | undefined,
   pinnedViewIds: readonly string[],
 ): string[] {
-  const ids = DEFAULT_STARRED_BUILTINS.map(builtinViewItemId);
+  const ids = BUILTIN_VIEW_KEYS.map(builtinViewItemId);
   for (const view of views) {
     if (view.owner_id === userId) ids.push(savedViewItemId(view.id));
   }
@@ -102,7 +121,8 @@ export function useSidebarViews(wsId: string, userId: string | undefined) {
   const save = useUpdateIssueViewPreference(wsId, SIDEBAR_VIEWS_SCOPE);
 
   const preference = preferenceQuery.data;
-  const savedOrder = preference && preference.updated_at !== "" ? preference.prefs.order : null;
+  const storedOrder = preference && preference.updated_at !== "" ? preference.prefs.order : null;
+  const savedOrder = useMemo(() => (storedOrder ? migrateSidebarViewOrder(storedOrder) : null), [storedOrder]);
   const order = useMemo(
     () =>
       savedOrder ??
