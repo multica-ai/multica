@@ -836,9 +836,8 @@
       "manual_label": "직접 보관",
       "manual_description": "사이드바의 행이나 알림 상단에서",
       "manual_value": "언제든지",
-      "done_label": "태스크 완료 또는 취소",
-      "done_description": "태스크가 완료 또는 취소 계열 상태가 되면 그 알림은 보관됩니다.",
-      "done_value": "자동",
+      "done_label": "내가 완료한 태스크 보관",
+      "done_description": "태스크를 완료 또는 취소 계열 상태로 바꾸면 그 알림은 보관됩니다. 다른 사람이 완료한 태스크는 인박스에 남습니다.",
       "archived_label": "보관된 알림",
       "archived_description": "여기서 다시 찾고 보관을 해제할 수 있습니다",
       "archived_action": "보관된 알림 보기"

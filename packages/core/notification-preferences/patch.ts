@@ -15,6 +15,7 @@ const NOTIFICATION_GROUP_KEYS: readonly NotificationGroupKey[] = [
   "new_issues",
   "agent_activity",
   "system_notifications",
+  "auto_archive_completed",
 ];
 
 function preferenceValue(

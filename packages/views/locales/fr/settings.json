@@ -845,9 +845,8 @@
       "manual_label": "Archiver à la main",
       "manual_description": "Depuis sa ligne dans la barre latérale ou le haut de la notification",
       "manual_value": "À tout moment",
-      "done_label": "Tâche terminée ou annulée",
-      "done_description": "Quand une tâche passe à un statut Terminé ou Annulé, ses notifications sont archivées.",
-      "done_value": "Automatique",
+      "done_label": "Archiver les tâches que vous terminez",
+      "done_description": "Quand vous passez une tâche à un statut Terminé ou Annulé, ses notifications sont archivées. Celles terminées par d'autres restent dans la boîte de réception.",
       "archived_label": "Notifications archivées",
       "archived_description": "Retrouvez-les et désarchivez-les",
       "archived_action": "Voir les archivées"

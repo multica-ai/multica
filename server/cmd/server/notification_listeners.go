@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
@@ -244,38 +246,78 @@ func archiveStaleTaskFailedInbox(
 		"row_count", len(rows), "recipient_count", count)
 }
 
-// archiveTerminalIssueInbox archives every recipient's notifications for an
-// issue that reached a done or closed status: finished or abandoned work
-// leaves the inbox whether or not it was read, the same set "Archive
-// completed" clears by hand.
+// autoArchiveCompletedPref is the preference key for archiving your own
+// notifications when you move an issue to a done or closed status. It is on
+// unless set to "muted".
+const autoArchiveCompletedPref = "auto_archive_completed"
+
+// archiveTerminalIssueInbox archives the actor's own notifications for an
+// issue they moved to a done or closed status, read or not, the same set
+// "Archive completed" clears by hand. Other recipients keep theirs: someone
+// else finishing an issue is news they have not seen yet.
 func archiveTerminalIssueInbox(
 	ctx context.Context,
 	queries *db.Queries,
 	bus *events.Bus,
 	workspaceID string,
 	issueID string,
+	actorType string,
+	actorID string,
 ) {
-	rows, err := queries.ArchiveInboxByIssueForAllRecipients(ctx, db.ArchiveInboxByIssueForAllRecipientsParams{
+	if actorType != "member" || actorID == "" {
+		return
+	}
+
+	// FAIL CLOSED: archiving on a guess hides notifications the user wanted.
+	pref, err := queries.GetNotificationPreference(ctx, db.GetNotificationPreferenceParams{
 		WorkspaceID: parseUUID(workspaceID),
-		IssueID:     parseUUID(issueID),
+		UserID:      parseUUID(actorID),
+	})
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+	case err != nil:
+		slog.Warn("auto-archive terminal issue inbox: load preference failed; keeping rows",
+			"workspace_id", workspaceID, "issue_id", issueID, "error", err)
+		return
+	default:
+		var prefs map[string]string
+		if err := json.Unmarshal(pref.Preferences, &prefs); err != nil {
+			slog.Warn("auto-archive terminal issue inbox: bad preference JSON; keeping rows",
+				"workspace_id", workspaceID, "issue_id", issueID, "error", err)
+			return
+		}
+		if prefs[autoArchiveCompletedPref] == "muted" {
+			return
+		}
+	}
+
+	count, err := queries.ArchiveInboxByIssue(ctx, db.ArchiveInboxByIssueParams{
+		WorkspaceID:   parseUUID(workspaceID),
+		RecipientType: "member",
+		RecipientID:   parseUUID(actorID),
+		IssueID:       parseUUID(issueID),
 	})
 	if err != nil {
 		slog.Error("auto-archive terminal issue inbox: query failed",
 			"workspace_id", workspaceID, "issue_id", issueID, "error", err)
 		return
 	}
-	if len(rows) == 0 {
+	if count == 0 {
 		return
 	}
-	recipients := make([]inboxArchivedRecipient, len(rows))
-	for i, row := range rows {
-		recipients[i] = inboxArchivedRecipient{Type: row.RecipientType, ID: row.RecipientID}
-	}
-	count := publishInboxBatchArchived(bus, workspaceID, issueID, recipients)
+	bus.Publish(events.Event{
+		Type:        protocol.EventInboxBatchArchived,
+		WorkspaceID: workspaceID,
+		Payload: map[string]any{
+			"recipient_id": actorID,
+			"count":        count,
+			"issue_id":     issueID,
+			"reason":       "issue_status_terminal",
+		},
+	})
 
 	slog.Info("auto-archive terminal issue inbox: archived rows",
-		"workspace_id", workspaceID, "issue_id", issueID,
-		"row_count", len(rows), "recipient_count", count)
+		"workspace_id", workspaceID, "issue_id", issueID, "row_count", count)
 }
 
 type inboxArchivedRecipient struct {
@@ -1034,14 +1076,15 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			}
 
 			// After the status_changed rows above, so "moved to Done" leaves
-			// the inbox together with the rest of the issue's notifications.
+			// the actor's inbox together with the rest of the issue's
+			// notifications.
 			category, categoryErr := issuestatus.CategoryWithError(ctx, queries, parseUUID(e.WorkspaceID), issue.Status)
 			switch {
 			case categoryErr != nil:
 				slog.Warn("resolve issue status category for terminal-issue inbox archive; keeping rows",
 					"issue_id", issue.ID, "status", issue.Status, "error", categoryErr)
 			case category == issuestatus.CategoryDone, category == issuestatus.CategoryClosed:
-				archiveTerminalIssueInbox(ctx, queries, bus, e.WorkspaceID, issue.ID)
+				archiveTerminalIssueInbox(ctx, queries, bus, e.WorkspaceID, issue.ID, e.ActorType, e.ActorID)
 			}
 		}
 
