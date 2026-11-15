@@ -96,7 +96,7 @@ multica project update <project-id> --visibility private --member alice@example.
 multica project member add <project-id> carol@example.com
 ```
 
-비공개 프로젝트를 **전체 워크스페이스**로 되돌릴 때는 확인을 거칩니다. 되돌리면 모든 워크스페이스 멤버가 프로젝트와 그 안의 태스크, 댓글, 첨부 파일을 볼 수 있기 때문입니다.
+비공개 프로젝트를 **전체 워크스페이스**로 되돌리면 모든 워크스페이스 멤버가 프로젝트와 그 안의 태스크, 댓글, 첨부 파일을 볼 수 있습니다. 앱에서는 저장 전에 확인을 거치지만, `multica project update --visibility workspace`는 바로 적용됩니다.
 
 ### 워크스페이스 소유자 복구 [#workspace-owner-recovery]
 

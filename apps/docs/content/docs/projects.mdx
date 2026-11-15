@@ -96,7 +96,7 @@ multica project update <project-id> --visibility private --member alice@example.
 multica project member add <project-id> carol@example.com
 ```
 
-Switching a private project back to **Entire workspace** asks for confirmation, since every workspace member can then see the project and its issues, comments, and attachments.
+Switching a private project back to **Entire workspace** makes the project and its issues, comments, and attachments visible to every workspace member. The app asks for confirmation first; `multica project update --visibility workspace` applies the change immediately.
 
 ### Workspace owner recovery
 

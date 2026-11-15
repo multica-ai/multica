@@ -96,7 +96,7 @@ multica project update <project-id> --visibility private --member alice@example.
 multica project member add <project-id> carol@example.com
 ```
 
-把私有项目改回**整个工作区**需要确认，因为之后所有工作区成员都能看到这个项目及其中的任务、评论和附件。
+把私有项目改回**整个工作区**后，所有工作区成员都能看到这个项目及其中的任务、评论和附件。在界面中保存前会要求确认；`multica project update --visibility workspace` 则直接生效。
 
 ### 工作区所有者恢复访问 [#workspace-owner-recovery]
 
