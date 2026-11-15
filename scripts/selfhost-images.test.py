@@ -18,6 +18,9 @@ spec.loader.exec_module(transfer)
 
 class TransferTest(unittest.TestCase):
     def setUp(self):
+        platform_env = patch.dict(transfer.os.environ, {"DOCKER_DEFAULT_PLATFORM": ""})
+        platform_env.start()
+        self.addCleanup(platform_env.stop)
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.args = SimpleNamespace(release="v0.8.1", platform="linux/amd64",
@@ -25,6 +28,7 @@ class TransferTest(unittest.TestCase):
         self.refs = ["ghcr.io/multica-ai/multica-backend:v0.8.1",
                      "ghcr.io/multica-ai/multica-web:v0.8.1", "pgvector/pgvector:pg17"]
         self.target_refs = self.refs[:]
+        self.compose_platform = ""
         self.config = {ref: json.dumps({"test-ref": ref}).encode() for ref in self.refs}
         self.loaded = []
         self.save_refs = self.refs[:]
@@ -41,6 +45,9 @@ class TransferTest(unittest.TestCase):
 
     def check_output_docker(self, cmd, **kwargs):
         if "compose" in cmd:
+            if cmd[-2:] == ["config", "--environment"]:
+                platform = transfer.os.environ.get("DOCKER_DEFAULT_PLATFORM") or self.compose_platform
+                return f"DOCKER_DEFAULT_PLATFORM={platform}\n"
             self.assertEqual(cmd[-2:], ["config", "--images"])
             return "\n".join(self.refs if "--env-file" in cmd else self.target_refs)
         self.assertEqual(cmd[:5], ["docker", "image", "inspect", "--platform", "linux/amd64"])
@@ -136,6 +143,23 @@ class TransferTest(unittest.TestCase):
         self.target_refs = self.refs[:]
         (self.args.bundle / "images.tar").write_bytes(b"damaged")
         with self.assertRaisesRegex(ValueError, "archive digest mismatch"):
+            transfer.import_images(self.args)
+        self.assertEqual(self.loaded, [])
+
+    def test_conflicting_compose_platform_never_loads(self):
+        self.export()
+        with patch.dict(transfer.os.environ, {"DOCKER_DEFAULT_PLATFORM": "linux/arm64"}):
+            with self.assertRaisesRegex(ValueError, "DOCKER_DEFAULT_PLATFORM"):
+                transfer.import_images(self.args)
+        self.assertEqual(self.loaded, [])
+        with patch.dict(transfer.os.environ, {"DOCKER_DEFAULT_PLATFORM": self.args.platform}):
+            transfer.import_images(self.args)
+        self.assertEqual(len(self.loaded), 1)
+
+    def test_conflicting_platform_from_compose_dotenv_never_loads(self):
+        self.export()
+        self.compose_platform = "linux/arm64"
+        with self.assertRaisesRegex(ValueError, "DOCKER_DEFAULT_PLATFORM"):
             transfer.import_images(self.args)
         self.assertEqual(self.loaded, [])
 

@@ -524,13 +524,13 @@ Transfer the resulting directory and communicate the printed manifest digest thr
 On the disconnected host, configure `.env` as in Manual Docker Compose Setup above and set `MULTICA_IMAGE_TAG=v0.8.1`. The import verifies that the actual Compose image settings match the bundle. Use the digest from the connected machine:
 
 ```bash
-scripts/selfhost-images.py import v0.8.1 linux/amd64 ./multica-images 'sha256:<manifest-digest>'
-docker compose -f docker-compose.selfhost.yml up -d --pull never
+DOCKER_DEFAULT_PLATFORM=linux/amd64 scripts/selfhost-images.py import v0.8.1 linux/amd64 ./multica-images 'sha256:<manifest-digest>'
+DOCKER_DEFAULT_PLATFORM=linux/amd64 docker compose -f docker-compose.selfhost.yml up -d --pull never
 curl --fail --retry 30 --retry-delay 2 --retry-connrefused \
   "http://$(docker compose -f docker-compose.selfhost.yml port backend 8080)/health"
 ```
 
-The import verifies the archive before loading it and checks each loaded image ID before reporting success. On error, stop before running Compose. This transfers container images only. Configure SMTP, model providers, and other integrations according to the target site's connectivity.
+Use the same platform for the import argument and `DOCKER_DEFAULT_PLATFORM` on both commands (`linux/arm64` for an ARM64 target). The import rejects a conflicting platform setting, verifies the archive before loading it and checks each loaded image ID before reporting success. On error, stop before running Compose. This transfers container images only. Configure SMTP, model providers, and other integrations according to the target site's connectivity.
 
 ## Manual CLI Configuration
 

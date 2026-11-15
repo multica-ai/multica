@@ -156,6 +156,13 @@ def import_images(args):
         ["docker", "compose", "-f", str(COMPOSE), "config", "--images"], text=True)
     if set(configured.splitlines()) != set(images):
         raise ValueError("target Compose image settings do not match the bundle")
+    configured_environment = subprocess.check_output(
+        ["docker", "compose", "-f", str(COMPOSE), "config", "--environment"], text=True)
+    for line in configured_environment.splitlines():
+        if line.startswith("DOCKER_DEFAULT_PLATFORM="):
+            configured_platform = line.partition("=")[2]
+            if configured_platform and configured_platform != args.platform:
+                raise ValueError(f"DOCKER_DEFAULT_PLATFORM must match the bundle platform {args.platform}")
     for ref, record in images.items():
         if not all(DIGEST.fullmatch(record[key]) for key in ("registry_digest", "image_id", "config_digest")):
             raise ValueError(f"{ref} has invalid digest metadata")
