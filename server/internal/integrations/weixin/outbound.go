@@ -21,28 +21,45 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
+const outboundEventQueueDepth = 256
+const outboundSessionQueueDepth = 32
+const outboundSessionLimit = 64
+
+type outboundReply struct {
+	event    events.Event
+	payload  completion
+	taskID   pgtype.UUID
+	delivery db.ChannelTaskDelivery
+}
+
+type outboundSession struct {
+	queue []outboundReply
+}
+
 // Final replies only: iLink has no message-edit contract. The shared delivery
 // lease fences replicas and retry attempts; an ambiguous send is never replayed.
 type Outbound struct {
-	Typing  *TypingNotifier
-	q       *db.Queries
-	box     *secretbox.Box
-	client  *http.Client
-	logger  *slog.Logger
-	queues  [4]chan events.Event
-	done    chan struct{}
-	once    sync.Once
-	wg      sync.WaitGroup
-	objects objectStore
+	Typing   *TypingNotifier
+	q        *db.Queries
+	box      *secretbox.Box
+	client   *http.Client
+	logger   *slog.Logger
+	queues   [4]chan events.Event
+	mu       sync.Mutex
+	sessions map[string]*outboundSession
+	done     chan struct{}
+	once     sync.Once
+	wg       sync.WaitGroup
+	objects  objectStore
 }
 
 func NewOutbound(q *db.Queries, box *secretbox.Box, logger *slog.Logger) *Outbound {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	o := &Outbound{q: q, box: box, logger: logger, done: make(chan struct{}), Typing: NewTypingNotifier(q, box, logger)}
+	o := &Outbound{q: q, box: box, logger: logger, done: make(chan struct{}), Typing: NewTypingNotifier(q, box, logger), sessions: make(map[string]*outboundSession)}
 	for i := range o.queues {
-		o.queues[i] = make(chan events.Event, 32)
+		o.queues[i] = make(chan events.Event, outboundEventQueueDepth)
 	}
 	return o
 }
@@ -65,11 +82,14 @@ func (o *Outbound) Start(ctx context.Context) {
 					case <-ctx.Done():
 						return
 					case event := <-queue:
-						call, cancel := context.WithTimeout(ctx, 5*time.Minute)
-						if err := o.processEvent(call, event); err != nil {
-							o.logger.WarnContext(ctx, "weixin: reply delivery failed", "task_id", event.TaskID, "error", err)
-						}
+						call, cancel := context.WithTimeout(ctx, 5*time.Second)
+						reply, err := o.prepareEvent(call, event)
 						cancel()
+						if err != nil {
+							o.logger.WarnContext(ctx, "weixin: reply routing failed", "task_id", event.TaskID, "error", err)
+						} else if reply != nil {
+							o.enqueueReply(ctx, *reply)
+						}
 					}
 				}
 			}()
@@ -95,11 +115,61 @@ func (o *Outbound) enqueue(e events.Event) {
 	}
 	hash := fnv.New32a()
 	_, _ = hash.Write([]byte(e.ChatSessionID))
-	// Bound memory and preserve per-conversation ordering. Backpressure never
-	// silently discards a final answer. HTTP does not run on the event bus.
+	// The event bus is synchronous. Saturation must never hold up task
+	// completion or realtime fanout; the answer remains in the Multica chat.
 	select {
 	case o.queues[hash.Sum32()%uint32(len(o.queues))] <- e:
 	case <-o.done:
+	default:
+		o.logger.Error("weixin: outbound event queue capacity exceeded", "task_id", e.TaskID, "chat_session_id", e.ChatSessionID)
+	}
+}
+
+// Only routed WeChat replies enter these bounded per-session queues. A slow
+// provider call cannot occupy a routing worker or another conversation's sender.
+func (o *Outbound) enqueueReply(ctx context.Context, reply outboundReply) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if ctx.Err() != nil {
+		return
+	}
+	key := reply.event.ChatSessionID
+	session := o.sessions[key]
+	if session == nil {
+		if len(o.sessions) >= outboundSessionLimit {
+			o.logger.Error("weixin: outbound session capacity exceeded", "task_id", reply.event.TaskID, "chat_session_id", key)
+			return
+		}
+		session = &outboundSession{}
+		o.sessions[key] = session
+		o.wg.Add(1)
+		go o.sendSession(ctx, key, session)
+	}
+	if len(session.queue) >= outboundSessionQueueDepth {
+		o.logger.Error("weixin: outbound session queue capacity exceeded", "task_id", reply.event.TaskID, "chat_session_id", key)
+		return
+	}
+	session.queue = append(session.queue, reply)
+}
+
+func (o *Outbound) sendSession(ctx context.Context, key string, session *outboundSession) {
+	defer o.wg.Done()
+	for {
+		o.mu.Lock()
+		if ctx.Err() != nil || len(session.queue) == 0 {
+			delete(o.sessions, key)
+			o.mu.Unlock()
+			return
+		}
+		reply := session.queue[0]
+		session.queue[0] = outboundReply{}
+		session.queue = session.queue[1:]
+		o.mu.Unlock()
+		call, cancel := context.WithTimeout(ctx, 5*time.Minute)
+		if err := o.deliverReply(call, reply); err != nil {
+			o.logger.WarnContext(ctx, "weixin: reply delivery failed", "task_id", reply.event.TaskID, "error", err)
+		}
+		cancel()
 	}
 }
 
@@ -110,32 +180,37 @@ type completion struct {
 	RetryPending bool   `json:"retry_pending"`
 }
 
-func (o *Outbound) processEvent(ctx context.Context, event events.Event) error {
+func (o *Outbound) prepareEvent(ctx context.Context, event events.Event) (*outboundReply, error) {
 	var payload completion
 	raw, _ := json.Marshal(event.Payload)
 	if err := json.Unmarshal(raw, &payload); err != nil {
-		return nil
+		return nil, nil
 	}
 	if payload.RetryPending {
-		return nil
+		return nil, nil
 	}
 	if event.TaskID != "" {
 		payload.TaskID = event.TaskID
 	}
 	taskID, err := util.ParseUUID(payload.TaskID)
 	if err != nil || !taskID.Valid {
-		return nil
+		return nil, nil
 	}
 	delivery, err := o.q.GetChannelTaskDelivery(ctx, taskID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil
+		return nil, nil
 	}
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if delivery.ChannelType != string(TypeWeixin) {
-		return nil
+		return nil, nil
 	}
+	return &outboundReply{event: event, payload: payload, taskID: taskID, delivery: delivery}, nil
+}
+
+func (o *Outbound) deliverReply(ctx context.Context, reply outboundReply) error {
+	event, payload, taskID, delivery := reply.event, reply.payload, reply.taskID, reply.delivery
 	task, err := o.q.GetAgentTask(ctx, taskID)
 	if err != nil {
 		return err
