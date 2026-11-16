@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -128,6 +129,64 @@ func TestTypingKeepaliveCacheAndTerminalCleanup(t *testing.T) {
 				n.wg.Wait()
 				if configs.Load() != 1 {
 					t.Fatalf("ticket not cached: requests=%d", configs.Load())
+				}
+			}
+		})
+	}
+}
+
+func TestTypingContinuesAfterTransientSendFailure(t *testing.T) {
+	for _, failAt := range []int32{1, 2} {
+		t.Run(fmt.Sprint(failAt), func(t *testing.T) {
+			statuses := make(chan int, 32)
+			var attempts atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if strings.HasSuffix(r.URL.Path, "getconfig") {
+					_, _ = w.Write([]byte(`{"ret":0,"typing_ticket":"ticket"}`))
+					return
+				}
+				var body struct {
+					Status int `json:"status"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Error(err)
+				}
+				if body.Status == 1 && attempts.Add(1) == failAt {
+					statuses <- -1
+					w.WriteHeader(http.StatusServiceUnavailable)
+					return
+				}
+				statuses <- body.Status
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			defer server.Close()
+			box := testBox(t)
+			encrypted, _ := box.Seal([]byte("token"))
+			cfg, _ := json.Marshal(installConfig{AppID: "bot", UserID: "owner", BaseURL: DefaultBaseURL, TokenEncrypted: base64.StdEncoding.EncodeToString(encrypted)})
+			store := &memoryTypingStore{}
+			store.active.Store(true)
+			n := NewTypingNotifier(store, box, nil)
+			n.client = providerClient(server)
+			n.interval = 10 * time.Millisecond
+			ctx, cancel := context.WithCancel(context.Background())
+			defer func() { cancel(); n.wait() }()
+			n.Start(ctx)
+			n.OnIngested(ctx, engine.ResolvedInstallation{ID: dbid.NewV7(), Platform: db.ChannelInstallation{Config: cfg}}, channel.InboundMessage{Source: channel.Source{SenderID: "owner"}}, dbid.NewV7(), dbid.NewV7())
+			if failAt == 2 {
+				receiveTyping(t, statuses, 1)
+			}
+			receiveTyping(t, statuses, -1)
+			receiveTyping(t, statuses, 1)
+			cancel()
+			n.wait()
+			for {
+				select {
+				case status := <-statuses:
+					if status == 2 {
+						return
+					}
+				default:
+					t.Fatal("typing was not cleared after cancellation")
 				}
 			}
 		})

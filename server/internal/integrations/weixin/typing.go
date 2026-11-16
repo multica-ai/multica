@@ -178,10 +178,8 @@ func (n *TypingNotifier) keepalive(ctx context.Context, sessionID pgtype.UUID, i
 		}
 		err = api.sendTyping(call, creds.UserID, ticket, 1)
 		cancel()
-		if err != nil {
-			return
-		}
-		if !started {
+		// Typing is cosmetic: a transient send failure must not end keepalives.
+		if err == nil && !started {
 			n.logger.DebugContext(ctx, "weixin: typing started", "session_id", sessionID)
 			started = true
 		}
