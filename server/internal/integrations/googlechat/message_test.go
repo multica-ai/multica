@@ -30,20 +30,34 @@ func TestNotificationActions(t *testing.T) {
 		{"issue_assigned", "Alice &lt;Ops&gt; assigned you"},
 		{"mentioned", "Alice &lt;Ops&gt; mentioned you"},
 		{"new_comment", "Alice &lt;Ops&gt; commented"},
-		{"status_changed", "Alice &lt;Ops&gt; changed status: todo → done"},
-		{"priority_changed", "Alice &lt;Ops&gt; changed priority: todo → done"},
+		{"status_changed", "Alice &lt;Ops&gt; changed status: In Progress → Done"},
+		{"priority_changed", "Alice &lt;Ops&gt; changed priority: In Progress → Done"},
+		{"due_date_changed", "Alice &lt;Ops&gt; changed due date: in_progress → done"},
 		{"task_failed", "Alice &lt;Ops&gt;'s run failed"},
 		{"future_event", "future event"},
 	} {
 		t.Run(test.kind, func(t *testing.T) {
 			got := FormatNotifications("Acme", []NotificationItem{{
 				Title: "Fix login", Type: test.kind, Actor: "Alice <Ops>",
-				Details: map[string]string{"from": "todo", "to": "done"},
+				Details: map[string]string{"from": "in_progress", "to": "done"},
 			}})
 			if !strings.Contains(got, test.want) || strings.Contains(got, "1 new notification") {
 				t.Fatalf("message = %q, want action %q without count header", got, test.want)
 			}
 		})
+	}
+}
+
+func TestFormatNotificationsShowsMentionsAndLinksAsText(t *testing.T) {
+	got := FormatNotifications("Acme", []NotificationItem{{
+		Title: "Fix login",
+		Type:  "mentioned",
+		Actor: "Alex",
+		Body:  "[@Charles](mention://member/de2f3c96-2376-44ac-a9cf-793e813a4a84) see [the spec](https://example.com/spec) and ![shot](https://example.com/a.png)",
+	}})
+	want := "Alex mentioned you — @Charles see the spec and shot"
+	if !strings.Contains(got, want) || strings.Contains(got, "mention://") || strings.Contains(got, "https://example.com") {
+		t.Fatalf("message = %q, want %q", got, want)
 	}
 }
 

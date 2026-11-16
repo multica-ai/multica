@@ -139,7 +139,7 @@ func TestNotifierDeliversConfiguredMemberNotification(t *testing.T) {
 		t.Fatalf("webhook URL = %q", sender.url)
 	}
 	want := "*Acme*\n" +
-		"• <https://app.example.com/acme/issues/ACME-12|ACME-12: Checkout needs review> — Alice changed status: todo → done — Please check &lt;totals&gt;"
+		"• <https://app.example.com/acme/issues/ACME-12|ACME-12: Checkout needs review> — Alice changed status: Todo → Done — Please check &lt;totals&gt;"
 	if sender.message != want {
 		t.Fatalf("message =\n%s\nwant\n%s", sender.message, want)
 	}

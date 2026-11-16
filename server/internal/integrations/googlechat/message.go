@@ -2,7 +2,9 @@ package googlechat
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -21,6 +23,10 @@ type NotificationItem struct {
 	Actor           string
 	Details         map[string]string
 }
+
+// markdownLink matches markdown links and images, including Multica mentions
+// such as [@Ada](mention://member/<id>).
+var markdownLink = regexp.MustCompile(`!?\[([^\]]*)\]\([^)\s]+\)`)
 
 // EscapeText prevents user-authored text from becoming Google Chat markup.
 func EscapeText(value string) string {
@@ -70,7 +76,7 @@ func formatNotificationLine(item NotificationItem) string {
 	if action := notificationAction(item); action != "" {
 		line += " — " + EscapeText(truncateCompactText(action))
 	}
-	if body := truncateCompactText(item.Body); body != "" {
+	if body := truncateCompactText(plainText(item.Body)); body != "" {
 		line += " — " + EscapeText(body)
 	}
 	return line
@@ -100,13 +106,8 @@ func notificationAction(item NotificationItem) string {
 		return actor + " requested your review"
 	case "status_changed", "priority_changed", "start_date_changed", "due_date_changed":
 		field := strings.TrimSuffix(strings.ReplaceAll(item.Type, "_", " "), " changed")
-		from, to := item.Details["from"], item.Details["to"]
-		if from == "" {
-			from = "unset"
-		}
-		if to == "" {
-			to = "unset"
-		}
+		from := changeValue(item.Type, item.Details["from"])
+		to := changeValue(item.Type, item.Details["to"])
 		return fmt.Sprintf("%s changed %s: %s → %s", actor, field, from, to)
 	case "reaction_added":
 		return actor + " reacted " + item.Details["emoji"]
@@ -140,6 +141,29 @@ func omittedItemsLine(count int) string {
 		return ""
 	}
 	return fmt.Sprintf("\n…and %d more in Multica", count)
+}
+
+// plainText reads a markdown excerpt as text: a mention becomes its "@Name"
+// label and a link its text, since Google Chat would show the raw markup.
+func plainText(value string) string {
+	return markdownLink.ReplaceAllString(value, "$1")
+}
+
+// changeValue labels a changed field's value. Status and priority are stored as
+// keys (in_progress), so they read as titles (In Progress); dates stay as-is.
+func changeValue(kind, value string) string {
+	if value == "" {
+		return "unset"
+	}
+	if kind != "status_changed" && kind != "priority_changed" {
+		return value
+	}
+	words := strings.Fields(strings.ReplaceAll(value, "_", " "))
+	for i, word := range words {
+		first, size := utf8.DecodeRuneInString(word)
+		words[i] = string(unicode.ToUpper(first)) + word[size:]
+	}
+	return strings.Join(words, " ")
 }
 
 func truncateCompactText(value string) string {
