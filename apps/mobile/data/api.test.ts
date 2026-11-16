@@ -104,3 +104,18 @@ describe("api.sendChatMessage steering", () => {
     expect(body.content).toBe("use the new path");
   });
 });
+
+describe("native attachment metadata", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("falls back to the validated inline URL when the optional download-intent field drifts", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({
+      id: "attachment-1", filename: "report.txt", url: "/uploads/report.txt",
+      download_url: "/api/attachments/attachment-1/signed-download?sig=s",
+      attachment_download_url: 123,
+    })));
+    const metadata = await api.getAttachmentForDownload("attachment-1");
+    expect(metadata.attachment_download_url).toBe("");
+    expect(metadata.download_url).toBe("/api/attachments/attachment-1/signed-download?sig=s");
+  });
+});
