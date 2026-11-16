@@ -1460,7 +1460,13 @@
       "up_to_date": "已是最新版本。",
       "downloading": "v{{version}} 正在後臺下載——準備好安裝時會通知你。",
       "check_now": "立即檢查",
-      "checking": "檢查中..."
+      "checking": "檢查中...",
+      "check_unavailable": "暫時無法檢查更新，請稍後重試。",
+      "check_network": "無法連線至更新服務，請檢查網路後重試。",
+      "check_failed": "檢查更新失敗，請重試。",
+      "download_failed": "更新下載失敗，可以繼續使用目前版本並重試。",
+      "download_ready": "v{{version}} 已可安裝。",
+      "retry": "重試"
     },
     "daemon": {
       "title": "守護程序",
