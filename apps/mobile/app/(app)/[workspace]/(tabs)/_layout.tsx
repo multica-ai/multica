@@ -22,8 +22,8 @@
  */
 import { useRef } from "react";
 import { Tabs } from "expo-router";
-import { Image } from "expo-image";
-import { View } from "react-native";
+import { PlatformIcon } from "@/components/ui/platform-icon";
+import { Platform, View } from "react-native";
 import type { TriggerRef } from "@rn-primitives/dropdown-menu";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useColorScheme } from "@/lib/use-color-scheme";
@@ -74,6 +74,7 @@ export default function TabsLayout() {
           tabBarInactiveTintColor: theme.mutedForeground,
           tabBarStyle: { backgroundColor: theme.background },
           tabBarLabelStyle: { fontSize: 11 },
+          tabBarHideOnKeyboard: Platform.OS === "android",
         }}
       >
         <Tabs.Screen
@@ -83,9 +84,11 @@ export default function TabsLayout() {
             tabBarBadge: inboxBadge,
             tabBarBadgeStyle: BADGE_STYLE,
             tabBarIcon: ({ color, size, focused }) => (
-              <Image
-                source={focused ? "sf:tray.fill" : "sf:tray"}
-                style={{ width: size, height: size, color }}
+              <PlatformIcon
+                ios={focused ? "tray.fill" : "tray"}
+                android={focused ? "file-tray" : "file-tray-outline"}
+                size={size}
+                color={color}
               />
             ),
           }}
@@ -95,9 +98,11 @@ export default function TabsLayout() {
           options={{
             title: t("tabs.my_issues"),
             tabBarIcon: ({ color, size, focused }) => (
-              <Image
-                source={focused ? "sf:checklist" : "sf:checklist.unchecked"}
-                style={{ width: size, height: size, color }}
+              <PlatformIcon
+                ios={focused ? "checklist" : "checklist.unchecked"}
+                android={focused ? "checkbox" : "checkbox-outline"}
+                size={size}
+                color={color}
               />
             ),
           }}
@@ -109,9 +114,11 @@ export default function TabsLayout() {
             tabBarBadge: chatBadge,
             tabBarBadgeStyle: BADGE_STYLE,
             tabBarIcon: ({ color, size, focused }) => (
-              <Image
-                source={focused ? "sf:bubble.left.fill" : "sf:bubble.left"}
-                style={{ width: size, height: size, color }}
+              <PlatformIcon
+                ios={focused ? "bubble.left.fill" : "bubble.left"}
+                android={focused ? "chatbubble" : "chatbubble-outline"}
+                size={size}
+                color={color}
               />
             ),
           }}
@@ -121,9 +128,11 @@ export default function TabsLayout() {
           options={{
             title: t("tabs.more"),
             tabBarIcon: ({ color, size }) => (
-              <Image
-                source="sf:ellipsis"
-                style={{ width: size, height: size, color }}
+              <PlatformIcon
+                ios="ellipsis"
+                android="ellipsis-horizontal"
+                size={size}
+                color={color}
               />
             ),
           }}

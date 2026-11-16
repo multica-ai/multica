@@ -1,14 +1,24 @@
 ---
-title: 移动 App（iOS）
+title: 移动 App（iOS 和 Android）
 description: 从源码把 Multica 安装到 iPhone，并连接 Cloud 或自托管实例。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 import { Step, Steps } from "fumadocs-ui/components/steps";
 
-Multica iOS 客户端目前还没有上架 App Store。你可以在 Mac 上从公开的源码仓库构建 Release 版本，再安装到自己的 iPhone。Android 客户端暂未提供。
+Multica iOS 客户端目前还没有上架 App Store。你可以在 Mac 上从公开的源码仓库构建 Release 版本，再安装到自己的 iPhone。Android 复用同一 React Native 客户端，可构建已签名、独立运行的 APK。
 
 安装后的 App 默认连接 Multica Cloud，用已有账号登录即可。工作区、任务、评论和执行记录都保存在服务端，不需要从 Web 或 Desktop 同步。
+
+## Android APK
+
+准备 JDK 17 和 Android SDK 36，配置仓库外的 Release 签名密钥，再从仓库根目录运行：
+
+```bash
+pnpm -C apps/mobile android:release
+```
+
+APK 默认连接 Multica Cloud，无需 Metro。签名、环境变体、自托管地址和安装验证见 [Android 构建指南](https://github.com/multica-ai/multica/blob/main/apps/mobile/docs/android-release.md)。首版不包含后台推送。下文为 iPhone 安装说明。
 
 ## 准备工作
 

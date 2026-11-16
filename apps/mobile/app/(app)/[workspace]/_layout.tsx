@@ -1,5 +1,7 @@
 import { useEffect } from "react";
 import type { ComponentProps } from "react";
+import { Platform } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Redirect, Stack, useLocalSearchParams } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { workspaceListOptions } from "@/data/queries/workspaces";
@@ -44,7 +46,7 @@ import { useT } from "@/lib/i18n";
  *   - `headerShown: false` — every sheet body draws its own header (title
  *     + optional right action). The native Stack header would double up.
  */
-const SHEET_OPTIONS: ComponentProps<typeof Stack.Screen>["options"] = {
+const IOS_SHEET_OPTIONS: ComponentProps<typeof Stack.Screen>["options"] = {
   presentation: "formSheet",
   sheetGrabberVisible: true,
   sheetAllowedDetents: [0.6, 0.95],
@@ -101,6 +103,19 @@ function RealtimeSubscriptions() {
  * membership, deep links to wrong slugs, etc.).
  */
 export default function WorkspaceLayout() {
+  const insets = useSafeAreaInsets();
+  // Android uses full-height modal routes: their native header supplies Back
+  // and the top inset, while scrollable picker bodies retain their own titles.
+  const SHEET_OPTIONS: ComponentProps<typeof Stack.Screen>["options"] =
+    Platform.OS === "android"
+      ? {
+          presentation: "modal",
+          headerShown: true,
+          title: "",
+          headerLeft: () => <ModalCloseButton />,
+          contentStyle: { flex: 1, paddingBottom: insets.bottom },
+        }
+      : IOS_SHEET_OPTIONS;
   const { workspace: slug } = useLocalSearchParams<{ workspace: string }>();
   const { t } = useT("navigation");
   const { data: workspaces, isLoading } = useQuery(workspaceListOptions());

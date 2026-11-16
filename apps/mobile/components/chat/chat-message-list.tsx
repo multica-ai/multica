@@ -7,7 +7,7 @@
  * inline appear as standalone cards. Long-press actions highlight the target
  * without adding a border that would shift the layout.
  */
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, View } from "react-native";
 import { FlashList } from "@shopify/flash-list";
 import { Ionicons } from "@expo/vector-icons";
@@ -284,7 +284,7 @@ function QueuedMessageRow({ message }: { message: QueuedChatMessage }) {
   );
 }
 
-function MessageRow({
+const MessageRow = memo(function MessageRow({
   message,
   onQuickAction,
   quickActionsDisabled,
@@ -366,7 +366,7 @@ function MessageRow({
       quickActionsDisabled={quickActionsDisabled}
     />
   );
-}
+});
 
 /**
  * Persisted assistant message. Renders:

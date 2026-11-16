@@ -1,14 +1,24 @@
 ---
-title: Application mobile (iOS)
+title: Application mobile (iOS et Android)
 description: Installez Multica sur votre iPhone à partir des sources, et connectez-vous à Cloud ou à une instance auto-hébergée.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 import { Step, Steps } from "fumadocs-ui/components/steps";
 
-Le client iOS de Multica n'est pas encore disponible sur l'App Store. Vous pouvez compiler une version Release à partir du dépôt de code source public sur un Mac et l'installer sur votre propre iPhone. Il n'existe pas encore de client Android.
+Le client iOS de Multica n'est pas encore disponible sur l'App Store. Vous pouvez compiler une version Release à partir du dépôt de code source public sur un Mac et l'installer sur votre propre iPhone. Android utilise le même client React Native et peut être compilé en APK signé autonome.
 
 L'application installée se connecte par défaut à Multica Cloud ; connectez-vous avec votre compte existant. Les espaces de travail, les tâches, les commentaires et l'historique des exécutions sont tous stockés sur le serveur : rien n'a besoin d'être synchronisé depuis le web ou Desktop.
+
+## APK Android
+
+Préparez JDK 17 et le SDK Android 36, configurez une clé de signature Release hors du dépôt, puis lancez depuis la racine :
+
+```bash
+pnpm -C apps/mobile android:release
+```
+
+L’APK se connecte à Multica Cloud par défaut et ne nécessite pas Metro. Consultez le [guide de compilation Android](https://github.com/multica-ai/multica/blob/main/apps/mobile/docs/android-release.md) pour la signature, les variantes, les adresses auto-hébergées et les vérifications. Les notifications push en arrière-plan ne sont pas incluses. Les instructions suivantes concernent l’iPhone.
 
 ## Prérequis
 

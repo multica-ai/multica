@@ -10,6 +10,8 @@ vi.hoisted(() => {
 
 // The real store pulls in expo-secure-store; the client only needs the slug.
 vi.mock("@/data/workspace-store", () => ({ getCurrentSlug: () => null }));
+vi.mock("react-native", () => ({ Platform: { OS: "android" } }));
+vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "0.1.1" } } }));
 
 describe("api.listAgents", () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -22,7 +24,12 @@ describe("api.listAgents", () => {
     const fetchMock = vi.fn(async () => Response.json([]));
     vi.stubGlobal("fetch", fetchMock);
     await expect(api.listAgents(opts)).resolves.toEqual([]);
-    expect(fetchMock).toHaveBeenCalledExactlyOnceWith(`https://api.example.test${path}`, expect.any(Object));
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith(
+      `https://api.example.test${path}`,
+      expect.objectContaining({
+        headers: expect.objectContaining({ "X-Client-OS": "android", "X-Client-Version": "0.1.1" }),
+      }),
+    );
   });
 });
 

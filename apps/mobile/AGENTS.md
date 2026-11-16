@@ -21,8 +21,8 @@ These rules apply only to `apps/mobile/`, in addition to the [root instructions]
 ## UI Components
 
 - Inspect existing rows, pickers, forms, and domain visuals before adding components. Extend a suitable existing pattern; do not rewrite a domain component merely because a new feature uses it.
-- For a new interaction, prefer a native iOS/RN API, then an RNR component. If neither fits, compose existing primitives inline for a local need. A new generic primitive requires at least three callers and no suitable native/RNR alternative; clarify unresolved interaction requirements before inventing one.
-- Native examples: `Alert.prompt` for text prompts, `Alert.alert` for confirmation, `ActionSheetIOS` for action menus, existing native date/media/document pickers, `Share.share`, and `expo-haptics`.
+- For a new interaction, prefer an API supported by both native platforms, then an RNR component. Preserve platform-specific behavior behind explicit branches. If neither fits, compose existing primitives inline for a local need. A new generic primitive requires at least three callers and no suitable native/RNR alternative; clarify unresolved interaction requirements before inventing one.
+- Native examples: `Alert.alert` for confirmation, existing native date/media/document pickers, `Share.share`, and `expo-haptics`. Action menus use `lib/use-action-sheet.ts` (native iOS and Android modal menus); never call `ActionSheetIOS` or iOS-only `Alert.prompt` from shared screens.
 - Add RNR components with `npx @react-native-reusables/cli@latest add <name>`. Review generated changes and preserve local customizations. Keep default variants/spacing unless a concrete product need requires changes.
 - Generic primitives live in `components/ui/`; domain compositions live in `components/<domain>/`. Use the existing `cn()` in `lib/utils.ts` and semantic tokens.
 - Screens have titles, tab bars have icons, secondary labels use type-aware helpers, and multiple trailing row elements stack vertically. Check long text, keyboard, safe areas, scrolling, and both themes.
@@ -41,7 +41,7 @@ These rules apply only to `apps/mobile/`, in addition to the [root instructions]
 | --- | --- |
 | Confirmation or text prompt | Native alert/prompt |
 | Short action menu | Native action sheet; reuse existing local popover patterns when appropriate |
-| Long list, search, form, or keyboard interaction | Expo Router `presentation: "formSheet"` route |
+| Long list, search, form, or keyboard interaction | Shared `SHEET_OPTIONS`: iOS formSheet, Android modal with a native close control |
 | Multi-screen modal flow | Expo Router `presentation: "modal"` |
 
 - All pickers in one attribute row use the same formSheet interaction, including short option lists.
@@ -88,7 +88,7 @@ pnpm --filter @multica/mobile lint
 pnpm --filter @multica/mobile test
 ```
 
-- Root frontend checks exclude mobile. `.github/workflows/mobile-verify.yml` defines the current mobile CI scope; these checks do not build an IPA or verify native rendering.
+- Root frontend checks exclude mobile. `.github/workflows/mobile-verify.yml` runs mobile checks without building native artifacts or verifying native rendering. Signed Android APKs use `scripts/android-release.mjs`; see `docs/android-release.md`.
 - For UI changes, verify the affected flow in the simulator/device, including themes, keyboard/scrolling, and navigation. For shared semantics or realtime changes, change the same data from web and confirm mobile catches up without manual refresh, including after reconnect.
 - Test parsing/transforms in the existing Vitest setup. Preserve `scripts/ios-run.test.sh` coverage when changing the native build wrapper.
 - Report which checks ran and which native/cross-client checks were unavailable. Do not claim visual or release verification from typecheck/unit tests alone.

@@ -16,6 +16,7 @@ vi.mock("react", async (importOriginal) => ({
   useState: () => [lifecycle.clientState, (value: unknown) => { lifecycle.clientState = value; }],
 }));
 vi.mock("react-native", () => ({
+  Platform: { OS: "android" },
   AppState: {
     addEventListener: (_event: string, handler: (state: string) => void) => {
       lifecycle.onAppState = handler;
@@ -23,6 +24,7 @@ vi.mock("react-native", () => ({
     },
   },
 }));
+vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "0.1.1" } } }));
 vi.mock("@react-native-community/netinfo", () => ({
   default: { addEventListener: () => vi.fn() },
 }));

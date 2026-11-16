@@ -9,6 +9,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { PortalHost } from "@rn-primitives/portal";
+import { ActionSheetProvider } from "@expo/react-native-action-sheet";
 import { api } from "@/data/api";
 import { maybeRenewSession } from "@/data/session-renewal";
 import { queryClient } from "@/data/query-client";
@@ -85,17 +86,19 @@ export default function RootLayout() {
             <QueryClientProvider client={queryClient}>
               <ThemeProvider value={NAV_THEME[colorScheme]}>
                 <AuthInitializer>
-                  <SessionActivityBoundary>
-                    <LightboxProvider>
-                      <StatusBar style={isDarkColorScheme ? "light" : "dark"} />
-                      <Stack screenOptions={{ headerShown: false }}>
-                        <Stack.Screen name="index" />
-                        <Stack.Screen name="(auth)" />
-                        <Stack.Screen name="(app)" />
-                      </Stack>
-                      <PortalHost />
-                    </LightboxProvider>
-                  </SessionActivityBoundary>
+                  <ActionSheetProvider>
+                    <SessionActivityBoundary>
+                      <LightboxProvider>
+                        <StatusBar style={isDarkColorScheme ? "light" : "dark"} />
+                        <Stack screenOptions={{ headerShown: false }}>
+                          <Stack.Screen name="index" />
+                          <Stack.Screen name="(auth)" />
+                          <Stack.Screen name="(app)" />
+                        </Stack>
+                        <PortalHost />
+                      </LightboxProvider>
+                    </SessionActivityBoundary>
+                  </ActionSheetProvider>
                 </AuthInitializer>
               </ThemeProvider>
             </QueryClientProvider>

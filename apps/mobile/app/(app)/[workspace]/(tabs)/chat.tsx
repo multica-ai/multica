@@ -48,6 +48,7 @@ import type {
   Agent,
   ChatMessage,
   ChatPendingTask,
+  ChatQuickAction,
 } from "@multica/core/types";
 import {
   enqueuePendingChatTask,
@@ -265,7 +266,7 @@ export default function ChatTab() {
   }, [isFocused, activeSessionId, activeSession?.has_unread, markRead]);
 
   // ── Mutations ──────────────────────────────────────────────────────────
-  const createSession = useCreateChatSession();
+  const { mutateAsync: createSession } = useCreateChatSession();
   const deleteSession = useDeleteChatSession();
 
   // ── Send burst ─────────────────────────────────────────────────────────
@@ -281,7 +282,7 @@ export default function ChatTab() {
         try {
           // Untitled on purpose: the server derives the title from the first
           // message it accepts, the same rule for every client and channel.
-          const session = await createSession.mutateAsync({
+          const session = await createSession({
             agent_id: currentAgent.id,
           });
           return session.id;
@@ -420,6 +421,11 @@ export default function ChatTab() {
     ],
   );
 
+  const handleQuickAction = useCallback(
+    (action: ChatQuickAction) => handleSend(action.prompt, [], { clearDraft: false }),
+    [handleSend],
+  );
+
   // ── Cancel in-flight ───────────────────────────────────────────────────
   const handleStop = useCallback(() => {
     if (!pendingTask?.task_id || !activeSessionId) return;
@@ -538,9 +544,7 @@ export default function ChatTab() {
           hasSessions={sessions.length > 0}
           agent={currentAgent}
           onPickPrompt={(text) => setDraft(draftKey, text)}
-          onQuickAction={(action) =>
-            handleSend(action.prompt, [], { clearDraft: false })
-          }
+          onQuickAction={handleQuickAction}
           quickActionsDisabled={sending || disabled}
           pendingTask={pendingTask}
           liveTaskMessages={liveTaskMessages}

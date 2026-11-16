@@ -37,7 +37,7 @@
  * a custom renderer — mobile doesn't lose anything that exists by
  * default elsewhere.
  */
-import { useCallback, useMemo } from "react";
+import { memo, useCallback, useMemo } from "react";
 import { Linking, View } from "react-native";
 import { router } from "expo-router";
 import { EnrichedMarkdownText } from "react-native-enriched-markdown";
@@ -105,7 +105,7 @@ interface Props {
   compact?: boolean;
 }
 
-export function Markdown({
+export const Markdown = memo(function Markdown({
   content,
   attachments,
   selectable = true,
@@ -218,4 +218,4 @@ export function Markdown({
       })}
     </View>
   );
-}
+});

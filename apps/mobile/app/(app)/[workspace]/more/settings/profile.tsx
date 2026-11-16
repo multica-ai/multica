@@ -1,10 +1,8 @@
 /**
  * Profile edit subscreen — name + avatar.
  *
- * Avatar tap opens an iOS native ActionSheet (Take Photo / Choose from Library
- * / Remove). Mirrors the avatar upload flow in
- * packages/views/settings/components/account-tab.tsx but the picker uses
- * native APIs per CLAUDE.md "iOS native > RNR > discuss" waterfall.
+ * Avatar tap opens library/remove actions. Camera capture is disabled in
+ * app.config.ts; the system photo picker does not need camera permission.
  *
  * Save runs PATCH /api/me then writes the returned user back to the auth
  * store via setUser — same source-of-truth pattern as web (server response
@@ -12,7 +10,6 @@
  */
 import { useState } from "react";
 import {
-  ActionSheetIOS,
   Alert,
   ActivityIndicator,
   Pressable,
@@ -29,6 +26,7 @@ import { useAuthStore } from "@/data/auth-store";
 import { api } from "@/data/api";
 import type { FileAsset } from "@/data/api";
 import { useT } from "@/lib/i18n";
+import { useActionSheet } from "@/lib/use-action-sheet";
 
 const MAX_AVATAR_BYTES = 5 * 1024 * 1024; // 5 MB — matches what's reasonable on cellular.
 
@@ -44,6 +42,7 @@ function initialsOf(name: string | undefined): string {
 }
 
 export default function ProfileSettingsScreen() {
+  const { showActionSheetWithOptions } = useActionSheet();
   const user = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
   const { t } = useT("settings");
@@ -63,22 +62,20 @@ export default function ProfileSettingsScreen() {
   const dirty = name.trim() !== (user?.name ?? "") && name.trim().length > 0;
 
   const handleAvatarPick = () => {
-    const actions = ["camera", "library"];
+    const actions = ["library"];
     if (user?.avatar_url) actions.push("remove");
     actions.push("cancel");
-    const removeIndex = user?.avatar_url ? 2 : -1;
+    const removeIndex = user?.avatar_url ? 1 : -1;
     const cancelIndex = actions.length - 1;
     const visibleOptions = actions.map((action) =>
-      action === "camera"
-        ? t("avatar.take")
-        : action === "library"
+      action === "library"
           ? t("avatar.library")
           : action === "remove"
             ? t("avatar.remove")
             : t("common:actions.cancel"),
     );
 
-    ActionSheetIOS.showActionSheetWithOptions(
+    showActionSheetWithOptions(
       {
         options: visibleOptions,
         cancelButtonIndex: cancelIndex,
@@ -87,29 +84,10 @@ export default function ProfileSettingsScreen() {
       async (index) => {
         if (index === cancelIndex) return;
         const action = actions[index];
-        if (action === "camera") await pickFromCamera();
-        else if (action === "library") await pickFromLibrary();
+        if (action === "library") await pickFromLibrary();
         else if (action === "remove") await removeAvatar();
       },
     );
-  };
-
-  const pickFromCamera = async () => {
-    const perm = await ImagePicker.requestCameraPermissionsAsync();
-    if (!perm.granted) {
-      Alert.alert(
-        t("avatar.permission_title"),
-        t("avatar.permission_message"),
-      );
-      return;
-    }
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ["images"],
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.8,
-    });
-    if (!result.canceled) await uploadAvatar(result.assets[0]);
   };
 
   const pickFromLibrary = async () => {

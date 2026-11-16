@@ -65,6 +65,19 @@ describe("WSClient application heartbeat", () => {
     vi.restoreAllMocks();
   });
 
+  it("identifies Android sockets without putting credentials in the URL", () => {
+    const client = new WSClient({
+      url: "wss://example.test/ws", token: "secret", workspaceSlug: "workspace",
+      clientOS: "android", clientVersion: "0.1.1",
+    });
+    client.connect();
+    const url = new URL(MockWebSocket.instances[0].url);
+    expect(url.searchParams.get("client_os")).toBe("android");
+    expect(url.searchParams.get("client_version")).toBe("0.1.1");
+    expect(url.toString()).not.toContain("secret");
+    client.disconnect();
+  });
+
   it("reconnects a stale OPEN socket through the jittered backoff path", () => {
     vi.spyOn(Math, "random").mockReturnValue(0);
     const { client, socket } = connectAuthenticatedClient();

@@ -1,14 +1,24 @@
 ---
-title: モバイルアプリ (iOS)
+title: モバイルアプリ (iOS / Android)
 description: ソースコードから Multica を iPhone にインストールし、Cloud またはセルフホストインスタンスに接続します。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 import { Step, Steps } from "fumadocs-ui/components/steps";
 
-Multica の iOS クライアントはまだ App Store にありません。Mac で公開されているソースリポジトリから Release 版をビルドし、自分の iPhone にインストールできます。Android クライアントはまだ提供されていません。
+Multica の iOS クライアントはまだ App Store にありません。Mac で公開されているソースリポジトリから Release 版をビルドし、自分の iPhone にインストールできます。Android では同じ React Native クライアントから署名済みのスタンドアロン APK をビルドできます。
 
 インストールしたアプリはデフォルトで Multica Cloud に接続し、既存のアカウントでそのままサインインできます。ワークスペース、タスク、コメント、実行履歴はすべてサーバー側に保存されるため、Web や Desktop から同期する必要はありません。
+
+## Android APK
+
+JDK 17 と Android SDK 36 を準備し、リポジトリ外に Release 署名鍵を設定してから、ルートで実行します：
+
+```bash
+pnpm -C apps/mobile android:release
+```
+
+APK は既定で Multica Cloud に接続し、Metro は不要です。署名、環境切り替え、セルフホスト接続とインストール確認は [Android ビルドガイド](https://github.com/multica-ai/multica/blob/main/apps/mobile/docs/android-release.md)を参照してください。バックグラウンドのプッシュ通知は含まれません。以下は iPhone の手順です。
 
 ## 事前準備
 

@@ -1,6 +1,11 @@
-# Multica Mobile (iOS)
+# Multica Mobile (iOS and Android)
 
-Expo + React Native iOS client for Multica. Independent from web/desktop — shares types and pure utilities from `@multica/core/`. See [`AGENTS.md`](./AGENTS.md) for mobile architecture and development rules; `package.json` records the current dependency versions.
+Expo + React Native iOS and Android client for Multica. Independent from web/desktop — shares types and pure utilities from `@multica/core/`. See [`AGENTS.md`](./AGENTS.md) for mobile architecture and development rules; `package.json` records the current dependency versions.
+
+For Android, see [Android builds](./docs/android-release.md) for SDK setup,
+signing, production/staging/private endpoints and standalone APK verification.
+`pnpm -C apps/mobile android:release` builds a signed production APK using your
+external keystore. The iPhone instructions below require macOS/Xcode.
 
 ## Just want to use it on your phone? (no development)
 

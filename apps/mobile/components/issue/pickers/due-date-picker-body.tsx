@@ -10,10 +10,12 @@
  * day as a date-only string.
  */
 import { useState, useEffect, useImperativeHandle, forwardRef } from "react";
-import { View } from "react-native";
+import { Platform, View } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { toDateOnly, dateOnlyToLocalDate } from "@multica/core/issues/date";
 import { i18n } from "@/lib/i18n";
+import { Button } from "@/components/ui/button";
+import { Text } from "@/components/ui/text";
 
 interface Props {
   value: string | null;
@@ -31,6 +33,7 @@ function toLocalDay(value: string | null): Date {
 export const DueDatePickerBody = forwardRef<DueDatePickerBodyHandle, Props>(
   function DueDatePickerBody({ value }, ref) {
     const [draft, setDraft] = useState<Date>(() => toLocalDay(value));
+    const [showPicker, setShowPicker] = useState(Platform.OS === "ios");
 
     useEffect(() => {
       setDraft(toLocalDay(value));
@@ -42,15 +45,23 @@ export const DueDatePickerBody = forwardRef<DueDatePickerBodyHandle, Props>(
 
     return (
       <View className="flex-1 items-center pt-2">
-        <DateTimePicker
-          value={draft}
-          mode="date"
-          display="inline"
-          locale={i18n.resolvedLanguage ?? i18n.language}
-          onChange={(_event, selected) => {
-            if (selected) setDraft(selected);
-          }}
-        />
+        {Platform.OS === "android" ? (
+          <Button variant="outline" onPress={() => setShowPicker(true)}>
+            <Text>{draft.toLocaleDateString(i18n.resolvedLanguage ?? i18n.language)}</Text>
+          </Button>
+        ) : null}
+        {showPicker ? (
+          <DateTimePicker
+            value={draft}
+            mode="date"
+            display={Platform.OS === "ios" ? "inline" : "default"}
+            locale={i18n.resolvedLanguage ?? i18n.language}
+            onChange={(event, selected) => {
+              if (Platform.OS === "android") setShowPicker(false);
+              if (event.type === "set" && selected) setDraft(selected);
+            }}
+          />
+        ) : null}
       </View>
     );
   },
