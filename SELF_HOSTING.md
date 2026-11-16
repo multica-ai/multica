@@ -486,9 +486,22 @@ If the selected GHCR tag has not been published yet, fall back to `make selfhost
 >
 > ```bash
 > docker compose -f docker-compose.selfhost.yml up -d --wait postgres
-> docker compose -f docker-compose.selfhost.yml exec -T postgres sh -c \
->   'echo "ALTER USER :\"role\" WITH PASSWORD :'\''pw'\'';" | psql -v ON_ERROR_STOP=1 -v role="$POSTGRES_USER" -v pw="$POSTGRES_PASSWORD" -U "$POSTGRES_USER" -d postgres'
+> docker compose -f docker-compose.selfhost.yml exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -v role="$POSTGRES_USER" -U "$POSTGRES_USER" -d postgres' <<'SQL'
+> \getenv pw POSTGRES_PASSWORD
+> ALTER USER :"role" WITH PASSWORD :'pw';
+> SQL
+> ```
+>
+> Then restart the stack using the Compose files for your installation. For official images (`make selfhost`):
+>
+> ```bash
 > docker compose -f docker-compose.selfhost.yml up -d
+> ```
+>
+> For locally built images (`make selfhost-build`), keep the build override so recovery uses your existing local images:
+>
+> ```bash
+> docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d
 > ```
 >
 > The command connects as `POSTGRES_USER` from `.env`. If you changed that value after the first start, put the original user name back first: PostgreSQL keeps the role it was initialized with. Do not run `docker compose down -v` to fix this: it deletes the database volume.
