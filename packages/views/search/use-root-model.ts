@@ -229,6 +229,7 @@ export function useRootModel(
       agents: people ? objects.agents : [],
       squads: people ? objects.squads : [],
       members: people ? objects.members : [],
+      views: scope === "all" ? objects.views : [],
       autopilots: scope === "all" ? objects.autopilots : [],
       chats: scope === "all" ? objects.chats : [],
       skills: scope === "all" ? objects.skills : [],
@@ -259,6 +260,7 @@ export function useRootModel(
       visibleObjects.agents.length +
       visibleObjects.squads.length +
       visibleObjects.members.length +
+      visibleObjects.views.length +
       visibleObjects.autopilots.length +
       visibleObjects.chats.length +
       visibleObjects.skills.length +

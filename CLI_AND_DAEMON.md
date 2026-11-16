@@ -968,9 +968,10 @@ belongs to a workspace and can optionally have a lead (member or agent).
 multica project list
 multica project list --status in_progress
 multica project list --output json
+multica project list --archived
 ```
 
-Available filters: `--status`.
+Available filters: `--status`, `--archived` (only archived projects; they are hidden by default).
 
 ### Get Project
 
@@ -1004,6 +1005,18 @@ multica project status <id> in_progress
 ```
 
 Valid statuses: `planned`, `in_progress`, `paused`, `completed`, `cancelled`.
+
+### Archive and Restore
+
+```bash
+multica project archive <id>
+multica project restore <id>
+```
+
+Archiving hides a project from lists and pickers and stops new issues from being
+filed into it (HTTP 409 `project_archived`); existing issues stay editable.
+Active autopilots that file into the project are paused, and restoring does not
+resume them. Archiving is independent of status.
 
 ### Delete Project
 
@@ -1152,6 +1165,41 @@ output — use `autopilot get <id> --output json --show-secrets` to reveal them.
 The CLI exposes cron-based `schedule` triggers via `trigger-add`, and `webhook`
 triggers via `trigger-add --kind webhook` plus `trigger-rotate-url`. The data model
 also defines an `api` kind, which is not surfaced here.
+
+### Webhook Event and Action Filters
+
+Use a JSON file to configure the same event/action filters as the web UI:
+
+```json
+[
+  {"event": "pull_request_review", "actions": ["submitted"]},
+  {"event": "push"}
+]
+```
+
+Save this array as `filters.json`, then create or update a webhook trigger:
+
+```bash
+multica autopilot trigger-add <autopilot-id> --kind webhook --event-filters-file filters.json
+multica autopilot trigger-update <autopilot-id> <trigger-id> --event-filters-file filters.json
+multica autopilot get <autopilot-id> --output json
+```
+
+An event without `actions` (or with an empty actions array) accepts every action
+for that event. Filters apply only to webhook triggers; schedule triggers reject
+them. The server validates the filters using the same rules as UI submissions.
+
+Omitting `--event-filters-file` on update preserves the saved filters. Replacing
+filters requires a nonempty array; `null`, an empty array, unknown fields, and
+malformed files are rejected. To explicitly remove filters and accept all events:
+
+```bash
+multica autopilot trigger-update <autopilot-id> <trigger-id> --clear-event-filters
+```
+
+`--clear-event-filters` cannot be combined with `--event-filters-file`. Creation
+without a filter file accepts all events. These flags configure existing event
+and action matching; they do not add payload-field conditions.
 
 ## Other Commands
 

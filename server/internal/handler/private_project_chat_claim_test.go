@@ -37,8 +37,9 @@ func TestPrivateProjectChatClaimDropsContextAfterRemoval(t *testing.T) {
 			})
 			addProjectMemberRow(t, projectID, member)
 
-			// The agent's owner is the workspace owner, who sees every
-			// project: only the chat's human can stop the context.
+			// The agent's owner stays a project member throughout: only the
+			// chat's human can stop the context.
+			addProjectMemberRow(t, projectID, testUserID)
 			agentID := createHandlerTestAgent(t, "PrivateChatClaimAgent", []byte("[]"))
 			runtimeID := handlerTestRuntimeID(t)
 			sessionID := dbfx.ChatSession(t, agentID, testutil.Cols{"creator_id": member, "project_id": projectID})

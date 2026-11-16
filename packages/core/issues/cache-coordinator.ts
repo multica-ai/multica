@@ -22,6 +22,7 @@ import {
   patchNeedsInvalidation,
   removeIssueFromBuckets,
 } from "./cache-helpers";
+import { NO_PROJECT_SIDEBAR_SOURCE } from "./sidebar-list";
 import {
   issueMatchesListFilter,
   listFilterDependsOn,
@@ -654,7 +655,10 @@ export function invalidateSidebarListsForIssue(
   issueId: string,
   projectIds: readonly (string | null | undefined)[],
 ) {
-  const projectSources = new Set(projectIds.filter(Boolean).map((id) => `project:${id}`));
+  // `null` is no project; `undefined` says nothing about it.
+  const projectSources = new Set(
+    projectIds.flatMap((id) => (id ? [`project:${id}`] : id === null ? [NO_PROJECT_SIDEBAR_SOURCE] : [])),
+  );
   const prefix = issueKeys.sidebarAll(wsId);
   qc.invalidateQueries({
     queryKey: prefix,

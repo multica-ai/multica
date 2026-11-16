@@ -272,7 +272,7 @@ export function IssueStatusesTab({
       />
       <ArchiveStatusDialog open={archiveOpen && pendingArchive?.workspace_id === wsId} status={pendingArchive} onClose={() => setArchiveOpen(false)} onViewIssues={viewIssues} />
       <Dialog open={inspectionOpen && inspection?.workspaceId === wsId} onOpenChange={setInspectionOpen} onOpenChangeComplete={(open) => !open && setInspection(null)}>
-        <DialogContent className="flex h-[85dvh] flex-col overflow-hidden sm:max-w-6xl">
+        <DialogContent className="flex h-[85%] flex-col overflow-hidden sm:max-w-6xl">
           {inspection?.workspaceId === wsId && <StatusIssueInspection key={`${wsId}:${inspection.status.key}`} status={inspection.status} onClose={() => setInspectionOpen(false)} />}
         </DialogContent>
       </Dialog>

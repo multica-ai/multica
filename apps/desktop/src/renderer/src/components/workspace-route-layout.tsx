@@ -11,6 +11,7 @@ import { isWorkspaceDeletePending } from "@multica/core/workspace/pending-delete
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceSeen } from "@multica/views/workspace/use-workspace-seen";
 import { WorkspacePresencePrefetch } from "@multica/views/layout";
+import { VoiceWorkspaceWords } from "@multica/views/voice";
 import { SourceBackfillModal } from "@multica/views/onboarding";
 import { useTabStore } from "@/stores/tab-store";
 import { useWindowOverlayStore } from "@/stores/window-overlay-store";
@@ -176,6 +177,7 @@ export function WorkspaceRouteLayout() {
   return (
     <WorkspaceSlugProvider slug={workspaceSlug}>
       <WorkspacePresencePrefetch />
+      <VoiceWorkspaceWords />
       <Outlet />
       {/* Source-attribution backfill: same Dialog the web shell mounts
        *  inside DashboardLayout. Desktop's WorkspaceRouteLayout doesn't

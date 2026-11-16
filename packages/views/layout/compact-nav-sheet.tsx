@@ -19,7 +19,7 @@ import { SpacePanelContent } from "./space-panel";
  * Below `md` the rail and the current space's panel move into one sheet,
  * opened by the page header's nav trigger.
  */
-export function CompactNavSheet({ globalActions = true }: { globalActions?: boolean }) {
+export function CompactNavSheet() {
   const { t } = useT("layout");
   const { isCompact, openMobile, setOpenMobile } = useSidebar();
   const { pathname } = useNavigation();
@@ -42,13 +42,15 @@ export function CompactNavSheet({ globalActions = true }: { globalActions?: bool
         side="left"
         showCloseButton={false}
         data-slot="compact-nav-sheet"
-        className="flex-row gap-0 overflow-hidden bg-app-shell p-0 data-[side=left]:w-auto data-[side=left]:max-w-[calc(100vw-3rem)]"
+        // Runs to the screen edge like the shell it stands in for, insetting
+        // its content instead of stopping at the safe area as sheets do.
+        className="flex-row gap-0 overflow-hidden bg-app-shell p-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] data-[side=left]:inset-y-0 data-[side=left]:left-0 data-[side=left]:w-auto data-[side=left]:max-w-[calc(100vw-3rem)]"
       >
         <SheetHeader className="sr-only">
           <SheetTitle>{t(($) => $.rail.label)}</SheetTitle>
           <SheetDescription>{t(($) => $.rail.sheet_description)}</SheetDescription>
         </SheetHeader>
-        <AppRail globalActions={globalActions} />
+        <AppRail />
         {hasPanel && (
           <div className="my-2 mr-2 flex w-[260px] min-w-0 flex-col overflow-hidden rounded-xl bg-page-canvas shadow-[var(--surface-shadow)] ring-1 ring-surface-border">
             <SpacePanelContent space={shell?.space ?? null} />

@@ -43,6 +43,8 @@ vi.mock("./pickers", () => ({
   PriorityPicker: () => null,
   AssigneePicker: () => null,
   AssigneePickerPanel: () => null,
+  DueDatePicker: () => null,
+  StartDatePicker: () => null,
 }));
 vi.mock("../../search/register-context", () => ({ useRegisterCommandBarContext: () => {} }));
 vi.mock("../actions/use-issue-actions", () => ({
@@ -73,6 +75,9 @@ describe("BatchActionToolbar — batch context menu", () => {
     const menu = await screen.findByRole("menu");
     expect(menu).toHaveTextContent("2 selected");
     expect(screen.getByRole("menuitem", { name: "Delete 2 issues" })).toBeInTheDocument();
+    for (const field of ["Labels", "Project", "Due date"]) {
+      expect(screen.getByRole("menuitem", { name: field })).toBeInTheDocument();
+    }
 
     fireEvent.click(screen.getByRole("menuitem", { name: "Clear selection" }));
     expect(selection.clear).toHaveBeenCalledTimes(1);

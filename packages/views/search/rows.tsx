@@ -71,6 +71,8 @@ export function CommandRow({
   const Icon = command.icon;
   return (
     <CommandPrimitive.Item
+      data-mc="palette-item"
+      data-type="command"
       value={scope ? `command:${scope}:${command.id}` : `command:${command.id}`}
       onSelect={() => {
         if (command.page) {

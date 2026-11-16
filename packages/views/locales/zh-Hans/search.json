@@ -6,6 +6,7 @@
   "breadcrumb_aria": "当前菜单",
   "groups": {
     "pages": "页面",
+    "views": "视图",
     "commands": "命令",
     "members": "成员",
     "agents": "智能体",
@@ -122,7 +123,6 @@
     "unsubscribed": "已取消订阅",
     "label_added": "已添加标签 {{name}}",
     "label_removed": "已移除标签 {{name}}",
-    "label_failed": "未能给所有任务添加标签 {{name}}",
     "update_failed": "更新失败",
     "assigned": "已把 {{identifier}} 指派给 {{name}}"
   },

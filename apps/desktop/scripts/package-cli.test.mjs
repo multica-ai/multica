@@ -8,19 +8,26 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, expect, it } from "vitest";
 
-let root, scripts, bin, marker;
+let root, scripts, bin, marker, voiceMarker;
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "multica-package-cli-"));
   scripts = join(root, "apps", "desktop", "scripts");
   bin = join(root, "bin");
   marker = join(root, "builder-args.txt");
+  voiceMarker = join(root, "voice-args.jsonl");
   mkdirSync(scripts, { recursive: true });
   mkdirSync(bin);
   writeFileSync(marker, "");
+  writeFileSync(voiceMarker, "");
   for (const script of ["bundle-cli.mjs", "package.mjs"]) {
     copyFileSync(fileURLToPath(new URL(script, import.meta.url)), join(scripts, script));
   }
+  // Record staging without loading the native engine or fetching packages.
+  writeFileSync(join(scripts, "bundle-voice-engine.mjs"), `
+    import { appendFileSync } from "node:fs";
+    appendFileSync(process.env.VOICE_MARKER, JSON.stringify(process.argv.slice(2)) + "\\n");
+  `);
 
   // Isolate PATH so no Go toolchain or real Electron packager is used.
   if (process.platform === "win32") {
@@ -42,7 +49,7 @@ function runScript(name, args) {
     if (key.toUpperCase() === "PATH") delete env[key];
   }
   const result = spawnSync(process.execPath, [join(scripts, name), ...args], {
-    env: { ...env, PATH: bin, BUILDER_MARKER: marker },
+    env: { ...env, PATH: bin, BUILDER_MARKER: marker, VOICE_MARKER: voiceMarker },
     encoding: "utf8",
   });
   if (result.error) throw result.error;
@@ -58,6 +65,7 @@ it("allows development without a CLI but refuses to package that target", () => 
   expect(result.stderr).toContain("Packaging Windows x64 requires a bundled CLI");
   expect(result.stderr).not.toContain("at main (");
   expect(readFileSync(marker, "utf8")).toBe("");
+  expect(readFileSync(voiceMarker, "utf8")).toBe("");
 });
 
 it("packages the available x64 CLI and stops before the missing arm64 target", () => {
@@ -72,4 +80,8 @@ it("packages the available x64 CLI and stops before the missing arm64 target", (
   expect(calls).toHaveLength(1);
   expect(calls[0].split(" ")).toContain("--x64");
   expect(calls[0]).not.toContain("--arm64");
+  const voiceCalls = readFileSync(voiceMarker, "utf8").trim().split(/\r?\n/).map(line => JSON.parse(line));
+  expect(voiceCalls).toEqual([
+    ["--target-platform", "win32", "--target-arch", "x64", "--required"],
+  ]);
 });

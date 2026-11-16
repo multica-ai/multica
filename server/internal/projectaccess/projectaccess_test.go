@@ -17,28 +17,34 @@ func uid(b byte) pgtype.UUID {
 	return id
 }
 
-// fakeQuerier: private projects p1 and p2; user 1 is an admin, user 2 is a
-// member of p1 only, user 3 is a member of nothing, user 4 is not in the
-// workspace.
+// fakeQuerier: private projects p1 and p2. User 1 is a member of both, user 2
+// of p1 only, user 3 of neither. User 5 is a workspace admin and user 6 the
+// workspace owner, members of neither. User 4 is not in the workspace.
 type fakeQuerier struct{}
 
 var (
 	p1, p2                                = uid(101), uid(102)
-	admin, p1Member, nonMember, notInWork = uid(1), uid(2), uid(3), uid(4)
+	bothMember, p1Member, nonMember       = uid(1), uid(2), uid(3)
+	notInWork, outsideAdmin, outsideOwner = uid(4), uid(5), uid(6)
 )
 
 func (fakeQuerier) GetMemberByUserAndWorkspace(_ context.Context, arg db.GetMemberByUserAndWorkspaceParams) (db.Member, error) {
 	switch arg.UserID {
-	case admin:
-		return db.Member{UserID: admin, Role: "admin"}, nil
-	case p1Member, nonMember:
+	case outsideOwner:
+		return db.Member{UserID: arg.UserID, Role: "owner"}, nil
+	case outsideAdmin:
+		return db.Member{UserID: arg.UserID, Role: "admin"}, nil
+	case bothMember, p1Member, nonMember:
 		return db.Member{UserID: arg.UserID, Role: "member"}, nil
 	}
 	return db.Member{}, pgx.ErrNoRows
 }
 
 func (fakeQuerier) ListHiddenProjectIDsForUser(_ context.Context, arg db.ListHiddenProjectIDsForUserParams) ([]pgtype.UUID, error) {
-	if arg.UserID == p1Member {
+	switch arg.UserID {
+	case bothMember:
+		return nil, nil
+	case p1Member:
 		return []pgtype.UUID{p2}, nil
 	}
 	return []pgtype.UUID{p1, p2}, nil
@@ -56,11 +62,14 @@ func TestForPrincipals(t *testing.T) {
 		seeP1      bool
 		seeP2      bool
 	}{
-		{"admin sees every project", []pgtype.UUID{admin}, true, true},
+		{"member of both sees both", []pgtype.UUID{bothMember}, true, true},
 		{"member sees their project only", []pgtype.UUID{p1Member}, true, false},
-		{"run needs both humans: admin and member", []pgtype.UUID{admin, p1Member}, true, false},
+		{"workspace admin outside a project does not see it", []pgtype.UUID{outsideAdmin}, false, false},
+		{"workspace owner outside a project does not see it", []pgtype.UUID{outsideOwner}, false, false},
+		{"run needs both humans: two members", []pgtype.UUID{bothMember, p1Member}, true, false},
 		{"run needs both humans: member and outsider", []pgtype.UUID{p1Member, nonMember}, false, false},
-		{"principal outside the workspace sees nothing private", []pgtype.UUID{admin, notInWork}, false, false},
+		{"run needs both humans: member and outside admin", []pgtype.UUID{bothMember, outsideAdmin}, false, false},
+		{"principal outside the workspace sees nothing private", []pgtype.UUID{bothMember, notInWork}, false, false},
 		{"no principal sees nothing private", nil, false, false},
 		{"invalid principals are ignored", []pgtype.UUID{{}, p1Member}, true, false},
 	} {
@@ -81,12 +90,12 @@ func TestForPrincipals(t *testing.T) {
 }
 
 func TestHiddenParamIsNilWhenNothingHidden(t *testing.T) {
-	hidden, err := ForMember(context.Background(), fakeQuerier{}, uid(200), admin, "owner")
+	hidden, err := ForMember(context.Background(), fakeQuerier{}, uid(200), bothMember)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if hidden.Param() != nil || !hidden.Empty() {
-		t.Fatalf("owner hidden set = %v", hidden.Param())
+		t.Fatalf("hidden set of a member of every project = %v", hidden.Param())
 	}
 	if hidden.IDs() == nil {
 		t.Fatal("IDs must never be nil")

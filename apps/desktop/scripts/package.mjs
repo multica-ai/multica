@@ -34,6 +34,7 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 const desktopRoot = resolve(here, "..");
 const bundleCliScript = resolve(here, "bundle-cli.mjs");
+const bundleVoiceEngineScript = resolve(here, "bundle-voice-engine.mjs");
 
 const PLATFORM_CONFIG = {
   mac: {
@@ -454,6 +455,23 @@ function main() {
       );
       process.exit(1);
     }
+
+    console.log(`[package] bundling voice engine → ${formatTarget(target)}`);
+    execFileSync(
+      "node",
+      [
+        bundleVoiceEngineScript,
+        "--target-platform",
+        PLATFORM_CONFIG[target.platform].runtimePlatform,
+        "--target-arch",
+        target.arch,
+        "--required",
+      ],
+      {
+        stdio: "inherit",
+        cwd: desktopRoot,
+      },
+    );
 
     const builderArgs = builderArgsForTarget(target, parsed, version, {
       disableMacNotarize,

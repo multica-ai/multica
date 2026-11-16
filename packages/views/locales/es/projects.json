@@ -6,16 +6,23 @@
     "view_comfortable": "Cómodo",
     "no_search_results": "Ningún resultado coincide con tu búsqueda",
     "view_table": "Tabla",
-    "view_cards": "Tarjetas",
+    "view_board": "Tablero",
     "row_menu": "Acciones del proyecto",
     "rename": "Renombrar",
     "pin": "Fijar en la barra lateral",
     "unpin": "Dejar de fijar",
     "delete": "Eliminar",
     "no_matches": "Ningún proyecto coincide",
+    "search": "Buscar proyectos",
+    "group_none": "Sin agrupar",
+    "board_column_empty": "Sin proyectos",
     "scope_all": "Todos los proyectos",
     "scope_active": "Proyectos activos",
-    "scope_closed": "Proyectos cerrados"
+    "scope_closed": "Proyectos cerrados",
+    "scope_archived": "Proyectos archivados",
+    "archive": "Archivar",
+    "restore": "Restaurar",
+    "no_archived": "No hay proyectos archivados"
   },
   "table": {
     "name": "Nombre",
@@ -23,8 +30,12 @@
     "status": "Estado",
     "progress": "Progreso",
     "lead": "Responsable",
+    "start_date": "Fecha de inicio",
+    "due_date": "Fecha de entrega",
+    "last_activity": "Actividad reciente",
     "created": "Creado",
-    "issues": "Tareas"
+    "issues": "Tareas",
+    "archived": "Archivado"
   },
   "status": {
     "planned": "Planificado",
@@ -86,7 +97,9 @@
     "toast_move_issue_failed": "No se ha podido mover la tarea",
     "not_found_description": "Puede haberse eliminado o puede que no tengas acceso.",
     "back_to_list": "Todos los proyectos",
-    "empty_issues_add_existing": "Añadir tarea existente"
+    "empty_issues_add_existing": "Añadir tarea existente",
+    "archive_action": "Archivar proyecto",
+    "restore_action": "Restaurar proyecto"
   },
   "resources": {
     "section_header": "Recursos",
@@ -155,7 +168,9 @@
     "title": "Eliminar proyecto",
     "description": "Esto eliminará el proyecto. Las tareas no se eliminarán, pero se desenlazarán.",
     "confirm": "Eliminar",
-    "cancel": "Cancelar"
+    "cancel": "Cancelar",
+    "archive_instead": "Archivar en su lugar",
+    "archive_hint": "Archivar oculta el proyecto pero conserva sus tareas, historial y ajustes. Puedes restaurarlo cuando quieras."
   },
   "picker": {
     "no_project": "Sin proyecto",
@@ -215,7 +230,8 @@
     "search": "Buscar nombre o correo...",
     "no_members": "No hay miembros coincidentes",
     "no_selected": "No hay miembros del proyecto",
-    "admin_notice": "Los owner y admin del espacio de trabajo siempre tienen acceso.",
+    "members_only_notice": "Solo las personas de esta lista tienen acceso. Los owner y admin del espacio de trabajo también deben añadirse.",
+    "manager": "Gestiona el acceso",
     "you": "Tú",
     "remove": "Quitar a {{name}}",
     "failed": "No se pudieron guardar los permisos.",
@@ -224,5 +240,29 @@
     "publish_description": "Todos los miembros podrán ver este proyecto, sus tareas, comentarios y archivos adjuntos.",
     "done": "Listo",
     "retry": "Reintentar"
+  },
+  "archive": {
+    "badge": "Archivado",
+    "dialog_title": "¿Archivar «{{name}}»?",
+    "dialog_title_count_one": "¿Archivar {{count}} proyecto?",
+    "dialog_title_count_other": "¿Archivar {{count}} proyectos?",
+    "dialog_description": "Los proyectos archivados se ocultan de las listas y selectores de proyectos y dejan de aceptar tareas nuevas. No se elimina nada.",
+    "dialog_open_issues_one": "{{count}} tarea abierta se queda como está y se puede seguir viendo y editando.",
+    "dialog_open_issues_other": "{{count}} tareas abiertas se quedan como están y se pueden seguir viendo y editando.",
+    "dialog_autopilots_one": "Se pausará {{count}} automatización activa que crea tareas en él.",
+    "dialog_autopilots_other": "Se pausarán {{count}} automatizaciones activas que crean tareas en él.",
+    "dialog_restore_hint": "Puedes restaurarlo cuando quieras desde Proyectos archivados.",
+    "cancel": "Cancelar",
+    "confirm": "Archivar",
+    "toast_archived": "«{{name}}» archivado",
+    "toast_archived_count_one": "{{count}} proyecto archivado",
+    "toast_archived_count_other": "{{count}} proyectos archivados",
+    "toast_paused_one": "Se pausó {{count}} automatización que crea tareas en él",
+    "toast_paused_other": "Se pausaron {{count}} automatizaciones que crean tareas en él",
+    "undo": "Deshacer",
+    "toast_restored": "«{{name}}» restaurado",
+    "toast_completed": "«{{name}}» está completado",
+    "notice": "Este proyecto está archivado. No aparece en las listas ni en los selectores de proyectos y no acepta tareas nuevas; sus tareas se pueden seguir viendo y editando.",
+    "prop_label": "Archivado"
   }
 }

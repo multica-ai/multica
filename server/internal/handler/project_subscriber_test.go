@@ -65,8 +65,9 @@ func TestIssueSubscribersIncludeProjectSubscribers(t *testing.T) {
 		testPool.Exec(context.Background(), `DELETE FROM project_subscriber WHERE project_id = $1`, f.projectID)
 		testPool.Exec(context.Background(), `DELETE FROM issue_subscriber WHERE issue_id = $1`, f.secretIssue)
 	})
-	// The outsider's row stands for a member who lost access after subscribing.
-	for _, userID := range []string{f.insider, f.outsider, testUserID} {
+	// The outsider's row stands for a member who lost access after
+	// subscribing, the admin's for one whose role used to be enough.
+	for _, userID := range []string{f.insider, f.outsider, f.outsideAdmin, testUserID} {
 		if _, err := testPool.Exec(ctx, `
 			INSERT INTO project_subscriber (workspace_id, project_id, user_id) VALUES ($1, $2, $3)
 		`, testWorkspaceID, f.projectID, userID); err != nil {
@@ -109,6 +110,9 @@ func TestIssueSubscribersIncludeProjectSubscribers(t *testing.T) {
 	}
 	if r, ok := got[f.outsider]; ok {
 		t.Fatalf("outsider listed with %v; they cannot see the project", r)
+	}
+	if r, ok := got[f.outsideAdmin]; ok {
+		t.Fatalf("workspace admin outside the project listed with %v; the role does not let them see it", r)
 	}
 
 	// Leaving the issue persists an opt-out although no row existed.

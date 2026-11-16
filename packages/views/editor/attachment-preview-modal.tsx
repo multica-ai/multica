@@ -33,6 +33,7 @@ import {
   Code,
   Copy,
   Download,
+  Ellipsis,
   ExternalLink,
   File,
   FileAudio,
@@ -67,7 +68,19 @@ import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import { createShortcutChord } from "@multica/core/shortcuts";
 import { cn } from "@multica/ui/lib/utils";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
-import { copyImage } from "@multica/ui/lib/clipboard";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@multica/ui/components/ui/dropdown-menu";
+import { copyImage, copyText } from "@multica/ui/lib/clipboard";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import {
   UI_EASE_OUT,
@@ -568,8 +581,9 @@ export function AttachmentPreviewModal({
       {open && (
         <motion.div
           // Blurred as well as dimmed: at any opacity that still reads as a
-          // backdrop, the page's text shows through behind the top bar.
-          className="fixed inset-0 z-50 flex flex-col bg-black/95 backdrop-blur-xl"
+          // backdrop, the page's text shows through behind the top bar. The
+          // backdrop runs to the screen edge; the controls stay in the safe area.
+          className="fixed inset-0 z-50 flex flex-col bg-black/95 pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] backdrop-blur-xl"
           // Only a click that lands on the backdrop itself closes. A pan that
           // starts on the zoom canvas and releases out here retargets its
           // click through pointer capture, but this makes the intent explicit
@@ -826,6 +840,17 @@ function PreviewPanel({
   // headers), and there the browser's own context menu has Copy image. Copies
   // the frame on screen, which during a sequence swap is still the last one.
   const canCopyImage = kind === "image" && isDesktopShell();
+  const canCopyText =
+    kind !== null && TEXT_BACKED_KINDS.has(kind) && (kind !== "html" || htmlSource);
+  const copyContent = useAttachmentHtmlText(canCopyText ? state.attachmentId : null);
+  const handleCopyText = async () => {
+    if (!copyContent.data || copyContent.isError) return;
+    if (await copyText(copyContent.data.text)) {
+      toast.success(t(($) => $.attachment.contents_copied));
+    } else {
+      toast.error(t(($) => $.attachment.copy_failed));
+    }
+  };
   const handleCopyImage = async () => {
     if (await copyImage(mediaUrl)) {
       toast.success(t(($) => $.image.image_copied));
@@ -880,6 +905,7 @@ function PreviewPanel({
 
   const wrapButton = (enabled: boolean) => (
     <ChromeButton
+      className="hidden @3xl:flex"
       label={t(($) => $.attachment.wrap_lines)}
       pressed={enabled && wrap}
       disabled={!enabled}
@@ -894,6 +920,17 @@ function PreviewPanel({
     tablet: t(($) => $.attachment.viewport_tablet),
     phone: t(($) => $.attachment.viewport_phone),
   };
+  const overflowTriggerRef = useRef<HTMLButtonElement>(null);
+  const restoreOverflowFocus = useRef(false);
+  const overflowActionMovesFocus = useRef(false);
+  const navigateFromOverflow = (navigate: () => void) => {
+    overflowActionMovesFocus.current = true;
+    navigate();
+  };
+  const showZoomControls = kind === "image" && !!(natural || sequence);
+  const hasViewControls = showZoomControls || kind === "html" || kind === "structured" || kind === "text";
+  const hasOverflowActions = hasViewControls || !!(locate || copyLink || onOpenInNewTab || onOpenOverview || info);
+  const canWrap = kind === "text" || (kind === "html" && htmlSource) || (kind === "structured" && structuredView === "raw");
 
   return (
     <>
@@ -902,10 +939,10 @@ function PreviewPanel({
         style={surface === "viewer" ? DRAG : undefined}
       >
         <div className="flex min-w-0 items-center gap-2.5">
-          <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-secondary text-muted-foreground">
+          <span className="hidden size-8 shrink-0 items-center justify-center rounded-md bg-secondary text-muted-foreground @3xl:flex">
             <KindIcon className="size-4" />
           </span>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <div className="flex min-w-0 items-center gap-2" style={titleAccessory ? NO_DRAG : undefined}>
               {kind === "html" && !htmlSource ? (
                 <HtmlPreviewAddress
@@ -936,9 +973,9 @@ function PreviewPanel({
               (disabled while un-measured) instead: `natural` passes through
               null on every swap, and controls that vanish and reappear shift
               the buttons to their right on every navigation. */}
-          {kind === "image" && (natural || sequence) && (
+          {showZoomControls && (
             <>
-              <ZoomControls canvas={canvas} disabled={!natural} />
+              <ZoomControls className="hidden @3xl:flex" canvas={canvas} disabled={!natural} />
               <ChromeDivider />
             </>
           )}
@@ -947,6 +984,7 @@ function PreviewPanel({
           {kind === "html" && (
             <>
               <ChromeButton
+                className="hidden @3xl:flex"
                 label={t(($) => $.attachment.reload)}
                 disabled={htmlSource}
                 onClick={htmlLocation.reload}
@@ -954,6 +992,7 @@ function PreviewPanel({
                 <RotateCw className="size-4" />
               </ChromeButton>
               <ChromeSegmented
+                className="hidden @3xl:flex"
                 label={t(($) => $.attachment.viewport)}
                 value={htmlViewport}
                 disabled={htmlSource}
@@ -978,6 +1017,7 @@ function PreviewPanel({
           {kind === "structured" && (
             <>
               <ChromeSegmented
+                className="hidden @3xl:flex"
                 label={t(($) => $.attachment.view_mode)}
                 value={structuredView}
                 disabled={!treeAvailable}
@@ -1006,17 +1046,32 @@ function PreviewPanel({
             </>
           )}
           {locate && (
-            <ChromeButton label={locate.label} onClick={locate.onSelect}>
+            <ChromeButton className="hidden @3xl:flex" label={locate.label} onClick={locate.onSelect}>
               <MessageSquareText className="size-4" />
             </ChromeButton>
           )}
+          {/* Reserve the HTML copy slot so switching source never moves its toggle. */}
+          {(canCopyText || kind === "html") && (
+            <div className="size-11 shrink-0 @3xl:size-8">
+              {canCopyText && (
+                <ChromeButton
+                  label={t(($) => $.attachment.copy_contents)}
+                  disabled={!copyContent.data || copyContent.isError}
+                  onClick={() => void handleCopyText()}
+                >
+                  <Copy className="size-4" />
+                </ChromeButton>
+              )}
+            </div>
+          )}
           {copyLink && (
-            <ChromeButton label={copyLink.label} onClick={copyLink.onSelect}>
+            <ChromeButton className="hidden @3xl:flex" label={copyLink.label} onClick={copyLink.onSelect}>
               <Link2 className="size-4" />
             </ChromeButton>
           )}
           {onOpenInNewTab && (
             <ChromeButton
+              className="hidden @3xl:flex"
               label={t(($) => $.attachment.open_in_new_tab)}
               onClick={onOpenInNewTab}
             >
@@ -1044,9 +1099,142 @@ function PreviewPanel({
               <Download className="size-4" />
             )}
           </ChromeButton>
+          {hasOverflowActions && (
+            <div className="@3xl:hidden">
+              <DropdownMenu
+                onOpenChange={(open, details) => {
+                  if (open) {
+                    restoreOverflowFocus.current = false;
+                    overflowActionMovesFocus.current = false;
+                  } else if (details.reason !== "trigger-hover") {
+                    // Hover dismissal can follow item selection or Escape during exit.
+                    restoreOverflowFocus.current = details.reason === "escape-key" ||
+                      (details.reason === "item-press" && !overflowActionMovesFocus.current);
+                  }
+                }}
+                onOpenChangeComplete={(open) => {
+                  if (!open && restoreOverflowFocus.current) {
+                    restoreOverflowFocus.current = false;
+                    overflowTriggerRef.current?.focus({ preventScroll: true });
+                  }
+                }}
+              >
+                <DropdownMenuTrigger
+                  ref={overflowTriggerRef}
+                  render={
+                    <button
+                      type="button"
+                      aria-label={t(($) => $.attachment.more_actions)}
+                      className="flex size-11 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                    >
+                      <Ellipsis className="size-4" />
+                    </button>
+                  }
+                />
+                <DropdownMenuContent
+                  align="end"
+                  className="dark w-72 max-w-[calc(100vw-1rem)] [&_[role^=menuitem]]:min-h-11"
+                >
+                  {kind === "html" && (
+                    <DropdownMenuGroup>
+                      <DropdownMenuLabel>{t(($) => $.attachment.viewport)}</DropdownMenuLabel>
+                      <DropdownMenuRadioGroup
+                        className="grid grid-cols-2 gap-0.5"
+                        value={htmlViewport}
+                        onValueChange={(value) => setHtmlViewport(value as HtmlViewport)}
+                      >
+                        {HTML_VIEWPORTS.map((viewport) => (
+                          <DropdownMenuRadioItem key={viewport} value={viewport} disabled={htmlSource}>
+                            {viewportLabels[viewport]}
+                          </DropdownMenuRadioItem>
+                        ))}
+                      </DropdownMenuRadioGroup>
+                      <DropdownMenuItem onClick={htmlLocation.reload} disabled={htmlSource}>
+                        <RotateCw className="size-4" />
+                        {t(($) => $.attachment.reload)}
+                      </DropdownMenuItem>
+                    </DropdownMenuGroup>
+                  )}
+                  {kind === "structured" && (
+                    <DropdownMenuGroup>
+                      <DropdownMenuLabel>{t(($) => $.attachment.view_mode)}</DropdownMenuLabel>
+                      <DropdownMenuRadioGroup
+                        value={structuredView}
+                        onValueChange={(value) => setStructuredChoice(value as StructuredView)}
+                      >
+                        <DropdownMenuRadioItem value="tree" disabled={!treeAvailable}>
+                          <ListTree className="size-4" />
+                          {t(($) => $.attachment.view_tree)}
+                        </DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="raw" disabled={!treeAvailable}>
+                          <Code className="size-4" />
+                          {t(($) => $.attachment.view_raw)}
+                        </DropdownMenuRadioItem>
+                      </DropdownMenuRadioGroup>
+                    </DropdownMenuGroup>
+                  )}
+                  {(kind === "html" || kind === "structured" || kind === "text") && (
+                    <DropdownMenuCheckboxItem checked={canWrap && wrap} disabled={!canWrap} closeOnClick={false} onCheckedChange={setWrapChoice}>
+                      <WrapText className="size-4" />
+                      {t(($) => $.attachment.wrap_lines)}
+                    </DropdownMenuCheckboxItem>
+                  )}
+                  {showZoomControls && (
+                    <DropdownMenuGroup>
+                      <DropdownMenuLabel>{canvas.zoomPercent}%</DropdownMenuLabel>
+                      <DropdownMenuItem onClick={canvas.zoomOut} disabled={!natural || !canvas.canZoomOut}>
+                        {t(($) => $.canvas.zoom_out)}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={canvas.zoomIn} disabled={!natural || !canvas.canZoomIn}>
+                        {t(($) => $.canvas.zoom_in)}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={canvas.fit} disabled={!natural}>
+                        {t(($) => $.canvas.zoom_fit)}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={canvas.zoomToActualSize} disabled={!natural}>
+                        {t(($) => $.canvas.zoom_actual)}
+                      </DropdownMenuItem>
+                    </DropdownMenuGroup>
+                  )}
+                  {hasViewControls && (locate || copyLink || onOpenInNewTab || onOpenOverview || info) && <DropdownMenuSeparator />}
+                  {locate && (
+                    <DropdownMenuItem onClick={() => navigateFromOverflow(locate.onSelect)}>
+                      <MessageSquareText className="size-4" />
+                      {locate.label}
+                    </DropdownMenuItem>
+                  )}
+                  {copyLink && (
+                    <DropdownMenuItem onClick={copyLink.onSelect}>
+                      <Link2 className="size-4" />
+                      {copyLink.label}
+                    </DropdownMenuItem>
+                  )}
+                  {onOpenInNewTab && (
+                    <DropdownMenuItem onClick={() => navigateFromOverflow(onOpenInNewTab)}>
+                      <ExternalLink className="size-4" />
+                      {t(($) => $.attachment.open_in_new_tab)}
+                    </DropdownMenuItem>
+                  )}
+                  {onOpenOverview && (
+                    <DropdownMenuItem onClick={() => navigateFromOverflow(onOpenOverview)}>
+                      <LayoutGrid className="size-4" />
+                      {t(($) => $.attachment.overview)}
+                    </DropdownMenuItem>
+                  )}
+                  {info && (
+                    <DropdownMenuCheckboxItem checked={info.open} closeOnClick onCheckedChange={info.onToggle}>
+                      <PanelRight className="size-4" />
+                      {t(($) => $.attachment.info)}
+                    </DropdownMenuCheckboxItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          )}
           {(onOpenOverview || info) && <ChromeDivider />}
           {onOpenOverview && (
             <ChromeButton
+              className="hidden @3xl:flex"
               label={t(($) => $.attachment.overview)}
               shortcut="G"
               onClick={onOpenOverview}
@@ -1056,6 +1244,7 @@ function PreviewPanel({
           )}
           {info && (
             <ChromeButton
+              className="hidden @3xl:flex"
               label={t(($) => $.attachment.info)}
               shortcut="I"
               pressed={info.open}
@@ -1140,6 +1329,7 @@ function PreviewPanel({
 // Top-bar icon button. Sits inside the `dark` header, so the semantic tokens
 // resolve to the dark set whatever the app theme is.
 function ChromeButton({
+  className,
   label,
   shortcut,
   pressed,
@@ -1148,6 +1338,7 @@ function ChromeButton({
   onClick,
   children,
 }: {
+  className?: string;
   label: string;
   /** Single-key shortcut, shown in the tooltip and announced to AT. */
   shortcut?: string;
@@ -1171,8 +1362,9 @@ function ChromeButton({
       <button
         type="button"
         className={cn(
-          "flex size-8 items-center justify-center rounded-md transition-colors enabled:hover:bg-secondary enabled:hover:text-foreground disabled:opacity-40",
+          "flex size-11 shrink-0 items-center justify-center rounded-md transition-colors enabled:hover:bg-secondary enabled:hover:text-foreground disabled:opacity-40 @3xl:size-8",
           pressed ? "bg-secondary text-foreground" : "text-muted-foreground",
+          className,
         )}
         aria-label={label}
         aria-keyshortcuts={shortcut}
@@ -1191,12 +1383,14 @@ function ChromeButton({
 // pressed look as the toggle buttons beside it. Labels show once the bar has
 // room for them; below that the icons carry the choice, named by tooltip.
 function ChromeSegmented<T extends string>({
+  className,
   label,
   value,
   options,
   disabled,
   onChange,
 }: {
+  className?: string;
   label: string;
   value: T;
   options: ReadonlyArray<{ value: T; label: string; icon: IconComponent }>;
@@ -1204,7 +1398,7 @@ function ChromeSegmented<T extends string>({
   onChange: (value: T) => void;
 }) {
   return (
-    <div role="group" aria-label={label} className="flex items-center gap-0.5">
+    <div role="group" aria-label={label} className={cn("flex items-center gap-0.5", className)}>
       {options.map((option) => {
         const pressed = option.value === value;
         const Icon = option.icon;
@@ -1234,7 +1428,7 @@ function ChromeSegmented<T extends string>({
 }
 
 function ChromeDivider() {
-  return <span className="mx-1.5 h-4 w-px bg-input" aria-hidden />;
+  return <span className="mx-1.5 hidden h-4 w-px bg-input @3xl:block" aria-hidden />;
 }
 
 // Prev / next with the position between them, centered under the stage. The

@@ -748,6 +748,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
   if (isLoading) {
     return (
       <ObjectPage
+        type="skill"
         layoutId={SKILL_DETAIL_LAYOUT_ID}
         segments={[listSegment]}
         leaf={<Skeleton className="h-4 w-40" />}
@@ -773,6 +774,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
   if (error || !skill) {
     return (
       <ObjectPage
+        type="skill"
         layoutId={SKILL_DETAIL_LAYOUT_ID}
         segments={[listSegment]}
         leaf={
@@ -1062,6 +1064,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
     // same rule as the skills list batch toolbar).
     <div className="relative flex min-h-0 flex-1 flex-col">
       <ObjectPage
+        type="skill"
         layoutId={SKILL_DETAIL_LAYOUT_ID}
         segments={
           subView

@@ -42,3 +42,20 @@ describe("openCreateIssueWithPreference", () => {
     expect(useModalStore.getState().data).toEqual({ project_id: "p2" });
   });
 });
+
+describe("useCreateModeStore expanded", () => {
+  afterEach(() => {
+    useCreateModeStore.getState().setExpanded(false);
+  });
+
+  it("defaults to the compact dialog", () => {
+    expect(useCreateModeStore.getState().expanded).toBe(false);
+  });
+
+  it("remembers the last dialog size", () => {
+    useCreateModeStore.getState().setExpanded(true);
+    expect(useCreateModeStore.getState().expanded).toBe(true);
+    useCreateModeStore.getState().setExpanded(false);
+    expect(useCreateModeStore.getState().expanded).toBe(false);
+  });
+});

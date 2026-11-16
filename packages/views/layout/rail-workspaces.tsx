@@ -173,12 +173,13 @@ export function RailWorkspaces() {
           <DropdownMenuTrigger
             aria-label={label}
             onContextMenu={tileMenu.openAtPointer}
-            className="relative inline-flex size-[34px] shrink-0 cursor-pointer items-center justify-center rounded-lg outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            className="relative inline-flex size-[34px] shrink-0 cursor-pointer items-center justify-center rounded-[var(--avatar-radius,var(--radius-lg))] outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
           >
             <WorkspaceAvatar
               name={current.name}
               avatarUrl={current.avatar_url}
-              className="h-[34px] w-[34px] rounded-lg border-surface-border bg-surface-raised text-body text-foreground shadow-[var(--surface-shadow)]"
+              radius="lg"
+              className="h-[34px] w-[34px] border-surface-border bg-surface-raised text-body text-foreground shadow-[var(--surface-shadow)]"
             />
             {(otherUnread || invitations.length > 0) && (
               <UnreadDot className="absolute -top-0.5 -right-0.5 ring-2 ring-app-shell" />

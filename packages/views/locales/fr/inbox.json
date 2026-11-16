@@ -42,7 +42,8 @@
     "archive": "Archiver",
     "unarchive": "Désarchiver",
     "open_in_new_tab": "Ouvrir dans un nouvel onglet",
-    "delete": "Supprimer"
+    "delete": "Supprimer",
+    "unsubscribe_archive": "Se désabonner et archiver"
   },
   "list": {
     "loading_selection": "Chargement de la notification…",
@@ -70,6 +71,8 @@
     "retry_with_context": "Réessayer avec le contexte",
     "edit_advanced": "Modifier en mode avancé",
     "autopilot_quota_exceeded_body": "Cet espace de travail a atteint sa limite de {{limit}} exécutions d'automatisation pour la période actuelle. Les prochaines exécutions d'automatisation ne démarreront qu'après la réinitialisation du quota {{resetAt}}.",
+    "project_owner_joined_body": "{{name}}, propriétaire de l’espace de travail, s’est ajouté à ce projet privé et peut désormais voir ses tâches, commentaires et pièces jointes.",
+    "open_project": "Ouvrir le projet",
     "autopilot_quota_upgrade": "Voir les options de mise à niveau",
     "archive": "Archiver",
     "unarchive": "Désarchiver"
@@ -97,6 +100,7 @@
     "quick_create_unconfirmed": "Création avec un agent non confirmée",
     "autopilot_paused": "Automatisation en pause",
     "children_done": "Sous-tâches terminées",
+    "project_owner_joined": "Le propriétaire a rejoint le projet",
     "autopilot_quota_exceeded": "Limite d'exécutions d'automatisation atteinte",
     "app_action_requested": "Confirmation requise",
     "app_action_reminder": "Confirmation bientôt expirée",
@@ -122,7 +126,11 @@
     "source_context_retry_started": "Nouvelle tentative démarrée avec le contexte d'origine",
     "archived": "Notification archivée",
     "unarchived": "Notification restaurée",
-    "deleted": "Notification supprimée"
+    "deleted": "Notification supprimée",
+    "unsubscribed_archived": "Désabonné et archivé",
+    "unsubscribed_archived_subtree": "Désabonné de cette tâche et de ses sous-tâches",
+    "unsubscribed_hint": "Ses mises à jour n'arriveront plus dans votre boîte de réception. Les @mentions, si.",
+    "undo": "Annuler"
   },
   "errors": {
     "archived_lookup_failed": "Échec du chargement de la notification liée",
@@ -139,7 +147,9 @@
     "unarchive_failed": "Échec du désarchivage",
     "archived_load_failed": "Échec du chargement des notifications archivées",
     "filters_load_failed": "Impossible de charger les filtres",
-    "delete_failed": "Impossible de supprimer la notification. Réessayez."
+    "delete_failed": "Impossible de supprimer la notification. Réessayez.",
+    "unsubscribe_archive_failed": "Échec du désabonnement",
+    "undo_unsubscribe_failed": "Échec de l'annulation"
   },
   "delete_dialog": {
     "title": "Supprimer la notification ?",
@@ -147,5 +157,45 @@
     "issue_description": "Les notifications de cette tâche dans cette vue seront supprimées définitivement. La tâche et ses exécutions seront conservées.",
     "cancel": "Annuler",
     "active_issue_description": "Les notifications actives de cette tâche seront supprimées définitivement. Les notifications précédemment archivées seront conservées et réapparaîtront dans les archives. La tâche et ses exécutions seront conservées."
+  },
+  "unsubscribe": {
+    "title": "Se désabonner et archiver. Ses mises à jour ne vous parviendront plus ; les @mentions, si.",
+    "this_issue": "Cette tâche uniquement",
+    "subtree_one": "Cette tâche et sa {{count}} sous-tâche",
+    "subtree_other": "Cette tâche et ses {{count}} sous-tâches",
+    "subtree_unknown": "Cette tâche et ses sous-tâches"
+  },
+  "snooze": {
+    "action": "Reporter",
+    "menu_title": "Reporter jusqu'à…",
+    "unsnooze": "Faire revenir maintenant",
+    "change_time": "Changer l'heure",
+    "hours_1": "1 heure",
+    "hours_3": "3 heures",
+    "days_1": "1 jour",
+    "days_3": "3 jours",
+    "weeks_1": "1 semaine",
+    "pick_time": "Choisir une date et une heure…",
+    "picker_title": "Choisir une date et une heure",
+    "picker_back": "Retour",
+    "picker_time": "Heure",
+    "picker_hour": "Heure",
+    "picker_minute": "Minute",
+    "picker_submit": "Reporter jusqu'à {{time}}",
+    "hint": "Revient plus tôt si vous êtes mentionné nommément, assigné, ou si une exécution échoue.",
+    "custom_invalid": "Choisissez une heure future, dans moins d'un an.",
+    "back_at": "Revient {{time}}",
+    "returned": "Report terminé",
+    "updates_one": "{{count}} nouveauté pendant le report",
+    "updates_other": "{{count}} nouveautés pendant le report",
+    "toast_snoozed": "Reporté jusqu'à {{time}}",
+    "toast_unsnoozed": "De retour dans votre boîte de réception",
+    "undo": "Annuler",
+    "failed": "Impossible de reporter",
+    "unsnooze_failed": "Impossible de faire revenir",
+    "view_empty": "Rien de reporté",
+    "view_empty_description": "Reportez une tâche depuis votre boîte de réception : elle attend ici jusqu'à son retour.",
+    "col_updates": "Pendant le report",
+    "col_back": "Retour"
   }
 }

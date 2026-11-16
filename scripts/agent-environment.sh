@@ -57,10 +57,19 @@ other_component() {
 
 # An atomic mkdir, as in dev-env.sh: flock is not on a stock macOS. A lock
 # whose holder is gone is taken over, so a killed stop cannot wedge the next.
+# mkdir's exit status alone does not decide the holder: uutils mkdir (Ubuntu
+# 26.04) can tell two simultaneous callers that each created the directory.
+# The holder is whoever then creates `held` in it, which bash's noclobber does
+# with O_EXCL. The directory stays the lock, so a stop and a `start` still
+# running an earlier version of this script keep excluding each other.
+try_lock() {
+  mkdir "$LOCK_DIR" 2>/dev/null && (set -C; : > "$LOCK_DIR/held") 2>/dev/null
+}
+
 acquire_lock() {
   local holder marker waited=0
   mkdir -p "$STATE_DIR"
-  while ! mkdir "$LOCK_DIR" 2>/dev/null; do
+  while ! try_lock; do
     # Removing a PID-specific marker is the reaper's atomic claim. Only
     # its winner may rmdir the old lock; another stale observer cannot
     # remove a new holder's marker (or its directory).
@@ -71,6 +80,7 @@ acquire_lock() {
         *) holder="${marker##*/owner-}" ;;
       esac
       if [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null && rm "$marker" 2>/dev/null; then
+        rm -f "$LOCK_DIR/held"
         rmdir "$LOCK_DIR" 2>/dev/null || true
       fi
     done
@@ -82,7 +92,9 @@ acquire_lock() {
 }
 
 release_lock() {
-  rm "$LOCK_DIR/owner-$$" && rmdir "$LOCK_DIR"
+  rm "$LOCK_DIR/owner-$$" "$LOCK_DIR/held"
+  # Once held is gone the next holder may already have taken this directory.
+  rmdir "$LOCK_DIR" 2>/dev/null || true
 }
 
 claim_file() { printf '%s/%s.claim' "$STATE_DIR" "$1"; }
