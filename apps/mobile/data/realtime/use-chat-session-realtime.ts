@@ -11,7 +11,10 @@
  *   - chat:done                 → patch messages inline + refresh pendingTask
  *   - chat:quick_actions        → patch the async quick-actions supplement
  *                                  onto the assistant message
- *   - task:queued / dispatch    → seed / promote pendingTask
+ *   - task:queued               → refresh pendingTask + messages (a
+ *                                  re-queued steer moves its message to a
+ *                                  new turn)
+ *   - task:dispatch             → promote pendingTask
  *   - task:cancelled            → refresh pendingTask + messages
  *   - chat:cancel_finalized     → refresh the durable cancellation outcome
  *   - task:completed            → no-op for messages (chat:done already
