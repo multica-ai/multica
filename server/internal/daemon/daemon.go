@@ -5693,12 +5693,12 @@ func (d *Daemon) noteWokenRuntime(runtimeID string) {
 //     pre-#7452 behaviour) rather than re-forcing forever; the empty-claim TTL
 //     remains the outer bound.
 //   - acknowledged non-nil: an upgraded server spoke. It lists only the forced
-//     runtimes it settled this cycle (no candidates, or every candidate agent
-//     attempted with nothing claimable left behind). Every other drained
-//     runtime is re-noted and forced again next cycle, including when the list
-//     is empty. A forced runtime that may still hold an unattempted claimable
-//     task is deliberately in that group: it keeps its stale cached verdict, so
-//     staying forced is what makes the fix independent of a Redis repair write.
+//     runtimes it observed genuinely idle (a zero-candidate scan, cache
+//     re-armed). Every other drained runtime is re-noted and forced again next
+//     cycle, including when the list is empty. A forced runtime whose scan found
+//     candidates is deliberately in that group: it keeps its stale cached
+//     verdict until a scan comes back empty, so the fix never depends on a
+//     Redis repair write succeeding.
 //
 // The caller passes a set already intersected with the live runtime set
 // (filterLiveRuntimes), so a runtime deleted since it was woken is never
@@ -5760,10 +5760,9 @@ func (d *Daemon) filterLiveRuntimes(ids []string) []string {
 }
 
 // hasPendingForceRecheck reports whether any runtime is still awaiting a forced
-// server-side re-check (#7452). The poller consults it before taking the long WS
-// safety interval: a pending force hint means a woken runtime's queued task may
-// still be stranded, so the poller must keep the normal cadence rather than wait
-// out the ~3-minute interval that would re-introduce the #7452 stall.
+// server-side re-check (#7452). taskClaimPollInterval consults it after a claim
+// that took work, so a woken runtime's remaining same-agent task is not left
+// behind the ~3-minute WS safety interval.
 func (d *Daemon) hasPendingForceRecheck() bool {
 	d.forceRecheckMu.Lock()
 	defer d.forceRecheckMu.Unlock()
@@ -5777,22 +5776,37 @@ func (d *Daemon) hasPendingForceRecheck() bool {
 // jitter keeps the default below the server's 3-minute empty-claim cache TTL
 // while preventing an idle fleet from polling in lockstep.
 func (d *Daemon) taskClaimPollInterval(result claimTasksResult) time.Duration {
-	// A still-pending force-recheck hint (#7452) must not wait out the long WS
-	// safety interval: a forced claim that dispatched one task but deliberately
-	// kept the runtime forced leaves free slots, and sleeping ~3 minutes here is
-	// exactly the stall this fix targets. Fall back to the normal poll so the
-	// next claim re-forces the runtime promptly.
-	if d.hasPendingForceRecheck() {
-		if d.cfg.PollInterval > 0 {
-			return d.cfg.PollInterval
+	interval := d.baseTaskClaimPollInterval(result)
+	// A forced claim that claimed work while a force-recheck hint is still
+	// pending (#7452) must not wait out the long WS safety interval: the
+	// server keeps a runtime forced while it still has candidates, and the
+	// one-attempt-per-agent rule can leave a second same-agent task queued
+	// behind the stale cached verdict. Cap the wait at the normal poll so the
+	// next forced claim takes it. The cap applies only while claims make
+	// progress: a runtime whose remaining candidates are blocked (agent or
+	// runtime capacity, per-(issue, agent) serialization, a stale heartbeat, a
+	// locked row) stays forced but goes back to the normal cadence, and the
+	// terminal transition that clears a capacity or serialization barrier sends
+	// its own targeted wakeup. Capping instead of returning keeps a sooner
+	// deferred-task deadline.
+	if len(result.Tasks) > 0 && d.hasPendingForceRecheck() {
+		if poll := d.normalTaskClaimPollInterval(); interval > poll {
+			interval = poll
 		}
-		return DefaultPollInterval
 	}
+	return interval
+}
+
+func (d *Daemon) normalTaskClaimPollInterval() time.Duration {
+	if d.cfg.PollInterval > 0 {
+		return d.cfg.PollInterval
+	}
+	return DefaultPollInterval
+}
+
+func (d *Daemon) baseTaskClaimPollInterval(result claimTasksResult) time.Duration {
 	if !d.wsRPC.supportsRPCV1() || !result.ClaimedOverWS || !result.ClaimPollHintSupported {
-		if d.cfg.PollInterval > 0 {
-			return d.cfg.PollInterval
-		}
-		return DefaultPollInterval
+		return d.normalTaskClaimPollInterval()
 	}
 	upperBound := d.cfg.WSClaimPollInterval
 	if upperBound <= 0 {

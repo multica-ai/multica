@@ -280,9 +280,8 @@ const batchClaimRequestTimeout = protocol.DaemonBatchClaimRequestTimeout
 // daemons talking to old servers and claims whose WS outcome was uncertain.
 //
 // ForceRecheckedRuntimeIDs is the server's force_rechecked_runtime_ids
-// acknowledgement (#7452): the forced runtimes the server settled this cycle
-// (no candidates, or every candidate agent attempted with nothing claimable
-// left behind). It is a POINTER so absence is distinguishable from emptiness:
+// acknowledgement (#7452): the forced runtimes the server observed genuinely
+// idle this cycle (a zero-candidate scan, cache re-armed). It is a POINTER so absence is distinguishable from emptiness:
 // a non-nil empty slice means an upgraded server acknowledged nothing, so the
 // caller keeps every drained runtime forced; nil means the server omitted the
 // field (it predates #7452, or the legacy per-runtime fallback ran), so the

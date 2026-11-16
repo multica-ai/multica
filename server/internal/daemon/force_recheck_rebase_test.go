@@ -138,9 +138,43 @@ func TestTaskClaimPollInterval_PendingForceKeepsNormalCadence(t *testing.T) {
 		t.Fatalf("healthy-WS interval = %v, want the long safety interval above PollInterval %v", got, d.cfg.PollInterval)
 	}
 
-	// A pending force hint must collapse the interval back to the normal poll.
+	// A pending force hint after a claim that took work must collapse the
+	// interval back to the normal poll.
 	d.noteWokenRuntime("rt-forced")
-	if got := d.taskClaimPollInterval(result); got != d.cfg.PollInterval {
-		t.Fatalf("interval with pending force = %v, want normal PollInterval %v", got, d.cfg.PollInterval)
+	progressed := result
+	progressed.Tasks = []*Task{{ID: "task-1"}}
+	if got := d.taskClaimPollInterval(progressed); got != d.cfg.PollInterval {
+		t.Fatalf("interval with pending force after a claim = %v, want normal PollInterval %v", got, d.cfg.PollInterval)
+	}
+
+	// A pending force hint after a claim that took nothing (the remaining
+	// candidates are blocked) keeps the long interval: the poller must not
+	// re-scan every PollInterval for as long as the blocker runs.
+	if got := d.taskClaimPollInterval(result); got <= d.cfg.PollInterval {
+		t.Fatalf("interval with pending force after an empty claim = %v, want the long safety interval", got)
+	}
+}
+
+// TestTaskClaimPollInterval_PendingForceKeepsSoonerDeferredDeadline: the
+// pending-force cap must not override a deferred task that is due sooner than
+// the normal poll.
+func TestTaskClaimPollInterval_PendingForceKeepsSoonerDeferredDeadline(t *testing.T) {
+	d := New(Config{
+		PollInterval:        30 * time.Second,
+		WSClaimPollInterval: 3 * time.Minute,
+		MaxConcurrentTasks:  5,
+	}, silentDaemonLogger())
+	gen := d.wsRPC.attach(func([]byte) (*wsOutbound, error) { return nil, nil })
+	d.wsRPC.markRPCV1Supported(gen)
+	d.noteWokenRuntime("rt-forced")
+
+	result := claimTasksResult{
+		Tasks:                       []*Task{{ID: "task-1"}},
+		ClaimedOverWS:               true,
+		ClaimPollHintSupported:      true,
+		NextDeferredTaskAfterMillis: 1000,
+	}
+	if got := d.taskClaimPollInterval(result); got != time.Second {
+		t.Fatalf("interval = %v, want the 1s deferred deadline", got)
 	}
 }
