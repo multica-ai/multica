@@ -612,4 +612,23 @@ require_contains "$out" "Cancelled."
   command rm -rf "$LOCK_DIR"
 )
 
+# Releasing must drop only this holder's claim. Under uutils mkdir the next
+# caller can claim the directory as soon as the pid file is unlinked; deleting
+# the directory after that would hand the lock to a third caller.
+(
+  # shellcheck disable=SC1090
+  source "$root_dir/scripts/dev-env.sh"
+  acquire_lock
+  rm() {
+    command rm -f "$LOCK_DIR/pid"
+    # The next caller claims the lock between the unlink and the directory removal.
+    printf '%s\n' "$PPID" > "$LOCK_DIR/pid"
+    case "$1" in -r*) command rmdir "$LOCK_DIR" ;; esac
+  }
+  release_lock 2> "$out" || fail "release_lock failed when the next holder had already claimed the lock"
+  unset -f rm
+  [ "$(cat "$LOCK_DIR/pid" 2>/dev/null)" = "$PPID" ] || fail "release_lock removed the next holder's lock"
+  command rm -rf "$LOCK_DIR"
+)
+
 echo "✓ dev-env.sh registry behaviour verified"

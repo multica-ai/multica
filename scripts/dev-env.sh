@@ -116,7 +116,11 @@ acquire_lock() {
   done
 }
 
-release_lock() { rm -rf "$LOCK_DIR"; }
+release_lock() {
+  rm -f "$LOCK_DIR/pid"
+  # Once pid is gone the next holder may already have taken this directory.
+  rmdir "$LOCK_DIR" 2>/dev/null || true
+}
 
 # ---------------------------------------------------------------- registry ---
 
