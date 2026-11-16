@@ -17,11 +17,11 @@ import { useT } from "../../i18n";
 import { canAssignAgent } from "../../issues/components/pickers/assignee-picker";
 import { SettingsRow } from "./settings-layout";
 
-const LAST_USED_AGENT = "last-used";
+const AUTOMATIC_AGENT = "automatic";
 
 /**
- * The agent Ask Multica starts a new chat with. Unset, a new chat goes to the
- * agent last chatted with. Stored on this device per workspace, like the
+ * The personal agent Ask Multica starts a new chat with, before the workspace
+ * default and first available agent. Stored on this device per workspace, like the
  * chat's other selections.
  */
 export function QuickChatAgentRow() {
@@ -37,7 +37,7 @@ export function QuickChatAgentRow() {
 
   const options = useMemo(
     () => [
-      { value: LAST_USED_AGENT, label: t(($) => $.chat.ask_agent_last_used) },
+      { value: AUTOMATIC_AGENT, label: t(($) => $.chat.ask_agent_automatic) },
       ...agents
         .filter((agent) => !agent.archived_at && canAssignAgent(agent, user?.id, role))
         .map((agent) => ({ value: agent.id, label: agent.name })),
@@ -46,7 +46,7 @@ export function QuickChatAgentRow() {
   );
   // An agent that was archived or is no longer open to this member is not a
   // choice any more; the row then reads as unset, which is how chat treats it.
-  const value = options.some((option) => option.value === agentId) ? agentId! : LAST_USED_AGENT;
+  const value = options.some((option) => option.value === agentId) ? agentId! : AUTOMATIC_AGENT;
   const label = t(($) => $.chat.ask_agent_label);
 
   return (
@@ -56,7 +56,7 @@ export function QuickChatAgentRow() {
         value={value}
         disabled={!enabled}
         onValueChange={(next) => {
-          if (next) setAgentId(next === LAST_USED_AGENT ? null : next);
+          if (next) setAgentId(next === AUTOMATIC_AGENT ? null : next);
         }}
       >
         <SelectTrigger size="sm" className="w-full" aria-label={label}>

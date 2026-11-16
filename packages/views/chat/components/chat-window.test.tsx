@@ -5,7 +5,8 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createChatStore, registerChatStore, useChatStore } from "@multica/core/chat";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
-import type { ChatSession } from "@multica/core/types";
+import { WorkspaceSlugProvider } from "@multica/core/paths";
+import type { Agent, ChatSession } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enChat from "../../locales/en/chat.json";
@@ -78,7 +79,8 @@ vi.mock("./archived-agent-banner", () => ({ ArchivedAgentBanner: () => null }));
 vi.mock("./agent-access-revoked-banner", () => ({ AgentAccessRevokedBanner: () => null }));
 vi.mock("./runtime-required-banner", () => ({ RuntimeRequiredBanner: () => null }));
 
-import { ChatWindow } from "./chat-window";
+import { NavigationProvider } from "../../navigation";
+import { AgentDropdown, ChatWindow } from "./chat-window";
 
 // With no session open the session picker's visible label is also "New chat";
 // an open session keeps the header button the only control with that name.
@@ -180,5 +182,34 @@ describe("ChatWindow minimize and close", () => {
     fireEvent.click(screen.getByRole("button", { name: enChat.window.minimize_tooltip }));
 
     expect(chatInputProps.last?.hidden).toBe(true);
+  });
+});
+
+describe("AgentDropdown unresolved automatic target", () => {
+  it("allows a manual choice while automatic workspace resolution is unavailable", async () => {
+    const agent = { id: "agent-1", name: "Manual agent", runtime_id: "runtime", owner_id: "user-1" } as Agent;
+    const onSelect = vi.fn();
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <I18nProvider locale="en" resources={TEST_RESOURCES}>
+          <WorkspaceSlugProvider slug="ws">
+            <NavigationProvider value={{
+              pathname: "/ws/issues",
+              searchParams: new URLSearchParams(),
+              hash: "",
+              getShareableUrl: (path) => path,
+              push: vi.fn(),
+              replace: vi.fn(),
+              back: vi.fn(),
+            }}>
+              <AgentDropdown agents={[agent]} activeAgent={null} userId="user-1" onSelect={onSelect} />
+            </NavigationProvider>
+          </WorkspaceSlugProvider>
+        </I18nProvider>
+      </QueryClientProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: enChat.window.agent_filter_placeholder }));
+    fireEvent.click(await screen.findByText("Manual agent"));
+    expect(onSelect).toHaveBeenCalledWith(agent);
   });
 });

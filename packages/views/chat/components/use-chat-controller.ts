@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useAuthStore } from "@multica/core/auth";
 import { getCurrentWsId } from "@multica/core/platform";
-import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
+import { agentListOptions, memberListOptions, workspaceListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { canAssignAgent } from "../../issues/components/pickers/assignee-picker";
 import { api, dispatchReasonCode } from "@multica/core/api";
@@ -33,7 +33,7 @@ import {
   useSetChatSessionProject,
   useSetChatSessionArchived,
 } from "@multica/core/chat/mutations";
-import { useChatStore } from "@multica/core/chat";
+import { useChatStore, resolveChatAgent, workspaceDefaultChatAgentId } from "@multica/core/chat";
 import { upsertChatMessageToCaches } from "@multica/core/chat/message-cache";
 import { refetchChatSessionsAfterCommit } from "@multica/core/chat/session-list";
 import {
@@ -180,12 +180,14 @@ const CHAT_VIRTUOSO_INITIAL_FIRST_ITEM_INDEX = 1_000_000;
  * currently on screen — which gates auto-mark-read so a background overlay
  * doesn't silently clear unread state the user hasn't actually seen.
  */
-export function useChatController(opts?: { isActive?: boolean }) {
+export function useChatController(opts?: { isActive?: boolean; intentSessionId?: string | null; intentAgentId?: string | null }) {
   const isActive = opts?.isActive ?? true;
   const { t } = useT("chat");
   const wsId = useWorkspaceId();
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const selectedAgentId = useChatStore((s) => s.selectedAgentId);
+  const quickChatAgentId = useChatStore((s) => s.quickChatAgentId);
+  const newChatSource = useChatStore((s) => s.newChatSource);
   const selectedProjectId = useChatStore((s) => s.selectedProjectId);
   const setActiveSession = useChatStore((s) => s.setActiveSession);
   const setSelectedAgentId = useChatStore((s) => s.setSelectedAgentId);
@@ -311,11 +313,15 @@ export function useChatController(opts?: { isActive?: boolean }) {
   const setSessionProject = useSetChatSessionProject();
   const setArchived = useSetChatSessionArchived();
 
+  // Failed or pending workspace queries cannot authorize a first-agent fallback.
+  // Explicit, session and personal choices resolve before this query is needed.
+  const { data: workspaces = [], isSuccess: workspacesLoaded } = useQuery(workspaceListOptions());
+  const workspace = workspaces.find((item) => item.id === wsId);
   const currentMember = members.find((m) => m.user_id === user?.id);
   const memberRole = currentMember?.role;
-  const availableAgents = agents.filter(
+  const availableAgents = agentsLoaded && membersLoaded ? agents.filter(
     (a) => !a.archived_at && canAssignAgent(a, user?.id, memberRole),
-  );
+  ) : [];
   // `availableAgents` is only trustworthy once BOTH queries above succeeded:
   // the permission filter reads the member role, so agents-without-members
   // misreports a public_to agent as unavailable. Consumers that must tell
@@ -337,13 +343,22 @@ export function useChatController(opts?: { isActive?: boolean }) {
     : null;
   const isAgentArchived = !!sessionAgent?.archived_at;
 
-  // Resolve selected agent: open session's agent → stored preference → first
-  // available. New chats have no session, so they fall through to the picker.
-  const activeAgent =
-    sessionAgent ??
-    availableAgents.find((a) => a.id === selectedAgentId) ??
-    availableAgents[0] ??
-    null;
+  const resolutionSessionId = opts?.intentSessionId ?? activeSessionId;
+  const pendingIntent = !!opts?.intentAgentId || (!!opts?.intentSessionId && opts.intentSessionId !== activeSessionId);
+  const resolutionSession = sessions.find((session) => session.id === resolutionSessionId);
+  const activeAgent = pendingIntent ? null : resolveChatAgent({
+    agents,
+    availableAgents,
+    agentsSettled: agentsLoaded && membersLoaded,
+    sessionId: resolutionSessionId,
+    sessionAgentId: resolutionSession?.agent_id ?? null,
+    explicitAgentId: opts?.intentAgentId,
+    selectedAgentId,
+    quickChatAgentId,
+    isAskChat: newChatSource === "ask",
+    workspaceSettled: workspacesLoaded,
+    defaultAgentId: workspacesLoaded ? workspaceDefaultChatAgentId(workspace?.settings) : null,
+  });
   const isAgentRuntimeBound = !!activeAgent && hasAgentRuntime(activeAgent);
 
   // A session outlives the permission that created it. The agent can be flipped
@@ -354,10 +369,10 @@ export function useChatController(opts?: { isActive?: boolean }) {
   // composer goes read-only up front instead of after the user types
   // (MUL-6380). Same rule the server enforces, via the shared predicate.
   const isAgentAccessRevoked =
-    !!activeAgent && !canAssignAgent(activeAgent, user?.id, memberRole);
+    agentsSettled && !!activeAgent && !canAssignAgent(activeAgent, user?.id, memberRole);
 
   const agentAvailability = useWorkspaceAgentAvailability();
-  const noAgent = agentAvailability === "none";
+  const noAgent = agentsLoaded && membersLoaded && agentAvailability === "none";
 
   const projectContextSupport = useChatProjectContextSupport(wsId, activeAgent);
 
@@ -472,8 +487,8 @@ export function useChatController(opts?: { isActive?: boolean }) {
       commitInput?: (options?: { extraDraftKeys?: string[]; clearEditor?: boolean }) => void,
       draftAttachments: Attachment[] = [],
     ): Promise<boolean> => {
-      if (!activeAgent) {
-        apiLogger.warn("sendChatMessage skipped: no active agent");
+      if (getCurrentWsId() !== wsId || !agentsLoaded || !membersLoaded || !activeAgent) {
+        apiLogger.warn("sendChatMessage skipped: target is unavailable");
         return false;
       }
       // Read-only conversation: the agent is retired and can no longer pick up
@@ -538,8 +553,8 @@ export function useChatController(opts?: { isActive?: boolean }) {
         );
         return false;
       }
-      if (!sessionId) {
-        apiLogger.warn("sendChatMessage aborted: ensureSession returned null");
+      if (!sessionId || getCurrentWsId() !== wsId) {
+        apiLogger.warn("sendChatMessage aborted: compose workspace changed or session unavailable");
         return false;
       }
 
@@ -613,6 +628,9 @@ export function useChatController(opts?: { isActive?: boolean }) {
       // hasn't navigated away mid-send. See isStillOnComposeTarget. commitInput
       // clears the sent draft, and scrubs the shared editor only when the user
       // is still on the session they sent from.
+      // Acknowledgements can arrive after workspace rehydration. Retain the
+      // source draft instead of clearing the destination workspace's slot.
+      if (getCurrentWsId() !== wsId) return false;
       const live = useChatStore.getState();
       const stillOnSourceSession = isStillOnComposeTarget(live.activeSessionId, activeSessionId);
       if (stillOnSourceSession) {
@@ -646,6 +664,8 @@ export function useChatController(opts?: { isActive?: boolean }) {
     },
     [
       wsId,
+      agentsLoaded,
+      membersLoaded,
       activeSessionId,
       activeAgent,
       isAgentArchived,

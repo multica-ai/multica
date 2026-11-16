@@ -104,7 +104,7 @@ describe("QuickChatAgentRow", () => {
     renderRow();
 
     const select = screen.getByRole("combobox", { name: "Ask Multica agent" });
-    expect(select).toHaveTextContent("Last used");
+    expect(select).toHaveTextContent("Automatic");
 
     await user.click(select);
     expect(screen.queryByRole("option", { name: "Retired" })).not.toBeInTheDocument();
@@ -113,7 +113,7 @@ describe("QuickChatAgentRow", () => {
     expect(h.chat.setQuickChatAgentId).toHaveBeenCalledWith("agent-2");
   });
 
-  it("shows the saved agent and clears it with Last used", async () => {
+  it("shows the saved agent and clears it with Automatic", async () => {
     h.chat.quickChatAgentId = "agent-1";
     const user = userEvent.setup();
     renderRow();
@@ -122,7 +122,7 @@ describe("QuickChatAgentRow", () => {
     expect(select).toHaveTextContent("Kepler");
 
     await user.click(select);
-    await user.click(await screen.findByRole("option", { name: "Last used" }));
+    await user.click(await screen.findByRole("option", { name: "Automatic" }));
 
     expect(h.chat.setQuickChatAgentId).toHaveBeenCalledWith(null);
   });
@@ -131,7 +131,7 @@ describe("QuickChatAgentRow", () => {
     h.chat.quickChatAgentId = "agent-3";
     renderRow();
 
-    expect(screen.getByRole("combobox", { name: "Ask Multica agent" })).toHaveTextContent("Last used");
+    expect(screen.getByRole("combobox", { name: "Ask Multica agent" })).toHaveTextContent("Automatic");
   });
 
   it("is disabled while the floating chat is off", () => {
