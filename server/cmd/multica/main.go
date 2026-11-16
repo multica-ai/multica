@@ -55,6 +55,7 @@ func init() {
 	labelCmd.GroupID = groupCore
 	propertyCmd.GroupID = groupCore
 	viewCmd.GroupID = groupCore
+	inboxCmd.GroupID = groupCore
 	agentCmd.GroupID = groupCore
 	autopilotCmd.GroupID = groupCore
 	workspaceCmd.GroupID = groupCore
@@ -84,6 +85,7 @@ func init() {
 	rootCmd.AddCommand(labelCmd)
 	rootCmd.AddCommand(propertyCmd)
 	rootCmd.AddCommand(viewCmd)
+	rootCmd.AddCommand(inboxCmd)
 	rootCmd.AddCommand(agentCmd)
 	rootCmd.AddCommand(autopilotCmd)
 	rootCmd.AddCommand(workspaceCmd)
