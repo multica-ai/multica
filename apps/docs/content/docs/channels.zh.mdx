@@ -20,6 +20,7 @@ import { ChannelChatDemo } from "@/components/demos/channel-chat-demo";
 | 创建任务 | `/issue` 消息命令，按输入直接创建 | `/issue` slash 命令，智能体整理描述后创建 | `/issue` 消息命令，按输入直接创建 | `/issue` 消息命令，按输入直接创建 | `/issue` 消息命令，按输入直接创建 | `/issue` 消息命令，按输入直接创建 |
 | 新建 Chat | `/new [消息]` | 私聊：`/new [消息]`；频道/thread：`@Multica /new [消息]` | `/new [消息]` | `/new [消息]` | `/new [消息]` | `/new [消息]` |
 | 清空当前 Chat 上下文 | `/clear [消息]` | 私聊：`/clear [消息]`；频道/thread：`@Multica /clear [消息]` | `/clear [消息]` | `/clear [消息]` | `/clear [消息]` | `/clear [消息]` |
+| 群聊订阅任务 | `/subscribe <任务>`、`/unsubscribe <任务>` | `@Multica /subscribe <任务>`、`@Multica /unsubscribe <任务>` | `/subscribe <任务>`、`/unsubscribe <任务>` | 暂不支持 | `/subscribe <任务>`、`/unsubscribe <任务>` | 暂不支持 |
 | 连接方式 | 平台长连接 | Socket Mode | Stream 模式 | 平台长连接 | `getUpdates` 长轮询 | iLink 长轮询 |
 
 新连接目前只开放中国大陆版飞书；已有的国际版 Lark 连接仍可继续使用和管理。
@@ -61,6 +62,12 @@ Telegram 会把图片、文件、视频和音频作为附件转交给智能体�
 `/clear` 不会新建 Chat，只会在当前 Multica Chat 中开启一段新的智能体可见上下文。完整 Chat 历史仍保存在 Multica 中，但智能体无法读取边界之前的消息。`/clear <消息>` 会把消息作为新上下文的第一轮；裸 `/clear` 会把边界应用到下一条真实消息。
 
 在 Slack 私聊中，`/new` 和 `/clear` 都是原生 slash 命令。原生 slash command payload 无法标识频道里的目标 thread，因此需要在目标 thread 中发送 `@Multica /new [消息]` 或 `@Multica /clear [消息]`。
+
+## 在群聊中订阅任务
+
+群聊可以订阅任务：任务的状态变化、负责人变化和新评论都会推送到群里，并附上回到 Multica 的链接。@ Bot 发送 `/subscribe <任务>` 开始订阅，`/unsubscribe <任务>` 取消；`<任务>` 可以是任务编号（`ABC-123`）、序号或 Multica 链接。在群里用 `/issue` 创建的任务会自动被该群订阅，确认消息中会注明。Slack 原生 `/issue` slash 命令不会自动订阅，需要再发送 `@Multica /subscribe`。
+
+更新会发到订阅时所在的 thread 或话题，否则发到群里。只能订阅自己有权限查看的任务。订阅私有项目中的任务后，群里所有人都会收到它的更新，包括项目外的成员。发起订阅的成员失去该任务的访问权限后，推送会停止；群里任何人都仍可以 `/unsubscribe`。在私聊中，请在 Multica 里订阅任务，更新会进入你的[收件箱](/inbox)。
 
 ## 会话隔离
 

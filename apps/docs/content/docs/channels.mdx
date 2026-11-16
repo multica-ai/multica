@@ -20,6 +20,7 @@ Feishu/Lark, Slack, DingTalk, WeCom, Telegram, and WeChat are available. WeChat 
 | Create issues | `/issue` message command; creates the issue from your input as-is | `/issue` slash command; the agent writes up the description before creating | `/issue` message command; creates the issue from your input as-is | `/issue` message command; creates the issue from your input as-is | `/issue` message command; creates the issue from your input as-is | `/issue` message command; creates the issue from your input as-is |
 | Start a new Chat | `/new [message]` | DM: `/new [message]`; channel/thread: `@Multica /new [message]` | `/new [message]` | `/new [message]` | `/new [message]` | `/new [message]` |
 | Clear the current Chat context | `/clear [message]` | DM: `/clear [message]`; channel/thread: `@Multica /clear [message]` | `/clear [message]` | `/clear [message]` | `/clear [message]` | `/clear [message]` |
+| Follow an issue in a group | `/subscribe <issue>`, `/unsubscribe <issue>` | `@Multica /subscribe <issue>`, `@Multica /unsubscribe <issue>` | `/subscribe <issue>`, `/unsubscribe <issue>` | Not supported | `/subscribe <issue>`, `/unsubscribe <issue>` | Not supported |
 | Connection | Platform long connection | Socket Mode | Stream mode | Platform long connection | `getUpdates` long polling | iLink long polling |
 
 New connections are currently open only for mainland-China Feishu; existing international Lark connections keep working and can still be managed.
@@ -61,6 +62,12 @@ Channel messages that don't @-mention the Bot never trigger the agent and never 
 `/clear` stays in the current Multica Chat but starts a new agent-visible context. The full Chat history remains available in Multica, while the agent cannot retrieve messages from before the boundary. `/clear <message>` uses the message as the first turn in the new context; a bare `/clear` applies to the next real message.
 
 On Slack, `/new` and `/clear` are native slash commands in a DM. A native slash-command payload does not identify a channel thread, so use `@Multica /new [message]` or `@Multica /clear [message]` inside the target thread.
+
+## Follow issues in a group
+
+A group chat can follow an issue so its status changes, assignee changes, and new comments are posted there, each with a link back to Multica. @-mention the Bot with `/subscribe <issue>` to start and `/unsubscribe <issue>` to stop; `<issue>` is the issue key (`ABC-123`), its number, or its Multica link. An `/issue` sent in a group makes that group follow the new issue, and the confirmation says so. Slack's native `/issue` slash command doesn't; use `@Multica /subscribe` there.
+
+Updates go to the thread or topic the subscription was made in, otherwise to the group. You can only subscribe a chat to an issue you can see. For an issue in a private project, everyone in the group then gets its updates, including people outside the project. If the member who subscribed loses access to the issue, its updates stop. Anyone in the group can still `/unsubscribe`. In a DM, follow the issue in Multica to get its updates in your [inbox](/inbox).
 
 ## Session isolation
 
