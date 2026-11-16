@@ -67,6 +67,8 @@ import { InboxDemo } from "@/components/demos/inbox-demo";
 multica inbox list --project <project-id> --type mentioned --output json
 ```
 
+`--project` 接受完整 UUID 或唯一 ID 前綴，包括 `multica project list` 顯示的短 ID。前綴會先透過專案列表解析，再讀取收件箱；沒有符合項目或前綴有歧義時會顯示錯誤。
+
 兩個篩選條件都可省略，在取得目前收件箱後於本機套用。JSON 包含通知、任務、專案和可選的評論 ID，以及類型、標題、已讀狀態和建立時間。預設輸出為表格。獲授權的 AI 代理執行使用任務憑證讀取執行環境擁有者的通知，不會退回使用人的登入憑證。
 
 ## 處理通知

@@ -31,7 +31,7 @@ func init() {
 }
 
 func registerInboxListFlags(cmd *cobra.Command) {
-	cmd.Flags().String("project", "", "Filter by issue project ID")
+	cmd.Flags().String("project", "", "Filter by issue project ID or unique ID prefix")
 	cmd.Flags().String("type", "", "Filter by notification type (e.g. mentioned)")
 	cmd.Flags().String("output", "table", "Output format: table or json")
 }
@@ -59,6 +59,15 @@ func runInboxList(cmd *cobra.Command, _ []string) error {
 	ctx, cancel := cli.APIContext(cmd.Context())
 	defer cancel()
 
+	projectID := ""
+	if v, _ := cmd.Flags().GetString("project"); v != "" {
+		project, err := resolveProjectID(ctx, client, v)
+		if err != nil {
+			return err
+		}
+		projectID = project.ID
+	}
+
 	var response []struct {
 		inboxListItem
 		Details json.RawMessage `json:"details"`
@@ -66,11 +75,10 @@ func runInboxList(cmd *cobra.Command, _ []string) error {
 	if err := client.GetJSON(ctx, "/api/inbox", &response); err != nil {
 		return fmt.Errorf("list inbox: %w", err)
 	}
-	project, _ := cmd.Flags().GetString("project")
 	notifType, _ := cmd.Flags().GetString("type")
 	items := make([]inboxListItem, 0, len(response))
 	for _, row := range response {
-		if project != "" && (row.IssueProjectID == nil || *row.IssueProjectID != project) {
+		if projectID != "" && (row.IssueProjectID == nil || !strings.EqualFold(*row.IssueProjectID, projectID)) {
 			continue
 		}
 		if notifType != "" && row.Type != notifType {

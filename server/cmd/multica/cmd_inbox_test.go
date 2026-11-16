@@ -33,9 +33,9 @@ func TestInboxListFiltersAndCommentAnchors(t *testing.T) {
 			t.Error("lost workspace or task credential")
 		}
 		_, _ = w.Write([]byte(`[
-			{"id":"n1","type":"mentioned","title":"Need input","issue_id":"i1","issue_project_id":"p1","read":false,"created_at":"2026-11-16T08:00:00Z","details":{"comment_id":"c1","original_prompt":"not a list field"}},
-			{"id":"n2","type":"mentioned","title":"Another project","issue_project_id":"p2","read":true},
-			{"id":"n3","type":"new_comment","issue_project_id":"p1","details":{}},
+			{"id":"n1","type":"mentioned","title":"Need input","issue_id":"i1","issue_project_id":"aaaaaaaa-1111-1111-1111-111111111111","read":false,"created_at":"2026-11-16T08:00:00Z","details":{"comment_id":"c1","original_prompt":"not a list field"}},
+			{"id":"n2","type":"mentioned","title":"Another project","issue_project_id":"bbbbbbbb-2222-2222-2222-222222222222","read":true},
+			{"id":"n3","type":"new_comment","issue_project_id":"aaaaaaaa-1111-1111-1111-111111111111","details":{}},
 			{"id":"n4","type":"system","issue_project_id":null,"details":null}
 		]`))
 	}))
@@ -52,10 +52,10 @@ func TestInboxListFiltersAndCommentAnchors(t *testing.T) {
 		ids   string
 	}{
 		{"all", map[string]string{}, "n1,n2,n3,n4"},
-		{"project", map[string]string{"project": "p1"}, "n1,n3"},
+		{"project", map[string]string{"project": "aaaaaaaa-1111-1111-1111-111111111111"}, "n1,n3"},
 		{"type", map[string]string{"type": "mentioned"}, "n1,n2"},
-		{"intersection", map[string]string{"project": "p1", "type": "mentioned"}, "n1"},
-		{"empty", map[string]string{"project": "missing"}, ""},
+		{"intersection", map[string]string{"project": "aaaaaaaa-1111-1111-1111-111111111111", "type": "mentioned"}, "n1"},
+		{"empty", map[string]string{"project": "cccccccc-3333-3333-3333-333333333333"}, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.flags["output"] = "json"
@@ -144,5 +144,85 @@ func TestInboxListRegistered(t *testing.T) {
 	}
 	if cmd.Flags().Lookup("user") != nil {
 		t.Fatal("inbox must not select another recipient")
+	}
+}
+
+func TestInboxListResolvesProjectID(t *testing.T) {
+	const projectA = "aaaaaaaa-1111-1111-1111-111111111111"
+	const projectB = "bbbbbbbb-2222-2222-2222-222222222222"
+	const collision = "aaaaaaaa-3333-3333-3333-333333333333"
+	for _, tc := range []struct {
+		name, input, wantID, wantError string
+		projectRequests, inboxRequests int
+	}{
+		{"full UUID", projectB, "n2", "", 0, 1},
+		{"uppercase full UUID", strings.ToUpper(projectB), "n2", "", 0, 1},
+		{"unique short ID", "bbbbbbbb", "n2", "", 1, 1},
+		{"longer prefix disambiguates", "aaaaaaaa-1111", "n1", "", 1, 1},
+		{"no match", "deadbeef", "", `no project found matching id prefix "deadbeef"`, 1, 0},
+		{"ambiguous prefix", "aaaaaaaa", "", `ambiguous project id prefix "aaaaaaaa"`, 1, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			projectRequests, inboxRequests := 0, 0
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet || r.Header.Get("X-Workspace-ID") != "ws-1" ||
+					r.Header.Get("Authorization") != "Bearer mat_inbox-test" {
+					t.Errorf("unexpected method or execution credentials: %s %s", r.Method, r.URL)
+				}
+				switch r.URL.Path {
+				case "/api/projects":
+					projectRequests++
+					if r.URL.Query().Get("workspace_id") != "ws-1" || r.URL.Query().Get("include_archived") != "true" {
+						t.Errorf("project resolution lost existing catalog scope: %s", r.URL)
+					}
+					_ = json.NewEncoder(w).Encode(map[string]any{"projects": []any{
+						map[string]any{"id": projectA, "title": "A"},
+						map[string]any{"id": projectB, "title": "B"},
+						map[string]any{"id": collision, "title": "No notifications, but still ambiguous"},
+					}})
+				case "/api/inbox":
+					inboxRequests++
+					_ = json.NewEncoder(w).Encode([]map[string]any{
+						{"id": "n1", "type": "mentioned", "issue_project_id": projectA},
+						{"id": "n2", "type": "mentioned", "issue_project_id": projectB},
+						{"id": "n3", "type": "new_comment", "issue_project_id": projectB},
+					})
+				default:
+					t.Errorf("unexpected path: %s", r.URL)
+					http.NotFound(w, r)
+				}
+			}))
+			defer srv.Close()
+			t.Setenv("MULTICA_SERVER_URL", srv.URL)
+			t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+			t.Setenv("MULTICA_TOKEN", "mat_inbox-test")
+			t.Setenv("MULTICA_AGENT_ID", "agent-1")
+			t.Setenv("MULTICA_TASK_ID", "task-1")
+			out, err := runInboxListTest(t, map[string]string{"project": tc.input, "type": "mentioned", "output": "json"})
+			if tc.wantError != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantError) || out != "" {
+					t.Fatalf("output=%q error=%v, want %s without list output", out, err, tc.wantError)
+				}
+				if tc.name == "ambiguous prefix" && (!strings.Contains(err.Error(), projectA) || !strings.Contains(err.Error(), collision)) {
+					t.Fatalf("ambiguity error omitted matching project IDs: %v", err)
+				}
+			} else {
+				if err != nil {
+					t.Fatal(err)
+				}
+				var rows []struct {
+					ID string `json:"id"`
+				}
+				if err := json.Unmarshal([]byte(out), &rows); err != nil {
+					t.Fatal(err)
+				}
+				if len(rows) != 1 || rows[0].ID != tc.wantID {
+					t.Fatalf("filtered output=%s, want %s", out, tc.wantID)
+				}
+			}
+			if projectRequests != tc.projectRequests || inboxRequests != tc.inboxRequests {
+				t.Fatalf("project/inbox requests=%d/%d, want %d/%d", projectRequests, inboxRequests, tc.projectRequests, tc.inboxRequests)
+			}
+		})
 	}
 }

@@ -67,6 +67,8 @@ Utilisez votre connexion CLI existante pour lister les notifications actives san
 multica inbox list --project <project-id> --type mentioned --output json
 ```
 
+`--project` accepte un UUID complet ou un préfixe d'ID unique, y compris l'ID court affiché par `multica project list`. Les préfixes sont résolus via la liste des projets avant de lire la boîte de réception ; un préfixe sans correspondance ou ambigu produit une erreur.
+
 Les deux filtres sont facultatifs et s'appliquent localement après récupération de la boîte de réception active. Le JSON contient les ID de notification, de tâche, de projet et, si disponible, de commentaire, ainsi que le type, le titre, l'état lu et la date de création. La sortie par défaut est un tableau. Une exécution d'agent autorisée utilise son identifiant d'exécution pour lire les notifications du propriétaire du runtime, sans revenir à la connexion d'une personne.
 
 ## Traiter les notifications

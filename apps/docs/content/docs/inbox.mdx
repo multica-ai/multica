@@ -67,6 +67,8 @@ Use your existing CLI login to list your active notifications without marking th
 multica inbox list --project <project-id> --type mentioned --output json
 ```
 
+`--project` accepts a full UUID or a unique ID prefix, including the short ID from `multica project list`. Prefixes are resolved through the project list before reading the inbox; no match or an ambiguous prefix produces an error.
+
 Both filters are optional and apply locally after fetching the active inbox. JSON includes notification, issue, project and optional comment IDs, plus the type, title, read status and creation time. The default output is a table. An authorized agent run reads the runtime owner's notifications using its task credential; it never falls back to a person's login.
 
 ## Handle notifications
