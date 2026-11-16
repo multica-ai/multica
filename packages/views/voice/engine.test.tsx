@@ -1,7 +1,7 @@
 import { renderHook, waitFor, act } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { configStore } from "@multica/core/config";
-import { useVoiceModelsStore } from "@multica/core/voice";
+import { useVoiceModelsStore, useVoiceSettingsStore } from "@multica/core/voice";
 import type { VoiceModels } from "@multica/core/voice";
 import { SERVER_VOICE_MODEL, desktopVoiceRuntime, serverVoiceRuntime, useVoiceModels } from "./engine";
 
@@ -85,6 +85,31 @@ describe("desktopVoiceRuntime", () => {
       configStore.getState().setVoiceTranscriptionEnabled(true);
       const onChange = vi.fn();
       desktopVoiceRuntime()!.watchModels(onChange);
+      expect(onChange).toHaveBeenLastCalledWith({ engineAvailable: true, models: [SERVER_VOICE_MODEL] });
+    }));
+
+  it("waits for the engine before listing anything when an on-device model was chosen", () =>
+    withDesktop(async () => {
+      (window as unknown as { desktopAPI: { voice: { listModels: () => Promise<VoiceModels> } } }).desktopAPI.voice.listModels =
+        () => new Promise<VoiceModels>((resolve) => setTimeout(() => resolve(LOCAL), 20));
+      useVoiceSettingsStore.getState().update({ modelId: "whisper" });
+      configStore.getState().setVoiceTranscriptionEnabled(true);
+      const onChange = vi.fn();
+      desktopVoiceRuntime()!.watchModels(onChange);
+      expect(onChange).not.toHaveBeenCalled();
+      await waitFor(() =>
+        expect(onChange).toHaveBeenLastCalledWith({ engineAvailable: true, models: [SERVER_VOICE_MODEL, ...LOCAL.models] }),
+      );
+    }).finally(() => useVoiceSettingsStore.getState().update({ modelId: null })));
+
+  it("lists only the server model where this computer has no engine", () =>
+    withDesktop(async () => {
+      (window as unknown as { desktopAPI: { voice: { listModels: () => Promise<VoiceModels> } } }).desktopAPI.voice.listModels =
+        () => Promise.resolve({ ...LOCAL, engineAvailable: false });
+      configStore.getState().setVoiceTranscriptionEnabled(true);
+      const onChange = vi.fn();
+      desktopVoiceRuntime()!.watchModels(onChange);
+      await new Promise((resolve) => setTimeout(resolve, 0));
       expect(onChange).toHaveBeenLastCalledWith({ engineAvailable: true, models: [SERVER_VOICE_MODEL] });
     }));
 });

@@ -92,4 +92,14 @@ describe("VoiceInputTab", () => {
     act(() => useVoiceSettingsStore.getState().update({ modelId: "whisper" }));
     expect(screen.getByText(/transcribed on this computer and never leaves it/)).toBeInTheDocument();
   });
+
+  it("on desktop with no engine of its own, lists the server model without promising local ones", () => {
+    configStore.getState().setVoiceTranscriptionEnabled(true);
+    useVoiceSettingsStore.getState().update({ enabled: true });
+    useVoiceModelsStore.getState().setModels({ engineAvailable: true, models: [{ ...SERVER_VOICE_MODEL }] });
+    renderWithI18n(<VoiceInputTab />);
+    expect(screen.getByText("Server")).toBeInTheDocument();
+    expect(screen.queryByText(/run on this computer/)).not.toBeInTheDocument();
+  });
 });
+

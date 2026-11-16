@@ -11,6 +11,7 @@ import { configStore, useConfigStore } from "@multica/core/config";
 import {
   connectVoiceRuntime,
   useVoiceModelsStore,
+  useVoiceSettingsStore,
   type VoiceDecodeOptions,
   type VoiceModel,
   type VoiceModels,
@@ -87,13 +88,19 @@ export function desktopVoiceRuntime(): VoiceRuntime | null {
       let local: VoiceModels | null = null;
       let changed = false;
       // The server model leads the list while the server transcribes, so it is
-      // the default until another model is chosen.
+      // the default until another model is chosen. Local models are listed only
+      // where this computer's engine can run them.
       const report = () => {
         if (!configStore.getState().voiceTranscriptionEnabled) {
           if (local) onChange(local);
           return;
         }
-        onChange({ engineAvailable: true, models: [SERVER_VOICE_MODEL, ...(local?.models ?? [])] });
+        // Until the engine answers, a saved on-device choice is not in the list
+        // and the server model would stand in for it; wait instead.
+        const chosen = useVoiceSettingsStore.getState().modelId;
+        if (!local && chosen !== null && chosen !== SERVER_VOICE_MODEL.id) return;
+        const onDevice = local?.engineAvailable ? local.models : [];
+        onChange({ engineAvailable: true, models: [SERVER_VOICE_MODEL, ...onDevice] });
       };
       report();
       configStore.subscribe((next, previous) => {

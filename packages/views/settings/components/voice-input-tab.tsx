@@ -48,7 +48,8 @@ export function VoiceInputTab() {
   const serverEngine = useServerVoiceEngine();
   const enabled = useVoiceSettingsStore((state) => state.enabled);
   const modelId = useVoiceSettingsStore((state) => state.modelId);
-  const offersServer = models?.models.some((model) => model.streams) ?? false;
+  const onDeviceModels = models?.models.filter((model) => !model.streams).length ?? 0;
+  const offersServer = (models?.models.length ?? 0) > onDeviceModels;
   const streamsSpeech = serverEngine || pickVoiceModel(models, modelId)?.streams === true;
   return (
     <SettingsTab
@@ -73,9 +74,11 @@ export function VoiceInputTab() {
             description={
               engineAvailable === false
                 ? t(($) => $.voice_input.engine_unavailable)
-                : offersServer
-                  ? t(($) => $.voice_input.model_hint_server)
-                  : t(($) => $.voice_input.model_hint)
+                : !offersServer
+                  ? t(($) => $.voice_input.model_hint)
+                  : onDeviceModels > 0
+                    ? t(($) => $.voice_input.model_hint_server)
+                    : undefined
             }
             anchor="voice-model"
           >
