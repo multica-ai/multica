@@ -175,7 +175,7 @@ func TestInboxRowsWrittenIntoASnoozeJoinItUnlessTheyWakeIt(t *testing.T) {
 
 	create := func(notifType string, details string) db.InboxItem {
 		t.Helper()
-		row, inserted, err := inbox.CreateIfEligible(context.Background(), testHandler.Queries, db.CreateInboxItemParams{
+		row, inserted, err := inbox.Deliver(context.Background(), testHandler.Queries, nil, inbox.Notification{Params: db.CreateInboxItemParams{
 			WorkspaceID:   parseUUID(f.workspaceID),
 			RecipientType: "member",
 			RecipientID:   parseUUID(testUserID),
@@ -184,7 +184,7 @@ func TestInboxRowsWrittenIntoASnoozeJoinItUnlessTheyWakeIt(t *testing.T) {
 			IssueID:       parseUUID(f.issueID),
 			Title:         "Snoozed issue",
 			Details:       []byte(details),
-		})
+		}})
 		if err != nil || !inserted {
 			t.Fatalf("create %s: inserted=%v err=%v", notifType, inserted, err)
 		}
@@ -297,7 +297,7 @@ func TestSnoozeInboxRefreshesClientsThatPredateIt(t *testing.T) {
 	// A row written into the snooze is announced as snoozed only: never as new,
 	// and without the refresh, since the list does not change.
 	*seen = nil
-	row, inserted, err := inbox.CreateIfEligible(context.Background(), testHandler.Queries, db.CreateInboxItemParams{
+	row, inserted, err := inbox.Deliver(context.Background(), testHandler.Queries, nil, inbox.Notification{Params: db.CreateInboxItemParams{
 		WorkspaceID:   parseUUID(f.workspaceID),
 		RecipientType: "member",
 		RecipientID:   parseUUID(testUserID),
@@ -306,7 +306,7 @@ func TestSnoozeInboxRefreshesClientsThatPredateIt(t *testing.T) {
 		IssueID:       parseUUID(f.issueID),
 		Title:         "Snoozed issue",
 		Details:       []byte(`{}`),
-	})
+	}})
 	if err != nil || !inserted {
 		t.Fatalf("create: inserted=%v err=%v", inserted, err)
 	}

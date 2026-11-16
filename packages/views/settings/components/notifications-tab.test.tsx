@@ -53,6 +53,7 @@ describe("Inbox notification settings", () => {
       "Mentions",
       "Reactions",
       "Issues you subscribe to",
+      "Other people's issues",
       "Status changes",
       "Comments",
       "Priority & Due date",
@@ -63,6 +64,16 @@ describe("Inbox notification settings", () => {
     ]);
     expect(within(inbox).getByRole("switch", { name: "Priority & Due date" })).not.toBeChecked();
     expect(within(inbox).getByRole("switch", { name: "Comments" })).toBeChecked();
+  });
+
+  it.each<{ preferences: Record<string, string>; shown: string }>([
+    { preferences: {}, shown: "Key updates only" },
+    { preferences: { others_issues: "key_updates" }, shown: "Key updates only" },
+    { preferences: { others_issues: "all" }, shown: "All activity" },
+  ])("shows how much of other people's issues reaches you: %j", ({ preferences, shown }) => {
+    renderTab(preferences);
+    const inbox = screen.getByRole("region", { name: "Inbox" });
+    expect(within(inbox).getByRole("combobox", { name: "Other people's issues" })).toHaveTextContent(shown);
   });
 
   it("explains how notifications leave the Inbox, with a way to the archived ones", () => {

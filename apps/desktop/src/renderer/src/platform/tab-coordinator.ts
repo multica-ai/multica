@@ -175,7 +175,7 @@ function reconcile(): void {
  *
  * Plain scroll containers self-mark with `data-tab-scroll-root` (the
  * attribute value is the container key, "main" when bare). Containers sitting
- * at 0 are simply absent from the result — the store's per-route REPLACE
+ * at 0 on both axes are simply absent from the result — the store's per-route REPLACE
  * semantics turn that absence into "clear the stale offset".
  *
  * External sources (sandboxed iframe documents) are merged in for the
@@ -193,9 +193,13 @@ function captureScrollEntries(
       "[data-tab-scroll-root]",
     );
     els.forEach((el) => {
-      if (el.scrollTop <= 0) return;
+      const { scrollTop: top, scrollLeft: left } = el;
+      if (top <= 0 && left <= 0) return;
       const key = el.getAttribute("data-tab-scroll-root") || "main";
-      entries[key] = { top: el.scrollTop, height: el.scrollHeight };
+      entries[key] =
+        left > 0
+          ? { top, height: el.scrollHeight, left }
+          : { top, height: el.scrollHeight };
     });
   }
   if (outgoingTabId) {

@@ -426,6 +426,10 @@
         "label": "알림 보관",
         "description": "열린 인박스 알림을 보관합니다. 보관함을 보는 중에는 보관을 해제합니다."
       },
+      "unsubscribeArchiveInboxItem": {
+        "label": "구독 해제 후 보관",
+        "description": "열린 알림의 태스크 구독을 해제하고 보관합니다. 나 또는 내 에이전트의 태스크가 아닐 때 사용할 수 있습니다."
+      },
       "snoozeInboxItem": {
         "label": "알림 미루기",
         "description": "인박스에서 연 태스크를 미룹니다. 이미 미뤘다면 지금 되돌립니다."
@@ -717,6 +721,7 @@
     "save_failed": "속성을 저장하지 못했습니다",
     "limit_hint": "활성 속성 {{count}}/{{max}}",
     "archived_badge": "보관됨",
+    "options_preview": "{{name}}의 모든 옵션 보기",
     "types": {
       "text": "텍스트",
       "number": "숫자",
@@ -833,6 +838,12 @@
       "issues": "구독 중인 태스크",
       "projects": "구독 중인 프로젝트",
       "agents": "에이전트"
+    },
+    "others_issues": {
+      "label": "다른 사람의 태스크",
+      "description": "다른 사람이나 그 사람의 에이전트에게 배정된 태스크 중, 만들거나 댓글을 달거나 멘션되어 자동으로 구독한 것. 주요 업데이트는 나를 향한 @멘션, 참여한 스레드의 답글, 그리고 검토 필요·차단·완료처럼 사람이 봐야 하는 상태입니다.",
+      "key_updates": "주요 업데이트만",
+      "all": "모든 활동"
     },
     "leaving": {
       "title": "인박스에서 빠지는 경우",

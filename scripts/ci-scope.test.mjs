@@ -51,6 +51,7 @@ for (const [name, files, selected] of [
   ["brand generator", ["scripts/brand/sync.mjs"], ["quality"]],
   ["PR evidence uploader", ["scripts/pr-shots"], ["quality"]],
   ["cross-module runtime contract", ["packages/core/runtimes/cli-version.ts"], ["frontend", "backend", "runtime", "quality"]],
+  ["inbox type contract", ["packages/core/types/inbox.ts"], ["frontend", "backend", "quality"]],
   ["shared quick action body contract", ["server/internal/handler/testdata/quick_action_bodies.json"], ["frontend", "backend", "runtime"]],
   ["lockfile", ["pnpm-lock.yaml"], ["frontend", "quality", "docs"]],
   ["workspace catalog", ["pnpm-workspace.yaml"], ["frontend", "quality", "docs"]],
@@ -186,6 +187,17 @@ test("no gated job or shared quality step continues past a failure", () => {
   const action = readFileSync(new URL("../.github/actions/frontend-quality/action.yml", import.meta.url), "utf8");
   assert.doesNotMatch(workflow, /continue-on-error:/);
   assert.doesNotMatch(action, /continue-on-error:/);
+});
+
+// A push only checks the paths it changed, so a main run that is cancelled or
+// left pending behind a newer push skips its commit for good.
+test("path-filtered workflows never cancel or supersede a main run", () => {
+  for (const name of ["ci.yml", "mobile-verify.yml"]) {
+    const source = readFileSync(new URL(`../.github/workflows/${name}`, import.meta.url), "utf8");
+    const block = field(source, /^concurrency:\n((?:  .+\n)+)/m);
+    assert.match(block, /^  group: .*\$\{\{ github\.event\.pull_request\.number \|\| github\.run_id \}\}$/m, name);
+    assert.match(block, /^  cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}$/m, name);
+  }
 });
 
 test("quality checks have exactly one runner", () => {

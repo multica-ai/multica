@@ -6,8 +6,20 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { notificationPreferenceOptions } from "@multica/core/notification-preferences/queries";
 import { useUpdateNotificationPreferences } from "@multica/core/notification-preferences/mutations";
-import type { NotificationGroupKey, NotificationPreferences } from "@multica/core/types";
+import { notificationPreferenceValue } from "@multica/core/notification-preferences/patch";
+import type {
+  NotificationGroupKey,
+  NotificationPreferences,
+  OthersIssuesValue,
+} from "@multica/core/types";
 import { buttonVariants } from "@multica/ui/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@multica/ui/components/ui/select";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
@@ -40,15 +52,7 @@ export function NotificationsTab() {
 
   const preferences = data?.preferences ?? {};
 
-  const handleToggle = (key: NotificationGroupKey, enabled: boolean) => {
-    const updated: NotificationPreferences = {
-      ...preferences,
-      [key]: enabled ? "all" : "muted",
-    };
-    // Remove keys set to "all" (default) to keep the object clean
-    if (enabled) {
-      delete updated[key];
-    }
+  const save = (updated: NotificationPreferences) => {
     mutation.mutate(updated, {
       onError: (err) =>
         toast.error(
@@ -58,6 +62,29 @@ export function NotificationsTab() {
         ),
     });
   };
+
+  const handleToggle = (key: NotificationGroupKey, enabled: boolean) => {
+    const updated: NotificationPreferences = {
+      ...preferences,
+      [key]: enabled ? "all" : "muted",
+    };
+    // Remove keys set to "all" (default) to keep the object clean
+    if (enabled) {
+      delete updated[key];
+    }
+    save(updated);
+  };
+
+  const handleOthersIssues = (value: OthersIssuesValue) => {
+    const updated: NotificationPreferences = { ...preferences, others_issues: value };
+    if (value === "key_updates") delete updated.others_issues;
+    save(updated);
+  };
+
+  const othersIssuesItems: { value: OthersIssuesValue; label: string }[] = [
+    { value: "key_updates", label: t(($) => $.notifications.others_issues.key_updates) },
+    { value: "all", label: t(($) => $.notifications.others_issues.all) },
+  ];
 
   const systemEnabled = preferences.system_notifications !== "muted";
 
@@ -79,6 +106,34 @@ export function NotificationsTab() {
               >
                 {t(($) => $.notifications.categories[category.key])}
               </div>
+              {category.key === "issues" && (
+                <SettingsRow
+                  anchor="others_issues"
+                  label={t(($) => $.notifications.others_issues.label)}
+                  description={t(($) => $.notifications.others_issues.description)}
+                >
+                  <Select
+                    items={othersIssuesItems}
+                    value={notificationPreferenceValue(preferences, "others_issues")}
+                    onValueChange={(next) => next && handleOthersIssues(next as OthersIssuesValue)}
+                  >
+                    <SelectTrigger
+                      size="sm"
+                      className="w-40"
+                      aria-label={t(($) => $.notifications.others_issues.label)}
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent align="end">
+                      {othersIssuesItems.map((item) => (
+                        <SelectItem key={item.value} value={item.value}>
+                          {item.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </SettingsRow>
+              )}
               {category.groups.map((key) => (
                 <SettingsRow
                   key={key}

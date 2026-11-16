@@ -2042,6 +2042,15 @@ export class ApiClient {
     });
   }
 
+  /**
+   * Reverses the caller's own issue-only unsubscribe, restoring the
+   * subscription with its original reason (or the project subscription that
+   * covered it). Not a subscribe: that would make it a manual subscription.
+   */
+  async undoUnsubscribeFromIssue(issueId: string): Promise<void> {
+    await this.fetch(`/api/issues/${issueId}/unsubscribe/undo`, { method: "POST" });
+  }
+
   // Agents
   async listAgents(params?: { workspace_id?: string; include_archived?: boolean }): Promise<Agent[]> {
     const search = new URLSearchParams();
@@ -4221,11 +4230,13 @@ export class ApiClient {
     sessionId: string,
     content: string,
     attachmentIds?: string[],
+    options?: { queue?: boolean },
   ): Promise<SendChatMessageResponse> {
     const body: {
       content: string;
+      steer: boolean;
       attachment_ids?: string[];
-    } = { content };
+    } = { content, steer: options?.queue !== true };
     if (attachmentIds && attachmentIds.length > 0) {
       body.attachment_ids = attachmentIds;
     }

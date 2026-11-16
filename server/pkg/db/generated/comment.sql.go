@@ -1976,6 +1976,62 @@ func (q *Queries) ListThreadCommentsForIssuePaged(ctx context.Context, arg ListT
 	return items, nil
 }
 
+const listThreadMemberAuthors = `-- name: ListThreadMemberAuthors :many
+WITH RECURSIVE root_of AS (
+    SELECT c.id, c.parent_id
+    FROM comment c
+    WHERE c.id = $1 AND c.workspace_id = $2
+    UNION ALL
+    SELECT p.id, p.parent_id
+    FROM comment p
+    JOIN root_of r ON p.id = r.parent_id
+),
+thread AS (
+    SELECT c.id
+    FROM comment c
+    WHERE c.id = (SELECT id FROM root_of WHERE parent_id IS NULL LIMIT 1)
+    UNION ALL
+    SELECT c.id
+    FROM comment c
+    JOIN thread t ON c.parent_id = t.id
+)
+SELECT DISTINCT c.author_id
+FROM comment c
+JOIN thread t ON t.id = c.id
+WHERE c.id <> $1
+  AND c.author_type = 'member'
+  AND c.deleted_at IS NULL
+`
+
+type ListThreadMemberAuthorsParams struct {
+	CommentID   pgtype.UUID `json:"comment_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// The members who wrote any other comment in the thread @comment_id belongs
+// to: its root and every reply under that root, at any depth. Used by the
+// bystander delivery tier, so a reply in a thread you took part in still
+// reaches you on an issue you are only watching (MUL-9343).
+func (q *Queries) ListThreadMemberAuthors(ctx context.Context, arg ListThreadMemberAuthorsParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listThreadMemberAuthors, arg.CommentID, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var author_id pgtype.UUID
+		if err := rows.Scan(&author_id); err != nil {
+			return nil, err
+		}
+		items = append(items, author_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockCommentAncestorPath = `-- name: LockCommentAncestorPath :many
 WITH RECURSIVE ancestor_ids AS (
   SELECT c.id, c.parent_id, 1::integer AS depth, ARRAY[c.id]::uuid[] AS visited_ids

@@ -93,10 +93,17 @@ expires_at_after_hours() {
 # flock is not on a stock macOS, so the lock is an atomic mkdir. The holder's
 # pid is recorded so a lock left behind by a killed process is recoverable
 # instead of wedging every later command.
+# mkdir's exit status alone is not the claim: uutils mkdir (Ubuntu 26.04)
+# also reports success to a caller that lost the race to create the directory.
+# Creating the pid file exclusively decides the holder.
+try_lock() {
+  mkdir "$LOCK_DIR" 2>/dev/null && (set -o noclobber; printf '%s\n' "$$" > "$LOCK_DIR/pid") 2>/dev/null
+}
+
 acquire_lock() {
   local waited=0
   mkdir -p "$DEV_HOME"
-  while ! mkdir "$LOCK_DIR" 2>/dev/null; do
+  while ! try_lock; do
     local holder=""
     holder="$(cat "$LOCK_DIR/pid" 2>/dev/null || true)"
     if [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; then
@@ -107,10 +114,13 @@ acquire_lock() {
     [ "$waited" -lt 100 ] || die "Timed out waiting for the allocation lock at $LOCK_DIR. If nothing else is running, remove it."
     sleep 0.1
   done
-  printf '%s\n' "$$" > "$LOCK_DIR/pid"
 }
 
-release_lock() { rm -rf "$LOCK_DIR"; }
+release_lock() {
+  rm -f "$LOCK_DIR/pid"
+  # Once pid is gone the next holder may already have taken this directory.
+  rmdir "$LOCK_DIR" 2>/dev/null || true
+}
 
 # ---------------------------------------------------------------- registry ---
 

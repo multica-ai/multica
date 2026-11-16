@@ -55,6 +55,7 @@ Docs-only changes can use link/reference checks and `git diff --check`; state th
 
 - TanStack Query owns API/server data. Zustand owns client state such as filters, drafts, modals, and tab layout; persist only durable preferences/drafts/layout, not server data or ephemeral UI state.
 - Web/desktop shared stores live in `packages/core/`. Desktop platform stores remain in desktop; mobile stores remain in mobile. Do not define stores in `packages/views/`.
+- Desktop tabs in a window share one set of Zustand stores and mount one at a time; a web tab gets its own. State describing how the current page was reached (source list, selection, highlight) must not assume one page: a click that opens a new tab leaves the current page's record intact and still records the target tab's own (`sidebarTabIssuesByWorkspace` in `packages/core/inbox/selection-store.ts`).
 - On web/desktop, workspace identity is route-driven; platform mirrors exist only for request headers, storage namespaces, and reconnects. React Context is for platform plumbing, not a second server-state store.
 - Among stores, only auth/workspace stores may call `api.*` directly; other server interactions belong in queries/mutations.
 - Workspace-scoped query keys include `wsId`; account-level keys remain account-scoped. Hooks needing workspace context accept `wsId` unless guaranteed to run under its provider.
@@ -62,6 +63,7 @@ Docs-only changes can use link/reference checks and `git diff --check`; state th
 - WebSocket events patch or invalidate Query caches, not server payloads in Zustand. Clearing client-owned pointers is allowed with one responder and a self-initiated guard when this client can cause the event.
 - Optimistic field patches require a predictable result, rare failure, trivial rollback, and staying on the current screen. Snapshot before patching, roll back on failure, and invalidate uncertain projections on settle.
 - Create/delete/leave and confirmation flows await the server before navigation or cleanup; do not optimistically delete entities. Exceptions: workspace leave (known debt under Desktop Rules) and mobile inbox mark-read (mobile instructions).
+- When the caller can unmount before the request settles (moving to the next item, closing a dialog or menu), attach toasts and follow-up work to the request promise (`mutateAsync().then(onSuccess, onError)`) or to `useMutation`'s own callbacks, not to per-call `mutate(vars, { onSuccess, onError })` callbacks, which React Query skips once the caller unmounts. Test these flows with the real mutation hook and a mocked API, unmounting the caller before the request settles (`packages/views/inbox/components/use-inbox-snooze.test.tsx`, `packages/views/issues/actions/__tests__/issue-inbox-actions.test.tsx`).
 - Message sends use visible pending state and retry on failure.
 
 ## API Compatibility

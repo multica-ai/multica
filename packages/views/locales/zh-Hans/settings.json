@@ -426,6 +426,10 @@
         "label": "归档通知",
         "description": "归档当前打开的收件箱通知；在归档列表中则取消归档。"
       },
+      "unsubscribeArchiveInboxItem": {
+        "label": "取消订阅并归档",
+        "description": "退订当前通知所在的任务并归档它。仅在不属于你或你的智能体的任务上可用。"
+      },
       "snoozeInboxItem": {
         "label": "延后通知",
         "description": "延后从收件箱打开的任务；已延后时让它现在回来。"
@@ -717,6 +721,7 @@
     "save_failed": "保存属性失败",
     "limit_hint": "{{count}}/{{max}} 个启用中属性",
     "archived_badge": "已归档",
+    "options_preview": "查看 {{name}} 的全部选项",
     "types": {
       "text": "文本",
       "number": "数字",
@@ -833,6 +838,12 @@
       "issues": "你订阅的任务",
       "projects": "你订阅的项目",
       "agents": "智能体"
+    },
+    "others_issues": {
+      "label": "别人的任务",
+      "description": "任务分配给别人或别人的智能体，而你只是因为创建、评论或被 @ 自动订阅了它。关键更新指 @你、回复你参与的讨论，以及待评审、受阻、完成等需要人来看的状态。",
+      "key_updates": "仅关键更新",
+      "all": "全部动态"
     },
     "leaving": {
       "title": "移出收件箱",

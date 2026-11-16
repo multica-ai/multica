@@ -729,6 +729,14 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := qtx.DeleteChatTaskSupplementsBySession(r.Context(), session.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete chat supplements")
+		return
+	}
+	if err := qtx.DeleteChatSupplementCapabilitiesBySession(r.Context(), session.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete chat supplement capabilities")
+		return
+	}
 	cancelled, err := qtx.CancelAgentTasksByChatSession(r.Context(), session.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to cancel chat session tasks")
@@ -822,6 +830,7 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 // Chat Messages
 
 type SendChatMessageRequest struct {
+	Steer         bool     `json:"steer"`
 	SubmissionID  *string  `json:"submission_id"`
 	Content       string   `json:"content"`
 	AttachmentIDs []string `json:"attachment_ids"`
@@ -883,7 +892,7 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 			h.writeDispatchBlocked(w, http.StatusForbidden, ReasonInvocationNotAllowed)
 			return
 		}
-		response, err := h.TaskService.LookupDirectChatSubmission(r.Context(), session, parseUUID(userID), req.Content, attachmentIDs, actorType, parseUUID(actorID), submissionID)
+		response, err := h.TaskService.LookupDirectChatSubmission(r.Context(), session, parseUUID(userID), req.Content, attachmentIDs, actorType, parseUUID(actorID), submissionID, req.Steer)
 		if err != nil {
 			h.writeChatSubmissionError(w, err)
 			return
@@ -979,9 +988,9 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	// resolved above for the invoke gate.
 	var sent *service.DirectChatSendResult
 	if submissionID.Valid {
-		sent, err = h.TaskService.SendDirectChatMessageWithSubmission(r.Context(), session, agent, parseUUID(userID), req.Content, attachmentIDs, actorType, parseUUID(actorID), submissionID)
+		sent, err = h.TaskService.SendDirectChatMessageWithSubmission(r.Context(), session, agent, parseUUID(userID), req.Content, attachmentIDs, actorType, parseUUID(actorID), submissionID, req.Steer)
 	} else {
-		sent, err = h.TaskService.SendDirectChatMessage(r.Context(), session, agent, parseUUID(userID), req.Content, attachmentIDs, actorType, parseUUID(actorID))
+		sent, err = h.TaskService.SendDirectChatMessage(r.Context(), session, agent, parseUUID(userID), req.Content, attachmentIDs, actorType, parseUUID(actorID), req.Steer)
 	}
 	if err != nil {
 		switch {
@@ -1007,6 +1016,9 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	msg := sent.Message
 	task := sent.Task
+	if sent.Steered {
+		h.notifyTaskSupplementAvailable(task)
+	}
 	currentTitle := session.Title
 	if sent.InitialTitle != "" {
 		currentTitle = sent.InitialTitle
@@ -1043,7 +1055,7 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		MessageID:     uuidToString(msg.ID),
 		Role:          "user",
 		Content:       req.Content,
-		TaskID:        uuidToString(task.ID),
+		TaskID:        uuidToString(msg.TaskID),
 		CreatedAt:     timestampToString(msg.CreatedAt),
 	})
 
@@ -1059,12 +1071,15 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, SendChatMessageResponse{
-		MessageID:     uuidToString(msg.ID),
-		TaskID:        uuidToString(task.ID),
-		SupportsQueue: true,
-		Queued:        sent.Queued,
-		CreatedAt:     timestampToString(task.CreatedAt),
-		AttachmentIDs: boundAttachmentIDs,
+		MessageID:        uuidToString(msg.ID),
+		TaskID:           uuidToString(task.ID),
+		SupportsQueue:    true,
+		Queued:           sent.Queued,
+		Steered:          sent.Steered,
+		MessageTaskID:    uuidToString(msg.TaskID),
+		MessageCreatedAt: timestampToString(msg.CreatedAt),
+		CreatedAt:        timestampToString(task.CreatedAt),
+		AttachmentIDs:    boundAttachmentIDs,
 	})
 }
 

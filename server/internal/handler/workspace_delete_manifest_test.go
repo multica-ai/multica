@@ -138,6 +138,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"theme_store_download":               workspaceDeleteKeep, // per registry theme, not workspace-owned
 	"task_context_receipt":               workspaceDelete,
 	"task_message":                       workspaceDelete,
+	"chat_task_supplement":               workspaceDelete,
 	"task_supplement":                    workspaceDelete,
 	"task_supplement_capability":         workspaceDelete,
 	"task_token":                         workspaceDelete,

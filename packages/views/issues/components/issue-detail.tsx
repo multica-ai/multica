@@ -69,6 +69,7 @@ import {
   DropdownMenuItem,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { Popover, PopoverTrigger, PopoverContent } from "@multica/ui/components/ui/popover";
+import { KeyUpdatesSubscriptionBadge } from "./key-updates-subscription-badge";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@multica/ui/components/ui/command";
 import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar";
@@ -76,6 +77,8 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { MemberProfileCard } from "../../members/member-profile-card";
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "@multica/ui/components/ui/hover-card";
 import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
+import { UnsubscribeArchiveButton } from "../../inbox/components/unsubscribe-archive-button";
+import type { InboxUnsubscribeScope } from "@multica/core/inbox/mutations";
 import { PropRow } from "../../common/prop-row";
 import { TimelineHandoff } from "../../workflows/timeline-handoff";
 import { PropertyIcon } from "../../common/property-icon";
@@ -1221,6 +1224,11 @@ interface IssueDetailProps {
   onDelete?: () => void;
   /** Called after the issue is marked as done via the toolbar button. */
   onDone?: () => void;
+  /**
+   * The Inbox's "unsubscribe & archive", shown next to Done on issues that
+   * are not the viewer's own. Only read alongside `onDone`.
+   */
+  onUnsubscribeArchive?: (scope: InboxUnsubscribeScope) => void;
   defaultSidebarOpen?: boolean;
   layoutId?: string;
   /** When set, the issue detail will auto-scroll to this comment and briefly highlight it. */
@@ -1252,6 +1260,8 @@ interface IssueDetailProps {
   variant?: "page" | "peek";
   /** Peek only: host controls at the end of the header (open full page, close). */
   trailingActions?: ReactNode;
+  /** A bar the host shows under the header, above the scrolling body. */
+  notice?: ReactNode;
   /**
    * Read the viewer's inbox notifications on this issue while it is on screen
    * (MUL-8588). The inbox turns this off for the issue it has open: it reads
@@ -1471,7 +1481,7 @@ export function IssueDetailSkeleton({
 
 // IssueDetail
 
-export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = ISSUE_DETAIL_LAYOUT_ID, highlightCommentId: linkedCommentId, highlightRequestToken: linkedRequestToken, highlightAppRequestId, leadingAction, variant = "page", trailingActions, readsInbox = true, skipInitialRefetch = false, openDeliverable, onDeliverableLinkDone }: IssueDetailProps) {
+export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, defaultSidebarOpen = true, layoutId = ISSUE_DETAIL_LAYOUT_ID, highlightCommentId: linkedCommentId, highlightRequestToken: linkedRequestToken, highlightAppRequestId, leadingAction, variant = "page", trailingActions, notice, readsInbox = true, skipInitialRefetch = false, openDeliverable, onDeliverableLinkDone }: IssueDetailProps) {
   const isPeek = variant === "peek";
   const { t } = useT("issues");
   const { t: tCommon } = useT("common");
@@ -2414,9 +2424,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   } = useIssueReactions(id, user?.id);
 
   const {
-    subscribers, isSubscribed, subscriptionReason, subscriptionKnown,
+    subscribers, isSubscribed, subscriptionReason, subscriptionDelivery, subscriptionKnown,
     togglePending, subtreePending,
-    toggleSubscribe: handleToggleSubscribe, toggleSubscriber,
+    toggleSubscribe: handleToggleSubscribe, toggleSubscriber, followAllActivity,
     unsubscribeFromSubtree: handleUnsubscribeSubtree,
   } = useIssueSubscribers(id, user?.id);
 
@@ -3589,6 +3599,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 }
               />
             )}
+            {onDone && onUnsubscribeArchive && (
+              <UnsubscribeArchiveButton issueId={id} userId={user?.id} onConfirm={onUnsubscribeArchive} />
+            )}
             {onDone && !issueBehavesAsAny(issue, ["done", "closed"]) && (
               <IconButton
                 label={t(($) => $.detail.mark_done_tooltip)}
@@ -3654,6 +3667,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             </>
           }
         />
+        {notice}
 
         {/* scrollbar-gutter both-edges: with classic (space-taking) scrollbars —
             macOS with a mouse or "always show", Windows, Linux — the global
@@ -4071,8 +4085,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 {/* A delegated subscription is one the user never opted into
                     by hand — their agent created this issue for them. Saying
                     so is what keeps it from reading as the product quietly
-                    adding them to things (MUL-5483). */}
-                {isSubscribed && subscriptionReason === "delegated" && (
+                    adding them to things (MUL-5483). The server's delivery
+                    tier decides it: a project watcher's delegated row still
+                    gets every event (MUL-9360). */}
+                {isSubscribed && subscriptionDelivery === "delegated" && (
                   <Tooltip>
                     {/* Quiet surface, not plain body text: this is metadata
                         explaining a state, and must not read as a second
@@ -4085,6 +4101,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       {t(($) => $.detail.delegated_subscription_hint)}
                     </TooltipContent>
                   </Tooltip>
+                )}
+                {isSubscribed && (
+                  <KeyUpdatesSubscriptionBadge
+                    delivery={subscriptionDelivery}
+                    pending={togglePending}
+                    onFollowAll={followAllActivity}
+                  />
                 )}
                 {/* Inherited from the project: say so, and that leaving
                     here only covers this issue, so Unsubscribe is not read as

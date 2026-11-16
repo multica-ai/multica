@@ -1,13 +1,19 @@
 "use client";
 
-import type { CSSProperties, ReactNode } from "react";
+import { useState, type CSSProperties, type ReactNode } from "react";
+import { inboxSnoozeOptions, type InboxSnoozePreset } from "@multica/core/inbox/snooze";
 import {
+  AlarmClock,
   AppWindow,
+  Archive,
+  ArrowUp,
   Bot,
   Check,
   ChevronDown,
+  Clock,
   Ellipsis,
   Laptop,
+  Paperclip,
   Plus,
   Quote,
   RotateCw,
@@ -17,7 +23,8 @@ import {
   Square,
 } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
-import { useT } from "../i18n";
+import { useLocale, useT } from "../i18n";
+import { formatSnoozeTime } from "../inbox/components/inbox-snooze-time";
 
 /**
  * Hero art for the What's new deck: a small mock of the feature built from
@@ -310,6 +317,133 @@ function AnnotationsArt() {
   );
 }
 
+/* ── Inbox snooze: a Work panel Inbox row and its snooze menu ──────── */
+
+function InboxRowArt({ title, detail, agent, active }: { title: number; detail: number; agent?: boolean; active?: boolean }) {
+  return (
+    <div className={cn("flex items-start gap-2 rounded-md px-2 py-1.5", active && "bg-accent/60")}>
+      <span
+        className={cn(
+          "mt-0.5 grid size-5 shrink-0 place-items-center rounded-full",
+          agent ? "bg-brand/10 text-brand" : "bg-muted",
+        )}
+      >
+        {agent && <Bot className="size-3" />}
+      </span>
+      <div className="flex min-w-0 flex-1 flex-col gap-1.5 pt-1">
+        <span className="h-1.5 rounded-full bg-foreground/55" style={{ width: title }} />
+        <span className="h-1.5 rounded-full bg-muted-foreground/30" style={{ width: detail }} />
+      </div>
+      {active ? (
+        <span className="flex shrink-0 gap-0.5 text-muted-foreground">
+          <span className="grid size-5 place-items-center rounded-md bg-surface-selected text-foreground">
+            <AlarmClock className="size-3" />
+          </span>
+          <span className="grid size-5 place-items-center rounded-md">
+            <Archive className="size-3" />
+          </span>
+        </span>
+      ) : (
+        <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-brand" />
+      )}
+    </div>
+  );
+}
+
+const SNOOZE_PRESETS_SHOWN: InboxSnoozePreset[] = ["hours_1", "hours_3", "days_1", "days_3"];
+
+function SnoozeArt() {
+  const { t } = useT("inbox");
+  const { t: tLayout } = useT("layout");
+  const locale = useLocale();
+  const [now] = useState(() => new Date());
+  const presetLabel: Record<InboxSnoozePreset, string> = {
+    hours_1: t(($) => $.snooze.hours_1),
+    hours_3: t(($) => $.snooze.hours_3),
+    days_1: t(($) => $.snooze.days_1),
+    days_3: t(($) => $.snooze.days_3),
+    weeks_1: t(($) => $.snooze.weeks_1),
+  };
+  const options = inboxSnoozeOptions(now).filter((option) => SNOOZE_PRESETS_SHOWN.includes(option.preset));
+  return (
+    <>
+      <Surface className="top-4 left-6 w-[15rem]">
+        <div className="flex h-8 items-center gap-1 px-3">
+          <span className="text-label font-medium">{tLayout(($) => $.nav.inbox)}</span>
+          <ChevronDown className="size-3 text-muted-foreground" />
+          <span className="ml-auto text-caption text-muted-foreground tabular-nums">2</span>
+        </div>
+        <div className="px-1 pb-2">
+          <InboxRowArt title={120} detail={88} agent active />
+          <InboxRowArt title={96} detail={128} />
+          <InboxRowArt title={136} detail={72} agent />
+        </div>
+      </Surface>
+      <Menu className="top-[3.25rem] left-[10.75rem] w-52">
+        <div className="px-2 py-1 text-caption font-medium text-muted-foreground">{t(($) => $.snooze.menu_title)}</div>
+        {options.map((option, i) => (
+          <MenuItem key={option.preset} icon={<Clock />} active={i === 0}>
+            <span>{presetLabel[option.preset]}</span>
+            <span className="ml-auto pl-2 text-caption text-muted-foreground tabular-nums">
+              {formatSnoozeTime(option.until, now, locale)}
+            </span>
+          </MenuItem>
+        ))}
+      </Menu>
+    </>
+  );
+}
+
+/* ── Desktop voice input: hold the mic in a comment box and talk ───── */
+
+/** A frozen take of the recorder's waveform; 0 is a silent dot. */
+const VOICE_LEVELS = [0, 0, 0.3, 0.6, 0.9, 0.5, 0.75, 1, 0.65, 0.35, 0, 0.45, 0.8, 0.55, 0.95, 0.7, 0.4];
+
+function VoiceArt() {
+  const { t } = useT("editor");
+  const { t: tIssues } = useT("issues");
+  return (
+    <div className="absolute top-[5.75rem] left-6 w-[20.5rem]">
+      <div className="absolute bottom-full left-1/2 z-10 mb-3 flex h-10 -translate-x-1/2 items-center gap-2.5 whitespace-nowrap rounded-full bg-multica-ink pr-4 pl-3.5 text-multica-paper shadow-[var(--floating-shadow)]">
+        <span className="size-2 shrink-0 rounded-full bg-[#ff5a52]" />
+        <span className="flex h-5 items-center gap-[2px]">
+          {VOICE_LEVELS.map((level, i) => (
+            <span
+              key={i}
+              className={cn("w-[2.5px] rounded-full bg-current", level === 0 && "opacity-40")}
+              style={{ height: level === 0 ? 2.5 : 2.5 + 17.5 * level }}
+            />
+          ))}
+        </span>
+        <span className="text-caption tabular-nums opacity-70">0:07</span>
+        <span className="text-caption opacity-70">{t(($) => $.voice.release_to_insert)}</span>
+      </div>
+      <Surface className="relative">
+        <div className="px-3 py-2 text-body text-muted-foreground">
+          {tIssues(($) => $.comment.leave_comment_placeholder)}
+        </div>
+        <div className="flex h-9 items-center justify-end gap-1 px-2 pb-1 text-muted-foreground">
+          <span className="grid size-7 place-items-center">
+            <Paperclip className="size-4" />
+          </span>
+          <span className="grid size-7 place-items-center rounded-md bg-brand/10 text-brand">
+            <span className="flex h-3.5 items-center gap-[2px]">
+              {[0.7, 1, 0.8].map((h) => (
+                <span key={h} className="w-[3px] rounded-full bg-current" style={{ height: `${h * 100}%` }} />
+              ))}
+            </span>
+          </span>
+          <span className="grid size-7 place-items-center rounded-full bg-muted text-faint-foreground">
+            <ArrowUp className="size-4" />
+          </span>
+        </div>
+      </Surface>
+    </div>
+  );
+}
+
 export const THEMES_HERO: WhatsNewHero = { ground: "orange", Art: ThemesArt };
 export const ENVIRONMENTS_HERO: WhatsNewHero = { ground: "ice", Art: EnvironmentsArt };
 export const ANNOTATIONS_HERO: WhatsNewHero = { ground: "lime", Art: AnnotationsArt };
+export const SNOOZE_HERO: WhatsNewHero = { ground: "brand", Art: SnoozeArt };
+export const VOICE_HERO: WhatsNewHero = { ground: "orange", Art: VoiceArt };

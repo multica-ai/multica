@@ -1278,6 +1278,11 @@ export function useRealtimeSync(
           task.issue_id === issue.id ? { ...task, issue_title: issue.title } : task,
         ));
       }
+      // Whose issue it is decides each subscriber's delivery tier, and a
+      // reassignment can change that without any subscriber event (MUL-9360).
+      if (payload.assignee_changed) {
+        qc.invalidateQueries({ queryKey: issueKeys.subscribers(issue.id) });
+      }
       const wsId = getCurrentWsId();
       if (wsId) {
         onIssueUpdated(qc, wsId, issue, {

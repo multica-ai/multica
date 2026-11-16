@@ -10,7 +10,7 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// CreateIfEligible returns inserted=false without an error when the recipient
+// createIfEligible returns inserted=false without an error when the recipient
 // does not belong to the workspace. Other database errors remain failures.
 // Eligibility is checked by the insert's snapshot, without additional locks.
 //
@@ -18,7 +18,7 @@ import (
 // CreateInboxItem). When the row is one that needs the recipient
 // (WakesSnooze), the snooze ends instead and the issue is back in the inbox
 // with this row on top. Announce the returned row with NewItemEventType.
-func CreateIfEligible(ctx context.Context, queries *db.Queries, params db.CreateInboxItemParams) (item db.InboxItem, inserted bool, err error) {
+func createIfEligible(ctx context.Context, queries *db.Queries, params db.CreateInboxItemParams) (item db.InboxItem, inserted bool, err error) {
 	item, err = queries.CreateInboxItem(ctx, params)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return db.InboxItem{}, false, nil

@@ -185,8 +185,10 @@ The auth rate limits require `REDIS_URL`; without it, the startup log notes that
 |---|---|---|
 | GitHub | `GITHUB_APP_SLUG` | GitHub App slug |
 | GitHub | `GITHUB_WEBHOOK_SECRET` | Webhook HMAC and connect-state signing secret |
-| GitHub | `GITHUB_APP_ID` | Needed for CI status and mergeability on PR cards and the "pick from GitHub" repository picker |
-| GitHub | `GITHUB_APP_PRIVATE_KEY` | Full PEM private key paired with the App ID; same uses as above |
+| GitHub | `GITHUB_APP_CLIENT_ID` | App Client ID. Required to verify the connecting user can access the installation |
+| GitHub | `GITHUB_APP_CLIENT_SECRET` | Client secret paired with the Client ID; required for new connections |
+| GitHub | `GITHUB_APP_ID` | Required for new connections to verify installation control; also used by PR cards and repository browsing |
+| GitHub | `GITHUB_APP_PRIVATE_KEY` | Required for new connections to verify installation control; also used by PR cards and repository browsing |
 | Lark | `MULTICA_LARK_SECRET_KEY` | Base64-encoded 32-byte credential encryption key |
 | Slack | `MULTICA_SLACK_SECRET_KEY` | Base64-encoded 32-byte token encryption key |
 | Telegram | `MULTICA_TELEGRAM_SECRET_KEY` | Base64-encoded 32-byte Bot token encryption key |

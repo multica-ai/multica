@@ -13,7 +13,8 @@ import { useSidebarKeptStore } from "@multica/core/issues/stores/sidebar-kept-st
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
 import { projectListOptions } from "@multica/core/projects/queries";
 import type { Project } from "@multica/core/types";
-import { useNavigation } from "../../navigation";
+import { resolveClickIntent, useHeldUntilArrival, useNavigation } from "../../navigation";
+import { useSidebarInboxIssue } from "../../inbox/components/use-sidebar-inbox-issue";
 import { IssueContextMenuProvider } from "../../issues/actions";
 import { useIssueViewActions } from "../../issue-views/use-view-actions";
 import { useT } from "../../i18n";
@@ -35,13 +36,6 @@ interface ClickedIssue {
   list: string | null;
 }
 
-/** The highlight records the open issue had before a click or the issue header moved on. */
-interface SettledIssue {
-  issueId: string | null;
-  clickedIssue: ClickedIssue | null;
-  inboxIssueId: string | null;
-}
-
 /**
  * The `{id}` of a `{base}/{id}` route — for `/issues/{id}`, a UUID or an
  * identifier like `MUL-123`.
@@ -53,14 +47,15 @@ function routeSegment(pathname: string, base: string): string | null {
 }
 
 /**
- * Ends the rows the sidebar lists keep (`useKeptActiveItem`) once their issue
- * or project is no longer the page. Mounted with the shell rather than the
+ * Ends the rows the sidebar lists keep (`useKeptActiveItem`), and the Inbox
+ * rows kept in place (`keepOpenInboxRow`), once their issue, project or
+ * notification is no longer the page. Mounted with the shell rather than the
  * Work panel, which unmounts on leaving Work and with every compact sheet
  * close.
  */
 export function KeptRowsRelease() {
   const p = useWorkspacePaths();
-  const { pathname } = useNavigation();
+  const { pathname, searchParams } = useNavigation();
   const wsId = useCurrentWorkspace()?.id ?? "";
   const issueSegment = routeSegment(pathname, p.issues());
   const { data: issue } = useQuery({
@@ -70,17 +65,20 @@ export function KeptRowsRelease() {
   // `undefined` while an identifier route waits for the page to load its issue.
   const issueId = issueSegment ? (issue?.id ?? (isIssueUuid(issueSegment) ? issueSegment : undefined)) : null;
   const projectId = routeSegment(pathname, p.projects());
+  // The notification the Inbox page has open, as its rows are keyed.
+  const inboxKey = pathname === p.inbox() ? searchParams.get("issue") : null;
   useLayoutEffect(() => {
     if (issueId === undefined) return;
     useSidebarKeptStore.getState().release([issueId, projectId].filter((id) => id !== null));
-  }, [issueId, projectId]);
+    if (wsId) useInboxSelectionStore.getState().releaseRows(wsId, [issueId, inboxKey].filter((id) => id !== null));
+  }, [wsId, issueId, projectId, inboxKey]);
   return null;
 }
 
 export function WorkPanel() {
   const { t } = useT("layout");
   const p = useWorkspacePaths();
-  const { pathname, searchParams } = useNavigation();
+  const { pathname, searchParams, openInNewTab } = useNavigation();
   const wsId = useCurrentWorkspace()?.id;
   const userId = useAuthStore((s) => s.user?.id);
   const viewActions = useIssueViewActions();
@@ -107,56 +105,43 @@ export function WorkPanel() {
   const [liveClickedIssue, setClickedIssue] = useState<ClickedIssue | null>(null);
   const isOpenIssue = (segment: string) =>
     !!currentIssueId && (segment === currentIssueId || segment === currentIssue?.identifier);
+  // Until the route reaches the issue a click names, the open issue keeps the
+  // records it had, or its highlight would fall through to another list, or
+  // All issues, for the length of the load.
+  const clicked = useHeldUntilArrival(
+    currentIssueId,
+    liveClickedIssue,
+    !!liveClickedIssue && !isOpenIssue(liveClickedIssue.segment),
+  );
   // An issue opened from the Inbox, by a row or by the issue header moving on
-  // to the next notification, lights there while the section still shows it;
-  // once archived, it falls back to the other lists.
-  const liveInboxIssueId = useInboxSelectionStore((s) => (wsId ? (s.sidebarIssueByWorkspace[wsId] ?? null) : null));
-  // A click, or the issue header moving on, names the next issue before the
-  // route reaches it, which on web waits for the next page to load. Until
-  // then the open issue keeps the record it had, or its highlight would fall
-  // through to another list, or All issues, for the length of the load.
-  const [settled, setSettled] = useState<SettledIssue>({
-    issueId: currentIssueId,
-    clickedIssue: liveClickedIssue,
-    inboxIssueId: liveInboxIssueId,
-  });
-  const movingOn =
-    settled.issueId === currentIssueId &&
-    ((liveClickedIssue !== settled.clickedIssue && !!liveClickedIssue && !isOpenIssue(liveClickedIssue.segment)) ||
-      (liveInboxIssueId !== settled.inboxIssueId && !!liveInboxIssueId && liveInboxIssueId !== currentIssueId));
-  if (
-    !movingOn &&
-    (settled.issueId !== currentIssueId ||
-      settled.clickedIssue !== liveClickedIssue ||
-      settled.inboxIssueId !== liveInboxIssueId)
-  ) {
-    setSettled({ issueId: currentIssueId, clickedIssue: liveClickedIssue, inboxIssueId: liveInboxIssueId });
-  }
-  const clickedIssue = movingOn ? settled.clickedIssue : liveClickedIssue;
-  const inboxIssueId = movingOn ? settled.inboxIssueId : liveInboxIssueId;
+  // to the next notification, belongs to the Inbox until another list is
+  // clicked. Its row stays in place while it is open (`keepOpenInboxRow`),
+  // and when an Inbox action took it with nothing left to open it lights
+  // nowhere: never in another list the user did not open it from.
+  const inbox = useSidebarInboxIssue(wsId, currentIssueId, clicked.movingOn);
+  const clickedIssue = clicked.value;
   const clickedList = clickedIssue && isOpenIssue(clickedIssue.segment) ? clickedIssue.list : undefined;
   // The notification open beside the section: an issue opened from it, or an
   // issue-less one on the Inbox page.
   const inboxOpenKey =
     pathname === p.inbox()
       ? searchParams.get("issue")
-      : currentIssueId && inboxIssueId === currentIssueId
+      : currentIssueId && inbox.fromInbox
         ? currentIssueId
         : null;
   const inboxRows = useInboxSectionRows(wsId, inboxOpenKey);
   const rememberSidebarIssue = useInboxSelectionStore((s) => s.rememberSidebarIssue);
-  // Moving on from an archived row keeps the issue lit nowhere rather than elsewhere.
-  const inboxClaimsIssue =
-    !!currentIssueId &&
-    inboxIssueId === currentIssueId &&
-    (movingOn || inboxRows.shownIssueIds.has(currentIssueId));
+  const rememberSidebarTabIssue = useInboxSelectionStore((s) => s.rememberSidebarTabIssue);
+  const forgetSidebarTabIssue = useInboxSelectionStore((s) => s.forgetSidebarTabIssue);
+  const inboxClaimsIssue = !!currentIssueId && inbox.fromInbox && !inboxRows.collapsed;
   const treeClaimsIssue = inboxClaimsIssue || (clickedList !== undefined && clickedList !== PINS_LIST);
   const pins = usePanelPins(wsId, userId, pathname, treeClaimsIssue ? null : currentIssueId);
   const requestLocate = useSidebarTreeStore((s) => s.requestLocate);
   const rememberClickedIssue = (event: React.MouseEvent) => {
+    // A middle click opens a tab; other buttons open nothing.
+    if (event.type === "auxclick" && event.button !== 1) return;
     const link = (event.target as HTMLElement).closest("a[href]");
     if (!link) return;
-    requestLocate(null);
     const path = new URL(link.getAttribute("href") ?? "", window.location.href).pathname;
     const segment = routeSegment(path, p.issues());
     // An Inbox row's hover card renders in a portal, outside the row's list.
@@ -165,9 +150,20 @@ export function WorkPanel() {
       : link.closest("[data-inbox-card]")
         ? INBOX_LIST
         : (link.closest("[data-sidebar-list]")?.getAttribute("data-sidebar-list") ?? null);
+    // A click that opens a tab or window, as AppLink resolves it, leaves this
+    // page and its records where they are. A desktop tab shares this page's
+    // store, so an issue the Inbox opens there is recorded beside them.
+    if (resolveClickIntent(event) !== "push" || (event.shiftKey && !openInNewTab)) {
+      if (openInNewTab && segment && wsId && list === INBOX_LIST) rememberSidebarTabIssue(wsId, segment);
+      return;
+    }
+    requestLocate(null);
     setClickedIssue(segment ? { segment, list } : null);
     // Inbox rows link by issue id, which is what the issue header compares.
-    if (segment && wsId) rememberSidebarIssue(wsId, list === INBOX_LIST ? segment : null);
+    if (segment && wsId) {
+      rememberSidebarIssue(wsId, list === INBOX_LIST ? segment : null);
+      forgetSidebarTabIssue(wsId, segment);
+    }
   };
 
   const { projectSettings, projectOrder } = useSidebarProjectPrefs(wsId ?? "");
@@ -238,7 +234,7 @@ export function WorkPanel() {
       {/* Outside PanelBody: clicks inside the menu's portal still bubble
           through the React tree, and must not reach rememberClickedIssue. */}
       <IssueContextMenuProvider variant="sidebar">
-        <PanelBody onClickCapture={rememberClickedIssue}>
+        <PanelBody onClickCapture={rememberClickedIssue} onAuxClickCapture={rememberClickedIssue}>
           {wsId && (
             <InboxSection
               wsId={wsId}

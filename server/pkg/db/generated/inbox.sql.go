@@ -352,7 +352,7 @@ type CreateInboxItemParams struct {
 //
 // MUL-9333: a row written on an issue the recipient has snoozed joins the
 // snooze, so it stays out of the inbox with the rest of the issue.
-// inbox.CreateIfEligible ends the snooze instead when the row is one that
+// inbox.Deliver ends the snooze instead when the row is one that
 // wakes it.
 // MUL-8472: a member outside a private project gets no notification about its
 // issues, whatever their workspace role. Only project members do.
