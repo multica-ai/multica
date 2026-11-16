@@ -91,10 +91,11 @@ type ContextReceiptSource struct {
 }
 
 // contextFileLoadProbes records runtimes confirmed to load the context file
-// the daemon writes, and the CLI version each probe ran against. Source: the
-// MUL-5392 canary probes documented on providerNeedsInlineSystemPrompt, plus
-// the kiro-cli ACP smoke. Add a row only with a probe behind it; an absent
-// runtime reads "unverified" on the receipt, which is the honest answer.
+// the daemon writes, and the CLI version each probe ran against.
+// See providerNeedsInlineSystemPrompt for the evidence ledger and the pending
+// acceptance decision for Pi 1.5.2's author-reported in-band run (GitHub #10713).
+// Add a row only with a probe behind it; an absent runtime reads "unverified"
+// on the receipt, which is the honest answer.
 var contextFileLoadProbes = map[string]string{
 	"claude":   "2.1.220",
 	"codex":    "0.144.6",
