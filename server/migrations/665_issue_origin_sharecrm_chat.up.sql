@@ -2,10 +2,9 @@
 -- command. The shared channel Router stamps origin_type='sharecrm_chat'.
 -- Same NOT VALID + separate VALIDATE pattern as Telegram (366/367).
 -- The full list is respecified and must include every prior origin
--- (including telegram_chat from migration 366). Numbers 661/662 follow
--- upstream 660 (inbox_item_snoozed_at). Upstream 657–660 add inbox
--- snooze timestamps, project archive, and the projects-page issue view
--- preference; they do not change origin_type.
+-- (including telegram_chat from migration 366). Numbers 665/666 follow
+-- upstream 664 (chat_task_supplement_workspace). Upstream 661–664 add
+-- chat task supplement tables and indexes; they do not change origin_type.
 ALTER TABLE issue DROP CONSTRAINT IF EXISTS issue_origin_type_check;
 ALTER TABLE issue ADD CONSTRAINT issue_origin_type_check
     CHECK (origin_type IN ('autopilot', 'quick_create', 'lark_chat', 'slack_chat', 'agent_create', 'dingtalk_chat', 'wecom_chat', 'telegram_chat', 'sharecrm_chat'))
