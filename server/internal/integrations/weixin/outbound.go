@@ -24,6 +24,7 @@ import (
 // Final replies only: iLink has no message-edit contract. The shared delivery
 // lease fences replicas and retry attempts; an ambiguous send is never replayed.
 type Outbound struct {
+	Typing  *TypingNotifier
 	q       *db.Queries
 	box     *secretbox.Box
 	client  *http.Client
@@ -39,7 +40,7 @@ func NewOutbound(q *db.Queries, box *secretbox.Box, logger *slog.Logger) *Outbou
 	if logger == nil {
 		logger = slog.Default()
 	}
-	o := &Outbound{q: q, box: box, logger: logger, done: make(chan struct{})}
+	o := &Outbound{q: q, box: box, logger: logger, done: make(chan struct{}), Typing: NewTypingNotifier(q, box, logger)}
 	for i := range o.queues {
 		o.queues[i] = make(chan events.Event, 32)
 	}
@@ -54,6 +55,7 @@ func (o *Outbound) Register(bus *events.Bus) {
 
 func (o *Outbound) Start(ctx context.Context) {
 	o.once.Do(func() {
+		o.Typing.Start(ctx)
 		for _, queue := range o.queues {
 			o.wg.Add(1)
 			go func() {
@@ -78,7 +80,7 @@ func (o *Outbound) Start(ctx context.Context) {
 
 func (o *Outbound) WaitWithTimeout(timeout time.Duration) bool {
 	done := make(chan struct{})
-	go func() { o.wg.Wait(); close(done) }()
+	go func() { o.wg.Wait(); o.Typing.wg.Wait(); close(done) }()
 	select {
 	case <-done:
 		return true
@@ -138,6 +140,7 @@ func (o *Outbound) processEvent(ctx context.Context, event events.Event) error {
 	if err != nil {
 		return err
 	}
+	defer o.Typing.Wake(task.ChatSessionID)
 	fromChannel, err := engine.TaskInputIsChannelIngested(ctx, o.q, task)
 	if err != nil || !fromChannel {
 		return err

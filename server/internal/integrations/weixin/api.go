@@ -231,6 +231,9 @@ func (c *apiClient) request(ctx context.Context, method, endpoint string, body a
 	if err != nil || len(b) > maxResponseBytes {
 		return ErrProtocol
 	}
+	if result == nil {
+		return nil
+	}
 	if err := json.Unmarshal(b, result); err != nil {
 		return ErrProtocol
 	}
@@ -241,11 +244,14 @@ func baseInfo() map[string]string {
 	return map[string]string{"channel_version": protocolVersion, "bot_agent": "Multica"}
 }
 
-func (c *apiClient) QRCode(ctx context.Context) (qrResult, error) {
+func (c *apiClient) QRCode(ctx context.Context, tokens ...string) (qrResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, apiTimeout)
 	defer cancel()
 	var result qrResult
-	err := c.request(ctx, http.MethodPost, "get_bot_qrcode?bot_type=3", map[string]any{"local_token_list": []string{}}, false, &result)
+	if tokens == nil {
+		tokens = []string{}
+	}
+	err := c.request(ctx, http.MethodPost, "get_bot_qrcode?bot_type=3", map[string]any{"local_token_list": tokens}, false, &result)
 	if err != nil {
 		return result, err
 	}
@@ -361,5 +367,33 @@ func (c *apiClient) notify(ctx context.Context, start bool) error {
 	if err := c.request(ctx, http.MethodPost, endpoint, map[string]any{"base_info": baseInfo()}, true, &result); err != nil {
 		return err
 	}
-	return result.check(true)
+	return result.check(false)
+}
+
+func (c *apiClient) typingTicket(ctx context.Context, user, replyContext string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, apiTimeout)
+	defer cancel()
+	var result struct {
+		apiResult
+		Ticket string `json:"typing_ticket"`
+	}
+	err := c.request(ctx, http.MethodPost, "getconfig", map[string]any{"ilink_user_id": user, "context_token": replyContext, "base_info": baseInfo()}, true, &result)
+	if err != nil {
+		return "", err
+	}
+	if err := result.check(true); err != nil {
+		return "", err
+	}
+	if result.Ticket == "" {
+		return "", ErrProtocol
+	}
+	return result.Ticket, nil
+}
+
+func (c *apiClient) sendTyping(ctx context.Context, user, ticket string, status int) error {
+	ctx, cancel := context.WithTimeout(ctx, apiTimeout)
+	defer cancel()
+	// The provider does not promise a JSON response for this cosmetic request.
+	reqBody := map[string]any{"ilink_user_id": user, "typing_ticket": ticket, "status": status, "base_info": baseInfo()}
+	return c.request(ctx, http.MethodPost, "sendtyping", reqBody, true, nil)
 }

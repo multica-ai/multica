@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
@@ -108,5 +109,73 @@ func TestInboundRejectsOtherUsersGroupsAndBotEchoes(t *testing.T) {
 		if _, ok := normalizeMessage(creds, copy); ok {
 			t.Fatal("accepted foreign or unsupported source")
 		}
+	}
+}
+
+func TestStopNotificationOnlyForShutdownOrExpiredToken(t *testing.T) {
+	for _, kind := range []string{"transient", "cancelled", "expired"} {
+		t.Run(kind, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			var stops atomic.Int32
+			store := &memoryAccount{}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case strings.HasSuffix(r.URL.Path, "notifystop"):
+					if r.Context().Err() != nil {
+						t.Error("stop inherited cancelled context")
+					}
+					stops.Add(1)
+				case strings.HasSuffix(r.URL.Path, "getupdates"):
+					switch kind {
+					case "transient":
+						w.WriteHeader(http.StatusBadGateway)
+						return
+					case "cancelled":
+						cancel()
+					case "expired":
+						_, _ = w.Write([]byte(`{"errcode":-14}`))
+						return
+					}
+				}
+				_, _ = w.Write([]byte(`{}`))
+			}))
+			defer server.Close()
+			c := &weixinChannel{api: newAPI(server.URL, "token", server.Client()), q: store, logger: slog.Default(), handler: func(context.Context, channel.InboundMessage) error { return nil }}
+			err := c.Connect(ctx)
+			if kind == "transient" && err == nil {
+				t.Fatal("transient error was swallowed")
+			}
+			wantStops := int32(1)
+			if kind == "transient" {
+				wantStops = 0
+			}
+			if stops.Load() != wantStops || store.expired != (kind == "expired") {
+				t.Fatalf("stops=%d expired=%v", stops.Load(), store.expired)
+			}
+		})
+	}
+}
+
+func TestUnchangedCursorDoesNotWriteOrSkipMessages(t *testing.T) {
+	var polls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "getupdates") {
+			if polls.Add(1) > 1 {
+				w.WriteHeader(http.StatusBadGateway)
+				return
+			}
+			_, _ = w.Write([]byte(`{"get_updates_buf":"same","msgs":[{"message_id":1,"from_user_id":"owner","message_type":1,"item_list":[{"type":1,"text_item":{"text":"hello"}}]}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+	store := &memoryAccount{state: db.WeixinAccountState{GetUpdatesBuf: "same"}}
+	calls := 0
+	c := &weixinChannel{creds: credentials{installConfig: installConfig{AppID: "bot", UserID: "owner"}}, api: newAPI(server.URL, "token", server.Client()), q: store, box: testBox(t), logger: slog.Default(), handler: func(context.Context, channel.InboundMessage) error { calls++; return nil }}
+	_ = c.Connect(context.Background())
+	if store.cursorSaved || calls != 1 {
+		t.Fatalf("cursorSaved=%v messages=%d", store.cursorSaved, calls)
 	}
 }

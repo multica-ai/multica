@@ -11,6 +11,7 @@ import {
   weixinInstallationsOptions,
   weixinKeys,
   isWeixinLoginPending,
+  weixinConflict,
 } from "@multica/core/weixin";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
@@ -43,6 +44,9 @@ export function WeixinAgentBindButton({
   const active = listing.data?.installations.find(
     (item) => item.agent_id === agentId && item.status === "active",
   );
+  const expired = listing.data?.installations.some(
+    (item) => item.agent_id === agentId && item.status === "expired",
+  );
   if (listing.isError)
     return (
       <p role="alert" className="text-caption">
@@ -71,7 +75,12 @@ export function WeixinAgentBindButton({
     );
   if (listing.data.install_supported !== true)
     return <p className="text-caption">{t(($) => $.weixin.not_enabled)}</p>;
-  return <WeixinConnect agentId={agentId} agentName={agentName} onBusyChange={onBusyChange} />;
+  return (
+    <div className="space-y-2">
+      {expired && <p role="status" className="text-caption text-destructive">{t(($) => $.weixin.authorization_expired)}</p>}
+      <WeixinConnect agentId={agentId} agentName={agentName} onBusyChange={onBusyChange} />
+    </div>
+  );
 }
 
 function WeixinDisconnect({
@@ -270,6 +279,13 @@ function WeixinConnect({
                   ? t(($) => $.weixin.action_failed)
                   : t(($) => $.weixin.scan_hint);
   const failed = begin.isError || poll.isError || verify.isError || closeError;
+  const error = begin.error ?? poll.error ?? verify.error;
+  const conflict = weixinConflict(error);
+  const errorText = conflict
+    ? conflict.agent_name
+      ? t(($) => $.weixin.already_connected, { agent: conflict.agent_name })
+      : t(($) => $.weixin.connected_elsewhere)
+    : clientErrorMessage(error) ?? t(($) => $.weixin.action_failed);
   return (
     <>
       <Button variant="outline" size="sm" onClick={start}>
@@ -340,8 +356,7 @@ function WeixinConnect({
           )}
           {failed && (
             <p role="alert" className="text-caption text-destructive">
-              {clientErrorMessage(begin.error ?? poll.error ?? verify.error) ??
-                t(($) => $.weixin.action_failed)}
+              {errorText}
             </p>
           )}
           <DialogFooter>

@@ -1261,8 +1261,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				outbound.EnableFileDelivery(store)
 				h.DeclareChannelFileDelivery(string(weixin.TypeWeixin))
 			}
-			channelRouter.Register(weixin.TypeWeixin, weixin.NewWeixinResolverSet(queries, pool, outbound, nil, media))
-			weixin.RegisterWeixin(channelRegistry, weixin.ChannelDeps{Queries: queries, Box: box, Logger: slog.Default()})
+			channelRouter.Register(weixin.TypeWeixin, weixin.NewWeixinResolverSet(queries, pool, outbound, outbound.Typing, media))
+			weixin.RegisterWeixin(channelRegistry, weixin.ChannelDeps{Queries: queries, Box: box, Logger: slog.Default(), Typing: outbound.Typing, Bus: bus})
 			outbound.Register(bus)
 			h.WeixinInstall, h.WeixinOutbound = install, outbound
 			slog.Info("weixin integration enabled (QR login and long polling)")

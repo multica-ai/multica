@@ -11,10 +11,11 @@ import (
 const TypeWeixin channel.Type = "weixin"
 
 type installConfig struct {
-	AppID          string `json:"app_id"`
-	UserID         string `json:"user_id"`
-	BaseURL        string `json:"base_url"`
-	TokenEncrypted string `json:"bot_token_encrypted"`
+	AppID                string `json:"app_id"`
+	UserID               string `json:"user_id"`
+	BaseURL              string `json:"base_url"`
+	TokenEncrypted       string `json:"bot_token_encrypted"`
+	AuthorizationExpired bool   `json:"authorization_expired,omitempty"`
 }
 
 type credentials struct {
@@ -22,12 +23,15 @@ type credentials struct {
 	Token string
 }
 
-type PublicConfig struct{ BotID, UserID string }
+type PublicConfig struct {
+	BotID, UserID        string
+	AuthorizationExpired bool
+}
 
 func DecodePublicConfig(raw json.RawMessage) PublicConfig {
 	var cfg installConfig
 	_ = json.Unmarshal(raw, &cfg)
-	return PublicConfig{BotID: cfg.AppID, UserID: cfg.UserID}
+	return PublicConfig{BotID: cfg.AppID, UserID: cfg.UserID, AuthorizationExpired: cfg.AuthorizationExpired}
 }
 
 func decodeCredentials(raw json.RawMessage, box *secretbox.Box) (credentials, error) {

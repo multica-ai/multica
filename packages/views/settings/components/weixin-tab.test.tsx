@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enSettings from "../../locales/en/settings.json";
+import { ApiError } from "@multica/core/api/client";
 
 const mocks = vi.hoisted(() => ({
   list: vi.fn(),
@@ -187,5 +188,36 @@ describe("WeChat QR connection", () => {
     expect(await screen.findByRole("alert")).toBeVisible();
     expect(screen.getByRole("dialog")).toBeVisible();
     expect(mocks.revoke).toHaveBeenCalledWith("workspace-1", "bot-1");
+  });
+
+  it("names the agent owning a conflicting WeChat connection", async () => {
+    const user = userEvent.setup();
+    mocks.poll.mockRejectedValue(new ApiError("already connected", 409, "Conflict", {
+      code: "weixin_already_connected", agent_id: "other-agent", agent_name: "Research Assistant",
+    }));
+    renderButton();
+    await user.click(await screen.findByRole("button", { name: "Connect WeChat" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "This WeChat account is connected to Research Assistant. Disconnect it there first.",
+    );
+  });
+
+  it("keeps cross-workspace conflict details private", async () => {
+    const user = userEvent.setup();
+    mocks.poll.mockRejectedValue(new ApiError("already connected", 409, "Conflict", {
+      code: "weixin_already_connected",
+    }));
+    renderButton();
+    await user.click(await screen.findByRole("button", { name: "Connect WeChat" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "This WeChat account is connected elsewhere. Disconnect the existing connection first.",
+    );
+  });
+
+  it("explains expired authorization and offers reconnection", async () => {
+    mocks.list.mockResolvedValue({ configured: true, install_supported: true, installations: [{ ...active, status: "expired" }] });
+    renderButton();
+    expect(await screen.findByText("WeChat authorization expired. Scan again to reconnect.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Connect WeChat" })).toBeVisible();
   });
 });

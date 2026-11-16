@@ -137,7 +137,8 @@ func (q *Queries) DeleteWeixinAccountState(ctx context.Context, installationID p
 }
 
 const expireWeixinInstallation = `-- name: ExpireWeixinInstallation :execrows
-UPDATE channel_installation SET status = 'revoked', updated_at = now()
+UPDATE channel_installation SET status = 'revoked',
+    config = jsonb_set(config, '{authorization_expired}', 'true'), updated_at = now()
 WHERE id = $1 AND channel_type = 'weixin' AND status = 'active' AND config = $2
 `
 
@@ -236,6 +237,38 @@ func (q *Queries) GetWeixinLoginSession(ctx context.Context, arg GetWeixinLoginS
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const isWeixinTypingActive = `-- name: IsWeixinTypingActive :one
+SELECT EXISTS (
+ SELECT 1 FROM chat_session s
+ JOIN channel_installation i ON i.id = $1 AND i.workspace_id = s.workspace_id
+ JOIN channel_chat_session_binding b ON b.chat_session_id = s.id AND b.installation_id = i.id
+ JOIN chat_message m ON m.chat_session_id = s.id
+ WHERE s.id = $2 AND s.status = 'active'
+  AND i.channel_type = 'weixin' AND i.status = 'active' AND i.config = $3
+  AND b.channel_type = 'weixin' AND b.retired_at IS NULL
+  AND m.channel_ingested AND m.role = 'user' AND NOT m.channel_typing_settled
+  AND COALESCE(m.channel_context_revision, 1) = b.context_revision
+  AND ((m.task_id IS NULL AND m.created_at > now() - interval '2 minutes') OR EXISTS (
+   SELECT 1 FROM agent_task_queue t WHERE t.chat_session_id = s.id
+    AND (t.id = m.task_id OR t.chat_input_task_id = m.task_id)
+    AND t.status IN ('queued','dispatched','running','waiting_local_directory','deferred')
+  ))
+) AS active
+`
+
+type IsWeixinTypingActiveParams struct {
+	InstallationID pgtype.UUID `json:"installation_id"`
+	ChatSessionID  pgtype.UUID `json:"chat_session_id"`
+	Config         []byte      `json:"config"`
+}
+
+func (q *Queries) IsWeixinTypingActive(ctx context.Context, arg IsWeixinTypingActiveParams) (bool, error) {
+	row := q.db.QueryRow(ctx, isWeixinTypingActive, arg.InstallationID, arg.ChatSessionID, arg.Config)
+	var active bool
+	err := row.Scan(&active)
+	return active, err
 }
 
 const lockWeixinLoginSession = `-- name: LockWeixinLoginSession :one
@@ -359,6 +392,38 @@ func (q *Queries) SaveWeixinCursor(ctx context.Context, arg SaveWeixinCursorPara
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const settleWeixinTypingInputs = `-- name: SettleWeixinTypingInputs :exec
+UPDATE chat_message m SET channel_typing_settled = true
+FROM chat_message cutoff, chat_session s, channel_installation i
+WHERE cutoff.id = $1 AND cutoff.chat_session_id = s.id
+ AND s.id = $2 AND s.workspace_id = $3
+ AND i.id = $4 AND i.workspace_id = s.workspace_id AND i.channel_type = 'weixin'
+ AND EXISTS (SELECT 1 FROM channel_chat_session_binding b WHERE b.chat_session_id = s.id
+  AND b.installation_id = i.id AND b.channel_type = 'weixin')
+ AND m.chat_session_id = s.id AND m.channel_ingested AND m.role = 'user' AND m.task_id IS NULL
+ AND COALESCE(m.channel_context_revision, 1) = $5
+ AND (m.created_at, m.id) <= (cutoff.created_at, cutoff.id)
+`
+
+type SettleWeixinTypingInputsParams struct {
+	ThroughMessageID pgtype.UUID `json:"through_message_id"`
+	ChatSessionID    pgtype.UUID `json:"chat_session_id"`
+	WorkspaceID      pgtype.UUID `json:"workspace_id"`
+	InstallationID   pgtype.UUID `json:"installation_id"`
+	ContextRevision  pgtype.Int8 `json:"context_revision"`
+}
+
+func (q *Queries) SettleWeixinTypingInputs(ctx context.Context, arg SettleWeixinTypingInputsParams) error {
+	_, err := q.db.Exec(ctx, settleWeixinTypingInputs,
+		arg.ThroughMessageID,
+		arg.ChatSessionID,
+		arg.WorkspaceID,
+		arg.InstallationID,
+		arg.ContextRevision,
+	)
+	return err
 }
 
 const updateWeixinLoginSession = `-- name: UpdateWeixinLoginSession :execrows

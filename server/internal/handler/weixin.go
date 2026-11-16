@@ -25,6 +25,9 @@ type WeixinInstallationResponse struct {
 
 func weixinInstallationResponse(row db.ChannelInstallation) WeixinInstallationResponse {
 	info := weixin.DecodePublicConfig(row.Config)
+	if row.Status == "revoked" && info.AuthorizationExpired {
+		row.Status = "expired"
+	}
 	return WeixinInstallationResponse{ID: uuidToString(row.ID), WorkspaceID: uuidToString(row.WorkspaceID), AgentID: uuidToString(row.AgentID), BotID: info.BotID, UserID: info.UserID, InstallerUserID: uuidToString(row.InstallerUserID), Status: row.Status, InstalledAt: row.InstalledAt.Time.UTC().Format(time.RFC3339)}
 }
 
@@ -184,7 +187,12 @@ func writeWeixinError(w http.ResponseWriter, err error) {
 	case errors.Is(err, weixin.ErrInvalidCode):
 		writeError(w, http.StatusBadRequest, "enter the numeric verification code shown in WeChat")
 	case errors.Is(err, weixin.ErrConflict):
-		writeError(w, http.StatusConflict, "this WeChat bot is already connected; disconnect it before changing its agent")
+		body := map[string]any{"code": "weixin_already_connected", "error": "this WeChat account is already connected; disconnect it before changing its agent"}
+		var conflict *weixin.ConflictError
+		if errors.As(err, &conflict) {
+			body["agent_id"], body["agent_name"] = conflict.AgentID, conflict.AgentName
+		}
+		writeJSON(w, http.StatusConflict, body)
 	case errors.Is(err, weixin.ErrBusy):
 		writeError(w, http.StatusConflict, "this login is being checked; try again shortly")
 	case errors.Is(err, weixin.ErrAccess):

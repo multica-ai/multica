@@ -10,11 +10,13 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/internal/util/secretbox"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 type accountStore interface {
@@ -29,17 +31,21 @@ type ChannelDeps struct {
 	Box     *secretbox.Box
 	Logger  *slog.Logger
 	Client  *http.Client
+	Typing  *TypingNotifier
+	Bus     *events.Bus
 }
 
 type weixinChannel struct {
-	id      pgtype.UUID
-	creds   credentials
-	api     *apiClient
-	q       accountStore
-	box     *secretbox.Box
-	handler channel.InboundHandler
-	logger  *slog.Logger
-	config  []byte
+	id        pgtype.UUID
+	creds     credentials
+	api       *apiClient
+	q         accountStore
+	box       *secretbox.Box
+	handler   channel.InboundHandler
+	logger    *slog.Logger
+	config    []byte
+	typing    *TypingNotifier
+	onExpired func(context.Context)
 }
 
 func RegisterWeixin(reg *channel.Registry, deps ChannelDeps) {
@@ -55,13 +61,22 @@ func RegisterWeixin(reg *channel.Registry, deps ChannelDeps) {
 		if logger == nil {
 			logger = slog.Default()
 		}
-		return &weixinChannel{id: cfg.ID, config: cfg.Raw, creds: creds, api: newAPI(creds.BaseURL, creds.Token, deps.Client), q: deps.Queries, box: deps.Box, handler: cfg.Handler, logger: logger}, nil
+		c := &weixinChannel{id: cfg.ID, config: cfg.Raw, creds: creds, api: newAPI(creds.BaseURL, creds.Token, deps.Client), q: deps.Queries, box: deps.Box, handler: cfg.Handler, logger: logger, typing: deps.Typing}
+		if deps.Bus != nil {
+			c.onExpired = func(ctx context.Context) {
+				inst, err := deps.Queries.GetChannelInstallation(ctx, db.GetChannelInstallationParams{ID: cfg.ID, ChannelType: string(TypeWeixin)})
+				if err == nil {
+					deps.Bus.Publish(events.Event{Type: protocol.EventWeixinInstallationRevoked, WorkspaceID: util.UUIDToString(inst.WorkspaceID), ActorType: "system", Payload: map[string]any{"id": util.UUIDToString(inst.ID)}})
+				}
+			}
+		}
+		return c, nil
 	})
 }
 
 func (c *weixinChannel) Type() channel.Type { return TypeWeixin }
 func (c *weixinChannel) Capabilities() channel.Capability {
-	return channel.CapText | channel.CapAttachment
+	return channel.CapText | channel.CapAttachment | channel.CapTypingIndicator
 }
 func (c *weixinChannel) Disconnect(context.Context) error { return nil }
 
@@ -76,10 +91,21 @@ func (c *weixinChannel) Connect(ctx context.Context) error {
 	if err := c.api.notify(ctx, true); err != nil && ctx.Err() == nil {
 		c.logger.WarnContext(ctx, "weixin: start notification failed", "error", err)
 	}
+	tokenExpired := false
 	defer func() {
+		if ctx.Err() == nil && !tokenExpired {
+			return
+		}
+		if c.typing != nil {
+			clear, cancel := context.WithTimeout(context.WithoutCancel(ctx), typingCallTimeout)
+			c.typing.StopInstallation(clear, c.id)
+			cancel()
+		}
 		stop, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 		defer cancel()
-		_ = c.api.notify(stop, false)
+		if err := c.api.notify(stop, false); err != nil {
+			c.logger.WarnContext(stop, "weixin: stop notification failed", "error", err)
+		}
 	}()
 	cursor := state.GetUpdatesBuf
 	for ctx.Err() == nil {
@@ -92,9 +118,12 @@ func (c *weixinChannel) Connect(ctx context.Context) error {
 		}
 		if err != nil {
 			if errors.Is(err, ErrTokenExpired) {
+				tokenExpired = true
 				// Fence against a newer QR login rotating this installation while
 				// its predecessor's long poll was still in flight.
-				_, _ = c.q.ExpireWeixinInstallation(ctx, db.ExpireWeixinInstallationParams{ID: c.id, Config: c.config})
+				if rows, err := c.q.ExpireWeixinInstallation(ctx, db.ExpireWeixinInstallationParams{ID: c.id, Config: c.config}); err == nil && rows == 1 && c.onExpired != nil {
+					c.onExpired(ctx)
+				}
 			}
 			return err
 		}
@@ -118,7 +147,7 @@ func (c *weixinChannel) Connect(ctx context.Context) error {
 				return err
 			}
 		}
-		if result.Cursor != "" {
+		if result.Cursor != "" && result.Cursor != cursor {
 			rows, err := c.q.SaveWeixinCursor(ctx, db.SaveWeixinCursorParams{InstallationID: c.id, BotID: c.creds.AppID, GetUpdatesBuf: result.Cursor})
 			if err != nil {
 				return err

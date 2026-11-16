@@ -1729,7 +1729,10 @@
     "blocked": "WeChat has blocked further verification attempts. Try again later.",
     "already_bound": "This bot is already bound in WeChat. Disconnect the previous client and try again.",
     "refresh": "New QR code",
-    "retry": "Retry"
+    "retry": "Retry",
+    "already_connected": "This WeChat account is connected to {{agent}}. Disconnect it there first.",
+    "connected_elsewhere": "This WeChat account is connected elsewhere. Disconnect the existing connection first.",
+    "authorization_expired": "WeChat authorization expired. Scan again to reconnect."
   },
   "connected_apps": {
     "description": "Accounts your agents use to access external apps. Allowed actions run immediately.",

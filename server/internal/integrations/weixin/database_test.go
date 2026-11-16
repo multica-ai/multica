@@ -73,6 +73,7 @@ type databaseFixture struct {
 	workspace pgtype.UUID
 	user      pgtype.UUID
 	status    atomic.Value
+	tokens    atomic.Value
 	provider  *httptest.Server
 	block     func()
 }
@@ -93,6 +94,13 @@ func newDatabaseFixture(t *testing.T) *databaseFixture {
 	x.provider = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/ilink/bot/get_bot_qrcode":
+			var body struct {
+				Tokens []string `json:"local_token_list"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Error(err)
+			}
+			x.tokens.Store(body.Tokens)
 			_ = json.NewEncoder(w).Encode(map[string]string{"qrcode": "private-qr", "qrcode_img_content": "https://weixin.qq.com/test-qr"})
 		case "/ilink/bot/get_qrcode_status":
 			if x.block != nil {
@@ -243,6 +251,145 @@ func TestLoginBotOwnershipAndRevoke(t *testing.T) {
 	if count := x.f.Count(t, "SELECT count(*) FROM weixin_account_state WHERE installation_id=$1", inst.ID); count != 0 {
 		t.Fatal("revoked context retained")
 	}
+}
+
+func TestLoginTokensAreScopedAndBoundRedirectPreservesInstallation(t *testing.T) {
+	x := newDatabaseFixture(t)
+	inst := x.connect(t)
+	if _, err := x.q.SaveWeixinCursor(context.Background(), db.SaveWeixinCursorParams{InstallationID: inst.ID, BotID: DecodePublicConfig(inst.Config).BotID, GetUpdatesBuf: "saved-cursor"}); err != nil {
+		t.Fatal(err)
+	}
+	y := newDatabaseFixture(t)
+	y.connect(t)
+	id := x.begin(t)
+	tokens := x.tokens.Load().([]string)
+	if len(tokens) != 1 || tokens[0] != "test-token" {
+		t.Fatalf("wrong current-agent tokens: count=%d", len(tokens))
+	}
+	x.status.Store(qrStatus{Status: "binded_redirect"})
+	view, err := x.svc.Poll(context.Background(), id, x.workspace, x.user, "")
+	if err != nil || view.Status != "confirmed" || view.InstallationID != util.UUIDToString(inst.ID) {
+		t.Fatalf("repeat binding: %+v %v", view, err)
+	}
+	state, err := x.q.GetWeixinAccountState(context.Background(), db.GetWeixinAccountStateParams{InstallationID: inst.ID, BotID: DecodePublicConfig(inst.Config).BotID})
+	if err != nil || state.GetUpdatesBuf != "saved-cursor" {
+		t.Fatalf("repeat binding reset state: %v", err)
+	}
+	other := testUUID(t, x.f.Agent(t, "Another agent", ""))
+	if _, err := x.svc.Begin(context.Background(), x.workspace, other, x.user); err != nil {
+		t.Fatal(err)
+	}
+	if tokens := x.tokens.Load().([]string); len(tokens) != 0 {
+		t.Fatalf("another agent received %d tokens", len(tokens))
+	}
+}
+
+func TestBoundRedirectRejectsMissingRevokedOrChangedInstallation(t *testing.T) {
+	for _, kind := range []string{"missing", "revoked", "changed", "demoted"} {
+		t.Run(kind, func(t *testing.T) {
+			x := newDatabaseFixture(t)
+			var inst db.ChannelInstallation
+			if kind != "missing" {
+				inst = x.connect(t)
+			}
+			id := x.begin(t)
+			switch kind {
+			case "revoked":
+				if err := x.svc.Revoke(context.Background(), inst.ID, x.workspace); err != nil {
+					t.Fatal(err)
+				}
+			case "changed":
+				x.f.Exec(t, `UPDATE channel_installation SET config=config || '{"changed":true}'::jsonb WHERE id=$1`, inst.ID)
+			case "demoted":
+				x.f.Exec(t, `UPDATE member SET role='member' WHERE workspace_id=$1 AND user_id=$2`, x.workspace, x.user)
+			}
+			x.status.Store(qrStatus{Status: "binded_redirect"})
+			if _, err := x.svc.Poll(context.Background(), id, x.workspace, x.user, ""); err == nil {
+				t.Fatal("stale or absent binding treated as connected")
+			}
+		})
+	}
+}
+
+func TestLoginConflictNamesOnlyCurrentWorkspaceAgent(t *testing.T) {
+	x := newDatabaseFixture(t)
+	x.connect(t)
+	other := testUUID(t, x.f.Agent(t, "Another agent", ""))
+	view, err := x.svc.Begin(context.Background(), x.workspace, other, x.user)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = x.svc.Poll(context.Background(), testUUID(t, view.ID), x.workspace, x.user, "")
+	var conflict *ConflictError
+	if !errors.As(err, &conflict) || conflict.AgentID != util.UUIDToString(x.agent) || conflict.AgentName != "WeChat test agent" {
+		t.Fatalf("missing conflict owner: %v", err)
+	}
+	y := newDatabaseFixture(t)
+	y.status.Store(x.status.Load().(qrStatus))
+	_, err = y.svc.Poll(context.Background(), y.begin(t), y.workspace, y.user, "")
+	if !errors.Is(err, ErrConflict) || errors.As(err, &conflict) {
+		t.Fatal("cross-workspace conflict leaked agent identity")
+	}
+}
+
+func TestExpiredTokenIsMarkedWithoutRevokingRotatedCredentials(t *testing.T) {
+	x := newDatabaseFixture(t)
+	inst := x.connect(t)
+	rows, err := x.q.ExpireWeixinInstallation(context.Background(), db.ExpireWeixinInstallationParams{ID: inst.ID, Config: inst.Config})
+	if err != nil || rows != 1 {
+		t.Fatalf("expire: %d %v", rows, err)
+	}
+	expired, err := x.q.GetChannelInstallation(context.Background(), db.GetChannelInstallationParams{ID: inst.ID, ChannelType: string(TypeWeixin)})
+	if err != nil || expired.Status != "revoked" || !DecodePublicConfig(expired.Config).AuthorizationExpired {
+		t.Fatalf("expiration missing: %v", err)
+	}
+	x.connect(t)
+	rows, err = x.q.ExpireWeixinInstallation(context.Background(), db.ExpireWeixinInstallationParams{ID: inst.ID, Config: inst.Config})
+	if err != nil || rows != 0 {
+		t.Fatalf("stale credential expired new binding: %d %v", rows, err)
+	}
+}
+
+func TestTypingTracksDurableInputsAndRetryAcrossReplicas(t *testing.T) {
+	x := newDatabaseFixture(t)
+	ctx := context.Background()
+	inst := x.connect(t)
+	session := x.f.Insert(t, "chat_session", dbfx.Cols{"workspace_id": x.workspace, "agent_id": x.agent, "creator_id": x.user})
+	sessionID := testUUID(t, session)
+	_, err := x.q.CreateChannelChatSessionBinding(ctx, db.CreateChannelChatSessionBindingParams{ChatSessionID: sessionID, InstallationID: inst.ID, ChannelType: string(TypeWeixin), ChannelChatID: "owner", ChatType: "p2p", Config: []byte(`{}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := x.f.Insert(t, "chat_message", dbfx.Cols{"chat_session_id": session, "role": "user", "content": "hello", "channel_ingested": true})
+	params := db.IsWeixinTypingActiveParams{InstallationID: inst.ID, ChatSessionID: sessionID, Config: inst.Config}
+	assertActive := func(want bool) {
+		t.Helper()
+		got, err := x.q.IsWeixinTypingActive(ctx, params)
+		if err != nil || got != want {
+			t.Fatalf("typing active=%v want=%v error=%v", got, want, err)
+		}
+	}
+	assertActive(true)
+	if err := x.q.SettleWeixinTypingInputs(ctx, db.SettleWeixinTypingInputsParams{InstallationID: inst.ID, ChatSessionID: sessionID, WorkspaceID: x.workspace, ThroughMessageID: testUUID(t, input), ContextRevision: pgtype.Int8{Int64: 1, Valid: true}}); err != nil {
+		t.Fatal(err)
+	}
+	assertActive(false)
+	x.f.Exec(t, `UPDATE chat_message SET channel_typing_settled=false WHERE id=$1`, input)
+	runtime := x.f.Runtime(t, "typing test runtime")
+	task := x.f.Task(t, util.UUIDToString(x.agent), dbfx.Cols{"runtime_id": runtime, "chat_session_id": session, "status": "running"})
+	x.f.Exec(t, `UPDATE chat_message SET task_id=$2 WHERE id=$1`, input, task)
+	assertActive(true)
+	x.f.Exec(t, `UPDATE agent_task_queue SET status='completed' WHERE id=$1`, task)
+	assertActive(false)
+	retry := x.f.Task(t, util.UUIDToString(x.agent), dbfx.Cols{"runtime_id": runtime, "chat_session_id": session, "status": "deferred", "chat_input_task_id": task})
+	assertActive(true)
+	x.f.Exec(t, `UPDATE agent_task_queue SET status='cancelled' WHERE id=$1`, retry)
+	assertActive(false)
+	x.f.Exec(t, `UPDATE agent_task_queue SET status='running' WHERE id=$1`, retry)
+	if err := x.svc.Revoke(ctx, inst.ID, x.workspace); err != nil {
+		t.Fatal(err)
+	}
+	assertActive(false)
 }
 
 type roundTripper func(*http.Request) (*http.Response, error)

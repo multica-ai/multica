@@ -3,9 +3,11 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/multica-ai/multica/server/internal/integrations/weixin"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -51,5 +53,33 @@ func TestDeleteWorkspaceRemovesWeixinLoginAndReplyContext(t *testing.T) {
 	testutil.Call(t, testHandler.DeleteWorkspace, req).Want(http.StatusNoContent)
 	if dbfx.Count(t, "SELECT count(*) FROM weixin_login_session WHERE workspace_id=$1", ws) != 0 || dbfx.Count(t, "SELECT count(*) FROM weixin_account_state WHERE installation_id=$1", installation) != 0 {
 		t.Fatal("workspace deletion retained WeChat login or reply credentials")
+	}
+}
+
+func TestWeixinConflictResponseNamesScopedAgent(t *testing.T) {
+	w := httptest.NewRecorder()
+	writeWeixinError(w, &weixin.ConflictError{AgentID: "agent-id", AgentName: "Assistant"})
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != http.StatusConflict || body["code"] != "weixin_already_connected" || body["agent_name"] != "Assistant" {
+		t.Fatalf("conflict body: %s", w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	writeWeixinError(w, weixin.ErrConflict)
+	if strings.Contains(w.Body.String(), "agent_id") || strings.Contains(w.Body.String(), "agent_name") {
+		t.Fatal("unscoped conflict exposed agent details")
+	}
+}
+
+func TestWeixinExpiredAuthorizationProjection(t *testing.T) {
+	row := db.ChannelInstallation{Status: "revoked", Config: []byte(`{"authorization_expired":true}`)}
+	if got := weixinInstallationResponse(row); got.Status != "expired" {
+		t.Fatalf("status=%s", got.Status)
+	}
+	row.Config = []byte(`{}`)
+	if got := weixinInstallationResponse(row); got.Status != "revoked" {
+		t.Fatal("manual disconnect shown as expired")
 	}
 }

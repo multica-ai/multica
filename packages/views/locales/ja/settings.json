@@ -1713,7 +1713,10 @@
     "blocked": "WeChat により認証が制限されています。しばらくしてからお試しください。",
     "already_bound": "このボットはすでに WeChat に接続されています。以前のクライアントの接続を解除して再試行してください。",
     "refresh": "新しい QR コード",
-    "retry": "再試行"
+    "retry": "再試行",
+    "already_connected": "このWeChatアカウントは{{agent}}に接続されています。先にそちらで接続を解除してください。",
+    "connected_elsewhere": "このWeChatアカウントは別の場所で接続されています。先に既存の接続を解除してください。",
+    "authorization_expired": "WeChatの認証が失効しました。もう一度スキャンして接続してください。"
   },
   "connected_apps": {
     "description": "エージェントが外部アプリを操作するアカウントです。許可された操作はすぐに実行されます。",

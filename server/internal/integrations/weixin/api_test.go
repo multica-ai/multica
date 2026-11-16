@@ -169,6 +169,22 @@ func TestSendRejectsProviderErrors(t *testing.T) {
 	}
 }
 
+func TestNotifyOptionalReturnCode(t *testing.T) {
+	for _, start := range []bool{true, false} {
+		for _, body := range []string{`{}`, `{"ret":0}`, `{"errcode":0}`, `{"ret":123}`, `{"errcode":456}`} {
+			t.Run(body, func(t *testing.T) {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(body)) }))
+				defer server.Close()
+				err := newAPI(server.URL, "token", server.Client()).notify(context.Background(), start)
+				wantError := strings.Contains(body, "123") || strings.Contains(body, "456")
+				if (err != nil) != wantError {
+					t.Fatalf("notify error=%v, wantError=%v", err, wantError)
+				}
+			})
+		}
+	}
+}
+
 func TestProviderURLsAndRedirects(t *testing.T) {
 	for _, raw := range []string{"http://ilinkai.weixin.qq.com", "https://weixin.qq.com.evil.test", "https://evil.test/", "https://user:pass@ilinkai.weixin.qq.com", "https://ilinkai.weixin.qq.com:8443", "https://ilinkai.weixin.qq.com/path"} {
 		if _, err := validateBaseURL(raw); err == nil {

@@ -1713,7 +1713,10 @@
     "blocked": "微信已暂停验证码验证，请稍后重试。",
     "already_bound": "此机器人已在微信中绑定，请先断开原客户端，再重试。",
     "refresh": "重新生成二维码",
-    "retry": "重试"
+    "retry": "重试",
+    "already_connected": "这个微信已经连接到智能体 {{agent}}，请先在那边断开。",
+    "connected_elsewhere": "这个微信已在其他位置连接，请先断开原连接。",
+    "authorization_expired": "微信授权已过期，请重新扫码连接。"
   },
   "connected_apps": {
     "description": "智能体通过这些账号操作外部应用，允许的操作会直接执行。",

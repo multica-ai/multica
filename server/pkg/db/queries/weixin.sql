@@ -74,5 +74,36 @@ WHERE installation_id = $1 AND bot_id = $2;
 DELETE FROM weixin_account_state WHERE installation_id = $1;
 
 -- name: ExpireWeixinInstallation :execrows
-UPDATE channel_installation SET status = 'revoked', updated_at = now()
+UPDATE channel_installation SET status = 'revoked',
+    config = jsonb_set(config, '{authorization_expired}', 'true'), updated_at = now()
 WHERE id = $1 AND channel_type = 'weixin' AND status = 'active' AND config = $2;
+
+-- name: IsWeixinTypingActive :one
+SELECT EXISTS (
+ SELECT 1 FROM chat_session s
+ JOIN channel_installation i ON i.id = @installation_id AND i.workspace_id = s.workspace_id
+ JOIN channel_chat_session_binding b ON b.chat_session_id = s.id AND b.installation_id = i.id
+ JOIN chat_message m ON m.chat_session_id = s.id
+ WHERE s.id = @chat_session_id AND s.status = 'active'
+  AND i.channel_type = 'weixin' AND i.status = 'active' AND i.config = @config
+  AND b.channel_type = 'weixin' AND b.retired_at IS NULL
+  AND m.channel_ingested AND m.role = 'user' AND NOT m.channel_typing_settled
+  AND COALESCE(m.channel_context_revision, 1) = b.context_revision
+  AND ((m.task_id IS NULL AND m.created_at > now() - interval '2 minutes') OR EXISTS (
+   SELECT 1 FROM agent_task_queue t WHERE t.chat_session_id = s.id
+    AND (t.id = m.task_id OR t.chat_input_task_id = m.task_id)
+    AND t.status IN ('queued','dispatched','running','waiting_local_directory','deferred')
+  ))
+) AS active;
+
+-- name: SettleWeixinTypingInputs :exec
+UPDATE chat_message m SET channel_typing_settled = true
+FROM chat_message cutoff, chat_session s, channel_installation i
+WHERE cutoff.id = @through_message_id AND cutoff.chat_session_id = s.id
+ AND s.id = @chat_session_id AND s.workspace_id = @workspace_id
+ AND i.id = @installation_id AND i.workspace_id = s.workspace_id AND i.channel_type = 'weixin'
+ AND EXISTS (SELECT 1 FROM channel_chat_session_binding b WHERE b.chat_session_id = s.id
+  AND b.installation_id = i.id AND b.channel_type = 'weixin')
+ AND m.chat_session_id = s.id AND m.channel_ingested AND m.role = 'user' AND m.task_id IS NULL
+ AND COALESCE(m.channel_context_revision, 1) = @context_revision
+ AND (m.created_at, m.id) <= (cutoff.created_at, cutoff.id);

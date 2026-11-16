@@ -1,6 +1,7 @@
 package weixin
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -28,10 +29,21 @@ var (
 )
 
 type loginState struct {
-	QRCode  string `json:"qrcode"`
-	Content string `json:"content"`
-	BaseURL string `json:"base_url"`
+	QRCode             string `json:"qrcode"`
+	Content            string `json:"content"`
+	BaseURL            string `json:"base_url"`
+	InstallationID     string `json:"installation_id,omitempty"`
+	InstallationConfig []byte `json:"installation_config,omitempty"`
 }
+
+// Agent identity is exposed only for conflicts within the requested workspace.
+type ConflictError struct {
+	AgentID   string
+	AgentName string
+}
+
+func (e *ConflictError) Error() string { return ErrConflict.Error() }
+func (e *ConflictError) Unwrap() error { return ErrConflict }
 
 // LoginView never contains bot credentials, the polling QR value, or a code.
 // Only the initiating Multica user can retrieve this short-lived view.
@@ -66,11 +78,27 @@ func (s *InstallService) api(base, token string) *apiClient {
 }
 
 func (s *InstallService) Begin(ctx context.Context, workspace, agent, initiator pgtype.UUID) (LoginView, error) {
-	qr, err := s.api(DefaultBaseURL, "").QRCode(ctx)
+	state := loginState{BaseURL: DefaultBaseURL}
+	var tokens []string
+	inst, err := s.q.GetWeixinInstallationForAgent(ctx, db.GetWeixinInstallationForAgentParams{WorkspaceID: workspace, AgentID: agent})
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return LoginView{}, err
+	}
+	if err == nil && inst.Status == "active" && inst.InstallerUserID == initiator {
+		creds, err := decodeCredentials(inst.Config, s.box)
+		if err != nil {
+			return LoginView{}, err
+		}
+		tokens = append(tokens, creds.Token)
+		state.InstallationID = util.UUIDToString(inst.ID)
+		state.InstallationConfig = inst.Config
+	}
+	qr, err := s.api(DefaultBaseURL, "").QRCode(ctx, tokens...)
 	if err != nil {
 		return LoginView{}, err
 	}
-	raw, _ := json.Marshal(loginState{QRCode: qr.QRCode, Content: qr.Content, BaseURL: DefaultBaseURL})
+	state.QRCode, state.Content = qr.QRCode, qr.Content
+	raw, _ := json.Marshal(state)
 	sealed, err := s.box.Seal(raw)
 	if err != nil {
 		return LoginView{}, err
@@ -191,7 +219,11 @@ func (s *InstallService) Poll(ctx context.Context, session, workspace, initiator
 			return LoginView{}, err
 		}
 	}
-	if status.Status == "confirmed" {
+	if status.Status == "binded_redirect" {
+		if err := s.confirmExisting(ctx, row, state); err != nil {
+			return LoginView{}, err
+		}
+	} else if status.Status == "confirmed" {
 		if err := s.complete(ctx, row, status); err != nil {
 			return LoginView{}, err
 		}
@@ -239,7 +271,7 @@ func (s *InstallService) complete(ctx context.Context, session db.WeixinLoginSes
 		return err
 	}
 	if err == nil && owner.Status == "active" && owner.WorkspaceExists && owner.AgentExists && (owner.WorkspaceID != session.WorkspaceID || owner.AgentID != session.AgentID) {
-		return ErrConflict
+		return s.conflict(ctx, q, session.WorkspaceID, owner.WorkspaceID, owner.AgentID)
 	}
 	if _, err := q.ReclaimDeadChannelInstallationByAppID(ctx, db.ReclaimDeadChannelInstallationByAppIDParams{ChannelType: string(TypeWeixin), AppID: result.BotID, WorkspaceID: session.WorkspaceID, AgentID: session.AgentID}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return err
@@ -251,7 +283,7 @@ func (s *InstallService) complete(ctx context.Context, session db.WeixinLoginSes
 	if err == nil {
 		previous := DecodePublicConfig(old.Config)
 		if old.Status == "active" && (previous.BotID != result.BotID || previous.UserID != result.UserID || old.InstallerUserID != session.InitiatorUserID) {
-			return ErrConflict
+			return s.conflict(ctx, q, session.WorkspaceID, old.WorkspaceID, old.AgentID)
 		}
 		if previous.BotID != result.BotID || previous.UserID != result.UserID || old.InstallerUserID != session.InitiatorUserID {
 			if _, err := q.ClearChannelInstallationBotScopedRows(ctx, old.ID); err != nil {
@@ -273,6 +305,49 @@ func (s *InstallService) complete(ctx context.Context, session db.WeixinLoginSes
 	}
 	if err := q.ResetWeixinAccountState(ctx, db.ResetWeixinAccountStateParams{InstallationID: inst.ID, BotID: result.BotID, UserID: result.UserID}); err != nil {
 		return err
+	}
+	if _, err := q.UpdateWeixinLoginSession(ctx, db.UpdateWeixinLoginSessionParams{ID: session.ID, LeaseToken: session.LeaseToken, Status: "confirmed", StateEncrypted: []byte{}, InstallationID: inst.ID}); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (s *InstallService) conflict(ctx context.Context, q *db.Queries, requestedWorkspace, ownerWorkspace, agentID pgtype.UUID) error {
+	if requestedWorkspace != ownerWorkspace {
+		return ErrConflict
+	}
+	agent, err := q.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{ID: agentID, WorkspaceID: requestedWorkspace})
+	if err != nil {
+		return ErrConflict
+	}
+	return &ConflictError{AgentID: util.UUIDToString(agent.ID), AgentName: agent.Name}
+}
+
+func (s *InstallService) confirmExisting(ctx context.Context, session db.WeixinLoginSession, state loginState) error {
+	id, err := util.ParseUUID(state.InstallationID)
+	if err != nil || !id.Valid || len(state.InstallationConfig) == 0 {
+		return ErrProtocol
+	}
+	tx, err := s.tx.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	q := s.q.WithTx(tx)
+	if _, err := q.LockWeixinLoginSession(ctx, db.LockWeixinLoginSessionParams{ID: session.ID, LeaseToken: session.LeaseToken}); err != nil {
+		return ErrNotFound
+	}
+	member, err := q.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{UserID: session.InitiatorUserID, WorkspaceID: session.WorkspaceID})
+	if err != nil || member.Role != "owner" && member.Role != "admin" {
+		return ErrAccess
+	}
+	agent, err := q.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{ID: session.AgentID, WorkspaceID: session.WorkspaceID})
+	if err != nil || agent.ArchivedAt.Valid {
+		return ErrAccess
+	}
+	inst, err := q.GetWeixinInstallationForAgent(ctx, db.GetWeixinInstallationForAgentParams{WorkspaceID: session.WorkspaceID, AgentID: session.AgentID})
+	if err != nil || inst.ID != id || inst.Status != "active" || inst.InstallerUserID != session.InitiatorUserID || !bytes.Equal(inst.Config, state.InstallationConfig) {
+		return ErrAccess
 	}
 	if _, err := q.UpdateWeixinLoginSession(ctx, db.UpdateWeixinLoginSessionParams{ID: session.ID, LeaseToken: session.LeaseToken, Status: "confirmed", StateEncrypted: []byte{}, InstallationID: inst.ID}); err != nil {
 		return err

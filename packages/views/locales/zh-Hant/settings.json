@@ -1713,7 +1713,10 @@
     "blocked": "微信已暫停驗證碼驗證，請稍後重試。",
     "already_bound": "此機器人已在微信中綁定，請先中斷原用戶端，再重試。",
     "refresh": "重新產生 QR 碼",
-    "retry": "重試"
+    "retry": "重試",
+    "already_connected": "此微信已連接至 AI 代理 {{agent}}，請先在該處中斷連線。",
+    "connected_elsewhere": "此微信已在其他位置連接，請先中斷原連線。",
+    "authorization_expired": "微信授權已過期，請重新掃碼連接。"
   },
   "connected_apps": {
     "description": "AI 代理透過這些帳號操作外部應用，允許的操作會直接執行。",
