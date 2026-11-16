@@ -53,11 +53,23 @@ Sur une tâche assignée à quelqu'un d'autre ou à son agent, un abonnement obt
 
 La page de la tâche signale un tel abonnement par **Mises à jour clés**. Son menu propose **Recevoir toute l'activité**, qui en fait un abonnement explicite à cette tâche ; il n'est ensuite plus possible de revenir aux mises à jour clés pour cette tâche, seulement de se désabonner. **Modifier la valeur par défaut** ouvre **Paramètres → Notifications**, où **Tâches des autres**, en tête de **Tâches que vous suivez**, fait passer toutes ces tâches à **Toute l'activité**.
 
-## Les agents n'utilisent pas la boîte de réception
+## Les agents et la boîte de réception
 
-La boîte de réception est réservée aux membres de l'espace de travail. Même lorsqu'un agent est l'assigné ou un abonné, il ne lit jamais les notifications de la boîte de réception.
+Les notifications appartiennent aux membres de l'espace de travail. Pour la liste des notifications actives utilisée par `multica inbox list`, un agent peut lire les notifications du propriétaire du runtime uniquement si le serveur vérifie que ce propriétaire est la personne à l'origine de l'exécution. Cette identité est transmise dans les chaînes de délégation entre agents. Les exécutions déclenchées par une autre personne ou sans personne vérifiable, ainsi que les identifiants de nœud cloud sans liaison à une exécution, ne peuvent pas lire cette liste active. Cette garantie couvre uniquement la liste active ; les listes archivées et reportées, les compteurs de non-lus et les interfaces d'écriture conservent leurs permissions actuelles en attendant un traitement séparé.
 
 @mentionner un agent dans un commentaire, lui assigner une tâche ou déclencher une automatisation crée directement une exécution ; aucune notification n'est laissée à l'agent. `@all` ne notifie que les membres.
+
+## Lire depuis le CLI
+
+Utilisez votre connexion CLI existante pour lister les notifications actives sans les marquer comme lues :
+
+```sh
+multica inbox list --project <project-id> --type mentioned --output json
+```
+
+`--project` accepte un UUID complet ou un préfixe d'ID unique, y compris l'ID court affiché par `multica project list`. Les préfixes sont résolus via la liste des projets avant de lire la boîte de réception ; un préfixe sans correspondance ou ambigu produit une erreur.
+
+Les deux filtres sont facultatifs et s'appliquent localement après récupération de la boîte de réception active. Le JSON contient les ID de notification, de tâche, de projet et, si disponible, de commentaire, ainsi que le type, le titre, l'état lu et la date de création. La sortie par défaut est un tableau. Une exécution d'agent autorisée utilise son identifiant d'exécution pour lire les notifications du propriétaire du runtime, sans revenir à la connexion d'une personne.
 
 ## Traiter les notifications
 

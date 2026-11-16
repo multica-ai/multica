@@ -3,12 +3,15 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -205,6 +208,10 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !h.requireInboxListAccess(w, r, userID, wsUUID) {
+		return
+	}
+
 	// Notifications about private-project issues are not written for
 	// outsiders (CreateInboxItem); this read filter also drops older rows once
 	// the reader loses access.
@@ -229,6 +236,55 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// Task tokens identify the runtime owner, not necessarily the human who asked
+// the agent to act. Personal notifications require that same human upstream.
+// Auth strips client identity headers and stamps the task/agent from the token.
+func (h *Handler) requireInboxListAccess(w http.ResponseWriter, r *http.Request, userID string, workspaceID pgtype.UUID) bool {
+	source := r.Header.Get("X-Actor-Source")
+	if source == "" {
+		return true
+	}
+	deny := func() bool {
+		writeError(w, http.StatusForbidden, "inbox access requires the runtime owner's verified human trigger")
+		return false
+	}
+	queryFailure := func(err error) bool {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return deny()
+		}
+		slog.Warn("resolve inbox access failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to resolve inbox access")
+		return false
+	}
+	// A cloud-node PAT has no authenticated task binding or human trigger.
+	if source != "task_token" {
+		return deny()
+	}
+	taskID, err := util.ParseUUID(r.Header.Get("X-Task-ID"))
+	if err != nil {
+		return deny()
+	}
+	task, err := h.Queries.GetAgentTask(r.Context(), taskID)
+	if err != nil {
+		return queryFailure(err)
+	}
+	if isTerminalTaskStatus(task.Status) ||
+		!task.OriginatorUserID.Valid || uuidToString(task.OriginatorUserID) != userID ||
+		uuidToString(task.AgentID) != r.Header.Get("X-Agent-ID") {
+		return deny()
+	}
+	runtime, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
+		ID: task.RuntimeID, WorkspaceID: workspaceID,
+	})
+	if err != nil {
+		return queryFailure(err)
+	}
+	if !runtime.OwnerID.Valid || uuidToString(runtime.OwnerID) != userID {
+		return deny()
+	}
+	return true
 }
 
 // ListArchivedInbox returns the recipient's archived notifications, backing the
