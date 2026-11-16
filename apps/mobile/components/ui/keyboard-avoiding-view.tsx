@@ -8,7 +8,7 @@ cssInterop(ControlledKeyboardAvoidingView, { className: "style" });
 /** Android edge-to-edge windows need the controller's keyboard frame events. */
 export function KeyboardAvoidingView(props: ComponentProps<typeof NativeKeyboardAvoidingView>) {
   return Platform.OS === "android" ? (
-    <ControlledKeyboardAvoidingView {...props} behavior={props.behavior ?? "height"} />
+    <ControlledKeyboardAvoidingView {...props} behavior={props.behavior ?? "padding"} />
   ) : (
     <NativeKeyboardAvoidingView {...props} />
   );
