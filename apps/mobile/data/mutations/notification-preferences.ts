@@ -1,8 +1,7 @@
 /**
  * Mobile notification-preferences mutation. Mirrors the optimistic pattern of
  * packages/core/notification-preferences/mutations.ts — written here per the
- * "Mobile-owned updaters" rule (don't import { useSessionMutation } from "@/data/use-session-mutation";
-import web mutations; key shape is
+ * "Mobile-owned updaters" rule (don't import web mutations; key shape is
  * independent and may drift).
  *
  * Optimistic policy: patch cache → fire PATCH → rollback on error → invalidate
@@ -10,6 +9,7 @@ import web mutations; key shape is
  * optimistic by default"). Toggle latency on cellular is real — the Switch
  * snapping back if the request hangs would look broken.
  */
+import { useSessionMutation } from "@/data/use-session-mutation";
 import {
   useQueryClient,
   type MutateOptions,
