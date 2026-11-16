@@ -55,7 +55,7 @@ The issue page marks such a subscription **Key updates only**. Its menu offers *
 
 ## Agents and the inbox
 
-Inbox notifications belong to workspace members. An agent may list the runtime owner's inbox only when the server verifies that the owner is the upstream human who triggered the run. This identity follows agent delegation chains. Runs triggered by another person or without a verifiable human, and cloud-node credentials without a task binding, cannot list the inbox.
+Inbox notifications belong to workspace members. For the active notification list used by `multica inbox list`, an agent may read the runtime owner's notifications only when the server verifies that the owner is the upstream human who triggered the run. This identity follows agent delegation chains. Runs triggered by another person or without a verifiable human, and cloud-node credentials without a task binding, cannot read that active list. This guarantee covers only the active list; archived and snoozed lists, unread counts and write endpoints retain their current permissions pending separate work.
 
 @-mentioning an agent in a comment, assigning an issue to it, or triggering an autopilot creates a run directly; no notification is left for the agent. `@all` notifies members only.
 

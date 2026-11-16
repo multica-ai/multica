@@ -55,7 +55,7 @@ La page de la tâche signale un tel abonnement par **Mises à jour clés**. Son 
 
 ## Les agents et la boîte de réception
 
-Les notifications appartiennent aux membres de l'espace de travail. Un agent peut lister la boîte de réception du propriétaire du runtime uniquement si le serveur vérifie que ce propriétaire est la personne à l'origine de l'exécution. Cette identité est transmise dans les chaînes de délégation entre agents. Les exécutions déclenchées par une autre personne ou sans personne vérifiable, ainsi que les identifiants de nœud cloud sans liaison à une exécution, ne peuvent pas lister la boîte de réception.
+Les notifications appartiennent aux membres de l'espace de travail. Pour la liste des notifications actives utilisée par `multica inbox list`, un agent peut lire les notifications du propriétaire du runtime uniquement si le serveur vérifie que ce propriétaire est la personne à l'origine de l'exécution. Cette identité est transmise dans les chaînes de délégation entre agents. Les exécutions déclenchées par une autre personne ou sans personne vérifiable, ainsi que les identifiants de nœud cloud sans liaison à une exécution, ne peuvent pas lire cette liste active. Cette garantie couvre uniquement la liste active ; les listes archivées et reportées, les compteurs de non-lus et les interfaces d'écriture conservent leurs permissions actuelles en attendant un traitement séparé.
 
 @mentionner un agent dans un commentaire, lui assigner une tâche ou déclencher une automatisation crée directement une exécution ; aucune notification n'est laissée à l'agent. `@all` ne notifie que les membres.
 

@@ -3,10 +3,12 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -248,6 +250,14 @@ func (h *Handler) requireInboxListAccess(w http.ResponseWriter, r *http.Request,
 		writeError(w, http.StatusForbidden, "inbox access requires the runtime owner's verified human trigger")
 		return false
 	}
+	queryFailure := func(err error) bool {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return deny()
+		}
+		slog.Warn("resolve inbox access failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to resolve inbox access")
+		return false
+	}
 	// A cloud-node PAT has no authenticated task binding or human trigger.
 	if source != "task_token" {
 		return deny()
@@ -257,7 +267,10 @@ func (h *Handler) requireInboxListAccess(w http.ResponseWriter, r *http.Request,
 		return deny()
 	}
 	task, err := h.Queries.GetAgentTask(r.Context(), taskID)
-	if err != nil || isTerminalTaskStatus(task.Status) ||
+	if err != nil {
+		return queryFailure(err)
+	}
+	if isTerminalTaskStatus(task.Status) ||
 		!task.OriginatorUserID.Valid || uuidToString(task.OriginatorUserID) != userID ||
 		uuidToString(task.AgentID) != r.Header.Get("X-Agent-ID") {
 		return deny()
@@ -265,7 +278,10 @@ func (h *Handler) requireInboxListAccess(w http.ResponseWriter, r *http.Request,
 	runtime, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
 		ID: task.RuntimeID, WorkspaceID: workspaceID,
 	})
-	if err != nil || !runtime.OwnerID.Valid || uuidToString(runtime.OwnerID) != userID {
+	if err != nil {
+		return queryFailure(err)
+	}
+	if !runtime.OwnerID.Valid || uuidToString(runtime.OwnerID) != userID {
 		return deny()
 	}
 	return true

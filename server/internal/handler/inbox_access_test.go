@@ -1,17 +1,24 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/testutil"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 func inboxTaskCredential(t *testing.T, taskID, agentID, workspaceID, userID string) string {
@@ -22,6 +29,72 @@ func inboxTaskCredential(t *testing.T, taskID, agentID, workspaceID, userID stri
 		"workspace_id": workspaceID, "user_id": userID, "expires_at": time.Now().Add(time.Hour),
 	})
 	return token
+}
+
+type inboxAccessFailureDB struct {
+	db.DBTX
+	query                string
+	err                  error
+	failures, inboxReads int
+}
+
+func (d *inboxAccessFailureDB) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	if strings.HasPrefix(sql, "-- name: "+d.query+" :one\n") {
+		d.failures++
+		return &mockRow{err: d.err}
+	}
+	return d.DBTX.QueryRow(ctx, sql, args...)
+}
+
+func (d *inboxAccessFailureDB) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	if strings.HasPrefix(sql, "-- name: ListInboxItems :many\n") {
+		d.inboxReads++
+	}
+	return d.DBTX.Query(ctx, sql, args...)
+}
+
+func TestListInboxAccessLookupErrors(t *testing.T) {
+	runtimeID := dbfx.Runtime(t, "Inbox lookup runtime")
+	agentID := dbfx.Agent(t, "Inbox lookup agent", runtimeID)
+	taskID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id": runtimeID, "status": "running",
+		"originator_user_id": testUserID, "accountable_user_id": testUserID,
+	})
+	token := inboxTaskCredential(t, taskID, agentID, testWorkspaceID, testUserID)
+	const privateDetails = "private-inbox-database-host-and-query"
+	for _, query := range []string{"GetAgentTask", "GetAgentRuntimeForWorkspace"} {
+		for _, tc := range []struct {
+			name   string
+			err    error
+			status int
+		}{
+			{"missing", pgx.ErrNoRows, http.StatusForbidden},
+			{"wrapped missing", fmt.Errorf("%s: %w", privateDetails, pgx.ErrNoRows), http.StatusForbidden},
+			{"deadline", fmt.Errorf("%s: %w", privateDetails, context.DeadlineExceeded), http.StatusInternalServerError},
+			{"statement timeout", &pgconn.PgError{Code: "57014", Message: privateDetails}, http.StatusInternalServerError},
+			{"connection failure", errors.New(privateDetails), http.StatusInternalServerError},
+		} {
+			t.Run(query+"/"+tc.name, func(t *testing.T) {
+				faults := &inboxAccessFailureDB{DBTX: testPool, query: query, err: tc.err}
+				h := *testHandler
+				h.Queries = db.New(faults)
+				handler := middleware.Auth(testHandler.Queries, nil, nil, nil)(
+					middleware.RequireWorkspaceMember(testHandler.Queries)(http.HandlerFunc(h.ListInbox)),
+				).ServeHTTP
+				body := testutil.Call(t, handler, inboxCredentialRequest(token, testWorkspaceID)).Want(tc.status).Map()
+				if faults.failures != 1 || faults.inboxReads != 0 {
+					t.Fatalf("lookup failures=%d inbox reads=%d; want one failure and no Inbox read", faults.failures, faults.inboxReads)
+				}
+				publicError, ok := body["error"].(string)
+				if len(body) != 1 || !ok || publicError == "" || strings.Contains(fmt.Sprint(body), privateDetails) {
+					t.Fatalf("response must contain only a protected public error: %v", body)
+				}
+				if tc.status == http.StatusInternalServerError && body["error"] != "failed to resolve inbox access" {
+					t.Fatalf("service failure reported as an authorization error: %v", body)
+				}
+			})
+		}
+	}
 }
 
 func inboxAccessHandler(cloud *auth.CloudPATVerifier) http.HandlerFunc {
