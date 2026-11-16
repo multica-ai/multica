@@ -205,7 +205,7 @@ export type DemoDict = {
 /** A page's title, search description, and the card shown when its link is shared. */
 export type PageMeta = { title: string; description: string; ogTitle: string; ogDescription: string };
 
-export type MetaPage = "home" | "about" | "changelog" | "contactSales" | "download" | "licensing" | "privacy";
+export type MetaPage = "home" | "about" | "changelog" | "contactSales" | "download" | "licensing" | "pricing" | "privacy";
 
 /** Copy for the home page. */
 export type HomeDict = {
@@ -239,10 +239,60 @@ export type HomeDict = {
   };
 };
 
+export type PricingPlanId = "free" | "pro" | "business" | "enterprise";
+
+/** A comparison-table cell: included, not included, or a value. */
+export type PricingCell = boolean | string;
+
+/**
+ * Copy for the pricing page. Prices stay in USD and are filled in by the page:
+ * `{price}` is a formatted amount and `{date}` the launch offer's last day.
+ */
+export type PricingDict = {
+  eyebrow: string;
+  title: string;
+  lead: string;
+  launchOffer: { badge: string; text: string };
+  billing: { label: string; yearly: string; monthly: string; save: string };
+  recommended: string;
+  soon: string;
+  included: string;
+  notIncluded: string;
+  yearlyNote: string;
+  monthlyNote: string;
+  firstYear: string;
+  plans: Record<
+    PricingPlanId,
+    {
+      name: string;
+      audience: string;
+      cadence: string;
+      cta: string;
+      ctaNote: string;
+      ctaNoteLink?: string;
+      includes: string;
+      features: { label: string; soon?: boolean }[];
+    }
+  >;
+  customPrice: string;
+  cloudCredits: { title: string; body: string };
+  selfHost: { title: string; body: string; contactSales: string; licensing: string };
+  compare: {
+    title: string;
+    lead: string;
+    groups: {
+      title: string;
+      rows: { label: string; hint?: string; soon?: boolean; cells: [PricingCell, PricingCell, PricingCell, PricingCell] }[];
+    }[];
+  };
+  faq: { title: string; items: { question: string; answer: string }[] };
+};
+
 export type LandingDict = {
   site: SiteDict;
   home: HomeDict;
   demo: DemoDict;
+  pricing: PricingDict;
   meta: Record<MetaPage, PageMeta>;
   faq: {
     label: string;

@@ -2,6 +2,7 @@ import { githubUrl, discordUrl } from "../components/shared";
 import { createEnDict } from "./en";
 import type { LandingDict } from "./types";
 import { jaSiteCopy } from "./site-ja";
+import { jaPricingCopy } from "./pricing-ja";
 
 export function createJaDict(): LandingDict {
   const base = createEnDict();
@@ -9,6 +10,7 @@ export function createJaDict(): LandingDict {
   return {
     ...base,
     ...jaSiteCopy,
+  pricing: jaPricingCopy,
     faq: {
       label: "FAQ",
       headline: "よくある質問。",
