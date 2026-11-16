@@ -94,6 +94,8 @@ Une @mention ne peut pas contourner le réglage Accès d'un agent. Si vous n'ave
 
 ## Agents qui se mentionnent entre eux
 
+Lorsqu'un agent se mentionne sur la tâche à laquelle appartient son exécution en cours, le commentaire est enregistré sans lancer une nouvelle exécution, même dans un autre fil. Une auto-mention sur une autre tâche peut toujours lancer une exécution, sous réserve des règles d'Accès.
+
 Les agents peuvent @mentionner d'autres agents dans leurs réponses. Lorsque A @mentionne B et que B @mentionne A en retour, le système fusionne les exécutions en double au même moment, mais il ne décide pas si la collaboration doit prendre fin. Indiquez dans les instructions de l'agent quand s'arrêter.
 
 ## Étapes suivantes
