@@ -22,10 +22,12 @@ func validateSkillWriteBudget(content string, files []CreateSkillFileRequest) er
 		if len(body) > maxImportFileSize {
 			return fmt.Errorf("skill file %q is %d bytes, exceeding the %d byte per-file limit", path, len(body), maxImportFileSize)
 		}
-		total += len(body)
+		if path != "SKILL.md" {
+			total += len(body)
+		}
 	}
 	if total > maxImportTotalSize {
-		return fmt.Errorf("skill is %d bytes, exceeding the %d byte total limit including SKILL.md", total, maxImportTotalSize)
+		return fmt.Errorf("skill supporting files total %d bytes, exceeding the %d byte total limit", total, maxImportTotalSize)
 	}
 	return nil
 }

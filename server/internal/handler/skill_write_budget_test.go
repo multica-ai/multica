@@ -98,6 +98,8 @@ func TestSkillWriteEndpointsEnforceResultingBundleBudget(t *testing.T) {
 			beforeVersions := len(listVersions(t, skill.ID))
 			if limit == "file count" {
 				files = append(files, CreateSkillFileRequest{Path: "overflow.md"})
+			} else {
+				files = append(files, CreateSkillFileRequest{Path: "overflow.md", Content: "x"})
 			}
 			for _, route := range []string{"create", "update", "upsert"} {
 				t.Run(route, func(t *testing.T) {
@@ -110,12 +112,10 @@ func TestSkillWriteEndpointsEnforceResultingBundleBudget(t *testing.T) {
 					case "update":
 						testHandler.UpdateSkill(w, withURLParam(newRequest(http.MethodPut, "/api/skills/"+skill.ID, UpdateSkillRequest{Files: files}), "id", skill.ID))
 					case "upsert":
-						if limit == "file count" {
-							// One fewer than the cap was created above, so fill the final slot first.
-							req := withURLParam(newRequest(http.MethodPut, "/api/skills/"+skill.ID+"/files", files[len(files)-2]), "id", skill.ID)
-							testutil.Call(t, testHandler.UpsertSkillFile, req).Want(http.StatusOK)
-							beforeVersions++
-						}
+						// Fill the remaining budget before attempting the overflow file.
+						req := withURLParam(newRequest(http.MethodPut, "/api/skills/"+skill.ID+"/files", files[len(files)-2]), "id", skill.ID)
+						testutil.Call(t, testHandler.UpsertSkillFile, req).Want(http.StatusOK)
+						beforeVersions++
 						testHandler.UpsertSkillFile(w, withURLParam(newRequest(http.MethodPut, "/api/skills/"+skill.ID+"/files", files[len(files)-1]), "id", skill.ID))
 					}
 					if w.Code != http.StatusRequestEntityTooLarge {
@@ -136,4 +136,78 @@ func TestSkillWriteEndpointsAcceptFileAtByteLimit(t *testing.T) {
 	updateSkillForVersionTest(t, skill.ID, UpdateSkillRequest{Content: &content})
 	req := withURLParam(newRequest(http.MethodPut, "/api/skills/"+skill.ID+"/files", CreateSkillFileRequest{Path: "script.mjs", Content: content}), "id", skill.ID)
 	testutil.Call(t, testHandler.UpsertSkillFile, req).Want(http.StatusOK)
+}
+
+func TestSkillWriteEndpointsAcceptMaximumImportBudget(t *testing.T) {
+	content := strings.Repeat("x", maxImportFileSize)
+	files := make([]CreateSkillFileRequest, maxImportTotalSize/maxImportFileSize)
+	for i := range files {
+		files[i] = CreateSkillFileRequest{Path: fmt.Sprintf("references/%d.md", i), Content: content}
+	}
+	for _, route := range []string{"create", "update", "upsert"} {
+		t.Run(route, func(t *testing.T) {
+			var skill SkillWithFilesResponse
+			wantContent := content
+			if route == "create" {
+				testutil.Call(t, testHandler.CreateSkill, newRequest(http.MethodPost, "/api/skills", CreateSkillRequest{
+					Name: "maximum-import-budget", Content: content, Files: files,
+				})).Want(http.StatusCreated).JSON(&skill)
+				dbfx.Cleanup(t, `DELETE FROM skill WHERE id = $1`, skill.ID)
+				dbfx.Cleanup(t, `DELETE FROM skill_file WHERE skill_id = $1`, skill.ID)
+			} else {
+				skill.ID = insertHandlerTestSkill(t, "maximum-import-budget", content)
+				storedFiles := files
+				if route == "upsert" {
+					storedFiles = files[:len(files)-1]
+				}
+				for _, file := range storedFiles {
+					dbfx.Insert(t, "skill_file", testutil.Cols{"skill_id": skill.ID, "path": file.Path, "content": file.Content})
+				}
+				if route == "update" {
+					// The web editor submits both content and supporting files on every save.
+					wantContent = content[:len(content)-1] + "y"
+					updateSkillForVersionTest(t, skill.ID, UpdateSkillRequest{Content: &wantContent, Files: files})
+				} else {
+					req := withURLParam(newRequest(http.MethodPut, "/api/skills/"+skill.ID+"/files", files[len(files)-1]), "id", skill.ID)
+					testutil.Call(t, testHandler.UpsertSkillFile, req).Want(http.StatusOK)
+				}
+			}
+			dbfx.Cleanup(t, `DELETE FROM skill_version WHERE skill_id = $1`, skill.ID)
+			saved, err := testHandler.Queries.GetSkill(context.Background(), parseUUID(skill.ID))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if saved.Content != wantContent {
+				t.Fatal("write did not preserve the requested main content at the byte limit")
+			}
+			stored, err := testHandler.Queries.ListSkillFiles(context.Background(), parseUUID(skill.ID))
+			if err != nil {
+				t.Fatal(err)
+			}
+			total := 0
+			for _, file := range stored {
+				total += len(file.Content)
+			}
+			if len(stored) != len(files) || total != maxImportTotalSize {
+				t.Fatalf("saved supporting files: count=%d, bytes=%d", len(stored), total)
+			}
+		})
+	}
+}
+
+func TestSkillWriteEndpointsAllowMetadataUpdateOverBudget(t *testing.T) {
+	content := strings.Repeat("x", maxImportFileSize+1)
+	skillID := insertHandlerTestSkill(t, "legacy-over-budget", content)
+	dbfx.Insert(t, "skill_file", testutil.Cols{"skill_id": skillID, "path": "legacy.md", "content": content})
+	dbfx.Cleanup(t, `DELETE FROM skill_version WHERE skill_id = $1`, skillID)
+	name, description := "renamed-"+skillID, "updated metadata"
+	var updated SkillWithFilesResponse
+	req := withURLParam(newRequest(http.MethodPut, "/api/skills/"+skillID, UpdateSkillRequest{
+		Name: &name, Description: &description,
+	}), "id", skillID)
+	testutil.Call(t, testHandler.UpdateSkill, req).Want(http.StatusOK).JSON(&updated)
+	if updated.Name != name || updated.Description != description || updated.Content != content ||
+		len(updated.Files) != 1 || updated.Files[0].Content != content {
+		t.Fatal("metadata update changed the legacy skill contents or failed to save metadata")
+	}
 }

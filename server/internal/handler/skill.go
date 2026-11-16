@@ -2592,14 +2592,6 @@ func (h *Handler) UpsertSkillFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to upsert skill file")
 		return
 	}
-	if _, err := recordSkillVersion(r.Context(), qtx, skill.ID, skillVersionRecord{
-		Source:    skillVersionSourceUpdate,
-		CreatedBy: parseUUID(requestUserID(r)),
-	}); err != nil {
-		slog.Warn("record skill version failed", append(logger.RequestAttrs(r), "error", err)...)
-		writeError(w, http.StatusInternalServerError, "failed to upsert skill file")
-		return
-	}
 	resp, err := skillWithFilesInTx(r.Context(), qtx, skill)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list skill files")
@@ -2607,6 +2599,14 @@ func (h *Handler) UpsertSkillFile(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := validateSkillResponseBudget(resp); err != nil {
 		writeError(w, http.StatusRequestEntityTooLarge, err.Error())
+		return
+	}
+	if _, err := recordSkillVersion(r.Context(), qtx, skill.ID, skillVersionRecord{
+		Source:    skillVersionSourceUpdate,
+		CreatedBy: parseUUID(requestUserID(r)),
+	}); err != nil {
+		slog.Warn("record skill version failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to upsert skill file")
 		return
 	}
 	if err := tx.Commit(r.Context()); err != nil {

@@ -77,7 +77,7 @@ scripts/check.sh
 
 `SKILL.md` est un chemin réservé ; un fichier annexe ne peut pas porter ce nom. Les fichiers annexes sont transmis à l'agent avec le fichier principal.
 
-Lors de la création ou de la modification d'un skill, chaque fichier, y compris `SKILL.md`, doit contenir au plus 1 MiB de texte UTF-8. Un skill peut contenir jusqu'à 512 fichiers annexes et 8 MiB au total, `SKILL.md` compris. Un enregistrement dépassant ces limites est refusé et conserve la version existante. Scindez les fichiers volumineux ou réduisez leur taille avant de les enregistrer.
+Lors de la création ou de la modification d'un skill, chaque fichier, y compris `SKILL.md`, doit contenir au plus 1 MiB de texte UTF-8. Un skill peut contenir jusqu'à 512 fichiers annexes totalisant au plus 8 MiB ; `SKILL.md` a sa propre limite et n'entre pas dans ce total. Un enregistrement dépassant ces limites est refusé et conserve la version existante. Scindez les fichiers volumineux ou réduisez leur taille avant de les enregistrer.
 
 ## Rattacher un skill à un agent
 

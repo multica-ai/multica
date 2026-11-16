@@ -77,7 +77,7 @@ scripts/check.sh
 
 `SKILL.md` is a reserved path; a supporting file cannot use that name. Supporting files are delivered to the agent together with the main file.
 
-When creating or editing a skill, each file, including `SKILL.md`, must be at most 1 MiB of UTF-8 text. A skill can contain up to 512 supporting files and 8 MiB in total, including `SKILL.md`. An over-limit save is rejected and keeps the existing version. Split large files or reduce their size before saving.
+When creating or editing a skill, each file, including `SKILL.md`, must be at most 1 MiB of UTF-8 text. A skill can contain up to 512 supporting files totaling at most 8 MiB; `SKILL.md` is limited separately and does not count toward that total. An over-limit save is rejected and keeps the existing version. Split large files or reduce their size before saving.
 
 ## Attaching to an agent
 
