@@ -97,6 +97,29 @@ func TestDeleteAgentRuntime_OfflineProfileInstanceRefusalPointsAtAutoCleanup(t *
 	}
 }
 
+func TestDeleteAgentRuntime_LegacyProfileExplainsMachineBinding(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	runtimeID, profileID := createProfileBackedRuntime(t, context.Background(), "Legacy machine guidance")
+	dbfx.Exec(t, `UPDATE runtime_profile SET daemon_id = NULL WHERE id = $1`, profileID)
+	dbfx.Exec(t, `UPDATE agent_runtime SET status = 'offline' WHERE id = $1`, runtimeID)
+	req := withURLParam(newRequest("DELETE", "/", nil), "runtimeId", runtimeID)
+	w := httptest.NewRecorder()
+	testHandler.DeleteAgentRuntime(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status=%d: %s", w.Code, w.Body.String())
+	}
+	body := decodeConflict(t, w)
+	msg := conflictMessage(t, body)
+	if !strings.Contains(msg, "choose the machine") || strings.Contains(msg, "automatically after") {
+		t.Fatalf("incorrect legacy guidance: %s", msg)
+	}
+	if body["requires_machine_binding"] != true || body["auto_cleanup_after_days"] != float64(0) {
+		t.Fatalf("cleanup contract=%v", body)
+	}
+}
+
 // Online is the one case where waiting is not the answer — the daemon would
 // re-register the row immediately. The refusal has to say so instead of
 // promising a cleanup that will not happen.

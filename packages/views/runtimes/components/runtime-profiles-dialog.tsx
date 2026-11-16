@@ -16,6 +16,7 @@ import {
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import { ApiError } from "@multica/core/api";
+import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import type {
   RuntimeProfile,
   RuntimeProfileType,
@@ -38,6 +39,14 @@ import {
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import { Textarea } from "@multica/ui/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@multica/ui/components/ui/select";
+import { buildRuntimeMachines } from "./runtime-machines";
 import { cn } from "@multica/ui/lib/utils";
 import { ProviderLogo } from "./provider-logo";
 import { DeleteRuntimeProfileDialog } from "./delete-runtime-profile-dialog";
@@ -760,6 +769,21 @@ function ProfileDetailsForm({
   const idPrefix = `runtime-profile-${useId().replace(/:/g, "")}`;
   const createProfile = useCreateRuntimeProfile(wsId);
   const updateProfile = useUpdateRuntimeProfile(wsId);
+  const needsMachine = mode === "edit" && !profile?.daemon_id;
+  const { data: runtimes = [] } = useQuery({
+    ...runtimeListOptions(wsId),
+    enabled: needsMachine,
+  });
+  const machineOptions = useMemo(
+    () => buildRuntimeMachines(runtimes, { now: Date.now() }).flatMap((machine) =>
+      machine.mode === "local" && machine.daemonId
+        ? [{ value: machine.daemonId, label: machine.title }]
+        : [],
+    ),
+    [runtimes],
+  );
+  const [bindingMachine, setBindingMachine] = useState("");
+  const [machineRequired, setMachineRequired] = useState(false);
 
   const [values, setValues] = useState<ProfileFormValues>({
     displayName: profile?.display_name ?? "",
@@ -788,12 +812,13 @@ function ProfileDetailsForm({
     event.preventDefault();
     setFormError(null);
     setDuplicateName(false);
+    setMachineRequired(needsMachine && !bindingMachine);
     const validationErrors = validateProfileForm(values);
     if (!validationErrors.includes("commandLine") && !parsedCommand.ok) {
       validationErrors.push("commandLine");
     }
     setErrors(validationErrors);
-    if (validationErrors.length > 0) return;
+    if (validationErrors.length > 0 || (needsMachine && !bindingMachine)) return;
     if (!parsedCommand.ok) return;
 
     const description = values.description.trim();
@@ -816,6 +841,7 @@ function ProfileDetailsForm({
         const updated = await updateProfile.mutateAsync({
           profileId: profile.id,
           patch: {
+            ...(needsMachine ? { daemon_id: bindingMachine } : {}),
             display_name: values.displayName.trim(),
             command_name: commandName,
             fixed_args: fixedArgs,
@@ -826,8 +852,14 @@ function ProfileDetailsForm({
         onSaved(updated);
       }
     } catch (err) {
-      // 409 from create/patch means the display name collides.
-      if (err instanceof ApiError && err.status === 409) {
+      const conflictCode =
+        err instanceof ApiError && err.body &&
+        typeof err.body === "object" && "code" in err.body
+          ? err.body.code : undefined;
+      if (
+        err instanceof ApiError && err.status === 409 &&
+        conflictCode !== "runtime_profile_machine_conflict"
+      ) {
         setDuplicateName(true);
         return;
       }
@@ -876,6 +908,50 @@ function ProfileDetailsForm({
               ? t(($) => $.profiles.form.step_details_label)
               : t(($) => $.profiles.form.edit_title)}
           </h3>
+        )}
+
+        {needsMachine && (
+          <div className="space-y-1.5">
+            <Label
+              htmlFor={`${idPrefix}-machine`}
+              className="text-caption text-muted-foreground"
+            >
+              {t(($) => $.profiles.form.machine_label)}
+            </Label>
+            <Select
+              items={machineOptions}
+              value={bindingMachine || null}
+              onValueChange={(value) => {
+                setBindingMachine(value ?? "");
+                setMachineRequired(false);
+              }}
+              disabled={submitting}
+            >
+              <SelectTrigger
+                id={`${idPrefix}-machine`}
+                className="w-full"
+                aria-invalid={machineRequired}
+                aria-describedby={`${idPrefix}-machine-hint`}
+              >
+                <SelectValue placeholder={t(($) => $.profiles.form.machine_placeholder)} />
+              </SelectTrigger>
+              <SelectContent>
+                {machineOptions.map((machine) => (
+                  <SelectItem key={machine.value} value={machine.value}>
+                    {machine.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p id={`${idPrefix}-machine-hint`} className="text-caption text-muted-foreground">
+              {t(($) => $.profiles.form.machine_hint)}
+            </p>
+            {machineRequired && (
+              <p role="alert" className="text-caption text-destructive">
+                {t(($) => $.profiles.form.machine_required)}
+              </p>
+            )}
+          </div>
         )}
 
         <div className="space-y-1.5">

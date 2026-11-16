@@ -91,7 +91,7 @@ Lorsqu'un runtime est hors ligne :
 - Les exécutions déjà en file d'attente attendent que le runtime revienne ; elles ne passent pas sur un autre ordinateur. Elles n'échouent qu'une fois que le runtime a cessé d'envoyer des signaux de présence pendant plus longtemps que le délai de grâce de reconnexion **et** que l'exécution elle-même est en file d'attente depuis aussi longtemps. Un runtime simplement occupé conserve sa file, et le travail assigné à un runtime déjà hors ligne bénéficie tout de même d'un délai de grâce complet.
 - Les exécutions en cours n'échouent pas tout de suite. Elles échouent avec `runtime_offline` seulement lorsque le signal de présence du runtime manque depuis plus longtemps que le délai de grâce de reconnexion (`MULTICA_RUNTIME_RECONNECT_GRACE`, 3 heures par défaut) ; les exécutions de tâche ou de discussion éligibles peuvent être relancées automatiquement.
 - Au redémarrage, le daemon réenregistre ses runtimes et récupère les exécutions qui ne se sont pas terminées proprement la dernière fois.
-- Un runtime hors ligne depuis plus de 7 jours et auquel aucun agent n'est lié (y compris les agents archivés) est supprimé automatiquement.
+- Un runtime hors ligne depuis plus de 7 jours et auquel aucun agent n'est lié (y compris les agents archivés) est supprimé automatiquement. Les anciens profils personnalisés sans machine liée conservent leurs instances jusqu’à ce qu’un administrateur choisisse la machine.
 
 Dans la démo ci-dessous, une exécution assignée pendant que l'ordinateur est hors ligne attend dans la file et n'est prise en charge qu'une fois l'ordinateur de nouveau en ligne.
 
@@ -235,6 +235,8 @@ Seuls les propriétaires et administrateurs de l'espace de travail peuvent crée
 4. Renseignez le nom, la commande et les arguments fixes, puis enregistrez.
 
 Un nouveau profil appartient uniquement à l’ordinateur sélectionné lors de sa création. Seul son daemon le télécharge et l’enregistre ; les autres ordinateurs ne sont pas concernés, même si la même commande y est installée. Si la commande est introuvable, l’erreur apparaît uniquement sur l’ordinateur sélectionné. La création du profil n’installe pas la commande et ne connecte pas l’outil.
+
+Pour les anciens profils, ouvrez **Modifier le runtime personnalisé**, sélectionnez **Machine**, puis enregistrez. Les copies inutilisées sur les autres machines sont supprimées ; les agents actifs ou les tâches inachevées bloquent le changement. Les agents archivés et l’historique des tâches sont conservés. Tant que le profil n’est pas lié, ses machines restent enregistrées même après sept jours hors ligne, pour permettre au daemon de se reconnecter.
 
 Le champ de commande accepte un exécutable et des arguments, pas un script shell. Les arguments simples, les guillemets et les échappements par barre oblique inverse fonctionnent ; les tubes, les redirections, `&&`, `;`, les accents graves (backticks) et l'expansion de variables d'environnement ne fonctionnent pas. Si vous avez besoin de ces comportements, placez-les dans un script d'encapsulation et utilisez ce script comme commande.
 

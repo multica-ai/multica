@@ -193,17 +193,26 @@ func (h *Handler) CreateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 		enabled = *req.Enabled
 	}
 
-	// Installed clients omit the selected machine. Infer it only when the
-	// workspace has one local machine; an admin may be viewing someone else's.
+	// Older clients omit the machine. Prefer the caller's sole local machine;
+	// never guess between multiple machines owned by that caller.
 	req.DaemonID = strings.TrimSpace(req.DaemonID)
 	machineParams := db.ListRuntimeProfileMachinesParams{WorkspaceID: wsUUID}
 	if req.DaemonID != "" {
 		machineParams.DaemonID = strToText(req.DaemonID)
+	} else {
+		machineParams.OwnerID = member.UserID
 	}
 	machines, err := h.Queries.ListRuntimeProfileMachines(r.Context(), machineParams)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to resolve runtime profile machine")
 		return
+	}
+	if req.DaemonID == "" && len(machines) == 0 {
+		machines, err = h.Queries.ListRuntimeProfileMachines(r.Context(), db.ListRuntimeProfileMachinesParams{WorkspaceID: wsUUID})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to resolve runtime profile machine")
+			return
+		}
 	}
 	if len(machines) != 1 {
 		writeError(w, http.StatusBadRequest, "daemon_id must select a registered local machine; upgrade your client or pass daemon_id explicitly")
@@ -293,6 +302,7 @@ func (h *Handler) GetRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 }
 
 type updateRuntimeProfileRequest struct {
+	DaemonID       *string   `json:"daemon_id"`
 	RuntimeType    *string   `json:"runtime_type"`
 	ProtocolFamily *string   `json:"protocol_family"`
 	DisplayName    *string   `json:"display_name"`
@@ -363,8 +373,30 @@ func (h *Handler) UpdateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 		params.Enabled = pgtype.Bool{Bool: *req.Enabled, Valid: true}
 	}
 
-	profile, err := h.Queries.UpdateRuntimeProfile(r.Context(), params)
+	var profile db.RuntimeProfile
+	var err error
+	var binding profileMachineBindingResult
+	if req.DaemonID != nil {
+		machine := strings.TrimSpace(*req.DaemonID)
+		if machine == "" {
+			writeError(w, http.StatusBadRequest, "daemon_id cannot be empty")
+			return
+		}
+		params.DaemonID = strToText(machine)
+		binding, err = h.bindRuntimeProfileMachine(r.Context(), params)
+		profile = binding.profile
+	} else {
+		profile, err = h.Queries.UpdateRuntimeProfile(r.Context(), params)
+	}
 	if err != nil {
+		if errors.Is(err, errProfileMachineUnavailable) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if errors.Is(err, errProfileMachineImmutable) || errors.Is(err, errProfileMachineInUse) {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error(), "code": "runtime_profile_machine_conflict"})
+			return
+		}
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "runtime profile not found")
 			return
@@ -379,6 +411,12 @@ func (h *Handler) UpdateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	profileID := uuidToString(profile.ID)
+	for _, runtime := range binding.removed {
+		h.NotifyRuntimeGone(uuidToString(runtime.ID))
+	}
+	for _, teardown := range binding.teardowns {
+		h.publishRuntimeTeardown(r.Context(), teardown, wsID, uuidToString(member.UserID))
+	}
 	h.requestDaemonRuntimeProfileRefresh(wsID, profileID)
 	h.publish(protocol.EventDaemonRegister, wsID, "member", uuidToString(member.UserID), map[string]any{
 		"runtime_profile_id": profileID,
@@ -691,23 +729,7 @@ func (h *Handler) DaemonListRuntimeProfiles(w http.ResponseWriter, r *http.Reque
 		}
 		daemonID = tokenDaemonID
 	}
-	if daemonID == "" && requestUserID(r) != "" {
-		userID, ok := parseUUIDOrBadRequest(w, requestUserID(r), "user id")
-		if !ok {
-			return
-		}
-		machines, err := h.Queries.ListRuntimeProfileMachines(r.Context(), db.ListRuntimeProfileMachinesParams{
-			WorkspaceID: wsUUID,
-			OwnerID:     userID,
-		})
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to resolve runtime profile machine")
-			return
-		}
-		if len(machines) == 1 {
-			daemonID = machines[0].String
-		}
-	}
+
 	if daemonID != "" {
 		owners, err := h.Queries.ListRuntimeOwnersByDaemon(r.Context(), db.ListRuntimeOwnersByDaemonParams{
 			WorkspaceID: wsUUID,
@@ -723,16 +745,18 @@ func (h *Handler) DaemonListRuntimeProfiles(w http.ResponseWriter, r *http.Reque
 				return
 			}
 		}
-		if len(owners) == 0 {
-			daemonID = ""
-		}
 	}
-	// Old PAT clients with multiple machines do not identify which one is
-	// calling. An empty set prevents downloading another machine's profiles.
-	profiles, err := h.Queries.ListEnabledRuntimeProfilesForDaemon(r.Context(), db.ListEnabledRuntimeProfilesForDaemonParams{
-		WorkspaceID: wsUUID,
-		DaemonID:    strToText(daemonID),
-	})
+	var profiles []db.RuntimeProfile
+	var err error
+	if daemonID == "" && requestUserID(r) != "" {
+		userID, ok := parseUUIDOrBadRequest(w, requestUserID(r), "user id")
+		if !ok {
+			return
+		}
+		profiles, err = h.Queries.ListEnabledRuntimeProfilesForOwner(r.Context(), db.ListEnabledRuntimeProfilesForOwnerParams{WorkspaceID: wsUUID, OwnerID: userID})
+	} else {
+		profiles, err = h.Queries.ListEnabledRuntimeProfilesForDaemon(r.Context(), db.ListEnabledRuntimeProfilesForDaemonParams{WorkspaceID: wsUUID, DaemonID: strToText(daemonID)})
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list runtime profiles")
 		return

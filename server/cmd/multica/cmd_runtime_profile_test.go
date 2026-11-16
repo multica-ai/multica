@@ -46,6 +46,7 @@ func newProfileCreateTestCmd() *cobra.Command {
 
 func newProfileUpdateTestCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "update"}
+	cmd.Flags().String("daemon-id", "", "")
 	addCommonProfileFlags(cmd)
 	cmd.Flags().String("display-name", "", "")
 	cmd.Flags().String("command-name", "", "")
@@ -223,6 +224,15 @@ func TestRunRuntimeProfileUpdateOnlySendsChangedFlags(t *testing.T) {
 	}
 	if _, ok := gotBody["visibility"]; ok {
 		t.Errorf("visibility should not be sent when unchanged: %#v", gotBody)
+	}
+	bind := newProfileUpdateTestCmd()
+	_ = bind.Flags().Set("daemon-id", "keep-machine")
+	gotBody = nil
+	if err := runRuntimeProfileUpdate(bind, []string{"prof-1"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(gotBody) != 1 || gotBody["daemon_id"] != "keep-machine" {
+		t.Fatalf("binding-only update = %#v", gotBody)
 	}
 }
 

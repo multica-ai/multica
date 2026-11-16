@@ -65,6 +65,19 @@ WHERE p.workspace_id = @workspace_id AND p.enabled = true
   )))
 ORDER BY p.created_at ASC;
 
+-- name: ListEnabledRuntimeProfilesForOwner :many
+-- Older PAT daemons do not send their machine ID. Registration still enforces
+-- the profile's machine binding, so returning this owner's set cannot copy it.
+SELECT p.* FROM runtime_profile p
+WHERE p.workspace_id = @workspace_id AND p.enabled = true
+  AND (p.created_by = @owner_id OR EXISTS (
+    SELECT 1 FROM agent_runtime ar
+    WHERE ar.workspace_id = p.workspace_id AND ar.owner_id = @owner_id
+      AND ((p.daemon_id IS NOT NULL AND ar.daemon_id = p.daemon_id)
+        OR (p.daemon_id IS NULL AND ar.profile_id = p.id))
+  ))
+ORDER BY p.created_at ASC;
+
 -- name: RuntimeProfileHasDaemonInstance :one
 SELECT EXISTS (
   SELECT 1 FROM agent_runtime
@@ -92,6 +105,7 @@ SET display_name = COALESCE(sqlc.narg('display_name'), display_name),
     fixed_args   = COALESCE(sqlc.narg('fixed_args'), fixed_args),
     visibility   = COALESCE(sqlc.narg('visibility'), visibility),
     enabled      = COALESCE(sqlc.narg('enabled'), enabled),
+    daemon_id    = COALESCE(sqlc.narg('daemon_id'), daemon_id),
     updated_at   = now()
 WHERE id = @id AND workspace_id = @workspace_id
 RETURNING *;

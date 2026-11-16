@@ -3,12 +3,14 @@
 import { describe, expect, it, beforeEach, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
-import type { RuntimeProfile } from "@multica/core/types";
+import { ApiError } from "@multica/core/api";
+import type { AgentRuntime, RuntimeProfile } from "@multica/core/types";
 import enCommon from "../../locales/en/common.json";
 import enRuntimes from "../../locales/en/runtimes.json";
 
 const queryState = vi.hoisted(() => ({
   profiles: [] as RuntimeProfile[],
+  runtimes: [] as AgentRuntime[],
   isLoading: false,
 }));
 const mutationState = vi.hoisted(() => ({
@@ -22,8 +24,8 @@ vi.mock("@tanstack/react-query", async () => {
   );
   return {
     ...actual,
-    useQuery: vi.fn(() => ({
-      data: queryState.profiles,
+    useQuery: vi.fn((options: { queryKey: string[] }) => ({
+      data: options.queryKey[0] === "runtimes" ? queryState.runtimes : queryState.profiles,
       isLoading: queryState.isLoading,
     })),
   };
@@ -34,6 +36,7 @@ vi.mock("sonner", () => ({
 }));
 
 vi.mock("@multica/core/runtimes", () => ({
+  deriveRuntimeHealth: () => "online",
   runtimeProfileListOptions: vi.fn((wsId: string) => ({
     queryKey: ["runtime-profiles", wsId, "list"],
   })),
@@ -63,6 +66,7 @@ function profile(overrides: Partial<RuntimeProfile> = {}): RuntimeProfile {
   return {
     id: "prof-1",
     workspace_id: "ws-1",
+    daemon_id: "daemon-target",
     display_name: "Team Codex",
     protocol_family: "codex",
     command_name: "codex",
@@ -109,6 +113,7 @@ function renderDialog({
 describe("RuntimeProfilesDialog", () => {
   beforeEach(() => {
     queryState.profiles = [];
+    queryState.runtimes = [];
     queryState.isLoading = false;
     vi.clearAllMocks();
     mutationState.createProfile.mockResolvedValue(
@@ -118,6 +123,34 @@ describe("RuntimeProfilesDialog", () => {
       }),
     );
     mutationState.updateProfile.mockResolvedValue(profile());
+  });
+
+  it.each([false, true])("binds an existing profile and surfaces usage conflicts (%s)", async (conflict) => {
+    queryState.runtimes = [{
+      id: "rt-1", workspace_id: "ws-1", daemon_id: "keep-machine",
+      name: "Codex (Studio Mac)", runtime_mode: "local", provider: "codex",
+      status: "online", owner_id: "user-1", visibility: "private", metadata: {},
+      launch_header: "codex", device_info: "Studio Mac", profile_id: null,
+      last_seen_at: new Date().toISOString(), created_at: "", updated_at: "",
+    }];
+    if (conflict) mutationState.updateProfile.mockRejectedValueOnce(new ApiError(
+      "Finish pending tasks on the other machine first.", 409, "Conflict", { code: "runtime_profile_machine_conflict" },
+    ));
+    const { onClose } = renderDialog({ intent: "edit", initialProfile: profile({ daemon_id: null }) });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Select a machine before saving.");
+    expect(mutationState.updateProfile).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByLabelText("Machine"));
+    fireEvent.click(await screen.findByRole("option", { name: "Studio Mac" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(mutationState.updateProfile).toHaveBeenCalledWith({
+      profileId: "prof-1", patch: expect.objectContaining({ daemon_id: "keep-machine" }),
+    }));
+    if (conflict) {
+      expect(await screen.findByRole("alert")).toHaveTextContent("Finish pending tasks");
+      expect(screen.queryByText("A runtime with this display name already exists.")).not.toBeInTheDocument();
+      expect(onClose).not.toHaveBeenCalled();
+    } else await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
   });
 
   it("shows the custom empty state and keeps built-in protocols collapsed", () => {

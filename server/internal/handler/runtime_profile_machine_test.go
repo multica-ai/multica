@@ -47,14 +47,20 @@ func TestRuntimeProfile_MachineIsolation(t *testing.T) {
 	mismatch := withURLParam(newDaemonTokenRequest("GET", "/?daemon_id="+a, nil, testWorkspaceID, b), "workspaceId", testWorkspaceID)
 	testutil.Call(t, testHandler.DaemonListRuntimeProfiles, mismatch).Want(http.StatusForbidden)
 
-	// Older PAT daemons with several machines cannot safely infer a target.
+	// Older PAT daemons retain the owner's profiles; registration fences each machine.
+	other := dbfx.User(t, "Other profile owner", "other-profile-"+uuid.NewString()+"@example.com")
+	dbfx.Member(t, testWorkspaceID, other, "member")
+	foreignMachine := "foreign-owner-" + uuid.NewString()
+	dbfx.Runtime(t, "Other owner's machine", testutil.Cols{"daemon_id": foreignMachine, "runtime_mode": "local", "owner_id": other})
+	foreignProfile := insertRuntimeProfileFixture(t, context.Background(), "Other owner's profile "+uuid.NewString(), "codex", "codex")
+	dbfx.Exec(t, `UPDATE runtime_profile SET created_by=$2, daemon_id=$3 WHERE id=$1`, foreignProfile, other, foreignMachine)
 	old := withURLParam(newOwnerDaemonRequest("GET", "/", nil), "workspaceId", testWorkspaceID)
 	var oldOut struct {
 		Profiles []RuntimeProfileResponse `json:"runtime_profiles"`
 	}
 	testutil.Call(t, testHandler.DaemonListRuntimeProfiles, old).Want(http.StatusOK).JSON(&oldOut)
-	if len(oldOut.Profiles) != 0 {
-		t.Fatalf("unidentified daemon received profiles: %+v", oldOut.Profiles)
+	if len(oldOut.Profiles) != 1 || oldOut.Profiles[0].ID != profile.ID {
+		t.Fatalf("older daemon lost its profile: %+v", oldOut.Profiles)
 	}
 
 	// Identical commands on B must not create either an online instance or an
@@ -93,8 +99,6 @@ func TestRuntimeProfile_MachineIsolation(t *testing.T) {
 	// A token for another workspace cannot read this workspace's profile set.
 	foreign := withURLParam(newDaemonTokenRequest("GET", "/", nil, uuid.NewString(), a), "workspaceId", testWorkspaceID)
 	testutil.Call(t, testHandler.DaemonListRuntimeProfiles, foreign).Want(http.StatusNotFound)
-	other := dbfx.User(t, "Other profile owner", "other-profile-"+uuid.NewString()+"@example.com")
-	dbfx.Member(t, testWorkspaceID, other, "member")
 	otherReq := withURLParam(newRequest("GET", "/?daemon_id="+a, nil), "workspaceId", testWorkspaceID)
 	otherReq.Header.Set("X-User-ID", other)
 	testutil.Call(t, testHandler.DaemonListRuntimeProfiles, otherReq).Want(http.StatusNotFound)
@@ -135,11 +139,17 @@ func TestCreateRuntimeProfile_OlderClientRequiresUnambiguousMachine(t *testing.T
 	if out.DaemonID == nil || *out.DaemonID != machine {
 		t.Fatalf("wrong inferred machine: %+v", out)
 	}
-	// An admin can select another member's machine. Inferring the admin's
-	// own machine once there are two would silently target the wrong host.
+	// Older clients can still create on their sole owned machine in a multi-member workspace.
 	other := dbfx.User(t, "Another machine owner", "machine-owner-"+uuid.NewString()+"@example.com")
 	dbfx.Member(t, ws, other, "member")
 	dbfx.Runtime(t, "Other local machine", testutil.Cols{"workspace_id": ws, "daemon_id": "other-" + uuid.NewString(), "runtime_mode": "local", "owner_id": other})
+	var second RuntimeProfileResponse
+	testutil.Call(t, testHandler.CreateRuntimeProfile, create()).Want(http.StatusCreated).JSON(&second)
+	dbfx.Cleanup(t, `DELETE FROM runtime_profile WHERE id = $1`, second.ID)
+	if second.DaemonID == nil || *second.DaemonID != machine {
+		t.Fatalf("wrong owned machine: %+v", second)
+	}
+	dbfx.Runtime(t, "Second owned machine", testutil.Cols{"workspace_id": ws, "daemon_id": "second-" + uuid.NewString(), "runtime_mode": "local"})
 	testutil.Call(t, testHandler.CreateRuntimeProfile, create()).Want(http.StatusBadRequest)
 }
 

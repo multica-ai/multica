@@ -9,10 +9,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -304,6 +306,7 @@ func TestRuntimeGC_ProfileBackedInstanceKeepsProfile(t *testing.T) {
 	ctx := context.Background()
 	profileID := createRuntimeGCFixtureProfile(t, ctx, "preserved")
 	runtimeID := createRuntimeGCFixtureRuntime(t, ctx, "profile-backed")
+	workspaceFixture(t).Exec(t, `UPDATE runtime_profile SET daemon_id = $2 WHERE id = $1`, profileID, "gc-bound-machine")
 	if _, err := testPool.Exec(ctx, `UPDATE agent_runtime SET profile_id = $2 WHERE id = $1`, runtimeID, profileID); err != nil {
 		t.Fatalf("bind runtime profile: %v", err)
 	}
@@ -321,6 +324,31 @@ func TestRuntimeGC_ProfileBackedInstanceKeepsProfile(t *testing.T) {
 	}
 	if profiles != 1 {
 		t.Fatalf("runtime profile rows=%d, want preserved", profiles)
+	}
+}
+
+func TestRuntimeGC_KeepsLegacyMachineUntilProfileIsBound(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+	fx := workspaceFixture(t)
+	profile := fx.Insert(t, "runtime_profile", testutil.Cols{"workspace_id": testWorkspaceID, "display_name": "Legacy GC " + uuid.NewString(), "protocol_family": "codex", "command_name": "codex", "created_by": testUserID})
+	runtime := fx.Runtime(t, "Legacy offline machine", testutil.Cols{"daemon_id": "legacy-gc-" + uuid.NewString(), "runtime_mode": "local", "profile_id": profile, "status": "offline", "last_seen_at": testutil.Raw("now()-interval '10 days'")})
+	result, err := gcRuntime(context.Background(), testPool, db.New(testPool), parseUUID(runtime))
+	if err != nil || result.deleted {
+		t.Fatalf("legacy machine lost: %+v, %v", result, err)
+	}
+	if n := fx.Count(t, `SELECT count(*) FROM agent_runtime WHERE id=$1`, runtime); n != 1 {
+		t.Fatal("legacy binding anchor removed")
+	}
+	eligible, err := db.New(testPool).ListStaleOfflineRuntimeGCCandidates(context.Background(), db.ListStaleOfflineRuntimeGCCandidatesParams{StaleSeconds: offlineRuntimeTTLSeconds, MaxPerTick: 1000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, candidate := range eligible {
+		if candidate == parseUUID(runtime) {
+			t.Fatal("legacy machine consumes a GC candidate slot")
+		}
 	}
 }
 

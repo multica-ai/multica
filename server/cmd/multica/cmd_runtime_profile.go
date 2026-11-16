@@ -98,6 +98,7 @@ func init() {
 	runtimeProfileCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// update
+	runtimeProfileUpdateCmd.Flags().String("daemon-id", "", "Bind a legacy profile to this registered local machine")
 	runtimeProfileUpdateCmd.Flags().String("display-name", "", "New display name")
 	runtimeProfileUpdateCmd.Flags().String("command-name", "", "New command name")
 	runtimeProfileUpdateCmd.Flags().String("description", "", "New description")
@@ -239,6 +240,10 @@ func runRuntimeProfileUpdate(cmd *cobra.Command, args []string) error {
 	profileID := args[0]
 
 	body := map[string]any{}
+	if cmd.Flags().Changed("daemon-id") {
+		v, _ := cmd.Flags().GetString("daemon-id")
+		body["daemon_id"] = v
+	}
 	if cmd.Flags().Changed("display-name") {
 		v, _ := cmd.Flags().GetString("display-name")
 		body["display_name"] = v
