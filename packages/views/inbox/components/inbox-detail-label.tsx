@@ -53,6 +53,12 @@ function shortDate(dateStr: string, locale: string): string {
   return formatDateOnly(dateStr, { month: "short", day: "numeric" }, locale);
 }
 
+// The label sits in a one-line, ellipsis-truncated row. Keep it plain inline
+// content with the icon flowing in the text: an `inline-flex` wrapper is a
+// single atomic box, and when it does not fit the browser hides the whole box
+// behind the ellipsis, leaving only "Name …" on the row. (MUL-9407)
+const INLINE_ICON_CLASS = "inline-block h-3 w-3 align-[-0.125em]";
+
 export function InboxDetailLabel({ item }: { item: InboxItem }) {
   const { t } = useT("inbox");
   const { t: tIssues } = useT("issues");
@@ -69,15 +75,15 @@ export function InboxDetailLabel({ item }: { item: InboxItem }) {
     case "status_changed": {
       if (!details.to) return <span>{typeLabels[item.type]}</span>;
       return (
-        <span className="inline-flex items-center gap-1">
-          {t(($) => $.labels.set_status_to)}
+        <span>
+          {t(($) => $.labels.set_status_to)}{" "}
           <StatusIcon
             status={details.to as IssueStatus}
             category={categoryOf(details.to)}
             color={colorOf(details.to)}
             icon={iconOf(details.to)}
-            className="h-3 w-3"
-          />
+            className={INLINE_ICON_CLASS}
+          />{" "}
           {statusLabelOf(details.to)}
         </span>
       );
@@ -86,9 +92,9 @@ export function InboxDetailLabel({ item }: { item: InboxItem }) {
       if (!details.to) return <span>{typeLabels[item.type]}</span>;
       const label = priorityLabel(details.to, tIssues);
       return (
-        <span className="inline-flex items-center gap-1">
-          {t(($) => $.labels.set_priority_to)}
-          <PriorityIcon priority={details.to as IssuePriority} className="h-3 w-3" />
+        <span>
+          {t(($) => $.labels.set_priority_to)}{" "}
+          <PriorityIcon priority={details.to as IssuePriority} className={INLINE_ICON_CLASS} />{" "}
           {label}
         </span>
       );
