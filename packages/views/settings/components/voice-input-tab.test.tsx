@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { configStore } from "@multica/core/config";
 import { DEFAULT_VOICE_SETTINGS, useVoiceModelsStore, useVoiceSettingsStore } from "@multica/core/voice";
 import { renderWithI18n } from "../../test/i18n";
+import { SERVER_VOICE_MODEL } from "../../voice/engine";
 import { VoiceInputTab } from "./voice-input-tab";
 
 vi.mock("../../navigation", () => ({
@@ -70,5 +71,25 @@ describe("VoiceInputTab", () => {
     await userEvent.click(screen.getByRole("switch", { name: "Voice input" }));
     expect(screen.queryByText("Speech model")).not.toBeInTheDocument();
     expect(await screen.findByText("Microphone")).toBeInTheDocument();
+  });
+
+  it("on desktop with the server model in use, says speech goes to the server and keeps it undeletable", async () => {
+    configStore.getState().setVoiceTranscriptionEnabled(true);
+    useVoiceSettingsStore.getState().update({ enabled: true });
+    useVoiceModelsStore.getState().setModels({
+      engineAvailable: true,
+      models: [
+        { ...SERVER_VOICE_MODEL },
+        { ...SERVER_VOICE_MODEL, id: "whisper", name: "Whisper", streams: undefined, sizeBytes: 1_000_000 },
+      ],
+    });
+    renderWithI18n(<VoiceInputTab />);
+    expect(screen.getByText(/speech-to-text service your Multica server/)).toBeInTheDocument();
+    expect(screen.getByText(/The server model streams speech/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete Server" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete Whisper" })).toBeInTheDocument();
+
+    act(() => useVoiceSettingsStore.getState().update({ modelId: "whisper" }));
+    expect(screen.getByText(/transcribed on this computer and never leaves it/)).toBeInTheDocument();
   });
 });

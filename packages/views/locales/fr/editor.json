@@ -229,6 +229,7 @@
     "setup": {
       "title": "Configurer la saisie vocale",
       "description": "La voix est transcrite sur cet ordinateur : les enregistrements ne le quittent jamais. Téléchargez un modèle vocal une fois pour commencer.",
+      "description_server": "Choisissez un modèle vocal pour commencer. Le modèle serveur transmet la voix au service de reconnaissance vocale de votre serveur Multica ; les autres s'exécutent sur cet ordinateur après un téléchargement unique.",
       "later": "Plus tard",
       "start": "Commencer à dicter"
     }

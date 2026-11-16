@@ -4,6 +4,7 @@ import {
   MAX_VOCABULARY_WORDS,
   applyVocabulary,
   dictationSeparator,
+  pickClipVoiceModel,
   removeSpokenFillers,
   sanitizeVoiceSettings,
 } from ".";
@@ -100,5 +101,31 @@ describe("sanitizeVoiceSettings", () => {
     expect(settings.vocabulary[0]).toBe("Multica");
     expect(settings.vocabulary).toHaveLength(MAX_VOCABULARY_WORDS);
     expect(settings.modelId).toBe("sensevoice-small");
+  });
+});
+
+describe("pickClipVoiceModel", () => {
+  const base = {
+    author: "",
+    licenseUrl: "",
+    languages: ["en"],
+    languageHint: false,
+    sizeBytes: 0,
+    status: "ready" as const,
+    receivedBytes: 0,
+  };
+  const server = { ...base, id: "server", name: "Server", streams: true };
+  const whisper = { ...base, id: "whisper", name: "Whisper" };
+
+  it("uses the chosen model when it takes clips", () => {
+    expect(pickClipVoiceModel({ engineAvailable: true, models: [server, whisper] }, "whisper")).toBe(whisper);
+  });
+
+  it("falls back to an installed clip model when the chosen one only streams", () => {
+    expect(pickClipVoiceModel({ engineAvailable: true, models: [server, whisper] }, "server")).toBe(whisper);
+  });
+
+  it("has nothing when only a streaming model is installed", () => {
+    expect(pickClipVoiceModel({ engineAvailable: true, models: [server] }, null)).toBeNull();
   });
 });

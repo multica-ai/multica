@@ -95,6 +95,7 @@ export function desktopVoiceRuntime(): VoiceRuntime | null {
         }
         onChange({ engineAvailable: true, models: [SERVER_VOICE_MODEL, ...(local?.models ?? [])] });
       };
+      report();
       configStore.subscribe((next, previous) => {
         if (next.voiceTranscriptionEnabled !== previous.voiceTranscriptionEnabled) report();
       });

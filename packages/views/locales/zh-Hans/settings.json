@@ -1922,6 +1922,7 @@
     "description_server": "在聊天、评论和回复中语音输入。语音会流式发送到你的 Multica 服务器所配置的语音转文字服务。",
     "model_title": "语音模型",
     "model_hint": "模型在这台电脑上运行。下载一个，或在已下载的模型之间切换。",
+    "model_hint_server": "服务器模型会将语音流式传输到你的 Multica 服务器所配置的语音转文字服务。其他模型在本机运行：下载一个，或在已有模型之间切换。",
     "engine_unavailable": "这台电脑暂不支持本地语音转写。",
     "enabled": {
       "title": "语音输入",

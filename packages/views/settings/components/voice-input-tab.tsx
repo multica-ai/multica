@@ -37,19 +37,24 @@ import {
 
 /**
  * Speech models and how dictation behaves on this computer. Desktop
- * transcribes on the device; the web app sends recordings to the server
- * when it transcribes them, and then has no models to manage.
+ * transcribes on the device, and also lists the server's model when the
+ * server transcribes; the web app only streams to the server, and then has
+ * no models to manage.
  */
 export function VoiceInputTab() {
   const { t } = useT("settings");
-  const engineAvailable = useVoiceModels()?.engineAvailable;
+  const models = useVoiceModels();
+  const engineAvailable = models?.engineAvailable;
   const serverEngine = useServerVoiceEngine();
   const enabled = useVoiceSettingsStore((state) => state.enabled);
+  const modelId = useVoiceSettingsStore((state) => state.modelId);
+  const offersServer = models?.models.some((model) => model.streams) ?? false;
+  const streamsSpeech = serverEngine || pickVoiceModel(models, modelId)?.streams === true;
   return (
     <SettingsTab
       title={t(($) => $.page.tabs.voice_input)}
       description={
-        serverEngine
+        streamsSpeech
           ? t(($) => $.voice_input.description_server)
           : t(($) => $.voice_input.description)
       }
@@ -68,7 +73,9 @@ export function VoiceInputTab() {
             description={
               engineAvailable === false
                 ? t(($) => $.voice_input.engine_unavailable)
-                : t(($) => $.voice_input.model_hint)
+                : offersServer
+                  ? t(($) => $.voice_input.model_hint_server)
+                  : t(($) => $.voice_input.model_hint)
             }
             anchor="voice-model"
           >

@@ -158,7 +158,7 @@ function ModelRow({
 
 /**
  * Desktop's speech models as rows, for a bordered list. `manage` adds
- * choosing between installed models and deleting them.
+ * choosing between installed models and deleting the downloaded ones.
  */
 export function VoiceModelRows({
   manage = false,
@@ -208,7 +208,11 @@ export function VoiceSetupDialog({ voice }: { voice: ComposerVoice }) {
       <DialogContent className="sm:max-w-lg" data-editor-overlay-owner={overlayOwner}>
         <DialogHeader>
           <DialogTitle>{t(($) => $.voice.setup.title)}</DialogTitle>
-          <DialogDescription>{t(($) => $.voice.setup.description)}</DialogDescription>
+          <DialogDescription>
+            {snapshot?.models.some((model) => model.streams)
+              ? t(($) => $.voice.setup.description_server)
+              : t(($) => $.voice.setup.description)}
+          </DialogDescription>
         </DialogHeader>
         <div className="divide-y divide-surface-border rounded-lg border border-surface-border">
           <VoiceModelRows onDownload={(id) => update({ modelId: id })} />

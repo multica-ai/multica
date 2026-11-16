@@ -61,12 +61,15 @@ export function activeVoiceModel(): VoiceModel | null {
 }
 
 /**
- * The model to transcribe a kept clip with: the active one, unless it only
+ * The model to transcribe a kept clip with: the chosen one, unless it only
  * streams, then the first installed model that takes clips.
  */
+export function pickClipVoiceModel(models: VoiceModels | null, preferred: string | null): VoiceModel | null {
+  const chosen = pickVoiceModel(models, preferred);
+  if (!chosen?.streams) return chosen;
+  return models?.models.find((model) => model.status === "ready" && !model.streams) ?? null;
+}
+
 export function clipVoiceModel(): VoiceModel | null {
-  const active = activeVoiceModel();
-  if (!active?.streams) return active;
-  const models = useVoiceModelsStore.getState().models?.models ?? [];
-  return models.find((model) => model.status === "ready" && !model.streams) ?? null;
+  return pickClipVoiceModel(useVoiceModelsStore.getState().models, useVoiceSettingsStore.getState().modelId);
 }

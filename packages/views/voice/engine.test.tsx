@@ -77,4 +77,15 @@ describe("desktopVoiceRuntime", () => {
       });
       expect(runtime.stream).toBeTypeOf("function");
     }));
+
+  it("offers the server model at once when the local engine never answers", () =>
+    withDesktop(async () => {
+      (window as unknown as { desktopAPI: { voice: { listModels: () => Promise<never> } } }).desktopAPI.voice.listModels =
+        () => new Promise<never>(() => {});
+      configStore.getState().setVoiceTranscriptionEnabled(true);
+      const onChange = vi.fn();
+      desktopVoiceRuntime()!.watchModels(onChange);
+      expect(onChange).toHaveBeenLastCalledWith({ engineAvailable: true, models: [SERVER_VOICE_MODEL] });
+    }));
 });
+

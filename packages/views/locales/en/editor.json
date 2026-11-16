@@ -229,6 +229,7 @@
     "setup": {
       "title": "Set up voice input",
       "description": "Speech is transcribed on this computer, so recordings never leave it. Download a speech model once to start.",
+      "description_server": "Choose a speech model to start. The server model streams speech to your Multica server's speech-to-text service; the others run on this computer after a one-time download.",
       "later": "Not now",
       "start": "Start dictating"
     }

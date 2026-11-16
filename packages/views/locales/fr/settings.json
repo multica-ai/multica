@@ -1943,6 +1943,7 @@
     "description_server": "Dictez dans le chat, les commentaires et les réponses. La voix est transmise au service de reconnaissance vocale configuré sur votre serveur Multica.",
     "model_title": "Modèle vocal",
     "model_hint": "Les modèles s’exécutent sur cet ordinateur. Téléchargez-en un, ou passez de l’un à l’autre.",
+    "model_hint_server": "Le modèle serveur transmet la voix au service de reconnaissance vocale de votre serveur Multica. Les autres s'exécutent sur cet ordinateur : téléchargez-en un ou passez de l'un à l'autre.",
     "engine_unavailable": "La transcription sur l’appareil n’est pas disponible sur cet ordinateur.",
     "enabled": {
       "title": "Saisie vocale",
