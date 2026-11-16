@@ -113,37 +113,6 @@ func (q *Queries) CreateChannelProjectSubscription(ctx context.Context, arg Crea
 	return i, err
 }
 
-const deleteChannelIssueSubscription = `-- name: DeleteChannelIssueSubscription :execrows
-DELETE FROM channel_issue_subscription
-WHERE workspace_id = $1
-  AND issue_id = $2
-  AND installation_id = $3
-  AND chat_id = $4
-  AND thread_id = $5
-`
-
-type DeleteChannelIssueSubscriptionParams struct {
-	WorkspaceID    pgtype.UUID `json:"workspace_id"`
-	IssueID        pgtype.UUID `json:"issue_id"`
-	InstallationID pgtype.UUID `json:"installation_id"`
-	ChatID         string      `json:"chat_id"`
-	ThreadID       string      `json:"thread_id"`
-}
-
-func (q *Queries) DeleteChannelIssueSubscription(ctx context.Context, arg DeleteChannelIssueSubscriptionParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteChannelIssueSubscription,
-		arg.WorkspaceID,
-		arg.IssueID,
-		arg.InstallationID,
-		arg.ChatID,
-		arg.ThreadID,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const deleteChannelIssueSubscriptionByID = `-- name: DeleteChannelIssueSubscriptionByID :exec
 DELETE FROM channel_issue_subscription WHERE id = $1
 `
@@ -151,37 +120,6 @@ DELETE FROM channel_issue_subscription WHERE id = $1
 func (q *Queries) DeleteChannelIssueSubscriptionByID(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, deleteChannelIssueSubscriptionByID, id)
 	return err
-}
-
-const deleteChannelProjectSubscription = `-- name: DeleteChannelProjectSubscription :execrows
-DELETE FROM channel_project_subscription
-WHERE workspace_id = $1
-  AND project_id = $2
-  AND installation_id = $3
-  AND chat_id = $4
-  AND thread_id = $5
-`
-
-type DeleteChannelProjectSubscriptionParams struct {
-	WorkspaceID    pgtype.UUID `json:"workspace_id"`
-	ProjectID      pgtype.UUID `json:"project_id"`
-	InstallationID pgtype.UUID `json:"installation_id"`
-	ChatID         string      `json:"chat_id"`
-	ThreadID       string      `json:"thread_id"`
-}
-
-func (q *Queries) DeleteChannelProjectSubscription(ctx context.Context, arg DeleteChannelProjectSubscriptionParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteChannelProjectSubscription,
-		arg.WorkspaceID,
-		arg.ProjectID,
-		arg.InstallationID,
-		arg.ChatID,
-		arg.ThreadID,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
 }
 
 const deleteChannelProjectSubscriptionByID = `-- name: DeleteChannelProjectSubscriptionByID :exec

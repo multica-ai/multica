@@ -180,6 +180,40 @@ func TestRouter_SubscribeInThreadTargetsThread_DB(t *testing.T) {
 	}
 }
 
+// A chat-level subscription posts into the topic its reply opened under the
+// command; commands sent inside that topic address the same subscription.
+func TestRouter_SubscriptionTopicUnderCommand_DB(t *testing.T) {
+	s := newSubscriptionDB(t)
+	h, _ := s.harness(t)
+	ref := fmt.Sprintf("SUB-%d", s.public.Number)
+	cmd := groupSubscribeMessage(t, "/subscribe issue "+ref)
+	cmd.MessageID = "om-cmd"
+	if got := sendSubscription(t, h, cmd); got.Subscription.Action != SubscriptionSubscribed {
+		t.Fatalf("chat-level subscribe = %+v", got)
+	}
+	rows := s.rows(t, s.public.ID)
+	if len(rows) != 1 || rows[0].ThreadID != "" || rows[0].AnchorMessageID != "om-cmd" {
+		t.Fatalf("chat-level subscription = %+v", rows)
+	}
+
+	inTopic := func(text string) channel.InboundMessage {
+		msg := groupSubscribeMessage(t, text)
+		msg.MessageID = "om-in-topic-" + strings.ReplaceAll(text, " ", "-")
+		msg.Source.ThreadID = "omt_created"
+		msg.ReplyTo = &channel.ReplyCtx{MessageID: "om-cmd", RootID: "om-cmd"}
+		return msg
+	}
+	if got := sendSubscription(t, h, inTopic("/subscribe issue "+ref)); got.Subscription.Action != SubscriptionAlreadySubscribed {
+		t.Fatalf("subscribe inside the reply topic = %+v", got)
+	}
+	if got := sendSubscription(t, h, inTopic("/unsubscribe issue "+ref)); got.Subscription.Action != SubscriptionUnsubscribed {
+		t.Fatalf("unsubscribe inside the reply topic = %+v", got)
+	}
+	if rows := s.rows(t, s.public.ID); len(rows) != 0 {
+		t.Fatalf("unsubscribe inside the topic left rows: %+v", rows)
+	}
+}
+
 func TestRouter_SubscribeRejectsHiddenAndUnknownIssues_DB(t *testing.T) {
 	s := newSubscriptionDB(t)
 	h, _ := s.harness(t)

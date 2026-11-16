@@ -10,9 +10,9 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// chatPoster delivers chat issue subscription updates as plain Lark text. A
-// subscription made inside a topic replies in that topic through its anchor
-// message; others post at the chat level.
+// chatPoster delivers chat subscription updates as plain Lark text, replying
+// in the topic under the subscription's anchor message. Subscriptions without
+// an anchor post at the chat level.
 type chatPoster struct {
 	client      APIClient
 	credentials CredentialsResolver
@@ -39,8 +39,10 @@ func (p *chatPoster) PostToChat(ctx context.Context, row db.ChannelInstallation,
 	if err != nil {
 		return err
 	}
+	// Updates go into the topic under the message that subscribed: the topic
+	// it was sent in, or the one the command reply opened under it.
 	reply := ReplyTarget{}
-	if target.ThreadID != "" && target.AnchorMessageID != "" {
+	if target.AnchorMessageID != "" {
 		reply = ReplyTarget{MessageID: target.AnchorMessageID, InThread: true}
 	}
 	return sendWithReplyFallback(p.log, "send issue subscription update", reply, func(t ReplyTarget) error {

@@ -71,7 +71,14 @@ func TestChatPosterRepliesInTopicThroughAnchor(t *testing.T) {
 		target engine.ChatTarget
 		want   ReplyTarget
 	}{
-		{name: "chat level", target: engine.ChatTarget{ChatID: "oc_group"}},
+		{name: "no anchor", target: engine.ChatTarget{ChatID: "oc_group"}},
+		{
+			// A chat-level subscription posts into the topic its command
+			// reply opened under the command message.
+			name:   "chat level command",
+			target: engine.ChatTarget{ChatID: "oc_group", AnchorMessageID: "om_cmd"},
+			want:   ReplyTarget{MessageID: "om_cmd", InThread: true},
+		},
 		{
 			name:   "topic",
 			target: engine.ChatTarget{ChatID: "oc_group", ThreadID: "omt_1", AnchorMessageID: "om_anchor"},
