@@ -13,6 +13,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -20,6 +21,7 @@ import (
 // issueFeedPublisher is the channel engine surface the feed listeners need.
 type issueFeedPublisher interface {
 	PublishIssueUpdate(workspaceID, issueID pgtype.UUID, render func(context.Context) string)
+	PublishIssueCreated(workspaceID, issueID pgtype.UUID, render func(context.Context) string)
 }
 
 type issueFeedQueries interface {
@@ -36,10 +38,39 @@ const issueFeedCommentRunes = 500
 
 var feedMentionLink = regexp.MustCompile(`\[([^\]]*)\]\(mention://[^)]*\)`)
 
-// registerChannelIssueFeedListeners posts status changes, assignee changes
-// and new comments into the IM chats that follow an issue (/subscribe, or an
-// /issue created in a group chat).
+// registerChannelIssueFeedListeners posts new issues, status changes,
+// assignee changes and new comments into the IM chats that follow an issue or
+// its project (/subscribe, or an /issue created in a group chat).
 func registerChannelIssueFeedListeners(bus *events.Bus, q issueFeedQueries, feed issueFeedPublisher, appURL string) {
+	bus.Subscribe(protocol.EventIssueCreated, func(e events.Event) {
+		payload, ok := e.Payload.(map[string]any)
+		if !ok {
+			return
+		}
+		created, ok := extractIssueFields(payload["issue"])
+		if !ok {
+			return
+		}
+		wsID, issueID := parseUUID(created.WorkspaceID), parseUUID(created.ID)
+		feed.PublishIssueCreated(wsID, issueID, func(ctx context.Context) string {
+			issue, err := q.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: issueID, WorkspaceID: wsID})
+			if err != nil {
+				return ""
+			}
+			header := "🆕 " + feedIssueLabel(feedIssueIdentifier(ctx, q, wsID, issue.Number), issue.Title)
+			if actor := feedActorName(ctx, q, wsID, e.ActorType, e.ActorID); actor != "" {
+				header += " — created by " + actor
+			}
+			body := ""
+			if issue.AssigneeType.Valid && issue.AssigneeID.Valid {
+				if name := feedActorName(ctx, q, wsID, issue.AssigneeType.String, util.UUIDToString(issue.AssigneeID)); name != "" {
+					body = "Assignee: " + name
+				}
+			}
+			return feedMessage(header, body, feedIssueLink(ctx, q, wsID, appURL, created.ID))
+		})
+	})
+
 	bus.Subscribe(protocol.EventIssueUpdated, func(e events.Event) {
 		payload, ok := e.Payload.(map[string]any)
 		if !ok {
@@ -105,10 +136,7 @@ func registerChannelIssueFeedListeners(bus *events.Bus, q issueFeedQueries, feed
 			if err != nil {
 				return ""
 			}
-			identifier := ""
-			if ws, err := q.GetWorkspace(ctx, wsID); err == nil {
-				identifier = service.IssueIdentifier(ws.IssuePrefix, issue.Number)
-			}
+			identifier := feedIssueIdentifier(ctx, q, wsID, issue.Number)
 			header := "💬 " + feedIssueLabel(identifier, issue.Title)
 			if author := feedActorName(ctx, q, wsID, authorType, authorID); author != "" {
 				header = "💬 " + author + " commented on " + feedIssueLabel(identifier, issue.Title)
@@ -139,6 +167,14 @@ func feedIssueLabel(identifier, title string) string {
 	default:
 		return identifier + " " + title
 	}
+}
+
+func feedIssueIdentifier(ctx context.Context, q issueFeedQueries, wsID pgtype.UUID, number int32) string {
+	ws, err := q.GetWorkspace(ctx, wsID)
+	if err != nil {
+		return ""
+	}
+	return service.IssueIdentifier(ws.IssuePrefix, number)
 }
 
 // feedIssueLink links by UUID: a workspace without an issue prefix renders the

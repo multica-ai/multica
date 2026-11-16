@@ -24,6 +24,8 @@ type subscriptionDB struct {
 	userID       pgtype.UUID
 	installation pgtype.UUID
 	projectID    string
+	webProject   pgtype.UUID
+	webIssue     db.Issue
 	public       db.Issue
 	private      db.Issue
 }
@@ -38,6 +40,8 @@ func newSubscriptionDB(t *testing.T) *subscriptionDB {
 	f := dbfx.New(pool, wsID, userID)
 	f.Member(t, wsID, userID, "owner")
 	projectID := f.Project(t, "Secret", dbfx.Cols{"visibility": "private"})
+	webProjectID := f.Project(t, "Web App")
+	webIssueID := f.Issue(t, "Polish header", dbfx.Cols{"project_id": webProjectID})
 	publicID := f.Issue(t, "Fix login")
 	privateID := f.Issue(t, "Secret work", dbfx.Cols{"project_id": projectID})
 	instID := f.Insert(t, "channel_installation", dbfx.Cols{
@@ -45,13 +49,18 @@ func newSubscriptionDB(t *testing.T) *subscriptionDB {
 		"installer_user_id": userID,
 	})
 	f.Cleanup(t, `DELETE FROM channel_issue_subscription WHERE workspace_id = $1`, wsID)
+	f.Cleanup(t, `DELETE FROM channel_project_subscription WHERE workspace_id = $1`, wsID)
 
 	s := &subscriptionDB{
 		f: f, q: db.New(pool),
 		workspaceID: util.MustParseUUID(wsID), userID: util.MustParseUUID(userID),
 		installation: util.MustParseUUID(instID), projectID: projectID,
+		webProject: util.MustParseUUID(webProjectID),
 	}
 	var err error
+	if s.webIssue, err = s.q.GetIssueInWorkspace(context.Background(), db.GetIssueInWorkspaceParams{ID: util.MustParseUUID(webIssueID), WorkspaceID: s.workspaceID}); err != nil {
+		t.Fatalf("load project issue: %v", err)
+	}
 	if s.public, err = s.q.GetIssueInWorkspace(context.Background(), db.GetIssueInWorkspaceParams{ID: util.MustParseUUID(publicID), WorkspaceID: s.workspaceID}); err != nil {
 		t.Fatalf("load public issue: %v", err)
 	}
@@ -133,7 +142,7 @@ func TestRouter_SubscribeAndUnsubscribe_DB(t *testing.T) {
 	ref := fmt.Sprintf("sub-%d", s.public.Number)
 
 	got := sendSubscription(t, h, groupSubscribeMessage(t, "/subscribe "+ref))
-	if got.SubscriptionAction != SubscriptionSubscribed || got.IssueIdentifier != fmt.Sprintf("SUB-%d", s.public.Number) {
+	if got.Subscription.Action != SubscriptionSubscribed || got.IssueIdentifier != fmt.Sprintf("SUB-%d", s.public.Number) {
 		t.Fatalf("first subscribe = %+v", got)
 	}
 	rows := s.rows(t, s.public.ID)
@@ -141,18 +150,18 @@ func TestRouter_SubscribeAndUnsubscribe_DB(t *testing.T) {
 		t.Fatalf("stored subscription = %+v", rows)
 	}
 
-	if got := sendSubscription(t, h, groupSubscribeMessage(t, "/subscribe #"+fmt.Sprint(s.public.Number))); got.SubscriptionAction != SubscriptionAlreadySubscribed {
-		t.Fatalf("repeat subscribe = %q", got.SubscriptionAction)
+	if got := sendSubscription(t, h, groupSubscribeMessage(t, "/subscribe #"+fmt.Sprint(s.public.Number))); got.Subscription.Action != SubscriptionAlreadySubscribed {
+		t.Fatalf("repeat subscribe = %q", got.Subscription.Action)
 	}
 	link := "https://app.example/sub/issues/" + util.UUIDToString(s.public.ID)
-	if got := sendSubscription(t, h, groupSubscribeMessage(t, "/unsubscribe "+link)); got.SubscriptionAction != SubscriptionUnsubscribed {
-		t.Fatalf("unsubscribe by link = %q", got.SubscriptionAction)
+	if got := sendSubscription(t, h, groupSubscribeMessage(t, "/unsubscribe "+link)); got.Subscription.Action != SubscriptionUnsubscribed {
+		t.Fatalf("unsubscribe by link = %q", got.Subscription.Action)
 	}
 	if rows := s.rows(t, s.public.ID); len(rows) != 0 {
 		t.Fatalf("unsubscribe left rows: %+v", rows)
 	}
-	if got := sendSubscription(t, h, groupSubscribeMessage(t, "/unsubscribe "+ref)); got.SubscriptionAction != SubscriptionNotSubscribed {
-		t.Fatalf("second unsubscribe = %q", got.SubscriptionAction)
+	if got := sendSubscription(t, h, groupSubscribeMessage(t, "/unsubscribe "+ref)); got.Subscription.Action != SubscriptionNotSubscribed {
+		t.Fatalf("second unsubscribe = %q", got.Subscription.Action)
 	}
 }
 
@@ -162,8 +171,8 @@ func TestRouter_SubscribeInThreadTargetsThread_DB(t *testing.T) {
 	msg := groupSubscribeMessage(t, fmt.Sprintf("/subscribe SUB-%d", s.public.Number))
 	msg.MessageID = "om-thread-cmd"
 	msg.Source.ThreadID = "omt_topic"
-	if got := sendSubscription(t, h, msg); got.SubscriptionAction != SubscriptionSubscribed {
-		t.Fatalf("subscribe in thread = %q", got.SubscriptionAction)
+	if got := sendSubscription(t, h, msg); got.Subscription.Action != SubscriptionSubscribed {
+		t.Fatalf("subscribe in thread = %q", got.Subscription.Action)
 	}
 	rows := s.rows(t, s.public.ID)
 	if len(rows) != 1 || rows[0].ThreadID != "omt_topic" || rows[0].AnchorMessageID != "om-thread-cmd" {
@@ -180,7 +189,7 @@ func TestRouter_SubscribeRejectsHiddenAndUnknownIssues_DB(t *testing.T) {
 		"SUB-999999",
 	} {
 		got := sendSubscription(t, h, groupSubscribeMessage(t, "/subscribe "+ref))
-		if got.SubscriptionAction != SubscriptionIssueNotFound || got.IssueTitle != "" {
+		if got.Subscription.Action != SubscriptionNotFound || got.IssueTitle != "" {
 			t.Fatalf("subscribe %s = %+v, want not found without issue details", ref, got)
 		}
 	}
@@ -196,7 +205,7 @@ func TestRouter_SubscribeFollowsSenderAccess_DB(t *testing.T) {
 
 	s.joinPrivateProject(t, s.userID)
 	got := sendSubscription(t, h, groupSubscribeMessage(t, "/subscribe "+ref))
-	if got.SubscriptionAction != SubscriptionSubscribed || got.IssueTitle != s.private.Title {
+	if got.Subscription.Action != SubscriptionSubscribed || got.IssueTitle != s.private.Title {
 		t.Fatalf("project member subscribe = %+v", got)
 	}
 	if rows := s.rows(t, s.private.ID); len(rows) != 1 || rows[0].CreatedBy != s.userID {
@@ -208,14 +217,14 @@ func TestRouter_SubscribeFollowsSenderAccess_DB(t *testing.T) {
 	h.ident.id = ResolvedIdentity{UserID: s.otherMember(t)}
 	other := groupSubscribeMessage(t, "/subscribe "+ref)
 	other.Source.ChatID = "oc_other"
-	if got := sendSubscription(t, h, other); got.SubscriptionAction != SubscriptionIssueNotFound || got.IssueTitle != "" {
+	if got := sendSubscription(t, h, other); got.Subscription.Action != SubscriptionNotFound || got.IssueTitle != "" {
 		t.Fatalf("outsider subscribe = %+v", got)
 	}
 	other.Text = "/unsubscribe " + ref
-	if got := sendSubscription(t, h, other); got.SubscriptionAction != SubscriptionIssueNotFound || got.IssueTitle != "" {
+	if got := sendSubscription(t, h, other); got.Subscription.Action != SubscriptionNotFound || got.IssueTitle != "" {
 		t.Fatalf("outsider unsubscribe in an unsubscribed chat = %+v", got)
 	}
-	if got := sendSubscription(t, h, groupSubscribeMessage(t, "/unsubscribe "+ref)); got.SubscriptionAction != SubscriptionUnsubscribed {
+	if got := sendSubscription(t, h, groupSubscribeMessage(t, "/unsubscribe "+ref)); got.Subscription.Action != SubscriptionUnsubscribed {
 		t.Fatalf("outsider unsubscribe of a followed issue = %+v", got)
 	}
 	if rows := s.rows(t, s.private.ID); len(rows) != 0 {
@@ -304,5 +313,102 @@ func TestRouter_PublishIssueUpdate_DB(t *testing.T) {
 	}
 	if rows := s.rows(t, s.private.ID); len(rows) != 2 {
 		t.Fatalf("an outsider's subscription must be kept while its updates pause: %+v", rows)
+	}
+}
+
+func (s *subscriptionDB) projectRows(t *testing.T, projectID pgtype.UUID) []db.ChannelProjectSubscription {
+	t.Helper()
+	rows, err := s.q.ListChannelProjectSubscriptionsForProject(context.Background(), db.ListChannelProjectSubscriptionsForProjectParams{
+		ProjectID: projectID, WorkspaceID: s.workspaceID,
+	})
+	if err != nil {
+		t.Fatalf("list project subscriptions: %v", err)
+	}
+	return rows
+}
+
+func TestRouter_SubscribeProject_DB(t *testing.T) {
+	s := newSubscriptionDB(t)
+	h, _ := s.harness(t)
+
+	got := sendSubscription(t, h, groupSubscribeMessage(t, "/subscribe project web app"))
+	if got.Subscription.Action != SubscriptionSubscribed || got.Subscription.ProjectID != s.webProject || got.Subscription.ProjectTitle != "Web App" {
+		t.Fatalf("subscribe by name = %+v", got)
+	}
+	if rows := s.projectRows(t, s.webProject); len(rows) != 1 || rows[0].ChatID != "oc_chat" || rows[0].CreatedBy != s.userID {
+		t.Fatalf("stored project subscription = %+v", rows)
+	}
+	link := "https://app.example/sub/projects/" + util.UUIDToString(s.webProject)
+	if got := sendSubscription(t, h, groupSubscribeMessage(t, "/subscribe "+link)); got.Subscription.Action != SubscriptionAlreadySubscribed {
+		t.Fatalf("repeat subscribe by bare project link = %+v", got)
+	}
+	if got := sendSubscription(t, h, groupSubscribeMessage(t, "/unsubscribe project "+link)); got.Subscription.Action != SubscriptionUnsubscribed {
+		t.Fatalf("unsubscribe by link = %+v", got)
+	}
+	if rows := s.projectRows(t, s.webProject); len(rows) != 0 {
+		t.Fatalf("unsubscribe left rows: %+v", rows)
+	}
+
+	// A second project with the same name makes the name ambiguous.
+	s.f.Project(t, "web APP")
+	if got := sendSubscription(t, h, groupSubscribeMessage(t, "/subscribe project Web App")); got.Subscription.Action != SubscriptionAmbiguous {
+		t.Fatalf("ambiguous name = %+v", got)
+	}
+}
+
+func TestRouter_SubscribeProjectFollowsSenderAccess_DB(t *testing.T) {
+	s := newSubscriptionDB(t)
+	h, _ := s.harness(t)
+	private := util.MustParseUUID(s.projectID)
+	for _, ref := range []string{"Secret", "https://app.example/sub/projects/" + s.projectID, "Nope"} {
+		got := sendSubscription(t, h, groupSubscribeMessage(t, "/subscribe project "+ref))
+		if got.Subscription.Action != SubscriptionNotFound || got.Subscription.ProjectTitle != "" {
+			t.Fatalf("subscribe %s without access = %+v", ref, got)
+		}
+	}
+	s.joinPrivateProject(t, s.userID)
+	if got := sendSubscription(t, h, groupSubscribeMessage(t, "/subscribe project Secret")); got.Subscription.Action != SubscriptionSubscribed {
+		t.Fatalf("project member subscribe = %+v", got)
+	}
+	if rows := s.projectRows(t, private); len(rows) != 1 {
+		t.Fatalf("private project subscription = %+v", rows)
+	}
+}
+
+func TestRouter_PublishProjectFeed_DB(t *testing.T) {
+	s := newSubscriptionDB(t)
+	h, poster := s.harness(t)
+	ctx := context.Background()
+	follow := func(chat string) {
+		if _, err := s.q.CreateChannelProjectSubscription(ctx, db.CreateChannelProjectSubscriptionParams{
+			WorkspaceID: s.workspaceID, ProjectID: s.webProject, InstallationID: s.installation,
+			ChannelType: string(channel.TypeFeishu), ChatID: chat, CreatedBy: s.userID,
+		}); err != nil {
+			t.Fatalf("seed project subscription: %v", err)
+		}
+	}
+	follow("oc_project")
+	follow("oc_both")
+	if _, err := s.q.CreateChannelIssueSubscription(ctx, db.CreateChannelIssueSubscriptionParams{
+		WorkspaceID: s.workspaceID, IssueID: s.webIssue.ID, InstallationID: s.installation,
+		ChannelType: string(channel.TypeFeishu), ChatID: "oc_both", CreatedBy: s.userID,
+	}); err != nil {
+		t.Fatalf("seed issue subscription: %v", err)
+	}
+
+	h.router.PublishIssueUpdate(s.workspaceID, s.webIssue.ID, func(context.Context) string { return "updated" })
+	h.router.PublishIssueUpdate(s.workspaceID, s.public.ID, func(context.Context) string { return "unrelated" })
+	if !h.router.Drain(ctx) {
+		t.Fatal("drain timed out")
+	}
+	counts := map[string]int{}
+	for _, p := range poster.calls() {
+		if p.text != "updated" {
+			t.Fatalf("issue outside the project posted: %+v", p)
+		}
+		counts[p.target.ChatID]++
+	}
+	if len(counts) != 2 || counts["oc_project"] != 1 || counts["oc_both"] != 1 {
+		t.Fatalf("project fanout = %v, want each chat once", counts)
 	}
 }

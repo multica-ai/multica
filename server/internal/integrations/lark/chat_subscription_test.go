@@ -31,7 +31,7 @@ func TestLarkOutcomeReplierIssueSubscriptionRepliesWithText(t *testing.T) {
 	newSubscriptionTestReplier(stub).Reply(context.Background(), inst, InboundMessage{ChatID: "oc_group"}, DispatchResult{
 		Outcome: OutcomeIssueSubscription, IssueID: issueID, IssueNumber: 42,
 		IssueIdentifier: "MUL-42", IssueWorkspaceSlug: "demo-web", IssueTitle: "fix login",
-		SubscriptionAction: engine.SubscriptionSubscribed,
+		Subscription: engine.SubscriptionOutcome{Action: engine.SubscriptionSubscribed, Target: engine.SubscriptionTargetIssue},
 	})
 
 	stub.mu.Lock()
@@ -59,7 +59,7 @@ func TestLarkOutcomeReplierIssueCreatedNotesChatSubscription(t *testing.T) {
 
 	stub.mu.Lock()
 	defer stub.mu.Unlock()
-	if len(stub.textOut) != 1 || !strings.HasSuffix(stub.textOut[0].Text, "Send /unsubscribe MUL-42 to stop.") {
+	if len(stub.textOut) != 1 || !strings.HasSuffix(stub.textOut[0].Text, "Send /unsubscribe issue MUL-42 to stop.") {
 		t.Fatalf("issue-created reply must end with the follow note: %+v", stub.textOut)
 	}
 }

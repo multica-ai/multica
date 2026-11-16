@@ -314,9 +314,7 @@ func dispatchResultFromEngine(res engine.Result) DispatchResult {
 		IssueDuplicate:      res.IssueDuplicate,
 		IssueUsageHadMedia:  res.IssueUsageHadMedia,
 		IssueChatSubscribed: res.IssueChatSubscribed,
-		SubscriptionAction:  res.SubscriptionAction,
-		SubscriptionKind:    res.SubscriptionKind,
-		SubscriptionRef:     res.SubscriptionRef,
+		Subscription:        res.Subscription,
 	}
 }
 

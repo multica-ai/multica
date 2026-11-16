@@ -18,11 +18,17 @@ func TestParseSubscriptionCommand(t *testing.T) {
 		ok   bool
 		want SubscriptionCommand
 	}{
-		{body: "/subscribe MUL-12", ok: true, want: SubscriptionCommand{Kind: SubscriptionCommandSubscribe, Ref: "MUL-12"}},
-		{body: "\n  /subscribe   MUL-12 please\nmore", ok: true, want: SubscriptionCommand{Kind: SubscriptionCommandSubscribe, Ref: "MUL-12"}},
-		{body: "/unsubscribe #7", ok: true, want: SubscriptionCommand{Kind: SubscriptionCommandUnsubscribe, Ref: "#7"}},
+		{body: "/subscribe MUL-12", ok: true, want: SubscriptionCommand{Kind: SubscriptionCommandSubscribe, Target: SubscriptionTargetIssue, Ref: "MUL-12"}},
+		{body: "/subscribe issue MUL-12", ok: true, want: SubscriptionCommand{Kind: SubscriptionCommandSubscribe, Target: SubscriptionTargetIssue, Ref: "MUL-12"}},
+		{body: "\n  /subscribe   MUL-12 please\nmore", ok: true, want: SubscriptionCommand{Kind: SubscriptionCommandSubscribe, Target: SubscriptionTargetIssue, Ref: "MUL-12"}},
+		{body: "/unsubscribe #7", ok: true, want: SubscriptionCommand{Kind: SubscriptionCommandUnsubscribe, Target: SubscriptionTargetIssue, Ref: "#7"}},
 		{body: "/subscribe", ok: true, want: SubscriptionCommand{Kind: SubscriptionCommandSubscribe}},
-		{body: "/subscribe\nMUL-12", ok: true, want: SubscriptionCommand{Kind: SubscriptionCommandSubscribe, Ref: "MUL-12"}},
+		{body: "/subscribe issue", ok: true, want: SubscriptionCommand{Kind: SubscriptionCommandSubscribe, Target: SubscriptionTargetIssue}},
+		{body: "/subscribe\nMUL-12", ok: true, want: SubscriptionCommand{Kind: SubscriptionCommandSubscribe, Target: SubscriptionTargetIssue, Ref: "MUL-12"}},
+		{body: "/subscribe Project  Web App \nnotes", ok: true, want: SubscriptionCommand{Kind: SubscriptionCommandSubscribe, Target: SubscriptionTargetProject, Ref: "Web App"}},
+		{body: "/unsubscribe project", ok: true, want: SubscriptionCommand{Kind: SubscriptionCommandUnsubscribe, Target: SubscriptionTargetProject}},
+		{body: "/subscribe https://app.example/acme/projects/abc", ok: true, want: SubscriptionCommand{Kind: SubscriptionCommandSubscribe, Target: SubscriptionTargetProject, Ref: "https://app.example/acme/projects/abc"}},
+		{body: "/subscribe https://app.example/acme/issues/abc", ok: true, want: SubscriptionCommand{Kind: SubscriptionCommandSubscribe, Target: SubscriptionTargetIssue, Ref: "https://app.example/acme/issues/abc"}},
 		{body: "/subscribers MUL-12"},
 		{body: "/Subscribe MUL-12"},
 		{body: "please /subscribe MUL-12"},
@@ -80,8 +86,8 @@ func TestRouter_SubscriptionCommand_WithoutPosterIsUnsupported(t *testing.T) {
 	if err := h.router.Handle(context.Background(), groupSubscribeMessage(t, "/subscribe MUL-1")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got := subscriptionReply(t, h); got.SubscriptionAction != SubscriptionUnsupported {
-		t.Fatalf("action = %q, want unsupported", got.SubscriptionAction)
+	if got := subscriptionReply(t, h); got.Subscription.Action != SubscriptionUnsupported {
+		t.Fatalf("action = %q, want unsupported", got.Subscription.Action)
 	}
 	assertSubscriptionCommandNotIngested(t, h)
 }
@@ -98,8 +104,8 @@ func TestRouter_SubscriptionCommand_DirectMessageIsGroupOnly(t *testing.T) {
 	if err := h.router.Handle(context.Background(), msg); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got := subscriptionReply(t, h); got.SubscriptionAction != SubscriptionGroupOnly {
-		t.Fatalf("action = %q, want group_only", got.SubscriptionAction)
+	if got := subscriptionReply(t, h); got.Subscription.Action != SubscriptionGroupOnly {
+		t.Fatalf("action = %q, want group_only", got.Subscription.Action)
 	}
 	assertSubscriptionCommandNotIngested(t, h)
 }
@@ -107,23 +113,32 @@ func TestRouter_SubscriptionCommand_DirectMessageIsGroupOnly(t *testing.T) {
 func TestSubscriptionReplyText_EscapesMemberText(t *testing.T) {
 	escape := func(s string) string { return strings.ReplaceAll(s, "<", "&lt;") }
 	got := SubscriptionReplyText(Result{
-		SubscriptionAction: SubscriptionIssueNotFound, SubscriptionRef: "<!channel>",
+		Subscription: SubscriptionOutcome{Action: SubscriptionNotFound, Target: SubscriptionTargetProject, Ref: "<!channel>"},
 	}, "", escape)
-	if strings.Contains(got, "<!channel>") {
+	if strings.Contains(got, "<!channel>") || !strings.HasPrefix(got, "No project matches") {
 		t.Fatalf("member-typed ref must pass through the escaper: %q", got)
 	}
 	got = SubscriptionReplyText(Result{
-		SubscriptionAction: SubscriptionSubscribed, IssueIdentifier: "MUL-3", IssueTitle: "<b>",
-		IssueWorkspaceSlug: "acme", IssueID: uid(3),
+		Subscription:    SubscriptionOutcome{Action: SubscriptionSubscribed, Target: SubscriptionTargetIssue},
+		IssueIdentifier: "MUL-3", IssueTitle: "<b>", IssueWorkspaceSlug: "acme", IssueID: uid(3),
 	}, "https://app.example", escape)
 	if !strings.Contains(got, "MUL-3 — &lt;b>") || !strings.HasSuffix(got, "https://app.example/acme/issues/"+util.UUIDToString(uid(3))) {
 		t.Fatalf("unexpected subscribed reply: %q", got)
 	}
+	got = SubscriptionReplyText(Result{
+		Subscription: SubscriptionOutcome{
+			Action: SubscriptionSubscribed, Target: SubscriptionTargetProject, ProjectID: uid(4), ProjectTitle: "<Web>",
+		},
+		IssueWorkspaceSlug: "acme",
+	}, "https://app.example", escape)
+	if !strings.Contains(got, "follows project &lt;Web>. New issues") || !strings.HasSuffix(got, "https://app.example/acme/projects/"+util.UUIDToString(uid(4))) {
+		t.Fatalf("unexpected project subscribed reply: %q", got)
+	}
 }
 
-// unusedSubscriptionQueries satisfies IssueSubscriptionQueries for paths that
+// unusedSubscriptionQueries satisfies ChatSubscriptionQueries for paths that
 // must answer before touching the database.
-type unusedSubscriptionQueries struct{ IssueSubscriptionQueries }
+type unusedSubscriptionQueries struct{ ChatSubscriptionQueries }
 
 type postedUpdate struct {
 	installationID string

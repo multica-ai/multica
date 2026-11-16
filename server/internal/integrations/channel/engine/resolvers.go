@@ -35,8 +35,8 @@ const (
 	// refuses the same person at the same point; this is that verdict on the
 	// channel side.
 	OutcomeInvokeDenied Outcome = "invoke_denied"
-	// OutcomeIssueSubscription — a /subscribe or /unsubscribe command ran;
-	// Result.SubscriptionAction carries the verdict.
+	// OutcomeIssueSubscription — a /subscribe or /unsubscribe command ran for
+	// an issue or a project; Result.Subscription carries the verdict.
 	OutcomeIssueSubscription Outcome = "issue_subscription"
 )
 
@@ -85,11 +85,9 @@ type Result struct {
 	// IssueChatSubscribed marks an /issue confirmation whose group chat now
 	// follows the created issue (see IssueChatSubscribedNote).
 	IssueChatSubscribed bool
-	// SubscriptionAction, SubscriptionKind and SubscriptionRef describe an
-	// OutcomeIssueSubscription result; render it with SubscriptionReplyText.
-	SubscriptionAction SubscriptionAction
-	SubscriptionKind   SubscriptionCommandKind
-	SubscriptionRef    string
+	// Subscription describes an OutcomeIssueSubscription result; render it
+	// with SubscriptionReplyText.
+	Subscription SubscriptionOutcome
 	// runScheduled reports whether this ingest scheduled a normal chat run.
 	// It is Router-internal state: repliers must continue to use Outcome.
 	runScheduled bool

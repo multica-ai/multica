@@ -19,6 +19,7 @@ import (
 type capturedFeedUpdate struct {
 	workspaceID, issueID string
 	text                 string
+	created              bool
 }
 
 type fakeIssueFeed struct {
@@ -30,7 +31,14 @@ func (f *fakeIssueFeed) PublishIssueUpdate(workspaceID, issueID pgtype.UUID, ren
 	text := render(context.Background())
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.updates = append(f.updates, capturedFeedUpdate{util.UUIDToString(workspaceID), util.UUIDToString(issueID), text})
+	f.updates = append(f.updates, capturedFeedUpdate{util.UUIDToString(workspaceID), util.UUIDToString(issueID), text, false})
+}
+
+func (f *fakeIssueFeed) PublishIssueCreated(workspaceID, issueID pgtype.UUID, render func(context.Context) string) {
+	text := render(context.Background())
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.updates = append(f.updates, capturedFeedUpdate{util.UUIDToString(workspaceID), util.UUIDToString(issueID), text, true})
 }
 
 func (f *fakeIssueFeed) take() []capturedFeedUpdate {
@@ -71,6 +79,17 @@ func TestChannelIssueFeed_RendersIssueAndCommentUpdates(t *testing.T) {
 		ID: issueID, WorkspaceID: testWorkspaceID, Identifier: identifier, Title: issue.Title,
 		Status: "in_progress", AssigneeType: &memberType, AssigneeID: &memberID,
 	}
+	bus.Publish(events.Event{
+		Type: protocol.EventIssueCreated, WorkspaceID: testWorkspaceID, ActorType: "member", ActorID: testUserID,
+		Payload: map[string]any{"issue": handler.IssueResponse{
+			ID: issueID, WorkspaceID: testWorkspaceID, CreatorType: "member", CreatorID: testUserID,
+		}},
+	})
+	if got := feed.take(); len(got) != 1 || !got[0].created ||
+		got[0].text != "🆕 "+identifier+" "+issue.Title+" — created by "+user.Name+"\n"+link {
+		t.Fatalf("issue created = %+v", got)
+	}
+
 	bus.Publish(events.Event{
 		Type: protocol.EventIssueUpdated, WorkspaceID: testWorkspaceID, ActorType: "member", ActorID: testUserID,
 		Payload: map[string]any{

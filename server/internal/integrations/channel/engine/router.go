@@ -42,7 +42,7 @@ type Router struct {
 	reader    SessionReader
 	lifecycle ChannelChatLifecycle
 
-	subscriptions IssueSubscriptionQueries
+	subscriptions ChatSubscriptionQueries
 
 	batcher *pendingBatcher
 
@@ -80,9 +80,9 @@ type RouterConfig struct {
 	MediaConcurrency int
 	Logger           *slog.Logger
 	Lifecycle        ChannelChatLifecycle
-	// Subscriptions backs chat issue subscriptions (/subscribe, /unsubscribe,
+	// Subscriptions backs chat subscriptions (/subscribe, /unsubscribe,
 	// /issue auto-subscribe, PublishIssueUpdate). Nil disables the feature.
-	Subscriptions IssueSubscriptionQueries
+	Subscriptions ChatSubscriptionQueries
 }
 
 // NewRouter builds a Router around the shared (platform-agnostic) services:

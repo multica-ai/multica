@@ -241,9 +241,7 @@ func engineSubscriptionResult(res DispatchResult) engine.Result {
 		IssueIdentifier:    res.IssueIdentifier,
 		IssueWorkspaceSlug: res.IssueWorkspaceSlug,
 		IssueTitle:         res.IssueTitle,
-		SubscriptionAction: res.SubscriptionAction,
-		SubscriptionKind:   res.SubscriptionKind,
-		SubscriptionRef:    res.SubscriptionRef,
+		Subscription:       res.Subscription,
 	}
 }
 

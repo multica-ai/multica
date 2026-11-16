@@ -135,8 +135,6 @@ type DispatchResult struct {
 	IssueUsageHadMedia bool
 	// IssueChatSubscribed appends the follow note to an /issue confirmation.
 	IssueChatSubscribed bool
-	// Subscription* carry an OutcomeIssueSubscription verdict.
-	SubscriptionAction engine.SubscriptionAction
-	SubscriptionKind   engine.SubscriptionCommandKind
-	SubscriptionRef    string
+	// Subscription carries an OutcomeIssueSubscription verdict.
+	Subscription engine.SubscriptionOutcome
 }
