@@ -1,11 +1,15 @@
 "use client";
 
-import type { CSSProperties, ReactNode } from "react";
+import { useState, type CSSProperties, type ReactNode } from "react";
+import { inboxSnoozeOptions, type InboxSnoozePreset } from "@multica/core/inbox/snooze";
 import {
+  AlarmClock,
   AppWindow,
+  Archive,
   Bot,
   Check,
   ChevronDown,
+  Clock,
   Ellipsis,
   Laptop,
   Plus,
@@ -17,7 +21,8 @@ import {
   Square,
 } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
-import { useT } from "../i18n";
+import { useLocale, useT } from "../i18n";
+import { formatSnoozeTime } from "../inbox/components/inbox-snooze-time";
 
 /**
  * Hero art for the What's new deck: a small mock of the feature built from
@@ -310,6 +315,84 @@ function AnnotationsArt() {
   );
 }
 
+/* ── Inbox snooze: a Work panel Inbox row and its snooze menu ──────── */
+
+function InboxRowArt({ title, detail, agent, active }: { title: number; detail: number; agent?: boolean; active?: boolean }) {
+  return (
+    <div className={cn("flex items-start gap-2 rounded-md px-2 py-1.5", active && "bg-accent/60")}>
+      <span
+        className={cn(
+          "mt-0.5 grid size-5 shrink-0 place-items-center rounded-full",
+          agent ? "bg-brand/10 text-brand" : "bg-muted",
+        )}
+      >
+        {agent && <Bot className="size-3" />}
+      </span>
+      <div className="flex min-w-0 flex-1 flex-col gap-1.5 pt-1">
+        <span className="h-1.5 rounded-full bg-foreground/55" style={{ width: title }} />
+        <span className="h-1.5 rounded-full bg-muted-foreground/30" style={{ width: detail }} />
+      </div>
+      {active ? (
+        <span className="flex shrink-0 gap-0.5 text-muted-foreground">
+          <span className="grid size-5 place-items-center rounded-md bg-surface-selected text-foreground">
+            <AlarmClock className="size-3" />
+          </span>
+          <span className="grid size-5 place-items-center rounded-md">
+            <Archive className="size-3" />
+          </span>
+        </span>
+      ) : (
+        <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-brand" />
+      )}
+    </div>
+  );
+}
+
+const SNOOZE_PRESETS_SHOWN: InboxSnoozePreset[] = ["hours_1", "hours_3", "days_1", "days_3"];
+
+function SnoozeArt() {
+  const { t } = useT("inbox");
+  const { t: tLayout } = useT("layout");
+  const locale = useLocale();
+  const [now] = useState(() => new Date());
+  const presetLabel: Record<InboxSnoozePreset, string> = {
+    hours_1: t(($) => $.snooze.hours_1),
+    hours_3: t(($) => $.snooze.hours_3),
+    days_1: t(($) => $.snooze.days_1),
+    days_3: t(($) => $.snooze.days_3),
+    weeks_1: t(($) => $.snooze.weeks_1),
+  };
+  const options = inboxSnoozeOptions(now).filter((option) => SNOOZE_PRESETS_SHOWN.includes(option.preset));
+  return (
+    <>
+      <Surface className="top-4 left-6 w-[15rem]">
+        <div className="flex h-8 items-center gap-1 px-3">
+          <span className="text-label font-medium">{tLayout(($) => $.nav.inbox)}</span>
+          <ChevronDown className="size-3 text-muted-foreground" />
+          <span className="ml-auto text-caption text-muted-foreground tabular-nums">2</span>
+        </div>
+        <div className="px-1 pb-2">
+          <InboxRowArt title={120} detail={88} agent active />
+          <InboxRowArt title={96} detail={128} />
+          <InboxRowArt title={136} detail={72} agent />
+        </div>
+      </Surface>
+      <Menu className="top-[3.25rem] left-[10.75rem] w-52">
+        <div className="px-2 py-1 text-caption font-medium text-muted-foreground">{t(($) => $.snooze.menu_title)}</div>
+        {options.map((option, i) => (
+          <MenuItem key={option.preset} icon={<Clock />} active={i === 0}>
+            <span>{presetLabel[option.preset]}</span>
+            <span className="ml-auto pl-2 text-caption text-muted-foreground tabular-nums">
+              {formatSnoozeTime(option.until, now, locale)}
+            </span>
+          </MenuItem>
+        ))}
+      </Menu>
+    </>
+  );
+}
+
 export const THEMES_HERO: WhatsNewHero = { ground: "orange", Art: ThemesArt };
 export const ENVIRONMENTS_HERO: WhatsNewHero = { ground: "ice", Art: EnvironmentsArt };
 export const ANNOTATIONS_HERO: WhatsNewHero = { ground: "lime", Art: AnnotationsArt };
+export const SNOOZE_HERO: WhatsNewHero = { ground: "brand", Art: SnoozeArt };

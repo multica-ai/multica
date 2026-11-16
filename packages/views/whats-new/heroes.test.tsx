@@ -22,6 +22,7 @@ describe("What's new hero art", () => {
     ["community-themes", ["Themes", "Search themes", "Install", "In use"]],
     ["environment-controls", ["Environments", "2 running", "Running", "Switch to window", "View logs"]],
     ["chat-annotations", ["1 annotation", "Add a comment…", "Add"]],
+    ["inbox-snooze", ["Inbox", "Snooze until…", "1 hour", "3 hours", "1 day", "3 days"]],
   ])("draws %s from the product's own strings", (id, texts) => {
     const { container } = renderHero(id, "en");
     for (const text of texts) expect(container).toHaveTextContent(text);

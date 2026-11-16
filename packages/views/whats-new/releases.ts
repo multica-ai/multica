@@ -1,8 +1,8 @@
-import { CircleDot, Command, Gauge, Globe, History, Layers, ListPlus, Lock, Palette, PanelLeft, Pin, Quote, Server, Terminal, Users, Workflow, type IconComponent } from "@multica/ui/icons";
+import { AlarmClock, CircleDot, Command, FolderKanban, Gauge, Globe, History, Layers, ListPlus, Lock, Mic, Palette, PanelLeft, Pin, Quote, Server, Terminal, Users, Workflow, type IconComponent } from "@multica/ui/icons";
 import type { SupportedLocale } from "@multica/core/i18n";
 import type { WorkspacePaths } from "@multica/core/paths";
 import type { ReleaseStamp } from "@multica/core/whats-new";
-import { ANNOTATIONS_HERO, ENVIRONMENTS_HERO, THEMES_HERO, type WhatsNewHero } from "./heroes";
+import { ANNOTATIONS_HERO, ENVIRONMENTS_HERO, SNOOZE_HERO, THEMES_HERO, type WhatsNewHero } from "./heroes";
 
 export interface HighlightCopy {
   title: string;
@@ -45,6 +45,105 @@ export const WHATS_NEW_DECK_SINCE = "0.9.0";
  * reach users only through the Help menu.
  */
 export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
+  {
+    version: "0.10.0",
+    date: "2026-11-16",
+    highlights: [
+      {
+        id: "inbox-snooze",
+        icon: AlarmClock,
+        hero: SNOOZE_HERO,
+        action: { kind: "route", to: (p) => p.inbox() },
+        copy: {
+          en: {
+            title: "Snooze a notification until later",
+            body: "Your Inbox now sits at the top of the Work panel. Hover a notification and click the clock, or press H on an open issue, to pick when it comes back; until then it waits in the Snoozed view.",
+          },
+          "zh-Hans": {
+            title: "把通知延后处理",
+            body: "收件箱现在位于「工作」面板顶部。悬停一条通知并点闹钟按钮，或在打开的任务上按 H，选好它回来的时间；在那之前，它会待在「已延后」视图里。",
+          },
+          "zh-Hant": {
+            title: "把通知延後處理",
+            body: "收件箱現在位於「工作」面板頂部。將游標移到一則通知上並點鬧鐘按鈕，或在開啟的任務上按 H，選好它回來的時間；在那之前，它會待在「已延後」檢視裡。",
+          },
+          ja: {
+            title: "通知をあとで処理する",
+            body: "インボックスは「作業」パネルの一番上に移りました。通知にカーソルを合わせて時計ボタンを押すか、開いているタスクで H を押して、戻ってくる時間を選びます。それまでは「スヌーズ中」ビューで待機します。",
+          },
+          ko: {
+            title: "알림을 나중으로 미루기",
+            body: "인박스가 이제 '작업' 패널 맨 위에 있습니다. 알림에 마우스를 올려 시계 버튼을 누르거나 열린 태스크에서 H를 눌러 다시 알릴 시간을 고르세요. 그때까지는 '미뤄둔 항목' 보기에 있습니다.",
+          },
+          fr: {
+            title: "Reportez une notification à plus tard",
+            body: "La boîte de réception est désormais en haut du panneau Travail. Survolez une notification et cliquez sur l'horloge, ou appuyez sur H dans une tâche ouverte, pour choisir quand elle revient ; d'ici là, elle attend dans la vue Reportés.",
+          },
+        },
+      },
+      {
+        id: "desktop-voice-input",
+        icon: Mic,
+        copy: {
+          en: {
+            title: "Dictate instead of typing on desktop",
+            body: "In the desktop app, turn on Settings → Voice input, then tap the mic in chat, a comment, or a reply to dictate, or hold it while you talk. The first time, pick a speech model to download; audio is transcribed on your computer.",
+          },
+          "zh-Hans": {
+            title: "在桌面端用语音代替打字",
+            body: "在桌面端打开「设置 → 语音输入」，然后在聊天、评论或回复的输入框里点麦克风开始听写，也可以按住麦克风说话。第一次使用时选一个语音模型下载，录音只在你的电脑上转写。",
+          },
+          "zh-Hant": {
+            title: "在桌面端用語音代替打字",
+            body: "在桌面端打開「設定 → 語音輸入」，然後在聊天、留言或回覆的輸入框裡點麥克風開始聽寫，也可以按住麥克風說話。第一次使用時選一個語音模型下載，錄音只在你的電腦上轉寫。",
+          },
+          ja: {
+            title: "デスクトップでは入力の代わりに話す",
+            body: "デスクトップアプリで「設定 → 音声入力」をオンにし、チャット、コメント、返信の入力欄でマイクを押すと音声入力が始まります。押し続けながら話すこともできます。初回は音声モデルを選んでダウンロードし、音声はこのコンピューター上で文字に変換されます。",
+          },
+          ko: {
+            title: "데스크톱에서 타이핑 대신 말하기",
+            body: "데스크톱 앱에서 '설정 → 음성 입력'을 켠 뒤 채팅, 댓글, 답글 입력창의 마이크를 눌러 받아쓰거나 누른 채로 말하세요. 처음에는 음성 모델을 골라 내려받으며, 음성은 이 컴퓨터에서 텍스트로 바뀝니다.",
+          },
+          fr: {
+            title: "Dictez au lieu de taper dans l'app de bureau",
+            body: "Dans l'app de bureau, activez Paramètres → Saisie vocale, puis cliquez sur le micro d'une discussion, d'un commentaire ou d'une réponse pour dicter, ou maintenez-le pendant que vous parlez. La première fois, choisissez un modèle vocal à télécharger ; l'audio est transcrit sur votre ordinateur.",
+          },
+        },
+      },
+      {
+        id: "project-board-archive",
+        icon: FolderKanban,
+        action: { kind: "route", to: (p) => p.projects() },
+        copy: {
+          en: {
+            title: "Plan projects on a board, and archive finished ones",
+            body: "On Projects, open Display settings to switch to Board or group by status, priority, or lead, and search from the header. Archive a project from its menu to hide it, and restore it any time from Archived projects.",
+          },
+          "zh-Hans": {
+            title: "用看板管理项目，并归档已完成的项目",
+            body: "在「项目」页打开「显示设置」，可以切换到看板，或按状态、优先级、负责人分组，也可以在页头搜索。在项目菜单里选「归档」即可把它隐藏，之后随时可以在「已归档的项目」里恢复。",
+          },
+          "zh-Hant": {
+            title: "用看板管理專案，並歸檔已完成的專案",
+            body: "在「專案」頁打開「顯示設定」，可以切換到看板，或按狀態、優先順序、負責人分組，也可以在頁首搜尋。在專案選單裡選「歸檔」即可把它隱藏，之後隨時可以在「已歸檔的專案」裡還原。",
+          },
+          ja: {
+            title: "プロジェクトをボードで管理し、終わったものはアーカイブ",
+            body: "「プロジェクト」ページで「表示設定」を開くと、ボードに切り替えたり、ステータス、優先度、リードでグループ化したりでき、ヘッダーから検索もできます。プロジェクトのメニューから「アーカイブ」を選ぶと非表示になり、「アーカイブ済みのプロジェクト」からいつでも復元できます。",
+          },
+          ko: {
+            title: "보드로 프로젝트를 관리하고 끝난 프로젝트는 보관하기",
+            body: "'프로젝트' 페이지에서 '표시 설정'을 열어 보드로 바꾸거나 상태, 우선순위, 리드별로 그룹화하고, 헤더에서 검색할 수 있습니다. 프로젝트 메뉴에서 '보관'을 고르면 숨겨지고, '보관된 프로젝트'에서 언제든 복원할 수 있습니다.",
+          },
+          fr: {
+            title: "Organisez vos projets en tableau et archivez ceux qui sont terminés",
+            body: "Dans Projets, ouvrez Affichage pour passer en Tableau ou regrouper par statut, priorité ou responsable, et cherchez depuis l'en-tête. Archivez un projet depuis son menu pour le masquer, et restaurez-le à tout moment depuis Projets archivés.",
+          },
+        },
+      },
+    ],
+  },
   {
     version: "0.9.0",
     date: "2026-11-13",
