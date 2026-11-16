@@ -172,6 +172,15 @@ type ExecOptions struct {
 	// can trip its idle watchdog. Take the snapshot and report on your own
 	// goroutine.
 	OnUsage func(map[string]TokenUsage)
+	// OnRateLimits optionally receives the account's subscription rate-limit
+	// snapshot each time the agent CLI reports a change (Claude Code's
+	// rate_limit_event, Codex's account/rateLimits/updated). Every call carries
+	// the full merged view, so the latest call supersedes earlier ones.
+	// Backends whose CLI reports no rate limits never call it.
+	//
+	// Like OnUsage it runs on the backend's protocol reader goroutine and MUST
+	// NOT block.
+	OnRateLimits func(RateLimitSnapshot)
 	// piMcpExtensionPath is set by piBackend.Execute after it writes the
 	// temporary MCP extension. The daemon does not fill it.
 	piMcpExtensionPath string
