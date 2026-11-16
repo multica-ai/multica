@@ -2,11 +2,15 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const mobileRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 process.chdir(mobileRoot);
+// Gradle honors JAVA_HOME; the SDK's apksigner launcher invokes java on PATH.
+if (process.env.JAVA_HOME) {
+  process.env.PATH = `${join(process.env.JAVA_HOME, "bin")}${delimiter}${process.env.PATH ?? ""}`;
+}
 
 function run(command, args, capture = false) {
   const result = spawnSync(command, args, {
@@ -63,6 +67,7 @@ const toolsVersion = process.env.ANDROID_BUILD_TOOLS_VERSION ??
     .sort((a, b) => a.localeCompare(b, "en", { numeric: true })).at(-1);
 if (!toolsVersion) throw new Error("Install Android SDK build-tools first");
 const tool = (name) => join(sdk, "build-tools", toolsVersion, name);
+run(tool("apksigner"), ["version"]);
 const architectures = process.env.MULTICA_ANDROID_ABIS ?? "arm64-v8a,x86_64";
 if (!architectures.split(",").every((a) => ["arm64-v8a", "armeabi-v7a", "x86", "x86_64"].includes(a))) {
   throw new Error("Invalid MULTICA_ANDROID_ABIS");
