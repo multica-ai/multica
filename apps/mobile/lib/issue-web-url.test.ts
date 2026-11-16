@@ -11,4 +11,5 @@ it("copies canonical issue/comment links on the independently chosen Web host an
   expect(issueWebUrl("acceptance", "DAT-1")).toBe("https://web.example.test:9443/ui/acceptance/issues/DAT-1");
   expect(issueWebUrl("acceptance", "DAT-1", "comment-1"))
     .toBe("https://web.example.test:9443/ui/acceptance/issues/DAT-1#comment-comment-1");
+  expect(issueWebUrl("ui", "DAT-1")).toBe("https://web.example.test:9443/ui/ui/issues/DAT-1");
 });

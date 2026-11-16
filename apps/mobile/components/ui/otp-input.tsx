@@ -16,6 +16,7 @@ import {
   type SlotProps,
 } from "input-otp-native";
 import { cn } from "@/lib/utils";
+import { transformOtpPaste } from "@/lib/otp-paste";
 
 export type { OTPInputRef as OtpInputRef };
 
@@ -25,12 +26,13 @@ export interface OtpInputProps
 }
 
 export const OtpInput = forwardRef<OTPInputRef, OtpInputProps>(
-  ({ numberOfDigits = 6, ...rest }, ref) => {
+  ({ numberOfDigits = 6, pasteTransformer, ...rest }, ref) => {
     return (
       <OTPInput
         ref={ref}
         maxLength={numberOfDigits}
-        containerStyle={{ flexDirection: "row", gap: 8 }}
+        containerStyle={{ flexDirection: "row", gap: 8, width: "100%", justifyContent: "center" }}
+        pasteTransformer={pasteTransformer ?? ((text) => transformOtpPaste(text, numberOfDigits))}
         render={({ slots }) => (
           <>
             {slots.map((slot, idx) => (
@@ -49,9 +51,10 @@ function Slot({ slot }: { slot: SlotProps }) {
   return (
     <View
       className={cn(
-        "w-12 h-14 rounded-md items-center justify-center bg-secondary/50",
+        "h-14 rounded-md items-center justify-center bg-secondary/50",
         slot.isActive && "border-2 border-primary",
       )}
+      style={{ flexGrow: 1, flexShrink: 1, flexBasis: 0, maxWidth: 48 }}
     >
       {slot.char ? (
         <Text

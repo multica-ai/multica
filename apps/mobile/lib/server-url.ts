@@ -42,14 +42,6 @@ export function normalizeServerConfig(config: ServerConfig): ServerConfig {
 
 export function joinServerPath(base: string, path: string): string {
   const root = base.replace(/\/+$/, "");
-  // Server-generated paths may already include the proxy's base path.
-  if (root && path.startsWith("/")) {
-    const url = new URL(root);
-    const prefix = url.pathname.replace(/\/+$/, "");
-    if (prefix && (path === prefix || path.startsWith(`${prefix}/`))) {
-      return `${url.origin}${path}`;
-    }
-  }
   return `${root}/${path.replace(/^\/+/, "")}`;
 }
 

@@ -39,8 +39,8 @@ describe("server addresses", () => {
     },
   );
 
-  it("does not duplicate a proxy prefix already supplied by the server", () => {
-    expect(joinServerPath("https://host.test:8443/proxy", "/proxy/api/attachments/a/download"))
-      .toBe("https://host.test:8443/proxy/api/attachments/a/download");
+  it("preserves a client route whose first segment is also the proxy prefix", () => {
+    expect(joinServerPath("https://host.test:8443/auth", "/auth/send-code"))
+      .toBe("https://host.test:8443/auth/auth/send-code");
   });
 });
