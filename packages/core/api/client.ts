@@ -102,6 +102,7 @@ import type {
   AssigneeFrequencyEntry,
   TaskMessagePayload,
   TaskContextReceiptResponse,
+  RuntimeRateLimitsResponse,
   Attachment,
   ChatSession,
   ChatPinnedAgent,
@@ -382,6 +383,7 @@ import {
   RuntimeUsageByAgentListSchema,
   RuntimeUsageByHourListSchema,
   RuntimeUsageListSchema,
+  RuntimeRateLimitsResponseSchema,
   SearchIssuesResponseSchema,
   ProjectSchema,
   ArchiveProjectResponseSchema,
@@ -2721,6 +2723,16 @@ export class ApiClient {
     await this.fetch(
       `/api/workspaces/${workspaceId}/runtime-profiles/${profileId}`,
       { method: "DELETE" },
+    );
+  }
+
+  async getRuntimeRateLimits(runtimeId: string): Promise<RuntimeRateLimitsResponse> {
+    const raw = await this.fetch<unknown>(`/api/runtimes/${runtimeId}/rate-limits`);
+    return parseWithFallback<RuntimeRateLimitsResponse>(
+      raw,
+      RuntimeRateLimitsResponseSchema,
+      { rate_limits: null },
+      { endpoint: "GET /api/runtimes/:id/rate-limits" },
     );
   }
 

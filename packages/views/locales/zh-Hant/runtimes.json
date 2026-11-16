@@ -376,7 +376,8 @@
     "pending_health_warning": "等待守護程序同步",
     "pending_health_error": "註冊錯誤",
     "pending_health_disabled": "已禁用",
-    "pending_cli_unknown": "等待中"
+    "pending_cli_unknown": "等待中",
+    "col_rate_limits": "額度"
   },
   "profiles": {
     "cta": "新增執行時",
@@ -674,5 +675,38 @@
       "run_there": "在那臺機器上執行",
       "connected": "{{name}} 已連接到 Multica"
     }
+  },
+  "rate_limits": {
+    "title": "額度",
+    "caption": "執行任務時由 CLI 回報",
+    "updated": "{{ago}}更新",
+    "empty_title": "還沒有額度資料",
+    "empty_hint": "這個執行時下次執行任務時會自動記錄。API Key 帳號沒有方案額度。",
+    "window_session": "工作階段",
+    "window_session_hours": "工作階段 · {{hours}} 小時",
+    "window_weekly": "本週",
+    "window_weekly_opus": "本週 · Opus",
+    "window_weekly_sonnet": "本週 · Sonnet",
+    "window_generic": "其他額度",
+    "short_session": "工作階段",
+    "short_weekly": "本週",
+    "short_weekly_opus": "Opus",
+    "short_weekly_sonnet": "Sonnet",
+    "short_generic": "其他",
+    "used": "已用 {{pct}}%",
+    "limited": "已達上限",
+    "resets_in": "{{duration}}後重置",
+    "resets_at": "{{time}} 重置",
+    "reset_since": "上次記錄後已重置",
+    "verdict_ahead": "超出節奏 {{pct}}% · 約 {{duration}}後用完",
+    "verdict_on_pace": "依目前節奏可撐到重置",
+    "verdict_limited": "重置後恢復",
+    "credits": "Credits",
+    "credits_balance": "餘額 {{balance}}",
+    "credits_unlimited": "不限",
+    "credits_none": "無",
+    "duration_minutes": "{{minutes}} 分鐘",
+    "duration_hours": "{{hours}} 小時 {{minutes}} 分",
+    "duration_days": "{{days}} 天 {{hours}} 小時"
   }
 }
