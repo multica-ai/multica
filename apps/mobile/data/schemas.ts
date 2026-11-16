@@ -325,11 +325,16 @@ export const ChatPendingTaskSchema: z.ZodType<ChatPendingTask> = z.object({
 
 export const EMPTY_CHAT_PENDING_TASK: ChatPendingTask = {};
 
+// Steering fields are additive: servers before #10715 omit them and a
+// malformed value degrades to the legacy queued reading, never a failed send.
 export const SendChatMessageResponseSchema: z.ZodType<SendChatMessageResponse> = z.object({
   message_id: z.string(),
   task_id: z.string(),
   supports_queue: z.boolean().optional(),
   queued: z.boolean().optional().catch(undefined),
+  steered: z.boolean().optional().catch(undefined),
+  message_task_id: z.string().min(1).optional().catch(undefined),
+  message_created_at: z.string().min(1).optional().catch(undefined),
   created_at: z.string().default(""),
 }).loose();
 
