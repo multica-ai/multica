@@ -28,6 +28,7 @@ import type {
   ChatDraftRestoresResponse,
   ChatPendingTask,
   ChatSession,
+  ChatWakeup,
   PrioritizeQueuedChatTaskResponse,
   SendChatMessageResponse,
   StartMikaOnboardingResponse,
@@ -1146,12 +1147,13 @@ export const ChatMessageSchema = z.object({
   failure_reason: z.string().nullable().optional(),
   elapsed_ms: z.number().nullable().optional(),
   message_kind: z
-    .enum(["message", "no_response", "onboarding_kickoff", "onboarding_opening"])
+    .enum(["message", "no_response", "onboarding_kickoff", "onboarding_opening", "wakeup"])
     .catch("message")
     .optional(),
   // Optional additive data degrades independently: a malformed suggestion
   // must not hide the assistant reply that contains it.
   quick_actions: z.array(ChatQuickActionSchema).catch([]).optional().default([]),
+  wakeup_id: z.string().nullish().catch(undefined),
 }).loose();
 
 export const ChatMessageListSchema = z.array(ChatMessageSchema).default([]);
@@ -2579,6 +2581,7 @@ const ChatLastMessageSchema = z.object({
     "no_response",
     "onboarding_kickoff",
     "onboarding_opening",
+    "wakeup",
   ]).optional().catch(undefined),
 }).loose();
 
@@ -2648,6 +2651,7 @@ const ChatQueuedTaskSchema = z.object({
   created_at: z.string().default(""),
   message_id: z.string().optional(),
   content: z.string().optional(),
+  wakeup_id: z.string().optional().catch(undefined),
 }).loose();
 
 const ChatQueuedTasksSchema = z.array(z.unknown()).transform((tasks) =>
@@ -2670,6 +2674,45 @@ export const ChatPendingTaskSchema: z.ZodType<ChatPendingTask> = z.object({
 }).loose();
 
 export const EMPTY_CHAT_PENDING_TASK: ChatPendingTask = {};
+
+// A malformed wakeup row is dropped rather than failing the list: the strip
+// and panel are status surfaces next to the conversation, not its content.
+const ChatWakeupSchema: z.ZodType<ChatWakeup> = z.object({
+  id: z.string().min(1),
+  chat_session_id: z.string().min(1),
+  chat_session_title: z.string().optional().catch(undefined),
+  agent_id: z.string().default(""),
+  title: z.string().default(""),
+  instruction: z.string().default(""),
+  kind: z.enum(["condition", "at", "check"]),
+  condition: z.record(z.string(), z.unknown()).nullish().catch(undefined),
+  interval_seconds: z.number().nullable().default(null),
+  fire_at: z.string().nullable().default(null),
+  next_eval_at: z.string().default(""),
+  expires_at: z.string().default(""),
+  status: z.enum(["active", "fired", "expired", "cancelled", "failed"]),
+  end_reason: z.string().nullable().default(null),
+  ended_at: z.string().nullable().default(null),
+  check_count: z.number().default(0),
+  last_check_note: z.string().nullable().default(null),
+  last_checked_at: z.string().nullable().default(null),
+  last_task_id: z.string().nullable().default(null),
+  last_task_status: z.string().optional().catch(undefined),
+  last_fired_at: z.string().nullable().default(null),
+  last_error: z.string().nullable().default(null),
+  source_message_id: z.string().nullable().default(null),
+  source_task_id: z.string().nullable().default(null),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const ChatWakeupListSchema = z.array(z.unknown()).transform((rows) =>
+  rows.flatMap((row) => {
+    const parsed = ChatWakeupSchema.safeParse(row);
+    return parsed.success ? [parsed.data] : [];
+  }),
+);
+export const EMPTY_CHAT_WAKEUP_LIST: ChatWakeup[] = [];
 
 export const SendChatMessageResponseSchema: z.ZodType<SendChatMessageResponse> = z.object({
   steered: z.boolean().optional().catch(undefined),

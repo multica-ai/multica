@@ -136,6 +136,7 @@ import type {
   ChatQuickActionsPendingState,
   ChatQuickActionsFailureState,
   ChatCancelFinalizedPayload,
+  ChatWakeupChangedPayload,
   ChatMessage,
   ChatMessageEventPayload,
   ChatPendingTask,
@@ -749,6 +750,7 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
   // what the durable draft-restore rows exist for (#5219) — re-pull them so
   // a mounted composer recovers the prompt without a remount.
   qc.invalidateQueries({ queryKey: chatKeys.draftRestoresAll() });
+  qc.invalidateQueries({ queryKey: chatKeys.wakeupsAll() });
   qc.invalidateQueries({ queryKey: workspaceKeys.list() });
 }
 
@@ -1211,7 +1213,7 @@ export function useRealtimeSync(
       "subscriber:added", "subscriber:removed",
       "daemon:heartbeat",
       // Chat events are handled explicitly below; do not double-invalidate.
-      "chat:message", "chat:done", "chat:reply_notification", "chat:quick_actions", "chat:cancel_finalized", "chat:session_read",
+      "chat:message", "chat:done", "chat:reply_notification", "chat:quick_actions", "chat:cancel_finalized", "chat:wakeup_changed", "chat:session_read",
       "chat:session_created", "chat:session_deleted", "chat:session_updated",
       // task:message stays out of the prefix path because it fires per
       // streamed message during a long run — invalidating the snapshot on
@@ -1873,6 +1875,23 @@ export function useRealtimeSync(
       }
     });
 
+    // A wakeup changed. When it started a turn (task_id), the turn's hidden
+    // input row is new too, so the transcript and queue refetch.
+    const unsubChatWakeupChanged = ws.on("chat:wakeup_changed", (p) => {
+      const payload = p as ChatWakeupChangedPayload;
+      chatWsLogger.info("chat:wakeup_changed (global)", payload);
+      qc.invalidateQueries({ queryKey: chatKeys.wakeups(payload.chat_session_id) });
+      const id = getCurrentWsId();
+      if (id) qc.invalidateQueries({ queryKey: chatKeys.myWakeups(id) });
+      if (payload.task_id) {
+        qc.invalidateQueries({ queryKey: chatKeys.messages(payload.chat_session_id) });
+        qc.invalidateQueries({ queryKey: chatKeys.messagesPage(payload.chat_session_id) });
+        qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
+        invalidatePendingAggregate();
+        invalidateSessionLists();
+      }
+    });
+
     // Lifecycle events are invalidation hints. They intentionally omit queue
     // previews and message ids, so only the pending-task endpoint can author
     // the complete queue shape.
@@ -2064,6 +2083,7 @@ export function useRealtimeSync(
     return () => {
       releaseSyncTarget();
       unsubAny();
+      unsubChatWakeupChanged();
       unsubGitHubInstallationCreated();
       unsubIssueUpdated();
       unsubIssueCreated();
