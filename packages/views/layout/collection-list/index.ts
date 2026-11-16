@@ -9,7 +9,7 @@ export {
 } from "./collection-list";
 export { CollectionRowMenu } from "./collection-row-menu";
 export { CollectionBatchBar } from "./collection-batch-bar";
-export { CollectionDisplayMenu } from "./collection-display-menu";
+export { CollectionDisplayMenu, type CollectionGrouping } from "./collection-display-menu";
 export {
   CollectionEmptyValue,
   CollectionNameCell,

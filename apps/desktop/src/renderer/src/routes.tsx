@@ -21,10 +21,7 @@ import { MyIssuesPage } from "@multica/views/my-issues";
 import { SkillsPage } from "@multica/views/skills";
 import { DesktopRuntimesPage } from "./components/desktop-runtimes-page";
 import { DesktopAgentsPage } from "./components/desktop-agents-page";
-import {
-  AiCreateAgentPage,
-  ManualCreateAgentPage,
-} from "@multica/views/agents";
+import { ManualCreateAgentPage } from "@multica/views/agents";
 import { DesktopChooseRuntimePage } from "./components/desktop-choose-runtime-page";
 import { AgentCreatedPage } from "./pages/agent-created-page";
 import { SquadsPage, SquadDetailPage as SquadDetailPageView } from "@multica/views/squads/components";
@@ -163,6 +160,12 @@ export const appRoutes: RouteObject[] = [
             handle: { title: "Issue" },
           },
           {
+            // The issue, opened on the newest version of one deliverable.
+            path: "issues/:id/deliverables/:name",
+            element: <IssueDetailPage />,
+            handle: { title: "Issue" },
+          },
+          {
             path: "projects",
             element: <ProjectsPage />,
             handle: { title: "Projects" },
@@ -226,11 +229,6 @@ export const appRoutes: RouteObject[] = [
           {
             path: "agents/new/manual",
             element: <ManualCreateAgentPage />,
-            handle: { title: "Create Agent" },
-          },
-          {
-            path: "agents/new/ai",
-            element: <AiCreateAgentPage />,
             handle: { title: "Create Agent" },
           },
           {

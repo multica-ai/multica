@@ -39,6 +39,8 @@ type piBackend struct {
 	// changing concurrent executions through package-global state.
 	turnErrorGrace time.Duration
 	terminateGrace time.Duration
+	// Tests inject unsupported kernels per backend without changing global state.
+	cleanupPreflight func() error
 }
 
 var (
@@ -371,6 +373,13 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 	lookedUp, err := exec.LookPath(execName)
 	if err != nil {
 		return nil, fmt.Errorf("%s executable not found at %q: %w", label, execName, err)
+	}
+	checkCleanup := b.cleanupPreflight
+	if checkCleanup == nil {
+		checkCleanup = checkPiCleanupSupport
+	}
+	if err := checkCleanup(); err != nil {
+		return nil, fmt.Errorf("%s process cleanup unavailable before start: %w", label, err)
 	}
 
 	rpcMode := label == "pi" && opts.EnableTaskSupplement

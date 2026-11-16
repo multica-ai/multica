@@ -2,10 +2,21 @@ import { describe, expect, it } from "vitest";
 import {
   applyNotificationPreferencePatch,
   deriveNotificationPreferencePatch,
+  notificationPreferenceValue,
   rollbackNotificationPreferencePatch,
 } from "./patch";
 
 describe("notification preference patches", () => {
+  it("persists, enables and rolls back chat replies independently of comments", () => {
+    const current = { comments: "muted" } as const;
+    const muted = { ...current, chat_replies: "muted" } as const;
+    expect(deriveNotificationPreferencePatch(current, muted)).toEqual({ chat_replies: "muted" });
+    expect(applyNotificationPreferencePatch(current, { chat_replies: "muted" })).toEqual(muted);
+    expect(deriveNotificationPreferencePatch(muted, current)).toEqual({ chat_replies: "all" });
+    expect(applyNotificationPreferencePatch(muted, { chat_replies: "all" })).toEqual(current);
+    expect(rollbackNotificationPreferencePatch(muted, { chat_replies: "muted" }, current)).toEqual(current);
+  });
+
   it("sends only the changed key when another muted preference is present", () => {
     expect(
       deriveNotificationPreferencePatch(
@@ -54,6 +65,25 @@ describe("notification preference patches", () => {
         { mentions: "muted" },
       ),
     ).toEqual({ comments: "muted", mentions: "muted" });
+  });
+
+  it("treats a missing others_issues as key updates, not all", () => {
+    expect(notificationPreferenceValue({}, "others_issues")).toBe("key_updates");
+    expect(
+      deriveNotificationPreferencePatch({}, { others_issues: "all" }),
+    ).toEqual({ others_issues: "all" });
+    expect(
+      deriveNotificationPreferencePatch({ others_issues: "all" }, {}),
+    ).toEqual({ others_issues: "key_updates" });
+    expect(
+      applyNotificationPreferencePatch({ comments: "muted" }, { others_issues: "all" }),
+    ).toEqual({ comments: "muted", others_issues: "all" });
+    expect(
+      applyNotificationPreferencePatch({ others_issues: "all" }, { others_issues: "key_updates" }),
+    ).toEqual({});
+    expect(
+      rollbackNotificationPreferencePatch({ others_issues: "all" }, { others_issues: "all" }, {}),
+    ).toEqual({});
   });
 
   it("does not roll back a key that a later mutation already changed", () => {

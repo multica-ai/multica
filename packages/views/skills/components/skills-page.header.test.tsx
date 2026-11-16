@@ -69,10 +69,9 @@ vi.mock("@multica/core/workspace/avatar-url", () => ({
 vi.mock("@multica/ui/components/common/actor-avatar", () => ({
   ActorAvatar: () => null,
 }));
-vi.mock("../../labels/label-manager", () => ({ LabelManager: () => null }));
 vi.mock("./create-skill-dialog", () => ({
-  CreateSkillDialog: ({ initialMethod }: { initialMethod?: string }) => (
-    <div data-testid="create-dialog">{initialMethod}</div>
+  CreateSkillDialog: ({ method }: { method: string }) => (
+    <div data-testid="create-dialog">{method}</div>
   ),
 }));
 vi.mock("./skill-list-actions", () => ({
@@ -229,9 +228,14 @@ describe("SkillsPage header", () => {
     const menu = await screen.findByRole("menu");
     expect(
       within(menu).getAllByRole("menuitem").map((item) => item.textContent),
-    ).toEqual(["Create manually", "Import from local", "Import from URL", "Copy from runtime"]);
+    ).toEqual([
+      "Create manuallyStart from a blank SKILL.md.",
+      "Import from localPick a folder with SKILL.md, or a .skill / .zip archive.",
+      "Import from URLFetch a published skill by URL.",
+      "Copy from runtimePromote a skill installed on your local runtime.",
+    ]);
 
-    await user.click(within(menu).getByRole("menuitem", { name: "Import from URL" }));
+    await user.click(within(menu).getByRole("menuitem", { name: /^Import from URL/ }));
     expect(screen.getByTestId("create-dialog")).toHaveTextContent("url");
   });
 
@@ -242,7 +246,7 @@ describe("SkillsPage header", () => {
 
     const intro = screen.getByRole("region", { name: "Turn how your team works into skills" });
     await user.click(within(intro).getByRole("button", { name: "New skill" }));
-    await user.click(await screen.findByRole("menuitem", { name: "Create manually" }));
+    await user.click(await screen.findByRole("menuitem", { name: /^Create manually/ }));
     expect(screen.getByTestId("create-dialog")).toHaveTextContent("manual");
   });
 });

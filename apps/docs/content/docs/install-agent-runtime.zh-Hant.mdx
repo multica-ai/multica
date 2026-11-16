@@ -45,6 +45,8 @@ Multica 當前會檢測以下命令：
 | Qoder CN CLI | `qoderclicn` | [Qoder CN CLI 快速開始](https://help.aliyun.com/zh/lingma/qodercli-cn/user-guide/qoder-cli-cn-get-started-quickly) |
 | Qwen Code | `qwen` | [Qwen Code](https://github.com/QwenLM/qwen-code) |
 | QwenPaw | `qwenpaw` | [QwenPaw](https://github.com/agentscope-ai/QwenPaw) |
+| Amp | `amp` | [Amp CLI](https://ampcode.com/docs/cli) |
+| Factory Droid | `droid` | [Factory Droid](https://docs.factory.com/droid-exec/overview) |
 | Reasonix | `reasonix` | [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) |
 | TRAE CLI | `traecli` | [TRAE 官方站](https://www.trae.cn/) |
 | Dim | `dim` | [DimCode](https://dimagent.cn/docs/cli) |
@@ -72,10 +74,14 @@ Multica 當前會檢測以下命令：
 | Copilot | 1.0.0 |
 | Grok | 0.2.89 |
 | Qwen Code | 0.20.0 |
+| Factory Droid | 1.8.0 |
 | MiniMax Code | 0.1.2 |
+| Muse Code | 1.4.10 |
 | OpenCode | 1.1.54 |
 | Dim | 0.3.10 |
+| Devin CLI | 3000.3.22 |
 | ZeroClaw | 0.8.0 |
+| ZCode | 0.16.0 |
 
 以下工具除了登入，還要額外配置：
 
@@ -216,4 +222,4 @@ multica daemon restart
 - [守護程序與執行時](/daemon-runtimes) — 瞭解線上狀態、併發和自定義執行時。
 - [AI 程式設計工具對照](/providers) — 比較各工具在 Multica 中的能力。
 
-ZCode Desktop 的 macOS 應用程式包可被自動發現；請同時安裝 Node.js，並在桌面端啟用可用的 API 連線。模型與思考強度由 ZCode 原生目錄提供。詳見[執行時對照](/providers#zcode)。
+ZCode Desktop 的 macOS 應用程式包可被自動發現，需要同時安裝 Node.js。Linux 下，守護程序透過 PATH 中的 `zcode` 或 `/opt/ZCode/zcode` 自動發現 ZCode Desktop，在背景執行內建 CLI，不開啟桌面視窗，無需額外安裝 Node.js 或手動設定環境變數。請在桌面端啟用可用的 API 連線。模型與思考強度由 ZCode 原生目錄提供。詳見[執行時對照](/providers#zcode)。

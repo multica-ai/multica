@@ -11,7 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/dispatch"
 	inboxwriter "github.com/multica-ai/multica/server/internal/inbox"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -501,7 +501,7 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 		return err
 	}
 	var activities []wakeupActivity
-	var inbox []db.InboxItem
+	var pendingInbox inboxwriter.Deferred
 	note := func(action string, details map[string]any) error {
 		a, err := recordWakeupActivity(ctx, q, w, action, "system", pgtype.UUID{}, details)
 		if err == nil {
@@ -514,8 +514,8 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 			return err
 		}
 		s.publishWakeupActivities(activities...)
-		for _, item := range inbox {
-			s.publishSystemInbox(item, issue.Status)
+		if s.Tasks != nil {
+			pendingInbox.Flush(s.Tasks.Bus)
 		}
 		return nil
 	}
@@ -560,17 +560,18 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 		if current.Type == "member" {
 			facts["outcome"] = "notified"
 			details, _ := json.Marshal(facts)
-			item, inserted, err := inboxwriter.CreateIfEligible(ctx, q, db.CreateInboxItemParams{
-				ID: dbid.NewV7(), WorkspaceID: issue.WorkspaceID, RecipientType: "member", RecipientID: current.ID,
-				Type: "children_done", Severity: "info", IssueID: issue.ID, Title: issue.Title,
-				ActorType: pgtype.Text{String: "system", Valid: true}, Details: details,
+			_, inserted, err := inboxwriter.Deliver(ctx, q, &pendingInbox, inboxwriter.Notification{
+				Params: db.CreateInboxItemParams{
+					ID: dbid.NewV7(), WorkspaceID: issue.WorkspaceID, RecipientType: "member", RecipientID: current.ID,
+					Type: "children_done", Severity: "info", IssueID: issue.ID, Title: issue.Title,
+					ActorType: pgtype.Text{String: "system", Valid: true}, Details: details,
+				},
+				IssueStatus: &issue.Status,
 			})
 			if err != nil {
 				return err
 			}
-			if inserted {
-				inbox = append(inbox, item)
-			} else {
+			if !inserted {
 				facts["outcome"] = "none"
 			}
 		}
@@ -629,6 +630,20 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 	attr, err := s.childDoneRunAs(ctx, issue, agent)
 	if err != nil {
 		return err
+	}
+	// Recorded without a run, like an assignee whose agent cannot run.
+	if err = s.Tasks.guardRunProjectAccess(ctx, issue, agent, attr.UserID, attr.AccountableUserID); err != nil {
+		if !errors.Is(err, ErrProjectAccessDenied) {
+			return err
+		}
+		facts["outcome"], facts["reason"] = "none", string(dispatch.ReasonProjectAccessBlocked)
+		if err = q.ConsumeWakeupReceipts(ctx, db.ConsumeWakeupReceiptsParams{Ids: ids}); err != nil {
+			return err
+		}
+		if err = note(wakeupActivityTriggered, facts); err != nil {
+			return err
+		}
+		return commit()
 	}
 	waiting, err := hasWaitingRun(ctx, q, issue.ID, agent.ID, attr.UserID)
 	if err != nil {
@@ -689,23 +704,6 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 	s.Tasks.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
 	s.Tasks.NotifyTaskEnqueued(ctx, task)
 	return nil
-}
-
-func (s *IssueWakeupService) publishSystemInbox(item db.InboxItem, issueStatus string) {
-	if s.Tasks == nil || s.Tasks.Bus == nil {
-		return
-	}
-	s.Tasks.Bus.Publish(events.Event{
-		Type: protocol.EventInboxNew, WorkspaceID: util.UUIDToString(item.WorkspaceID), ActorType: "system",
-		Payload: map[string]any{"item": map[string]any{
-			"id": util.UUIDToString(item.ID), "workspace_id": util.UUIDToString(item.WorkspaceID),
-			"recipient_type": item.RecipientType, "recipient_id": util.UUIDToString(item.RecipientID),
-			"type": item.Type, "severity": item.Severity, "issue_id": util.UUIDToPtr(item.IssueID),
-			"title": item.Title, "body": util.TextToPtr(item.Body), "read": item.Read, "archived": item.Archived,
-			"created_at": util.TimestampToString(item.CreatedAt), "actor_type": util.TextToPtr(item.ActorType),
-			"actor_id": util.UUIDToPtr(item.ActorID), "details": json.RawMessage(item.Details), "issue_status": issueStatus,
-		}},
-	})
 }
 
 // SystemWakeupInput is a person's change to a system rule on one issue.

@@ -4,8 +4,9 @@ import path from "node:path";
 // Node helpers and data-layer tests mock native/API boundaries. Composer
 // lifecycle tests use React's test renderer with host/native substitutes:
 // they exercise real hooks and cleanup, not native layout or keyboard behavior.
-// The run cancel button and inbox use headless callback/prop tests with native
-// modules mocked. App configuration tests cover prebuild options without RN.
+// The run cancel button, inbox and timeline list use headless callback/prop
+// tests with native modules mocked; they do not verify native rendering.
+// App configuration tests cover prebuild options without loading React Native.
 
 export default defineConfig({
   resolve: {
@@ -23,6 +24,7 @@ export default defineConfig({
       "components/**/*.test.tsx",
       "components/issue/run-cancel-button.test.ts",
       "components/inbox/inbox-screen.test.ts",
+      "components/issue/timeline-list.test.ts",
     ],
     passWithNoTests: true,
   },

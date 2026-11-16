@@ -46,6 +46,7 @@
   "type": {
     "assigned": "已分配",
     "subscribed": "已订阅",
+    "issue_created": "新任务",
     "unassigned": "已取消分配",
     "reassigned": "重新分配",
     "status_changed": "状态已更改",
@@ -65,6 +66,7 @@
     "quick_create_unconfirmed": "快速创建需要确认",
     "autopilot_paused": "自动化已暂停",
     "children_done": "子任务已全部结束",
+    "project_owner_joined": "所有者加入了项目",
     "autopilot_quota_exceeded": "自动化运行次数已达上限",
     "set_status": "状态设为",
     "set_priority": "优先级设为",
@@ -75,11 +77,16 @@
     "reacted_with": "回应了 {{emoji}}",
     "created_with_agent": "由智能体创建：{{identifier}}",
     "failed_with_detail": "失败：{{detail}}",
-    "run_limit_blocked": "已达到上限，本次运行被阻止"
+    "run_limit_blocked": "已达到上限，本次运行被阻止",
+    "app_action_requested": "等待你确认",
+    "app_action_reminder": "确认即将过期",
+    "app_connect_requested": "请连接应用",
+    "app_action_result": "应用操作结果"
   },
   "body": {
     "autopilot_title_limit": "自动化 \"{{title}}\" 未启动，因为该工作区已达到当前周期 {{limit}} 次运行的上限。额度将在 {{resetAt}} 重置。",
-    "autopilot_limit": "该工作区已达到当前周期 {{limit}} 次自动化运行的上限。此执行未启动。额度将在 {{resetAt}} 重置。"
+    "autopilot_limit": "该工作区已达到当前周期 {{limit}} 次自动化运行的上限。此执行未启动。额度将在 {{resetAt}} 重置。",
+    "project_owner_joined": "{{name}} 是工作区所有者，已把自己加入这个私有项目，现在可以看到其中的任务、评论和附件。"
   },
   "actions.archive_completed": "归档已完成项",
   "detail.status_todo": "todo",

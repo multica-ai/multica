@@ -27,6 +27,10 @@ import { RolesDemo } from "@/components/demos/roles-demo";
 角色不决定谁能运行智能体。每个智能体有独立的访问范围（Access），`owner` 和 `admin` 也不能绕过它运行未授权的智能体。详见[智能体](/agents#权限与-access)。
 </Callout>
 
+<Callout type="info">
+角色同样不会打开私有项目。`owner` 或 `admin` 只有在成员名单里时才能看到私有项目。详见[私有项目](/projects#private-projects)。
+</Callout>
+
 ## 邀请成员
 
 `owner` 和 `admin` 在**设置 → 成员**中点击**邀请成员**，填写邮箱、选择角色后发送。邀请只能授予 `admin` 或 `member`；`owner` 需要先加入工作区，再由现有 `owner` 提升。

@@ -246,3 +246,25 @@ describe("TranscriptButton", () => {
     );
   });
 });
+
+
+describe("TranscriptButton hosted terminal dialog", () => {
+  it("hands the loaded timeline and keyboard intent to the list owner", async () => {
+    listTaskMessages.mockResolvedValue([msg(1, "Read")]);
+    const onOpenTranscript = vi.fn();
+    renderWith(newClient(), <TranscriptButton
+      task={{ ...baseTask, status: "completed" }}
+      agentName="Demo agent"
+      onOpenTranscript={onOpenTranscript}
+    />);
+    fireEvent.click(screen.getByRole("button", { name: "View transcript" }), { detail: 0 });
+    await waitFor(() => expect(onOpenTranscript).toHaveBeenCalledTimes(1));
+    expect(onOpenTranscript.mock.calls[0]?.[0]).toHaveLength(1);
+    expect(onOpenTranscript.mock.calls[0]?.[1]).toBe(true);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "View transcript" }), { detail: 1 });
+    expect(onOpenTranscript).toHaveBeenCalledTimes(2);
+    expect(onOpenTranscript.mock.calls[1]?.[1]).toBe(false);
+    expect(listTaskMessages).toHaveBeenCalledTimes(1);
+  });
+});

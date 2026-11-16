@@ -1,13 +1,34 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import {
   attachmentDownloadPath,
   attachmentIdFromDownloadURL,
+  attachmentIdFromLocalUploadURL,
   attachmentIdFromStorageURL,
   contentReferencesAttachment,
   stripChannelMediaMarkers,
 } from "./attachment-url";
 
 const ID = "11111111-2222-3333-4444-555555555555";
+const LOCAL_URL = `/uploads/workspaces/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/${ID}.png`;
+
+describe("legacy local attachment URLs", () => {
+  it.each([LOCAL_URL, `${LOCAL_URL}?exp=1&sig=old#image`, `https://old.example${LOCAL_URL}`])(
+    "extracts the attachment identity from %s",
+    (url) => expect(attachmentIdFromLocalUploadURL(url)).toBe(ID),
+  );
+
+  it.each(["/uploads/users/user/avatar.png", `${LOCAL_URL}.meta.json`, "/uploads/workspaces/ws/file.png", `//other.example${LOCAL_URL}`])(
+    "does not treat %s as an attachment",
+    (url) => expect(attachmentIdFromLocalUploadURL(url)).toBeUndefined(),
+  );
+
+  it("deduplicates historical body references after the response URL changes", () => {
+    expect(contentReferencesAttachment(`![image](${LOCAL_URL})`, {
+      id: ID, url: attachmentDownloadPath(ID),
+    })).toBe(true);
+  });
+});
 
 describe("attachmentDownloadPath", () => {
   it("returns the stable per-attachment download path", () => {

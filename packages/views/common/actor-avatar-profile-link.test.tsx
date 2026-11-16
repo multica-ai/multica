@@ -13,6 +13,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { AppLink } from "../navigation/app-link";
 import { NavigationProvider } from "../navigation/context";
 import type { NavigationAdapter } from "../navigation/types";
+import { CardControl } from "./card-control";
 import { DeferredPopup } from "./deferred-popup";
 
 const actorDirectory = vi.hoisted(() => ({ known: true as boolean | undefined }));
@@ -78,23 +79,11 @@ function renderAvatar(adapter: NavigationAdapter) {
   );
 }
 
-function PickerWrapper({ children }: { children: React.ReactNode }) {
-  const stop = (event: React.SyntheticEvent) => {
-    event.stopPropagation();
-    event.preventDefault();
-  };
-  return (
-    <div onClick={stop} onMouseDown={stop} onPointerDown={stop}>
-      {children}
-    </div>
-  );
-}
-
 function renderCardPicker(adapter: NavigationAdapter) {
   return render(
     <NavigationProvider value={adapter}>
       <AppLink href="/acme/issues/issue-1">
-        <PickerWrapper>
+        <CardControl>
           <DeferredPopup
             trigger={
               <span>
@@ -113,7 +102,7 @@ function renderCardPicker(adapter: NavigationAdapter) {
               </span>
             )}
           </DeferredPopup>
-        </PickerWrapper>
+        </CardControl>
       </AppLink>
     </NavigationProvider>,
   );
