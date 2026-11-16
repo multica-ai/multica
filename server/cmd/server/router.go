@@ -2284,14 +2284,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/projects", func(r chi.Router) {
 				r.Get("/search", h.SearchProjects)
 				// Workspace owner only: every private project, joined or not.
-				r.Get("/private", h.ListPrivateProjectsForOwner)
+				// Human-only: a machine credential carries its owner's user
+				// id and must not use the owner's way into private projects.
+				r.With(handler.RequireHumanActor).Get("/private", h.ListPrivateProjectsForOwner)
 				r.Get("/", h.ListProjects)
 				r.Post("/", h.CreateProject)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetProject)
 					r.Put("/", h.UpdateProject)
 					r.Delete("/", h.DeleteProject)
-					r.Post("/join", h.JoinPrivateProject)
+					r.With(handler.RequireHumanActor).Post("/join", h.JoinPrivateProject)
 					r.Post("/archive", h.ArchiveProject)
 					r.Post("/restore", h.RestoreProject)
 					r.Post("/workflow", h.SetProjectWorkflow)

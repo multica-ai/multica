@@ -44,6 +44,11 @@ func TestWorkspaceOwnerListsPrivateProjects(t *testing.T) {
 	asAgent.Header.Set("X-Task-ID", task)
 	list(asAgent).Want(http.StatusForbidden)
 
+	// Nor a cloud node PAT, which auth stamps with its owner's user id.
+	asCloudPAT := get(testUserID)
+	asCloudPAT.Header.Set("X-Actor-Source", "cloud_pat")
+	list(asCloudPAT).Want(http.StatusForbidden)
+
 	var resp struct {
 		Projects []PrivateProjectOverview `json:"projects"`
 	}
@@ -100,7 +105,13 @@ func TestWorkspaceOwnerJoinsPrivateProject(t *testing.T) {
 	// Only the owner has this way in.
 	join(f.outsideAdmin, f.projectID).Want(http.StatusForbidden)
 	join(f.outsider, f.projectID).Want(http.StatusForbidden)
-	if members := projectMemberIDs(t, f.projectID); members[f.outsideAdmin] || members[f.outsider] {
+	// Machine credentials carry the owner's user id but not their way in.
+	for _, source := range []string{"task_token", "cloud_pat"} {
+		req := withURLParam(asUser(newRequest(http.MethodPost, "/api/projects/"+f.projectID+"/join", nil), testUserID), "id", f.projectID)
+		req.Header.Set("X-Actor-Source", source)
+		testutil.Call(t, testHandler.JoinPrivateProject, req).Want(http.StatusForbidden)
+	}
+	if members := projectMemberIDs(t, f.projectID); members[f.outsideAdmin] || members[f.outsider] || members[testUserID] {
 		t.Fatalf("a refused join still added a member: %v", members)
 	}
 	join(testUserID, "00000000-0000-0000-0000-0000000000ff").Want(http.StatusNotFound)
