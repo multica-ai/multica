@@ -408,7 +408,8 @@
     "pending_health_warning": "Ожидание синхронизации с демоном",
     "pending_health_error": "Ошибка регистрации",
     "pending_health_disabled": "Отключена",
-    "pending_cli_unknown": "ожидание"
+    "pending_cli_unknown": "ожидание",
+    "col_rate_limits": "Лимиты"
   },
   "profiles": {
     "cta": "Добавить среду выполнения",
@@ -734,5 +735,38 @@
       }
     },
     "title": "Предоставьте агентам компьютер для работы"
+  },
+  "rate_limits": {
+    "title": "Лимиты",
+    "caption": "Сообщает CLI во время выполнения задач",
+    "updated": "Обновлено {{ago}}",
+    "empty_title": "Данных о лимитах пока нет",
+    "empty_hint": "Появятся, когда эта среда выполнения в следующий раз выполнит задачу. У аккаунтов с API-ключом нет лимитов тарифа.",
+    "window_session": "Сессия",
+    "window_session_hours": "Сессия {{hours}} ч",
+    "window_weekly": "Неделя",
+    "window_weekly_opus": "Неделя · Opus",
+    "window_weekly_sonnet": "Неделя · Sonnet",
+    "window_generic": "Другой лимит",
+    "short_session": "Сессия",
+    "short_weekly": "Неделя",
+    "short_weekly_opus": "Opus",
+    "short_weekly_sonnet": "Sonnet",
+    "short_generic": "Другое",
+    "used": "Использовано {{pct}}%",
+    "limited": "Лимит исчерпан",
+    "resets_in": "Сброс через {{duration}}",
+    "resets_at": "Сброс {{time}}",
+    "reset_since": "Сброшен после последнего отчёта",
+    "verdict_ahead": "Опережение темпа на {{pct}}% · закончится примерно через {{duration}}",
+    "verdict_on_pace": "При текущем темпе хватит до сброса",
+    "verdict_limited": "Возобновится после сброса",
+    "credits": "Кредиты",
+    "credits_balance": "Осталось {{balance}}",
+    "credits_unlimited": "Без ограничений",
+    "credits_none": "Нет",
+    "duration_minutes": "{{minutes}} мин",
+    "duration_hours": "{{hours}} ч {{minutes}} мин",
+    "duration_days": "{{days}} д {{hours}} ч"
   }
 }

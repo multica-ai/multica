@@ -388,7 +388,8 @@
     "pending_health_warning": "En attente de synchronisation du daemon",
     "pending_health_error": "Erreur d'enregistrement",
     "pending_health_disabled": "Désactivé",
-    "pending_cli_unknown": "en attente"
+    "pending_cli_unknown": "en attente",
+    "col_rate_limits": "Limites"
   },
   "profiles": {
     "cta": "Ajouter un runtime",
@@ -694,5 +695,38 @@
       "run_there": "À lancer sur cette machine",
       "connected": "{{name}} connecté à Multica"
     }
+  },
+  "rate_limits": {
+    "title": "Limites",
+    "caption": "Signalées par la CLI pendant l'exécution des tâches",
+    "updated": "Mis à jour {{ago}}",
+    "empty_title": "Aucune donnée de limite pour l'instant",
+    "empty_hint": "Enregistrées la prochaine fois que ce runtime exécute une tâche. Les comptes à clé API n'ont pas de limites de forfait.",
+    "window_session": "Session",
+    "window_session_hours": "Session de {{hours}} h",
+    "window_weekly": "Hebdomadaire",
+    "window_weekly_opus": "Hebdomadaire · Opus",
+    "window_weekly_sonnet": "Hebdomadaire · Sonnet",
+    "window_generic": "Autre limite",
+    "short_session": "Session",
+    "short_weekly": "Semaine",
+    "short_weekly_opus": "Opus",
+    "short_weekly_sonnet": "Sonnet",
+    "short_generic": "Autre",
+    "used": "{{pct}} % utilisé",
+    "limited": "Limite atteinte",
+    "resets_in": "Réinitialisation dans {{duration}}",
+    "resets_at": "Réinitialisation {{time}}",
+    "reset_since": "Réinitialisée depuis le dernier relevé",
+    "verdict_ahead": "{{pct}} % d'avance sur le rythme · épuisée dans environ {{duration}}",
+    "verdict_on_pace": "Au rythme actuel, tient jusqu'à la réinitialisation",
+    "verdict_limited": "Reprend après la réinitialisation",
+    "credits": "Crédits",
+    "credits_balance": "Reste {{balance}}",
+    "credits_unlimited": "Illimités",
+    "credits_none": "Aucun",
+    "duration_minutes": "{{minutes}} min",
+    "duration_hours": "{{hours}} h {{minutes}} min",
+    "duration_days": "{{days}} j {{hours}} h"
   }
 }

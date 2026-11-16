@@ -760,6 +760,15 @@ func (c *Client) ReportTaskContextReceipt(ctx context.Context, taskID string, re
 	}, nil)
 }
 
+// ReportTaskRateLimits posts the subscription rate-limit snapshot the agent
+// CLI reported while running the task; the server keeps the newest one as the
+// state of the task's runtime.
+func (c *Client) ReportTaskRateLimits(ctx context.Context, taskID string, snapshot agent.RateLimitSnapshot) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/rate-limits", taskID), map[string]any{
+		"rate_limits": snapshot,
+	}, nil)
+}
+
 // EnvironmentCommand is a stop, restart, start or log read a member asked
 // for from the issue sidebar.
 type EnvironmentCommand struct {

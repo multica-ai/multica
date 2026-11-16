@@ -108,6 +108,8 @@ multica daemon autostart disable
 
 运行消耗的 token、费用和失败情况在[统计](/analytics)页按工作区汇总；单条运行时的 token 用量也可以用 `multica runtime usage <runtime-id>` 查看。
 
+Claude Code 和 Codex 运行时的页面上还有**额度**：CLI 账号在套餐的 5 小时会话和每周窗口里已经用了多少、什么时候重置，以及用量是否跑在时间前面。这些数据由 CLI 在执行任务时上报，反映的是这个运行时最近一次运行时的状态。API Key 账号没有套餐额度。
+
 ## 本机 MCP 配置 [#local-mcp]
 
 智能体没有保存 MCP 配置时，Multica 不向工具传任何 MCP 设置，工具照常读取这台电脑上它自己的配置。
