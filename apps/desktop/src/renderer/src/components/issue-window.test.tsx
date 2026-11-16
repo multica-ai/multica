@@ -46,6 +46,10 @@ vi.mock("@multica/views/layout", () => ({
   WorkspacePresencePrefetch: () => null,
 }));
 
+vi.mock("@multica/views/voice", () => ({
+  VoiceWorkspaceWords: () => null,
+}));
+
 vi.mock("@multica/views/platform", () => ({
   DragStrip: () => <div data-testid="drag-strip" />,
   WindowTitleBarProvider: ({

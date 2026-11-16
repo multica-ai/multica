@@ -897,6 +897,10 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if h.projectIsArchived(r.Context(), h.Queries, projectID, wsUUID) {
+		writeProjectArchived(w)
+		return
+	}
 
 	// Parse before insert so a malformed payload doesn't open a transaction.
 	subscribers, ok := parseAutopilotSubscribers(w, req.Subscribers)
@@ -1208,6 +1212,15 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 	nextStatus := prev.Status
 	if req.Status != nil {
 		nextStatus = *req.Status
+	}
+	// An archived project takes no new issues, so pointing an autopilot at
+	// one or resuming one that still targets one is refused. Editing a
+	// paused autopilot in place stays allowed.
+	projectChanged := params.ProjectID != prev.ProjectID
+	resuming := nextStatus == "active" && prev.Status != "active"
+	if (projectChanged || resuming) && h.projectIsArchived(r.Context(), qtx, params.ProjectID, prev.WorkspaceID) {
+		writeProjectArchived(w)
+		return
 	}
 	validateAssignee := typeSent || idSent || (req.Status != nil && *req.Status == "active")
 	if validateAssignee && !h.validateAutopilotAssigneeForSave(

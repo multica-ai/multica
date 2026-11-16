@@ -1,7 +1,7 @@
 {
   "name": "@multica/desktop",
   "productName": "Multica",
-  "version": "0.8.2",
+  "version": "0.9.0",
   "private": true,
   "description": "Multica Desktop — native desktop client for the Multica platform.",
   "homepage": "https://multica.ai",
@@ -18,10 +18,11 @@
   "main": "./out/main/index.js",
   "scripts": {
     "bundle-cli": "node scripts/bundle-cli.mjs",
+    "bundle-voice-engine": "node scripts/bundle-voice-engine.mjs",
     "brand-dev-electron": "node scripts/brand-dev-electron.mjs",
     "dev": "node scripts/dev.mjs",
     "dev:staging": "node scripts/dev.mjs --mode staging",
-    "build": "pnpm run bundle-cli && electron-vite build",
+    "build": "pnpm run bundle-cli && pnpm run bundle-voice-engine && electron-vite build",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "pnpm run typecheck:node && pnpm run typecheck:web",
@@ -40,7 +41,7 @@
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
     "@fontsource-variable/geist-mono": "^5.3.0",
-    "@fontsource-variable/inter": "^5.2.5",
+    "@fontsource-variable/inter": "catalog:",
     "@fontsource-variable/jetbrains-mono": "^5.3.0",
     "@fontsource-variable/source-serif-4": "^5.2.9",
     "@multica/core": "workspace:*",
@@ -76,6 +77,7 @@
     "electron-vite": "^5.0.0",
     "globals": "^16.0.0",
     "jsdom": "catalog:",
+    "sherpa-onnx-node": "2.0.1",
     "tailwindcss": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"

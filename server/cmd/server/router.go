@@ -1867,9 +1867,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// store it; a version is immutable once published, so
 					// there is no update route here by design.
 					r.Get("/plugins/packages", h.ListPluginPackages)
-					r.Post("/plugins/packages", h.PublishPluginPackage)
-					r.Post("/plugins/packages/local", h.PublishLocalPluginPackage)
-					r.Delete("/plugins/packages/{packageId}", h.DeletePluginPackage)
+					// Machine credentials inherit their owner's role, but
+					// plugin consent also requires a human credential.
+					r.With(handler.RequireHumanActor).Post("/plugins/packages", h.PublishPluginPackage)
+					r.With(handler.RequireHumanActor).Post("/plugins/packages/local", h.PublishLocalPluginPackage)
+					r.With(handler.RequireHumanActor).Delete("/plugins/packages/{packageId}", h.DeletePluginPackage)
 					// Installing a Plugin is two steps on purpose: preview
 					// reads the published version's manifest and returns the
 					// scope list without writing anything, so the consent
@@ -1877,19 +1879,19 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// exists. Both steps name the same version id, which is
 					// what makes the approved manifest and the running code
 					// the same artifact.
-					r.Post("/plugins/preview", h.PreviewPlugin)
-					r.Post("/plugins", h.InstallPlugin)
+					r.With(handler.RequireHumanActor).Post("/plugins/preview", h.PreviewPlugin)
+					r.With(handler.RequireHumanActor).Post("/plugins", h.InstallPlugin)
 					r.Get("/plugins/{installationId}/invocations", h.ListPluginInvocations)
-					r.Post("/plugins/{installationId}/token", h.RotatePluginToken)
-					r.Delete("/plugins/{installationId}/token", h.RevokePluginToken)
+					r.With(handler.RequireHumanActor).Post("/plugins/{installationId}/token", h.RotatePluginToken)
+					r.With(handler.RequireHumanActor).Delete("/plugins/{installationId}/token", h.RevokePluginToken)
 					// mcp-transport approval. Discovery adopts nothing; the PUT
 					// is the grant, and it pins the tools by schema digest.
 					r.Get("/plugins/{installationId}/mcp/{hookKey}/tools", h.ListPluginMCPTools)
-					r.Put("/plugins/{installationId}/mcp/{hookKey}/tools", h.ApprovePluginMCPTools)
-					r.Put("/plugins/{installationId}/config", h.ConfigurePlugin)
-					r.Post("/plugins/{installationId}/enable", h.EnablePlugin)
-					r.Post("/plugins/{installationId}/disable", h.DisablePlugin)
-					r.Delete("/plugins/{installationId}", h.UninstallPlugin)
+					r.With(handler.RequireHumanActor).Put("/plugins/{installationId}/mcp/{hookKey}/tools", h.ApprovePluginMCPTools)
+					r.With(handler.RequireHumanActor).Put("/plugins/{installationId}/config", h.ConfigurePlugin)
+					r.With(handler.RequireHumanActor).Post("/plugins/{installationId}/enable", h.EnablePlugin)
+					r.With(handler.RequireHumanActor).Post("/plugins/{installationId}/disable", h.DisablePlugin)
+					r.With(handler.RequireHumanActor).Delete("/plugins/{installationId}", h.UninstallPlugin)
 				})
 				// Owner-only access
 				r.With(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner")).Delete("/", h.DeleteWorkspace)
@@ -2162,6 +2164,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/subscribe", h.SubscribeToIssue)
 					r.Post("/unsubscribe", h.UnsubscribeFromIssue)
 					r.Post("/unsubscribe/subtree", h.UnsubscribeFromIssueSubtree)
+					r.Post("/unsubscribe/undo", h.UndoUnsubscribeFromIssue)
 					r.Post("/read", h.MarkIssueRead)
 					r.Post("/unread", h.MarkIssueUnread)
 					r.Get("/wakeups", h.ListIssueWakeups)
@@ -2280,12 +2283,17 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Projects
 			r.Route("/api/projects", func(r chi.Router) {
 				r.Get("/search", h.SearchProjects)
+				// Workspace owner only: every private project, joined or not.
+				r.Get("/private", h.ListPrivateProjectsForOwner)
 				r.Get("/", h.ListProjects)
 				r.Post("/", h.CreateProject)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetProject)
 					r.Put("/", h.UpdateProject)
 					r.Delete("/", h.DeleteProject)
+					r.Post("/join", h.JoinPrivateProject)
+					r.Post("/archive", h.ArchiveProject)
+					r.Post("/restore", h.RestoreProject)
 					r.Post("/workflow", h.SetProjectWorkflow)
 					r.Get("/members", h.ListProjectMembers)
 					r.Post("/members", h.AddProjectMembers)
@@ -2657,6 +2665,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/archive-all", h.ArchiveAllInbox)
 				r.Post("/archive-all-read", h.ArchiveAllReadInbox)
 				r.Post("/archive-completed", h.ArchiveCompletedInbox)
+				// The caller's snoozed issues, for the Snoozed view (MUL-9333).
+				r.Get("/snoozed", h.ListSnoozedInbox)
 				// Every unread notification on one issue, for reading the issue
 				// outside the inbox (MUL-8588).
 				r.Post("/issues/{issueId}/read", h.MarkIssueInboxRead)
@@ -2664,6 +2674,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/{id}/unread", h.MarkInboxUnread)
 				r.Post("/{id}/archive", h.ArchiveInboxItem)
 				r.Post("/{id}/unarchive", h.UnarchiveInboxItem)
+				r.Post("/{id}/snooze", h.SnoozeInboxItem)
+				r.Post("/{id}/unsnooze", h.UnsnoozeInboxItem)
 				r.Delete("/{id}", h.DeleteInboxItem)
 			})
 
@@ -2855,16 +2867,10 @@ func optionalUUID(s string) pgtype.UUID {
 	return util.MustParseUUID(s)
 }
 
-// themeStoreFromEnv builds the community theme store. MULTICA_THEME_STORE=off
-// (or false / 0) turns it off; MULTICA_THEME_REGISTRY_URL points it at
-// another registry's index.json. A URL that does not parse turns the store
-// off rather than failing the boot.
+// themeStoreFromEnv builds the community theme store, which is always on.
+// MULTICA_THEME_REGISTRY_URL points it at another registry's index.json. A
+// URL that does not parse turns the store off rather than failing the boot.
 func themeStoreFromEnv() *themestore.Store {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("MULTICA_THEME_STORE"))) {
-	case "off", "false", "0", "disabled":
-		slog.Info("theme store: turned off by MULTICA_THEME_STORE")
-		return nil
-	}
 	store, err := themestore.New(themestore.Config{
 		IndexURL: strings.TrimSpace(os.Getenv("MULTICA_THEME_REGISTRY_URL")),
 	})

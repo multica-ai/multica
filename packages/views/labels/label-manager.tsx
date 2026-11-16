@@ -41,8 +41,16 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
+import { cn } from "@multica/ui/lib/utils";
 import { ColorPicker, COLOR_PICKER_PRESETS } from "../common/color-picker";
+import {
+  CatalogHeader,
+  CatalogRow,
+  CatalogRows,
+  CatalogTable,
+} from "../settings/components/catalog-table";
 import { useLocale, useT } from "../i18n";
+import { paletteColor } from "@multica/core/appearance";
 
 /**
  * Label catalogs a user can manage. Narrower than `LabelResourceType`:
@@ -112,14 +120,13 @@ export function LabelManager({ scope }: { scope: LabelScope }) {
           </Button>
         </div>
 
-        <div className="overflow-hidden rounded-lg border border-surface-border bg-card">
-          <div className="hidden grid-cols-[minmax(11rem,1fr)_minmax(12rem,1.4fr)_6rem_7rem_2rem] gap-4 border-b border-surface-border bg-muted/20 px-4 py-2.5 text-caption font-medium text-muted-foreground md:grid">
+        <CatalogTable columns="minmax(11rem,1fr) minmax(12rem,1.4fr) 6rem 7rem">
+          <CatalogHeader>
             <span>{t(($) => $.labels.columns.name)}</span>
             <span>{t(($) => $.labels.columns.description)}</span>
             <span>{t(($) => $.labels.columns.usage)}</span>
             <span>{t(($) => $.labels.columns.updated)}</span>
-            <span />
-          </div>
+          </CatalogHeader>
 
           {isLoading ? (
             <div className="px-4 py-12 text-center text-body text-muted-foreground">
@@ -135,59 +142,72 @@ export function LabelManager({ scope }: { scope: LabelScope }) {
               </p>
             </div>
           ) : (
-            <div className="divide-y divide-surface-border">
+            <CatalogRows>
               {filteredLabels.map((label) => (
-                <div
+                <CatalogRow
                   key={label.id}
-                  className="grid gap-2 px-4 py-3 md:grid-cols-[minmax(11rem,1fr)_minmax(12rem,1.4fr)_6rem_7rem_2rem] md:items-center md:gap-4"
-                >
-                  <div className="flex min-w-0 items-center gap-3">
-                    <span
-                      className="size-2.5 shrink-0 rounded-full"
-                      style={{ backgroundColor: label.color }}
-                    />
-                    <span className="truncate text-body font-medium">{label.name}</span>
-                  </div>
-                  <p className="min-w-0 truncate text-caption text-muted-foreground md:text-body">
-                    {label.description || "—"}
-                  </p>
-                  <span className="text-caption tabular-nums text-muted-foreground md:text-body">
-                    {t(($) => $.labels.usage_count, { count: label.usage_count ?? 0 })}
-                  </span>
-                  <span className="text-caption text-muted-foreground">
-                    {new Date(label.updated_at).toLocaleDateString(locale)}
-                  </span>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger
-                      render={
-                        <IconButton
-                          variant="ghost"
-                          size="icon-sm"
-                          label={t(($) => $.labels.actions.open, { name: label.name })}
-                        >
-                          <MoreHorizontal className="size-4" />
-                        </IconButton>
-                      }
-                    />
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => setEditing(label)}>
-                        <Pencil className="size-4" />
-                        {t(($) => $.labels.actions.edit)}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        variant="destructive"
-                        onClick={() => setPendingDelete(label)}
+                  name={
+                    <div className="flex min-w-0 items-center gap-3">
+                      <span
+                        className="size-2.5 shrink-0 rounded-full"
+                        style={{ backgroundColor: paletteColor(label.color) }}
+                      />
+                      <span className="truncate text-body font-medium">{label.name}</span>
+                    </div>
+                  }
+                  meta={
+                    <>
+                      {/* The "—" placeholder holds the column when wide; when
+                          narrow it would only be noise on the meta line. */}
+                      <p
+                        className={cn(
+                          "min-w-0 max-w-full truncate",
+                          !label.description && "hidden @3xl/catalog:block",
+                        )}
                       >
-                        <Trash2 className="size-4" />
-                        {t(($) => $.labels.actions.delete)}
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
+                        {label.description || "—"}
+                      </p>
+                      <span className="tabular-nums">
+                        {t(($) => $.labels.usage_count, { count: label.usage_count ?? 0 })}
+                      </span>
+                      <span className="text-caption">
+                        {new Date(label.updated_at).toLocaleDateString(locale)}
+                      </span>
+                    </>
+                  }
+                  menu={
+                    <DropdownMenu>
+                      <DropdownMenuTrigger
+                        render={
+                          <IconButton
+                            variant="ghost"
+                            size="icon-sm"
+                            label={t(($) => $.labels.actions.open, { name: label.name })}
+                          >
+                            <MoreHorizontal className="size-4" />
+                          </IconButton>
+                        }
+                      />
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => setEditing(label)}>
+                          <Pencil className="size-4" />
+                          {t(($) => $.labels.actions.edit)}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          variant="destructive"
+                          onClick={() => setPendingDelete(label)}
+                        >
+                          <Trash2 className="size-4" />
+                          {t(($) => $.labels.actions.delete)}
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  }
+                />
               ))}
-            </div>
+            </CatalogRows>
           )}
-        </div>
+        </CatalogTable>
       </div>
 
       <LabelEditorDialog

@@ -34,7 +34,7 @@ func (h *Handler) hiddenProjects(r *http.Request, workspaceID string) (projectac
 		return projectaccess.ForPrincipals(ctx, h.Queries, wsUUID)
 	}
 	if m, ok := ctxMember(ctx); ok && m.WorkspaceID == wsUUID && m.UserID == userUUID {
-		return projectaccess.ForMember(ctx, h.Queries, wsUUID, userUUID, m.Role)
+		return projectaccess.ForMember(ctx, h.Queries, wsUUID, userUUID)
 	}
 	return projectaccess.ForPrincipals(ctx, h.Queries, wsUUID, userUUID)
 }

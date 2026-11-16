@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
+import { useDevPromptStore, useSessionPromptStore } from "@multica/core/session-prompt";
 import enCommon from "../locales/en/common.json";
 import enOnboarding from "../locales/en/onboarding.json";
 
@@ -361,5 +362,52 @@ describe("SourceBackfillModal", () => {
       screen.queryByText(/How did you hear about Multica/i),
     ).not.toBeInTheDocument();
     expect(mockListIssues).not.toHaveBeenCalled();
+  });
+});
+
+describe("SourceBackfillModal and the other prompts", () => {
+  const pending = () => useSessionPromptStore.getState().surveyPending;
+  const owesSurvey = {
+    id: "u1",
+    onboarded_at: "2026-01-01T00:00:00Z",
+    onboarding_questionnaire: { source: [] },
+  };
+
+  beforeEach(() => {
+    useSessionPromptStore.setState({ prompted: false, surveyPending: false });
+    useDevPromptStore.setState({ request: null });
+  });
+
+  it("holds the others back while it decides and while it is open, then lets them go", async () => {
+    let answer: (total: number) => void = () => {};
+    mockListIssues.mockImplementation(
+      () => new Promise((resolve) => (answer = (total) => resolve({ issues: [], total }))),
+    );
+    setUser(owesSurvey);
+    renderModal();
+    expect(pending()).toBe(true);
+
+    await act(async () => answer(3));
+    await screen.findByText(/How did you hear about Multica/i);
+    expect(pending()).toBe(true);
+
+    await userEvent.setup().click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(pending()).toBe(false));
+  });
+
+  it("lets the others go when the workspace has not reached the threshold", async () => {
+    mockAgentDoneTotal.value = 1;
+    setUser(owesSurvey);
+    renderModal();
+    await waitFor(() => expect(mockListIssues).toHaveBeenCalled());
+    await waitFor(() => expect(pending()).toBe(false));
+    expect(screen.queryByText(/How did you hear about Multica/i)).not.toBeInTheDocument();
+  });
+
+  it("opens on demand from the dev toolbar, even for a user who already answered", async () => {
+    setUser({ id: "u1", onboarded_at: "2026-01-01T00:00:00Z", onboarding_questionnaire: { source: ["search"] } });
+    renderModal();
+    act(() => useDevPromptStore.getState().trigger("survey"));
+    expect(await screen.findByText(/How did you hear about Multica/i)).toBeInTheDocument();
   });
 });

@@ -21,7 +21,8 @@
     "active": "アクティブ",
     "paused": "一時停止中",
     "paused_runtime_required": "一時停止中 — 担当エージェントのランタイムが必要です",
-    "archived": "アーカイブ済み"
+    "archived": "アーカイブ済み",
+    "paused_project_archived": "一時停止中 — プロジェクトがアーカイブされています"
   },
   "execution_mode": {
     "create_issue": "タスクを作成",
@@ -115,7 +116,8 @@
       "cancel": "キャンセル",
       "confirm": "削除",
       "deleting": "削除中..."
-    }
+    },
+    "paused_project_archived": "プロジェクトがアーカイブされたため一時停止しました。プロジェクトを復元してから再度有効にしてください。"
   },
   "access": {
     "title": "アクセス管理",

@@ -3,6 +3,7 @@
 import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderWithI18n } from "../test/i18n";
+import { PALETTE_PRESETS, PALETTE_SLOTS } from "@multica/core/appearance";
 import { ColorPickerPanel, COLOR_PICKER_PRESETS } from "./color-picker";
 
 afterEach(cleanup);
@@ -48,6 +49,10 @@ describe("ColorPickerPanel", () => {
     for (const preset of COLOR_PICKER_PRESETS) {
       expect(screen.getAllByLabelText(preset)).toHaveLength(1);
     }
+  });
+
+  it("offers one preset per theme colour slot, in slot order", () => {
+    expect([...COLOR_PICKER_PRESETS]).toEqual(PALETTE_SLOTS.map((slot) => PALETTE_PRESETS[slot]));
   });
 
   it("uses localized labels", () => {

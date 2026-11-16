@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, matchesGlob } from "node:path";
+import { dirname, join, matchesGlob, posix, sep } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
@@ -17,7 +17,8 @@ function filterFiles(files) {
 
 for (const [name, files, selected] of [
   ["readme only", ["README.md"], []],
-  ["docs only", ["apps/docs/content/docs/guide.mdx"], ["quality"]],
+  ["docs only", ["apps/docs/content/docs/guide.mdx"], ["quality", "docs"]],
+  ["docs test", ["apps/docs/lib/unrendered-bold.test.ts"], ["quality", "docs"]],
   ["web changelog", ["apps/web/features/landing/i18n/en.ts"], ["frontend", "quality"]],
   ["mobile UI", ["apps/mobile/app/index.tsx"], ["quality"]],
   ["migration only", ["server/migrations/999_example.up.sql"], ["backend", "sqlc"]],
@@ -29,7 +30,10 @@ for (const [name, files, selected] of [
   ["Go dependencies", ["server/go.mod", "server/go.sum"], ["backend", "runtime"]],
   ["Helm only", ["deploy/helm/multica/templates/deployment.yaml"], ["scripts"]],
   ["container entrypoint", ["docker/entrypoint.sh"], ["scripts"]],
-  ["selfhost config", [".env.example"], ["scripts", "installer"]],
+  ["selfhost config", [".env.example"], ["backend", "scripts", "installer"]],
+  ["selfhost compose", ["docker-compose.selfhost.yml"], ["backend", "scripts", "installer"]],
+  ["local environment config", [".multica/environments.toml"], ["backend", "scripts"]],
+  ["plugin example", ["examples/plugins/hello-panel/multica.plugin.json"], ["backend"]],
   ["shell installer", ["scripts/install.sh"], ["scripts", "installer"]],
   ["PowerShell installer", ["scripts/install.ps1.test.ps1"], ["installer"]],
   ["cleanup script", ["scripts/drop-database.sh"], ["scripts"]],
@@ -47,14 +51,16 @@ for (const [name, files, selected] of [
   ["brand generator", ["scripts/brand/sync.mjs"], ["quality"]],
   ["PR evidence uploader", ["scripts/pr-shots"], ["quality"]],
   ["cross-module runtime contract", ["packages/core/runtimes/cli-version.ts"], ["frontend", "backend", "runtime", "quality"]],
+  ["inbox type contract", ["packages/core/types/inbox.ts"], ["frontend", "backend", "quality"]],
   ["shared quick action body contract", ["server/internal/handler/testdata/quick_action_bodies.json"], ["frontend", "backend", "runtime"]],
-  ["lockfile", ["pnpm-lock.yaml"], ["frontend", "quality"]],
-  ["workspace package patch", ["patches/example.patch"], ["frontend", "quality"]],
+  ["lockfile", ["pnpm-lock.yaml"], ["frontend", "quality", "docs"]],
+  ["workspace catalog", ["pnpm-workspace.yaml"], ["frontend", "quality", "docs"]],
+  ["workspace package patch", ["patches/example.patch"], ["frontend", "quality", "docs"]],
   ["mobile package patch", ["apps/mobile/patches/example.patch"], ["quality"]],
   ["radius policy", ["scripts/check-ui-radius-tokens.mjs"], ["quality"]],
   ["shared quality action", [".github/actions/frontend-quality/action.yml"], ["frontend", "quality"]],
   ["new bitmap", ["apps/web/public/hero.png"], ["frontend", "quality", "images"]],
-  ["mixed docs and migration", ["apps/docs/content/guide.mdx", "server/migrations/999_example.up.sql"], ["quality", "backend", "sqlc"]],
+  ["mixed docs and migration", ["apps/docs/content/guide.mdx", "server/migrations/999_example.up.sql"], ["quality", "docs", "backend", "sqlc"]],
   ["CI configuration", [".github/ci-paths.json"], Object.keys(filters)],
 ]) {
   test(`PR and main select only affected scopes: ${name}`, () => {
@@ -183,6 +189,17 @@ test("no gated job or shared quality step continues past a failure", () => {
   assert.doesNotMatch(action, /continue-on-error:/);
 });
 
+// A push only checks the paths it changed, so a main run that is cancelled or
+// left pending behind a newer push skips its commit for good.
+test("path-filtered workflows never cancel or supersede a main run", () => {
+  for (const name of ["ci.yml", "mobile-verify.yml"]) {
+    const source = readFileSync(new URL(`../.github/workflows/${name}`, import.meta.url), "utf8");
+    const block = field(source, /^concurrency:\n((?:  .+\n)+)/m);
+    assert.match(block, /^  group: .*\$\{\{ github\.event\.pull_request\.number \|\| github\.run_id \}\}$/m, name);
+    assert.match(block, /^  cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}$/m, name);
+  }
+});
+
 test("quality checks have exactly one runner", () => {
   const invocation = "uses: ./.github/actions/frontend-quality";
   const owners = Object.entries(jobs).filter(([, source]) => source.includes(invocation)).map(([job]) => job);
@@ -194,6 +211,17 @@ test("quality checks have exactly one runner", () => {
       const results = productionNeeds("frontend", outputs);
       const runners = owners.filter((job) => results[job].result === "success");
       assert.equal(runners.length, frontend === "true" || quality === "true" ? 1 : 0);
+    }
+  }
+});
+
+test("docs run their test suite on one runner and are never built", () => {
+  const owners = Object.entries(jobs).filter(([, source]) => source.includes("--filter @multica/docs test")).map(([job]) => job);
+  assert.deepEqual(owners, ["docs-test"]);
+  assert.equal(productionMapping("frontend")["docs-test"], "docs");
+  for (const [job, source] of Object.entries(jobs)) {
+    for (const [run] of source.matchAll(/turbo build[^\n]*/g)) {
+      assert.match(run, /--filter='!@multica\/docs'/, `${job} builds docs`);
     }
   }
 });
@@ -217,4 +245,193 @@ test("the CLI writes real Actions outputs and exits nonzero on a failed gate", (
   });
   assert.equal(gate.status, 1);
   assert.match(gate.stderr, /backend-tests/);
+});
+
+// A Go test that reads a repository file outside server/ only runs on a PR
+// touching that file if the backend filter names it; otherwise the PR skips
+// backend-tests and the broken test lands on main. The scan is heuristic: it
+// follows the shapes the suite uses (filepath.Join from "..", "../" literals,
+// package string constants, a repo-root constant joined with a path literal)
+// and keeps only paths that exist, which drops traversal fixtures like
+// "../../etc/passwd".
+function goTokens(source) {
+  const tokens = [];
+  for (const [text] of source.matchAll(/\/\/[^\n]*|\/\*[\s\S]*?\*\/|"(?:[^"\\\n]|\\.)*"|`[^`]*`|'(?:[^'\\\n]|\\.)*'|\w+|\S/g)) {
+    if (text[0] === '"') {
+      try { tokens.push({ value: JSON.parse(text) }); } catch { tokens.push({ value: text.slice(1, -1) }); }
+    } else if (text[0] === "`") {
+      tokens.push({ value: text.slice(1, -1) });
+    } else if (!/^(\/\/|\/\*|')/.test(text)) {
+      tokens.push(text);
+    }
+  }
+  return tokens;
+}
+
+const opening = new Set(["(", "[", "{"]);
+const closingBrackets = new Set([")", "]", "}"]);
+function closing(tokens, open) {
+  for (let depth = 0, i = open; i < tokens.length; i++) {
+    if (opening.has(tokens[i])) depth++;
+    else if (closingBrackets.has(tokens[i]) && --depth === 0) return i;
+  }
+  return tokens.length;
+}
+function splitTopLevel(tokens, separator) {
+  const parts = [[]];
+  let depth = 0;
+  for (const token of tokens) {
+    if (opening.has(token)) depth++;
+    if (closingBrackets.has(token)) depth--;
+    if (token === separator && depth === 0) parts.push([]);
+    else parts.at(-1).push(token);
+  }
+  return parts;
+}
+
+function goStringConstants(tokens, constants) {
+  for (let i = 0; i < tokens.length; i++) {
+    if (tokens[i] !== "const" && tokens[i] !== "var") continue;
+    const end = tokens[i + 1] === "(" ? closing(tokens, i + 1) : i + 4;
+    for (let j = i + 2; j < end; j++) {
+      const value = tokens[j + 1]?.value;
+      if (tokens[j] !== "=" || value === undefined || tokens[j + 2] === "+") continue;
+      constants.set(tokens[j - 1] === "string" ? tokens[j - 2] : tokens[j - 1], value);
+    }
+  }
+}
+
+const pathFunctions = new Set(["Join", "Clean", "FromSlash", "ToSlash"]);
+function pathCall(tokens, i) {
+  if ((tokens[i] !== "filepath" && tokens[i] !== "path") || tokens[i + 1] !== "."
+    || !pathFunctions.has(tokens[i + 2]) || tokens[i + 3] !== "(") return undefined;
+  const end = closing(tokens, i + 3);
+  return { name: tokens[i + 2], args: splitTopLevel(tokens.slice(i + 4, end), ","), end };
+}
+// The leading arguments that resolve statically; a Join stops being known at
+// its first dynamic argument, which still leaves the directory it reads under.
+function knownPrefix(args, constants) {
+  const known = [];
+  for (const arg of args) {
+    const value = evaluate(arg, constants);
+    if (value === undefined) break;
+    known.push(value);
+  }
+  return known;
+}
+function evaluate(tokens, constants) {
+  let result = "";
+  for (const part of splitTopLevel(tokens, "+")) {
+    const call = pathCall(part, 0);
+    let value = part.length === 1 ? part[0].value ?? constants.get(part[0]) : undefined;
+    if (call?.end === part.length - 1) {
+      const known = knownPrefix(call.args, constants);
+      if (known.length === call.args.length && known.length > 0) {
+        value = call.name === "Join" ? posix.join(...known) : posix.normalize(known[0]);
+      }
+    }
+    if (value === undefined) return undefined;
+    result += value;
+  }
+  return result;
+}
+
+function goTestRepoReads(root) {
+  const reads = new Map();
+  const goFiles = readdirSync(join(root, "server"), { recursive: true })
+    .map((file) => posix.join("server", file.split(sep).join("/")))
+    .filter((file) => file.endsWith(".go"));
+  for (const [dir, files] of Map.groupBy(goFiles, posix.dirname)) {
+    const sources = new Map(files.map((file) => [file, goTokens(readFileSync(join(root, file), "utf8"))]));
+    const constants = new Map();
+    for (const tokens of sources.values()) goStringConstants(tokens, constants);
+    for (const [file, tokens] of sources) {
+      if (!file.endsWith("_test.go")) continue;
+      const bases = new Set();
+      const resolve = (path, { directories = true } = {}) => {
+        if (path === ".." || path.startsWith("../") || path === "server" || path.startsWith("server/")) return;
+        const stat = statSync(join(root, path), { throwIfNoEntry: false });
+        if (!stat || (stat.isDirectory() && !directories)) return;
+        if (stat.isDirectory()) bases.add(path);
+        if (path === ".") return;
+        if (!reads.has(path)) reads.set(path, { directory: stat.isDirectory(), readers: new Set() });
+        reads.get(path).readers.add(file);
+      };
+      for (let i = 0; i < tokens.length; i++) {
+        const call = pathCall(tokens, i);
+        const relative = call?.name === "Join"
+          ? posix.join(...knownPrefix(call.args, constants), ".")
+          : tokens[i].value ?? constants.get(tokens[i]);
+        if (relative === ".." || relative?.startsWith("../")) resolve(posix.join(dir, relative));
+      }
+      // readRepoFile(t, ".env.example") style: a helper joins the literal onto
+      // a repository directory resolved above.
+      for (const base of [...bases]) {
+        for (const { value } of tokens) {
+          if (/^(?!\.\.)[\w.@+-]+(\/[\w.@+-]+)*$/.test(value ?? "")) resolve(posix.join(base, value), { directories: false });
+        }
+      }
+    }
+  }
+  return reads;
+}
+
+function uncoveredReads(root, reads, patterns) {
+  const covered = (file) => patterns.some((pattern) => matchesGlob(file, pattern));
+  return [...reads].filter(([path, { directory }]) => !(directory
+    ? readdirSync(join(root, path), { recursive: true }).some((file) => covered(posix.join(path, file.split(sep).join("/"))))
+    : covered(path)));
+}
+
+function missingFilterMessage(missing) {
+  return "Go tests read these files outside server/, but a PR changing them skips backend-tests.\n"
+    + 'Add each path to the "backend" group in .github/ci-paths.json:\n'
+    + missing.map(([path, { directory, readers }]) =>
+      `  "${directory ? `${path}/**` : path}"  (read by ${[...readers].sort().join(", ")})`).join("\n");
+}
+
+test("every repository file a Go test reads outside server/ selects backend-tests", () => {
+  const root = fileURLToPath(new URL("..", import.meta.url));
+  const reads = goTestRepoReads(root);
+  assert.ok(reads.size > 0, "The scan found no reads outside server/; it no longer recognizes how Go tests load repository files.");
+  const missing = uncoveredReads(root, reads, filters.backend);
+  assert.deepEqual(missing.map(([path]) => path), [], missingFilterMessage(missing));
+});
+
+test("the Go test scan follows relative paths, constants and repo-root helpers", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "ci-scope-go-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const files = {
+    "server/pkg/a/config.go": 'package a\n\nconst ConfigPath = ".multica/environments.toml"\n',
+    "server/pkg/a/a_test.go": [
+      "package a",
+      'const repoRoot = "../../.."',
+      "func readRepoFile(name string) { os.ReadFile(filepath.Join(repoRoot, name)) }",
+      "func TestA(t *testing.T) {",
+      '\treadRepoFile(".env.example")',
+      '\tos.ReadFile(filepath.Join("..", "..", "..", filepath.FromSlash(ConfigPath)))',
+      '\tos.ReadFile("../../../scripts/check.sh")',
+      '\tos.ReadDir(filepath.Join("..", "..", "..", "examples", "plugins", entry.Name()))',
+      '\tos.ReadFile("../../migrations/1.up.sql")',
+      '\tstore.Get("../../../etc/passwd")',
+      '\t// os.ReadFile("../../../docs/commented.md")',
+      "}",
+    ].join("\n"),
+    ".multica/environments.toml": "",
+    ".env.example": "",
+    "scripts/check.sh": "",
+    "examples/plugins/demo/multica.plugin.json": "",
+    "server/migrations/1.up.sql": "",
+    "docs/commented.md": "",
+  };
+  for (const [file, body] of Object.entries(files)) {
+    mkdirSync(dirname(join(root, file)), { recursive: true });
+    writeFileSync(join(root, file), body);
+  }
+  const reads = goTestRepoReads(root);
+  assert.deepEqual([...reads.keys()].sort(),
+    [".env.example", ".multica/environments.toml", "examples/plugins", "scripts/check.sh"]);
+  const missing = uncoveredReads(root, reads, [".env.example", "examples/plugins/**", "scripts/*.sh"]);
+  assert.equal(missingFilterMessage(missing).split("\n").at(-1),
+    '  ".multica/environments.toml"  (read by server/pkg/a/a_test.go)');
 });

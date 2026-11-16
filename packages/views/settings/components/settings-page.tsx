@@ -11,6 +11,7 @@ import {
   ListPlus,
   Lock,
   MessagesSquare,
+  Mic,
   Palette,
   Plug,
   Search,
@@ -50,6 +51,8 @@ import { WorkflowsTab } from "../../workflows/workflows-tab";
 import { PropertiesTab } from "./properties-tab";
 import { QuickActionsTab } from "./quick-actions-tab";
 import { KeyboardShortcutsTab } from "./keyboard-shortcuts-tab";
+import { localVoiceAPI } from "../../platform/local-voice";
+import { VoiceInputTab } from "./voice-input-tab";
 import { PluginsTab } from "./plugins-tab";
 import { McpTab } from "./mcp-tab";
 import { BillingTab } from "./billing-tab";
@@ -114,7 +117,7 @@ interface SettingsScopeGroup {
 const SETTINGS_HEADER_RAIL = cn(
   "flex min-w-0 flex-1 items-center gap-2",
   "md:pl-[max(1rem,calc(50%-var(--settings-column)/2+2rem))]",
-  "md:group-has-[[data-slot=sidebar-trigger]]/settings-header:pl-[max(0px,calc(50%-var(--settings-column)/2-0.25rem))]",
+  "md:group-has-[[data-sidebar=trigger]]/settings-header:pl-[max(0px,calc(50%-var(--settings-column)/2-0.25rem))]",
   "md:pr-[max(1.5rem,calc(50%-var(--settings-column)/2+2.5rem))]",
 );
 
@@ -136,6 +139,7 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
     false,
   );
   const appsAvailable = useComposioAvailable();
+  const voiceInputAvailable = localVoiceAPI() !== undefined;
   const entry = (
     value: string,
     label: string,
@@ -177,6 +181,9 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
               Keyboard,
               <KeyboardShortcutsTab />,
             ),
+            ...(voiceInputAvailable
+              ? [entry("voice-input", t(($) => $.page.tabs.voice_input), Mic, <VoiceInputTab />)]
+              : []),
             entry("tokens", t(($) => $.page.tabs.tokens), KeyRound, <TokensTab />),
           ],
         },

@@ -3,8 +3,10 @@
 // realtime fanout all call into it instead of re-deriving visibility.
 //
 // The rule: a project with visibility "private" is visible to its
-// project_member rows and to workspace owners/admins. Every other project is
-// visible to every workspace member. An issue's visibility is its project's.
+// project_member rows and to nobody else. A workspace role grants no
+// visibility: an owner or admin sees a private project only as one of its
+// members (MUL-9284). Every other project is visible to every workspace
+// member. An issue's visibility is its project's.
 //
 // A viewer is a set of principals (human user ids). A member request has one
 // principal: the member. An agent run has two: the human who triggered it and
@@ -32,7 +34,8 @@ func ValidVisibility(v string) bool {
 	return v == VisibilityWorkspace || v == VisibilityPrivate
 }
 
-// IsManagerRole reports whether a workspace role sees every private project.
+// IsManagerRole reports whether a workspace role may manage the access of a
+// project its holder can see. It grants no visibility of its own.
 func IsManagerRole(role string) bool {
 	return role == "owner" || role == "admin"
 }
@@ -96,13 +99,10 @@ func (h Hidden) IDs() []pgtype.UUID {
 	return h.ids
 }
 
-// ForMember computes the hidden set for one workspace member whose role the
-// caller already knows (request middleware loaded it).
-func ForMember(ctx context.Context, q Querier, workspaceID, userID pgtype.UUID, role string) (Hidden, error) {
+// ForMember computes the hidden set for one current workspace member: every
+// private project they are not a member of.
+func ForMember(ctx context.Context, q Querier, workspaceID, userID pgtype.UUID) (Hidden, error) {
 	h := newHidden()
-	if IsManagerRole(role) {
-		return h, nil
-	}
 	ids, err := q.ListHiddenProjectIDsForUser(ctx, db.ListHiddenProjectIDsForUserParams{
 		WorkspaceID: workspaceID,
 		UserID:      userID,
@@ -146,7 +146,7 @@ func ForPrincipals(ctx context.Context, q Querier, workspaceID pgtype.UUID, prin
 		return all, nil
 	}
 	for _, p := range valid {
-		member, err := q.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+		_, err := q.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
 			UserID:      p,
 			WorkspaceID: workspaceID,
 		})
@@ -156,7 +156,7 @@ func ForPrincipals(ctx context.Context, q Querier, workspaceID pgtype.UUID, prin
 		if err != nil {
 			return Hidden{}, err
 		}
-		one, err := ForMember(ctx, q, workspaceID, p, member.Role)
+		one, err := ForMember(ctx, q, workspaceID, p)
 		if err != nil {
 			return Hidden{}, err
 		}
