@@ -130,6 +130,14 @@
     "unsubscribed_hint": "이후 업데이트는 인박스에 오지 않습니다. @멘션은 계속 알림을 받습니다.",
     "undo": "실행 취소"
   },
+  "kept": {
+    "archived": "보관됨",
+    "leaves": "다른 곳으로 이동하면 인박스에서 빠집니다",
+    "filtered": "더 이상 필터와 일치하지 않음",
+    "notification_archived": "알림이 보관됨",
+    "next": "다음",
+    "next_tooltip": "다음 열기: {{title}}"
+  },
   "errors": {
     "archived_lookup_failed": "링크된 알림을 불러오지 못했습니다",
     "source_context_retry_failed": "원본 컨텍스트로 재시도하지 못했습니다",

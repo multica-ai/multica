@@ -17,6 +17,7 @@ import { IssueInboxActions } from "../issue-inbox-actions";
 
 const state = vi.hoisted(() => ({
   archiveInbox: vi.fn(),
+  unarchiveInbox: vi.fn(() => Promise.resolve()),
   unsubscribeArchive: vi.fn(),
   snooze: vi.fn(() => Promise.resolve()),
   unsnooze: vi.fn(() => Promise.resolve()),
@@ -93,6 +94,7 @@ function setup({
   };
   setApiInstance({
     archiveInbox: state.archiveInbox,
+    unarchiveInbox: state.unarchiveInbox,
     listInbox: async () => rows,
     listSnoozedInbox: async () => snoozed,
     getInboxUnreadSummary: async () => [],
@@ -130,7 +132,7 @@ function setup({
   const arrive = (id: string) => rerender(page(id));
   /** The next page replacing this one, taking the header with it. */
   const leave = () => rerender(page(null));
-  return Object.assign(nav, { arrive, leave });
+  return Object.assign(nav, { arrive, leave, qc });
 }
 
 /** An archive request the test settles by hand, after the header is gone. */
@@ -148,7 +150,12 @@ function pendingArchive() {
 beforeEach(() => {
   vi.clearAllMocks();
   state.archiveInbox.mockImplementation(async (id: string) => item({ id, archived: true }));
-  useInboxSelectionStore.setState({ sidebarIssueByWorkspace: { ws: "issue-1" }, sidebarTabIssuesByWorkspace: {} });
+  useInboxSelectionStore.setState({
+    sidebarIssueByWorkspace: { ws: "issue-1" },
+    sidebarTabIssuesByWorkspace: {},
+    heldRows: {},
+    leftRowKeyByWorkspace: {},
+  });
   useInboxFilterStore.getState().clearFilters("ws");
 });
 afterEach(cleanup);
@@ -225,6 +232,50 @@ describe("IssueInboxActions", () => {
     expect(state.unsnooze).toHaveBeenCalledWith({ id: "n-1" });
   });
 
+  it("stays in place once the notification leaves the Inbox some other way, with undo and the next one", async () => {
+    const nav = setup();
+    act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, [ROWS[1]!]));
+
+    expect(await screen.findByText("Notification archived")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Archive" })).toBeNull();
+    expect(nav.push).not.toHaveBeenCalled();
+
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Undo" })));
+    expect(state.unarchiveInbox).toHaveBeenCalledWith("n-1");
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it("names the status that archived it, and opens the next one", async () => {
+    const nav = setup({ rows: [{ ...ROWS[0]!, issue_status: "done" }, ROWS[1]!] });
+    act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, [ROWS[1]!]));
+
+    expect(await screen.findByText("Done · Notification archived")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(nav.push).toHaveBeenCalledWith("/acme/issues/issue-2#comment-c-9");
+    expect(useInboxSelectionStore.getState().sidebarIssueByWorkspace.ws).toBe("issue-2");
+  });
+
+  it("moves on with E rather than archiving again", async () => {
+    const nav = setup();
+    act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, [ROWS[1]!]));
+
+    await screen.findByText("Notification archived");
+    fireEvent.keyDown(document, { key: "e", code: "KeyE" });
+    expect(nav.push).toHaveBeenCalledWith("/acme/issues/issue-2#comment-c-9");
+    expect(state.archiveInbox).not.toHaveBeenCalled();
+  });
+
+  it("lets the row go when marking done, so the archive that follows cannot keep it", async () => {
+    const onMarkDone = vi.fn();
+    const nav = setup({ rows: [ROWS[0]!], onMarkDone });
+    fireEvent.click(screen.getByRole("button", { name: "Mark as done" }));
+    act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, []));
+
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Mark as done" })).toBeNull());
+    expect(screen.queryByText("Notification archived")).toBeNull();
+    expect(useInboxSelectionStore.getState().leftRowKeyByWorkspace.ws).toBe("issue-1");
+  });
+
   it("archives and moves on to the next notification", async () => {
     const nav = setup();
     fireEvent.click(screen.getByRole("button", { name: "Archive" }));
@@ -233,7 +284,7 @@ describe("IssueInboxActions", () => {
     await waitFor(() => expect(state.archiveInbox).toHaveBeenCalledWith("n-1"));
   });
 
-  it("still confirms the archive after the next issue replaces this one", async () => {
+  it("still confirms the archive, with an undo, after the next issue replaces this one", async () => {
     const archive = pendingArchive();
     const nav = setup();
     fireEvent.click(screen.getByRole("button", { name: "Archive" }));
@@ -241,8 +292,13 @@ describe("IssueInboxActions", () => {
     nav.leave();
     await archive.resolve();
 
-    expect(toast.success).toHaveBeenCalledWith("Notification archived");
+    expect(toast.success).toHaveBeenCalledWith("Notification archived", {
+      action: { label: "Undo", onClick: expect.any(Function) },
+    });
     expect(toast.error).not.toHaveBeenCalled();
+    const undo = vi.mocked(toast.success).mock.calls.at(-1)?.[1] as unknown as { action: { onClick: () => void } };
+    await act(async () => undo.action.onClick());
+    expect(state.unarchiveInbox).toHaveBeenCalledWith("n-1");
   });
 
   it("still reports a failed archive after the next issue replaces this one", async () => {

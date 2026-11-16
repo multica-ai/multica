@@ -61,7 +61,7 @@ vi.mock("./inbox-context-menu", () => ({
 vi.mock("./inbox-detail-label", () => ({ useTypeLabels: () => ({}) }));
 vi.mock("../../i18n", () => {
   const t = () => "Inbox";
-  return { useT: () => ({ t }) };
+  return { useT: () => ({ t }), useLocale: () => "en" };
 });
 
 function item(overrides: Partial<InboxItem> = {}): InboxItem {

@@ -1,6 +1,7 @@
 "use client";
 
 import { create } from "zustand";
+import type { HeldInboxRow } from "./open-row";
 
 interface InboxSelectionState {
   lastResolvedKeyByWorkspace: Record<string, string>;
@@ -24,7 +25,26 @@ interface InboxSelectionState {
    */
   landing: { issueId: string; token: number } | null;
   requestLanding: (issueId: string) => void;
+  /**
+   * The open notification's row as each list last showed it, by
+   * `${wsId}:${list}`, so the list can keep it in place (`keepOpenInboxRow`).
+   */
+  heldRows: Record<string, HeldInboxRow>;
+  holdRow: (wsId: string, list: string, row: HeldInboxRow) => void;
+  /**
+   * The open notification an Inbox action left, by workspace. It leaves its
+   * lists for good, even while it stays open because nothing was left to
+   * move on to.
+   */
+  leftRowKeyByWorkspace: Record<string, string>;
+  leaveRow: (wsId: string, key: string) => void;
+  /** Forgets the rows held or left for notifications that are no longer open. */
+  releaseRows: (wsId: string, openKeys: readonly string[]) => void;
+  /** Forgets the row one list holds, for a list that is going away. */
+  dropRow: (wsId: string, list: string) => void;
 }
+
+const heldRowId = (wsId: string, list: string) => `${wsId}:${list}`;
 
 // Keep only the last resolved pointer per workspace, for this client run.
 // Notification data and its cache lifetime remain owned by TanStack Query.
@@ -60,4 +80,49 @@ export const useInboxSelectionStore = create<InboxSelectionState>()((set) => ({
   landing: null,
   requestLanding: (issueId) =>
     set((state) => ({ landing: { issueId, token: (state.landing?.token ?? 0) + 1 } })),
+  heldRows: {},
+  holdRow: (wsId, list, row) =>
+    set((state) => {
+      if (state.leftRowKeyByWorkspace[wsId] === row.key) return state;
+      const id = heldRowId(wsId, list);
+      const current = state.heldRows[id];
+      if (
+        current?.key === row.key &&
+        current.item === row.item &&
+        current.index === row.index &&
+        current.filters === row.filters
+      ) {
+        return state;
+      }
+      return { heldRows: { ...state.heldRows, [id]: row } };
+    }),
+  leftRowKeyByWorkspace: {},
+  leaveRow: (wsId, key) =>
+    set((state) => ({
+      leftRowKeyByWorkspace: { ...state.leftRowKeyByWorkspace, [wsId]: key },
+      heldRows: Object.fromEntries(
+        Object.entries(state.heldRows).filter(([id, row]) => !(id.startsWith(`${wsId}:`) && row.key === key)),
+      ),
+    })),
+  releaseRows: (wsId, openKeys) =>
+    set((state) => {
+      const left = state.leftRowKeyByWorkspace[wsId];
+      const leftStays = left === undefined || openKeys.includes(left);
+      const held = Object.entries(state.heldRows).filter(
+        ([id, row]) => !id.startsWith(`${wsId}:`) || openKeys.includes(row.key),
+      );
+      if (leftStays && held.length === Object.keys(state.heldRows).length) return state;
+      const { [wsId]: _released, ...otherLeft } = state.leftRowKeyByWorkspace;
+      return {
+        heldRows: Object.fromEntries(held),
+        leftRowKeyByWorkspace: leftStays ? state.leftRowKeyByWorkspace : otherLeft,
+      };
+    }),
+  dropRow: (wsId, list) =>
+    set((state) => {
+      const id = heldRowId(wsId, list);
+      if (!(id in state.heldRows)) return state;
+      const { [id]: _dropped, ...heldRows } = state.heldRows;
+      return { heldRows };
+    }),
 }));

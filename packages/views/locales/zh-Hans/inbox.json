@@ -130,6 +130,14 @@
     "unsubscribed_hint": "之后的普通动态不会再进收件箱，@你时仍会通知",
     "undo": "撤销"
   },
+  "kept": {
+    "archived": "已归档",
+    "leaves": "离开后移出收件箱",
+    "filtered": "不再符合筛选",
+    "notification_archived": "通知已归档",
+    "next": "下一条",
+    "next_tooltip": "打开下一条：{{title}}"
+  },
   "errors": {
     "archived_lookup_failed": "无法加载链接指向的通知",
     "source_context_retry_failed": "无法使用原始上下文重试",

@@ -132,6 +132,14 @@
     "unsubscribed_hint": "Its updates won't reach your inbox. @mentions still will.",
     "undo": "Undo"
   },
+  "kept": {
+    "archived": "Archived",
+    "leaves": "Leaves the Inbox when you move on",
+    "filtered": "No longer matches your filters",
+    "notification_archived": "Notification archived",
+    "next": "Next",
+    "next_tooltip": "Open next: {{title}}"
+  },
   "errors": {
     "archived_lookup_failed": "Failed to load the linked notification",
     "source_context_retry_failed": "Could not retry with the original context",

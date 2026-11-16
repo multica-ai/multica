@@ -132,6 +132,14 @@
     "unsubscribed_hint": "Sus actualizaciones no llegarán a tu bandeja. Las @menciones sí.",
     "undo": "Deshacer"
   },
+  "kept": {
+    "archived": "Archivado",
+    "leaves": "Sale de la bandeja al continuar",
+    "filtered": "Ya no coincide con tus filtros",
+    "notification_archived": "Notificación archivada",
+    "next": "Siguiente",
+    "next_tooltip": "Abrir la siguiente: {{title}}"
+  },
   "errors": {
     "archived_lookup_failed": "No se ha podido cargar la notificación enlazada",
     "source_context_retry_failed": "No se ha podido reintentar con el contexto original",

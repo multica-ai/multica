@@ -132,6 +132,14 @@
     "unsubscribed_hint": "Ses mises à jour n'arriveront plus dans votre boîte de réception. Les @mentions, si.",
     "undo": "Annuler"
   },
+  "kept": {
+    "archived": "Archivée",
+    "leaves": "Quitte la boîte de réception quand vous passez à la suite",
+    "filtered": "Ne correspond plus à vos filtres",
+    "notification_archived": "Notification archivée",
+    "next": "Suivante",
+    "next_tooltip": "Ouvrir la suivante : {{title}}"
+  },
   "errors": {
     "archived_lookup_failed": "Échec du chargement de la notification liée",
     "source_context_retry_failed": "Impossible de réessayer avec le contexte d'origine",

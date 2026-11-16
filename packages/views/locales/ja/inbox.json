@@ -130,6 +130,14 @@
     "unsubscribed_hint": "今後の更新はインボックスに届きません。@メンションは引き続き通知されます。",
     "undo": "元に戻す"
   },
+  "kept": {
+    "archived": "アーカイブ済み",
+    "leaves": "移動するとインボックスから外れます",
+    "filtered": "フィルターに一致しなくなりました",
+    "notification_archived": "通知をアーカイブしました",
+    "next": "次へ",
+    "next_tooltip": "次を開く：{{title}}"
+  },
   "errors": {
     "archived_lookup_failed": "リンク先の通知を読み込めませんでした",
     "source_context_retry_failed": "元のコンテキストで再試行できませんでした",
