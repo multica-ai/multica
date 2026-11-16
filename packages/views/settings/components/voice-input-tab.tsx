@@ -50,14 +50,16 @@ export function VoiceInputTab() {
   const modelId = useVoiceSettingsStore((state) => state.modelId);
   const onDeviceModels = models?.models.filter((model) => !model.streams).length ?? 0;
   const offersServer = (models?.models.length ?? 0) > onDeviceModels;
-  const streamsSpeech = serverEngine || pickVoiceModel(models, modelId)?.streams === true;
+  const active = pickVoiceModel(models, modelId);
+  // The on-device copy promises speech stays here, so it needs an on-device model in use.
+  const onDeviceOnly = !serverEngine && (!offersServer || (active !== null && !active.streams));
   return (
     <SettingsTab
       title={t(($) => $.page.tabs.voice_input)}
       description={
-        streamsSpeech
-          ? t(($) => $.voice_input.description_server)
-          : t(($) => $.voice_input.description)
+        onDeviceOnly
+          ? t(($) => $.voice_input.description)
+          : t(($) => $.voice_input.description_server)
       }
       scope="device"
     >

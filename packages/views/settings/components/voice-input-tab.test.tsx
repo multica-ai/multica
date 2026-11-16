@@ -101,4 +101,13 @@ describe("VoiceInputTab", () => {
     expect(screen.getByText("Server")).toBeInTheDocument();
     expect(screen.queryByText(/run on this computer/)).not.toBeInTheDocument();
   });
+
+  it("on desktop, makes no on-device promise when a lost choice leaves only the server model", () => {
+    configStore.getState().setVoiceTranscriptionEnabled(true);
+    useVoiceSettingsStore.getState().update({ enabled: true, modelId: "deleted-local" });
+    useVoiceModelsStore.getState().setModels({ engineAvailable: true, models: [{ ...SERVER_VOICE_MODEL }] });
+    renderWithI18n(<VoiceInputTab />);
+    expect(screen.queryByText(/never leaves it/)).not.toBeInTheDocument();
+    expect(screen.getByText(/speech-to-text service your Multica server/)).toBeInTheDocument();
+  });
 });
