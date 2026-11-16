@@ -36,6 +36,10 @@ func (o *Outbound) Reply(ctx context.Context, inst engine.ResolvedInstallation, 
 				text = "This issue already exists: " + result.IssueIdentifier
 			}
 		}
+	case engine.OutcomeIssueSubscription:
+		// WeChat has no chat poster: the engine answers every /subscribe and
+		// /unsubscribe as unsupported.
+		text = engine.SubscriptionReplyText(result, "", nil)
 	case engine.OutcomeDropped:
 		if result.DropReason == engine.DropReasonNonWorkspaceMember {
 			text = "You are no longer a member of this Multica workspace."
