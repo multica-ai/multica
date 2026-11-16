@@ -53,6 +53,12 @@ let baseUrl = "";
 let queryClient: QueryClient;
 const originalDesktopAPI = window.desktopAPI;
 const originalScrollIntoView = Element.prototype.scrollIntoView;
+// Every row and route here waits on the real fixture server, which shares its
+// event loop with the whole shell. In CI, turbo runs other packages' suites
+// beside this one, and the first search has queued behind the shell's startup
+// requests for over five seconds.
+const NETWORK_WAIT = { timeout: 15_000 };
+const TEST_TIMEOUT = 60_000;
 
 function payloadFor(path: string, workspace: string): unknown {
   if (path === "/api/config") return { feature_flags: {}, allow_signup: false };
@@ -121,7 +127,7 @@ async function notify(workspace: string) {
       listener({ slug: workspace, issueKey: workspace === "synthetic-b" ? "B-1" : "A-1" });
     }
   });
-  await waitFor(() => expect(getAppRouter().state.location.pathname).toMatch(new RegExp(`^/${workspace}/(inbox|issues/)`)));
+  await waitFor(() => expect(getAppRouter().state.location.pathname).toMatch(new RegExp(`^/${workspace}/(inbox|issues/)`)), NETWORK_WAIT);
 }
 
 async function mountShell() {
@@ -132,7 +138,7 @@ async function mountShell() {
       <ReadyShell />
     </CoreProvider>,
   );
-  await waitFor(() => expect(document.querySelector('[data-slot="title-bar-actions"]')).toBeInTheDocument());
+  await waitFor(() => expect(document.querySelector('[data-slot="app-rail"]')).toBeInTheDocument(), NETWORK_WAIT);
 }
 
 beforeAll(async () => {
@@ -182,26 +188,26 @@ it("resets completed search rows through a native notification workspace switch"
   await mountShell();
   await openSearch();
   fireEvent.change(input(), { target: { value: "alpha" } });
-  await screen.findByRole("option", { name: /Alpha A result/ });
+  await screen.findByRole("option", { name: /Alpha A result/ }, NETWORK_WAIT);
   await notify("synthetic-b");
   expect(input()).toHaveValue("");
   expect(screen.queryByRole("option", { name: /Alpha A result/ })).not.toBeInTheDocument();
   fireEvent.change(input(), { target: { value: "alpha" } });
-  await screen.findByRole("option", { name: /Alpha B result/ });
+  await screen.findByRole("option", { name: /Alpha B result/ }, NETWORK_WAIT);
   expect(requests.some((request) => request.path === "/api/issues/search" && request.workspace === "synthetic-b")).toBe(true);
   fireEvent.keyDown(input(), { key: "ArrowDown" });
   fireEvent.keyDown(input(), { key: "ArrowUp" });
   expect(screen.getByRole("option", { name: /Alpha B result/ })).toHaveAttribute("aria-selected", "true");
   fireEvent.keyDown(input(), { key: "Enter" });
-  await waitFor(() => expect(getAppRouter().state.location.pathname).toBe("/synthetic-b/issues/B-1"));
-});
+  await waitFor(() => expect(getAppRouter().state.location.pathname).toBe("/synthetic-b/issues/B-1"), NETWORK_WAIT);
+}, TEST_TIMEOUT);
 
 it("cancels an in-flight search when the production router switches workspace", async () => {
   await mountShell();
   await openSearch();
   holdA = true;
   fireEvent.change(input(), { target: { value: "alpha" } });
-  await waitFor(() => expect(held.length).toBe(2));
+  await waitFor(() => expect(held.length).toBe(2), NETWORK_WAIT);
   await notify("synthetic-b");
   await act(async () => {
     for (const { response, payload } of held.splice(0)) response.end(JSON.stringify(payload));
@@ -209,14 +215,14 @@ it("cancels an in-flight search when the production router switches workspace", 
   expect(input()).toHaveValue("");
   expect(screen.queryByRole("option", { name: /Alpha A result/ })).not.toBeInTheDocument();
   fireEvent.change(input(), { target: { value: "alpha" } });
-  await screen.findByRole("option", { name: /Alpha B result/ });
-});
+  await screen.findByRole("option", { name: /Alpha B result/ }, NETWORK_WAIT);
+}, TEST_TIMEOUT);
 
 it("resets a returning workspace while preserving same-workspace search navigation", async () => {
   await mountShell();
   await openSearch();
   fireEvent.change(input(), { target: { value: "alpha" } });
-  await screen.findByRole("option", { name: /Alpha A result/ });
+  await screen.findByRole("option", { name: /Alpha A result/ }, NETWORK_WAIT);
   // Notifications within A preserve the query and its results.
   await notify("synthetic-a");
   expect(input()).toHaveValue("alpha");
@@ -224,11 +230,11 @@ it("resets a returning workspace while preserving same-workspace search navigati
   await notify("synthetic-b");
   expect(input()).toHaveValue("");
   fireEvent.change(input(), { target: { value: "alpha" } });
-  await screen.findByRole("option", { name: /Alpha B result/ });
+  await screen.findByRole("option", { name: /Alpha B result/ }, NETWORK_WAIT);
   await notify("synthetic-a");
   expect(input()).toHaveValue("");
   expect(screen.queryByRole("option", { name: /Alpha B result/ })).not.toBeInTheDocument();
   fireEvent.keyDown(input(), { key: "Escape" });
   await openSearch();
   expect(input()).toHaveValue("");
-});
+}, TEST_TIMEOUT);

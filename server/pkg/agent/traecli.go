@@ -108,7 +108,14 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 	runCtx, cancel := runContext(ctx, timeout)
 
 	traecliArgs := append(
-		[]string{"acp", "serve", "--yolo"},
+		[]string{
+			"acp", "serve", "--yolo",
+			// Native Plan can finish an ACP prompt before implementation and
+			// automatically start another turn. Headless tasks use ordinary
+			// text planning within the original request instead.
+			"--disallowed-tool", "EnterPlanMode",
+			"--disallowed-tool", "ExitPlanMode",
+		},
 		filterCustomArgs(opts.CustomArgs, traecliBlockedArgs, b.cfg.Logger)...,
 	)
 	cmd := b.cfg.commandAt(execPath).exec(runCtx, traecliArgs...)

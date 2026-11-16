@@ -283,12 +283,11 @@ describe("useIssueSubscribers subscriptionKnown", () => {
 });
 
 /**
- * A project watcher who comments gets a direct commenter row. The project
- * still delivers every event to them, so the hook must keep saying so, or the
- * issue page claims "key updates only" for a subscription that is not narrowed
- * (MUL-9343).
+ * The delivery tier is the server's: the hook passes it through, and drops it
+ * from a row whose reason a realtime event changed locally, so no badge claims
+ * a tier the server has not confirmed (MUL-9360).
  */
-describe("useIssueSubscribers project coverage", () => {
+describe("useIssueSubscribers delivery", () => {
   afterEach(() => {
     cleanup();
     wsHandlers.clear();
@@ -303,24 +302,33 @@ describe("useIssueSubscribers project coverage", () => {
     ...extra,
   });
 
-  it("reads project_covered from the server", async () => {
+  it("reads delivery from the server", async () => {
     setApiInstance({
-      listIssueSubscribers: async () => [row("commenter", { project_covered: true })],
+      listIssueSubscribers: async () => [row("commenter", { delivery: "key_updates" })],
     } as unknown as ApiClient);
 
     const { result } = renderSubscribers();
-    await waitFor(() => expect(result.current.subscriptionKnown).toBe(true));
-    await waitFor(() => expect(result.current.subscriptionReason).toBe("commenter"));
-    expect(result.current.subscriptionProjectCovered).toBe(true);
+    await waitFor(() => expect(result.current.subscriptionDelivery).toBe("key_updates"));
+    expect(result.current.subscriptionReason).toBe("commenter");
   });
 
-  it("keeps the coverage when a project row turns into a direct one", async () => {
+  it("is undefined from a server that predates it", async () => {
     setApiInstance({
-      listIssueSubscribers: async () => [row("project")],
+      listIssueSubscribers: async () => [row("commenter")],
     } as unknown as ApiClient);
 
     const { result } = renderSubscribers();
-    await waitFor(() => expect(result.current.subscriptionReason).toBe("project"));
+    await waitFor(() => expect(result.current.subscriptionReason).toBe("commenter"));
+    expect(result.current.subscriptionDelivery).toBeUndefined();
+  });
+
+  it("drops the tier when a realtime event changes the reason", async () => {
+    setApiInstance({
+      listIssueSubscribers: async () => [row("delegated", { delivery: "delegated" })],
+    } as unknown as ApiClient);
+
+    const { result } = renderSubscribers();
+    await waitFor(() => expect(result.current.subscriptionDelivery).toBe("delegated"));
     act(() => {
       wsHandlers.get("subscriber:added")?.({
         issue_id: "issue-1",
@@ -331,25 +339,6 @@ describe("useIssueSubscribers project coverage", () => {
     });
 
     await waitFor(() => expect(result.current.subscriptionReason).toBe("commenter"));
-    expect(result.current.subscriptionProjectCovered).toBe(true);
-  });
-
-  it("is false for a plain direct subscription", async () => {
-    setApiInstance({
-      listIssueSubscribers: async () => [row("manual")],
-    } as unknown as ApiClient);
-
-    const { result } = renderSubscribers();
-    await waitFor(() => expect(result.current.subscriptionKnown).toBe(true));
-    act(() => {
-      wsHandlers.get("subscriber:added")?.({
-        issue_id: "issue-1",
-        user_type: "member",
-        user_id: "user-1",
-        reason: "commenter",
-      });
-    });
-    await waitFor(() => expect(result.current.subscriptionReason).toBe("commenter"));
-    expect(result.current.subscriptionProjectCovered).toBe(false);
+    expect(result.current.subscriptionDelivery).toBeUndefined();
   });
 });

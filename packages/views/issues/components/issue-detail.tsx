@@ -2422,7 +2422,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
   } = useIssueReactions(id, user?.id);
 
   const {
-    subscribers, isSubscribed, subscriptionReason, subscriptionProjectCovered, subscriptionKnown,
+    subscribers, isSubscribed, subscriptionReason, subscriptionDelivery, subscriptionKnown,
     togglePending, subtreePending,
     toggleSubscribe: handleToggleSubscribe, toggleSubscriber, followAllActivity,
     unsubscribeFromSubtree: handleUnsubscribeSubtree,
@@ -4082,8 +4082,10 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
                 {/* A delegated subscription is one the user never opted into
                     by hand — their agent created this issue for them. Saying
                     so is what keeps it from reading as the product quietly
-                    adding them to things (MUL-5483). */}
-                {isSubscribed && subscriptionReason === "delegated" && (
+                    adding them to things (MUL-5483). The server's delivery
+                    tier decides it: a project watcher's delegated row still
+                    gets every event (MUL-9360). */}
+                {isSubscribed && subscriptionDelivery === "delegated" && (
                   <Tooltip>
                     {/* Quiet surface, not plain body text: this is metadata
                         explaining a state, and must not read as a second
@@ -4099,10 +4101,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
                 )}
                 {isSubscribed && (
                   <KeyUpdatesSubscriptionBadge
-                    issue={issue}
-                    userId={user?.id}
-                    reason={subscriptionReason}
-                    projectCovered={subscriptionProjectCovered}
+                    delivery={subscriptionDelivery}
                     pending={togglePending}
                     onFollowAll={followAllActivity}
                   />
