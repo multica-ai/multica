@@ -163,7 +163,7 @@ export interface FileAsset {
  *  its own copy per the `mirror, don't import` rule in apps/mobile/CLAUDE.md. */
 const MAX_FILE_SIZE = 100 * 1024 * 1024;
 
-/** Hard ceiling for every HTTP request. Mobile-specific because iOS may
+/** Hard ceiling for JSON requests. Mobile-specific because iOS may
  *  suspend a backgrounded network task without ever resolving/rejecting
  *  the JS-side fetch promise (facebook/react-native#35384). Without this
  *  timeout, a refetch fired after returning to foreground can leave the
@@ -254,7 +254,7 @@ class ApiClient {
     const controller = new AbortController();
     this.requests.add(controller);
     let timedOut = false;
-    const timeoutId = setTimeout(() => {
+    const timeoutId = multipart ? undefined : setTimeout(() => {
       timedOut = true;
       controller.abort();
     }, FETCH_TIMEOUT_MS);
