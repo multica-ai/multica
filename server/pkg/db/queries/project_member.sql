@@ -15,6 +15,16 @@ WHERE p.workspace_id = sqlc.arg('workspace_id')
       WHERE pm.project_id = p.id AND pm.user_id = sqlc.arg('user_id')
   );
 
+-- name: ListHiddenProjectIDsForGuest :many
+-- Every project a guest (MUL-9420) cannot see: all but the ones it is a
+-- member of, whatever their visibility.
+SELECT p.id FROM project p
+WHERE p.workspace_id = sqlc.arg('workspace_id')
+  AND NOT EXISTS (
+      SELECT 1 FROM project_member pm
+      WHERE pm.project_id = p.id AND pm.user_id = sqlc.arg('user_id')
+  );
+
 -- name: ListPrivateProjectAudience :many
 -- Realtime fanout for private-project events: each private project with its
 -- member user ids (NULL user_id when the project has no members yet).
@@ -45,6 +55,37 @@ WHERE m.workspace_id = sqlc.arg('workspace_id')
   AND m.user_id = ANY(sqlc.arg('user_ids')::uuid[])
 ON CONFLICT (project_id, user_id) DO NOTHING
 RETURNING *;
+
+-- name: ListWorkspaceProjectIDs :many
+-- The ids among project_ids that are projects of this workspace.
+SELECT id FROM project
+WHERE workspace_id = sqlc.arg('workspace_id') AND id = ANY(sqlc.arg('project_ids')::uuid[]);
+
+-- name: ListGuestProjects :many
+-- Every guest's projects in a workspace, for the members list.
+SELECT pm.user_id, pm.project_id
+FROM project_member pm
+JOIN member m ON m.workspace_id = pm.workspace_id AND m.user_id = pm.user_id
+WHERE pm.workspace_id = $1 AND m.role = 'guest'
+ORDER BY pm.created_at, pm.project_id;
+
+-- name: AddUserToProjects :many
+-- A guest's (MUL-9420) projects. Unlike AddProjectMembers this does not
+-- require a member row, so an invitation's projects can be written in the
+-- same transaction that creates the member.
+INSERT INTO project_member (workspace_id, project_id, user_id, added_by)
+SELECT p.workspace_id, p.id, sqlc.arg('user_id')::uuid, sqlc.narg('added_by')::uuid
+FROM project p
+WHERE p.workspace_id = sqlc.arg('workspace_id')
+  AND p.id = ANY(sqlc.arg('project_ids')::uuid[])
+ON CONFLICT (project_id, user_id) DO NOTHING
+RETURNING *;
+
+-- name: RemoveUserFromProjectsExcept :execrows
+DELETE FROM project_member
+WHERE workspace_id = sqlc.arg('workspace_id')
+  AND user_id = sqlc.arg('user_id')
+  AND NOT (project_id = ANY(sqlc.arg('keep_project_ids')::uuid[]));
 
 -- name: DeleteProjectMember :execrows
 DELETE FROM project_member

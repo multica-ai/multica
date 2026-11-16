@@ -37,7 +37,7 @@ WITH ws AS (SELECT $1::uuid AS id, $2::uuid[] AS hidden),
 visible_issue AS (
     SELECT i.id, i.title, i.description FROM issue i, ws
     WHERE i.workspace_id = ws.id
-      AND (ws.hidden IS NULL OR i.project_id IS NULL OR NOT (i.project_id = ANY(ws.hidden)))
+      AND (ws.hidden IS NULL OR NOT (COALESCE(i.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY(ws.hidden)))
 ),
 visible_comment AS (
     SELECT c.content FROM comment c

@@ -20,7 +20,7 @@ WHERE i.workspace_id = $1 AND i.recipient_type = $2 AND i.recipient_id = $3 AND 
   -- whose time has passed is listed again and keeps snoozed_until, which is
   -- how the client tells an issue that came back on its own.
   AND (i.snoozed_until IS NULL OR i.snoozed_until <= now())
-  AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR iss.project_id IS NULL OR NOT (iss.project_id = ANY(sqlc.narg('hidden_project_ids')::uuid[])))
+  AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR NOT (COALESCE(iss.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY(sqlc.narg('hidden_project_ids')::uuid[])))
 -- Newest first by when the row arrived or came back (returned_at), the order
 -- idx_inbox_active_shown keeps. The
 -- inbox keeps only its newest rows (inbox.ActiveLimit); inbox.Trimmer archives
@@ -64,7 +64,7 @@ WITH eligible_archived AS MATERIALIZED (
       AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR i.issue_id IS NULL OR NOT EXISTS (
           SELECT 1 FROM issue hidden_issue
           WHERE hidden_issue.id = i.issue_id
-            AND hidden_issue.project_id = ANY(sqlc.narg('hidden_project_ids')::uuid[])
+            AND COALESCE(hidden_issue.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY(sqlc.narg('hidden_project_ids')::uuid[])
       ))
       AND (i.issue_id IS NULL OR NOT EXISTS (
           SELECT 1
@@ -269,7 +269,7 @@ WHERE i.workspace_id = sqlc.arg('workspace_id')
   AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR i.issue_id IS NULL OR NOT EXISTS (
       SELECT 1 FROM issue hidden_issue
       WHERE hidden_issue.id = i.issue_id
-        AND hidden_issue.project_id = ANY(sqlc.narg('hidden_project_ids')::uuid[])
+        AND COALESCE(hidden_issue.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY(sqlc.narg('hidden_project_ids')::uuid[])
   ));
 
 -- name: CountUnreadInboxByWorkspace :many
@@ -462,7 +462,7 @@ FROM (
       AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR NOT EXISTS (
           SELECT 1 FROM issue hidden_issue
           WHERE hidden_issue.id = i.issue_id
-            AND hidden_issue.project_id = ANY(sqlc.narg('hidden_project_ids')::uuid[])
+            AND COALESCE(hidden_issue.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY(sqlc.narg('hidden_project_ids')::uuid[])
       ))
     GROUP BY i.issue_id
 ) g

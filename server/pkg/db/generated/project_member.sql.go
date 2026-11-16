@@ -61,6 +61,57 @@ func (q *Queries) AddProjectMembers(ctx context.Context, arg AddProjectMembersPa
 	return items, nil
 }
 
+const addUserToProjects = `-- name: AddUserToProjects :many
+INSERT INTO project_member (workspace_id, project_id, user_id, added_by)
+SELECT p.workspace_id, p.id, $1::uuid, $2::uuid
+FROM project p
+WHERE p.workspace_id = $3
+  AND p.id = ANY($4::uuid[])
+ON CONFLICT (project_id, user_id) DO NOTHING
+RETURNING workspace_id, project_id, user_id, added_by, created_at
+`
+
+type AddUserToProjectsParams struct {
+	UserID      pgtype.UUID   `json:"user_id"`
+	AddedBy     pgtype.UUID   `json:"added_by"`
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+	ProjectIds  []pgtype.UUID `json:"project_ids"`
+}
+
+// A guest's (MUL-9420) projects. Unlike AddProjectMembers this does not
+// require a member row, so an invitation's projects can be written in the
+// same transaction that creates the member.
+func (q *Queries) AddUserToProjects(ctx context.Context, arg AddUserToProjectsParams) ([]ProjectMember, error) {
+	rows, err := q.db.Query(ctx, addUserToProjects,
+		arg.UserID,
+		arg.AddedBy,
+		arg.WorkspaceID,
+		arg.ProjectIds,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ProjectMember{}
+	for rows.Next() {
+		var i ProjectMember
+		if err := rows.Scan(
+			&i.WorkspaceID,
+			&i.ProjectID,
+			&i.UserID,
+			&i.AddedBy,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const deleteProjectMember = `-- name: DeleteProjectMember :execrows
 DELETE FROM project_member
 WHERE project_id = $1
@@ -195,6 +246,76 @@ func (q *Queries) ListAutopilotRunProjectIDs(ctx context.Context, ids []pgtype.U
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listGuestProjects = `-- name: ListGuestProjects :many
+SELECT pm.user_id, pm.project_id
+FROM project_member pm
+JOIN member m ON m.workspace_id = pm.workspace_id AND m.user_id = pm.user_id
+WHERE pm.workspace_id = $1 AND m.role = 'guest'
+ORDER BY pm.created_at, pm.project_id
+`
+
+type ListGuestProjectsRow struct {
+	UserID    pgtype.UUID `json:"user_id"`
+	ProjectID pgtype.UUID `json:"project_id"`
+}
+
+// Every guest's projects in a workspace, for the members list.
+func (q *Queries) ListGuestProjects(ctx context.Context, workspaceID pgtype.UUID) ([]ListGuestProjectsRow, error) {
+	rows, err := q.db.Query(ctx, listGuestProjects, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListGuestProjectsRow{}
+	for rows.Next() {
+		var i ListGuestProjectsRow
+		if err := rows.Scan(&i.UserID, &i.ProjectID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listHiddenProjectIDsForGuest = `-- name: ListHiddenProjectIDsForGuest :many
+SELECT p.id FROM project p
+WHERE p.workspace_id = $1
+  AND NOT EXISTS (
+      SELECT 1 FROM project_member pm
+      WHERE pm.project_id = p.id AND pm.user_id = $2
+  )
+`
+
+type ListHiddenProjectIDsForGuestParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+// Every project a guest (MUL-9420) cannot see: all but the ones it is a
+// member of, whatever their visibility.
+func (q *Queries) ListHiddenProjectIDsForGuest(ctx context.Context, arg ListHiddenProjectIDsForGuestParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listHiddenProjectIDsForGuest, arg.WorkspaceID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -413,6 +534,58 @@ func (q *Queries) ListProjectMembers(ctx context.Context, arg ListProjectMembers
 		return nil, err
 	}
 	return items, nil
+}
+
+const listWorkspaceProjectIDs = `-- name: ListWorkspaceProjectIDs :many
+SELECT id FROM project
+WHERE workspace_id = $1 AND id = ANY($2::uuid[])
+`
+
+type ListWorkspaceProjectIDsParams struct {
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+	ProjectIds  []pgtype.UUID `json:"project_ids"`
+}
+
+// The ids among project_ids that are projects of this workspace.
+func (q *Queries) ListWorkspaceProjectIDs(ctx context.Context, arg ListWorkspaceProjectIDsParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listWorkspaceProjectIDs, arg.WorkspaceID, arg.ProjectIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const removeUserFromProjectsExcept = `-- name: RemoveUserFromProjectsExcept :execrows
+DELETE FROM project_member
+WHERE workspace_id = $1
+  AND user_id = $2
+  AND NOT (project_id = ANY($3::uuid[]))
+`
+
+type RemoveUserFromProjectsExceptParams struct {
+	WorkspaceID    pgtype.UUID   `json:"workspace_id"`
+	UserID         pgtype.UUID   `json:"user_id"`
+	KeepProjectIds []pgtype.UUID `json:"keep_project_ids"`
+}
+
+func (q *Queries) RemoveUserFromProjectsExcept(ctx context.Context, arg RemoveUserFromProjectsExceptParams) (int64, error) {
+	result, err := q.db.Exec(ctx, removeUserFromProjectsExcept, arg.WorkspaceID, arg.UserID, arg.KeepProjectIds)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const touchProjectSearchIndexEntries = `-- name: TouchProjectSearchIndexEntries :exec

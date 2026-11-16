@@ -1733,6 +1733,10 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	}
 	// Determine author identity: agent (via X-Agent-ID header) or member.
 	authorType, authorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
+	if authorType == "member" && h.isGuest(r, uuidToString(issue.WorkspaceID), userID) && mentionsAgent(req.Content) {
+		writeError(w, http.StatusForbidden, "guests cannot mention agents or squads")
+		return
+	}
 
 	// A running turn receives text only, so a comment that carries files is
 	// always a normal trigger. A member's explicit skill selection is the

@@ -20,6 +20,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/projectaccess"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -574,6 +575,9 @@ type MemberWithUserResponse struct {
 	Name        string  `json:"name"`
 	Email       string  `json:"email"`
 	AvatarURL   *string `json:"avatar_url"`
+	// ProjectIDs lists a guest's projects. Omitted for other roles, and for
+	// guests when a guest is asking.
+	ProjectIDs []string `json:"project_ids,omitempty"`
 }
 
 func (h *Handler) ListMembersWithUser(w http.ResponseWriter, r *http.Request) {
@@ -589,6 +593,17 @@ func (h *Handler) ListMembersWithUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	guestProjects := map[[16]byte][]string{}
+	if requester, _ := ctxMember(r.Context()); !projectaccess.IsGuestRole(requester.Role) {
+		rows, err := h.Queries.ListGuestProjects(r.Context(), wsUUID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to list members")
+			return
+		}
+		for _, row := range rows {
+			guestProjects[row.UserID.Bytes] = append(guestProjects[row.UserID.Bytes], uuidToString(row.ProjectID))
+		}
+	}
 	resp := make([]MemberWithUserResponse, len(members))
 	for i, m := range members {
 		resp[i] = MemberWithUserResponse{
@@ -601,6 +616,9 @@ func (h *Handler) ListMembersWithUser(w http.ResponseWriter, r *http.Request) {
 			Email:       m.UserEmail,
 			AvatarURL:   h.resolveAvatarURLPtr(textToPtr(m.UserAvatarUrl)),
 		}
+		if projectaccess.IsGuestRole(m.Role) {
+			resp[i].ProjectIDs = guestProjects[m.UserID.Bytes]
+		}
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -609,6 +627,8 @@ func (h *Handler) ListMembersWithUser(w http.ResponseWriter, r *http.Request) {
 type CreateMemberRequest struct {
 	Email string `json:"email"`
 	Role  string `json:"role"`
+	// ProjectIDs are required for a guest and ignored otherwise.
+	ProjectIDs []string `json:"project_ids,omitempty"`
 }
 
 func (h *Handler) memberWithUserResponse(member db.Member, user db.User) MemberWithUserResponse {
@@ -631,7 +651,7 @@ func normalizeMemberRole(role string) (string, bool) {
 
 	role = strings.TrimSpace(role)
 	switch role {
-	case "owner", "admin", "member":
+	case "owner", "admin", "member", projectaccess.RoleGuest:
 		return role, true
 	default:
 		return "", false
@@ -640,6 +660,8 @@ func normalizeMemberRole(role string) (string, bool) {
 
 type UpdateMemberRequest struct {
 	Role string `json:"role"`
+	// ProjectIDs are required when the member becomes a guest.
+	ProjectIDs []string `json:"project_ids,omitempty"`
 }
 
 func (h *Handler) UpdateMember(w http.ResponseWriter, r *http.Request) {
@@ -693,12 +715,32 @@ func (h *Handler) UpdateMember(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	updatedMember, err := h.Queries.UpdateMemberRole(r.Context(), db.UpdateMemberRoleParams{
-		ID:   target.ID,
-		Role: role,
-	})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to update member")
+	wasGuest := projectaccess.IsGuestRole(target.Role)
+	toGuest := projectaccess.IsGuestRole(role)
+	var updatedMember db.Member
+	var guestProjects []pgtype.UUID
+	switch {
+	case toGuest && !wasGuest:
+		if !h.guestsEnabled(w, r) {
+			return
+		}
+		if guestProjects, ok = h.parseGuestProjectIDs(w, r, target.WorkspaceID, req.ProjectIDs); !ok {
+			return
+		}
+		updatedMember, ok = h.demoteMemberToGuest(w, r, requester, target, guestProjects)
+	case wasGuest && !toGuest:
+		updatedMember, ok = h.promoteGuest(w, r, target, role)
+	default:
+		updatedMember, err = h.Queries.UpdateMemberRole(r.Context(), db.UpdateMemberRoleParams{
+			ID:   target.ID,
+			Role: role,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update member")
+			return
+		}
+	}
+	if !ok {
 		return
 	}
 
@@ -710,12 +752,16 @@ func (h *Handler) UpdateMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	resp := h.memberWithUserResponse(updatedMember, user)
+	if toGuest {
+		resp.ProjectIDs = uuidsToStrings(guestProjects)
+	}
 	userID := requestUserID(r)
 	h.publish(protocol.EventMemberUpdated, uuidToString(requester.WorkspaceID), "member", userID, map[string]any{
-		"member": h.memberWithUserResponse(updatedMember, user),
+		"member": resp,
 	})
 
-	writeJSON(w, http.StatusOK, h.memberWithUserResponse(updatedMember, user))
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *Handler) DeleteMember(w http.ResponseWriter, r *http.Request) {

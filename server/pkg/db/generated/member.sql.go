@@ -97,6 +97,7 @@ JOIN (
            unnest($2::uuid[]) AS workspace_id
 ) AS requested
     ON m.user_id = requested.user_id AND m.workspace_id = requested.workspace_id
+WHERE m.role <> 'guest'
 `
 
 type GetRealtimeMembershipsParams struct {
@@ -109,6 +110,8 @@ type GetRealtimeMembershipsRow struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
+// Guests (MUL-9420) get no realtime stream: workspace fanout is not narrowed
+// to their projects, so a socket that becomes a guest's is closed.
 func (q *Queries) GetRealtimeMemberships(ctx context.Context, arg GetRealtimeMembershipsParams) ([]GetRealtimeMembershipsRow, error) {
 	rows, err := q.db.Query(ctx, getRealtimeMemberships, arg.UserIds, arg.WorkspaceIds)
 	if err != nil {
