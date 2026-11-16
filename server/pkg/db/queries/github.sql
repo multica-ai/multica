@@ -194,6 +194,35 @@ LEFT JOIN checks c ON c.pr_id = pr.id
 WHERE ipr.issue_id = sqlc.arg('issue_id')
 ORDER BY pr.pr_created_at DESC;
 
+-- name: ListIssuePullRequestSummaries :many
+-- Every issue -> PR link in the workspace, GitHub and self-hosted providers
+-- together, newest first. Carries only what an issue card or row needs to
+-- render a PR chip (no CI/merge snapshot). Backs the workspace wide "Pull
+-- requests" display option on board / list / table views. Links on issues in
+-- private projects the caller cannot see are left out, as in the issue lists.
+SELECT
+    ipr.issue_id,
+    pr.id, 'github'::text AS provider, pr.repo_owner, pr.repo_name,
+    pr.pr_number, pr.title, pr.state, pr.html_url, pr.pr_created_at
+FROM github_pull_request pr
+JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
+JOIN issue i ON i.id = ipr.issue_id
+WHERE pr.workspace_id = sqlc.arg('workspace_id')
+  AND i.workspace_id = sqlc.arg('workspace_id')
+  AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR i.project_id IS NULL OR NOT (i.project_id = ANY(sqlc.narg('hidden_project_ids')::uuid[])))
+UNION ALL
+SELECT
+    ipr.issue_id,
+    pr.id, pr.provider, pr.repo_owner, pr.repo_name,
+    pr.pr_number, pr.title, pr.state, pr.html_url, pr.pr_created_at
+FROM vcs_pull_request pr
+JOIN issue_vcs_pull_request ipr ON ipr.pull_request_id = pr.id
+JOIN issue i ON i.id = ipr.issue_id
+WHERE pr.workspace_id = sqlc.arg('workspace_id')
+  AND i.workspace_id = sqlc.arg('workspace_id')
+  AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR i.project_id IS NULL OR NOT (i.project_id = ANY(sqlc.narg('hidden_project_ids')::uuid[])))
+ORDER BY pr_created_at DESC;
+
 -- name: GetIssueReviewHeadSha :one
 -- Returns the head SHA of the commit currently "under review" for an issue:
 -- the most-recently-updated linked PR that still has an open/draft state and a

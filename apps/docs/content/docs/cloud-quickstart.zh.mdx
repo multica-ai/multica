@@ -4,40 +4,50 @@ description: 连接一台电脑，创建你的第一个智能体，并让它完�
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
 
 <Callout type="info">
 智能体执行前，运行它的电脑上需要有至少一款已安装并登录的[支持的 AI 编程工具](/providers)，例如 Claude Code、Codex 或 Cursor。Multica 不自带这些工具。
 </Callout>
 
-## 1. 登录，进入工作区
+<Steps>
+<Step>
 
-用 Web（[multica.ai](https://multica.ai)）或 [Multica Desktop](https://multica.ai/download) 登录，支持邮箱验证码和 Google。
+## 登录，进入工作区 [#1-登录进入工作区]
 
-- **Desktop**：可以自动连接这台电脑。
-- **Web**：需要在下一步通过命令行连接。
+用 Web（[multica.ai](https://multica.ai)）或 [Multica Desktop](https://multica.ai/download) 登录，支持邮箱验证码和 Google。用 Desktop 登录的话，下一步可以自动连接这台电脑；用 Web 则要在下一步通过命令行连接。
 
-## 2. 连接一台电脑
+</Step>
+<Step>
 
-智能体在你连接的电脑上执行工作。打开侧边栏底部的 **配置 → 运行时**：
+## 连接一台电脑 [#2-连接一台电脑]
+
+智能体在你连接的电脑上执行工作。打开侧边栏 **AI 团队** 下的 **运行时**：
 
 - **用 Desktop**：Desktop 会自动把这台电脑注册为运行时，并检测已安装的 AI 编程工具。刚安装的工具，点"刷新"重新检测。
-- **用 Web，或需要添加另一台电脑**：点右上角的 **添加电脑**，在目标电脑的终端里运行弹窗给出的两条命令：
+- **用 Web，或需要添加另一台电脑**：点右上角的 **添加**，选择 **其他机器或服务器**，在目标电脑的终端里运行弹窗给出的两条命令：
 
- **macOS / Linux**
+<Tabs groupId="os" persist items={["macOS / Linux", "Windows"]}>
+<Tab value="macOS / Linux">
 
- ```bash
- curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
- multica setup
- ```
+```bash
+curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
+multica setup
+```
 
- **Windows PowerShell**
+</Tab>
+<Tab value="Windows">
 
- ```powershell
- irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
- multica setup
- ```
+```powershell
+irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
+multica setup
+```
 
- `multica setup` 会打开浏览器完成登录，然后让守护进程在后台运行。守护进程上线后，弹窗通常在一分钟内自动检测到这台电脑。
+</Tab>
+</Tabs>
+
+`multica setup` 会打开浏览器完成登录，然后让守护进程在后台运行。守护进程上线后，弹窗通常在一分钟内检测到这台电脑。
 
 **成功标志**：运行时列表里出现一台在线的电脑。
 
@@ -47,20 +57,21 @@ import { Callout } from "fumadocs-ui/components/callout";
 自托管实例的连接命令略有不同，见[自托管快速上手](/self-host-quickstart)。
 </Callout>
 
-## 3. 创建一个智能体
+</Step>
+<Step>
 
-打开侧边栏的 **工作区 → 智能体**，点 **新建智能体**，选择一条路径：
+## 创建一个智能体 [#3-创建一个智能体]
 
-- **从空白开始**：自己填字段。最少只需要名称，再确认运行时和 AI 编程工具即可创建。
-- **通过 AI 创建**：描述你想要什么，由 Agent Builder 提问并生成配置。这条路径需要一个在线运行时。
+打开侧边栏 **AI 团队** 下的 **智能体**，点 **新建智能体**。先选择刚连接的电脑上的一款 AI 编程工具，再填名称，点 **创建智能体**。必填的只有运行时和名称。
 
-其余配置可以之后完善，详见[创建和配置智能体](/agents-create)。
+不想从头写配置，可以在配置页点 **让 AI 帮我写**，由 Agent Builder 提问并补全；这需要所选运行时在线。其余配置可以之后完善，详见[创建和配置智能体](/agents-create)。
 
 **成功标志**：智能体列表中出现你的智能体，并显示为在线。
 
-![创建智能体的起点选择页：Start blank 与 Build with AI](/images/docs/quickstart-new-agent.webp)
+</Step>
+<Step>
 
-## 4. 把第一个任务交给它
+## 把第一个任务交给它 [#4-把第一个任务交给它]
 
 点侧边栏顶部的 **新建任务**（或按快捷键 `C`）。在默认的智能体模式下：
 
@@ -70,13 +81,19 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 ![新建任务弹窗的智能体模式：Created by 已选中 Multica Assistant](/images/docs/quickstart-new-issue.webp)
 
-## 5. 查看进度和结果
+</Step>
+<Step>
+
+## 查看进度和结果 [#5-查看进度和结果]
 
 提交后打开这条任务：执行日志显示运行状态，智能体的进展和回复出现在时间线中。
 
 **成功标志**：执行日志状态变为"已完成"，时间线中出现智能体的回复。需要查看完整过程时，点"查看记录"。
 
 ![任务中智能体的回复与已完成的执行日志](/images/docs/quickstart-run-result.webp)
+
+</Step>
+</Steps>
 
 ## 常见问题
 
@@ -92,4 +109,4 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 - [核心概念](/concepts) — 三分钟认识 Multica 的全部核心对象。
 - [Multica 的工作方式](/how-multica-works) — 理解任务、智能体、运行时和每次执行之间的关系。
-- [让智能体开始工作](/triggering-agents) — 除了分配，还有 @评论、对话和自动化三种触发方式。
+- [让智能体开始工作](/triggering-agents) — 除了分配，还可以用 @提及、对话和自动化让智能体开始工作。

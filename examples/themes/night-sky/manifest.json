@@ -1,0 +1,13 @@
+{
+  "apiVersion": 1,
+  "id": "night-sky",
+  "name": "Night Sky",
+  "version": "1.0.0",
+  "author": "Multica",
+  "description": "A slowly drifting sky behind a frosted page: night in dark mode, dawn in light mode.",
+  "options": [
+    { "id": "glass", "type": "heading", "label": "Glass" },
+    { "id": "glass-blur", "type": "slider", "label": "Blur", "default": 18, "min": 0, "max": 40, "step": 2, "unit": "px" },
+    { "id": "glass-opacity", "type": "slider", "label": "Page opacity", "default": 72, "min": 40, "max": 100, "step": 4, "unit": "%" }
+  ]
+}

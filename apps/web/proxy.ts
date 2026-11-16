@@ -1,9 +1,16 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { LOCALE_COOKIE } from "@multica/core/i18n";
+import { LOCALE_COOKIE, type SupportedLocale } from "@multica/core/i18n";
 import {
+  isSupportedLocale,
   MULTICA_LOCALE_HEADER,
   resolveLocaleFromSignals,
 } from "./lib/locale-routing";
+import {
+  isLandingPath,
+  landingPathLocale,
+  localizeHref,
+  splitLandingLocale,
+} from "./lib/landing-locale-path";
 import { runtimeRewriteDestination } from "./config/runtime-urls";
 import { isOfficialMarketingHost } from "./lib/public-host";
 
@@ -25,7 +32,7 @@ const LEGACY_ROUTE_SEGMENTS = new Set([
   "usage",
 ]);
 
-function resolveLocale(req: NextRequest): string {
+function resolveLocale(req: NextRequest): SupportedLocale {
   return resolveLocaleFromSignals({
     cookieLocale: req.cookies.get(LOCALE_COOKIE)?.value,
     acceptLanguage: req.headers.get("accept-language"),
@@ -36,10 +43,46 @@ function resolveLocale(req: NextRequest): string {
 // request header. layout.tsx reads it through `await headers()`. The
 // `request: { headers }` form is what makes the header land on the upstream
 // request — without it the value would only sit on the response.
-function nextWithLocale(req: NextRequest): NextResponse {
+function nextWithLocale(req: NextRequest, locale = resolveLocale(req)): NextResponse {
   const headers = new Headers(req.headers);
-  headers.set(MULTICA_LOCALE_HEADER, resolveLocale(req));
+  headers.set(MULTICA_LOCALE_HEADER, locale);
   return NextResponse.next({ request: { headers } });
+}
+
+// The marketing site has one URL per language: English at the root, the
+// others under /zh, /ko and /ja (lib/landing-locale-path). Returns null for
+// paths that are not marketing pages.
+function routeLandingLocale(
+  req: NextRequest,
+  hasSession: boolean,
+  lastSlug: string | undefined,
+): NextResponse | null {
+  const { pathname } = req.nextUrl;
+  const prefixed = splitLandingLocale(pathname);
+  if (prefixed) {
+    // A workspace that took a language prefix as its slug before the prefix
+    // was reserved keeps its bare root for its members.
+    if (prefixed.path === "/" && hasSession && lastSlug === pathname.slice(1)) return null;
+    const url = req.nextUrl.clone();
+    url.pathname = prefixed.path;
+    const headers = new Headers(req.headers);
+    headers.set(MULTICA_LOCALE_HEADER, prefixed.locale);
+    return NextResponse.rewrite(url, { request: { headers } });
+  }
+  if (!isLandingPath(pathname)) return null;
+
+  // A remembered language choice goes to that language's URL. Without one the
+  // root URL stays English — the same page crawlers index — and the page
+  // offers the browser's language rather than switching to it.
+  const cookie = req.cookies.get(LOCALE_COOKIE)?.value ?? null;
+  const chosen = isSupportedLocale(cookie) ? landingPathLocale(cookie) : "en";
+  if (chosen !== "en") {
+    const url = req.nextUrl.clone();
+    url.pathname = localizeHref(chosen, pathname);
+    return NextResponse.redirect(url);
+  }
+  const resolved = resolveLocale(req);
+  return nextWithLocale(req, landingPathLocale(resolved) === "en" ? resolved : "en");
 }
 
 // Next.js 16 renamed `middleware` → `proxy`. API surface (NextRequest /
@@ -106,6 +149,9 @@ export function proxy(req: NextRequest) {
     return NextResponse.redirect(url);
   }
 
+  const landing = routeLandingLocale(req, hasSession, lastSlug);
+  if (landing) return landing;
+
   // --- Default: forward locale header to RSC, no redirect/rewrite ---
   // Covers logged-out root path, /login, /:slug/*, and everything else.
   return nextWithLocale(req);
@@ -118,9 +164,10 @@ export const config = {
   // request time instead of being baked into next.config.js at build time.
   matcher: [
     "/v1/:path*",
-    "/api/:path*",
+    // Uploads stream through an App Router handler instead of Proxy's body clone.
+    "/api",
+    "/api/((?!upload-file(?:/|$)).*)",
     "/auth/:path*",
-    "/uploads/:path*",
     "/docs/:path*",
     "/ws",
     "/((?!api|v1|_next/static|_next/image|favicon.ico|.*\\.).*)",

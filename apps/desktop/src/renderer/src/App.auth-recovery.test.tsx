@@ -40,10 +40,6 @@ vi.mock("@multica/core/auth", () => ({
     selector(state.auth),
 }));
 
-vi.mock("@multica/core/onboarding", () => ({
-  useWelcomeStore: { getState: () => ({ reset: vi.fn() }) },
-}));
-
 vi.mock("@multica/core/workspace/queries", () => ({
   workspaceKeys: { list: () => ["workspace-list"] },
 }));
@@ -179,7 +175,9 @@ beforeEach(() => {
       getLastFreeze: vi.fn(),
       onAuthToken: () => () => {},
       onCloseActiveTab: () => () => {},
+      onContextMenu: () => () => {},
       onInviteOpen: () => () => {},
+      onIssueOpen: () => () => {},
       onSystemLocaleChanged: () => () => {},
       reportAuthSession: vi.fn(),
       runtimeConfig: {

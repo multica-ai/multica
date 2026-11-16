@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/spf13/cobra"
 )
 
@@ -59,7 +60,7 @@ func captureRuntimeStdout(t *testing.T, fn func() error) (string, error) {
 }
 
 func TestRunRuntimeDeleteStrictSuccessPrintsJSON(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	t.Setenv("MULTICA_TOKEN", "test-token")
 
 	var deleteCount int
@@ -100,7 +101,7 @@ func TestRunRuntimeDeleteStrictSuccessPrintsJSON(t *testing.T) {
 }
 
 func TestRunRuntimeDeleteConflictSuggestsCascade(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	t.Setenv("MULTICA_TOKEN", "test-token")
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -129,7 +130,7 @@ func TestRunRuntimeDeleteConflictSuggestsCascade(t *testing.T) {
 }
 
 func TestRunRuntimeDeleteCascadeConfirmsActiveAgentSnapshot(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	t.Setenv("MULTICA_TOKEN", "test-token")
 
 	var gotExpectedIDs []string
@@ -143,8 +144,8 @@ func TestRunRuntimeDeleteCascadeConfirmsActiveAgentSnapshot(t *testing.T) {
 				"code":  "runtime_has_active_agents",
 				"error": "cannot delete runtime: it has active agents bound to it.",
 				"active_agents": []map[string]any{
-					{"id": "agent-1", "name": "Codex"},
-					{"id": "agent-2", "name": "Claude"},
+					{"id": "agent-1", "name": "Codex", "instructions": strings.Repeat("a", 40<<10)},
+					{"id": "agent-2", "name": "Claude", "instructions": strings.Repeat("b", 40<<10)},
 				},
 			})
 		case r.Method == http.MethodPost && r.URL.Path == "/api/runtimes/rt-1/unbind-agents-and-delete":
@@ -198,7 +199,7 @@ func TestRunRuntimeDeleteCascadeConfirmsActiveAgentSnapshot(t *testing.T) {
 // HTTPError.Error() used to print the whole JSON response at the user, burying
 // that guidance (GH #8456).
 func TestRunRuntimeDeleteProfileInstanceConflictShowsServerGuidance(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	t.Setenv("MULTICA_TOKEN", "test-token")
 
 	const guidance = `cannot delete "MSI-S3TEST" on its own: it is registered from the custom runtime profile "Devin CLI (WSL)". It is offline, and Multica removes offline runtimes automatically after 7 days.`
@@ -229,7 +230,7 @@ func TestRunRuntimeDeleteProfileInstanceConflictShowsServerGuidance(t *testing.T
 // A 409 with no readable sentence must still fall back to the wrapper rather
 // than surfacing an empty error.
 func TestRunRuntimeDeleteConflictWithoutMessageKeepsWrapper(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	t.Setenv("MULTICA_TOKEN", "test-token")
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -244,5 +245,189 @@ func TestRunRuntimeDeleteConflictWithoutMessageKeepsWrapper(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "delete runtime:") {
 		t.Fatalf("error = %q, want the generic wrapper", err.Error())
+	}
+}
+
+func TestRuntimeDeleteDoesNotConfirmIncompleteSnapshot(t *testing.T) {
+	redirectTestHome(t, t.TempDir())
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	const marker = "fixture-instruction"
+	for _, tc := range []struct {
+		name, body string
+	}{
+		{"oversized", `{"active_agents":[{"id":"agent-1","instructions":"` + marker + strings.Repeat("a", 8<<20) + `"}],"code":"runtime_has_active_agents"}`},
+		{"truncated", `{"active_agents":[{"instructions":"` + marker},
+		{"JSON with BOM", "\ufeff" + `{"error":"` + marker + `"}`},
+		{"JSON string", `"` + marker + `"`},
+		{"proxy plaintext", "proxy: " + marker},
+		{"missing ID", `{"code":"runtime_has_active_agents","active_agents":[{"id":"agent-1"},{"name":"second"}]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodDelete {
+					t.Errorf("unexpected confirmation request: %s %s", r.Method, r.URL.Path)
+				}
+				w.WriteHeader(http.StatusConflict)
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			defer srv.Close()
+
+			cmd := newRuntimeDeleteTestCmd(srv.URL)
+			_ = cmd.Flags().Set("cascade", "true")
+			err := runRuntimeDelete(cmd, []string{"rt-1"})
+			if err == nil || strings.Contains(err.Error(), marker) {
+				t.Fatal("expected a safe error without agent instructions")
+			}
+		})
+	}
+}
+
+func TestRuntimeDeleteCascadeRefusalDoesNotExposeInstructions(t *testing.T) {
+	redirectTestHome(t, t.TempDir())
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	const marker = "private-instruction-fixture"
+	for _, tc := range []struct{ name, body string }{
+		{"complete JSON", `{"code":"runtime_delete_plan_changed","error":"bindings changed","active_agents":[{"instructions":"` + marker + `"}]}`},
+		{"large JSON", `{"code":"runtime_delete_plan_changed","error":"bindings changed","active_agents":[{"instructions":"` + marker + strings.Repeat("a", 80<<10) + `"}]}`},
+		{"malformed JSON", `{"active_agents":[{"instructions":"` + marker},
+		{"proxy plaintext", "proxy: " + marker},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			deletes, confirmations := 0, 0
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusConflict)
+				if r.Method == http.MethodDelete {
+					deletes++
+					_, _ = io.WriteString(w, `{"code":"runtime_has_active_agents","active_agents":[{"id":"agent-1"}]}`)
+					return
+				}
+				confirmations++
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			defer srv.Close()
+			cmd := newRuntimeDeleteTestCmd(srv.URL)
+			_ = cmd.Flags().Set("cascade", "true")
+			err := runRuntimeDelete(cmd, []string{"rt-1"})
+			if err == nil || strings.Contains(cli.FormatError(err, true), marker) {
+				t.Fatal("expected a safe cascade refusal, including debug output")
+			}
+			if deletes != 1 || confirmations != 1 {
+				t.Fatalf("requests DELETE/POST=%d/%d, want 1/1 without retry", deletes, confirmations)
+			}
+		})
+	}
+}
+
+func newRuntimeUpdateTestCmd(serverURL, output string) *cobra.Command {
+	cmd := &cobra.Command{Use: "update"}
+	cmd.Flags().String("server-url", "", "")
+	cmd.Flags().String("workspace-id", "", "")
+	cmd.Flags().String("profile", "", "")
+	cmd.Flags().String("target-version", "", "")
+	cmd.Flags().String("output", "json", "")
+	cmd.Flags().Bool("wait", false, "")
+	_ = cmd.Flags().Set("server-url", serverURL)
+	_ = cmd.Flags().Set("workspace-id", "ws-1")
+	_ = cmd.Flags().Set("target-version", "9.9.9")
+	_ = cmd.Flags().Set("output", output)
+	_ = cmd.Flags().Set("wait", "true")
+	return cmd
+}
+
+// runtimeUpdateStub answers the initiate call, then the single status poll --wait makes.
+func runtimeUpdateStub(t *testing.T, terminal map[string]any) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/runtimes/rt-1/update":
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "upd-1", "status": "in_progress"})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/runtimes/rt-1/update/upd-1":
+			_ = json.NewEncoder(w).Encode(terminal)
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+}
+
+func isolateRuntimeUpdateTest(t *testing.T) {
+	t.Helper()
+	// Leave any daemon-task marker above this checkout, or the client demands a mat_ token.
+	t.Chdir(t.TempDir())
+	clearDaemonTaskEnv(t)
+	redirectTestHome(t, t.TempDir())
+	t.Setenv("MULTICA_TOKEN", "test-token")
+}
+
+func TestRuntimeUpdateWaitFailedReturnsError(t *testing.T) {
+	isolateRuntimeUpdateTest(t)
+	srv := runtimeUpdateStub(t, map[string]any{"id": "upd-1", "status": "failed", "error": "mismatch"})
+	defer srv.Close()
+
+	out, err := captureRuntimeStdout(t, func() error {
+		return runRuntimeUpdate(newRuntimeUpdateTestCmd(srv.URL, "table"), []string{"rt-1"})
+	})
+	if err == nil {
+		t.Fatal("failed update returned nil")
+	}
+	if !strings.Contains(err.Error(), "failed") || !strings.Contains(err.Error(), "mismatch") {
+		t.Fatalf("error = %q, want the status and the server error", err.Error())
+	}
+	if strings.TrimSpace(out) != "" {
+		t.Fatalf("stdout = %q, want no extra copy of the failure", out)
+	}
+}
+
+func TestRuntimeUpdateWaitTimeoutReturnsError(t *testing.T) {
+	isolateRuntimeUpdateTest(t)
+	srv := runtimeUpdateStub(t, map[string]any{"id": "upd-1", "status": "timeout", "error": "gave up"})
+	defer srv.Close()
+
+	err := runRuntimeUpdate(newRuntimeUpdateTestCmd(srv.URL, "table"), []string{"rt-1"})
+	if err == nil {
+		t.Fatal("timed-out update returned nil")
+	}
+	if !strings.Contains(err.Error(), "timeout") || !strings.Contains(err.Error(), "gave up") {
+		t.Fatalf("error = %q, want the status and the server error", err.Error())
+	}
+}
+
+func TestRuntimeUpdateWaitCompletedReturnsNil(t *testing.T) {
+	isolateRuntimeUpdateTest(t)
+	srv := runtimeUpdateStub(t, map[string]any{"id": "upd-1", "status": "completed", "output": "now 9.9.9"})
+	defer srv.Close()
+
+	out, err := captureRuntimeStdout(t, func() error {
+		return runRuntimeUpdate(newRuntimeUpdateTestCmd(srv.URL, "table"), []string{"rt-1"})
+	})
+	if err != nil {
+		t.Fatalf("completed update: %v", err)
+	}
+	if !strings.Contains(out, "Update completed: now 9.9.9") {
+		t.Fatalf("stdout = %q, want the existing completion line", out)
+	}
+}
+
+func TestRuntimeUpdateWaitFailedJSONStillPrintsBody(t *testing.T) {
+	isolateRuntimeUpdateTest(t)
+	srv := runtimeUpdateStub(t, map[string]any{"id": "upd-1", "status": "failed", "error": "mismatch"})
+	defer srv.Close()
+
+	out, err := captureRuntimeStdout(t, func() error {
+		return runRuntimeUpdate(newRuntimeUpdateTestCmd(srv.URL, "json"), []string{"rt-1"})
+	})
+	if err == nil {
+		t.Fatal("failed JSON update returned nil")
+	}
+	if !strings.Contains(err.Error(), "failed") || !strings.Contains(err.Error(), "mismatch") {
+		t.Fatalf("error = %q, want the status and the server error", err.Error())
+	}
+	var got map[string]any
+	if decodeErr := json.Unmarshal([]byte(out), &got); decodeErr != nil {
+		t.Fatalf("stdout is not JSON %q: %v", out, decodeErr)
+	}
+	if got["status"] != "failed" || got["error"] != "mismatch" {
+		t.Fatalf("stdout = %#v, want the failed update object", got)
 	}
 }

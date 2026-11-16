@@ -15,7 +15,7 @@ export function ThemeProvider({
       disableTransitionOnChange
       {...props}
     >
-      <TooltipProvider delay={500}>
+      <TooltipProvider>
         {children}
       </TooltipProvider>
     </NextThemesProvider>

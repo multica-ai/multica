@@ -4,10 +4,11 @@ description: 智能体是在工作区中反复使用的一套身份、能力和�
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { AgentAccessDemo } from "@/components/demos/agent-access-demo";
 
 智能体是 [Multica 工作区](/workspaces)中的协作者。你可以把任务分配给它、在评论中 @它，或直接和它对话。它会通过绑定的运行时调用 AI 编程工具，并把进度和结果写回工作区。
 
-智能体本身不是一个持续运行的进程。它是一套可以反复使用的身份和配置，只有收到工作时才会产生具体的[运行](/tasks)。
+智能体不会一直在后台运行。它保存的是一套可以反复使用的身份和配置，收到工作时才产生具体的[运行](/tasks)。
 
 ## 智能体的配置项
 
@@ -39,14 +40,14 @@ import { Callout } from "fumadocs-ui/components/callout";
 - **处理一条评论**：在评论中 @智能体，不改变任务的负责人。
 - **继续讨论**：回复智能体的评论，新的信息会进入后续执行。
 - **直接对话**：开始一段不依附于任务的对话。
-- **参与项目和小队**：智能体可以成为项目 lead，也可以担任小队 leader 或小队成员。
+- **参与项目和小队**：智能体可以成为项目 lead，也可以担任小队队长或小队成员。
 - **通过自动化运行**：按时间表或外部事件触发预设工作，也可以手动运行。
 
 智能体可以创建任务、发表评论和修改工作状态，但它没有收件箱，也不会收到 `@all`。对智能体的 @提及是一次执行触发，不是通知。
 
 ## 权限与 Access
 
-每个智能体都有一名 owner 和一个 Access 设置：
+每个智能体都有一名 owner 和一个 Access 设置（界面上叫"访问权限"）。Access 决定谁可以运行它，也就是把任务分配给它、在评论中 @它或和它对话：
 
 | Access | 谁可以运行 |
 |---|---|
@@ -54,13 +55,21 @@ import { Callout } from "fumadocs-ui/components/callout";
 | **整个工作区**（Entire workspace） | 工作区中的所有成员。 |
 | **指定成员**（Specific people） | 智能体 owner 和指定的成员。 |
 
-新建智能体默认使用 **仅自己**。
+新建智能体默认使用 **仅自己**。下面的演示从"仅自己"开始，依次切到另外两档，同时列出每位成员在负责人选择器和 @提及菜单里看到的结果。
+
+<AgentAccessDemo />
 
 <Callout type="info">
-工作区 `owner` 和 `admin` 可以查看并管理所有智能体，但不能绕过 Access 运行别人的"仅自己"智能体。普通成员只会看到自己拥有或有权运行的智能体。
+工作区 `owner` 和 `admin` 可以查看并管理所有智能体，但不能绕过 Access 运行别人的"仅自己"智能体。
 </Callout>
 
-**看见**由 owner 身份、工作区管理角色和 Access 共同决定；**修改**开放给智能体 owner 和工作区 owner/admin，其中 Access 只有智能体 owner 能改。
+运行之外的操作按下表划分：
+
+| 操作 | 谁可以 |
+|---|---|
+| 在智能体列表和选择器中看到它 | 智能体 owner、工作区 `owner` 和 `admin`，以及 Access 授权的成员 |
+| 修改配置 | 智能体 owner、工作区 `owner` 和 `admin` |
+| 修改 Access | 只有智能体 owner |
 
 环境变量和 MCP 等可能包含凭据的配置有更严格的读取规则，见[创建和配置智能体](/agents-create#环境变量与凭据)。
 
@@ -85,7 +94,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 ## 接下来
 
-- [创建和配置智能体](/agents-create) — 从空白开始，或通过 AI 创建。
+- [创建和配置智能体](/agents-create) — 自己填写配置，或让 AI 帮你写草稿。
 - [Skills](/skills) — 给智能体添加可复用的方法和资料。
-- [小队](/squads) — 让 leader 根据任务选择合适的成员。
+- [小队](/squads) — 让队长根据任务选择合适的成员。
 - [守护进程与运行时](/daemon-runtimes) — 了解智能体实际在哪里执行。

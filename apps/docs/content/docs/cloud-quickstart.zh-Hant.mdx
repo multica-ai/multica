@@ -1,0 +1,112 @@
+---
+title: 快速上手
+description: 連線一臺電腦，建立你的第一個 AI 代理，並讓它完成第一個任務。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
+
+<Callout type="info">
+AI 代理執行前，執行它的電腦上需要有至少一款已安裝並登入的[支援的 AI 程式設計工具](/providers)，例如 Claude Code、Codex 或 Cursor。Multica 不自帶這些工具。
+</Callout>
+
+<Steps>
+<Step>
+
+## 登入，進入工作區 [#1-登入進入工作區]
+
+用 Web（[multica.ai](https://multica.ai)）或 [Multica Desktop](https://multica.ai/download) 登入，支援信箱驗證碼和 Google。用 Desktop 登入的話，下一步可以自動連線這臺電腦；用 Web 則要在下一步透過命令列連線。
+
+</Step>
+<Step>
+
+## 連線一臺電腦 [#2-連線一臺電腦]
+
+AI 代理在你連線的電腦上執行工作。開啟側邊欄 **AI 團隊** 下的 **執行時**：
+
+- **用 Desktop**：Desktop 會自動把這臺電腦註冊為執行時，並檢測已安裝的 AI 程式設計工具。剛安裝的工具，點"重新整理"重新檢測。
+- **用 Web，或需要新增另一臺電腦**：點右上角的 **新增**，選擇 **其他機器或伺服器**，在目標電腦的終端裡執行彈窗給出的兩條命令：
+
+<Tabs groupId="os" persist items={["macOS / Linux", "Windows"]}>
+<Tab value="macOS / Linux">
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
+multica setup
+```
+
+</Tab>
+<Tab value="Windows">
+
+```powershell
+irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
+multica setup
+```
+
+</Tab>
+</Tabs>
+
+`multica setup` 會開啟瀏覽器完成登入，然後讓守護程序在後臺執行。守護程序上線後，彈窗通常在一分鐘內檢測到這臺電腦。
+
+**成功標誌**：執行時列表裡出現一臺線上的電腦。
+
+![Add a computer 彈窗：兩條命令與等待檢測提示](/images/docs/quickstart-add-computer.webp)
+
+<Callout type="info">
+自託管例項的連線命令略有不同，見[自託管快速上手](/self-host-quickstart)。
+</Callout>
+
+</Step>
+<Step>
+
+## 建立一個 AI 代理 [#3-建立一個 AI 代理]
+
+開啟側邊欄 **AI 團隊** 下的 **AI 代理**，點 **新建 AI 代理**。先選擇剛連線的電腦上的一款 AI 程式設計工具，再填名稱，點 **建立 AI 代理**。必填的只有執行時和名稱。
+
+不想從頭寫配置，可以在配置頁點 **讓 AI 幫我寫**，由 Agent Builder 提問並補全；這需要所選執行時線上。其餘配置可以之後完善，詳見[建立和配置 AI 代理](/agents-create)。
+
+**成功標誌**：AI 代理列表中出現你的 AI 代理，並顯示為線上。
+
+</Step>
+<Step>
+
+## 把第一個任務交給它 [#4-把第一個任務交給它]
+
+點側邊欄頂部的 **新建任務**（或按快捷鍵 `C`）。在預設的 AI 代理模式下：
+
+1. 在 **建立者** 中選擇剛建立的 AI 代理；
+2. 用一兩句話描述要做的事，例如"介紹一下這個工作區可以怎麼用"；
+3. 提交。Multica 會建立任務、把 AI 代理設為負責人並立即開始執行。
+
+![新建任務彈窗的 AI 代理模式：Created by 已選中 Multica Assistant](/images/docs/quickstart-new-issue.webp)
+
+</Step>
+<Step>
+
+## 檢視進度和結果 [#5-檢視進度和結果]
+
+提交後開啟這條任務：執行日誌顯示執行狀態，AI 代理的進展和回覆出現在時間線中。
+
+**成功標誌**：執行日誌狀態變為"已完成"，時間線中出現 AI 代理的回覆。需要檢視完整過程時，點"檢視記錄"。
+
+![任務中 AI 代理的回覆與已完成的執行日誌](/images/docs/quickstart-run-result.webp)
+
+</Step>
+</Steps>
+
+## 常見問題
+
+| 現象 | 先檢查什麼 |
+|---|---|
+| 沒有找到執行時 | 確認 AI 程式設計工具已經安裝並能在終端中執行。Desktop 點"重新整理"；CLI 方式重新執行 `multica setup`。 |
+| 執行時顯示離線 | Desktop 保持開啟；CLI 方式執行 `multica daemon status`，未啟動時執行 `multica daemon start`。 |
+| 任務一直排隊 | 確認 AI 代理使用的執行時線上。執行時達到併發上限時，新執行會繼續排隊。 |
+
+更多情況見[故障排查](/troubleshooting)。
+
+## 接下來
+
+- [核心概念](/concepts) — 三分鐘認識 Multica 的全部核心物件。
+- [Multica 的工作方式](/how-multica-works) — 理解任務、AI 代理、執行時和每次執行之間的關係。
+- [讓 AI 代理開始工作](/triggering-agents) — 除了分配，還可以用 @提及、對話和自動化讓 AI 代理開始工作。

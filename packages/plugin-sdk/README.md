@@ -67,12 +67,33 @@ cannot start agent runs as a side effect of posting text.
 
 ## Theme
 
-The host pushes design tokens over the private port and again on every theme switch, and
-the SDK writes them as custom properties on `:root`. Use `var(--foreground)`,
-`var(--background)`, `var(--border)`, `var(--radius)` and friends and your
-surface will look native without shipping a stylesheet.
+The host sends design tokens over the private port when the surface connects
+and again on every theme or mode switch, and the SDK writes them as custom
+properties on `:root`. Use `var(--foreground)`, `var(--surface)`,
+`var(--border)`, `var(--radius-card)`, `var(--status-done)`, `var(--chart-1)`,
+`var(--font-ui)` and friends and your surface will look native without
+shipping a stylesheet:
 
-`multica.ui.onThemeChange(fn)` if you need to react in JS.
+```css
+:root { color-scheme: var(--color-scheme); }
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font: var(--text-body) var(--font-ui);
+}
+```
+
+They are the same tokens HTML blocks in issues and chat get, listed with their kinds in
+[Embed token reference](../../docs/theming.md#embed-token-reference): surfaces
+and text, accents, status, priority and label colours, chart series, code
+highlighting, fonts, text sizes, radii and `--color-scheme`. Every value is
+resolved by the host to a plain colour, pixel length, font stack or keyword,
+so it is safe to use anywhere a value is expected. A token the host does not
+define is not sent; give it a fallback (`var(--chart-1, steelblue)`) if your
+surface needs one.
+
+`multica.ui.onThemeChange(fn)` if you need to react in JS, for example to
+redraw a canvas chart with the new colours.
 
 ## Sizing
 

@@ -39,7 +39,7 @@ export function useAutoSave<T>({
   const mountedRef = useRef(true);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savingRef = useRef(false);
-  const queuedRef = useRef<T | null>(null);
+  const queuedRef = useRef<{ value: T } | null>(null);
   const latestValueRef = useRef(value);
   const persistedRef = useRef(savedValue);
   const observedSavedRef = useRef(savedValue);
@@ -62,13 +62,15 @@ export function useAutoSave<T>({
   }
 
   const runSave = useCallback(async (next: T) => {
-    if (!enabledRef.current || isEqualRef.current(next, persistedRef.current)) {
+    if (!enabledRef.current) {
       return;
     }
     if (savingRef.current) {
-      queuedRef.current = next;
+      queuedRef.current = { value: next };
       return;
     }
+
+    if (isEqualRef.current(next, persistedRef.current)) return;
 
     savingRef.current = true;
     let succeeded = false;
@@ -84,9 +86,14 @@ export function useAutoSave<T>({
       savingRef.current = false;
       const queued = queuedRef.current;
       queuedRef.current = null;
-      if (queued && !isEqualRef.current(queued, persistedRef.current)) {
-        void runSave(queued);
-      } else if (succeeded && mountedRef.current) {
+      if (queued && !isEqualRef.current(queued.value, persistedRef.current)) {
+        void runSave(queued.value);
+      } else if (
+        succeeded &&
+        mountedRef.current &&
+        enabledRef.current &&
+        isEqualRef.current(next, latestValueRef.current)
+      ) {
         setStatus("saved");
         onSuccessRef.current?.(next);
       }
@@ -111,10 +118,16 @@ export function useAutoSave<T>({
   useEffect(() => {
     if (timerRef.current) clearTimeout(timerRef.current);
 
-    if (!enabled || isEqual(value, persistedRef.current)) {
+    if (!enabled) queuedRef.current = null;
+    if (!enabled || (!savingRef.current && isEqual(value, persistedRef.current))) {
       timerRef.current = null;
       if (!enabled) setStatus("idle");
       return;
+    }
+
+    // A ready queue must follow edits even when they match the old saved value.
+    if (savingRef.current && queuedRef.current) {
+      queuedRef.current = { value };
     }
 
     setStatus("saving");

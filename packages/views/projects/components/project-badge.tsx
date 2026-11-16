@@ -1,6 +1,6 @@
 "use client";
 
-import { Check } from "lucide-react";
+import { Check } from "@multica/ui/icons";
 import {
   PROJECT_STATUS_CONFIG,
   PROJECT_STATUS_ORDER,
@@ -16,11 +16,13 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import type { Project, ProjectStatus, ProjectPriority, UpdateProjectRequest } from "@multica/core/types";
 import { PriorityIcon } from "../../issues/components/priority-icon";
+import { useOfferArchiveOnComplete } from "./project-archive";
 import { useProjectStatusLabels, useProjectPriorityLabels } from "./labels";
 
 export function ProjectStatusBadge({ project, handleUpdate, triggerClassName, align = "end" }: { project: Project; handleUpdate: (data: UpdateProjectRequest) => void; triggerClassName?: string; align?: "start" | "end" | "center" }) {
   const statusLabels = useProjectStatusLabels();
   const statusCfg = PROJECT_STATUS_CONFIG[project.status];
+  const offerArchive = useOfferArchiveOnComplete();
 
   return (
     <DropdownMenu>
@@ -37,7 +39,13 @@ export function ProjectStatusBadge({ project, handleUpdate, triggerClassName, al
       />
       <DropdownMenuContent align={align} className="w-44">
         {PROJECT_STATUS_ORDER.map((s) => (
-          <DropdownMenuItem key={s} onClick={() => handleUpdate({ status: s as ProjectStatus })}>
+          <DropdownMenuItem
+            key={s}
+            onClick={() => {
+              handleUpdate({ status: s as ProjectStatus });
+              offerArchive(project, s as ProjectStatus);
+            }}
+          >
             <span className={cn("size-2 rounded-full", PROJECT_STATUS_CONFIG[s].dotColor)} />
             <span>{statusLabels[s]}</span>
             {s === project.status && <Check className="ml-auto h-3.5 w-3.5" />}
@@ -48,20 +56,26 @@ export function ProjectStatusBadge({ project, handleUpdate, triggerClassName, al
   );
 }
 
-export function ProjectPriorityBadge({ project, handleUpdate, triggerClassName, align = "end" }: { project: Project; handleUpdate: (data: UpdateProjectRequest) => void; triggerClassName?: string; align?: "start" | "end" | "center" }) {
+export function ProjectPriorityBadge({ project, handleUpdate, triggerClassName, align = "end", iconOnly = false }: { project: Project; handleUpdate: (data: UpdateProjectRequest) => void; triggerClassName?: string; align?: "start" | "end" | "center"; iconOnly?: boolean }) {
   const priorityLabels = useProjectPriorityLabels();
   const priorityCfg = PROJECT_PRIORITY_CONFIG[project.priority];
+  const label = priorityLabels[project.priority];
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
         render={
-          <button type="button" className={cn(
-            "inline-flex items-center gap-1 rounded-xs px-1.5 py-0.5 text-caption font-medium hover:bg-accent/60 transition-colors cursor-pointer",
-            triggerClassName
-          )}>
+          <button
+            type="button"
+            aria-label={iconOnly ? label : undefined}
+            title={iconOnly ? label : undefined}
+            className={cn(
+              "inline-flex items-center gap-1 rounded-xs px-1.5 py-0.5 text-caption font-medium hover:bg-accent/60 transition-colors cursor-pointer",
+              triggerClassName
+            )}
+          >
             <PriorityIcon priority={project.priority} />
-            <span className={cn("text-caption", priorityCfg.color)}>{priorityLabels[project.priority]}</span>
+            {iconOnly ? null : <span className={cn("text-caption", priorityCfg.color)}>{label}</span>}
           </button>
         }
       />

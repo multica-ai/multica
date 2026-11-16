@@ -54,6 +54,48 @@ Everything below is for app developers — you can ignore the rest if you only w
 
 Bundle id and display name switch on `APP_ENV` (see `app.config.ts`), so Dev / Staging / Production variants can coexist on the same device or simulator.
 
+### Regenerating iOS after the scene lifecycle migration
+
+The app uses Expo SDK 57's scene lifecycle support for builds linked against
+the iOS 27 SDK. `app.config.ts` enables `ios.enableSceneSupport` through
+`expo-build-properties`; Expo owns window creation and forwards scene lifecycle
+and linking events. This requires Expo 57.0.23+ and expo-build-properties
+57.0.20+; adding a scene manifest alone to an SDK 55 app is insufficient.
+See [Expo's migration guidance](https://github.com/expo/fyi/blob/main/ios-scene-lifecycle.md).
+
+SDK 57's scene backport does not include the later scene-aware presenter lookup
+used by native modules such as `expo-image-picker`. The workspace applies
+`apps/mobile/patches/expo-modules-core@57.0.21.patch`, a direct backport of Expo's
+[#46956](https://github.com/expo/expo/pull/46956) and
+[#48319](https://github.com/expo/expo/pull/48319), so avatar, chat, and issue
+image pickers and document attachments resolve their presenting window from the
+foregrounded scene. pnpm requires patched dependencies to be registered at the
+workspace root, but the patch source stays with the mobile app so patch-only
+changes remain in the mobile CI scope. Keep the patch until Expo backports the
+change to SDK 57 or mobile moves to SDK 58+.
+
+`eslint-config-expo` and TypeScript are temporarily excluded from
+`expo install --check`: upgrading them enables additional compiler lint rules
+that need a focused cleanup. [#9165](https://github.com/multica-ai/multica/issues/9165)
+tracks removing the exclusions and aligning both tools with SDK 57.
+
+After updating dependencies, regenerate an existing native project once (save
+any local native customizations first; `ios/` is generated and ignored):
+
+```bash
+cd apps/mobile
+APP_ENV=production pnpm exec expo prebuild --clean --platform ios
+```
+
+Use `development` or `staging` instead for those variants, then run the usual
+build script. Keep normal development builds on the incremental prebuild path.
+For native validation, test a Release cold launch to sign-in, cold and warm
+`multica://` links, background/foreground transitions, and the Debug dev-client
+in each variant. Also open the image picker from profile, chat, and the issue
+editor, select an image, and confirm the upload completes. From the issue editor,
+also attach a document and confirm its picker dismisses and the upload completes.
+Unit tests do not replace this device validation.
+
 ## First-time setup
 
 `.env.staging` is committed (public staging URL). `.env.development.local` is gitignored — copy the template once:
@@ -64,6 +106,8 @@ cp apps/mobile/.env.example apps/mobile/.env.development.local
 ```
 
 If your Apple ID isn't on the Multica Apple Developer team yet, also set `EXPO_BUNDLE_IDENTIFIER_DEV` to a reverse-domain you own (e.g. `com.yourname.multica.dev`). For a personal production build, set `EXPO_BUNDLE_IDENTIFIER_PROD` in `.env.production.local`.
+
+For staging builds, export `EXPO_BUNDLE_IDENTIFIER_STAGING=com.yourname.multica.staging` before running an `ios:*:staging` script. Each override applies only to its named variant, so development, staging, and production can stay installed side by side.
 
 If your Apple ID belongs to more than one Apple Developer team, also set `EXPO_APPLE_TEAM_ID` to the team that should sign your builds. Unlike the bundle id overrides it applies to every variant, and it is re-applied on each run — so it also fixes a checkout that has already latched onto the wrong team.
 

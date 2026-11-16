@@ -4,8 +4,9 @@ description: Connectez les agents Multica à Feishu, Lark, Slack, DingTalk, WeCo
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { ChannelChatDemo } from "@/components/demos/channel-chat-demo";
 
-Les intégrations de messagerie permettent à l'équipe de poser des questions à un agent, de le @mentionner dans une conversation de groupe ou de créer des tâches depuis la fenêtre de conversation, sans ouvrir Multica.
+Les intégrations de messagerie permettent à l'équipe de poser des questions à un agent en message direct, de le @mentionner dans une conversation de groupe ou de créer des tâches depuis la fenêtre de conversation, sans ouvrir Multica.
 
 Feishu/Lark, Slack, DingTalk, WeCom et Telegram sont pris en charge aujourd'hui. Ils partagent les mêmes mécanismes de session, d'identité et d'exécution, mais s'installent différemment.
 
@@ -46,9 +47,11 @@ Guides pas à pas :
 4. Le message rejoint une session de [discussion avec l'agent](/chat), et une exécution est créée.
 5. La réponse de l'agent est renvoyée dans le message direct ou le fil d'origine.
 
-Les messages de canal qui ne @mentionnent pas le bot ne déclenchent jamais l'agent et ne sont pas ajoutés au contexte de sa conversation.
+Les messages de canal qui ne @mentionnent pas le bot ne déclenchent jamais l'agent et ne deviennent jamais un tour à eux seuls. Feishu/Lark et Telegram joignent toutefois les messages récents du groupe, en lecture seule, devant le tour lorsque quelqu'un s'adresse au bot ; la page de chaque plateforme donne le détail.
 
-Les messages ordinaires suivent ce flux. `/issue` est une commande, pas un tour de discussion : Multica publie le résultat sur la plateforme d'origine, mais n'ajoute pas la commande aux discussions Multica. La commande slash native de Slack passe toujours par son propre flux asynchrone de création de tâche.
+`/issue` est une commande, pas un tour de discussion : Multica crée la tâche à partir du message, l'assigne à l'agent lié au bot et publie le résultat dans la conversation d'origine. La commande elle-même n'apparaît pas dans les discussions Multica. La commande slash native de Slack passe par un flux asynchrone distinct de création de tâche.
+
+<ChannelChatDemo />
 
 ## Contrôle des conversations
 
@@ -66,7 +69,7 @@ Sur Slack, `/new` et `/clear` sont des commandes slash natives dans un message d
 - WeCom sépare les sessions par conversation ; chaque message direct ou conversation de groupe poursuit sa propre session.
 - Telegram sépare les sessions par conversation ; les sujets de forum sont isolés par sujet.
 
-Dans un canal, chaque relance nécessite toujours une nouvelle @mention. L'agent ne reçoit que les messages qui lui sont adressés : il ne lit jamais automatiquement tout l'historique du canal.
+Dans un canal, chaque relance nécessite toujours une nouvelle @mention. En dehors du contexte récent décrit plus haut, l'agent ne lit jamais automatiquement l'historique du canal.
 
 ## Association de compte
 
@@ -98,12 +101,12 @@ MULTICA_TELEGRAM_SECRET_KEY=<base64-encoded 32-byte key>
 
 Ces clés chiffrent les identifiants de bot stockés. Consultez [Variables d'environnement](/environment-variables) pour savoir comment les générer, les stocker et les renouveler. Multica Cloud est déjà configuré.
 
-Le seul chemin sortant de WeCom est le WebSocket détenu par un processus ; ce qu'il advient d'une réponse produite sur une *autre* réplique dépend donc du relais temps réel :
+WeCom ne peut envoyer ses réponses que par le WebSocket détenu par un processus. Ce qu'il advient d'une réponse produite sur une autre réplique dépend du mode du relais temps réel :
 
-- **Mode de relais sharded ou dual** (`REDIS_URL` défini — le mode par défaut avec Redis) : la réponse est transmise à la réplique qui détient la connexion, puis livrée. WeCom sur plusieurs répliques est pris en charge.
+- **Mode de relais sharded ou dual** (`REDIS_URL` défini — le mode par défaut avec Redis) : la réponse est transmise à la réplique qui détient la connexion, puis livrée ; WeCom peut donc tourner sur plusieurs répliques.
 - **Mode de relais legacy, ou sans Redis** : la réponse est abandonnée. Dans cette configuration, exécutez le backend avec WeCom activé sur une seule réplique.
 
-Quel que soit le mode, une réponse produite alors qu'*aucune* réplique ne détient de connexion active (toutes en cours de reconnexion) n'est pas livrée. Elle est comptabilisée dans `multica_wecom_outbound_dropped_total{reason="no_live_connection"}` par la réplique qui l'a routée, ce qui permet de mesurer l'ampleur de cette fenêtre ; si cette perte est inacceptable, une réplique unique reste le déploiement le plus prudent.
+Quel que soit le mode, une réponse produite alors qu'aucune réplique ne détient de connexion active (toutes en cours de reconnexion) n'est pas livrée. La réplique qui l'a routée vérifie ensuite si une réplique a pris en charge la livraison et, sinon, incrémente `multica_wecom_outbound_dropped_total{reason="no_live_connection"}` : cette métrique indique la fréquence de ces pertes. Si elles sont inacceptables, une réplique unique reste le déploiement le plus prudent.
 
 ## Étapes suivantes
 

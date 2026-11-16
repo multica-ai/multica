@@ -3,7 +3,6 @@ package issueguard
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -20,26 +19,6 @@ func NormalizeTitle(title string) string {
 
 func DuplicateMessage(identifier, title, status string) string {
 	return "Active duplicate issue exists: " + identifier + " " + title + " (status: " + status + "). Set allow_duplicate=true or use --allow-duplicate to create another."
-}
-
-type ActiveDuplicateError struct {
-	ID         string
-	Identifier string
-	Title      string
-	Status     string
-}
-
-func (e *ActiveDuplicateError) Error() string {
-	return DuplicateMessage(e.Identifier, e.Title, e.Status)
-}
-
-func NewActiveDuplicateError(issue db.Issue, issuePrefix string) *ActiveDuplicateError {
-	return &ActiveDuplicateError{
-		ID:         util.UUIDToString(issue.ID),
-		Identifier: fmt.Sprintf("%s-%d", issuePrefix, issue.Number),
-		Title:      issue.Title,
-		Status:     issue.Status,
-	}
 }
 
 // inactiveStatusKeys are the status keys the duplicate guards never count as an

@@ -83,6 +83,16 @@ func setHandlerTestWorkspaceRepos(t *testing.T, repos []map[string]string) {
 
 // newDaemonTokenRequest creates an HTTP request with daemon token context set
 // (simulating DaemonAuth middleware for mdt_ tokens).
+// newOwnerDaemonRequest builds a daemon-route request authenticated the way a
+// real daemon is: with the runtime owner's user credential (PAT/JWT), i.e.
+// X-User-ID = testUserID and no daemon-token context. Every dbfx / handler
+// fixture runtime is owned by testUserID. Use newDaemonTokenRequest only for
+// tests about daemon-token (mdt_) semantics, which since MUL-8154 require the
+// target runtime's daemon_id to match the token.
+func newOwnerDaemonRequest(method, path string, body any) *http.Request {
+	return newRequest(method, path, body)
+}
+
 func newDaemonTokenRequest(method, path string, body any, workspaceID, daemonID string) *http.Request {
 	var buf bytes.Buffer
 	if body != nil {
@@ -92,6 +102,9 @@ func newDaemonTokenRequest(method, path string, body any, workspaceID, daemonID 
 	req.Header.Set("Content-Type", "application/json")
 	// No X-User-ID — daemon tokens don't set it.
 	ctx := middleware.WithDaemonContext(req.Context(), workspaceID, daemonID)
+	// Production daemon tokens are bound to the runtime owner they were
+	// issued for (MUL-8154); fixture runtimes are owned by testUserID.
+	ctx = middleware.WithDaemonTokenOwnerID(ctx, testUserID)
 	return req.WithContext(ctx)
 }
 
@@ -215,8 +228,7 @@ func claimTaskByRuntimeForTest(t *testing.T, runtimeID string) (*struct {
 }, string) {
 	t.Helper()
 
-	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
-		testWorkspaceID, "claim-reclaim-review")
+	req := newOwnerDaemonRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil)
 	req = withURLParam(req, "runtimeId", runtimeID)
 	w := testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusOK)
 
@@ -235,8 +247,7 @@ func claimTaskByRuntimeForTest(t *testing.T, runtimeID string) (*struct {
 func claimChatIntroForTest(t *testing.T, runtimeID string) (string, bool, string) {
 	t.Helper()
 
-	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
-		testWorkspaceID, "chat-intro-review")
+	req := newOwnerDaemonRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil)
 	req = withURLParam(req, "runtimeId", runtimeID)
 	w := testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusOK)
 
@@ -438,13 +449,11 @@ func TestExtendTaskPrepareLease(t *testing.T) {
 	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Extend prepare lease agent")
 	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "120 seconds", false)
 
-	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+otherRuntimeID+"/tasks/"+taskID+"/prepare-lease", nil,
-		testWorkspaceID, "extend-prepare-lease")
+	req := newOwnerDaemonRequest("POST", "/api/daemon/runtimes/"+otherRuntimeID+"/tasks/"+taskID+"/prepare-lease", nil)
 	req = withURLParams(req, "runtimeId", otherRuntimeID, "taskId", taskID)
 	testutil.Call(t, testHandler.ExtendTaskPrepareLease, req).Want(http.StatusNotFound)
 
-	req = newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/"+taskID+"/prepare-lease", nil,
-		testWorkspaceID, "extend-prepare-lease")
+	req = newOwnerDaemonRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/"+taskID+"/prepare-lease", nil)
 	req = withURLParams(req, "runtimeId", runtimeID, "taskId", taskID)
 	testutil.Call(t, testHandler.ExtendTaskPrepareLease, req).Want(http.StatusOK)
 
@@ -542,7 +551,7 @@ func TestClaimTaskByRuntime_SkillBundleRefsAndResolve(t *testing.T) {
 		"issue_id":   issueID,
 	})
 
-	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil, testWorkspaceID, "skill-refs-daemon")
+	req := newOwnerDaemonRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil)
 	req.Header.Set("X-Client-Capabilities", protocol.DaemonCapabilitySkillBundlesV1)
 	req = withURLParam(req, "runtimeId", runtimeID)
 	w := testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusOK)
@@ -569,7 +578,7 @@ func TestClaimTaskByRuntime_SkillBundleRefsAndResolve(t *testing.T) {
 	}
 
 	staleHashBody := resolveSkillBundlesRequest{Skills: []resolveSkillBundleRef{{ID: ref.ID, Source: ref.Source, Hash: "sha256:stale"}}}
-	req = newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/"+taskID+"/skill-bundles/resolve", staleHashBody, testWorkspaceID, "skill-refs-daemon")
+	req = newOwnerDaemonRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/"+taskID+"/skill-bundles/resolve", staleHashBody)
 	req = withURLParams(req, "runtimeId", runtimeID, "taskId", taskID)
 	w = testutil.Call(t, testHandler.ResolveTaskSkillBundles, req).Want(http.StatusOK)
 	var staleHashResp struct {
@@ -581,12 +590,12 @@ func TestClaimTaskByRuntime_SkillBundleRefsAndResolve(t *testing.T) {
 	}
 
 	invalidRefBody := resolveSkillBundlesRequest{Skills: []resolveSkillBundleRef{{ID: ref.ID, Source: ref.Source}}}
-	req = newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/"+taskID+"/skill-bundles/resolve", invalidRefBody, testWorkspaceID, "skill-refs-daemon")
+	req = newOwnerDaemonRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/"+taskID+"/skill-bundles/resolve", invalidRefBody)
 	req = withURLParams(req, "runtimeId", runtimeID, "taskId", taskID)
 	w = testutil.Call(t, testHandler.ResolveTaskSkillBundles, req).Want(http.StatusBadRequest)
 
 	resolveBody := resolveSkillBundlesRequest{Skills: []resolveSkillBundleRef{{ID: ref.ID, Source: ref.Source, Hash: ref.Hash}}}
-	req = newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/"+taskID+"/skill-bundles/resolve", resolveBody, testWorkspaceID, "skill-refs-daemon")
+	req = newOwnerDaemonRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/"+taskID+"/skill-bundles/resolve", resolveBody)
 	req = withURLParams(req, "runtimeId", runtimeID, "taskId", taskID)
 	w = testutil.Call(t, testHandler.ResolveTaskSkillBundles, req).Want(http.StatusOK)
 	var resolveResp struct {
@@ -598,7 +607,7 @@ func TestClaimTaskByRuntime_SkillBundleRefsAndResolve(t *testing.T) {
 	}
 
 	dbfx.Exec(t, `UPDATE agent_task_queue SET status = 'running', started_at = now() WHERE id = $1`, taskID)
-	req = newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/"+taskID+"/skill-bundles/resolve", resolveBody, testWorkspaceID, "skill-refs-daemon")
+	req = newOwnerDaemonRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/"+taskID+"/skill-bundles/resolve", resolveBody)
 	req = withURLParams(req, "runtimeId", runtimeID, "taskId", taskID)
 	w = testutil.Call(t, testHandler.ResolveTaskSkillBundles, req).Want(http.StatusConflict)
 }
@@ -634,8 +643,7 @@ func TestClaimTaskByRuntime_PopulatesWorkspaceContext(t *testing.T) {
 	dbfx.QueryRow(t, `SELECT slug, issue_prefix FROM workspace WHERE id = $1`, testWorkspaceID).Scan(&workspaceSlug, &issuePrefix)
 	dbfx.QueryRow(t, `SELECT number FROM issue WHERE id = $1`, issueID).Scan(&issueNumber)
 
-	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
-		testWorkspaceID, "workspace-context-claim")
+	req := newOwnerDaemonRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil)
 	req = withURLParam(req, "runtimeId", runtimeID)
 	w := testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusOK)
 
@@ -691,8 +699,7 @@ func TestClaimTaskByRuntime_WorkspaceContextEmptyWhenUnset(t *testing.T) {
 	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Workspace context empty claim agent")
 	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "120 seconds", false)
 
-	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
-		testWorkspaceID, "workspace-context-empty-claim")
+	req := newOwnerDaemonRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil)
 	req = withURLParam(req, "runtimeId", runtimeID)
 	w := testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusOK)
 
@@ -719,7 +726,7 @@ func TestClaimTaskByRuntime_MissingRuntimeOwnerCancelsAndRejects(t *testing.T) {
 	ctx := context.Background()
 	runtimeID := dbfx.Insert(t, "agent_runtime", testutil.Cols{
 		"workspace_id": testWorkspaceID,
-		"daemon_id":    nil,
+		"daemon_id":    "missing-owner-daemon",
 		"name":         "Missing owner claim runtime",
 		"runtime_mode": "cloud",
 		"provider":     "handler_test_runtime",
@@ -733,18 +740,23 @@ func TestClaimTaskByRuntime_MissingRuntimeOwnerCancelsAndRejects(t *testing.T) {
 	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Missing owner claim agent")
 	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "120 seconds", false)
 
-	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
-		testWorkspaceID, "missing-owner-claim")
+	// MUL-8154: an ownerless runtime is never reachable by a user
+	// credential, so nobody can claim it by PAT and nothing is touched.
+	userReq := newOwnerDaemonRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil)
+	userReq = withURLParam(userReq, "runtimeId", runtimeID)
+	testutil.Call(t, testHandler.ClaimTaskByRuntime, userReq).Want(http.StatusNotFound)
+
+	// Daemon tokens are owner-bound too, so even this daemon's own token
+	// cannot reach an ownerless runtime; the claim-path missing-owner
+	// defense stays covered by TestFinalizeClaimDelivery_*OwnerMissing*.
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil, testWorkspaceID, "missing-owner-daemon")
 	req = withURLParam(req, "runtimeId", runtimeID)
-	w := testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusInternalServerError)
-	if !strings.Contains(w.Body.String(), "runtime owner required to mint task token") {
-		t.Fatalf("ClaimTaskByRuntime body = %q, want runtime owner error", w.Body.String())
-	}
+	testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusNotFound)
 
 	var status string
 	dbfx.QueryRow(t, `SELECT status FROM agent_task_queue WHERE id = $1`, taskID).Scan(&status)
-	if status != "cancelled" {
-		t.Fatalf("task status = %q, want cancelled", status)
+	if status != "dispatched" {
+		t.Fatalf("task status = %q, want untouched (dispatched)", status)
 	}
 }
 
@@ -786,7 +798,7 @@ func TestDaemonRegister_RecordsRuntimeProfileRegistrationFailure(t *testing.T) {
 	ctx := context.Background()
 	profileID := insertRuntimeProfileFixture(t, ctx, "Missing Custom Codex", "codex", "missing-codex")
 
-	req := newDaemonTokenRequest("POST", "/api/daemon/register", map[string]any{
+	req := newOwnerDaemonRequest("POST", "/api/daemon/register", map[string]any{
 		"workspace_id": testWorkspaceID,
 		"daemon_id":    "test-daemon-profile-failure",
 		"device_name":  "test-device",
@@ -797,7 +809,7 @@ func TestDaemonRegister_RecordsRuntimeProfileRegistrationFailure(t *testing.T) {
 				"reason":       "command not found on PATH: missing-codex",
 			},
 		},
-	}, testWorkspaceID, "test-daemon-profile-failure")
+	})
 	req.Header.Set("X-Client-Capabilities", protocol.DaemonCapabilityLocalWorktreeV1)
 	testutil.Call(t, testHandler.DaemonRegister, req).Want(http.StatusOK)
 	t.Cleanup(func() {
@@ -971,9 +983,9 @@ func TestDaemonHeartbeat_HTTPRuntimeGoneReturns404(t *testing.T) {
 	}
 
 	missingRuntime := uuid.New().String()
-	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/heartbeat", map[string]any{
+	req := newOwnerDaemonRequest(http.MethodPost, "/api/daemon/heartbeat", map[string]any{
 		"runtime_id": missingRuntime,
-	}, testWorkspaceID, "test-daemon")
+	})
 	w := testutil.Call(t, testHandler.DaemonHeartbeat, req).Want(http.StatusNotFound)
 	if !strings.Contains(strings.ToLower(w.Body.String()), "runtime not found") {
 		t.Fatalf("expected 'runtime not found' body, got %s", w.Body.String())
@@ -1006,9 +1018,9 @@ func TestDaemonHeartbeat_SlowProbeDoesNotWedge(t *testing.T) {
 	})
 
 	w := httptest.NewRecorder()
-	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/heartbeat", map[string]any{
+	req := newOwnerDaemonRequest(http.MethodPost, "/api/daemon/heartbeat", map[string]any{
 		"runtime_id": runtimeID,
-	}, testWorkspaceID, "runtime-local-skills-daemon")
+	})
 
 	start := time.Now()
 	testHandler.DaemonHeartbeat(w, req)
@@ -1045,9 +1057,9 @@ func TestDaemonHeartbeat_EmptyQueueSkipsPopPending(t *testing.T) {
 		testHandler.LocalSkillImportStore = origImport
 	})
 
-	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/heartbeat", map[string]any{
+	req := newOwnerDaemonRequest(http.MethodPost, "/api/daemon/heartbeat", map[string]any{
 		"runtime_id": runtimeID,
-	}, testWorkspaceID, "runtime-local-skills-daemon")
+	})
 	testutil.Call(t, testHandler.DaemonHeartbeat, req).Want(http.StatusOK)
 	if listSpy.popCalls != 0 {
 		t.Fatalf("expected 0 PopPending calls on empty list queue, got %d", listSpy.popCalls)
@@ -1083,6 +1095,9 @@ func TestGetTaskStatus_WithDaemonToken_CrossWorkspace(t *testing.T) {
 		t.Fatalf("setup: get agent: %v", err)
 	}
 
+	// Since MUL-8154 a daemon token reaches only runtimes carrying its own
+	// daemon_id, so bind the task to a runtime of "legit-daemon".
+	runtimeID = dbfx.Runtime(t, "daemon-auth-status runtime", testutil.Cols{"daemon_id": "legit-daemon"})
 	err = testPool.QueryRow(context.Background(), `
 		INSERT INTO agent_task_queue (agent_id, issue_id, status, runtime_id)
 		VALUES ($1, $2, 'queued', $3)
@@ -1586,6 +1601,62 @@ func TestGetDaemonWorkspaceRepos_WithDaemonToken_WorkspaceMismatch(t *testing.T)
 	testutil.Call(t, testHandler.GetDaemonWorkspaceRepos, req).Want(http.StatusNotFound)
 }
 
+func TestGetDaemonWorkspaceRepos_CACerts(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	prev := testHandler.cfg.GitExtraCACerts
+	t.Cleanup(func() { testHandler.cfg.GitExtraCACerts = prev })
+
+	call := func() map[string]any {
+		req := newOwnerDaemonRequest("GET", "/api/daemon/workspaces/"+testWorkspaceID+"/repos", nil)
+		req = withURLParam(req, "workspaceId", testWorkspaceID)
+		var resp map[string]any
+		testutil.Call(t, testHandler.GetDaemonWorkspaceRepos, req).Want(http.StatusOK).JSON(&resp)
+		return resp
+	}
+
+	testHandler.cfg.GitExtraCACerts = nil
+	if _, ok := call()["ca_certs"]; ok {
+		t.Fatal("ca_certs present without configured CAs")
+	}
+
+	const pemCerts = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n"
+	testHandler.cfg.GitExtraCACerts = []byte(pemCerts)
+	if got := call()["ca_certs"]; got != pemCerts {
+		t.Fatalf("ca_certs = %v, want configured PEM", got)
+	}
+}
+
+func TestDaemonRegister_CACerts(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	prev := testHandler.cfg.GitExtraCACerts
+	t.Cleanup(func() { testHandler.cfg.GitExtraCACerts = prev })
+
+	const pemCerts = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n"
+	testHandler.cfg.GitExtraCACerts = []byte(pemCerts)
+
+	req := newOwnerDaemonRequest("POST", "/api/daemon/register", map[string]any{
+		"workspace_id": testWorkspaceID,
+		"daemon_id":    "test-daemon-ca",
+		"device_name":  "test-device",
+		"runtimes": []map[string]any{
+			{"name": "test-runtime-ca", "type": "claude", "version": "1.0.0", "status": "online"},
+		},
+	})
+	var resp map[string]any
+	testutil.Call(t, testHandler.DaemonRegister, req).Want(http.StatusOK).JSON(&resp)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE daemon_id = $1`, "test-daemon-ca")
+	})
+
+	if got := resp["ca_certs"]; got != pemCerts {
+		t.Fatalf("ca_certs = %v, want configured PEM", got)
+	}
+}
+
 func TestGetDaemonWorkspaceRepos_VersionIgnoresOrderAndDescription(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -1598,7 +1669,7 @@ func TestGetDaemonWorkspaceRepos_VersionIgnoresOrderAndDescription(t *testing.T)
 
 	getReposVersion := func() string {
 		t.Helper()
-		req := newDaemonTokenRequest("GET", "/api/daemon/workspaces/"+testWorkspaceID+"/repos", nil, testWorkspaceID, "test-daemon-mdt")
+		req := newOwnerDaemonRequest("GET", "/api/daemon/workspaces/"+testWorkspaceID+"/repos", nil)
 		req = withURLParam(req, "workspaceId", testWorkspaceID)
 		w := testutil.Call(t, testHandler.GetDaemonWorkspaceRepos, req).Want(http.StatusOK)
 		var resp struct {
@@ -2013,10 +2084,10 @@ func TestStartTask_AutopilotRunOnlyTask_ResolvesWorkspace(t *testing.T) {
 
 	// Same-workspace daemon token must succeed — this is the bug in #1224.
 	w = httptest.NewRecorder()
-	req = newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/start", map[string]any{
+	req = newOwnerDaemonRequest("POST", "/api/daemon/tasks/"+taskID+"/start", map[string]any{
 		"capabilities": []string{protocol.DaemonCapabilityTaskSupplementV1},
 	},
-		testWorkspaceID, "legit-daemon")
+	)
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 
 	testHandler.StartTask(w, req)
@@ -2081,7 +2152,7 @@ func TestClaimTask_ProjectGithubReposOverrideWorkspaceRepos(t *testing.T) {
 		"issue_id":   issueID,
 	})
 
-	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil, testWorkspaceID, "test-claim-project-repos")
+	req := newOwnerDaemonRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil)
 	req = withURLParam(req, "runtimeId", runtimeID)
 	w := testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusOK)
 
@@ -2147,7 +2218,7 @@ func TestClaimTask_ProjectDescriptionInjected(t *testing.T) {
 		"issue_id":   issueID,
 	})
 
-	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil, testWorkspaceID, "test-claim-project-desc")
+	req := newOwnerDaemonRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil)
 	req = withURLParam(req, "runtimeId", runtimeID)
 	w := testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusOK)
 
@@ -2236,7 +2307,7 @@ func TestClaimTask_ProjectWithoutRepos_FallsBackToWorkspaceRepos(t *testing.T) {
 		"issue_id":   issueID,
 	})
 
-	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil, testWorkspaceID, "test-claim-fallback")
+	req := newOwnerDaemonRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil)
 	req = withURLParam(req, "runtimeId", runtimeID)
 	w := testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusOK)
 
@@ -2316,8 +2387,7 @@ func TestClaimTask_AutopilotRunOnly_PopulatesWorkspaceAndProjectContext(t *testi
 	defer testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
 
 	w := httptest.NewRecorder()
-	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil,
-		testWorkspaceID, "test-daemon-claim")
+	req := newOwnerDaemonRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("runtimeId", runtimeID)
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
@@ -2437,8 +2507,7 @@ func TestClaimTaskByRuntime_TaskWorkspaceMismatch_CancelsAndRejects(t *testing.T
 	})
 
 	w := httptest.NewRecorder()
-	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+localRuntimeID+"/claim", nil,
-		testWorkspaceID, "legit-daemon")
+	req := newOwnerDaemonRequest("POST", "/api/daemon/runtimes/"+localRuntimeID+"/claim", nil)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("runtimeId", localRuntimeID)
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
@@ -2502,9 +2571,9 @@ func TestCompleteTask_CommentTriggered_SynthesizesCommentWhenAgentSilent(t *test
 	)
 
 	w := httptest.NewRecorder()
-	req := newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/complete",
+	req := newOwnerDaemonRequest("POST", "/api/daemon/tasks/"+taskID+"/complete",
 		map[string]any{"output": agentFinalOutput},
-		testWorkspaceID, "legit-daemon")
+	)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("taskId", taskID)
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
@@ -2587,9 +2656,9 @@ func TestCompleteTask_CommentTriggered_SkipsSynthesisWhenAgentAlreadyCommented(t
 	`, issueID, testWorkspaceID, agentID, triggerCommentID)
 
 	w := httptest.NewRecorder()
-	req := newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/complete",
+	req := newOwnerDaemonRequest("POST", "/api/daemon/tasks/"+taskID+"/complete",
 		map[string]any{"output": "final terminal text that must NOT become a comment"},
-		testWorkspaceID, "legit-daemon")
+	)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("taskId", taskID)
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
@@ -2635,9 +2704,9 @@ func TestCompleteTask_CommentTriggered_SuppressesTrivialDoneOutput(t *testing.T)
 	})
 
 	w := httptest.NewRecorder()
-	req := newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/complete",
+	req := newOwnerDaemonRequest("POST", "/api/daemon/tasks/"+taskID+"/complete",
 		map[string]any{"output": "Done."},
-		testWorkspaceID, "legit-daemon")
+	)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("taskId", taskID)
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
@@ -2680,9 +2749,9 @@ func TestCompleteTask_AssignmentTriggered_DoesNotSuppressTrivialDoneOutput(t *te
 	})
 
 	w := httptest.NewRecorder()
-	req := newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/complete",
+	req := newOwnerDaemonRequest("POST", "/api/daemon/tasks/"+taskID+"/complete",
 		map[string]any{"output": "Done."},
-		testWorkspaceID, "legit-daemon")
+	)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("taskId", taskID)
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
@@ -2750,8 +2819,7 @@ func claimTaskForRuntimeGuardWithCapabilities(t *testing.T, runtimeID, daemonID,
 	t.Helper()
 
 	w := httptest.NewRecorder()
-	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil,
-		testWorkspaceID, daemonID)
+	req := newOwnerDaemonRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil)
 	if capabilities != "" {
 		req.Header.Set("X-Client-Capabilities", capabilities)
 	}
@@ -3158,6 +3226,13 @@ func TestClaimTask_ManualRetryReusesWorkdir(t *testing.T) {
 		}
 		if task.PriorSessionID != "" {
 			t.Fatalf("PriorSessionID = %q, want empty (legacy 400 invalid_request_error must not resume)", task.PriorSessionID)
+		}
+	})
+
+	t.Run("opencode_clock_skew_reuses_workdir_fresh_session", func(t *testing.T) {
+		task := insertRerun(t, runtimeID, "opencode_clock_skew", "", "skewed-session", "/tmp/retry-clock-workdir")
+		if task.PriorWorkDir != "/tmp/retry-clock-workdir" || task.PriorSessionID != "" {
+			t.Fatalf("clock-skew retry must retain workdir and drop session: %+v", task)
 		}
 	})
 
@@ -3818,8 +3893,7 @@ func TestGetChatSessionGCCheck(t *testing.T) {
 	w := testutil.Call(t, testHandler.GetChatSessionGCCheck, req).Want(http.StatusNotFound)
 
 	// Same-workspace daemon token sees the live row.
-	req = newDaemonTokenRequest("GET", "/api/daemon/chat-sessions/"+sessionID+"/gc-check", nil,
-		testWorkspaceID, "legit-daemon")
+	req = newOwnerDaemonRequest("GET", "/api/daemon/chat-sessions/"+sessionID+"/gc-check", nil)
 	req = withURLParam(req, "sessionId", sessionID)
 	w = testutil.Call(t, testHandler.GetChatSessionGCCheck, req).Want(http.StatusOK)
 	var resp struct {
@@ -3837,8 +3911,7 @@ func TestGetChatSessionGCCheck(t *testing.T) {
 	// Hard-deleted session: 404 — exactly what the daemon needs to reclaim
 	// the workdir on the next GC pass after a user runs DeleteChatSession.
 	dbfx.Exec(t, `DELETE FROM chat_session WHERE id = $1`, sessionID)
-	req = newDaemonTokenRequest("GET", "/api/daemon/chat-sessions/"+sessionID+"/gc-check", nil,
-		testWorkspaceID, "legit-daemon")
+	req = newOwnerDaemonRequest("GET", "/api/daemon/chat-sessions/"+sessionID+"/gc-check", nil)
 	req = withURLParam(req, "sessionId", sessionID)
 	w = testutil.Call(t, testHandler.GetChatSessionGCCheck, req).Want(http.StatusNotFound)
 }
@@ -3879,8 +3952,7 @@ func TestGetAutopilotRunGCCheck(t *testing.T) {
 	w := testutil.Call(t, testHandler.GetAutopilotRunGCCheck, req).Want(http.StatusNotFound)
 
 	// Same-workspace probe.
-	req = newDaemonTokenRequest("GET", "/api/daemon/autopilot-runs/"+runID+"/gc-check", nil,
-		testWorkspaceID, "legit-daemon")
+	req = newOwnerDaemonRequest("GET", "/api/daemon/autopilot-runs/"+runID+"/gc-check", nil)
 	req = withURLParam(req, "runId", runID)
 	w = testutil.Call(t, testHandler.GetAutopilotRunGCCheck, req).Want(http.StatusOK)
 	var resp struct {
@@ -3934,8 +4006,7 @@ func TestGetTaskGCCheck(t *testing.T) {
 	w := testutil.Call(t, testHandler.GetTaskGCCheck, req).Want(http.StatusNotFound)
 
 	// Same-workspace probe — terminal task returns its status.
-	req = newDaemonTokenRequest("GET", "/api/daemon/tasks/"+taskID+"/gc-check", nil,
-		testWorkspaceID, "legit-daemon")
+	req = newOwnerDaemonRequest("GET", "/api/daemon/tasks/"+taskID+"/gc-check", nil)
 	req = withURLParam(req, "taskId", taskID)
 	w = testutil.Call(t, testHandler.GetTaskGCCheck, req).Want(http.StatusOK)
 	var resp struct {
@@ -4215,7 +4286,7 @@ type claimCommentTaskResp struct {
 
 func claimCommentTask(t *testing.T, runtimeID, daemonID string) claimCommentTaskResp {
 	t.Helper()
-	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil, testWorkspaceID, daemonID)
+	req := newOwnerDaemonRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil)
 	req = withURLParam(req, "runtimeId", runtimeID)
 	w := testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusOK)
 	var resp claimCommentTaskResp
@@ -4347,7 +4418,7 @@ func TestClaimTaskByRuntime_CommentTaskPopulatesInitiator(t *testing.T) {
 	taskID, _ := createCommentTriggeredClaimTask(t, ctx, agentID, runtimeID, issueID, nil)
 	dbfx.Exec(t, `UPDATE agent_task_queue SET originator_user_id = $2, accountable_user_id = $2, originator_source = 'direct_human' WHERE id = $1`, taskID, testUserID)
 
-	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil, testWorkspaceID, "comment-initiator-claim")
+	req := newOwnerDaemonRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil)
 	req = withURLParam(req, "runtimeId", runtimeID)
 	w := testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusOK)
 	var resp struct {
@@ -4394,7 +4465,7 @@ func TestClaimTaskByRuntime_AssignmentHydratesOriginator(t *testing.T) {
 		"accountable_user_id": testUserID,
 	})
 
-	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil, testWorkspaceID, "assignment-originator-claim")
+	req := newOwnerDaemonRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil)
 	req = withURLParam(req, "runtimeId", runtimeID)
 	var resp struct {
 		Task *AgentTaskResponse `json:"task"`
@@ -4446,7 +4517,7 @@ func TestClaimTaskByRuntime_DelegatedRunHydratesOriginator(t *testing.T) {
 		"delegated_from_task_id": sourceTaskID,
 	})
 
-	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+targetRuntimeID+"/tasks/claim", nil, testWorkspaceID, "delegated-originator-claim")
+	req := newOwnerDaemonRequest("POST", "/api/daemon/runtimes/"+targetRuntimeID+"/tasks/claim", nil)
 	req = withURLParam(req, "runtimeId", targetRuntimeID)
 	var resp struct {
 		Task *AgentTaskResponse `json:"task"`
@@ -4496,7 +4567,7 @@ func TestClaimTaskByRuntime_CommentAuthorDiffersFromOriginator(t *testing.T) {
 		"accountable_user_id": testUserID,
 	})
 
-	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil, testWorkspaceID, "rerun-originator-claim")
+	req := newOwnerDaemonRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil)
 	req = withURLParam(req, "runtimeId", runtimeID)
 	var resp struct {
 		Task *AgentTaskResponse `json:"task"`
@@ -4525,7 +4596,7 @@ func TestClaimTaskByRuntime_CommentWithoutOriginatorOmitsOnBehalfOf(t *testing.T
 	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Unattributed comment agent")
 	taskID, _ := createCommentTriggeredClaimTask(t, ctx, agentID, runtimeID, issueID, nil)
 
-	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil, testWorkspaceID, "unattributed-comment-claim")
+	req := newOwnerDaemonRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil)
 	req = withURLParam(req, "runtimeId", runtimeID)
 	var resp struct {
 		Task *AgentTaskResponse `json:"task"`
@@ -4656,8 +4727,7 @@ func TestAckTaskCancelled(t *testing.T) {
 	}
 
 	// Same-workspace token settles the deferred finalize.
-	req = newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/cancel-ack", nil,
-		testWorkspaceID, "legit-daemon")
+	req = newOwnerDaemonRequest("POST", "/api/daemon/tasks/"+taskID+"/cancel-ack", nil)
 	req = withURLParam(req, "taskId", taskID)
 	testutil.Call(t, testHandler.AckTaskCancelled, req).Want(http.StatusOK)
 	dbfx.QueryRow(t, `
@@ -4675,8 +4745,7 @@ func TestAckTaskCancelled(t *testing.T) {
 	}
 
 	// Idempotent: a second ack is a no-op (no duplicate Stopped.).
-	req = newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/cancel-ack", nil,
-		testWorkspaceID, "legit-daemon")
+	req = newOwnerDaemonRequest("POST", "/api/daemon/tasks/"+taskID+"/cancel-ack", nil)
 	req = withURLParam(req, "taskId", taskID)
 	testutil.Call(t, testHandler.AckTaskCancelled, req).Want(http.StatusOK)
 	dbfx.QueryRow(t, `
@@ -4733,8 +4802,8 @@ func TestIssueGCChecksReportWireStatusNotRawCustomStatus(t *testing.T) {
 	type wire struct{ status, category string }
 
 	t.Run("batch endpoint", func(t *testing.T) {
-		req := newDaemonTokenRequest("POST", "/api/daemon/workspaces/"+testWorkspaceID+"/issues/gc-check",
-			map[string]any{"issue_ids": []string{doneID, openID}}, testWorkspaceID, "legit-daemon")
+		req := newOwnerDaemonRequest("POST", "/api/daemon/workspaces/"+testWorkspaceID+"/issues/gc-check",
+			map[string]any{"issue_ids": []string{doneID, openID}})
 		req = withURLParam(req, "workspaceId", testWorkspaceID)
 
 		var resp struct {
@@ -4775,7 +4844,7 @@ func TestIssueGCChecksReportWireStatusNotRawCustomStatus(t *testing.T) {
 			{"nonterminal custom status", openID, wire{issuestatus.InProgress, issuestatus.CategoryStarted}},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
-				req := newDaemonTokenRequest("GET", "/api/daemon/issues/"+tc.issueID+"/gc-check", nil, testWorkspaceID, "legit-daemon")
+				req := newOwnerDaemonRequest("GET", "/api/daemon/issues/"+tc.issueID+"/gc-check", nil)
 				req = withURLParam(req, "issueId", tc.issueID)
 
 				var resp struct {
@@ -4821,8 +4890,8 @@ func TestBatchIssueGCCheckReadsCatalogOnceForManyCustomStatuses(t *testing.T) {
 	}
 
 	counter := withCountingCatalog(t)
-	req := newDaemonTokenRequest("POST", "/api/daemon/workspaces/"+testWorkspaceID+"/issues/gc-check",
-		map[string]any{"issue_ids": ids}, testWorkspaceID, "legit-daemon")
+	req := newOwnerDaemonRequest("POST", "/api/daemon/workspaces/"+testWorkspaceID+"/issues/gc-check",
+		map[string]any{"issue_ids": ids})
 	req = withURLParam(req, "workspaceId", testWorkspaceID)
 
 	var resp struct {
@@ -4873,8 +4942,8 @@ func TestBatchIssueGCCheckReadsNoCatalogForBuiltInStatuses(t *testing.T) {
 	}
 
 	counter := withCountingCatalog(t)
-	req := newDaemonTokenRequest("POST", "/api/daemon/workspaces/"+testWorkspaceID+"/issues/gc-check",
-		map[string]any{"issue_ids": ids}, testWorkspaceID, "legit-daemon")
+	req := newOwnerDaemonRequest("POST", "/api/daemon/workspaces/"+testWorkspaceID+"/issues/gc-check",
+		map[string]any{"issue_ids": ids})
 	req = withURLParam(req, "workspaceId", testWorkspaceID)
 	testutil.Call(t, testHandler.BatchIssueGCCheck, req).Want(http.StatusOK)
 
@@ -4893,10 +4962,10 @@ func TestDaemonRegister_ProfileUsesStoredRuntimeIdentity(t *testing.T) {
 	if _, err := testPool.Exec(ctx, `UPDATE runtime_profile SET runtime_type = 'omp' WHERE id = $1`, profileID); err != nil {
 		t.Fatal(err)
 	}
-	req := newDaemonTokenRequest("POST", "/api/daemon/register", map[string]any{
+	req := newOwnerDaemonRequest("POST", "/api/daemon/register", map[string]any{
 		"workspace_id": testWorkspaceID, "daemon_id": "test-omp-profile", "device_name": "test-device",
 		"runtimes": []map[string]any{{"name": "Custom OMP", "type": "pi", "profile_id": profileID, "status": "online"}},
-	}, testWorkspaceID, "test-omp-profile")
+	})
 	testutil.Call(t, testHandler.DaemonRegister, req).Want(http.StatusOK)
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE profile_id = $1`, profileID) })
 	var provider string

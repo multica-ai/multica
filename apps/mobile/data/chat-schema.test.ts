@@ -41,4 +41,32 @@ describe("SendChatMessageResponseSchema", () => {
   it("ignores a malformed additive queue position", () => {
     expect(SendChatMessageResponseSchema.parse({ ...base, queued: "no" }).queued).toBeUndefined();
   });
+
+  it("reads steering acceptance and the message's own input owner", () => {
+    const parsed = SendChatMessageResponseSchema.parse({
+      ...base,
+      task_id: "task-retry",
+      steered: true,
+      message_task_id: "task-root",
+      message_created_at: "2026-08-05T00:01:00Z",
+    });
+    expect(parsed).toMatchObject({
+      steered: true,
+      message_task_id: "task-root",
+      message_created_at: "2026-08-05T00:01:00Z",
+    });
+  });
+
+  it("degrades malformed steering fields to the legacy queued reading", () => {
+    const parsed = SendChatMessageResponseSchema.parse({
+      ...base,
+      steered: "yes",
+      message_task_id: "",
+      message_created_at: 42,
+    });
+    expect(parsed.task_id).toBe("task-1");
+    expect(parsed.steered).toBeUndefined();
+    expect(parsed.message_task_id).toBeUndefined();
+    expect(parsed.message_created_at).toBeUndefined();
+  });
 });

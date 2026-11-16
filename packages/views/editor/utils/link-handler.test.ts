@@ -1,3 +1,8 @@
+import {
+  bindWorkspaceSlugLookup,
+  createQueryClient,
+} from "@multica/core/query-client";
+import { workspaceKeys } from "@multica/core/workspace/queries";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   openLink,
@@ -14,6 +19,16 @@ function navigatedPaths(): string[] {
 let dispatched: Event[] = [];
 let openSpy: ReturnType<typeof vi.spyOn>;
 
+let unbindWorkspaces: () => void = () => {};
+
+/** Give the current account membership of `slugs`, as the mounted provider would. */
+function withWorkspaces(slugs: string[]) {
+  const client = createQueryClient();
+  unbindWorkspaces = bindWorkspaceSlugLookup(client);
+  client.setQueryData(workspaceKeys.list(), slugs.map((slug) => ({ slug })));
+  return client;
+}
+
 beforeEach(() => {
   dispatched = [];
   vi.spyOn(window, "dispatchEvent").mockImplementation((e: Event) => {
@@ -24,6 +39,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  unbindWorkspaces();
   vi.restoreAllMocks();
 });
 
@@ -259,5 +275,39 @@ describe("parseWorkspaceEntityLink", () => {
 
   it("returns null for a malformed percent-escape", () => {
     expect(parseWorkspaceEntityLink("/acme/projects/%E0%A4%A")).toBeNull();
+  });
+});
+
+
+describe("existing reserved-slug workspaces", () => {
+  it("keeps known reserved workspace links internal, including route-name slugs", () => {
+    const client = withWorkspaces(["dingtalk", "issues"]);
+    expect(toInternalAppPath(`${APP_ORIGIN}/dingtalk/issues/MUL-123`, APP_ORIGIN)).toBe(
+      "/dingtalk/issues/MUL-123",
+    );
+    expect(
+      parseWorkspaceEntityLink(`${APP_ORIGIN}/dingtalk/issues/MUL-123`, APP_ORIGIN),
+    ).toEqual({ kind: "issue", id: "MUL-123", slug: "dingtalk" });
+    openLink(`${APP_ORIGIN}/dingtalk/issues/MUL-123`, "acme", APP_ORIGIN);
+    openLink("/issues/issues/MUL-123", "acme", APP_ORIGIN);
+    expect(navigatedPaths()).toEqual(["/dingtalk/issues/MUL-123", "/issues/issues/MUL-123"]);
+    expect(openSpy).not.toHaveBeenCalled();
+    expect(toInternalAppPath(`${APP_ORIGIN}/dingtalk/bind`, APP_ORIGIN)).toBeNull();
+    client.clear();
+    expect(toInternalAppPath(`${APP_ORIGIN}/dingtalk/issues/MUL-123`, APP_ORIGIN)).toBeNull();
+  });
+
+  it("still scopes legacy unscoped links whose route is not a reserved slug", () => {
+    withWorkspaces(["acme"]);
+    openLink("/chat", "acme", APP_ORIGIN);
+    openLink("/inbox", "acme", APP_ORIGIN);
+    expect(navigatedPaths()).toEqual(["/acme/chat", "/acme/inbox"]);
+  });
+
+  it("leaves a member workspace named after a route alone", () => {
+    withWorkspaces(["chat"]);
+    openLink("/chat/issues", "acme", APP_ORIGIN);
+    openLink("/chat", "acme", APP_ORIGIN);
+    expect(navigatedPaths()).toEqual(["/chat/issues", "/acme/chat"]);
   });
 });

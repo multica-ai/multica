@@ -167,8 +167,8 @@ export class LocalSearchIndexClient {
         if (result === null) this.serving = false;
         resolve(result);
       });
-      const { q, limit, offset, include_closed } = params;
-      channel.post({ type: "search", id, kind, params: { q, limit, offset, include_closed } });
+      const { q, limit, offset, include_closed, include_archived } = params;
+      channel.post({ type: "search", id, kind, params: { q, limit, offset, include_closed, include_archived } });
     });
   }
 

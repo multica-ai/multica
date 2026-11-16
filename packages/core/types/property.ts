@@ -7,7 +7,8 @@
  * Values are typed per definition: select stores an option id, multi_select
  * an array of option ids (config order), date a "YYYY-MM-DD" string, checkbox
  * a boolean, number a number, text/url strings, actor a "member:<user_id>"
- * reference string, multi_actor an array of them (insertion order).
+ * reference string, multi_actor an array of them (insertion order), and
+ * multi_text/multi_url arrays of free-form strings (insertion order).
  */
 export type IssuePropertyType =
   | "text"
@@ -18,7 +19,9 @@ export type IssuePropertyType =
   | "checkbox"
   | "url"
   | "actor"
-  | "multi_actor";
+  | "multi_actor"
+  | "multi_text"
+  | "multi_url";
 
 export const ISSUE_PROPERTY_TYPES: IssuePropertyType[] = [
   "text",
@@ -30,6 +33,8 @@ export const ISSUE_PROPERTY_TYPES: IssuePropertyType[] = [
   "url",
   "actor",
   "multi_actor",
+  "multi_text",
+  "multi_url",
 ];
 
 export function isKnownPropertyType(type: string): type is IssuePropertyType {
@@ -51,6 +56,15 @@ export const ISSUE_PROPERTY_ACTOR_KINDS: IssuePropertyActorKind[] = ["member"];
 
 /** Upper bound on a single multi_actor value; mirrors the server cap. */
 export const MAX_ISSUE_PROPERTY_ACTOR_VALUES = 20;
+
+/** Upper bound on a single multi_select value; mirrors the server cap. */
+export const MAX_ISSUE_PROPERTY_SELECT_VALUES = 50;
+
+/** Upper bound on a select / multi_select definition; mirrors the server cap. */
+export const MAX_ISSUE_PROPERTY_SELECT_OPTIONS = 200;
+
+/** Per-property filter budget, including No value; mirrors the server cap. */
+export const MAX_ISSUE_PROPERTY_FILTER_VALUES = 50;
 
 export interface IssuePropertyActorRef {
   kind: IssuePropertyActorKind;
@@ -74,7 +88,8 @@ export function isFilterablePropertyType(type: string): boolean {
     type === "multi_select" ||
     type === "checkbox" ||
     isScalarPropertyType(type) ||
-    isActorPropertyType(type)
+    isActorPropertyType(type) ||
+    isListPropertyType(type)
   );
 }
 
@@ -83,6 +98,16 @@ export type ScalarIssuePropertyType = Extract<IssuePropertyType, "text" | "numbe
 
 export function isScalarPropertyType(type: string): type is ScalarIssuePropertyType {
   return type === "text" || type === "url" || type === "number" || type === "date";
+}
+
+/**
+ * Free-form list properties: multi_text / multi_url. Values are string arrays
+ * in insertion order; filtering matches any single element exactly.
+ */
+export type ListIssuePropertyType = Extract<IssuePropertyType, "multi_text" | "multi_url">;
+
+export function isListPropertyType(type: string): type is ListIssuePropertyType {
+  return type === "multi_text" || type === "multi_url";
 }
 
 export function formatActorRef(kind: IssuePropertyActorKind, id: string): string {
@@ -267,6 +292,8 @@ export const PROPERTY_FILTER_OPS_BY_TYPE: Record<IssuePropertyType, readonly Pro
   url: ["contains"],
   actor: [],
   multi_actor: [],
+  multi_text: [],
+  multi_url: [],
 };
 
 export interface CreatePropertyRequest {

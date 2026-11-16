@@ -4,10 +4,11 @@ description: Un agent est un ensemble réutilisable d'identité, de capacités e
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { AgentAccessDemo } from "@/components/demos/agent-access-demo";
 
 Un agent est un collaborateur d'un [espace de travail Multica](/workspaces). Vous pouvez lui assigner des tâches, le @mentionner dans des commentaires ou discuter directement avec lui. Il pilote un outil de codage IA via le runtime auquel il est associé, et renvoie son avancement et ses résultats dans l'espace de travail.
 
-Un agent n'est pas un processus qui tourne en continu. C'est une identité et une configuration réutilisables ; il ne produit des [exécutions](/tasks) concrètes que lorsque du travail arrive.
+Un agent ne tourne pas en permanence en arrière-plan. Il conserve une identité et une configuration réutilisables, et ne produit des [exécutions](/tasks) concrètes que lorsque du travail arrive.
 
 ## Configuration d'un agent
 
@@ -46,7 +47,7 @@ Les agents peuvent créer des tâches, publier des commentaires et changer le st
 
 ## Permissions et accès
 
-Chaque agent a un propriétaire et un paramètre **Accès** :
+Chaque agent a un propriétaire et un paramètre **Accès**. L'Accès détermine qui peut exécuter l'agent, c'est-à-dire lui assigner des tâches, le @mentionner dans un commentaire ou discuter avec lui :
 
 | Accès | Qui peut l'exécuter |
 |---|---|
@@ -54,15 +55,23 @@ Chaque agent a un propriétaire et un paramètre **Accès** :
 | **Tout l'espace de travail** | Tous les membres de l'espace de travail. |
 | **Personnes précises** | Le propriétaire de l'agent et les membres sélectionnés. |
 
-Les nouveaux agents sont par défaut en **Moi uniquement**.
+Les nouveaux agents sont par défaut en **Moi uniquement**. La démo ci-dessous part de Moi uniquement, passe tour à tour aux deux autres options et montre ce que chaque membre obtient alors dans le sélecteur d'assigné et le menu des @mentions.
+
+<AgentAccessDemo />
 
 <Callout type="info">
-Les `owner` et les `admin` de l'espace de travail peuvent voir et gérer tous les agents, mais ne peuvent pas contourner l'Accès pour exécuter l'agent « Moi uniquement » de quelqu'un d'autre. Les membres ordinaires ne voient que les agents dont ils sont propriétaires ou qu'ils sont autorisés à exécuter.
+Les `owner` et les `admin` de l'espace de travail peuvent voir et gérer tous les agents, mais ne peuvent pas contourner l'Accès pour exécuter l'agent « Moi uniquement » de quelqu'un d'autre.
 </Callout>
 
-La possibilité de **voir** un agent dépend à la fois de la propriété, des rôles d'administration de l'espace de travail et de l'Accès ; la **modification** est ouverte au propriétaire de l'agent ainsi qu'aux propriétaires et administrateurs de l'espace de travail, à l'exception de l'Accès lui-même, que seul le propriétaire de l'agent peut modifier.
+Les autres opérations se répartissent ainsi :
 
-Les éléments de configuration susceptibles de contenir des identifiants, comme les variables d'environnement et MCP, obéissent à des règles de lecture plus strictes — voir [Créer et configurer un agent](/agents-create#variables-denvironnement-et-identifiants).
+| Opération | Qui peut |
+|---|---|
+| Voir l'agent dans la liste et les sélecteurs | Le propriétaire de l'agent, les `owner` et `admin` de l'espace de travail, et les membres autorisés par l'Accès |
+| Modifier sa configuration | Le propriétaire de l'agent, les `owner` et `admin` de l'espace de travail |
+| Modifier l'Accès | Le propriétaire de l'agent uniquement |
+
+Les éléments de configuration susceptibles de contenir des identifiants, comme les variables d'environnement et MCP, obéissent à des règles de lecture plus strictes : voir [Créer et configurer un agent](/agents-create#variables-denvironnement-et-identifiants).
 
 ## En ligne, hors ligne et charge
 
@@ -85,7 +94,7 @@ Le propriétaire de l'agent ainsi que les `owner` et les `admin` de l'espace de 
 
 ## Étapes suivantes
 
-- [Créer et configurer un agent](/agents-create) — partez de zéro, ou construisez-le avec l'IA.
+- [Créer et configurer un agent](/agents-create) — remplissez la configuration vous-même, ou laissez l'IA en rédiger un brouillon.
 - [Skills](/skills) — ajoutez des méthodes et des documents réutilisables à un agent.
 - [Squads](/squads) — laissez un chef choisir le membre le plus adapté au travail.
 - [Daemon et runtimes](/daemon-runtimes) — là où les agents s'exécutent réellement.

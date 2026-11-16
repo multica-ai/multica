@@ -30,6 +30,8 @@ interface BuilderDraftSync {
   /** The assistant message whose draft is already reflected in the form. */
   appliedMessageId: string | null;
   markApplied: (messageId: string) => void;
+  dismissedMessageId: string | null;
+  markDismissed: (messageId: string) => void;
 }
 
 /**
@@ -46,6 +48,8 @@ interface BuilderDraftSync {
  * what stops a restore from re-applying the last reply over edits made after
  * it. Held only in memory it died with the page, which is precisely when the
  * next restore needs it.
+ * Dismissed recovery notices have a separate marker: older clients must still
+ * recognize the last applied draft rather than replay it over manual edits.
  */
 export function useBuilderDraftSync(options: {
   sessionId: string;
@@ -62,7 +66,8 @@ export function useBuilderDraftSync(options: {
     options;
 
   const [restored, setRestored] = useState(false);
-  const appliedMessageIdRef = useRef<string | null>(null);
+  const [appliedMessageId, markApplied] = useState<string | null>(null);
+  const [dismissedMessageId, markDismissed] = useState<string | null>(null);
   // The last shape known to be on the server, so an unchanged draft never
   // produces a request. Also seeded by the restore, which must not immediately
   // save back what it just read.
@@ -71,7 +76,8 @@ export function useBuilderDraftSync(options: {
   useEffect(() => {
     if (!sessionId || restored || !storedSettled) return;
     if (stored) {
-      appliedMessageIdRef.current = stored.applied_message_id;
+      markApplied(stored.applied_message_id);
+      markDismissed(stored.dismissed_message_id ?? null);
       savedRef.current = stored;
       setDraft(fromStoredAgentDraft(stored, runtimeId));
     }
@@ -102,14 +108,14 @@ export function useBuilderDraftSync(options: {
 
   useEffect(() => {
     if (!sessionId || !restored) return;
-    const next = toStoredAgentDraft(draft, appliedMessageIdRef.current);
+    const next = toStoredAgentDraft(draft, appliedMessageId, dismissedMessageId);
     if (savedRef.current && storedAgentDraftsEqual(savedRef.current, next)) {
       return;
     }
     pendingRef.current = next;
     const timer = setTimeout(() => save(next), AUTOSAVE_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [draft, restored, save, sessionId]);
+  }, [appliedMessageId, dismissedMessageId, draft, restored, save, sessionId]);
 
   // Unmount is the deadline: a tab switch, a route change or a session switch
   // all tear this down, and the debounce timer dies with it.
@@ -123,9 +129,9 @@ export function useBuilderDraftSync(options: {
 
   return {
     restored,
-    appliedMessageId: appliedMessageIdRef.current,
-    markApplied: (messageId: string) => {
-      appliedMessageIdRef.current = messageId;
-    },
+    appliedMessageId,
+    markApplied,
+    dismissedMessageId,
+    markDismissed,
   };
 }

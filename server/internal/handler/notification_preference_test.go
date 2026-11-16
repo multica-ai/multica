@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -71,7 +72,8 @@ func TestPatchNotificationPreferencesMergesWithoutReplacing(t *testing.T) {
 	testHandler.PatchNotificationPreferences(
 		patchRecorder,
 		notificationPreferenceRequest(t, http.MethodPatch, map[string]string{
-			"comments": "muted",
+			"comments":     "muted",
+			"chat_replies": "muted",
 		}),
 	)
 	if patchRecorder.Code != http.StatusOK {
@@ -93,6 +95,9 @@ func TestPatchNotificationPreferencesMergesWithoutReplacing(t *testing.T) {
 	}
 	if response.Preferences["comments"] != "muted" {
 		t.Fatalf("comments patch missing: %#v", response.Preferences)
+	}
+	if response.Preferences["chat_replies"] != "muted" {
+		t.Fatalf("chat_replies patch missing: %#v", response.Preferences)
 	}
 
 	enableRecorder := httptest.NewRecorder()
@@ -123,40 +128,55 @@ func TestPatchNotificationPreferencesMergesWithoutReplacing(t *testing.T) {
 	}
 }
 
-// TestPatchNotificationPreferencesAcceptsMentions covers the group added by
-// #6468. The whitelist rejects unknown keys, so a client shipped ahead of the
-// server would 400 on this key — the reason the server must deploy first.
-func TestPatchNotificationPreferencesAcceptsMentions(t *testing.T) {
+// TestPatchNotificationPreferencesAcceptsAddedGroups covers groups added after
+// the original set: mentions (#6468), reactions (MUL-9328) and
+// auto_archive_completed (MUL-9336). The whitelist rejects unknown keys, so a
+// client shipped ahead of the server would 400 on these keys — the reason the
+// server must deploy first.
+func TestPatchNotificationPreferencesAcceptsAddedGroups(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
 
-	t.Cleanup(func() {
-		_, _ = testPool.Exec(context.Background(), `
-			DELETE FROM notification_preference
-			WHERE workspace_id = $1 AND user_id = $2
-		`, testWorkspaceID, testUserID)
-	})
+	for _, groups := range [][]string{
+		{"mentions"},
+		{"reactions"},
+		{"auto_archive_completed"},
+		{"reactions", "auto_archive_completed"},
+	} {
+		t.Run(strings.Join(groups, "+"), func(t *testing.T) {
+			t.Cleanup(func() {
+				_, _ = testPool.Exec(context.Background(), `
+					DELETE FROM notification_preference
+					WHERE workspace_id = $1 AND user_id = $2
+				`, testWorkspaceID, testUserID)
+			})
 
-	recorder := httptest.NewRecorder()
-	testHandler.PatchNotificationPreferences(
-		recorder,
-		notificationPreferenceRequest(t, http.MethodPatch, map[string]string{
-			"mentions": "muted",
-		}),
-	)
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
-	}
+			patch := map[string]string{}
+			for _, group := range groups {
+				patch[group] = "muted"
+			}
+			recorder := httptest.NewRecorder()
+			testHandler.PatchNotificationPreferences(
+				recorder,
+				notificationPreferenceRequest(t, http.MethodPatch, patch),
+			)
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+			}
 
-	var response struct {
-		Preferences map[string]string `json:"preferences"`
-	}
-	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if response.Preferences["mentions"] != "muted" {
-		t.Fatalf("mentions not persisted: %#v", response.Preferences)
+			var response struct {
+				Preferences map[string]string `json:"preferences"`
+			}
+			if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			for _, group := range groups {
+				if response.Preferences[group] != "muted" {
+					t.Fatalf("%s not persisted: %#v", group, response.Preferences)
+				}
+			}
+		})
 	}
 }
 
@@ -174,5 +194,47 @@ func TestPatchNotificationPreferencesRejectsUnknownGroups(t *testing.T) {
 	)
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestPatchNotificationPreferencesValidatesOthersIssuesValues(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `
+			DELETE FROM notification_preference
+			WHERE workspace_id = $1 AND user_id = $2
+		`, testWorkspaceID, testUserID)
+	})
+
+	for value, want := range map[string]int{
+		"all":         http.StatusOK,
+		"key_updates": http.StatusOK,
+		"muted":       http.StatusBadRequest,
+	} {
+		recorder := httptest.NewRecorder()
+		testHandler.PatchNotificationPreferences(
+			recorder,
+			notificationPreferenceRequest(t, http.MethodPatch, map[string]string{
+				"others_issues": value,
+			}),
+		)
+		if recorder.Code != want {
+			t.Errorf("others_issues=%q: status=%d want %d body=%s",
+				value, recorder.Code, want, recorder.Body.String())
+		}
+	}
+
+	// key_updates stays exclusive to others_issues.
+	recorder := httptest.NewRecorder()
+	testHandler.PatchNotificationPreferences(
+		recorder,
+		notificationPreferenceRequest(t, http.MethodPatch, map[string]string{
+			"comments": "key_updates",
+		}),
+	)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("comments=key_updates: status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }

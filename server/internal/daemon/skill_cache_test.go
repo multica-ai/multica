@@ -74,6 +74,17 @@ func TestSkillBundleCacheRejectsCorruptBundle(t *testing.T) {
 	}
 }
 
+// The complete path matrix lives beside skill.IsSafeFilePath. This test only
+// verifies that the daemon wrapper uses the shared contract.
+func TestSafeSkillFilePathUsesSharedContract(t *testing.T) {
+	if !safeSkillFilePath("references/example.md") {
+		t.Fatal("expected canonical nested path to be accepted")
+	}
+	if safeSkillFilePath("C:/outside.txt") {
+		t.Fatal("expected Windows drive path to be rejected")
+	}
+}
+
 func testSkillBundle() SkillData {
 	bundle := SkillData{
 		ID:      "skill-1",
