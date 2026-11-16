@@ -21,7 +21,8 @@
     "active": "활성",
     "paused": "일시 중지",
     "paused_runtime_required": "일시 중지됨 — 담당 에이전트에 런타임이 필요합니다",
-    "archived": "보관됨"
+    "archived": "보관됨",
+    "paused_project_archived": "일시 중지됨 — 프로젝트가 보관되었습니다"
   },
   "execution_mode": {
     "create_issue": "태스크 생성",
@@ -115,7 +116,8 @@
       "cancel": "취소",
       "confirm": "삭제",
       "deleting": "삭제하는 중..."
-    }
+    },
+    "paused_project_archived": "프로젝트가 보관되어 자동화가 일시 중지되었습니다. 프로젝트를 복원한 후 다시 활성화하세요."
   },
   "access": {
     "title": "접근 권한 관리",
@@ -543,6 +545,25 @@
         "reply": "“PR이 병합되었습니다. 문서를 업데이트하고 작업을 닫겠습니다.”",
         "event_examples": "PR 병합, 새 댓글"
       }
+    },
+    "defaults": {
+      "title": "하위 태스크가 끝나면",
+      "description": "한 단계가 끝나고 다음 단계가 기다리고 있으면 상위 태스크 담당자를 깨우고, 모든 하위 태스크가 끝나면 한 번 더 깨웁니다. 담당자가 멤버면 받은편지함으로 알립니다.",
+      "badge": "워크스페이스 기본값",
+      "enabled": "기본으로 켜기",
+      "instruction": "기본 지시",
+      "instruction_hint": "깨운 에이전트에게 전달됩니다. 비워 두면 아래 기본 제공 지시를 사용합니다.",
+      "instruction_placeholder": "비워 두면 기본 제공 지시를 사용합니다",
+      "builtin": "기본 제공 지시",
+      "instruction_invalid": "지시는 4,000바이트 이내로 입력하세요.",
+      "save": "저장",
+      "saving": "저장 중…",
+      "save_error": "기본값을 저장하지 못했습니다.",
+      "customized_other": "진행 중인 태스크 {{count}}개가 자체 설정을 사용해 이 기본값을 따르지 않습니다.",
+      "admin_only": "소유자와 관리자만 기본값을 바꿀 수 있습니다.",
+      "load_error": "깨우기 기본값을 불러오지 못했습니다.",
+      "edit_instruction": "기본 지시 편집",
+      "view_instruction": "기본 지시 보기"
     }
   },
   "intro": {

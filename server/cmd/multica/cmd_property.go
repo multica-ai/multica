@@ -631,6 +631,12 @@ func encodeIssuePropertyValue(ctx context.Context, client *cli.APIClient, direct
 // API's ID-keyed typed bag. A definition may appear only once, including when
 // one flag uses its name and another its UUID.
 func buildIssueCreateProperties(ctx context.Context, client *cli.APIClient, pairs []string) (map[string]json.RawMessage, error) {
+	return buildIssuePropertyValues(ctx, client, pairs, "when creating an issue", "cannot unset a property during create")
+}
+
+// buildIssuePropertyValues is the shared Name=Value resolver; when and
+// sentinelHint finish the two error messages that depend on the command.
+func buildIssuePropertyValues(ctx context.Context, client *cli.APIClient, pairs []string, when, sentinelHint string) (map[string]json.RawMessage, error) {
 	properties, err := fetchProperties(ctx, client)
 	if err != nil {
 		return nil, err
@@ -644,13 +650,13 @@ func buildIssueCreateProperties(ctx context.Context, client *cli.APIClient, pair
 			return nil, fmt.Errorf(`--property %q must be in "Name=Value" form`, pair)
 		}
 		if strings.HasSuffix(name, "<") || strings.HasSuffix(name, ">") || strings.HasSuffix(name, "!") {
-			return nil, fmt.Errorf(`--property %q: filter comparison operators are not valid when creating an issue; use a property UUID if its name ends with that character`, pair)
+			return nil, fmt.Errorf(`--property %q: filter comparison operators are not valid %s; use a property UUID if its name ends with that character`, pair, when)
 		}
 		if strings.TrimSpace(rawValue) == "" {
 			return nil, fmt.Errorf("--property %s: value cannot be empty", name)
 		}
 		if strings.TrimSpace(rawValue) == propertyNoValueSentinel {
-			return nil, fmt.Errorf("--property %s: %s is a list-filter value and cannot unset a property during create", name, propertyNoValueSentinel)
+			return nil, fmt.Errorf("--property %s: %s is a list-filter value and %s", name, propertyNoValueSentinel, sentinelHint)
 		}
 		property, err := resolvePropertyRef(properties, name)
 		if err != nil {

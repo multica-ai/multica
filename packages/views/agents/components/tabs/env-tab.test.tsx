@@ -391,6 +391,27 @@ describe("EnvTab values that bulk text cannot represent", () => {
     ).toEqual(["PEM", "SAFE"]);
   });
 
+  it("names the key, not the value, when a stored key has no bulk text form", async () => {
+    getAgentEnv.mockResolvedValue({
+      custom_env: { "MY-TOOL_api_key": "x", SAFE: "ok" },
+    });
+    const user = userEvent.setup();
+    renderTab();
+
+    await user.click(screen.getByRole("button", { name: /reveal & edit/i }));
+    await user.click(screen.getByRole("button", { name: /bulk edit/i }));
+
+    expect(toastError).toHaveBeenCalledWith(
+      'Bulk text only supports names like API_KEY — edit "MY-TOOL_api_key" as a row',
+    );
+    expect(
+      screen.queryByRole("textbox", { name: /bulk edit/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getAllByPlaceholderText("KEY").map((i) => (i as HTMLInputElement).value),
+    ).toEqual(["MY-TOOL_api_key", "SAFE"]);
+  });
+
   it("refuses bulk mode when two rows share a key", async () => {
     getAgentEnv.mockResolvedValue({ custom_env: { A: "1" } });
     const user = userEvent.setup();

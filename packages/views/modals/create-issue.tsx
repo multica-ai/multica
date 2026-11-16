@@ -91,6 +91,7 @@ import {
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { BorderBeam } from "@multica/ui/components/common/border-beam";
 import { ClearablePillButton, PillButton } from "../common/pill-button";
+import { useComposerVoice, VoiceDialogFooter, VoiceMicButton } from "../voice";
 import { ActorAvatar } from "../common/actor-avatar";
 import { PropertyIcon } from "../common/property-icon";
 import {
@@ -277,6 +278,11 @@ export function ManualCreatePanel({
   const [formResetKey, setFormResetKey] = useState(0);
   const titleEditorRef = useRef<TitleEditorRef>(null);
   const descEditorRef = useRef<ContentEditorRef>(null);
+  // Dictation lands in the description. No send from the strip: creating
+  // needs a title, which voice does not fill.
+  const voice = useComposerVoice({
+    insert: (text) => descEditorRef.current?.insertText(text) ?? false,
+  });
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => descEditorRef.current?.uploadFile(f)),
   });
@@ -1025,7 +1031,7 @@ export function ManualCreatePanel({
             </div>
 
             {/* Title */}
-            <div className="px-5 pb-2 shrink-0">
+            <div className="px-5 pb-2 shrink-0" onFocusCapture={voice.onFocusCapture}>
               <TitleEditor
                 key={formResetKey}
                 ref={titleEditorRef}
@@ -1040,7 +1046,12 @@ export function ManualCreatePanel({
             </div>
 
             {/* Description — takes remaining space */}
-            <div {...descDropZoneProps} className="relative flex flex-1 min-h-0 overflow-y-auto px-5">
+            <div
+              {...descDropZoneProps}
+              ref={voice.rootRef}
+              onFocusCapture={voice.onFocusCapture}
+              className="relative flex flex-1 min-h-0 overflow-y-auto px-5"
+            >
               <ContentEditor
                 ref={descEditorRef}
                 defaultValue={draft.manual.description}
@@ -1218,7 +1229,7 @@ export function ManualCreatePanel({
                       data-property-error={propertyErrorId === property.id || undefined}
                       className={cn(
                         propertyErrorId === property.id &&
-                          "rounded-full ring-2 ring-destructive",
+                          "rounded-md ring-2 ring-destructive",
                       )}
                     >
                       <CustomPropertyValueInput
@@ -1252,7 +1263,7 @@ export function ManualCreatePanel({
               {parentIssueId && parentIssueLocked ? (
                 <span
                   data-testid="manual-sub-issue-chip"
-                  className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-caption text-muted-foreground"
+                  className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-caption text-muted-foreground"
                 >
                   {t(($) => $.create_issue.subissue_of, {
                     identifier: parentIssue?.identifier
@@ -1261,11 +1272,11 @@ export function ManualCreatePanel({
                   })}
                 </span>
               ) : parentIssueId && parentIssue ? (
-                <div className="inline-flex items-center rounded-full border text-caption transition-colors hover:bg-accent/60">
+                <div className="inline-flex items-center rounded-md border text-caption transition-colors hover:bg-accent/60">
                   <button
                     type="button"
                     onClick={() => setParentPickerOpen(true)}
-                    className="flex items-center gap-1.5 py-1 pl-2.5 cursor-pointer"
+                    className="flex items-center gap-1.5 py-1 pl-2 cursor-pointer"
                   >
                     <ArrowUp className="size-3 text-muted-foreground" />
                     <span>
@@ -1290,9 +1301,9 @@ export function ManualCreatePanel({
               {childIssues.map((c) => (
                 <div
                   key={c.id}
-                  className="inline-flex items-center rounded-full border text-caption transition-colors hover:bg-accent/60"
+                  className="inline-flex items-center rounded-md border text-caption transition-colors hover:bg-accent/60"
                 >
-                  <div className="flex items-center gap-1.5 py-1 pl-2.5">
+                  <div className="flex items-center gap-1.5 py-1 pl-2">
                     <ArrowDown className="size-3 text-muted-foreground" />
                     <span>{t(($) => $.create_issue.subissue_chip, { identifier: c.identifier })}</span>
                   </div>
@@ -1497,48 +1508,50 @@ export function ManualCreatePanel({
                 for why (MUL-6236). Tooltip renders no DOM and
                 TooltipContent is portaled, so the Create button stays a direct
                 grid child in both branches below. */}
-            <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-2.5 border-t px-4 py-3 shrink-0 sm:flex sm:flex-wrap">
-              <div className="flex min-h-7 items-center gap-2 sm:mr-auto">
-                <FileUploadButton
-                  size="sm"
-                  multiple
-                  onSelect={(file) => descEditorRef.current?.uploadFile(file)}
-                />
+            <VoiceDialogFooter voice={voice}>
+              <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-2.5 border-t px-4 py-3 shrink-0 sm:flex sm:flex-wrap">
+                <div className="flex min-h-7 items-center gap-2 sm:mr-auto">
+                  <FileUploadButton
+                    multiple
+                    onSelect={(file) => descEditorRef.current?.uploadFile(file)}
+                  />
+                  <VoiceMicButton voice={voice} />
+                </div>
+                <TooltipHint label={t(($) => $.create_issue.switch_to_agent_tooltip)}>
+                  <button
+                    type="button"
+                    onClick={switchToAgent}
+                    disabled={gate.uploading}
+                    aria-disabled={gate.uploading || undefined}
+                    aria-busy={gate.uploading || undefined}
+                    className="relative group flex shrink-0 items-center gap-1.5 justify-self-end text-caption px-2 py-1 rounded-sm text-muted-foreground bg-brand/5 hover:bg-brand/10 hover:text-foreground transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <ArrowLeftRight className="size-3.5 text-brand transition-transform duration-300 group-hover:rotate-180" />
+                    {t(($) => $.create_issue.switch_to_agent)}
+                    <BorderBeam />
+                  </button>
+                </TooltipHint>
+                <label className="flex shrink-0 items-center gap-1.5 text-caption text-muted-foreground cursor-pointer select-none">
+                  <Switch
+                    size="sm"
+                    checked={keepOpen}
+                    onCheckedChange={setKeepOpen}
+                  />
+                  {t(($) => $.create_issue.create_another)}
+                </label>
+                {submitState === "missing_title" ? (
+                  <Tooltip>
+                    {/* No `<span>` wrapper needed now: aria-disabled leaves the
+                        button focusable and hoverable, so it can anchor its own
+                        tooltip. */}
+                    <TooltipTrigger render={createButton} />
+                    <TooltipContent side="top">{t(($) => $.create_issue.title_required)}</TooltipContent>
+                  </Tooltip>
+                ) : (
+                  createButton
+                )}
               </div>
-              <TooltipHint label={t(($) => $.create_issue.switch_to_agent_tooltip)}>
-                <button
-                  type="button"
-                  onClick={switchToAgent}
-                  disabled={gate.uploading}
-                  aria-disabled={gate.uploading || undefined}
-                  aria-busy={gate.uploading || undefined}
-                  className="relative group flex shrink-0 items-center gap-1.5 justify-self-end text-caption px-2 py-1 rounded-sm text-muted-foreground bg-brand/5 hover:bg-brand/10 hover:text-foreground transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <ArrowLeftRight className="size-3.5 text-brand transition-transform duration-300 group-hover:rotate-180" />
-                  {t(($) => $.create_issue.switch_to_agent)}
-                  <BorderBeam />
-                </button>
-              </TooltipHint>
-              <label className="flex shrink-0 items-center gap-1.5 text-caption text-muted-foreground cursor-pointer select-none">
-                <Switch
-                  size="sm"
-                  checked={keepOpen}
-                  onCheckedChange={setKeepOpen}
-                />
-                {t(($) => $.create_issue.create_another)}
-              </label>
-              {submitState === "missing_title" ? (
-                <Tooltip>
-                  {/* No `<span>` wrapper needed now: aria-disabled leaves the
-                      button focusable and hoverable, so it can anchor its own
-                      tooltip. */}
-                  <TooltipTrigger render={createButton} />
-                  <TooltipContent side="top">{t(($) => $.create_issue.title_required)}</TooltipContent>
-                </Tooltip>
-              ) : (
-                createButton
-              )}
-            </div>
+            </VoiceDialogFooter>
     </>
   );
 }
@@ -1556,7 +1569,7 @@ export function manualDialogContentClass(isExpanded: boolean) {
     // `max-w-[calc(100%-2rem)]`, leaving the card edge to edge on a phone
     // (MUL-6236). `!h-96` stays a hard height; it already fits the shortest
     // phone we support.
-    "!w-full !max-w-[calc(100vw-1.5rem)]",
+    "!w-full !max-w-[calc(100%-1.5rem)]",
     isExpanded
       ? "!h-5/6 !-translate-y-1/2 sm:!max-w-4xl"
       : "!h-96 !-translate-y-1/2 sm:!max-w-2xl",

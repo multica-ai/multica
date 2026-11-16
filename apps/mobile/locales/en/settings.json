@@ -73,13 +73,17 @@
     "comments_description": "New comments on issues you're subscribed to.",
     "mentions": "Mentions",
     "mentions_description": "When someone @mentions you, including @all and @squad.",
+    "reactions": "Reactions",
+    "reactions_description": "When someone reacts to an issue you created or a comment you wrote.",
     "updates": "Issue updates",
     "updates_description": "Edits to title, description, labels, priority, or due date.",
+    "new_issues": "New issues",
+    "new_issues_description": "When an issue is created in a project you subscribe to.",
     "agent_activity": "Agent activity",
-    "agent_activity_description": "When an agent run fails.",
+    "agent_activity_description": "When an agent run fails, or an app action an agent asked to run is blocked or expires.",
     "inbox_notifications": "Inbox notifications",
     "system": "System",
     "system_notifications": "System notifications",
-    "system_description": "Account changes, security alerts, product updates."
+    "chat_replies": "Include chat replies"
   }
 }

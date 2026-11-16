@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { setApiInstance } from "@multica/core/api";
@@ -39,8 +39,11 @@ vi.mock("../../i18n", () => ({
   }),
 }));
 
+const wsHandlers = new Map<string, (payload: unknown) => void>();
 vi.mock("@multica/core/realtime", () => ({
-  useWSEvent: () => undefined,
+  useWSEvent: (event: string, handler: (payload: unknown) => void) => {
+    wsHandlers.set(event, handler);
+  },
   useWSReconnect: () => undefined,
 }));
 
@@ -276,5 +279,66 @@ describe("useIssueSubscribers subscriptionKnown", () => {
       ).toBe("error"),
     );
     expect(result.current.subscriptionKnown).toBe(false);
+  });
+});
+
+/**
+ * The delivery tier is the server's: the hook passes it through, and drops it
+ * from a row whose reason a realtime event changed locally, so no badge claims
+ * a tier the server has not confirmed (MUL-9360).
+ */
+describe("useIssueSubscribers delivery", () => {
+  afterEach(() => {
+    cleanup();
+    wsHandlers.clear();
+  });
+
+  const row = (reason: string, extra: Record<string, unknown> = {}) => ({
+    issue_id: "issue-1",
+    user_type: "member",
+    user_id: "user-1",
+    reason,
+    created_at: "2026-01-01T00:00:00Z",
+    ...extra,
+  });
+
+  it("reads delivery from the server", async () => {
+    setApiInstance({
+      listIssueSubscribers: async () => [row("commenter", { delivery: "key_updates" })],
+    } as unknown as ApiClient);
+
+    const { result } = renderSubscribers();
+    await waitFor(() => expect(result.current.subscriptionDelivery).toBe("key_updates"));
+    expect(result.current.subscriptionReason).toBe("commenter");
+  });
+
+  it("is undefined from a server that predates it", async () => {
+    setApiInstance({
+      listIssueSubscribers: async () => [row("commenter")],
+    } as unknown as ApiClient);
+
+    const { result } = renderSubscribers();
+    await waitFor(() => expect(result.current.subscriptionReason).toBe("commenter"));
+    expect(result.current.subscriptionDelivery).toBeUndefined();
+  });
+
+  it("drops the tier when a realtime event changes the reason", async () => {
+    setApiInstance({
+      listIssueSubscribers: async () => [row("delegated", { delivery: "delegated" })],
+    } as unknown as ApiClient);
+
+    const { result } = renderSubscribers();
+    await waitFor(() => expect(result.current.subscriptionDelivery).toBe("delegated"));
+    act(() => {
+      wsHandlers.get("subscriber:added")?.({
+        issue_id: "issue-1",
+        user_type: "member",
+        user_id: "user-1",
+        reason: "commenter",
+      });
+    });
+
+    await waitFor(() => expect(result.current.subscriptionReason).toBe("commenter"));
+    expect(result.current.subscriptionDelivery).toBeUndefined();
   });
 });

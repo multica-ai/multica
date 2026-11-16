@@ -1401,19 +1401,6 @@ func TestListComments_ThreadTailNotFoundReturns404(t *testing.T) {
 	_ = fx
 }
 
-// resolveCommentRow marks a comment resolved directly in the DB (test helper —
-// the public path goes through ResolveComment, but for list-filter tests we
-// just need the column set).
-func resolveCommentRow(t *testing.T, commentID string) {
-	t.Helper()
-	if _, err := testPool.Exec(context.Background(),
-		`UPDATE comment SET resolved_at = now(), resolved_by_type = 'member', resolved_by_id = $2 WHERE id = $1`,
-		commentID, testUserID,
-	); err != nil {
-		t.Fatalf("resolve comment row: %v", err)
-	}
-}
-
 // TestCountNewCommentsSince_IssueWideExcludesAgentOwnAndTrigger pins the
 // claim-side count query: it counts comments created after the given anchor
 // ACROSS THE WHOLE ISSUE (every thread, not just the triggering one), excludes

@@ -750,22 +750,4 @@ describe("sidebarIssuesOptions", () => {
       { limit: 20, cursor: "100" },
     ]);
   });
-
-  it("walks list pages past the server's 100-row cap", async () => {
-    const listIssues = vi.fn(async (params?: ListIssuesParams): Promise<ListIssuesResponse> => {
-      const offset = params?.offset ?? 0;
-      return { issues: issues.slice(offset, offset + Math.min(params?.limit ?? 100, 100)), total: issues.length };
-    });
-    installFakeApi(listIssues);
-
-    const result = await new QueryClient().fetchQuery(
-      sidebarIssuesOptions(WS_ID, "builtin:my_issues", { assignee_id: "u1" }, 130),
-    );
-
-    expect(result.issues.map((issue) => issue.id)).toEqual(issues.map((issue) => issue.id));
-    expect(listIssues.mock.calls.map(([params]) => [params?.limit, params?.offset])).toEqual([
-      [100, 0],
-      [30, 100],
-    ]);
-  });
 });

@@ -274,6 +274,7 @@ function BuyAndPortalSection() {
       // browser back button returns the user to this page after
       // Stripe redirects out. Stripe-hosted pages handle their own
       // SPA-like behaviour from there.
+      // eslint-disable-next-line no-restricted-syntax -- web-only test page; Desktop has no route to it
       window.location.href = url;
     } catch (err) {
       toast.error(

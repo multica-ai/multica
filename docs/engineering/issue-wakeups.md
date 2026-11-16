@@ -520,7 +520,8 @@ holds so facts that closed while it was off do not fire. The ordinary
 per-rule endpoints (update, enable, disable, instruction, trigger, delete)
 reject system rows. The workspace default lives in the settings keys
 `system_wakeup_child_done` (only an explicit `false` turns it off) and
-`system_wakeup_child_done_instruction`, edited under Settings → Wakeups through
+`system_wakeup_child_done_instruction`, edited on the Issue wakeups list's
+defaults card through
 `GET /api/system-wakeups` and `PUT /api/system-wakeups/child_done` (owners and
 admins). Changing the default applies to every rule nobody customized and the
 platform did not pause, re-baselining the ones it turns on.

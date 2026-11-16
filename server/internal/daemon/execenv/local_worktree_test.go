@@ -542,8 +542,11 @@ func TestFinalizeKeepsWorktreeWhenCommitFails(t *testing.T) {
 	writeFile(t, filepath.Join(wt.Path, "agent-output.txt"), "irreplaceable work\n")
 
 	// Force every commit in this worktree to fail the way a signing setup the
-	// daemon can't satisfy would.
+	// daemon can't satisfy would. Pin the format: gpg.program is only used for
+	// openpgp, so a host whose global config signs with ssh or x509 would
+	// otherwise sign this commit with its real key and the commit would succeed.
 	gitRun(t, wt.Path, "config", "commit.gpgSign", "true")
+	gitRun(t, wt.Path, "config", "gpg.format", "openpgp")
 	gitRun(t, wt.Path, "config", "gpg.program", filepath.Join(repo, "definitely-not-a-real-gpg"))
 
 	outcome, err := wt.Finalize(worktreeTestLogger())

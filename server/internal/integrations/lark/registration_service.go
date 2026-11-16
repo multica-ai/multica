@@ -805,10 +805,6 @@ func (s *RegistrationService) liveOwnerConflictMessage(ctx context.Context, requ
 	}
 }
 
-func (s *RegistrationService) gcDeadline() time.Time {
-	return s.cfg.Now().Add(s.cfg.SessionTTL)
-}
-
 // ErrRegistrationSessionNotFound is what the service returns for
 // unknown / GC'd sessions. The handler maps it to 404.
 var ErrRegistrationSessionNotFound = errors.New("lark registration: session not found")

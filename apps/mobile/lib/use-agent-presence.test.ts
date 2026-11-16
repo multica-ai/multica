@@ -29,7 +29,7 @@ vi.mock("react-native", () => ({
   },
 }));
 vi.mock("@tanstack/react-query", () => ({ useQuery: () => ({ data: [] }), queryOptions: (options: unknown) => options }));
-vi.mock("@multica/core/agents", () => ({ buildPresenceMap: clock.derive }));
+vi.mock("@multica/core/agents/derive-presence", () => ({ buildPresenceMap: clock.derive }));
 vi.mock("@/data/api", () => ({ api: {} }));
 
 describe("presence clock", () => {

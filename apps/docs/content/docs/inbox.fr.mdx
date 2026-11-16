@@ -8,19 +8,28 @@ import { InboxDemo } from "@/components/demos/inbox-demo";
 
 La boîte de réception rassemble l'activité de travail qui vous concerne et signale les changements qui demandent votre attention. Ce n'est pas un journal d'activité complet : le contexte reste sur la tâche correspondante.
 
+## Où la trouver
+
+La boîte de réception est la première section du panneau **Travail**, au-dessus des épingles, des vues et des projets. Le nombre de non-lus s'affiche à côté du titre de la section et en badge sur **Travail** dans la barre d'applications ; un clic droit sur **Travail** propose **Tout marquer comme lu**.
+
+La section affiche une ligne par tâche, de la plus récente à la plus ancienne, lues et non lues confondues. Une ligne montre le statut de la tâche, son titre et l'heure, et qui a fait quoi ; un point signale une ligne non lue. Survolez une ligne pour ouvrir une carte avec le titre complet, le commentaire, et **Ouvrir**, **Marquer comme lu** et **Archiver**.
+
+Sur téléphone, le panneau Travail se trouve dans le tiroir. Sa section Boîte de réception se termine par **Toutes les notifications**, qui ouvre la page Boîte de réception avec sa propre liste et ses filtres.
+
 ## Ce qui arrive dans la boîte de réception
 
 Les notifications courantes incluent :
 
 - une tâche vous est assignée, ou vous est retirée ;
-- une tâche à laquelle vous êtes abonné reçoit un nouveau commentaire, ou son assigné, son statut, sa priorité ou ses dates changent ;
+- une tâche à laquelle vous êtes abonné reçoit un nouveau commentaire, ou son assigné, son statut, sa priorité ou ses dates changent (sur les tâches des autres, seulement les mises à jour clés par défaut ; voir plus bas) ;
 - quelqu'un vous @mentionne dans la description ou un commentaire d'une tâche ;
 - une tâche ou un commentaire que vous avez créé reçoit une réaction ;
 - une exécution d'agent échoue sur une tâche à laquelle vous êtes abonné ;
+- une tâche est créée dans un projet que vous suivez ;
 - [la création d'une tâche via un agent](/issues#créer-avec-un-agent) aboutit ou échoue ;
 - une automatisation à laquelle vous êtes abonné crée une nouvelle tâche, ou est mise en pause après des échecs consécutifs.
 
-Vos propres actions ne vous notifient pas. Plusieurs notifications sur la même tâche sont fusionnées en une seule entrée ; ouvrez-la pour voir les changements récents de la tâche.
+Vos propres actions ne vous notifient pas. Plusieurs notifications sur la même tâche sont fusionnées en une seule ligne ; ouvrez-la pour voir les changements récents de la tâche.
 
 ## Sources d'abonnement automatique
 
@@ -38,6 +47,12 @@ Changer l'assigné ne supprime pas les abonnements existants. Abonnez-vous ou d�
 Lorsque le statut d'une sous-tâche change, les abonnés de la tâche parente sont également notifiés. Les commentaires, la priorité et les changements de dates d'une sous-tâche ne remontent pas à la tâche parente.
 </Callout>
 
+## Tâches des autres
+
+Sur une tâche assignée à quelqu'un d'autre ou à son agent, un abonnement obtenu parce que vous l'avez créée, commentée ou y avez été mentionné n'apporte par défaut que les mises à jour clés : les @mentions, les réponses dans les fils auxquels vous avez participé et les statuts qui demandent une personne, comme `in_review`, `blocked` ou `done`. Les commentaires courants et les autres changements restent sur la tâche. Les tâches auxquelles vous vous êtes abonné vous-même, celles que vous suivez par leur projet et celles assignées à vous ou à vos agents apportent toujours toute l'activité.
+
+La page de la tâche signale un tel abonnement par **Mises à jour clés**. Son menu propose **Recevoir toute l'activité**, qui en fait un abonnement explicite à cette tâche ; il n'est ensuite plus possible de revenir aux mises à jour clés pour cette tâche, seulement de se désabonner. **Modifier la valeur par défaut** ouvre **Paramètres → Notifications**, où **Tâches des autres**, en tête de **Tâches que vous suivez**, fait passer toutes ces tâches à **Toute l'activité**.
+
 ## Les agents n'utilisent pas la boîte de réception
 
 La boîte de réception est réservée aux membres de l'espace de travail. Même lorsqu'un agent est l'assigné ou un abonné, il ne lit jamais les notifications de la boîte de réception.
@@ -46,35 +61,79 @@ La boîte de réception est réservée aux membres de l'espace de travail. Même
 
 ## Traiter les notifications
 
-Sélectionner une notification la marque comme lue. Archivez-la quand vous avez terminé ; l'archivage ne modifie ni ne supprime la tâche correspondante.
+Cliquez sur une ligne pour ouvrir sa tâche au commentaire ou à la demande d'application dont parle la notification. La ligne reste en surbrillance tant que la tâche est ouverte, et un nouveau clic vous ramène à cet endroit. Ouvrir la tâche marque la notification comme lue, et la ligne reste dans la liste. Les notifications sans tâche, comme les mises en pause d'automatisation et les résultats de création rapide, s'ouvrent sur la page Boîte de réception.
 
 <InboxDemo />
 
-Dès qu'une tâche atteint un statut qui la rend à une personne, ses notifications « Exécution en échec » sont archivées automatiquement. Ces statuts sont `in_review`, les statuts personnalisés de la catégorie `started` et tous les statuts des catégories `done` et `closed`. `blocked` fait exception : il rend aussi la tâche, mais le travail reste bloqué, donc les échecs précédents méritent encore d'être lus.
+Une tâche ouverte depuis la boîte de réception affiche les actions de la boîte de réception dans son en-tête :
 
-Faites un clic droit sur une notification pour **Marquer comme lu** / **Marquer comme non lu** et **Archiver** (**Désarchiver** dans la vue Archivées). Marquer comme non lu est l'action « j'ai regardé, mais je n'en ai pas fini » : la notification redevient non lue et fait remonter le compteur de non-lus, et elle reste non lue même tant que vous la gardez ouverte ; la rouvrir plus tard la marque comme lue, comme d'habitude. Les notifications archivées conservent leur état de lecture : en restaurer une la rétablit exactement comme vous l'aviez laissée.
+- **Reporter** (`H`) retire la tâche de votre boîte de réception jusqu'à l'heure choisie et ouvre la suivante. Voir « Reporter une tâche » ci-dessous.
+- **Marquer comme terminé** passe la tâche en `done`, archive la notification et ouvre la suivante. La notification est archivée même si **Archiver les tâches que vous terminez** est désactivé. L'action est proposée tant que la tâche n'est ni terminée ni annulée.
+- **Archiver** (`E`) archive la notification et ouvre la suivante. L'archivage ne modifie ni ne supprime la tâche.
+- **Se désabonner et archiver** (`⇧E`) est proposé sur les tâches qui ne sont pas les vôtres : assignées ni à vous, ni à un agent qui vous appartient. L'action vous désabonne de la tâche, archive la notification et ouvre la suivante. Les mises à jour ordinaires n'arrivent plus dans votre boîte de réception, mais les @mentions, si. Sur une tâche avec des sous-tâches, vous choisissez entre cette tâche seulement et cette tâche avec toutes ses sous-tâches. Pour cette tâche seulement, la confirmation propose **Annuler**, qui rétablit l'abonnement tel qu'il était. Le désabonnement des sous-tâches ne s'annule pas ici ; réabonnez-vous depuis la page de la tâche. La même action se trouve dans la carte au survol et dans le menu contextuel d'une ligne.
 
-Depuis le menu de la boîte de réception, vous pouvez aussi :
+La suivante est la ligne suivante que la section affiche avec ses filtres actuels : vous parcourez ainsi la boîte de réception sans revenir à la liste.
 
-- tout marquer comme lu ;
-- tout archiver, ou archiver tout ce qui est lu ;
-- archiver les notifications des tâches en `done` ou `cancelled` ;
-- ouvrir Archivées et restaurer une notification.
+Le bouton de filtre dans l'en-tête de la section restreint la liste par type de notification, date de réception et expéditeur, ou par statut et priorité de la tâche. Une section filtrée garde le bouton visible, et **Effacer les filtres** la réinitialise.
 
-Ouvrez **Archivées** en bas de la boîte de réception pour parcourir les notifications plus anciennes. D'autres éléments se chargent au fil du défilement. Les filtres s'appliquent à l'ensemble des archives, y compris aux éléments pas encore chargés.
+Le menu ⋯ de la section regroupe **Voir les archivées** et les actions groupées :
 
-## Régler les types de notification
+- **Tout marquer comme lu** ;
+- **Archiver tout ce qui est lu** ;
+- **Archiver les éléments terminés**, pour les tâches des catégories `done` ou `closed` ;
+- **Tout archiver**.
 
-Ouvrez **Paramètres → Notifications** pour activer ou désactiver chaque groupe séparément :
+**Voir les archivées** ouvre les notifications archivées. D'autres éléments se chargent au fil du défilement, et les filtres s'appliquent à l'ensemble des archives, y compris aux éléments pas encore chargés. Les notifications archivées conservent leur état de lecture : **Désarchiver** (ou `E`) en rétablit une exactement comme vous l'aviez laissée.
 
-- Assignations ;
-- Changements de statut ;
-- Commentaires ;
-- Mentions ;
-- Priorité et date d'échéance ;
-- Activité des agents.
+## Reporter une tâche
 
-Désactiver un groupe n'empêche pas l'enregistrement des changements sur la tâche — cela arrête seulement les notifications dans la boîte de réception. Quelques types, comme les réactions, les résultats de création rapide et les mises en pause d'automatisation, ne relèvent pas de ces six groupes et sont toujours envoyés. Les notifications système et du navigateur contrôlent les bannières sur le bureau et ne modifient pas la boîte de réception elle-même.
+Reporter retire une tâche de votre boîte de réception jusqu'à l'heure choisie, puis la fait revenir en haut, non lue. Reportez depuis le bouton réveil dans l'en-tête de la tâche (ou avec `H`), depuis le bouton à côté d'Archiver au survol d'une ligne, ou depuis la carte de survol d'une ligne. Choisissez **1 heure**, **3 heures**, **1 jour**, **3 jours** ou **1 semaine**, ou **Choisir une date et une heure…** pour n'importe quel moment dans l'année. Un report d'un jour ou plus garde l'heure actuelle, sauf s'il est fait entre 22:00 et 6:00 : la tâche revient alors à 9:00. La confirmation permet d'annuler ; annuler un changement d'heure rétablit l'heure précédente.
+
+Tant qu'une tâche est reportée :
+
+- ses nouvelles notifications attendent avec elle et ne comptent pas dans le badge non lu. À son retour, la ligne indique **Report terminé** et le nombre de nouveautés arrivées entre-temps ;
+- elle revient plus tôt si quelqu'un vous mentionne nommément, si elle vous est assignée, si une exécution échoue, si une app demande votre action ou si toutes ses sous-tâches sont terminées. Les mentions `@all` et d'escouade ne la réveillent pas ;
+- **Tout marquer comme lu** et les actions d'archivage groupé l'ignorent. L'archiver met fin au report, tout comme terminer vous-même la tâche quand **Archiver les tâches que vous terminez** est activé ;
+- ouvrir la tâche depuis ailleurs ne la marque pas comme lue et ne met pas fin au report. Son en-tête indique quand elle revient ; ouvrez-le pour la faire revenir maintenant (`H`) ou changer l'heure.
+
+Le report est personnel : il ne change que votre boîte de réception. Tout ce que vous avez reporté se trouve dans la vue **Reportés** sous Vues, aussi accessible via **Voir les reportés** dans le menu de la boîte de réception.
+
+## Quand une notification quitte la boîte de réception
+
+Lire une notification ne la retire pas. Une ligne quitte la boîte de réception uniquement :
+
+- quand vous l'archivez, depuis sa ligne, la carte de survol, l'en-tête de la tâche ou une action groupée ;
+- quand vous reportez sa tâche. C'est temporaire : la tâche revient à l'heure choisie, ou plus tôt si quelque chose a besoin de vous. Voir « Reporter une tâche » ci-dessus ;
+- quand vous passez vous-même sa tâche à n'importe quel statut des catégories `done` ou `closed`, tant que **Archiver les tâches que vous terminez** est activé (c'est le cas par défaut). Seules vos propres notifications sur cette tâche sont archivées, lues ou non. Quand quelqu'un d'autre ou un agent termine une tâche, ses notifications restent dans votre boîte de réception, pour que vous voyiez la nouvelle ;
+- quand c'est une notification **Exécution en échec** et que sa tâche passe à un statut qui la rend à une personne : `in_review`, un statut personnalisé de la catégorie `started`, ou n'importe quel statut des catégories `done` ou `closed`. Les notifications Exécution en échec de tout le monde sur cette tâche sont alors archivées, quelle que soit la personne qui a changé le statut, et indépendamment du réglage ci-dessus. `blocked` fait exception : il rend aussi la tâche, mais le travail reste bloqué, donc les échecs précédents méritent encore d'être lus.
+
+Les fenêtres ouvertes retirent aussitôt une ligne archivée, sauf celle que vous avez ouverte. Quand sa notification quitte la boîte de réception autrement (vous passez la tâche à `done` depuis son statut, une autre fenêtre l'archive, ou une modification la sort des filtres de la section), la ligne reste en surbrillance à sa place et l'en-tête de la tâche indique ce qui s'est passé. **Annuler** fait revenir la notification, et **Suivante** (ou `E`) ouvre la ligne suivante. La ligne disparaît dès que vous passez à autre chose.
+
+Quand vous retirez vous-même la ligne ouverte, depuis l'en-tête de la tâche, sa ligne, la carte de survol ou une action groupée qui l'inclut, c'est la ligne suivante qui s'ouvre. S'il n'en reste aucune, la tâche reste ouverte. L'archivage, le passage à terminé et les actions groupées proposent **Annuler**, qui fait revenir les notifications sans changer le statut de la tâche.
+
+Une notification ultérieure sur la tâche revient dans la boîte de réception.
+
+**Paramètres → Notifications → Sortir de la boîte de réception** contient l'interrupteur **Archiver les tâches que vous terminez** et renvoie vers les notifications archivées.
+
+## Affichage et types de notification
+
+Le bouton de réglages dans l'en-tête de la section Boîte de réception ouvre ses réglages d'affichage, enregistrés sur cet appareil :
+
+- **Lignes affichées** : 5, 10 ou 20 ; une ligne « Afficher N de plus » donne accès au reste.
+- **Lignes compactes** : une seule ligne par notification au lieu de deux.
+- **Nombre de non lus** : le nombre à côté du titre de la section.
+- **Badge de non lus sur Travail** : le badge sur Travail dans la barre d'applications.
+
+En dessous, **Me notifier pour** active ou désactive chaque type de notification. Ce sont les mêmes interrupteurs que dans **Paramètres → Notifications**, qui les regroupe selon la façon dont ils vous parviennent :
+
+| Groupe | Types |
+|---|---|
+| **Vous concernant** | Assignations, Mentions, Réactions |
+| **Tâches que vous suivez** | Changements de statut, Commentaires, Priorité et date d'échéance |
+| **Projets que vous suivez** | Nouvelles tâches |
+| **Agents** | Activité des agents (exécutions en échec, et actions d'app demandées par un agent qui sont bloquées ou expirent) |
+
+Un type désactivé ne crée aucune notification, et le réactiver ne fait pas revenir ce que vous avez manqué ; les changements restent enregistrés sur la tâche. Quelques types, comme les résultats de création rapide et les mises en pause d'automatisation, ne relèvent pas de ces groupes et sont toujours envoyés. Les notifications système et du navigateur contrôlent les bannières sur le bureau et ne modifient pas la boîte de réception elle-même.
 
 ## Étapes suivantes
 

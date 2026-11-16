@@ -1,11 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -198,6 +203,82 @@ func TestSubscriberIssueCreated_SelfAssign(t *testing.T) {
 	}
 	if !isSubscribed(t, queries, issueID, "member", testUserID) {
 		t.Fatal("expected creator/assignee to be subscribed")
+	}
+}
+
+func TestSubscriberDescriptionMentionsSkipNonRecipients(t *testing.T) {
+	fixture := testutil.New(testPool, testWorkspaceID, testUserID)
+	memberID := fixture.User(t, "Mentioned member", "subscriber-description-mentions@multica.ai")
+	fixture.Member(t, testWorkspaceID, memberID, "member")
+	agentID := fixture.Agent(t, "Mentioned agent", "")
+	squadID := fixture.Squad(t, "Mentioned squad", agentID)
+	queries := db.New(testPool)
+
+	for _, eventType := range []string{protocol.EventIssueCreated, protocol.EventIssueUpdated} {
+		t.Run(eventType, func(t *testing.T) {
+			for _, mentionType := range []string{"issue", "squad", "all"} {
+				t.Run(mentionType, func(t *testing.T) {
+					issueID := fixture.Issue(t, "Description with mixed mentions")
+					mentionID := map[string]string{"issue": issueID, "squad": squadID, "all": "all"}[mentionType]
+					description := fmt.Sprintf(
+						"[Reference](mention://%s/%s) [@Member](mention://member/%s) [@Agent](mention://agent/%s)",
+						mentionType, mentionID, memberID, agentID,
+					)
+					bus := events.New()
+					registerSubscriberListeners(bus, testPool)
+					var added []events.Event
+					bus.Subscribe(protocol.EventSubscriberAdded, func(e events.Event) { added = append(added, e) })
+
+					var logs bytes.Buffer
+					previousLogger := slog.Default()
+					slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelError})))
+					defer slog.SetDefault(previousLogger)
+
+					bus.Publish(events.Event{
+						Type:        eventType,
+						WorkspaceID: testWorkspaceID,
+						ActorType:   "member",
+						ActorID:     testUserID,
+						Payload: map[string]any{
+							"issue": handler.IssueResponse{
+								ID:          issueID,
+								WorkspaceID: testWorkspaceID,
+								Title:       "Description with mixed mentions",
+								Status:      "todo",
+								CreatorType: "member",
+								CreatorID:   testUserID,
+								Description: &description,
+							},
+							"description_changed": true,
+						},
+					})
+
+					// The database rejects non-recipient rows even before the fix;
+					// capture errors so a failed insert cannot make this test pass.
+					for _, line := range strings.Split(logs.String(), "\n") {
+						if strings.Contains(line, "issue_id="+issueID) {
+							t.Errorf("unexpected subscriber error: %s", line)
+						}
+					}
+					if !isSubscribed(t, queries, issueID, "member", memberID) {
+						t.Error("member after the non-recipient mention was not subscribed")
+					}
+					if !isSubscribed(t, queries, issueID, "agent", agentID) {
+						t.Error("agent after the non-recipient mention was not subscribed")
+					}
+					want := 2
+					if eventType == protocol.EventIssueCreated {
+						want++ // The creator also subscribes on creation.
+					}
+					if count := subscriberCount(t, queries, issueID); count != want {
+						t.Errorf("subscriber count = %d, want %d", count, want)
+					}
+					if len(added) != want {
+						t.Errorf("subscriber:added events = %d, want %d", len(added), want)
+					}
+				})
+			}
+		})
 	}
 }
 

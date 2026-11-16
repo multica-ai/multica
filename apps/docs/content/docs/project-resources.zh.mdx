@@ -16,7 +16,7 @@ import { LocalDirModeDemo } from "@/components/demos/local-dir-mode-demo";
 | 资源 | 适用场景 | 执行位置 |
 |---|---|---|
 | **GitHub 仓库** | 团队共享的代码库，希望由运行时管理 checkout | 运行时管理的工作目录 |
-| **本地目录** | 已经存在的 checkout、很大的仓库，或需要直接查看本地改动 | 指定电脑上的原目录 |
+| **本地目录** | 已经存在的 checkout、很大的仓库，或需要直接查看本地改动 | 指定电脑上的原文件夹或独立 worktree |
 
 ## 资源进入执行的方式
 
@@ -24,11 +24,11 @@ import { LocalDirModeDemo } from "@/components/demos/local-dir-mode-demo";
 
 工作区关联的仓库列表始终包含在执行上下文中。项目关联的仓库在此基础上指明这组工作使用的代码和默认 ref。
 
-本地目录只对绑定它的守护进程有效。本次执行所在的守护进程有匹配的本地目录时，智能体直接进入该目录工作；其他电脑仍使用项目中的 GitHub 仓库或工作区仓库。
+本地目录只对绑定它的守护进程有效。执行所在的守护进程有匹配的本地目录时，智能体按 `in_place` 模式在原目录工作，或按 `worktree` 模式在其独立 worktree 中工作；其他电脑仍使用项目中的 GitHub 仓库或工作区仓库。
 
 ## 添加 GitHub 仓库
 
-打开项目，在 **资源** 中选择"添加资源"。可以选择已关联到工作区的仓库，也可以粘贴 Git URL。工作区仓库在 **设置 → 代码** 中维护；连接 GitHub 后，可在同一页面通过 **从 GitHub 选择** 导入 App 已授权的仓库。
+打开项目，在 **资源 → 仓库** 中点击 **添加仓库**。搜索已关联到工作区的仓库，或粘贴 Git URL。工作区仓库在 **设置 → 代码** 中维护；连接 GitHub 后，可在同一页面通过 **从 GitHub 选择** 导入 App 已授权的仓库。
 
 仓库不限于 GitHub：任何运行时能访问的 Git URL 都可以作为仓库资源。自部署的 Multica 还可以在 **设置 → 代码** 连接自托管的 Forgejo、Gitea 或 GitLab，见[自托管 Git 代码托管](/vcs-integration)。
 
@@ -54,17 +54,17 @@ import { LocalDirModeDemo } from "@/components/demos/local-dir-mode-demo";
 </Step>
 <Step>
 
-打开项目的 **资源**，或者创建项目对话框里的 **本地目录** 标签页。项目还没建出来时，也能在这里做同样的选择。
+已有项目打开 **资源 → 本地文件夹**，按下方步骤添加。创建项目时则使用 **本地文件夹** 标签页；所选文件夹和模式会随项目一起保存。
 
 </Step>
 <Step>
 
-选择"添加本地目录"，再选择要使用的文件夹。
+在你的电脑下点击 **选择文件夹...**，再选择要使用的文件夹。
 
 </Step>
 <Step>
 
-选择运行如何使用它：**原地** 还是 **并行**，区别见[运行如何共享这个目录](#运行如何共享这个目录)。如果这个文件夹是 git 仓库、并且那台机器上的运行时能做隔离，Desktop 会预选 **并行**，否则预选 **原地**。当场可以改，之后也可以在 **资源** 里点目录旁边的铅笔图标改。
+选择 **直接修改** 或 **并行运行**，区别见 [运行如何共享这个目录](#运行如何共享这个目录)，然后点击 **添加文件夹**。如果文件夹是 git 仓库，且该电脑的运行时支持隔离，Desktop 会预选 **并行运行**，否则预选 **直接修改**。之后可在 **资源** 中点击文件夹的模式标签，选择新模式后立即保存。
 
 </Step>
 </Steps>
@@ -84,12 +84,12 @@ import { LocalDirModeDemo } from "@/components/demos/local-dir-mode-demo";
 
 ## 运行如何共享这个目录
 
-本地目录有两种执行模式，按资源逐个设置。在资源面板里可以直接切换，CLI 用 `--execution-mode`。Desktop 里这两种模式显示为 **原地** 和 **并行**；API、CLI 和本页其余部分都使用标识符。
+本地目录有两种执行模式，按资源逐个设置。在资源面板里可以直接切换，CLI 用 `--execution-mode`。Desktop 里这两种模式显示为 **直接修改** 和 **并行运行**；API、CLI 和本页其余部分都使用标识符。
 
 <LocalDirModeDemo />
 
-<Tabs items={["in_place（原地，默认）", "worktree（并行）"]}>
-<Tab value="in_place（原地，默认）" id="in-place">
+<Tabs items={["in_place（直接修改，默认）", "worktree（并行运行）"]}>
+<Tab value="in_place（直接修改，默认）" id="in-place">
 
 智能体直接在你的目录里工作，同一时间只进行一次运行。两次运行使用同一个真实目录时，后到的运行进入 `waiting_local_directory`，等前一次释放目录后继续。两个路径经不同符号链接指向同一目录时，同样串行。
 
@@ -98,7 +98,7 @@ import { LocalDirModeDemo } from "@/components/demos/local-dir-mode-demo";
 普通的非 git 目录只能用这种模式：worktree 模式只面向 git 仓库。
 
 </Tab>
-<Tab value="worktree（并行）" id="worktree">
+<Tab value="worktree（并行运行）" id="worktree">
 
 每次运行拿到你仓库的一个独立 [git worktree](https://git-scm.com/docs/git-worktree)，建在运行时自己的工作区目录里。同一目录上的运行并发执行，谁都不用排队，也都不会写你的工作副本。
 

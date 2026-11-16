@@ -14,18 +14,18 @@ import (
 )
 
 // View commands — read the saved issue views a member can open, and the
-// issues each one lists.
+// issues each one lists. Writes live in cmd_view_write.go.
 
 const viewIssuesMaxPageSize = 100
 
 var viewCmd = &cobra.Command{
 	Use:   "view",
-	Short: "Read saved issue views and the issues they list",
-	Long: `Read saved issue views and the issues they list.
+	Short: "Read and manage saved issue views",
+	Long: `Read and manage saved issue views, and list the issues they show.
 
 A view is the caller's own or a workspace-shared saved filter. Inside an agent
-run the caller is the runtime owner, so the views listed and any "my" scope or
-"assigned to me" condition are the runtime owner's.`,
+run the caller is the runtime owner, so the views listed, the views created,
+and any "my" scope or "assigned to me" condition are the runtime owner's.`,
 }
 
 var viewListCmd = &cobra.Command{

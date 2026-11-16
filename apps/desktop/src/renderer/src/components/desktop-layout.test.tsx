@@ -66,13 +66,12 @@ vi.mock("@multica/views/platform", () => ({
 }));
 
 vi.mock("@multica/views/layout", () => ({
+  AppBottomBar: () => null,
   AppRail: () => null,
   AppShellProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
   CompactNavSheet: () => null,
   GlobalShortcuts: () => null,
   NavigationProgress: () => null,
-  NewIssueButton: () => null,
-  SearchButton: () => null,
   ShellRouteDataPrefetch: ({ children }: { children: ReactNode }) => <>{children}</>,
   SpacePanel: () => null,
   // In a panel space the shell's toggleNav is the sidebar toggle.
@@ -86,6 +85,8 @@ vi.mock("@multica/views/search", () => ({
   SearchCommand: () => null,
 }));
 vi.mock("@multica/views/chat", () => ({ FloatingChat: () => null }));
+vi.mock("@multica/views/star-prompt", () => ({ StarPrompt: () => null }));
+vi.mock("@multica/views/whats-new", () => ({ WhatsNewDeck: () => null }));
 vi.mock("./tab-bar", () => ({ TabBar: () => null }));
 vi.mock("./window-overlay", () => ({ WindowOverlay: () => null }));
 
@@ -154,24 +155,24 @@ describe("DesktopShell sidebar trigger", () => {
   it("keeps exactly one trigger and tells page headers not to add another", () => {
     const { container, getByTestId, queryByRole } = renderShell();
 
-    expect(container.querySelectorAll("[data-slot='sidebar-trigger']")).toHaveLength(1);
+    expect(container.querySelectorAll("[data-sidebar='trigger']")).toHaveLength(1);
     expect(getByTestId("page-content")).toHaveAttribute(
       "data-external-trigger",
       "true",
     );
-    // The toolbar floats over the 64px rail; the tabs start past the rest
+    // The toolbar floats over the 56px rail; the tabs start past the rest
     // of it whether or not the panel inside the card is open.
     const mainTopBar = container.querySelector('[data-slot="main-top-bar"]');
-    expect(mainTopBar).toHaveStyle({ paddingLeft: "136px" });
+    expect(mainTopBar).toHaveStyle({ paddingLeft: "144px" });
 
     fireEvent.click(
-      container.querySelector('[data-slot="sidebar-trigger"]')!,
+      container.querySelector('[data-sidebar="trigger"]')!,
     );
     expect(getByTestId("page-content")).toHaveAttribute(
       "data-sidebar-state",
       "collapsed",
     );
-    expect(mainTopBar).toHaveStyle({ paddingLeft: "136px" });
+    expect(mainTopBar).toHaveStyle({ paddingLeft: "144px" });
     expect(queryByRole("status", { name: /loading workspace/i })).toBeNull();
   });
 
