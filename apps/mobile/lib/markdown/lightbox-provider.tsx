@@ -154,6 +154,7 @@ export function LightboxProvider({ children }: { children: ReactNode }) {
       {children}
       <ImageView
         images={viewing?.images ?? []}
+        keyExtractor={(_image, index) => String(index)}
         imageIndex={viewing?.index ?? 0}
         visible={!!viewing}
         onRequestClose={() => setViewing(null)}

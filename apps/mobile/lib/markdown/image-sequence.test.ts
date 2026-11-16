@@ -197,6 +197,14 @@ describe("mobile Markdown image sequence wiring", () => {
     expect(state.setters[0]).not.toHaveBeenCalled();
   });
 
+  it("keeps distinct page identities while lazy images load or signatures change", () => {
+    const viewer = LightboxProvider({ children: null }).props.children[1];
+    const key = viewer.props.keyExtractor;
+    expect(key({}, 0)).not.toBe(key({}, 1));
+    expect(key({}, 1)).toBe(key({ uri: "https://signed.test/first" }, 1));
+    expect(key({ uri: "https://signed.test/first" }, 1)).toBe(key({ uri: "https://signed.test/renewed" }, 1));
+  });
+
   it.each(["resolve", "reject"])("discards a selected-image %s after the session changes", async (outcome) => {
     let resolve!: (uri: string) => void;
     let reject!: (error: Error) => void;
