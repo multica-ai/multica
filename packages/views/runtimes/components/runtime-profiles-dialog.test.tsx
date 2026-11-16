@@ -95,6 +95,7 @@ function renderDialog({
       <RuntimeProfilesDialog
         wsId="ws-1"
         intent={intent}
+        daemonId="daemon-target"
         machineName={machineName}
         initialProfile={initialProfile}
         onClose={onClose}
@@ -197,6 +198,7 @@ describe("RuntimeProfilesDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create runtime" }));
     await waitFor(() =>
       expect(mutationState.createProfile).toHaveBeenCalledWith({
+        daemon_id: "daemon-target",
         display_name: "Custom OMP",
         runtime_type: "omp",
         command_name: "wrapper",
@@ -217,6 +219,7 @@ describe("RuntimeProfilesDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create runtime" }));
     await waitFor(() =>
       expect(mutationState.createProfile).toHaveBeenCalledWith({
+        daemon_id: "daemon-target",
         display_name: "Team Devin",
         runtime_type: "devin",
         command_name: "team-devin",
@@ -250,6 +253,7 @@ describe("RuntimeProfilesDialog", () => {
 
     await waitFor(() =>
       expect(mutationState.createProfile).toHaveBeenCalledWith({
+        daemon_id: "daemon-target",
         display_name: "Composer Agent",
         runtime_type: "codex",
         command_name: "agent",

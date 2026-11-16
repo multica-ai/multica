@@ -68,6 +68,7 @@ type DialogState =
 export function RuntimeProfilesDialog({
   wsId,
   intent = "manage",
+  daemonId,
   machineName,
   initialProfile,
   onProfileCreated,
@@ -75,6 +76,7 @@ export function RuntimeProfilesDialog({
 }: {
   wsId: string;
   intent?: "create" | "edit" | "manage";
+  daemonId?: string;
   machineName?: string;
   initialProfile?: RuntimeProfile;
   onProfileCreated?: (profile: RuntimeProfile) => void;
@@ -185,6 +187,7 @@ export function RuntimeProfilesDialog({
         {state.surface === "form" ? (
           <ProfileFormView
             wsId={wsId}
+            daemonId={daemonId}
             mode={state.mode}
             step={state.mode === "create" ? state.step : "details"}
             family={
@@ -637,6 +640,7 @@ function DetailRow({
 
 function ProfileFormView({
   wsId,
+  daemonId,
   mode,
   step,
   family,
@@ -649,6 +653,7 @@ function ProfileFormView({
   onSaved,
 }: {
   wsId: string;
+  daemonId?: string;
   mode: "create" | "edit";
   step: "family" | "details";
   family: RuntimeProfileType;
@@ -718,6 +723,7 @@ function ProfileFormView({
   return (
     <ProfileDetailsForm
       wsId={wsId}
+      daemonId={daemonId}
       mode={mode}
       family={family}
       profile={profile}
@@ -731,6 +737,7 @@ function ProfileFormView({
 
 function ProfileDetailsForm({
   wsId,
+  daemonId,
   mode,
   family,
   profile,
@@ -740,6 +747,7 @@ function ProfileDetailsForm({
   onSaved,
 }: {
   wsId: string;
+  daemonId?: string;
   mode: "create" | "edit";
   family: RuntimeProfileType;
   profile: RuntimeProfile | null;
@@ -795,6 +803,7 @@ function ProfileDetailsForm({
     try {
       if (mode === "create") {
         const created = await createProfile.mutateAsync({
+          ...(daemonId ? { daemon_id: daemonId } : {}),
           display_name: values.displayName.trim(),
           runtime_type: family,
           command_name: commandName,

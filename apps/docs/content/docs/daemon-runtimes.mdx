@@ -234,7 +234,7 @@ Only workspace owners and admins can create, edit, or delete custom runtime prof
 3. Choose the protocol family the command is actually compatible with.
 4. Fill in the name, command, and fixed arguments, then save.
 
-The profile is shared across the workspace. Each connected computer looks up the command on its own; only computers that can resolve it on `PATH` register the corresponding runtime. Creating a profile does not install the command, and it does not sign other members in to the tool.
+A new profile belongs only to the computer selected when you create it. Only that computer’s daemon downloads and registers it; other computers are unaffected, even if they have the same command installed. If the command cannot be resolved, its error appears only on the selected computer. Creating a profile does not install the command or sign in to the tool.
 
 The command field takes an executable and arguments, not a shell script. Plain arguments, quotes, and backslash escapes work; pipes, redirects, `&&`, `;`, backticks, and environment variable expansion do not. When you need those behaviors, put them in a wrapper script and use that script as the command.
 

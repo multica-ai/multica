@@ -234,7 +234,7 @@ Seuls les propriétaires et administrateurs de l'espace de travail peuvent crée
 3. Choisissez la famille de protocoles avec laquelle la commande est réellement compatible.
 4. Renseignez le nom, la commande et les arguments fixes, puis enregistrez.
 
-Le profil est partagé dans tout l'espace de travail. Chaque ordinateur connecté recherche la commande de son côté ; seuls les ordinateurs capables de la résoudre dans le `PATH` enregistrent le runtime correspondant. Créer un profil n'installe pas la commande et ne connecte pas les autres membres à l'outil.
+Un nouveau profil appartient uniquement à l’ordinateur sélectionné lors de sa création. Seul son daemon le télécharge et l’enregistre ; les autres ordinateurs ne sont pas concernés, même si la même commande y est installée. Si la commande est introuvable, l’erreur apparaît uniquement sur l’ordinateur sélectionné. La création du profil n’installe pas la commande et ne connecte pas l’outil.
 
 Le champ de commande accepte un exécutable et des arguments, pas un script shell. Les arguments simples, les guillemets et les échappements par barre oblique inverse fonctionnent ; les tubes, les redirections, `&&`, `;`, les accents graves (backticks) et l'expansion de variables d'environnement ne fonctionnent pas. Si vous avez besoin de ces comportements, placez-les dans un script d'encapsulation et utilisez ce script comme commande.
 

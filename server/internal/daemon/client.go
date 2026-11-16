@@ -1274,6 +1274,7 @@ func (c *Client) GetWorkspaceRepos(ctx context.Context, workspaceID string) (*Wo
 type RuntimeProfile struct {
 	ID             string   `json:"id"`
 	WorkspaceID    string   `json:"workspace_id"`
+	DaemonID       *string  `json:"daemon_id"`
 	DisplayName    string   `json:"display_name"`
 	ProtocolFamily string   `json:"protocol_family"`
 	RuntimeType    string   `json:"runtime_type"`
@@ -1296,9 +1297,9 @@ type RuntimeProfilesResponse struct {
 // Mirrors GetWorkspaceRepos. Callers must treat this as best-effort: an older
 // server with no profiles route returns 404, which the daemon swallows and
 // continues with built-in runtimes only.
-func (c *Client) GetRuntimeProfiles(ctx context.Context, workspaceID string) (*RuntimeProfilesResponse, error) {
+func (c *Client) GetRuntimeProfiles(ctx context.Context, workspaceID, daemonID string) (*RuntimeProfilesResponse, error) {
 	var resp RuntimeProfilesResponse
-	if err := c.getJSON(ctx, fmt.Sprintf("/api/daemon/workspaces/%s/runtime-profiles", workspaceID), &resp); err != nil {
+	if err := c.getJSON(ctx, fmt.Sprintf("/api/daemon/workspaces/%s/runtime-profiles?daemon_id=%s", workspaceID, url.QueryEscape(daemonID)), &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil

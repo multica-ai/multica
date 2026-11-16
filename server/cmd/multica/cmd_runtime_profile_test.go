@@ -33,6 +33,7 @@ func newProfileListTestCmd() *cobra.Command {
 
 func newProfileCreateTestCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "create"}
+	cmd.Flags().String("daemon-id", "", "")
 	addCommonProfileFlags(cmd)
 	cmd.Flags().String("protocol-family", "", "")
 	cmd.Flags().String("runtime-type", "", "")
@@ -109,6 +110,7 @@ func TestRunRuntimeProfileCreate(t *testing.T) {
 	redirectTestHome(t, t.TempDir())
 	t.Setenv("MULTICA_TOKEN", "test-token")
 	t.Setenv("MULTICA_WORKSPACE_ID", "ws-123")
+	t.Setenv("MULTICA_DAEMON_ID", "local-machine")
 
 	var gotMethod, gotPath string
 	var gotBody map[string]any
@@ -130,6 +132,9 @@ func TestRunRuntimeProfileCreate(t *testing.T) {
 	if err := runRuntimeProfileCreate(cmd, nil); err != nil {
 		t.Fatalf("runRuntimeProfileCreate: %v", err)
 	}
+	if gotBody["daemon_id"] != "local-machine" {
+		t.Fatalf("wrong machine binding: %#v", gotBody)
+	}
 	if gotMethod != http.MethodPost {
 		t.Errorf("method = %s, want POST", gotMethod)
 	}
@@ -148,6 +153,13 @@ func TestRunRuntimeProfileCreate(t *testing.T) {
 	// 'workspace'), so it must never be sent.
 	if _, present := gotBody["visibility"]; present {
 		t.Errorf("visibility must not be sent by the CLI, got %#v", gotBody["visibility"])
+	}
+	_ = cmd.Flags().Set("daemon-id", "selected-machine")
+	if err := runRuntimeProfileCreate(cmd, nil); err != nil {
+		t.Fatal(err)
+	}
+	if gotBody["daemon_id"] != "selected-machine" {
+		t.Fatalf("explicit machine ignored: %#v", gotBody)
 	}
 }
 
