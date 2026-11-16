@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ListEnd, Scan, TriangleAlert, X } from "@multica/ui/icons";
+import { Scan, TriangleAlert, X } from "@multica/ui/icons";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
@@ -76,7 +76,6 @@ interface ChatInputProps {
     attachmentIds: string[] | undefined,
     commitInput: (options?: { extraDraftKeys?: string[]; clearEditor?: boolean }) => void,
     draftAttachments: Attachment[],
-    options?: { queue?: boolean },
   ) => void | boolean | Promise<void | boolean>;
   restoreDraftRequest?: {
     id: string;
@@ -494,7 +493,6 @@ export function ChatInput({
   // stale `true` behind for the next one.
   const editorScrubbedRef = useRef(false);
 
-  const queueNextSendRef = useRef(false);
   const { submitting, submit } = useComposerSubmit({
     editorRef,
     uploadGate: gate,
@@ -510,8 +508,6 @@ export function ChatInput({
       return hasReplyIntent(raw, current) ? composeAnnotatedReply(raw, current) : "";
     },
     onSubmit: async (content: string): Promise<boolean> => {
-      const queue = queueNextSendRef.current;
-      queueNextSendRef.current = false;
       editorScrubbedRef.current = false;
       // Same tick as `normalize`, so this is exactly what `content` quotes.
       const annotationKeyAtSend = annotationDraftKey;
@@ -626,9 +622,7 @@ export function ChatInput({
         commitInput,
         draftAttachments.filter((attachment) => uniqueActiveIds.includes(attachment.id)),
       ] as const;
-      const accepted = queue
-        ? await onSend(...sendArgs, { queue: true })
-        : await onSend(...sendArgs);
+      const accepted = await onSend(...sendArgs);
       // Owner rejected the send (or threw, which useComposerSubmit also treats
       // as a rejection): the draft was never committed, so it stays put for
       // retry. Only a commit — here or by the owner — clears it.
@@ -919,19 +913,6 @@ export function ChatInput({
               className="text-muted-foreground aria-pressed:bg-accent aria-pressed:text-foreground"
             >
               <Scan />
-            </IconButton>
-          )}
-          {isRunning && allowSubmitWhileRunning && !hasNothingToSend && !gate.uploading && (
-            <IconButton
-              type="button"
-              label={t(($) => $.input.queue_send_tooltip)}
-              disabled={submitting || gate.uploading || !!disabled || !!noAgent}
-              onClick={() => {
-                queueNextSendRef.current = true;
-                void submit().finally(() => { queueNextSendRef.current = false; });
-              }}
-            >
-              <ListEnd />
             </IconButton>
           )}
           <SubmitButton
