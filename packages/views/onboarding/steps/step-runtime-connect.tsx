@@ -30,9 +30,9 @@ import { useT } from "../../i18n";
  * Step 1 questionnaire's shell so the onboarding flow reads as one
  * continuous surface.
  *
- * Data layer (`useRuntimePicker`): TanStack Query polls every 2s
- * while empty; `daemon:register` WS event invalidates instantly;
- * default selection prefers online, falls back to first.
+ * Data layer (`useRuntimePicker`): TanStack Query backs off while empty
+ * (2s, then 5s, then 15s); `daemon:register` WS event invalidates
+ * instantly; default selection prefers online, falls back to first.
  *
  * Web routes to `StepPlatformFork` instead — it owns its own
  * runtime picker embedded under the CLI expand.
