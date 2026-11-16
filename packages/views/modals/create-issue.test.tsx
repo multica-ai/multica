@@ -34,6 +34,18 @@ function I18nWrapper({ children }: { children: ReactNode }) {
 const mockParentIssue = vi.hoisted(() => ({ value: null as Issue | null }));
 const mockPush = vi.hoisted(() => vi.fn());
 const mockCreateIssue = vi.hoisted(() => vi.fn());
+type VoiceOptions = { insert: (text: string) => boolean; submit?: () => void };
+const voiceOptions = vi.hoisted(() => ({ last: null as VoiceOptions | null }));
+
+// Voice input has its own tests; here only its wiring to the editor matters.
+vi.mock("../voice", () => ({
+  useComposerVoice: (options: VoiceOptions) => {
+    voiceOptions.last = options;
+    return { rootRef: () => {}, onFocusCapture: () => {} };
+  },
+  VoiceDialogFooter: ({ children }: { children: ReactNode }) => children,
+  VoiceMicButton: () => null,
+}));
 const mockCreateCommentSubIssue = vi.hoisted(() => vi.fn());
 const mockAttachLabel = vi.hoisted(() => vi.fn());
 const mockListProperties = vi.hoisted(() => vi.fn());
@@ -388,6 +400,12 @@ vi.mock("../editor", async () => {
           inFlightRef.current -= 1;
           if (inFlightRef.current === 0) onUploadingChange?.(false);
         }
+      },
+      insertText: (text: string) => {
+        valueRef.current += text;
+        setValue(valueRef.current);
+        onUpdate?.(valueRef.current);
+        return true;
       },
       hasActiveUploads: () => inFlightRef.current > 0,
       // Placeholder rebuild contract: the real handle draws a card for an
@@ -803,10 +821,25 @@ describe("CreateIssueModal", () => {
     }));
   });
 
-  it("uses the same compact attachment control as agent mode", () => {
+  it("dictates into the description and leaves creating to the button", async () => {
+    const user = userEvent.setup();
+    mockDraftStore.draft.manual.title = "Voice issue";
+    mockDraftStore.draft.manual.description = "Steps:";
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+    expect(voiceOptions.last?.submit).toBeUndefined();
+    act(() => {
+      expect(voiceOptions.last?.insert(" open the inbox")).toBe(true);
+    });
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    expect(mockCreateIssue).toHaveBeenCalledWith(expect.objectContaining({
+      title: "Voice issue", description: "Steps: open the inbox",
+    }));
+  });
+
+  it("uses the same attachment control as agent mode, sized to match the mic", () => {
     renderModal(<CreateIssueModal onClose={vi.fn()} />);
 
-    expect(screen.getByRole("button", { name: "Upload file" })).toHaveAttribute("data-size", "sm");
+    expect(screen.getByRole("button", { name: "Upload file" })).not.toHaveAttribute("data-size");
   });
 
   it("shows success feedback with a direct path to the new issue", async () => {
@@ -1676,6 +1709,17 @@ describe("CreateIssueModal", () => {
       expect.objectContaining({ projectId: "proj-1" }),
     );
     expect(mockSetAgent).toHaveBeenCalledWith({ prompt: "Refactor auth" });
+  });
+
+  it("opens without a project when asked for none, over an unfinished draft's project", async () => {
+    const user = userEvent.setup();
+    const firstOpen = renderModal(<CreateIssueModal onClose={vi.fn()} />);
+    await user.click(screen.getByTestId("project-picker"));
+    firstOpen.unmount();
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} data={{ project_id: null }} />);
+
+    expect(screen.getByTestId("project-picker")).toHaveAttribute("data-project-id", "none");
   });
 
   it("restores an unfinished project selection after manual create remounts", async () => {

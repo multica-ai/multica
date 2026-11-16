@@ -105,9 +105,11 @@ function PaletteBody({
     () => ({
       close,
       push,
-      navigate: (href) => {
+      navigate: (href, onNavigateInPlace) => {
         close();
-        intentNavigate(href, consumeIntent());
+        const intent = consumeIntent();
+        if (intent === "push") onNavigateInPlace?.();
+        intentNavigate(href, intent);
       },
       openHostDialog,
     }),
@@ -179,6 +181,7 @@ function PaletteFrame({
   return (
     <>
       <CommandPrimitive
+        data-mc="command-palette"
         key={stack.length}
         label={t(($) => $.title)}
         shouldFilter={false}

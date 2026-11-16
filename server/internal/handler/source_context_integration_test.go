@@ -749,8 +749,10 @@ func TestBatchDeleteParentAndChildPublishesOnlySurvivingDetach(t *testing.T) {
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("batch delete = %d: %s", recorder.Code, recorder.Body.String())
 	}
-	var response map[string]int
-	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil || response["deleted"] != 2 {
+	var response struct {
+		Deleted int `json:"deleted"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil || response.Deleted != 2 {
 		t.Fatalf("batch delete response = %#v, err=%v", response, err)
 	}
 	grandchild, err := testHandler.Queries.GetIssue(ctx, util.MustParseUUID(grandchildID))

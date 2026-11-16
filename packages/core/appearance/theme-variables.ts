@@ -14,13 +14,18 @@
  * until the next THEME_API_VERSION.
  */
 
+import { PALETTE_PRESETS, PALETTE_SLOTS } from "./palette";
+
 export type ThemeVariableSection =
   | "colors"
   | "status"
+  | "palette"
   | "shape"
   | "typography"
   | "controls"
   | "navigation"
+  | "backdrop"
+  | "layout"
   | "issues"
   | "editor"
   | "code";
@@ -41,10 +46,13 @@ export interface ThemeVariable {
 export const THEME_VARIABLE_SECTIONS: Record<ThemeVariableSection, string> = {
   colors: "Colours and surfaces",
   status: "Status and priority",
+  palette: "Label and custom status colours",
   shape: "Shape and depth",
   typography: "Typography",
   controls: "Controls and overlays",
   navigation: "Navigation and page",
+  backdrop: "Backdrop and glass",
+  layout: "Layout and spacing",
   issues: "Issues",
   editor: "Editor content",
   code: "Code",
@@ -61,6 +69,9 @@ const DEFAULT_TEXT: Record<string, string> = {
   "button-primary": "`--primary`",
   "button-primary-foreground": "`--primary-foreground`",
   "button-primary-border": "`--button-primary`",
+  ...Object.fromEntries(PALETTE_SLOTS.map((slot) => [`palette-${slot}`, "the colour as picked"])),
+  "label-chip-color": "dark or light, whichever reads on the picked colour",
+  backdrop: "`none`",
 };
 
 function section(name: ThemeVariableSection, entries: readonly Entry[]): ThemeVariable[] {
@@ -130,6 +141,16 @@ const COLORS: Entry[] = [
   ["scrollbar-track", "Scrollbar track."],
   ["scrollbar-thumb", "Scrollbar thumb."],
   ["scrollbar-thumb-hover", "Scrollbar thumb on hover."],
+];
+
+const PALETTE: Entry[] = [
+  ...PALETTE_SLOTS.map(
+    (slot): Entry => [
+      `palette-${slot}`,
+      `Labels, custom statuses and select options whose colour is the ${slot} preset (\`${PALETTE_PRESETS[slot]}\`) or nearest to it.`,
+    ],
+  ),
+  ["label-chip-color", "Text on a label. Set it with the slots it has to read on; `[data-palette]` on the chip names its slot."],
 ];
 
 const STATUS: Entry[] = [
@@ -237,12 +258,34 @@ const NAVIGATION: Entry[] = [
   ["rail-item-active-background", "The current space.", "var(--sidebar-accent)"],
   ["rail-item-active-color", "Icon and label of the current space.", "var(--sidebar-accent-foreground)"],
   ["nav-item-height", "Minimum height of a row in the space panel.", "2rem"],
+  ["nav-item-padding-y", "Top and bottom padding of a row in the space panel; with the text, it sets the row's height when that is above the minimum.", "0.375rem"],
   ["nav-item-radius", "Rows in the space panel.", "var(--radius)"],
   ["nav-item-color", "Row text.", "var(--muted-foreground)"],
   ["nav-item-hover-background", "Row hover.", "var(--surface-hover)"],
   ["nav-item-hover-color", "Row text on hover.", "var(--foreground)"],
   ["nav-item-active-background", "The current row.", "var(--surface-selected)"],
   ["nav-item-active-color", "Text of the current row.", "var(--surface-selected-foreground)"],
+];
+
+const BACKDROP: Entry[] = [
+  ["backdrop", "What the window shows behind the frame and the page, as `background` layers: colours, gradients and images in the theme folder, such as `url(sky.svg) center / cover no-repeat`. An SVG's own CSS animation plays. It shows through the glass below."],
+  ["backdrop-color", "Solid colour under the backdrop: shown while it loads, and the colour `theme:check` measures the glass on. Required with a backdrop; use the colour the backdrop averages to.", "var(--app-shell)"],
+  ["glass-opacity", "How much of the page's own colour covers the backdrop: `100%` is solid, lower lets the backdrop through. Only applies with a backdrop.", "100%"],
+  ["glass-blur", "Blur of the backdrop seen through the page.", "0px"],
+  ["frame-glass-opacity", "How much of `app-shell` covers the backdrop in the frame: rail, toolbar, tab bar and bottom bar.", "var(--glass-opacity, 100%)"],
+  ["frame-glass-blur", "Blur of the backdrop seen through the frame.", "var(--glass-blur, 0px)"],
+];
+
+const LAYOUT: Entry[] = [
+  ["space-xs", "Spacing step: the gap between board cards.", "0.5rem"],
+  ["space-sm", "Spacing step: board card padding, the issue page's side padding on phones.", "0.75rem"],
+  ["space-md", "Spacing step: the page's side padding.", "1rem"],
+  ["space-lg", "Spacing step: an object page's side padding, the issue page's top padding on phones.", "1.5rem"],
+  ["space-xl", "Spacing step: an object page's top padding, the issue page's padding.", "2rem"],
+  ["page-padding-x", "Side padding of page headers, the toolbars under them and full-width lists.", "var(--space-md, 1rem)"],
+  ["sidebar-panel-width", "Starting width of the navigation panel, kept between 200px and 320px. Once the person drags its edge, their width wins.", "280px"],
+  ["content-max-width", "Widest the reading column gets on an issue page and in chat.", "clamp(56rem, 70cqi, 70rem)"],
+  ["object-page-max-width", "Widest the body of a project, agent, squad, runtime or other object page gets.", "760px"],
 ];
 
 const ISSUES: Entry[] = [
@@ -262,6 +305,9 @@ const ISSUES: Entry[] = [
   ["board-card-hover-background", "Board card hover.", "var(--surface-hover)"],
   ["board-card-border-color", "Board card border.", "var(--surface-border)"],
   ["board-card-shadow", "Board card shadow.", "var(--surface-shadow)"],
+  ["board-card-padding-y", "Top and bottom padding of a board card.", "var(--space-sm, 0.75rem)"],
+  ["board-card-padding-x", "Side padding of a board card.", "0.625rem"],
+  ["board-card-gap", "Space between cards in a board column.", "var(--space-xs, 0.5rem)"],
 ];
 
 const HEADING_SIZES = [
@@ -360,10 +406,13 @@ const CODE: Entry[] = [
 export const THEME_VARIABLES: readonly ThemeVariable[] = [
   ...section("colors", COLORS),
   ...section("status", STATUS),
+  ...section("palette", PALETTE),
   ...section("shape", SHAPE),
   ...section("typography", TYPOGRAPHY),
   ...section("controls", CONTROLS),
   ...section("navigation", NAVIGATION),
+  ...section("backdrop", BACKDROP),
+  ...section("layout", LAYOUT),
   ...section("issues", ISSUES),
   ...section("editor", EDITOR),
   ...section("code", CODE),

@@ -89,6 +89,16 @@ test("writes a --json report larger than a pipe buffer in full", (t) => {
   assert.equal(report.ok, true);
 });
 
+test("checks the Night Sky example's glass over its backdrop colour, with nothing left unchecked", () => {
+  const result = run(resolve(import.meta.dirname, "../examples/themes/night-sky"), "--json");
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  const [report] = JSON.parse(result.stdout);
+  assert.equal(report.ok, true);
+  assert.deepEqual(report.issues, []);
+  assert.ok(report.contrast.some((c) => c.glass && c.background === "--page-canvas"));
+  assert.ok(report.contrast.some((c) => c.glass && c.background === "--app-shell"));
+});
+
 test("explains a path that is not a theme", () => {
   const result = run(join(tmpdir(), "no-such-theme-folder"));
   assert.equal(result.status, 1);

@@ -2,6 +2,7 @@ import { CircleDot, Command, Gauge, Globe, History, Layers, ListPlus, Lock, Pale
 import type { SupportedLocale } from "@multica/core/i18n";
 import type { WorkspacePaths } from "@multica/core/paths";
 import type { ReleaseStamp } from "@multica/core/whats-new";
+import { ANNOTATIONS_HERO, ENVIRONMENTS_HERO, THEMES_HERO, type WhatsNewHero } from "./heroes";
 
 export interface HighlightCopy {
   title: string;
@@ -21,11 +22,16 @@ export interface WhatsNewHighlight {
   /** English is required; a missing locale falls back to it. */
   copy: { en: HighlightCopy } & Partial<Record<SupportedLocale, HighlightCopy>>;
   action?: HighlightAction;
+  /** Puts the highlight in the What's new deck; highlights without one stay in the panel. */
+  hero?: WhatsNewHero;
 }
 
 export interface WhatsNewRelease extends ReleaseStamp {
   highlights: WhatsNewHighlight[];
 }
+
+/** The first release dealt as a corner deck; see WHATS_NEW_RELEASES. */
+export const WHATS_NEW_DECK_SINCE = "0.9.0";
 
 /**
  * In-app highlights per release, newest first. Not the changelog: only
@@ -33,6 +39,10 @@ export interface WhatsNewRelease extends ReleaseStamp {
  * says how to use the feature. Fix-only releases get no entry, so they are
  * never marked as new in the panel. Versions and dates must
  * match the changelog entry the highlights come from.
+ *
+ * From WHATS_NEW_DECK_SINCE on, every entry needs at least one highlight with
+ * hero art: only those reach the corner deck, and an entry without one would
+ * reach users only through the Help menu.
  */
 export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
   {
@@ -42,6 +52,7 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
       {
         id: "community-themes",
         icon: Palette,
+        hero: THEMES_HERO,
         action: { kind: "route", to: (p) => `${p.settings()}?tab=appearance` },
         copy: {
           en: {
@@ -73,6 +84,7 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
       {
         id: "environment-controls",
         icon: Server,
+        hero: ENVIRONMENTS_HERO,
         copy: {
           en: {
             title: "Run an issue's services from its sidebar",
@@ -103,6 +115,7 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
       {
         id: "chat-annotations",
         icon: Quote,
+        hero: ANNOTATIONS_HERO,
         action: { kind: "route", to: (p) => p.chat() },
         copy: {
           en: {

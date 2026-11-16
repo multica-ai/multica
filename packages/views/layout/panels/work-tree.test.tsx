@@ -6,11 +6,19 @@ import type { DragEndEvent } from "@dnd-kit/core";
 import type { IssueViewPreference } from "@multica/core/api/schemas";
 import { issueViewPreferenceOptions } from "@multica/core/issue-views/preferences";
 import { buildIssueStatusCatalog } from "@multica/core/issue-statuses/queries";
+import { issueTableFacetsOptions } from "@multica/core/issues/queries";
+import {
+  NO_PROJECT_FACET_KEY,
+  NO_PROJECT_ORDER_ID,
+  NO_PROJECT_SIDEBAR_SOURCE,
+  noProjectCountRequest,
+} from "@multica/core/issues/sidebar-list";
 import { SIDEBAR_PROJECTS_SCOPE } from "@multica/core/issues/sidebar-project-prefs";
 import {
   DEFAULT_SIDEBAR_ISSUE_SETTINGS,
   DEFAULT_SIDEBAR_PROJECT_SETTINGS,
   useSidebarTreeStore,
+  type SidebarProjectSettings,
 } from "@multica/core/issues/stores/sidebar-tree-store";
 import type { Project } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
@@ -93,14 +101,23 @@ const savedPrefs = (prefs: Record<string, unknown>): IssueViewPreference => ({
   prefs: { hidden: [], order: [], ...prefs },
 });
 
-function renderSection(projects = PROJECTS) {
-  const qc = new QueryClient({ defaultOptions: { queries: { enabled: false } } });
+function renderSection(
+  projects = PROJECTS,
+  projectSettings: Partial<SidebarProjectSettings> = {},
+  order: string[] = ["p9"],
+) {
+  const qc = new QueryClient({ defaultOptions: { queries: { enabled: false, retry: false } } });
+  qc.setQueryData(issueTableFacetsOptions("ws-1", noProjectCountRequest([])).queryKey, {
+    query_fingerprint: "",
+    total: 0,
+    facets: [{ kind: "project", values: [{ key: "p1", count: 3 }, { key: NO_PROJECT_FACET_KEY, count: 7 }] }],
+  });
   qc.setQueryData(
     issueViewPreferenceOptions("ws-1", SIDEBAR_PROJECTS_SCOPE).queryKey,
     savedPrefs({
-      projects: { ...DEFAULT_SIDEBAR_PROJECT_SETTINGS, ordering: "name" },
+      projects: { ...DEFAULT_SIDEBAR_PROJECT_SETTINGS, ordering: "name", ...projectSettings },
       issues: DEFAULT_SIDEBAR_ISSUE_SETTINGS,
-      order: ["p9"],
+      order,
     }),
   );
   renderWithI18n(
@@ -114,11 +131,16 @@ function renderSection(projects = PROJECTS) {
         plainRowsLit
         activeIssueId={null}
         litSource={null}
-        locatedProjectId={null}
+        locatedSource={null}
       />
     </QueryClientProvider>,
   );
 }
+
+const rowNames = () =>
+  screen
+    .getAllByRole("button", { name: /^(No project|Issues in .+)$/ })
+    .map((button) => button.getAttribute("aria-label")?.replace(/^Issues in /, "") ?? button.textContent);
 
 describe("ProjectsSection", () => {
   it("shows the project's chosen icon, keeping the folder when it has none", () => {
@@ -129,6 +151,20 @@ describe("ProjectsSection", () => {
     expect(iconSlot("Desktop")?.querySelector("svg")).toBeNull();
     expect(iconSlot("Mobile")).toHaveTextContent("");
     expect(iconSlot("Mobile")?.querySelector("svg")).not.toBeNull();
+  });
+
+  it("shows the folder for every project when minimal icons are on", () => {
+    renderSection([project("p1", "Desktop", "🚀")], { minimalIcons: true });
+    const iconSlot = screen.getByRole("button", { name: "Issues in Desktop" }).previousElementSibling;
+    expect(iconSlot).not.toHaveTextContent("🚀");
+    expect(iconSlot?.querySelector("svg")).not.toBeNull();
+  });
+
+  it("marks a private project with a lock inside its link", () => {
+    renderSection([{ ...project("p1", "Desktop"), visibility: "private" }, { ...project("p2", "Mobile"), visibility: "workspace" }]);
+    const lock = screen.getByRole("img", { name: "Visible to project members only" });
+    expect(lock.closest("a")).toHaveTextContent("Desktop");
+    expect(screen.getAllByRole("img", { name: "Visible to project members only" })).toHaveLength(1);
   });
 
   it("expands a project in place, keeping its count", () => {
@@ -152,7 +188,7 @@ describe("ProjectsSection", () => {
     act(() => dnd.onDragEnd?.({ active: { id: "p3" }, over: { id: "p1" } } as DragEndEvent));
     await waitFor(() => expect(apiMock.putIssueViewPreference).toHaveBeenCalledTimes(1));
     const { prefs } = apiMock.putIssueViewPreference.mock.calls[0]![0];
-    expect(prefs.order).toEqual(["p3", "p1", "p2", "p9"]);
+    expect(prefs.order).toEqual([NO_PROJECT_ORDER_ID, "p3", "p1", "p2", "p9"]);
     expect(prefs.projects.ordering).toBe("manual");
   });
 
@@ -185,10 +221,60 @@ describe("ProjectsSection", () => {
 
     const menu = await screen.findByRole("menu");
     const items = Array.from(menu.querySelectorAll('[role="menuitem"]'), (el) => el.textContent?.trim());
-    expect(items).toEqual(["New issue in this project", "Rename", "Open in new tab", "Pin to sidebar", "Copy link"]);
+    expect(items).toEqual([
+      "New issue in this project",
+      "Rename",
+      "Open in new tab",
+      "Pin to sidebar",
+      "Copy link",
+      "Archive",
+    ]);
 
     fireEvent.click(screen.getByRole("menuitem", { name: "New issue in this project" }));
     expect(openCreateIssue).toHaveBeenCalledWith({ project_id: "p2" });
+  });
+
+  it("lists issues outside every project under No project, which only expands", () => {
+    renderSection();
+    expect(screen.queryByRole("link", { name: "No project" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "No project" }));
+    expect(useSidebarTreeStore.getState().expanded).toEqual([NO_PROJECT_SIDEBAR_SOURCE]);
+    expect(screen.getByRole("button", { name: "No project" })).toHaveAttribute("aria-expanded", "true");
+    expect(document.querySelector(`[data-sidebar-list="${NO_PROJECT_SIDEBAR_SOURCE}"]`)).not.toBeNull();
+  });
+
+  it("counts the open issues outside every project", () => {
+    renderSection();
+    expect(screen.getByRole("button", { name: "No project" }).parentElement).toHaveTextContent("7");
+  });
+
+  it("creates an issue without a project from the No project row", () => {
+    renderSection();
+    openCreateIssue.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "New issue without a project" }));
+    expect(openCreateIssue).toHaveBeenCalledWith({ project_id: null });
+  });
+
+  it("lists No project first, and saves where it is dragged", async () => {
+    renderSection();
+    expect(rowNames()).toEqual(["No project", "Desktop", "Mobile", "Web"]);
+
+    act(() => dnd.onDragEnd?.({ active: { id: NO_PROJECT_ORDER_ID }, over: { id: "p2" } } as DragEndEvent));
+    await waitFor(() => expect(apiMock.putIssueViewPreference).toHaveBeenCalledTimes(1));
+    const { prefs } = apiMock.putIssueViewPreference.mock.calls[0]![0];
+    expect(prefs.order).toEqual(["p1", "p2", NO_PROJECT_ORDER_ID, "p3", "p9"]);
+    expect(prefs.projects.ordering).toBe("manual");
+  });
+
+  it("keeps No project where it was dragged", () => {
+    renderSection(PROJECTS, { ordering: "manual" }, ["p1", NO_PROJECT_ORDER_ID, "p2", "p3"]);
+    expect(rowNames()).toEqual(["Desktop", "No project", "Mobile", "Web"]);
+  });
+
+  it("leaves out No project when its setting is off", () => {
+    renderSection(PROJECTS, { showNoProject: false });
+    expect(screen.queryByRole("button", { name: "No project" })).toBeNull();
   });
 
   it("collapses from the section label", () => {

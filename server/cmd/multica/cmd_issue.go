@@ -714,6 +714,7 @@ func init() {
 
 	// issue delete
 	issueDeleteCmd.Flags().BoolP("yes", "y", false, "Skip the confirmation prompt")
+	issueDeleteCmd.Flags().Bool("dry-run", false, "List what would be deleted without deleting")
 	issueDeleteCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// issue reorder
@@ -1618,7 +1619,12 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 		body["parent_issue_id"] = parent.ID
 	}
 	if v, _ := cmd.Flags().GetString("project"); v != "" {
-		project, err := resolveProjectID(ctx, client, v)
+		resolveProject := resolveProjectIDForNewWork
+		if _, ok := body["parent_issue_id"]; ok {
+			// A sub-issue may stay in its parent's archived project; the server checks that.
+			resolveProject = resolveProjectID
+		}
+		project, err := resolveProject(ctx, client, v)
 		if err != nil {
 			return fmt.Errorf("resolve project: %w", err)
 		}
@@ -1838,7 +1844,8 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetString("title")
 		body["title"] = v
 	}
-	if cmd.Flags().Changed("description") || cmd.Flags().Changed("description-stdin") || cmd.Flags().Changed("description-file") {
+	useDescriptionStdin, _ := cmd.Flags().GetBool("description-stdin")
+	if cmd.Flags().Changed("description") || useDescriptionStdin || cmd.Flags().Changed("description-file") {
 		desc, _, err := resolveTextFlag(cmd, "description")
 		if err != nil {
 			return err
@@ -1860,6 +1867,8 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		if v == "" {
 			body["project_id"] = nil
 		} else {
+			// Naming the issue's current archived project is an ordinary edit;
+			// the server refuses only a move into one (409 project_archived).
 			project, err := resolveProjectID(ctx, client, v)
 			if err != nil {
 				return fmt.Errorf("resolve project: %w", err)

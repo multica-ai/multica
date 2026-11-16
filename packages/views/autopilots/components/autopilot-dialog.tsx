@@ -457,10 +457,10 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
         className={cn(
           "p-0 gap-0 flex flex-col overflow-hidden",
           "!transition-all !duration-300 !ease-out !-translate-y-1/2",
-          "!w-[calc(100vw-2rem)]",
+          "!w-[calc(100%-2rem)]",
           isExpanded
-            ? "!max-w-6xl !h-[calc(100vh-4rem)]"
-            : "!max-w-5xl !h-[min(720px,calc(100vh-4rem))]",
+            ? "!max-w-6xl !h-[calc(100%-4rem)]"
+            : "!max-w-5xl !h-[min(720px,calc(100%-4rem))]",
         )}
       >
         <DialogTitle className="sr-only">

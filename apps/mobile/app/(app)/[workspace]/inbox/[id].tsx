@@ -17,7 +17,8 @@ import {
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useT } from "@/lib/i18n";
 import {
-  getAutopilotQuotaBody,
+  getInboxNoticeBody,
+  isInboxNotice,
   getInboxDisplayTitle,
 } from "@/lib/inbox-display";
 
@@ -101,7 +102,7 @@ export default function InboxNoticeDetail() {
   const webUrl = process.env.EXPO_PUBLIC_WEB_URL?.replace(/\/+$/, "");
   const billingUrl =
     webUrl && wsSlug ? `${webUrl}/${wsSlug}/settings?tab=billing` : null;
-  const body = item ? getAutopilotQuotaBody(item) : null;
+  const body = item ? getInboxNoticeBody(item) : null;
 
   return (
     <View className="flex-1 bg-background">
@@ -122,9 +123,7 @@ export default function InboxNoticeDetail() {
         <View className="flex-1 items-center justify-center">
           <ActivityIndicator />
         </View>
-      ) : !item ||
-        (item.type !== "autopilot_quota_exceeded" &&
-          item.type !== "autopilot_paused") ? (
+      ) : !item || !isInboxNotice(item.type) ? (
         <View className="px-4 py-8">
           <Text className="text-sm text-muted-foreground text-center">
             {t("detail.unavailable")}

@@ -28,4 +28,10 @@ export interface IssueSubscriber {
   user_id: string;
   reason: IssueSubscriberReason;
   created_at: string;
+  /**
+   * A direct row whose member also subscribes to the issue's project. The
+   * project delivers every event, so the direct reason does not narrow what
+   * reaches them.
+   */
+  project_covered?: boolean;
 }

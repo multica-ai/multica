@@ -87,6 +87,70 @@ describe("KeyboardShortcutsTab", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
+  it("records macOS Option chords by physical key, including dead keys", () => {
+    configureShortcutPlatform("macos");
+    renderWithI18n(<KeyboardShortcutsTab />);
+    const recorder = screen.getByRole("button", {
+      name: "Change shortcut for Open search",
+    });
+
+    fireEvent.click(recorder);
+    fireEvent.keyDown(recorder, {
+      key: "Dead",
+      code: "KeyE",
+      metaKey: true,
+      altKey: true,
+    });
+
+    expect(getShortcut("openSearch")).toEqual(
+      createShortcutChord("E", { primary: true, alt: true }),
+    );
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("reports a conflict with an Option chord saved under its glyph", () => {
+    configureShortcutPlatform("macos");
+    const legacy = createShortcutChord("©", { primary: true, alt: true });
+    useShortcutStore.getState().setShortcut("openSearch", legacy);
+    renderWithI18n(<KeyboardShortcutsTab />);
+    const recorder = screen.getByRole("button", {
+      name: "Change shortcut for Create issue",
+    });
+
+    fireEvent.click(recorder);
+    fireEvent.keyDown(recorder, {
+      key: "©",
+      code: "KeyG",
+      metaKey: true,
+      altKey: true,
+    });
+
+    expect(getShortcut("createIssue")).toEqual(createShortcutChord("C"));
+    expect(getShortcut("openSearch")).toEqual(legacy);
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Already used by Open search.",
+    );
+  });
+
+  it("explains a key it cannot record instead of ignoring it", () => {
+    renderWithI18n(<KeyboardShortcutsTab />);
+    const recorder = screen.getByRole("button", {
+      name: "Change shortcut for Open search",
+    });
+
+    fireEvent.click(recorder);
+    fireEvent.keyDown(recorder, { key: "Control", ctrlKey: true });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    fireEvent.keyDown(recorder, { key: "Unidentified", ctrlKey: true });
+    expect(getShortcut("openSearch")).toEqual(
+      createShortcutChord("K", { primary: true }),
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "This key combination can't be recorded. Try another one.",
+    );
+  });
+
   it("only captures keys while the recorder is active", () => {
     renderWithI18n(<KeyboardShortcutsTab />);
     const recorder = screen.getByRole("button", {

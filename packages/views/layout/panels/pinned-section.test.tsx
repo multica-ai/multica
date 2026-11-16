@@ -187,6 +187,20 @@ describe("PinnedSection", () => {
     expect((await iconSlot())?.matches("svg")).toBe(true);
   });
 
+  it("marks a pinned private project with a lock", async () => {
+    state.pins = [{ ...pin(1), item_type: "project", item_id: "project-1" }];
+    state.detail = { isPending: false, isError: false, data: { title: "Fundraise", icon: null, visibility: "private" }, error: null };
+    const { unmount } = renderWithI18n(<Harness pathname="/acme/issues" />);
+    const lock = await screen.findByRole("img", { name: "Visible to project members only" });
+    expect(lock.closest("a")).toHaveTextContent("Fundraise");
+    unmount();
+
+    state.detail = { isPending: false, isError: false, data: { title: "Fundraise", icon: null, visibility: "workspace" }, error: null };
+    renderWithI18n(<Harness pathname="/acme/issues" />);
+    await screen.findByText("Fundraise");
+    expect(screen.queryByRole("img", { name: "Visible to project members only" })).toBeNull();
+  });
+
   // dnd-kit stops the release's click at the document without cancelling
   // it. Where React listens below the document (Desktop), it never sees that
   // click, so the row must not wait for it before opening on the next one.

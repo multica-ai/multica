@@ -9,7 +9,9 @@ import (
 // (cursor.com/docs/models-and-pricing), keyed by the base id cursorBaseModel
 // leaves. Cursor's sheet is the bill even where it differs from the vendor
 // rows in modelPrices, except that temporary promotional rates are not used:
-// GPT-5.6 Sol keeps its $5 / $30 list rate (Fast at 2x). Where Cursor offers
+// GPT-5.6 Sol keeps its $5 / $30 list rate (Fast at 2x), and Gemini 4 Carbon
+// its $4 / $20 rate from 2026-12-01 rather than the introductory $2 / $10
+// (the google: vendor row still carries the intro rate). Where Cursor offers
 // a Fast variant its sheet doesn't price, the `-fast` row carries the vendor's
 // published Fast rate, since Cursor bills third-party models at API list
 // price; other Fast variants stay unmapped rather than borrowing the cheaper
@@ -47,6 +49,7 @@ var cursorModelPrices = buildCursorPrices([]struct {
 	{"claude-opus-4-7-fast", 30, 150, 3, 37.5},
 	{"claude-4.6-opus", 5, 25, 0.5, 6.25},
 	{"claude-4.5-opus", 5, 25, 0.5, 6.25},
+	{"claude-fable-5-2", 8, 40, 0.2, 10},
 	{"claude-fable-5-1", 10, 50, 0.25, 12.5},
 	{"claude-fable-5", 10, 50, 1, 12.5},
 	{"claude-sonnet-5-5", 2, 10, 0.1, 2.5},
@@ -76,6 +79,8 @@ var cursorModelPrices = buildCursorPrices([]struct {
 	{"gpt-5-fast", 2.5, 20, 0.25, 0},
 	{"gpt-5-mini", 0.25, 2, 0.025, 0},
 	{"gemini-4-argon", 2, 10, 0.1, 0},
+	{"gemini-4-carbon", 4, 20, 0.2, 0},
+	{"gemini-4-hydrogen", 1.5, 7.5, 0.075, 0},
 	{"gemini-3.8-flash", 0.75, 3.75, 0.075, 0},
 	{"gemini-3.7-flash", 0.75, 3.75, 0.075, 0},
 	{"gemini-3.6-flash", 1.5, 7.5, 0.15, 0},

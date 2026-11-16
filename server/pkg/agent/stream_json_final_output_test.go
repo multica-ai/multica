@@ -174,6 +174,7 @@ printf '%s\n' '{"type":"user","message":{"role":"user","content":[{"type":"tool_
 		wantStatus      string
 		wantOutput      string
 		wantError       string
+		wantScanError   bool
 		forbiddenOutput []string
 	}{
 		{
@@ -273,9 +274,10 @@ printf '%s\n' '{"type":"user","message":{"role":"user","content":[{"type":"tool_
 				`dd if=/dev/zero bs=1048576 count=%d 2>/dev/null | tr '\000' x; printf '\n'`,
 				agentStreamMaxLineBytes/(1024*1024)+1,
 			) + "\n",
-			wantStatus: "failed",
-			wantOutput: "",
-			wantError:  "stdout read error",
+			wantStatus:    "failed",
+			wantOutput:    "",
+			wantError:     "stdout read error",
+			wantScanError: true,
 		},
 	}
 
@@ -323,6 +325,9 @@ printf '%s\n' '{"type":"user","message":{"role":"user","content":[{"type":"tool_
 					}
 					if tt.wantError != "" && !strings.Contains(result.Error, tt.wantError) {
 						t.Fatalf("error = %q, want substring %q", result.Error, tt.wantError)
+					}
+					if provider == "codebuddy" && result.Status != "completed" && !strings.Contains(result.Error, fmt.Sprintf("scanner_error=%t", tt.wantScanError)) {
+						t.Fatalf("incorrect scanner diagnostic: %q", result.Error)
 					}
 					for _, forbidden := range tt.forbiddenOutput {
 						if strings.Contains(result.Output, forbidden) {
