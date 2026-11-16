@@ -44,6 +44,9 @@ On `update`, any of them retargets the autopilot (`--agent` moves a squad
 autopilot back to a single agent); leave them all out to keep the current
 assignee.
 
+A CLI that answers `unknown flag: --squad` predates squad assignees: assign the
+squad in the web app, or ask the user to update the CLI.
+
 Do not run `trigger`, `delete`, `trigger-delete`, or `trigger-rotate-url` to
 test — those are real side effects. Use `trigger` only when the user explicitly
 asks for a manual run, and `trigger-rotate-url` only when rotating a webhook
