@@ -91,6 +91,8 @@ When one source sends several event types, add event filters to the trigger. Eac
 
 For example, with `workflow_run` as the event name and `completed, failed` as the actions, only those two kinds of `workflow_run` results are accepted. Multica recognizes the event and action from common request headers and payload fields, including GitHub's `X-GitHub-Event` and the `action` field in the body.
 
+You can also configure these filters entirely through the CLI with `--event-filters-file`. Updating without either filter option preserves existing filters; `--clear-event-filters` explicitly removes them and accepts all events. See the [CLI examples](/cli#webhook-event-filters) for the JSON format and commands.
+
 ### Protect the webhook URL
 
 <Callout type="warning">
