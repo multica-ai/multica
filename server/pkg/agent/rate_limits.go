@@ -237,9 +237,27 @@ func claudeRateLimitWindow(name string, utilization *float64, resetsAt *int64, s
 	return w, true
 }
 
+// mergeClaudeRateLimitWindow combines the top-level summary of the limiting
+// window with its unifiedWindows entry. Usage and reset come from the
+// per-window view when present; the status stays the top-level one, which is
+// the CLI's verdict for that window (unifiedWindows often carries no status).
+func mergeClaudeRateLimitWindow(top, unified RateLimitWindow) RateLimitWindow {
+	merged := unified
+	if merged.UsedPercent == nil {
+		merged.UsedPercent = top.UsedPercent
+	}
+	if merged.ResetsAt == nil {
+		merged.ResetsAt = top.ResetsAt
+	}
+	if top.Status != "" {
+		merged.Status = top.Status
+	}
+	return merged
+}
+
 // parseClaudeRateLimitEvent converts one rate_limit_info payload into an
-// update. The per-window view wins over the top-level summary of the same
-// window because it is the complete one.
+// update. The top-level status applies only to the window rateLimitType
+// names; other windows keep their own.
 func parseClaudeRateLimitEvent(raw json.RawMessage) (rateLimitUpdate, bool) {
 	if len(raw) == 0 {
 		return rateLimitUpdate{}, false
@@ -254,9 +272,14 @@ func parseClaudeRateLimitEvent(raw json.RawMessage) (rateLimitUpdate, bool) {
 		byKind[w.Kind] = w
 	}
 	for name, win := range info.UnifiedWindows {
-		if w, ok := claudeRateLimitWindow(name, win.Utilization, win.ResetsAt, win.Status); ok {
-			byKind[w.Kind] = w
+		w, ok := claudeRateLimitWindow(name, win.Utilization, win.ResetsAt, win.Status)
+		if !ok {
+			continue
 		}
+		if top, seen := byKind[w.Kind]; seen {
+			w = mergeClaudeRateLimitWindow(top, w)
+		}
+		byKind[w.Kind] = w
 	}
 	for _, w := range byKind {
 		u.windows = append(u.windows, w)

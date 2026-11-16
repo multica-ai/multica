@@ -74,6 +74,60 @@ func TestParseClaudeRateLimitEventUnifiedWindows(t *testing.T) {
 	}
 }
 
+func TestParseClaudeRateLimitEventKeepsTopLevelRejection(t *testing.T) {
+	// Claude Code 2.1.300: unifiedWindows carries only utilization/resetsAt and
+	// the verdict lives at the top level, so a rejected account can still show
+	// a window just under 100%.
+	update, ok := parseClaudeRateLimitEvent(json.RawMessage(`{
+		"status": "rejected",
+		"resetsAt": 1795327200,
+		"rateLimitType": "five_hour",
+		"unifiedWindows": {
+			"five_hour": {"utilization": 0.99, "resetsAt": 1795327200},
+			"seven_day": {"utilization": 0.41, "resetsAt": 1795568400}
+		}
+	}`))
+	if !ok {
+		t.Fatal("expected an update")
+	}
+	tr, got := collectRateLimits(t)
+	tr.apply(update)
+	snap := (*got)[0]
+	if snap.Status != RateLimitStatusRejected {
+		t.Fatalf("status = %q", snap.Status)
+	}
+	session := windowByKind(t, snap, RateLimitWindowSession)
+	if session.Status != RateLimitStatusRejected {
+		t.Fatalf("session status = %q, want rejected", session.Status)
+	}
+	if session.UsedPercent == nil || *session.UsedPercent < 98.99 || *session.UsedPercent > 99.01 {
+		t.Fatalf("session used = %v", session.UsedPercent)
+	}
+	if session.ResetsAt == nil || !session.ResetsAt.Equal(time.Unix(1795327200, 0)) {
+		t.Fatalf("session reset = %v", session.ResetsAt)
+	}
+	if weekly := windowByKind(t, snap, RateLimitWindowWeekly); weekly.Status != "" {
+		t.Fatalf("weekly status = %q, top-level verdict leaked to another window", weekly.Status)
+	}
+}
+
+func TestParseClaudeRateLimitEventTopLevelFillsMissingUnifiedFields(t *testing.T) {
+	update, _ := parseClaudeRateLimitEvent(json.RawMessage(`{
+		"status": "allowed_warning",
+		"resetsAt": 1795327200,
+		"rateLimitType": "five_hour",
+		"utilization": 0.85,
+		"unifiedWindows": {"five_hour": {"status": "allowed"}}
+	}`))
+	if len(update.windows) != 1 {
+		t.Fatalf("windows = %+v", update.windows)
+	}
+	w := update.windows[0]
+	if w.Status != RateLimitStatusWarning || w.UsedPercent == nil || *w.UsedPercent < 84.99 || w.ResetsAt == nil {
+		t.Fatalf("window = %+v", w)
+	}
+}
+
 func TestParseClaudeRateLimitEventTopLevelOnly(t *testing.T) {
 	// Older CLIs send only the limiting window, often without utilization.
 	update, ok := parseClaudeRateLimitEvent(json.RawMessage(`{"status":"rejected","resetsAt":1795327200,"rateLimitType":"seven_day_opus"}`))
