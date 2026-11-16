@@ -280,6 +280,9 @@ const dshProvisionOutputBytes = 2048
 // own change with its own blast radius.
 var dshProvisionURLCredentials = regexp.MustCompile(`(?i)\b([a-z][a-z0-9+.\-]*)://[^/?#\s:@]+:[^/?#\s@]+@`)
 
+// Quoted credential fields also occur inside prefixed JSON diagnostic lines.
+var dshQuotedCredential = regexp.MustCompile(`(?i)("(?:api[_-]?key|api[_-]?secret|secret[_-]?key|secret|access[_-]?token|auth[_-]?token|refresh[_-]?token|client[_-]?secret|private[_-]?key|database[_-]?url|db[_-]?(?:password|url)|redis[_-]?url|password|token|authorization)"\s*:\s*)"(?:\\.|[^"\\])*"`)
+
 // dshDiagnosticOutput renders captured probe/install diagnostics. Registry errors
 // routinely echo the request URL back, so URL credentials are scrubbed and the
 // shared redactor still runs for the token shapes it knows, before the text is
@@ -287,7 +290,8 @@ var dshProvisionURLCredentials = regexp.MustCompile(`(?i)\b([a-z][a-z0-9+.\-]*):
 func dshDiagnosticOutput(raw []byte) string {
 	text := dshProvisionURLCredentials.ReplaceAllString(
 		strings.ToValidUTF8(strings.TrimSpace(string(raw)), "�"), "$1://[REDACTED URL CREDENTIALS]@")
-	text = redact.Text(text)
+	text = dshQuotedCredential.ReplaceAllString(text, `${1}"[REDACTED CREDENTIAL]"`)
+	text = strings.ReplaceAll(redact.Text(text), "\x00", "")
 	if len(text) <= dshProvisionOutputBytes {
 		return text
 	}
@@ -360,6 +364,14 @@ func provisionDshMulticaProfile(ctx context.Context, dshPath string, logger *slo
 
 	var lastErr error
 	for i, spec := range specs {
+		// A profile may appear after discovery or after a failed candidate.
+		// Never continue installation over a now-populated profile.
+		if dshMulticaProfileNeedsMigration() {
+			return fmt.Errorf("%s", dshProfileMigrationReason)
+		}
+		if dshMulticaProfilePresent() {
+			return lastErr
+		}
 		output, err := processtree.CombinedOutput(ctx, dshProvisionCommand(dshPath, spec), 5*time.Second)
 		switch {
 		case err == nil && dshMulticaProfilePresent():

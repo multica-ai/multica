@@ -65,7 +65,8 @@ func TestProbeBuiltinRuntimeDshRetainsStartupDiagnosis(t *testing.T) {
 				t.Fatal(err)
 			}
 			d := &Daemon{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), agentVersions: map[string]string{}}
-			_, reason, verdict := d.probeBuiltinRuntime(context.Background(), "dsh", AgentEntry{Path: path, Command: "dsh"})
+			probe := d.probeBuiltinRuntime(context.Background(), "dsh", AgentEntry{Path: path, Command: "dsh"})
+			reason, verdict := probe.reason, probe.verdict
 			if verdict != tc.want {
 				t.Errorf("verdict=%v, want %v", verdict, tc.want)
 			}
@@ -146,7 +147,8 @@ func TestProbeBuiltinRuntimeDshRedactsStartupDiagnosis(t *testing.T) {
 	t.Cleanup(func() { runtimeVersionProbeRetryDelay, runtimeVersionProbeRetryWindow = originalDelay, originalWindow })
 	runtimeVersionProbeRetryDelay, runtimeVersionProbeRetryWindow = time.Millisecond, time.Millisecond
 	d := &Daemon{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), agentVersions: map[string]string{}}
-	_, reason, verdict := d.probeBuiltinRuntime(context.Background(), "dsh", AgentEntry{Path: path, Command: "dsh"})
+	probe := d.probeBuiltinRuntime(context.Background(), "dsh", AgentEntry{Path: path, Command: "dsh"})
+	reason, verdict := probe.reason, probe.verdict
 	if verdict != builtinProbeUnavailable || !strings.Contains(reason, "fatal probe startup") {
 		t.Fatal("redacted startup diagnostic was lost")
 	}
@@ -195,7 +197,7 @@ func TestDshCoreCompatibilityDemotionRequiresConfirmationAndRecovers(t *testing.
 	if id == "" || !fx.runtimeOnline(id) {
 		t.Fatal("healthy fixture never registered")
 	}
-	broken := "#!/bin/sh\nprintf '%s\\n' '" + dshCoreCompatibilityFixture + "' >&2\nexit 1\n"
+	broken := "#!/bin/sh\nprintf '%s\\n' '" + dshCoreCompatibilityFixture + "' >&2\nprintf 'unrelated-private-startup-text\\000\\n' >&2\nexit 1\n"
 	if err := os.WriteFile(path, []byte(broken), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -211,6 +213,13 @@ func TestDshCoreCompatibilityDemotionRequiresConfirmationAndRecovers(t *testing.
 	if !ok || reason.Code != RuntimeOfflineCodeDshProfile || reason.Installing || !strings.Contains(reason.Detail, "dsh-agent@0.2.2-rc.1") {
 		t.Fatalf("offline cause lost the manual profile repair diagnosis: %+v", reason)
 	}
+
+	if strings.Contains(reason.Detail, "unrelated-private-startup-text") || strings.ContainsRune(reason.Detail, 0) {
+		t.Error("durable runtime reason contains provider output or NUL")
+	}
+	if !strings.Contains(d.skippedAgentsSnapshot()["dsh"], "unrelated-private-startup-text") {
+		t.Error("daemon diagnostic lost local startup output")
+	}
 	healthy := "#!/bin/sh\n" + dshProbeOKFrame + "\n"
 	if err := os.WriteFile(path, []byte(healthy), 0755); err != nil {
 		t.Fatal(err)
@@ -225,5 +234,19 @@ func TestDshCoreCompatibilityDemotionRequiresConfirmationAndRecovers(t *testing.
 	after, err := os.ReadFile(manifestPath)
 	if err != nil || !bytes.Equal(before, after) {
 		t.Fatalf("probe lifecycle changed the user's profile: %v", err)
+	}
+}
+
+func TestDshCoreCompatibilitySignalIsTransient(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX signal fixture")
+	}
+	path := dshProbeFixture(t, "printf '%s\\n' '"+dshCoreCompatibilityFixture+"' >&2; kill -TERM $$", true)
+	result := probeDshMulticaProfile(context.Background(), path)
+	if result.verdict != dshProbeUnavailable {
+		t.Fatalf("signal verdict=%v, want transient", result.verdict)
+	}
+	if !strings.Contains(result.detail, "dsh-agent@0.2.2-rc.1") {
+		t.Fatal("signal lost available diagnostic")
 	}
 }

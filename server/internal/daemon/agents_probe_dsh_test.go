@@ -265,8 +265,9 @@ func TestProbeBuiltinRuntime_DshFailureWithProfileInstalledIsNotCondemned(t *tes
 				logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 				agentVersions: map[string]string{},
 			}
-			_, reason, verdict := d.probeBuiltinRuntime(context.Background(), "dsh",
+			probe := d.probeBuiltinRuntime(context.Background(), "dsh",
 				AgentEntry{Path: path, Command: "dsh"})
+			reason, verdict := probe.reason, probe.verdict
 
 			if verdict == builtinProbeMissingProfile {
 				t.Fatalf("verdict = missing profile (reason %q); a failing probe over an installed profile must not be installable", reason)
@@ -359,8 +360,9 @@ func TestProbeBuiltinRuntime_DshWithoutMulticaProfile(t *testing.T) {
 				logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 				agentVersions: map[string]string{},
 			}
-			_, reason, verdict := d.probeBuiltinRuntime(
+			probe := d.probeBuiltinRuntime(
 				context.Background(), "dsh", AgentEntry{Path: path, Command: "dsh"})
+			reason, verdict := probe.reason, probe.verdict
 			if verdict != tc.wantVerdict {
 				t.Fatalf("verdict = %v, want %v (reason %q)", verdict, tc.wantVerdict, reason)
 			}
@@ -382,8 +384,9 @@ func TestProbeBuiltinRuntime_DshBinaryGoneIsNotAProfileVerdict(t *testing.T) {
 		agentVersions: map[string]string{},
 	}
 	gone := filepath.Join(t.TempDir(), "dsh-that-was-removed")
-	_, reason, verdict := d.probeBuiltinRuntime(context.Background(), "dsh",
+	probe := d.probeBuiltinRuntime(context.Background(), "dsh",
 		AgentEntry{Path: gone, Command: ""})
+	reason, verdict := probe.reason, probe.verdict
 	if verdict == builtinProbeMissingProfile {
 		t.Fatalf("verdict = missing profile (reason %q), want the version-detection path to report the vanished binary", reason)
 	}
@@ -495,8 +498,9 @@ func TestProbeBuiltinRuntime_DshThatCannotRunIsNotAProfileVerdict(t *testing.T) 
 		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		agentVersions: map[string]string{},
 	}
-	_, reason, verdict := d.probeBuiltinRuntime(context.Background(), "dsh",
+	probe := d.probeBuiltinRuntime(context.Background(), "dsh",
 		AgentEntry{Path: path, Command: "dsh"})
+	reason, verdict := probe.reason, probe.verdict
 
 	if verdict == builtinProbeMissingProfile {
 		t.Fatalf("verdict = missing profile (reason %q); the CLI cannot run at all, "+
@@ -533,7 +537,7 @@ func TestNewRuntimeVerdict_DshProfileCarriesAStructuredCause(t *testing.T) {
 		{name: "missing, install running", verdict: builtinProbeMissingProfile, installing: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := newRuntimeVerdict(tc.verdict, "explained elsewhere", "/usr/local/bin/dsh", tc.installing)
+			got := newRuntimeVerdict(builtinProbeResult{verdict: tc.verdict, reason: "explained elsewhere"}, "/usr/local/bin/dsh", tc.installing)
 			if got.offline == nil {
 				t.Fatal("offline reason is nil: the server would treat this as a machine that is merely offline")
 			}
@@ -581,7 +585,8 @@ func TestProbeBuiltinRuntime_DshLegacyProfile(t *testing.T) {
 			writeDshProfileManifest(t, home, manifest)
 			t.Setenv(dshProfileBundleEnv, "@multica-ai/dsh-runtime")
 			d := &Daemon{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), agentVersions: map[string]string{}}
-			_, reason, verdict := d.probeBuiltinRuntime(context.Background(), "dsh", AgentEntry{Path: path, Command: "dsh"})
+			probe := d.probeBuiltinRuntime(context.Background(), "dsh", AgentEntry{Path: path, Command: "dsh"})
+			reason, verdict := probe.reason, probe.verdict
 			if verdict != builtinProbeProfileMigration || !demotableBuiltinProbeVerdict(verdict) {
 				t.Fatalf("profile verdict = %v, want demotable migration", verdict)
 			}

@@ -818,3 +818,48 @@ func TestDshMulticaProfileUnreadableManifest(t *testing.T) {
 		t.Fatal("an unreadable manifest must remain unknown, not missing or requiring migration")
 	}
 }
+
+func TestDshDiagnosticOutputRedactsQuotedCredentials(t *testing.T) {
+	for _, key := range []string{"access_token", "apiKey", "password", "client_secret", "refresh_token", "authorization"} {
+		raw := `prefixed startup: {"` + key + `":"opaque-synthetic-value","message":"permission denied"}`
+		got := dshDiagnosticOutput([]byte(raw))
+		if strings.Contains(got, "opaque-synthetic-value") {
+			t.Errorf("quoted %s credential survived", key)
+		}
+		if !strings.Contains(got, "permission denied") {
+			t.Errorf("%s lost useful diagnostic", key)
+		}
+	}
+}
+
+func TestProvisionDshMulticaProfileRechecksCurrentManifest(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX fake CLI")
+	}
+	for _, existing := range []bool{true, false} {
+		t.Run(strconv.FormatBool(existing), func(t *testing.T) {
+			dshPath, record := fakeDshScript(t, dshProfileWriteCommand(installedDshProfileManifest())+"\nexit 1")
+			t.Setenv(dshProfileBundleEnv, "first,second")
+			if existing {
+				writeDshProfileManifest(t, os.Getenv("DSH_HOME"), installedDshProfileManifest())
+			}
+			want := installedDshProfileManifest()
+			err := provisionDshMulticaProfile(context.Background(), dshPath, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			calls := strings.Count(readRecord(t, record), "args=")
+			expected := 1
+			if existing {
+				expected = 0
+			}
+			if calls != expected {
+				t.Errorf("install calls=%d, want %d", calls, expected)
+			}
+			if !existing && err == nil {
+				t.Error("partial failed install reported success")
+			}
+			got, readErr := os.ReadFile(dshMulticaProfileManifestPath())
+			if readErr != nil || string(got) != want {
+				t.Fatalf("populated manifest changed: %v", readErr)
+			}
+		})
+	}
+}

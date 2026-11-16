@@ -443,8 +443,9 @@ const (
 )
 
 type dshProbeResult struct {
-	verdict dshProbeVerdict
-	detail  string
+	verdict       dshProbeVerdict
+	detail        string
+	repairSummary string
 }
 
 // dshProbeTimeout bounds one `--probe`.
@@ -559,12 +560,13 @@ func probeDshMulticaProfile(ctx context.Context, executablePath string) dshProbe
 	}
 	detail := dshProbeDiagnostic(runErr, stdout.Bytes(), stderr.Bytes())
 	var exitErr *exec.ExitError
-	completed := runErr == nil || errors.As(runErr, &exitErr)
+	completed := runErr == nil || (errors.As(runErr, &exitErr) && exitErr.ProcessState.Exited())
 	if ctx.Err() == nil && completed {
 		if summary := dshCoreCompatibilitySummary(stderr.String()); summary != "" {
-			return dshProbeResult{verdict: dshProbeNeedsMigration, detail: fmt.Sprintf(
-				"%s; back up and inspect %q to align profile-local DSH core dependencies with the application packages, retain required independent plugins, and rerun dsh --profile multica --probe. %s",
-				summary, dshMulticaProfileManifestPath(), detail)}
+			repairSummary := fmt.Sprintf(
+				"%s; back up and inspect %q to align profile-local DSH core dependencies with the application packages, retain required independent plugins, and rerun dsh --profile multica --probe.",
+				summary, dshMulticaProfileManifestPath())
+			return dshProbeResult{verdict: dshProbeNeedsMigration, repairSummary: repairSummary, detail: repairSummary + " " + detail}
 		}
 	}
 	return dshProbeResult{verdict: dshProbeUnavailable, detail: detail}
