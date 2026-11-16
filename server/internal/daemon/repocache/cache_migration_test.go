@@ -2,6 +2,7 @@ package repocache
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +15,11 @@ const migrationWorkspaceID = "11111111-1111-1111-1111-111111111111"
 
 func seedLegacyEnterpriseCache(t *testing.T) (*Cache, string, string) {
 	t.Helper()
+	return seedLegacyCache(t, migrationRepoURL)
+}
+
+func seedLegacyCache(t *testing.T, repoURL string) (*Cache, string, string) {
+	t.Helper()
 	source := createTestRepo(t)
 	root, err := os.MkdirTemp("", "mc-")
 	if err != nil {
@@ -22,16 +28,100 @@ func seedLegacyEnterpriseCache(t *testing.T) (*Cache, string, string) {
 	t.Cleanup(func() { _ = os.RemoveAll(root) })
 	workspacesRoot := filepath.Join(root, strings.Repeat("w", max(1, 65-len(root)-1)))
 	cache := New(filepath.Join(workspacesRoot, ".repos"), testLogger())
-	legacyPath := filepath.Join(cache.root, migrationWorkspaceID, legacyBareDirName(migrationRepoURL))
+	legacyPath := filepath.Join(cache.root, migrationWorkspaceID, legacyBareDirName(repoURL))
 	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// The cache's real origin stays local; its lookup key has the reported
-	// enterprise URL shape and 28-character repository basename.
-	if err := gitCloneBareContext(context.Background(), source, legacyPath); err != nil {
+	// Reported installations enable core.longpaths. Allow the fixture to
+	// write loose objects at the old path before testing Git's separate
+	// worktree metadata limits. Keep all origin traffic local.
+	if out, err := runGitCombinedOutput("-c", "core.longpaths=true", "clone", "--bare", "--config", "core.longpaths=true", source, legacyPath); err != nil {
+		t.Fatalf("seed legacy cache: %s: %v", out, err)
+	}
+	if err := ensureRemoteTrackingLayout(legacyPath); err != nil {
 		t.Fatal(err)
 	}
 	return cache, legacyPath, filepath.Join(root, "workdir")
+}
+
+func TestMigrationFailureKeepsUsableLegacyCache(t *testing.T) {
+	t.Parallel()
+	for _, onSync := range []bool{false, true} {
+		name := "checkout"
+		if onSync {
+			name = "sync"
+		}
+		t.Run(name, func(t *testing.T) {
+			const repoURL = "https://github.com/org/repo.git"
+			cache, legacyPath, workDir := seedLegacyCache(t, repoURL)
+			attempted := false
+			cache.renameCache = func(string, string) error {
+				attempted = true
+				return os.ErrPermission
+			}
+			if onSync {
+				if err := cache.Sync(migrationWorkspaceID, []RepoInfo{{URL: repoURL}}); err != nil {
+					t.Fatalf("usable legacy cache failed sync after rename denial: %v", err)
+				}
+			}
+			result, err := cache.CreateWorktree(WorktreeParams{
+				WorkspaceID: migrationWorkspaceID,
+				RepoURL:     repoURL,
+				WorkDir:     workDir,
+				AgentName:   "test",
+				TaskID:      "12345678-0000-0000-0000-000000000000",
+			})
+			if err != nil {
+				t.Fatalf("usable legacy cache failed checkout after rename denial: %v", err)
+			}
+			if !attempted || cache.Lookup(migrationWorkspaceID, repoURL) != legacyPath {
+				t.Fatal("rename denial did not retain the legacy cache")
+			}
+			if admin := worktreeRegistration(t, result.Path); !samePath(filepath.Dir(admin), filepath.Join(legacyPath, "worktrees")) {
+				t.Fatalf("checkout did not use the legacy cache: %s", admin)
+			}
+			if got, want := gitHead(t, result.Path), gitRefCommit(t, legacyPath, getRemoteDefaultBranch(legacyPath)); got != want {
+				t.Fatalf("checkout has %s, want %s", got, want)
+			}
+			cache.renameCache = os.Rename
+			if err := runGit("-C", legacyPath, "worktree", "remove", "--force", result.Path); err != nil {
+				t.Fatal(err)
+			}
+			if err := cache.Sync(migrationWorkspaceID, []RepoInfo{{URL: repoURL}}); err != nil {
+				t.Fatalf("migration retry failed: %v", err)
+			}
+			shortPath := filepath.Join(cache.root, migrationWorkspaceID, bareDirName(repoURL))
+			if got := cache.Lookup(migrationWorkspaceID, repoURL); got != shortPath {
+				t.Fatalf("migration retry used %s, want %s", got, shortPath)
+			}
+		})
+	}
+}
+
+func TestMigrationFailureRespectsCancellation(t *testing.T) {
+	t.Parallel()
+	const repoURL = "https://github.com/org/repo.git"
+	cache, legacyPath, workDir := seedLegacyCache(t, repoURL)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	cache.renameCache = func(string, string) error {
+		cancel()
+		return os.ErrPermission
+	}
+	_, err := cache.CreateWorktreeContext(ctx, WorktreeParams{
+		WorkspaceID: migrationWorkspaceID,
+		RepoURL:     repoURL,
+		WorkDir:     workDir,
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("checkout error = %v, want cancellation", err)
+	}
+	if got := cache.Lookup(migrationWorkspaceID, repoURL); got != legacyPath {
+		t.Fatalf("cancelled migration changed the cache path: %s", got)
+	}
+	if _, err := os.Stat(filepath.Join(workDir, "repo")); !os.IsNotExist(err) {
+		t.Fatalf("cancelled migration started a checkout: %v", err)
+	}
 }
 
 func TestMigrateUnusedLegacyCache(t *testing.T) {

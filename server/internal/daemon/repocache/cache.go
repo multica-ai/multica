@@ -172,8 +172,9 @@ type CachedRepo struct {
 
 // Cache manages bare git clones for workspace repositories.
 type Cache struct {
-	root   string // base directory for all caches (e.g. ~/multica_workspaces/.repos)
-	logger *slog.Logger
+	root        string // base directory for all caches (e.g. ~/multica_workspaces/.repos)
+	logger      *slog.Logger
+	renameCache func(string, string) error
 	// repoLocks maps bare repo path → dedicated mutex. Any mutating operation
 	// on a given bare repo (clone, fetch, worktree add, ref update) must
 	// hold its lock — git's own lockfiles (packed-refs.lock, config.lock,
@@ -313,7 +314,7 @@ func (l *repoLock) cancelMaintenanceAndWait() {
 
 // New creates a new repo cache rooted at the given directory.
 func New(root string, logger *slog.Logger) *Cache {
-	return &Cache{root: root, logger: logger}
+	return &Cache{root: root, logger: logger, renameCache: os.Rename}
 }
 
 // lockForRepo returns the mutex dedicated to the given bare repo path. See
@@ -472,23 +473,34 @@ func (c *Cache) BarePath(workspaceID, url string) string {
 // path after taking the locks: another caller may have migrated it while we
 // waited. Registered worktrees contain absolute pointers into their cache,
 // so only an unused cache can be renamed, and an existing destination wins.
+// Migration is best-effort; failures must not block a usable legacy cache.
 func (c *Cache) prepareBarePathContext(ctx context.Context, workspaceID, repoURL string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", context.Cause(ctx)
+	}
 	path := c.BarePath(workspaceID, repoURL)
 	shortPath := filepath.Join(c.root, workspaceID, bareDirName(repoURL))
 	if path == shortPath {
 		return path, nil
 	}
+	keepLegacy := func(err error) (string, error) {
+		if ctx.Err() != nil {
+			return "", context.Cause(ctx)
+		}
+		c.logger.Warn("repo cache: migration deferred; continuing with legacy cache", "path", path, "error", err)
+		return path, nil
+	}
 	if _, err := os.Lstat(shortPath); err == nil {
 		return path, nil
 	} else if !os.IsNotExist(err) {
-		return "", fmt.Errorf("inspect short cache path: %w", err)
+		return keepLegacy(fmt.Errorf("inspect short cache path: %w", err))
 	}
 	if out, err := runGitCombinedOutputContext(ctx, "-C", path, "worktree", "prune", "--expire=now"); err != nil {
-		return "", fmt.Errorf("prune worktrees before cache migration: %s: %w", strings.TrimSpace(string(out)), err)
+		return keepLegacy(fmt.Errorf("prune worktrees before cache migration: %s: %w", strings.TrimSpace(string(out)), err))
 	}
 	entries, err := os.ReadDir(filepath.Join(path, "worktrees"))
 	if err != nil && !os.IsNotExist(err) {
-		return "", fmt.Errorf("inspect worktrees before cache migration: %w", err)
+		return keepLegacy(fmt.Errorf("inspect worktrees before cache migration: %w", err))
 	}
 	if len(entries) != 0 {
 		return path, nil
@@ -496,8 +508,8 @@ func (c *Cache) prepareBarePathContext(ctx context.Context, workspaceID, repoURL
 	if err := ctx.Err(); err != nil {
 		return "", context.Cause(ctx)
 	}
-	if err := os.Rename(path, shortPath); err != nil {
-		return "", fmt.Errorf("migrate unused repo cache from %s to %s: %w", path, shortPath, err)
+	if err := c.renameCache(path, shortPath); err != nil {
+		return keepLegacy(fmt.Errorf("migrate unused repo cache from %s to %s: %w", path, shortPath, err))
 	}
 	c.logger.Info("repo cache: shortened unused legacy cache path", "old_path", path, "path", shortPath)
 	return shortPath, nil
