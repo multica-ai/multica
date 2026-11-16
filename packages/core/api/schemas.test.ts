@@ -875,6 +875,13 @@ describe("ChatPendingTaskSchema", () => {
       status: "running",
     });
     expect(parsed.queued_tasks).toBeUndefined();
+    expect(parsed.can_supplement).toBeUndefined();
+  });
+
+  it("accepts explicit steering capability and ignores malformed values", () => {
+    expect(ChatPendingTaskSchema.parse({ can_supplement: true }).can_supplement).toBe(true);
+    expect(ChatPendingTaskSchema.parse({ can_supplement: false }).can_supplement).toBe(false);
+    expect(ChatPendingTaskSchema.parse({ can_supplement: "yes" }).can_supplement).toBeUndefined();
   });
 
   it("parses queued task summaries", () => {
